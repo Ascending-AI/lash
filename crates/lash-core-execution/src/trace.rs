@@ -634,7 +634,8 @@ mod span_identity_tests {
                 session_id: "session".into(),
                 turn_id: "turn".into(),
             }),
-            cause: lash_trace::TraceCause::Root,
+            cause: lash_trace::TraceCause::None,
+            links: lash_trace::TraceLinks::new(),
             anchor: lash_trace::TraceAnchor::Untraced,
             started_at_ms,
         }

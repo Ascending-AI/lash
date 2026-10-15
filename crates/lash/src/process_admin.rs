@@ -364,15 +364,20 @@ impl Processes {
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ActorContext,
     ) -> Result<lash_core::ProcessStartReceipt> {
-        // The caller's context is snapshotted here, before the first await,
-        // unless the request states its own: a detached host start links
-        // whoever started it.
-        let request = if request.trace_cause.is_root() {
-            let captured = self.core.env.core.tracing.scopes().capture_current();
-            request.with_trace_cause(lash_core::TraceCause::linked_to(captured))
-        } else {
+        // The start's `lash.process.start` producer opens here, before the
+        // first await, under the caller's context the request chose (else
+        // the ambient one): the process is admitted under it.
+        let scopes = self.core.env.core.tracing.scopes().as_ref();
+        let producer = scopes.open_producer(
             request
-        };
+                .trace_call()
+                .producer(lash_core::ProducerKind::ProcessStart, scopes),
+        );
+        let request = request.with_trace_parent(
+            producer
+                .as_deref()
+                .map(<dyn lash_core::TraceHostOperation>::parent),
+        );
         // The registrar mints the id; the key only makes the start idempotent.
         // A host mints only host keys: a key of a family lash derives for its
         // own start paths is refused, never adopted (ADR 0107).
@@ -427,6 +432,16 @@ impl Processes {
                 "process start returned the wrong outcome".to_string(),
             )));
         };
+        if let Some(producer) = producer {
+            producer.settle(match &disposition {
+                lash_core::ProcessRegistrationOutcome::Created => {
+                    lash_core::TraceCandidateOutcome::Selected
+                }
+                lash_core::ProcessRegistrationOutcome::Existing => {
+                    lash_core::TraceCandidateOutcome::Reused
+                }
+            });
+        }
         // Registration created the process's actor ready, in the same
         // transaction: nothing is left to deliver.
         Ok(lash_core::ProcessStartReceipt {

@@ -73,6 +73,7 @@ impl SessionStateAdmin {
                             request: Box::new(request),
                         },
                         idempotency_key,
+                        None,
                     ))
                     .await
                     .map(SubmittedCommand::Queued)
@@ -129,6 +130,7 @@ impl SessionStateAdmin {
                             request: Box::new(request),
                         },
                         idempotency_key,
+                        None,
                     ))
                     .await
                     .map(SubmittedCommand::Queued)
@@ -254,6 +256,7 @@ impl SessionStateAdmin {
                     return Box::pin(runtime.submit_session_command(
                         lash_core::facade_support::SessionCommand::CompactContext { instructions },
                         idempotency_key,
+                        None,
                     ))
                     .await
                     .map(SubmittedCommand::Queued)

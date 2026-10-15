@@ -263,7 +263,7 @@ pub async fn run_session_close(
                         tracing,
                         &super::session::cancelled_cause(cause),
                     );
-                    super::turn_trace::ended(tracing, turn, traced);
+                    super::turn_trace::ended(tracing, turn, traced, &[]);
                 }
                 continue_scope_ends(cx, session).await?;
             }

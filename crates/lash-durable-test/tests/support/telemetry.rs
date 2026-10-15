@@ -2,9 +2,9 @@
 //! FIG-5382): the scope factory and projector a core's trace runtime is
 //! served with.
 //!
-//! The factory mints a fresh trace for every root or linked proposal and
-//! keeps its parent's trace for an owned one, as an exporting adapter does,
-//! and its collector records every admission any process exported: the
+//! The factory opens every producer on a fresh trace unless it is its
+//! caller's child, and proposes every admission on its parent's trace, as
+//! an exporting adapter does, and its collector records every admission any process exported: the
 //! `lash.turn.admitted` span an adapter exports for a turn's scope, and the
 //! `lash.tool.admitted` span for a tool call's, whether a candidate was
 //! selected for it or a reader reconciled it (FIG-5395). Like an exporting
@@ -19,17 +19,18 @@
 use std::sync::{Arc, Mutex};
 
 use lash::tracing::{
-    AttemptObservation, DurableTraceScope, EmissionSource, TraceAdmissionCandidate, TraceAnchor,
-    TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainProjector, TraceRecord,
-    TraceScopeFactory, TraceScopeId, TraceScopeOwner, W3cSpanId, W3cTraceFlags, W3cTraceId,
-    W3cTraceState,
+    AttemptObservation, DurableTraceScope, EmissionSource, ProducerSpec, TraceAdmissionCandidate,
+    TraceAnchor, TraceCandidateOutcome, TraceCarrier, TraceDomainProjector, TraceHostOperation,
+    TraceLinkMode, TraceLinks, TraceParent, TraceRecord, TraceScopeFactory, TraceScopeId,
+    TraceScopeOwner, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 use lash_sansio::sync::MutexExt as _;
 
 /// What the collector received from every process's adapter.
 #[derive(Default)]
 struct Recorded {
-    /// How many candidates were proposed: each mints the next span.
+    /// How many producers were opened and candidates proposed: each mints
+    /// the next span.
     proposed: u64,
     /// Every exported admission, with the anchor it gave its scope.
     admitted: Vec<(TraceScopeId, TraceCarrier)>,
@@ -80,7 +81,35 @@ impl TraceAdmissionCandidate for Candidate {
     }
 }
 
+/// A producer span: settling it records nothing.
+struct Producer(TraceCarrier);
+
+impl TraceHostOperation for Producer {
+    fn carrier(&self) -> TraceCarrier {
+        self.0.clone()
+    }
+
+    fn settle(self: Box<Self>, _outcome: TraceCandidateOutcome) {}
+}
+
 impl Telemetry {
+    /// The next span, on `trace` or else on a fresh trace of its own.
+    fn mint(&self, trace: Option<W3cTraceId>) -> TraceCarrier {
+        let minted = {
+            let mut recorded = self.recorded.lock_recover();
+            recorded.proposed += 1;
+            recorded.proposed
+        };
+        TraceCarrier::new(
+            trace.unwrap_or_else(|| {
+                W3cTraceId::from_bytes(u128::from(minted).to_be_bytes()).expect("a trace id")
+            }),
+            W3cSpanId::from_bytes(minted.to_be_bytes()).expect("a span id"),
+            W3cTraceFlags::from_byte(W3cTraceFlags::SAMPLED),
+            W3cTraceState::default(),
+        )
+    }
+
     /// Export the admission of `scope` under `carrier` unless this process
     /// already did: its deferred candidates of the scope are settled.
     fn export(&self, scope: TraceScopeId, carrier: TraceCarrier) {
@@ -101,31 +130,24 @@ impl TraceScopeFactory for Telemetry {
         None
     }
 
+    fn open_producer(&self, spec: ProducerSpec) -> Option<Box<dyn TraceHostOperation>> {
+        // A producer is its caller's child, or else a root of its own.
+        let trace = match spec.link_mode {
+            TraceLinkMode::Parent => spec.caller.as_ref().map(TraceCarrier::trace_id),
+            TraceLinkMode::Link => None,
+        };
+        Some(Box::new(Producer(self.mint(trace))))
+    }
+
     fn propose(
         &self,
         scope: &TraceScopeId,
-        cause: &TraceCause,
+        parent: &TraceParent,
+        _links: &TraceLinks,
         _started_at_ms: u64,
     ) -> Box<dyn TraceAdmissionCandidate> {
-        let proposed = {
-            let mut recorded = self.recorded.lock_recover();
-            recorded.proposed += 1;
-            recorded.proposed
-        };
-        // An owned invocation continues its parent's trace; anything else
-        // starts one of its own.
-        let trace = match cause {
-            TraceCause::Parent(parent) => parent.trace_id(),
-            TraceCause::Root | TraceCause::Linked(_) => {
-                W3cTraceId::from_bytes(u128::from(proposed).to_be_bytes()).expect("a trace id")
-            }
-        };
-        let carrier = TraceCarrier::new(
-            trace,
-            W3cSpanId::from_bytes(proposed.to_be_bytes()).expect("a span id"),
-            W3cTraceFlags::from_byte(W3cTraceFlags::SAMPLED),
-            W3cTraceState::default(),
-        );
+        // An admission continues its parent's trace.
+        let carrier = self.mint(Some(parent.carrier().trace_id()));
         Box::new(Candidate {
             scope: scope.clone(),
             carrier,

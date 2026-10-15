@@ -1017,6 +1017,7 @@ impl LashSession {
     pub fn plugin_operations(&self) -> PluginOperations {
         PluginOperations {
             context: self.admin().context,
+            trace: lash_core::TraceCall::default(),
         }
     }
 

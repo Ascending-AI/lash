@@ -169,10 +169,10 @@ pub fn decode_ingress_terminal(
 }
 
 /// The stored spelling of an ingress row's trace cause: its JSON, or `None`
-/// (a NULL column) for a root cause. The admission that inserts the row
-/// writes it and no later statement does.
+/// (a NULL column) for no cause. The admission that inserts the row writes
+/// it and no later statement does.
 pub fn encode_trace_cause(cause: &lash_trace::TraceCause) -> Result<Option<String>, StoreError> {
-    if cause.is_root() {
+    if cause.is_none() {
         return Ok(None);
     }
     serde_json::to_string(cause)
@@ -180,7 +180,7 @@ pub fn encode_trace_cause(cause: &lash_trace::TraceCause) -> Result<Option<Strin
         .map_err(|error| StoreError::Backend(format!("failed to encode trace cause: {error}")))
 }
 
-/// The trace cause a stored row's `trace_cause_json` column spells: a run
+/// The trace cause a stored row's `trace_cause_json` column spells: no
 /// cause when it is NULL. A value that does not decode is stored data the
 /// backend refuses; nothing replaces it with another cause.
 pub fn decode_trace_cause(
@@ -188,7 +188,7 @@ pub fn decode_trace_cause(
     stored: Option<&str>,
 ) -> Result<lash_trace::TraceCause, StoreError> {
     match stored {
-        None => Ok(lash_trace::TraceCause::Root),
+        None => Ok(lash_trace::TraceCause::None),
         Some(json) => serde_json::from_str(json).map_err(|error| StoreError::StoredDataCorrupt {
             record_kind,
             message: format!("trace cause does not decode: {error}"),

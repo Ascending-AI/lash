@@ -70,7 +70,6 @@ pub(super) async fn release_process_events(
                     sequence: event.sequence,
                     event_type: event.fact.event_type().to_owned(),
                     invocation: event.invocation,
-                    trace_cause: event.trace_cause,
                     occurred_at: event.occurred_at,
                 };
                 crate::observed_sql::query(process_sql().event.release.sql())

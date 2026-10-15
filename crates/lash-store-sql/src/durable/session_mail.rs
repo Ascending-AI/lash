@@ -28,8 +28,9 @@ crate::statements! {
 
         /// Session `?1`'s open, unbound inputs that a turn may admit, in
         /// ingress order: next-turn inputs, and active-turn inputs with the
-        /// delivery they name.
-        open_inputs = "SELECT input_id, enqueue_seq, source_key, run_spec_hash, state, ingress_json
+        /// delivery they name, and the cause each retained.
+        open_inputs = "SELECT input_id, enqueue_seq, source_key, run_spec_hash, state, ingress_json,
+                    trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND admitted_run IS NULL
                AND state IN ('deferred_next_turn', 'pending_active')

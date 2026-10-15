@@ -93,7 +93,6 @@ impl SqliteProcessRegistry {
                         sequence: event.sequence,
                         event_type: event.fact.event_type().to_owned(),
                         invocation: event.invocation,
-                        trace_cause: event.trace_cause,
                         occurred_at: event.occurred_at,
                     };
                     crate::conn::cached_execute(

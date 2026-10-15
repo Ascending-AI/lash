@@ -435,11 +435,15 @@ impl LashRuntime {
         self.host.core.control.effect_host.clone()
     }
 
+    /// Durably accept `input` for this session, caused by `parent`: the
+    /// caller's producer or the scope it runs in, or none when the input is
+    /// unobserved.
     pub async fn enqueue_turn_input(
         &self,
         input: crate::TurnInput,
         ingress: crate::TurnInputIngress,
         source_key: Option<String>,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<crate::PendingTurnInput, RuntimeError> {
         let store = self
             .services
@@ -453,6 +457,7 @@ impl LashRuntime {
             ingress,
             source_key,
             crate::RunSpec::default(),
+            parent,
         )
         .await
     }
@@ -640,19 +645,22 @@ impl LashRuntime {
         &mut self,
         command: crate::SessionCommand,
         idempotency_key: impl Into<String>,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<AcceptedSessionCommand, RuntimeError> {
         Ok(self
-            .enqueue_session_command(command, idempotency_key)
+            .enqueue_session_command(command, idempotency_key, parent)
             .await?)
     }
 
-    /// Accept `command` under `idempotency_key`. An identical resubmission
-    /// under the key answers the retained submission's row; one with other
-    /// content is refused [`SessionCommandEnqueueError::ChangedContent`].
+    /// Accept `command` under `idempotency_key`, caused by `parent`. An
+    /// identical resubmission under the key answers the retained
+    /// submission's row and cause; one with other content is refused
+    /// [`SessionCommandEnqueueError::ChangedContent`].
     pub(super) async fn enqueue_session_command(
         &mut self,
         command: crate::SessionCommand,
         idempotency_key: impl Into<String>,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<AcceptedSessionCommand, SessionCommandEnqueueError> {
         self.reload_invalidated_resident_session_state().await?;
         let idempotency_key = idempotency_key.into();
@@ -680,7 +688,8 @@ impl LashRuntime {
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
             command,
         )
-        .with_source_key(source_key.clone());
+        .with_source_key(source_key.clone())
+        .with_trace_parent(parent);
         let enqueued = match store.enqueue_queued_work_with_outcome(draft).await {
             Ok(
                 crate::QueuedWorkEnqueueOutcome::Inserted(batch)
@@ -775,9 +784,10 @@ impl LashRuntime {
         &mut self,
         command: crate::SessionCommand,
         idempotency_key: impl Into<String>,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<crate::SessionCommandReceipt, RuntimeError> {
         let accepted = self
-            .accept_session_command(command, idempotency_key)
+            .accept_session_command(command, idempotency_key, parent)
             .await?;
         let receipt = match accepted {
             AcceptedSessionCommand::Inline(receipt) => return Ok(receipt),
@@ -898,6 +908,12 @@ impl LashRuntime {
                     }
                 })
                 .collect::<Vec<_>>();
+            // What caused the run: a command that applies alone is the run,
+            // and the turns its code queues retain its cause.
+            let cause = commands
+                .first()
+                .map(|(batch, _)| batch.trace_cause.clone())
+                .unwrap_or_default();
             let commands = commands
                 .into_iter()
                 .map(|(_, command)| command.clone())
@@ -939,6 +955,7 @@ impl LashRuntime {
             }
             if Box::pin(self.apply_session_command(
                 commands,
+                &cause,
                 run.completion(),
                 cancellation.clone(),
                 effect_controller,
@@ -975,6 +992,7 @@ impl LashRuntime {
     async fn apply_session_command(
         &mut self,
         commands: Vec<crate::SessionCommand>,
+        cause: &lash_trace::TraceCause,
         completion: crate::QueuedWorkCompletion,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &crate::ActorContext,
@@ -1062,6 +1080,7 @@ impl LashRuntime {
                     super::host_commands::HostPluginOperation::Command,
                     name.clone(),
                     args.clone(),
+                    cause.as_parent(),
                     completion,
                     effect_controller,
                 ))
@@ -1072,6 +1091,7 @@ impl LashRuntime {
                     super::host_commands::HostPluginOperation::Task,
                     name.clone(),
                     args.clone(),
+                    cause.as_parent(),
                     completion,
                     effect_controller,
                 ))

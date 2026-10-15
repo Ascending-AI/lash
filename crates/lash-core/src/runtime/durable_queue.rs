@@ -127,7 +127,7 @@ impl DurableSessionOps {
     /// actor in the same transaction (ADR 0132 §12).
     ///
     /// Success acknowledges durable acceptance only: the session actor runs
-    /// the input.
+    /// the input. The input retains `parent` as its cause.
     pub async fn enqueue_turn_input(
         &self,
         store: &crate::store::SessionStore,
@@ -135,6 +135,7 @@ impl DurableSessionOps {
         ingress: crate::TurnInputIngress,
         source_key: Option<String>,
         run_spec: crate::RunSpec,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
         self.enqueue_turn_inputs(
             store,
@@ -142,7 +143,7 @@ impl DurableSessionOps {
             ingress,
             run_spec,
             false,
-            lash_trace::TraceCause::Root,
+            parent,
         )
         .await?
         .pop()
@@ -162,10 +163,10 @@ impl DurableSessionOps {
     /// revision each one's run publishes is retained before the run can
     /// start (FIG-4731).
     ///
-    /// `trace_cause` is what caused the request, as its caller captured it;
-    /// this method consults no ambient context. Every input the request
-    /// newly admits retains it, and a row an earlier request admitted keeps
-    /// the cause that request gave it.
+    /// `parent` is what caused the request: its producer, or the scope its
+    /// caller runs in; this method consults no ambient context. Every input
+    /// the request newly admits retains it as its cause, and a row an
+    /// earlier request admitted keeps the cause that request gave it.
     pub async fn enqueue_turn_inputs(
         &self,
         store: &crate::store::SessionStore,
@@ -173,7 +174,7 @@ impl DurableSessionOps {
         ingress: crate::TurnInputIngress,
         run_spec: crate::RunSpec,
         pin: bool,
-        trace_cause: lash_trace::TraceCause,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
         let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
         let (enqueued, revision) = enqueue_turn_inputs_to_store(
@@ -183,7 +184,7 @@ impl DurableSessionOps {
             ingress,
             run_spec,
             pin,
-            trace_cause,
+            parent,
         )
         .await?;
         self.publish_queue_changed(
@@ -401,6 +402,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     ingress: crate::TurnInputIngress,
     source_key: Option<String>,
     run_spec: crate::RunSpec,
+    parent: Option<lash_trace::TraceParent>,
 ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
     enqueue_turn_inputs_to_store(
         session_id,
@@ -409,7 +411,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         ingress,
         run_spec,
         false,
-        lash_trace::TraceCause::Root,
+        parent,
     )
     .await?
     .0
@@ -437,14 +439,14 @@ pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     ingress: crate::TurnInputIngress,
     run_spec: crate::RunSpec,
     pin: bool,
-    trace_cause: lash_trace::TraceCause,
+    parent: Option<lash_trace::TraceParent>,
 ) -> Result<(Vec<crate::PendingTurnInput>, Option<SessionRevision>), crate::RuntimeError> {
     let mut drafts = Vec::with_capacity(inputs.len());
     for (input, source_key) in inputs {
         let mut draft =
             crate::PendingTurnInputDraft::new(session_id.clone(), ingress.clone(), input)
                 .with_run_spec(run_spec.clone())
-                .with_trace_cause(trace_cause.clone());
+                .with_trace_parent(parent.clone());
         // A keyed input's id is its key's: a host re-attaches by the key alone.
         if let Some(key) = source_key.as_deref() {
             draft.input_id = Some(crate::PendingTurnInputDraft::keyed_input_id(

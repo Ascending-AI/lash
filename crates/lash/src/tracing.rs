@@ -14,13 +14,13 @@ pub use lash_trace::telemetry::metrics::{
 };
 pub use lash_trace::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
-    InvalidTraceLinks, TraceAdmissionCandidate, TraceAnchor, TraceAttemptId,
-    TraceAttemptObservation, TraceCandidateOutcome, TraceCarrier, TraceCause,
-    TraceDomainCompletion, TraceDomainProjector, TraceDomainStatus, TraceDomainSubject,
-    TraceEventKind, TraceHostOperation, TraceLinks, TraceRecordIdentity, TraceScopeAdmission,
-    TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
-    TraceStateLimits, TraceToolOwner, TraceTransitionKind, UntracedScopes, W3cSpanId,
-    W3cTraceFlags, W3cTraceId, W3cTraceState,
+    InvalidTraceLinks, ProducerKind, ProducerSpec, TraceAdmissionCandidate, TraceAnchor,
+    TraceAttemptId, TraceAttemptObservation, TraceCall, TraceCaller, TraceCandidateOutcome,
+    TraceCarrier, TraceCause, TraceDomainCompletion, TraceDomainProjector, TraceDomainStatus,
+    TraceDomainSubject, TraceEventKind, TraceHostOperation, TraceLinkMode, TraceLinks, TraceParent,
+    TraceRecordIdentity, TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind,
+    TraceScopeOffer, TraceScopeOwner, TraceStateLimits, TraceToolOwner, TraceTransitionKind,
+    UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 pub use lash_trace::{TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
 

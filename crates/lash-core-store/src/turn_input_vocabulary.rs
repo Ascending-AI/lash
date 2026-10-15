@@ -378,7 +378,7 @@ pub struct PendingTurnInputDraft {
     /// beside the row and no later write changes it. It is no part of the
     /// submission, so a retry under another context is the same submission
     /// and reads the retained cause back.
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_none")]
     pub trace_cause: lash_trace::TraceCause,
 }
 impl PendingTurnInputDraft {
@@ -397,13 +397,14 @@ impl PendingTurnInputDraft {
             input,
             run_spec: crate::run_spec::RunSpec::default(),
             pin: false,
-            trace_cause: lash_trace::TraceCause::Root,
+            trace_cause: lash_trace::TraceCause::None,
         }
     }
 
-    /// Sets what caused the submission ([`Self::trace_cause`]).
-    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
-        self.trace_cause = trace_cause;
+    /// Sets what caused the submission ([`Self::trace_cause`]): the parent
+    /// the work it admits takes, or none when it is unobserved.
+    pub fn with_trace_parent(mut self, parent: Option<lash_trace::TraceParent>) -> Self {
+        self.trace_cause = lash_trace::TraceCause::from(parent);
         self
     }
 
@@ -654,7 +655,7 @@ pub struct PendingTurnInput {
     pub run_spec: Option<crate::run_spec::RunSpecHash>,
     /// What caused the submission, as its first acceptance retained it
     /// ([`PendingTurnInputDraft::trace_cause`]).
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_none")]
     pub trace_cause: lash_trace::TraceCause,
 }
 

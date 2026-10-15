@@ -16,6 +16,7 @@ impl RuntimeSessionServices {
         process_id: &crate::ProcessId,
         create_request: crate::SessionCreateRequest,
         turn_input: crate::TurnInput,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnMail, crate::PluginError>
     {
         let create_request = self.child_create_request(process_id, create_request);
@@ -25,6 +26,7 @@ impl RuntimeSessionServices {
             process_id,
             &turn_id,
             turn_input,
+            parent,
         ))
         .await
         {

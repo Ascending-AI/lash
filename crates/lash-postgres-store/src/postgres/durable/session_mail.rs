@@ -234,6 +234,7 @@ pub(super) async fn read(
             get(row, 3)?,
             &get::<String>(row, 4)?,
             &get::<String>(row, 5)?,
+            get::<Option<String>>(row, 6)?.as_deref(),
         )?);
     }
     let batches = crate::observed_sql::query(SQL.session_mail.open_batches.sql())
@@ -260,6 +261,7 @@ fn decode_input(
     run_spec_hash: Option<String>,
     state: &str,
     ingress_json: &str,
+    trace_cause: Option<&str>,
 ) -> Result<MailInput, DurableError> {
     let ingress: lash_core_execution::TurnInputIngress =
         serde_json::from_str(ingress_json).map_err(|error| undecodable("input delivery", error))?;
@@ -273,6 +275,11 @@ fn decode_input(
         source_key,
         run_spec_hash,
         active_turn,
+        trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+            "pending turn input",
+            trace_cause,
+        )
+        .map_err(|error| undecodable("input trace cause", error))?,
     })
 }
 

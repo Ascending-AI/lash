@@ -68,7 +68,8 @@ fn tool_scope_owner_stays_on_the_admitted_run_across_physical_turns() {
                 session_id: "session".into(),
                 turn_id: turn_id.into(),
             }),
-            cause: TraceCause::Root,
+            cause: TraceCause::None,
+            links: lash_trace::TraceLinks::new(),
             anchor: TraceAnchor::Untraced,
             started_at_ms: 1,
         };
@@ -87,7 +88,8 @@ fn tool_scope_owner_stays_on_the_admitted_run_across_physical_turns() {
         scope: TraceScopeId::admission(TraceScopeOwner::Process {
             process_id: crate::process_id_for_test("parent"),
         }),
-        cause: TraceCause::Root,
+        cause: TraceCause::None,
+        links: lash_trace::TraceLinks::new(),
         anchor: TraceAnchor::Untraced,
         started_at_ms: 1,
     };

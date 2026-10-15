@@ -623,6 +623,12 @@ lash_conformance::observer_intent_tests!({
     (backend, law_backend)
 });
 
+lash_conformance::trace_provenance_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    (backend, stores)
+});
+
 lash_conformance::queue_observation_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let law_backend = backend.as_backend();

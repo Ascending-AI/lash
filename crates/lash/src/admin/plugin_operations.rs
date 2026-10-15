@@ -35,9 +35,33 @@ impl<Error> From<PluginTaskResultError<Error>> for EmbedError {
 #[derive(Clone)]
 pub struct PluginOperations {
     pub(crate) context: AdminContext,
+    pub(crate) trace: lash_core::TraceCall,
 }
 
 impl PluginOperations {
+    /// Open each durable invocation's `lash.plugin.invoke` producer span
+    /// under `context`, the trace context of whatever caused it, instead of
+    /// the caller's ambient one. The turns the operation queues retain the
+    /// producer as their cause.
+    pub fn trace_context(mut self, context: lash_core::TraceCarrier) -> Self {
+        self.trace.caller = lash_core::TraceCaller::Explicit(Some(context));
+        self
+    }
+
+    /// Open each invocation's producer span with no caller: a new trace
+    /// root.
+    pub fn trace_context_none(mut self) -> Self {
+        self.trace.caller = lash_core::TraceCaller::Explicit(None);
+        self
+    }
+
+    /// How each invocation's producer span relates to its caller: its
+    /// child (the default), or a new trace root that links it.
+    pub fn trace_link_mode(mut self, mode: lash_core::TraceLinkMode) -> Self {
+        self.trace.link_mode = mode;
+        self
+    }
+
     /// Durably submit a host task under a stable key and return its operation
     /// Run. The engine owns execution; the handle follows, cancels and reads
     /// the result, including after a restart.
@@ -63,12 +87,13 @@ impl PluginOperations {
         let receipt = SessionCommandAdmin {
             context: self.context.clone(),
         }
-        .submit(
+        .submit_traced(
             lash_core::facade_support::SessionCommand::RunPluginTask {
                 name: name.into(),
                 args,
             },
             idempotency_key,
+            &self.trace,
         )
         .await?;
         let operation = lash_core::tool_run::OperationRun {
@@ -143,6 +168,23 @@ impl PluginOperations {
     {
         let idempotency_key = idempotency_key.into();
         let session_id = SessionId::from(self.context.runtime.observe().session_id());
+        // The invocation's producer opens here, before the first await; a
+        // storeless command admits no durable work and opens none.
+        let mut producer = self
+            .context
+            .runtime
+            .observe()
+            .queue_store
+            .is_some()
+            .then(|| {
+                self.context
+                    .target
+                    .open_producer(lash_core::ProducerKind::PluginInvoke, &self.trace)
+            })
+            .flatten();
+        let parent = producer
+            .as_deref()
+            .map(<dyn lash_core::TraceHostOperation>::parent);
         let submitted = self
             .context
             .with_writer(async |runtime: &mut LashRuntime| {
@@ -151,10 +193,14 @@ impl PluginOperations {
                         name: name.to_string(),
                         args,
                     };
-                    return Box::pin(runtime.submit_session_command(command, idempotency_key))
-                        .await
-                        .map(SubmittedCommand::Queued)
-                        .map_err(EmbedError::Runtime);
+                    return Box::pin(runtime.submit_session_command(
+                        command,
+                        idempotency_key,
+                        parent,
+                    ))
+                    .await
+                    .map(SubmittedCommand::Queued)
+                    .map_err(EmbedError::Runtime);
                 }
                 let receipt = runtime
                     .run_storeless_plugin_command(name, args, Some(session_id.clone()))
@@ -162,6 +208,9 @@ impl PluginOperations {
                 receipt.map(SubmittedCommand::Applied).map_err(Into::into)
             })
             .await?;
+        if let (Some(producer), SubmittedCommand::Queued(_)) = (producer.take(), &submitted) {
+            producer.settle(lash_trace::TraceCandidateOutcome::Selected);
+        }
         let receipt = match submitted {
             SubmittedCommand::Applied(receipt) => receipt,
             SubmittedCommand::Queued(receipt) => {

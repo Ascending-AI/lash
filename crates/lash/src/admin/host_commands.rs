@@ -15,19 +15,55 @@ impl SessionCommandAdmin {
     /// resubmission under the same key names the same command. Await its
     /// outcome with [`Self::settle`], from this handle or any other that holds
     /// the receipt.
+    ///
+    /// A plugin command or task is a plugin operation invoked through the
+    /// admin surface: it opens a `lash.plugin.invoke` producer span under
+    /// the caller's ambient context, and the turns it queues retain it.
     pub async fn submit(
         &self,
         command: lash_core::facade_support::SessionCommand,
         idempotency_key: impl Into<String>,
     ) -> Result<lash_core::facade_support::SessionCommandReceipt> {
-        let idempotency_key = idempotency_key.into();
-        self.context
-            .with_writer(async |runtime: &mut LashRuntime| {
-                Box::pin(runtime.submit_session_command(command, idempotency_key))
-                    .await
-                    .map_err(Into::into)
-            })
+        self.submit_traced(command, idempotency_key, &lash_core::TraceCall::default())
             .await
+    }
+
+    /// [`Self::submit`] with the trace choices `call` states for a plugin
+    /// operation's producer.
+    pub(super) async fn submit_traced(
+        &self,
+        command: lash_core::facade_support::SessionCommand,
+        idempotency_key: impl Into<String>,
+        call: &lash_core::TraceCall,
+    ) -> Result<lash_core::facade_support::SessionCommandReceipt> {
+        let idempotency_key = idempotency_key.into();
+        // A plugin operation's producer opens here, before the first await.
+        let producer = matches!(
+            command,
+            lash_core::facade_support::SessionCommand::RunPluginCommand { .. }
+                | lash_core::facade_support::SessionCommand::RunPluginTask { .. }
+        )
+        .then(|| {
+            self.context
+                .target
+                .open_producer(lash_core::ProducerKind::PluginInvoke, call)
+        })
+        .flatten();
+        let parent = producer
+            .as_deref()
+            .map(<dyn lash_core::TraceHostOperation>::parent);
+        let receipt = self
+            .context
+            .with_writer(async |runtime: &mut LashRuntime| {
+                Box::pin(runtime.submit_session_command(command, idempotency_key, parent))
+                    .await
+                    .map_err(crate::EmbedError::from)
+            })
+            .await?;
+        if let Some(producer) = producer {
+            producer.settle(lash_trace::TraceCandidateOutcome::Selected);
+        }
+        Ok(receipt)
     }
 
     /// Await the settlement of the command `receipt` names, reattaching by

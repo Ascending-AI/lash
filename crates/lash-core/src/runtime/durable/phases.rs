@@ -821,7 +821,14 @@ pub async fn run_phases(
                 let traced = turn_trace::outcome(services.tracing(), &cause);
                 // A frame switch mails its follow-on with its commit.
                 let follow_on = match &done.outcome {
-                    Some(outcome) => follow_on_mail(&session, outcome, switches)?,
+                    Some(outcome) => follow_on_mail(
+                        &session,
+                        outcome,
+                        switches,
+                        row.admission
+                            .trace()
+                            .and_then(lash_trace::DurableTraceScope::as_parent),
+                    )?,
                     None => None,
                 };
                 let commit = drive
@@ -902,7 +909,7 @@ pub async fn run_phases(
                     };
                     refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
                 })?;
-                turn_trace::ended(services.tracing(), &row, traced);
+                turn_trace::ended(services.tracing(), &row, traced, &drive.delivered_inputs());
                 drive.committed().await;
                 // The commit moved the head: the next turn loads it again.
                 heads.evict();
@@ -1043,7 +1050,7 @@ pub(super) async fn refuse(
         export_owed_admission(tracing, &current);
     }
     cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
-    turn_trace::ended(tracing, row, traced);
+    turn_trace::ended(tracing, row, traced, &[]);
     Ok(())
 }
 

@@ -211,7 +211,12 @@ fn facade_otel_admission_capacities_control_defer_and_dedup() {
         session_id: "capacity".into(),
         turn_id: "turn".into(),
     });
-    let candidate = adapter.propose(&scope, &TraceCause::Root, 1);
+    let cause = TraceCause::Parent(
+        TraceCarrier::parse_w3c(&format!("00-{:032x}-{:016x}-01", 1, 1), None)
+            .expect("a producer context"),
+    );
+    let parent = cause.as_parent().expect("a producer parents");
+    let candidate = adapter.propose(&scope, &parent, &TraceLinks::new(), 1);
     let anchor = candidate.anchor();
     candidate.defer();
     assert_eq!(
@@ -221,7 +226,8 @@ fn facade_otel_admission_capacities_control_defer_and_dedup() {
     );
     let retained = DurableTraceScope {
         scope,
-        cause: TraceCause::Root,
+        cause,
+        links: TraceLinks::new(),
         anchor,
         started_at_ms: 1,
     };

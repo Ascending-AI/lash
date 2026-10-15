@@ -262,6 +262,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
             &process_id,
             predecessor_request,
             crate::TurnInput::text("run"),
+            None,
         )
         .await
         .expect("the refusal is a typed terminal, not an infra error");

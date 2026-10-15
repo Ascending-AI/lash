@@ -181,7 +181,7 @@ pub struct ToolIntentIngress {
     core: crate::LashCore,
     session_id: SessionId,
     scope: lash_core::ExecutionScope,
-    trace: crate::send::SendTraceContext,
+    trace: lash_core::TraceCall,
 }
 
 /// What one submission offers its ledger row's trace scope, captured once
@@ -243,40 +243,68 @@ impl ToolIntentIngress {
             core,
             session_id,
             scope,
-            trace: crate::send::SendTraceContext::Ambient,
+            trace: lash_core::TraceCall::default(),
         }
     }
 
-    /// Link the intents this ingress submits to `context`, the trace
-    /// context of whatever caused them. An explicit context wins over the
-    /// caller's ambient one, which is then never consulted.
+    /// Open each submission's `lash.tool_intent.submit` producer span
+    /// under `context`, the trace context of whatever caused it. An
+    /// explicit context wins over the caller's ambient one, which is then
+    /// never consulted.
     ///
-    /// The link sits beside an intent, never inside it: the first
-    /// submission of an identity retains the context it was given, and a
-    /// redelivery under another context is the same submission and keeps
-    /// the first one.
+    /// The context sits beside an intent, never inside it: the first
+    /// submission of an identity retains its producer as the intent's
+    /// cause, and a redelivery under another context is the same submission
+    /// and keeps the first one.
     pub fn trace_context(mut self, context: lash_core::TraceCarrier) -> Self {
-        self.trace.set_context(context);
+        self.trace.caller = lash_core::TraceCaller::Explicit(Some(context));
+        self
+    }
+
+    /// Open each submission's producer span with no caller: a new trace
+    /// root.
+    pub fn trace_context_none(mut self) -> Self {
+        self.trace.caller = lash_core::TraceCaller::Explicit(None);
         self
     }
 
     /// Snapshot the caller's current trace context now, through the core's
     /// telemetry adapter, instead of when each submission is made.
     pub fn capture_trace_context(mut self) -> Self {
-        self.trace
-            .capture(|| self.core.env.core.tracing.scopes().capture_current());
+        self.trace.caller =
+            lash_core::TraceCaller::Explicit(self.core.env.core.tracing.scopes().capture_current());
         self
     }
 
-    /// What a submission made now offers its ledger row.
-    fn submission_trace(&self) -> SubmissionTrace {
-        SubmissionTrace {
+    /// How each submission's producer span relates to its caller: its
+    /// child (the default), or a new trace root that links it.
+    pub fn trace_link_mode(mut self, mode: lash_core::TraceLinkMode) -> Self {
+        self.trace.link_mode = mode;
+        self
+    }
+
+    /// The producer of a submission made now, and what the submission
+    /// offers its ledger row: the producer as the intent's cause.
+    fn submission_trace(
+        &self,
+    ) -> (
+        Option<Box<dyn lash_core::TraceHostOperation>>,
+        SubmissionTrace,
+    ) {
+        let scopes = self.core.env.core.tracing.scopes().as_ref();
+        let producer = scopes.open_producer(
+            self.trace
+                .producer(lash_core::ProducerKind::ToolIntentSubmit, scopes),
+        );
+        let trace = SubmissionTrace {
             offer: lash_core::TraceScopeOffer::caused_by(
-                self.trace
-                    .cause_through(self.core.env.core.tracing.scopes().as_ref()),
+                producer
+                    .as_deref()
+                    .map(<dyn lash_core::TraceHostOperation>::parent),
             ),
             submitted_at_ms: self.core.env.core.clock.timestamp_ms(),
-        }
+        };
+        (producer, trace)
     }
 
     /// Derive the idempotency key of the intent at `intent_index` of one host
@@ -341,9 +369,9 @@ impl ToolIntentIngress {
             replay_key = %identity.replay_key,
             submitted_kind = %intent.kind().as_str(),
         );
-        // The caller's context is snapshotted here, before the first await.
-        let trace = self.submission_trace();
-        Box::pin(
+        // The submission's producer opens here, before the first await.
+        let (producer, trace) = self.submission_trace();
+        let outcome = Box::pin(
             async {
                 let outcome = self.submit_inner(key, intent, &trace).await;
                 Self::record_decision(&identity, &outcome);
@@ -351,7 +379,21 @@ impl ToolIntentIngress {
             }
             .instrument(span),
         )
-        .await
+        .await;
+        if let Some(producer) = producer {
+            producer.settle(match &outcome {
+                ToolIntentIngressOutcome::Admitted {
+                    replayed: false, ..
+                } => lash_trace::TraceCandidateOutcome::Selected,
+                ToolIntentIngressOutcome::Admitted { replayed: true, .. } => {
+                    lash_trace::TraceCandidateOutcome::Reused
+                }
+                ToolIntentIngressOutcome::Refused { .. } => {
+                    lash_trace::TraceCandidateOutcome::Refused
+                }
+            });
+        }
+        outcome
     }
 
     async fn submit_inner(
@@ -510,11 +552,12 @@ impl ToolIntentIngress {
     ) -> std::result::Result<(lash_core::ToolIntentRealized, bool), RealizationFailure> {
         let kind = intent.kind();
         let submitted_intent = intent.clone();
-        if let Some(recorded) = self.admit_submission(identity, &intent, trace).await? {
+        let (recorded, parent) = self.admit_submission(identity, &intent, trace).await?;
+        if let Some(recorded) = recorded {
             return Ok((recorded, true));
         }
         let (result, replayed) = self
-            .realize_inner(identity, intent)
+            .realize_inner(identity, intent, parent)
             .await
             .map_err(|error| Self::realization_failure(kind, error))?;
         let realized = match result {
@@ -605,12 +648,21 @@ impl ToolIntentIngress {
     /// An owner whose ledger the retained-evidence lever reclaimed answers
     /// [`ToolIntentIngressRefusal::SubmissionOwnerReclaimed`] here, before
     /// anything realizes (FIG-1509).
+    ///
+    /// It also answers the parent the work the submission admits retains:
+    /// the submission's retained scope, the first writer's.
     async fn admit_submission(
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: &lash_core::ToolIntent,
         trace: &SubmissionTrace,
-    ) -> std::result::Result<Option<lash_core::ToolIntentRealized>, RealizationFailure> {
+    ) -> std::result::Result<
+        (
+            Option<lash_core::ToolIntentRealized>,
+            Option<lash_core::TraceParent>,
+        ),
+        RealizationFailure,
+    > {
         let kind = intent.kind();
         let record = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
             .map_err(|error| {
@@ -624,17 +676,16 @@ impl ToolIntentIngress {
         let registry = self
             .process_registry()
             .map_err(|error| RealizationFailure::Command(kind, error))?;
-        // The submission's admission proposes the anchor its scope retains,
-        // so the committed settlement has a parent to export under.
-        let candidate = self.core.env.core.tracing.scopes().propose(
-            &record.trace_scope_id(),
-            trace.offer.cause(),
+        // The submission's admission proposes the anchor its scope retains
+        // under its producer, so the committed settlement has a parent to
+        // export under.
+        let (scope, candidate) = self.core.env.core.tracing.scopes().propose_scope(
+            record.trace_scope_id(),
+            trace.offer.cause().as_parent().as_ref(),
+            lash_core::TraceLinks::new(),
             trace.submitted_at_ms,
         );
-        let submitted = record.with_trace_offer(
-            lash_core::TraceScopeOffer::new(trace.offer.cause().clone(), candidate.anchor()),
-            trace.submitted_at_ms,
-        );
+        let submitted = record.with_trace_offer(scope.offer(), trace.submitted_at_ms);
         let admission = match registry
             .admit_tool_intent_submission(submitted.clone())
             .await
@@ -658,7 +709,9 @@ impl ToolIntentIngress {
             }
         });
         let existing = match admission {
-            lash_core::ToolIntentSubmissionAdmission::Admitted => return Ok(None),
+            lash_core::ToolIntentSubmissionAdmission::Admitted => {
+                return Ok((None, scope.as_parent()));
+            }
             lash_core::ToolIntentSubmissionAdmission::Existing(existing) => existing,
             lash_core::ToolIntentSubmissionAdmission::Reclaimed => {
                 return Err(RealizationFailure::Refused(
@@ -691,12 +744,19 @@ impl ToolIntentIngress {
                 ToolIntentIngressRefusal::DuplicateIdentity { kind },
             ));
         }
-        Ok(match existing.execution_outcome() {
-            Some(lash_core::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
-                Some(realized)
-            }
-            _ => None,
-        })
+        let parent = existing
+            .trace
+            .as_ref()
+            .and_then(lash_core::DurableTraceScope::as_parent);
+        Ok((
+            match existing.execution_outcome() {
+                Some(lash_core::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
+                    Some(realized)
+                }
+                _ => None,
+            },
+            parent,
+        ))
     }
 
     /// Retain `outcome` in the durable tool-intent submission ledger under
@@ -820,6 +880,7 @@ impl ToolIntentIngress {
         &self,
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::ToolIntent,
+        parent: Option<lash_core::TraceParent>,
     ) -> Result<(RealizedIntent, bool), lash_core::PluginError> {
         // The launch the declaration sealed is held under this realization's
         // journal guard until registration carries it onto the record. A
@@ -852,7 +913,8 @@ impl ToolIntentIngress {
                 // id, so a re-submitted declaration starts the same process:
                 // one constructor, shared with core's recorded-intent seam
                 // (FIG-2876, FIG-2994).
-                let request = intent.into_request(identity);
+                // The start joins the submission's trace.
+                let request = intent.into_request(identity).with_trace_parent(parent);
                 // A host-submitted start is a root: its lifetime is
                 // `Detached` or `Until` a session the host holds (FIG-3607
                 // R3). The start's recorded admission checks that session is

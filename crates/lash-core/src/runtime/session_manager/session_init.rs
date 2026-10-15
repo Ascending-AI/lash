@@ -879,6 +879,7 @@ impl RuntimeSessionServices {
         process_id: &crate::ProcessId,
         turn_id: &TurnId,
         turn_input: crate::TurnInput,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<SessionId, SessionTurnInitError> {
         let requested_session_id = create_request.session_id.clone();
         // A recorded request can carry a start point this build keeps only
@@ -935,7 +936,8 @@ impl RuntimeSessionServices {
             crate::TurnInputIngress::next_turn(),
             turn_input.durable_projection(),
         )
-        .with_source_key(turn_id.as_str());
+        .with_source_key(turn_id.as_str())
+        .with_trace_parent(parent);
         store
             .store()
             .enqueue_pending_turn_input(draft)

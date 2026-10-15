@@ -1110,8 +1110,7 @@ impl PreparedProcessRegistration {
         mut self,
         anchor: lash_trace::TraceAnchor,
     ) -> (ProcessRegistration, Vec<SessionId>, ProcessId, bool, u64) {
-        self.registration.trace =
-            lash_trace::TraceScopeOffer::new(self.registration.trace.cause().clone(), anchor);
+        self.registration.trace = std::mem::take(&mut self.registration.trace).anchored(anchor);
         (
             self.registration,
             self.observers,

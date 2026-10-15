@@ -13,12 +13,11 @@
 //! The law walks every owning row through the stores under test: a turn
 //! input, a process start and a host-submitted tool intent.
 
-use crate::ActorContext;
 use std::sync::Arc;
 
 use lash_core::{
-    DurableTraceScope, TraceAnchor, TraceCarrier, TraceCause, TraceScopeAdmission, TraceScopeId,
-    TraceScopeOffer, TraceScopeOwner,
+    DurableTraceScope, TraceAnchor, TraceCarrier, TraceCause, TraceLinks, TraceScopeAdmission,
+    TraceScopeId, TraceScopeOffer, TraceScopeOwner,
 };
 use pretty_assertions::assert_eq;
 
@@ -41,14 +40,19 @@ fn context(producer: u8) -> TraceCarrier {
     .expect("a valid trace context")
 }
 
-fn linked(producer: u8) -> TraceCause {
-    TraceCause::linked_to(Some(context(producer)))
+/// The cause of work producer `producer` parents.
+fn caused(producer: u8) -> TraceCause {
+    TraceCause::Parent(context(producer))
 }
 
 /// The offer of an admission caused by `producer` whose candidate proposed
 /// the anchor `candidate`.
 fn offer(producer: u8, candidate: u8) -> TraceScopeOffer {
-    TraceScopeOffer::new(linked(producer), TraceAnchor::Context(context(candidate)))
+    TraceScopeOffer::new(
+        caused(producer),
+        TraceLinks::new(),
+        TraceAnchor::Context(context(candidate)),
+    )
 }
 
 const FIRST: u8 = 1;
@@ -61,7 +65,6 @@ const SECOND_ANCHOR: u8 = 0xa2;
 /// or typed conflict, and a retained read yields no emission permit.
 pub async fn first_admission_wins_without_changing_business_identity(
     prefix: &str,
-    _host: ActorContext,
     stores: Arc<dyn crate::StoreSet>,
 ) {
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
@@ -87,7 +90,7 @@ fn input_draft(
         crate::TurnInput::text(text),
     )
     .with_source_key(key)
-    .with_trace_cause(cause)
+    .with_trace_parent(cause.as_parent())
 }
 
 #[expect(
@@ -103,19 +106,19 @@ async fn a_retried_input_keeps_its_first_cause(parts: &TraceParts) {
             .expect("the submission has a digest")
     };
     assert_eq!(
-        digest(draft(linked(FIRST))),
-        digest(draft(TraceCause::Root)),
+        digest(draft(caused(FIRST))),
+        digest(draft(TraceCause::None)),
         "the cause is no part of the submission"
     );
-    assert_eq!(digest(draft(linked(FIRST))), digest(draft(linked(SECOND))));
+    assert_eq!(digest(draft(caused(FIRST))), digest(draft(caused(SECOND))));
 
     let accepted = parts
         .store
-        .enqueue_pending_turn_input(draft(linked(FIRST)))
+        .enqueue_pending_turn_input(draft(caused(FIRST)))
         .await
         .expect("the first acceptance");
-    assert_eq!(accepted.trace_cause, linked(FIRST));
-    for retry in [linked(SECOND), TraceCause::Root] {
+    assert_eq!(accepted.trace_cause, caused(FIRST));
+    for retry in [caused(SECOND), TraceCause::None] {
         let retried = parts
             .store
             .enqueue_pending_turn_input(draft(retry))
@@ -124,7 +127,7 @@ async fn a_retried_input_keeps_its_first_cause(parts: &TraceParts) {
         assert_eq!(retried.input_id, accepted.input_id);
         assert_eq!(
             retried.trace_cause,
-            linked(FIRST),
+            caused(FIRST),
             "a retry reads the first cause back"
         );
     }
@@ -138,7 +141,7 @@ async fn a_retried_input_keeps_its_first_cause(parts: &TraceParts) {
             .iter()
             .map(|read| read.input.trace_cause.clone())
             .collect::<Vec<_>>(),
-        vec![linked(FIRST)]
+        vec![caused(FIRST)]
     );
 
     // A changed submission is the typed conflict it always was.
@@ -148,7 +151,7 @@ async fn a_retried_input_keeps_its_first_cause(parts: &TraceParts) {
             parts,
             "traced-run",
             "other words",
-            linked(FIRST),
+            caused(FIRST),
         ))
         .await
     {
@@ -160,19 +163,19 @@ async fn a_retried_input_keeps_its_first_cause(parts: &TraceParts) {
     let untraced = |cause| input_draft(parts, "untraced-run", "words nobody traced", cause);
     let accepted = parts
         .store
-        .enqueue_pending_turn_input(untraced(TraceCause::Root))
+        .enqueue_pending_turn_input(untraced(TraceCause::None))
         .await
         .expect("the untraced acceptance");
-    assert_eq!(accepted.trace_cause, TraceCause::Root);
+    assert_eq!(accepted.trace_cause, TraceCause::None);
     let retried = parts
         .store
-        .enqueue_pending_turn_input(untraced(linked(SECOND)))
+        .enqueue_pending_turn_input(untraced(caused(SECOND)))
         .await
         .expect("a traced retry of an untraced submission");
     assert_eq!(retried.input_id, accepted.input_id);
     assert_eq!(
         retried.trace_cause,
-        TraceCause::Root,
+        TraceCause::None,
         "a retry cannot fill in a cause the first acceptance lacked"
     );
 }
@@ -199,7 +202,8 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
         scope: TraceScopeId::admission(TraceScopeOwner::Process {
             process_id: created.record.id.clone(),
         }),
-        cause: linked(FIRST),
+        cause: caused(FIRST),
+        links: TraceLinks::new(),
         anchor: TraceAnchor::Context(context(FIRST_ANCHOR)),
         started_at_ms: created.record.created_at_ms,
     };
@@ -289,7 +293,8 @@ async fn a_resubmitted_intent_keeps_its_first_scope(
             owner,
             replay_key: identity.replay_key.clone(),
         }),
-        cause: linked(FIRST),
+        cause: caused(FIRST),
+        links: TraceLinks::new(),
         anchor: TraceAnchor::Context(context(FIRST_ANCHOR)),
         started_at_ms: 7,
     };

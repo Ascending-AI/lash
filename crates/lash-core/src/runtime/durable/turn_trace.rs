@@ -121,27 +121,55 @@ pub(super) fn outcome(
 
 /// Emit `turn_completed` with `outcome` for `row`'s turn, whose terminal
 /// commit was just acknowledged, under the trace scope its admission
-/// retained. Its time is this owner's clock at the acknowledgement: the
-/// commit's receipt carries none.
+/// retained, linking what it consumed: the producers of `delivered`, the
+/// inputs its checkpoints delivered while it ran, which its checkpoint
+/// retains with their causes. Its time is this owner's clock at the
+/// acknowledgement: the commit's receipt carries none.
 pub(super) fn ended(
     tracing: Option<&TraceRuntime>,
     row: &TurnRow,
     outcome: Option<TraceTurnOutcome>,
+    delivered: &[crate::AdmittedTurnInputs],
 ) {
     let (Some(tracing), Some(scope), Some(outcome)) = (tracing, row.admission.trace(), outcome)
     else {
         return;
     };
-    tracing.unreplayed(Some(scope.clone())).transition(
-        Some(&EmissionPermit::new_transition()),
-        tracing.clock().timestamp_ms(),
-        TraceTransitionKind::Terminal,
-        0,
-        || {
-            (
-                context(&row.session, &row.run),
-                TraceEvent::TurnCompleted { outcome },
-            )
-        },
-    );
+    tracing
+        .unreplayed(Some(consumed(scope, delivered)))
+        .transition(
+            Some(&EmissionPermit::new_transition()),
+            tracing.clock().timestamp_ms(),
+            TraceTransitionKind::Terminal,
+            0,
+            || {
+                (
+                    context(&row.session, &row.run),
+                    TraceEvent::TurnCompleted { outcome },
+                )
+            },
+        );
+}
+
+/// `scope` linking, after its admission links, the producer of every input
+/// in `delivered` its turn consumed while it ran: a consumed input is
+/// linked, never a second parent (D1). Each producer is linked once, the
+/// turn's own parent never, and the overflow past the link limit is
+/// counted.
+fn consumed(
+    scope: &DurableTraceScope,
+    delivered: &[crate::AdmittedTurnInputs],
+) -> DurableTraceScope {
+    let mut scope = scope.clone();
+    let parent = scope.cause.as_parent();
+    for input in delivered.iter().flat_map(|admitted| &admitted.inputs) {
+        if let lash_trace::TraceCause::Parent(producer) = &input.trace_cause
+            && !parent
+                .as_ref()
+                .is_some_and(|parent| parent.carrier().same_span(producer))
+        {
+            scope.links.push(producer.clone());
+        }
+    }
+    scope
 }

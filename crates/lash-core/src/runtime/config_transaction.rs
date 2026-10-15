@@ -132,6 +132,7 @@ impl LashRuntime {
                     transaction: Box::new(record),
                 },
                 id.clone(),
+                None,
             )
             .await
         {

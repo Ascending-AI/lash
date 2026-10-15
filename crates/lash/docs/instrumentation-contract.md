@@ -10,6 +10,10 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.tool_intent.admitted` | Internal | Candidate |
 | `lash.process.admitted` | Internal | Candidate |
 | `lash.send` | Producer | Live |
+| `lash.send.batch` | Producer | Live |
+| `lash.process.start` | Producer | Live |
+| `lash.tool_intent.submit` | Producer | Live |
+| `lash.plugin.invoke` | Producer | Live |
 | `invoke_agent` | Internal | Transition |
 | `chat` | Client | Live |
 | `execute_tool` | Internal | Live |

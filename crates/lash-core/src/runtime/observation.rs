@@ -654,11 +654,14 @@ impl RuntimeHandle {
         Ok((ops, store))
     }
 
+    /// Durably accept `input` for the observed session, caused by
+    /// `parent`, or unobserved with none.
     pub async fn enqueue_turn_input(
         &self,
         input: crate::TurnInput,
         ingress: crate::TurnInputIngress,
         source_key: Option<String>,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<crate::PendingTurnInput, crate::RuntimeError> {
         let (ops, store) = self.durable_queue()?;
         ops.enqueue_turn_input(
@@ -667,6 +670,7 @@ impl RuntimeHandle {
             ingress,
             source_key,
             crate::RunSpec::default(),
+            parent,
         )
         .await
     }

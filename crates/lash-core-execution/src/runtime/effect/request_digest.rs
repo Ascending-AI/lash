@@ -448,10 +448,11 @@ mod tests {
     /// its recorded effect instead of diverging from it.
     #[test]
     fn trace_provenance_is_no_part_of_an_envelopes_identity() {
-        let linked = |id| lash_trace::TraceCause::linked_to(Some(producer(id)));
+        let parent = |id| lash_trace::TraceCause::Parent(producer(id)).as_parent();
         let offer = |id| {
             lash_trace::TraceScopeOffer::new(
-                linked(id),
+                lash_trace::TraceCause::Parent(producer(id)),
+                [producer(id + 50)].into_iter().collect(),
                 lash_trace::TraceAnchor::Context(producer(id + 100)),
             )
         };
@@ -468,7 +469,7 @@ mod tests {
                 execution_context: Box::default(),
             })
         };
-        let accept = |cause: lash_trace::TraceCause| {
+        let accept = |cause: Option<lash_trace::TraceParent>| {
             let mut envelope = process_effect(crate::ProcessCommand::List {
                 selection: crate::ProcessListSelection::HostRunning,
             });
@@ -480,7 +481,7 @@ mod tests {
                         crate::TurnInput::text("the accepted words"),
                     )
                     .with_source_key("provenance-input")
-                    .with_trace_cause(cause),
+                    .with_trace_parent(cause),
                 ),
             };
             envelope
@@ -492,12 +493,7 @@ mod tests {
                 start(offer(1)),
                 start(offer(2)),
             ),
-            (
-                "input",
-                accept(lash_trace::TraceCause::Root),
-                accept(linked(1)),
-                accept(linked(2)),
-            ),
+            ("input", accept(None), accept(parent(1)), accept(parent(2))),
         ] {
             let recorded = untraced.canonical_form().expect("canonical");
             for traced in [first, second] {

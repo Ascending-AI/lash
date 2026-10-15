@@ -81,9 +81,10 @@ pub use lash_sansio::{
 pub use recording::RecordingTraceSink;
 pub use telemetry::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
-    InvalidTraceLinks, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT,
-    TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome, TraceCarrier,
-    TraceCause, TraceDomainProjector, TraceHostOperation, TraceLinks, TraceRecordIdentity,
+    InvalidTraceLinks, ProducerKind, ProducerSpec, TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT,
+    TRACESTATE_MEMBER_LIMIT, TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCall,
+    TraceCaller, TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainProjector,
+    TraceHostOperation, TraceLinkMode, TraceLinks, TraceParent, TraceRecordIdentity,
     TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer,
     TraceScopeOwner, TraceStateLimits, TraceToolOwner, TraceTransitionKind, UntracedScopes,
     W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,

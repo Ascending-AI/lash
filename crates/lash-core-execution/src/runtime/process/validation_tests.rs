@@ -281,7 +281,6 @@ fn a_resume_ends_only_its_own_wait() {
                 "fixture",
                 request.replay,
             ),
-            trace_cause: request.trace_cause,
             occurred_at: sequence,
         };
         super::apply_process_event_projection(record, &event).expect("fold the wait fact");
@@ -334,7 +333,6 @@ fn a_resume_cannot_return_an_ended_process_to_running() {
             "fixture",
             request.replay,
         ),
-        trace_cause: request.trace_cause,
         occurred_at: sequence,
     };
     let outcome = crate::ProcessTerminal::from_tool_output(crate::ToolCallOutput::success(

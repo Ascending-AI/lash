@@ -169,13 +169,16 @@ pub trait TurnServices: Send + Sync {
         Ok(())
     }
 
-    /// Propose the trace admission of `run`, the turn `cx` admits: the
-    /// scope its `turn.admit` commit retains, and the candidate that commit
+    /// Propose the trace admission of `run`, the turn `cx` admits taking
+    /// inputs whose retained causes are `inputs`, in admission order: the
+    /// scope its `turn.admit` commit retains, under the head input's
+    /// producer and linking the others, and the candidate that commit
     /// settles (FIG-5395). `None` when the services trace nothing.
     fn propose_turn_trace(
         &self,
         _cx: &ActorContext,
         _run: &TurnId,
+        _inputs: &[lash_trace::TraceCause],
     ) -> Option<lash_core_execution::runtime::actor::round::TraceProposal> {
         None
     }
@@ -715,7 +718,7 @@ impl SessionActivation {
                     // admission (FIG-5395, FIG-5998).
                     let (trace, candidate) = self
                         .services
-                        .propose_turn_trace(cx, &admitted.run)
+                        .propose_turn_trace(cx, &admitted.run, &admitted.causes)
                         .map(|proposal| (Some(proposal.scope), Some(proposal.candidate)))
                         .unwrap_or_default();
                     let inputs = admitted.admission.input_ids().len();
@@ -1070,6 +1073,9 @@ pub struct AdmittedInputs {
     pub run: TurnId,
     /// What the run's admission took.
     pub admission: crate::store::RunAdmissionRecord,
+    /// The causes the taken inputs retained, in admission order; empty for
+    /// a run that takes no input.
+    pub causes: Vec<lash_trace::TraceCause>,
 }
 
 /// A new model call, prepared for its admission.

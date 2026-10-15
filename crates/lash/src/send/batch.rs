@@ -71,6 +71,7 @@ pub struct SendBatchBuilder {
     target: SendTarget,
     inputs: Vec<BatchInput>,
     run_spec: RunSpec,
+    trace: lash_core::TraceCall,
 }
 
 impl SendBatchBuilder {
@@ -79,7 +80,38 @@ impl SendBatchBuilder {
             target,
             inputs,
             run_spec: RunSpec::default(),
+            trace: lash_core::TraceCall::default(),
         }
+    }
+
+    /// Open the batch's one `lash.send.batch` producer span under
+    /// `context`, as [`SendBuilder::trace_context`](crate::SendBuilder::trace_context)
+    /// does for one send. Every input retains the producer as its cause.
+    pub fn trace_context(mut self, context: lash_core::TraceCarrier) -> Self {
+        self.trace.caller = lash_core::TraceCaller::Explicit(Some(context));
+        self
+    }
+
+    /// Open the batch's producer span with no caller: a new trace root.
+    pub fn trace_context_none(mut self) -> Self {
+        self.trace.caller = lash_core::TraceCaller::Explicit(None);
+        self
+    }
+
+    /// Snapshot the caller's current trace context now instead of when the
+    /// batch is first polled.
+    pub fn capture_trace_context(mut self) -> Self {
+        self.trace.caller =
+            lash_core::TraceCaller::Explicit(self.target.trace_scopes().capture_current());
+        self
+    }
+
+    /// How the batch's producer span relates to its caller, as
+    /// [`SendBuilder::trace_link_mode`](crate::SendBuilder::trace_link_mode)
+    /// sets it for one send.
+    pub fn trace_link_mode(mut self, mode: lash_core::TraceLinkMode) -> Self {
+        self.trace.link_mode = mode;
+        self
     }
 
     /// The one spec every input of the batch runs under, as
@@ -96,20 +128,18 @@ impl SendBatchBuilder {
             target,
             inputs,
             run_spec,
+            trace,
         } = self;
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
-        // One request, one cause: the caller's context, snapshotted on the
-        // first poll and before the first await.
-        let parent = target.capture_trace_context();
-        let host_send = target.begin_host_send(parent.as_ref());
-        let trace_cause = lash_core::TraceCause::linked_to(
-            host_send
-                .as_ref()
-                .map(|operation| operation.carrier())
-                .or(parent),
-        );
+        // One request, one producer and one cause: opened on the first
+        // poll and before the first await.
+        let host_send = target.open_producer(lash_core::ProducerKind::SendBatch, &trace);
+        let parent = host_send
+            .as_deref()
+            .map(<dyn lash_core::TraceHostOperation>::parent);
+        let trace_cause = lash_core::TraceCause::from(parent.clone());
         let mut submissions = Vec::with_capacity(inputs.len());
         for BatchInput { mut input, id } in inputs {
             // As for one send: the host id names the run, and an input sent
@@ -131,7 +161,7 @@ impl SendBatchBuilder {
                 TurnInputIngress::NextTurn,
                 run_spec,
                 false,
-                trace_cause.clone(),
+                parent,
             )
             .await?;
         if let Some(operation) = host_send {

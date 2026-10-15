@@ -820,10 +820,6 @@ pub struct ProcessEvent {
     pub sequence: u64,
     pub fact: ProcessLifecycleFact,
     pub invocation: crate::RuntimeInvocation,
-    /// What caused the event, as the append that inserted it retained it.
-    /// Written once with the event; a replayed append reads it back whatever
-    /// it carried.
-    pub trace_cause: lash_trace::TraceCause,
     pub occurred_at: u64,
 }
 
@@ -847,7 +843,6 @@ impl ProcessEvent {
             process_id: record.process_id,
             sequence: record.sequence,
             invocation: record.invocation,
-            trace_cause: record.trace_cause,
             occurred_at: record.occurred_at,
         })
     }
@@ -873,8 +868,6 @@ struct ProcessEventRecord {
     event_type: String,
     payload: serde_json::Value,
     invocation: crate::RuntimeInvocation,
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
-    trace_cause: lash_trace::TraceCause,
     occurred_at: u64,
 }
 
@@ -886,7 +879,6 @@ impl From<ProcessEvent> for ProcessEventRecord {
             event_type: event.fact.event_type().to_string(),
             payload: event.fact.payload(),
             invocation: event.invocation,
-            trace_cause: event.trace_cause,
             occurred_at: event.occurred_at,
         }
     }
@@ -1069,8 +1061,6 @@ pub struct ReleasedProcessEvent {
     pub sequence: u64,
     pub event_type: String,
     pub invocation: crate::RuntimeInvocation,
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
-    pub trace_cause: lash_trace::TraceCause,
     pub occurred_at: u64,
 }
 
@@ -1082,7 +1072,6 @@ impl ReleasedProcessEvent {
             sequence: event.sequence,
             event_type: event.fact.event_type().to_string(),
             invocation: event.invocation.clone(),
-            trace_cause: event.trace_cause.clone(),
             occurred_at: event.occurred_at,
         }
     }
@@ -1106,7 +1095,6 @@ pub fn restore_released_process_event(
             sequence: released.sequence,
             fact: fact.clone(),
             invocation: released.invocation,
-            trace_cause: released.trace_cause,
             occurred_at: released.occurred_at,
         });
     }
@@ -1155,19 +1143,11 @@ pub struct ProcessEventAppendReceipt {
 pub struct ProcessEventAppendRequest {
     pub fact: ProcessLifecycleFact,
     pub replay: Option<crate::RuntimeReplay>,
-    /// What caused the event, for telemetry: the append that inserts the
-    /// event retains it on the event. It takes no part in the append's replay
-    /// identity or its payload match.
-    pub trace_cause: lash_trace::TraceCause,
 }
 
 impl ProcessEventAppendRequest {
     fn new(fact: ProcessLifecycleFact) -> Self {
-        Self {
-            fact,
-            replay: None,
-            trace_cause: lash_trace::TraceCause::Root,
-        }
+        Self { fact, replay: None }
     }
 
     /// Read a stored append back: the store's `AppendEvent` write carries
@@ -1216,12 +1196,6 @@ impl ProcessEventAppendRequest {
     /// durable-substrate implementors while persisting and coordinating durable process execution.
     pub fn with_optional_replay(mut self, replay: Option<crate::RuntimeReplay>) -> Self {
         self.replay = replay;
-        self
-    }
-
-    /// Sets what caused the event ([`Self::trace_cause`]).
-    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
-        self.trace_cause = trace_cause;
         self
     }
 

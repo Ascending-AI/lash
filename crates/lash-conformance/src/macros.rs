@@ -1398,6 +1398,27 @@ macro_rules! queue_observation_tests {
     };
 }
 
+/// Register the trace-provenance law (FIG-4829, C1): the first writer's
+/// cause and anchor are retained. The fixture yields a guard and the store
+/// set under test.
+#[macro_export]
+macro_rules! trace_provenance_tests {
+    ($fixture:block) => {
+        $crate::trace_provenance_tests!(@catalogue $fixture; [
+            (first_admission_wins_without_changing_business_identity, "trace-first-writer"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, stores) = $fixture;
+                $crate::registration_macro_support::$law($label, stores).await;
+            }
+        )*
+    };
+}
+
 #[macro_export]
 macro_rules! checkpoint_profile_tests {
     ($fixture:block) => {

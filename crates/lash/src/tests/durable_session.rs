@@ -661,28 +661,23 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     client.shutdown().await.expect("shutdown");
 }
 
-/// FIG-4829: a send's trace context is linked to the input by the
-/// acceptance that first stores it. A retry of the same `id` under another
-/// context is the same submission and keeps the first link.
+/// FIG-6298: with no telemetry adapter no send opens a producer, so an
+/// input is admitted unobserved: a caller's context never becomes the
+/// parent an input retains.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_send_links_its_input_to_the_context_its_first_acceptance_carried() {
+async fn a_send_without_an_adapter_admits_its_input_unobserved() {
     let core = core_serving(sqlite_memory_store_backend().await, false);
     let durable = create(&core, "traced-send").await;
-    let context = |producer: u8| {
-        lash_core::TraceCarrier::parse_w3c(&format!("00-{producer:032x}-{producer:016x}-01"), None)
-            .expect("a valid trace context")
-    };
-    let send = |producer: u8| {
+    let context = lash_core::TraceCarrier::parse_w3c(&format!("00-{:032x}-{:016x}-01", 1, 1), None)
+        .expect("a valid trace context");
+    drop(
         durable
             .send(crate::TurnInput::text("the same words"))
             .id(turn("traced-send-input"))
-            .trace_context(context(producer))
-    };
-    let first = send(1).await.expect("first acceptance");
-    let retried = send(2).await.expect("retried acceptance");
-    assert_eq!(retried.input_id(), first.input_id());
-
-    // With no telemetry adapter there is no ambient context to capture.
+            .trace_context(context)
+            .await
+            .expect("traced acceptance"),
+    );
     drop(
         durable
             .send(crate::TurnInput::text("words nobody traced"))
@@ -696,26 +691,9 @@ async fn a_send_links_its_input_to_the_context_its_first_acceptance_carried() {
         .await
         .expect("queue")
         .into_iter()
-        .map(|read| {
-            (
-                read.input.source_key.clone(),
-                read.input.trace_cause.clone(),
-            )
-        })
+        .map(|read| read.input.trace_cause)
         .collect::<Vec<_>>();
-    assert_eq!(
-        causes,
-        vec![
-            (
-                Some("traced-send-input".to_string()),
-                lash_core::TraceCause::linked_to(Some(context(1))),
-            ),
-            (
-                Some("untraced-send-input".to_string()),
-                lash_core::TraceCause::Root,
-            ),
-        ]
-    );
+    assert_eq!(causes, vec![lash_core::TraceCause::None; 2]);
     core.shutdown().await.expect("shutdown");
 }
 

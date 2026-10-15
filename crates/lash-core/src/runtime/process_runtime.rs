@@ -205,8 +205,18 @@ impl SessionTurnRuntime {
     ) -> Result<lash_core_execution::runtime::actor::process::SessionTurnMail, crate::PluginError>
     {
         let (create_request, turn_input, _) = self.session_turn(process)?;
+        // The child turn joins the process's trace: it runs on the
+        // process's behalf.
         self.services
-            .mail_process_session_turn(&process.id, create_request.clone(), turn_input.clone())
+            .mail_process_session_turn(
+                &process.id,
+                create_request.clone(),
+                turn_input.clone(),
+                process
+                    .trace
+                    .as_ref()
+                    .and_then(lash_trace::DurableTraceScope::as_parent),
+            )
             .await
     }
 

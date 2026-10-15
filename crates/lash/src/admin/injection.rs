@@ -6,9 +6,33 @@ use lash_sansio::TurnId;
 /// Facade handle for injection administration.
 pub struct InjectionAdmin {
     pub(super) context: AdminContext,
+    pub(super) trace: lash_core::TraceCall,
 }
 
 impl InjectionAdmin {
+    /// Open each injection's `lash.plugin.invoke` producer span under
+    /// `context` instead of the caller's ambient one. The injected input
+    /// retains the producer as its cause, and the turn that consumes it
+    /// links it.
+    pub fn trace_context(mut self, context: lash_core::TraceCarrier) -> Self {
+        self.trace.caller = lash_core::TraceCaller::Explicit(Some(context));
+        self
+    }
+
+    /// Open each injection's producer span with no caller: a new trace
+    /// root.
+    pub fn trace_context_none(mut self) -> Self {
+        self.trace.caller = lash_core::TraceCaller::Explicit(None);
+        self
+    }
+
+    /// How each injection's producer span relates to its caller: its child
+    /// (the default), or a new trace root that links it.
+    pub fn trace_link_mode(mut self, mode: lash_core::TraceLinkMode) -> Self {
+        self.trace.link_mode = mode;
+        self
+    }
+
     /// Injects input for the session's next turn.
     pub async fn inject_turn_input(
         &self,
@@ -28,6 +52,16 @@ impl InjectionAdmin {
         turn_id: &TurnId,
         messages: Vec<lash_core::facade_support::InjectedTurnInput>,
     ) -> Result<()> {
+        // The injection's producer opens here, before the first await.
+        let producer = self
+            .context
+            .target
+            .open_producer(lash_core::ProducerKind::PluginInvoke, &self.trace);
+        let parent = producer
+            .as_deref()
+            .map(<dyn lash_core::TraceHostOperation>::parent);
+        let cause = lash_core::TraceCause::from(parent.clone());
+        let mut selected = true;
         for input in messages {
             let source_key = input.id.map(|id| format!("injection:{id}"));
             let turn_input = turn_input_from_plugin_message(input.message);
@@ -40,10 +74,18 @@ impl InjectionAdmin {
                         lash_core::TurnInputCheckpointBoundary::AfterWork,
                     ),
                     source_key,
+                    parent.clone(),
                 )
                 .await
-                .map(|_| ())
+                .map(|accepted| selected &= accepted.trace_cause == cause)
                 .map_err(EmbedError::Runtime)?;
+        }
+        if let Some(producer) = producer {
+            producer.settle(if selected {
+                lash_trace::TraceCandidateOutcome::Selected
+            } else {
+                lash_trace::TraceCandidateOutcome::Reused
+            });
         }
         Ok(())
     }

@@ -502,6 +502,19 @@ lash_conformance::observer_intent_tests!({
     )
 });
 
+lash_conformance::trace_provenance_tests!({
+    let Some((database_fixture, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres trace-provenance conformance: \
+             LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    let (attachments, stores) = pg_law_stores(&storage);
+    ((database_fixture, attachments), stores)
+});
+
 lash_conformance::queue_observation_tests!({
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(

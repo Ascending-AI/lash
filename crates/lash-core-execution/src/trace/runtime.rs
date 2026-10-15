@@ -18,10 +18,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash_trace::{
-    AttemptObservation, DurableTraceScope, EmissionPermit, TelemetryContent, TraceAnchor,
-    TraceAttemptId, TraceCause, TraceContext, TraceDomainProjector, TraceEvent, TraceLevel,
-    TraceRecord, TraceRecordIdentity, TraceScopeFactory, TraceScopeId, TraceScopeOwner, TraceSink,
-    TraceTransitionKind, UntracedScopes, telemetry::metrics::TelemetryMetrics,
+    AttemptObservation, DurableTraceScope, EmissionPermit, TelemetryContent, TraceAttemptId,
+    TraceContext, TraceDomainProjector, TraceEvent, TraceLevel, TraceRecord, TraceRecordIdentity,
+    TraceScopeFactory, TraceScopeId, TraceScopeOwner, TraceSink, TraceTransitionKind,
+    UntracedScopes, telemetry::metrics::TelemetryMetrics,
 };
 
 /// The runtime's shared trace handle: the scope factory, the clock, the
@@ -1032,23 +1032,25 @@ impl TraceStanding {
     }
 }
 
-/// The scope of a call under its admitted logical owner. A retained trace
-/// parent supplies only the causal anchor, even across physical turns.
+/// The scope of a call under its admitted logical owner, before an adapter
+/// anchors it. A retained trace parent supplies only the causal anchor,
+/// even across physical turns; a call with no observed parent is
+/// unobserved.
 pub fn tool_trace_scope(
     opener: &crate::EffectOpener,
     parent: Option<&DurableTraceScope>,
     call_id: &crate::ToolCallId,
     started_at_ms: u64,
 ) -> DurableTraceScope {
-    DurableTraceScope {
-        scope: TraceScopeId::admission(TraceScopeOwner::Tool {
+    DurableTraceScope::admit(
+        TraceScopeId::admission(TraceScopeOwner::Tool {
             owner: lash_trace::TraceToolOwner::from(opener),
             call_id: call_id.to_string(),
         }),
-        cause: parent.map_or(TraceCause::Root, DurableTraceScope::parent_cause),
-        anchor: TraceAnchor::Untraced,
+        parent.and_then(DurableTraceScope::as_parent).as_ref(),
+        lash_trace::TraceLinks::new(),
         started_at_ms,
-    }
+    )
 }
 
 #[cfg(test)]

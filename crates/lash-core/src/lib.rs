@@ -532,8 +532,9 @@ pub use lash_sansio::{
 pub use lash_trace::otel::{OtelOptions, OtelSpanEnricher, OtelTelemetry};
 pub use lash_trace::{
     DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier, InvalidTraceLinks,
-    TelemetryContent, TraceAdmissionCandidate, TraceAnchor, TraceAttemptId, TraceCandidateOutcome,
-    TraceCarrier, TraceCause, TraceHostOperation, TraceLinks, TraceScopeAdmission,
+    ProducerKind, ProducerSpec, TelemetryContent, TraceAdmissionCandidate, TraceAnchor,
+    TraceAttemptId, TraceCall, TraceCaller, TraceCandidateOutcome, TraceCarrier, TraceCause,
+    TraceHostOperation, TraceLinkMode, TraceLinks, TraceParent, TraceScopeAdmission,
     TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
     UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };

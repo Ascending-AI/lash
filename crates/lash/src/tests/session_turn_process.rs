@@ -3,12 +3,12 @@
 
 use super::*;
 
-const PARENT: &str = "session-turn-parent";
+pub(super) const PARENT: &str = "session-turn-parent";
 const CHILD: &str = "session-turn-child";
 
 /// A detached `SessionTurn` start whose child session `CHILD` runs one turn
 /// on the profile `model`, its metadata recorded in the start.
-fn request(model: &str) -> lash_core::ProcessStartRequest {
+pub(super) fn request(model: &str) -> lash_core::ProcessStartRequest {
     started(model, false)
 }
 

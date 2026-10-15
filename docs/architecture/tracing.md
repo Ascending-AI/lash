@@ -152,11 +152,21 @@ including an untraced admission. A retry under another context reads the
 winner. Trace provenance does not change business submission hashes,
 effect identities, tool-call identities or graph-node identities.
 
-Awaited work uses a parent edge. Independently admitted work starts a trace
-with links to its producers. The receiving scope keeps its parent when a
-host completion resolves a wait or a checkpoint consumes another input. A current
-execution attempt is an optional link, supplied through the engine interface;
-it never replaces the retained parent.
+Every admission has a parent, or it is unobserved: no admission makes a
+root. A host call that admits work opens a producer span first (`lash.send`,
+`lash.send.batch`, `lash.process.start`, `lash.tool_intent.submit` or
+`lash.plugin.invoke`), as the caller's child or, with
+`TraceLinkMode::Link`, as a new root that links the caller, and the work it
+admits retains that producer as its parent (FIG-6298). A turn joins its head
+input's producer and links the other inputs of its batch. A child-session
+turn joins its process's anchor, and a follow-on turn joins the turn that
+switched to it. An input a running turn consumes at a checkpoint is linked
+from the turn's completion and never becomes a second parent; the turn's
+checkpoint retains the delivered input's cause, so an owner that resumes
+the turn links it too. The receiving scope keeps its parent when a host
+completion resolves a wait. A current execution attempt is an optional
+link, supplied through the engine interface; it never replaces the retained
+parent.
 
 A durable scope has a short admission span. Its logical completion creates
 a new span under that retained anchor, using retained start and terminal

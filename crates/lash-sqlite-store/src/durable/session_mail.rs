@@ -69,11 +69,20 @@ pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbo
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (input, seq, source_key, run_spec_hash, state, ingress_json) in inputs {
-        match decode_input(input, seq, source_key, run_spec_hash, &state, &ingress_json) {
+    for (input, seq, source_key, run_spec_hash, state, ingress_json, trace_cause) in inputs {
+        match decode_input(
+            input,
+            seq,
+            source_key,
+            run_spec_hash,
+            &state,
+            &ingress_json,
+            trace_cause.as_deref(),
+        ) {
             Ok(input) => mailbox.inputs.push(input),
             Err(error) => return Ok(Err(error)),
         }
@@ -106,6 +115,7 @@ fn decode_input(
     run_spec_hash: Option<String>,
     state: &str,
     ingress_json: &str,
+    trace_cause: Option<&str>,
 ) -> Result<MailInput, DurableError> {
     let ingress: lash_core_execution::TurnInputIngress =
         serde_json::from_str(ingress_json).map_err(|error| undecodable("input delivery", error))?;
@@ -119,6 +129,11 @@ fn decode_input(
         source_key,
         run_spec_hash,
         active_turn,
+        trace_cause: lash_core_execution::store_backend_support::decode_trace_cause(
+            "pending turn input",
+            trace_cause,
+        )
+        .map_err(|error| undecodable("input trace cause", error))?,
     })
 }
 

@@ -14,8 +14,9 @@ use opentelemetry::{Context, KeyValue};
 use lash_sansio::llm::types::{AttemptOutcome, LlmUsage};
 
 use crate::telemetry::{
-    AttemptObservation, DurableTraceScope, EmissionSource, TraceAdmissionCandidate, TraceAnchor,
-    TraceCandidateOutcome, TraceCarrier, TraceCause, TraceDomainProjector, TraceHostOperation,
+    AttemptObservation, DurableTraceScope, EmissionSource, ProducerKind, ProducerSpec,
+    TraceAdmissionCandidate, TraceAnchor, TraceCandidateOutcome, TraceCarrier,
+    TraceDomainProjector, TraceHostOperation, TraceLinkMode, TraceLinks, TraceParent,
     TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOwner, TraceToolOwner,
     UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
@@ -267,6 +268,18 @@ impl OtelTelemetry {
             attributes.push(A::ToolName.value(tool.to_owned()));
         }
         let mut links = Vec::new();
+        // A turn links its fan-in: the other admitted inputs' producers and
+        // those of the inputs it consumed while it ran.
+        if projection.span == DomainSpan::Turn {
+            for context in scope.links.contexts() {
+                if let Some(context) = span_context(context) {
+                    links.push(Link::new(context, Vec::new(), 0));
+                }
+            }
+            if scope.links.omitted() > 0 {
+                attributes.push(A::LinksOmitted.value(i64::from(scope.links.omitted())));
+            }
+        }
         if let Some(observation) = attempt {
             if let Some(context) = &observation.context
                 && let Some(context) = span_context(context)
@@ -321,20 +334,23 @@ impl TraceScopeFactory for OtelTelemetry {
         carrier(Context::current().span().span_context())
     }
 
-    fn begin_host_send(
-        &self,
-        parent: Option<&TraceCarrier>,
-    ) -> Option<Box<dyn TraceHostOperation>> {
-        let definition = DomainSpan::Send.definition();
-        let parent = parent
-            .and_then(span_context)
-            .map(|context| Context::new().with_remote_span_context(context))
-            .unwrap_or_default();
+    fn open_producer(&self, spec: ProducerSpec) -> Option<Box<dyn TraceHostOperation>> {
+        let definition = producer(spec.kind).definition();
+        let caller = spec.caller.as_ref().and_then(span_context);
+        let (parent, links) = match (caller, spec.link_mode) {
+            (Some(caller), TraceLinkMode::Parent) => {
+                (Context::new().with_remote_span_context(caller), Vec::new())
+            }
+            (Some(caller), TraceLinkMode::Link) => {
+                (Context::new(), vec![Link::new(caller, Vec::new(), 0)])
+            }
+            (None, _) => (Context::new(), Vec::new()),
+        };
         let span = self
             .tracer
-            .span_builder("lash.send.attempt")
+            .span_builder(definition.name)
             .with_kind(definition.kind)
-            .with_attributes([A::OperationName.value("send")])
+            .with_links(links)
             .start_with_context(self.tracer.as_ref(), &parent);
         let context = carrier(span.span_context())?;
         Some(Box::new(HostOperation {
@@ -346,31 +362,25 @@ impl TraceScopeFactory for OtelTelemetry {
     fn propose(
         &self,
         scope: &TraceScopeId,
-        cause: &TraceCause,
+        parent: &TraceParent,
+        links: &TraceLinks,
         started_at_ms: u64,
     ) -> Box<dyn TraceAdmissionCandidate> {
         let definition = DomainSpan::AdmissionAttempt.definition();
-        let parent = match cause {
-            TraceCause::Parent(context) => {
-                let Some(context) = span_context(context) else {
-                    return UntracedScopes.propose(scope, cause, started_at_ms);
-                };
-                Context::new().with_remote_span_context(context)
-            }
-            _ => Context::new(),
+        let Some(parent_context) = span_context(parent.carrier()) else {
+            return UntracedScopes.propose(scope, parent, links, started_at_ms);
         };
-        let mut links = Vec::new();
-        if let TraceCause::Linked(causes) = cause {
-            for context in causes.contexts() {
-                let Some(context) = span_context(context) else {
-                    return UntracedScopes.propose(scope, cause, started_at_ms);
-                };
-                links.push(Link::new(context, Vec::new(), 0));
-            }
+        let parent_context = Context::new().with_remote_span_context(parent_context);
+        let mut span_links = Vec::new();
+        for context in links.contexts() {
+            let Some(context) = span_context(context) else {
+                return UntracedScopes.propose(scope, parent, links, started_at_ms);
+            };
+            span_links.push(Link::new(context, Vec::new(), 0));
         }
         let mut attributes = vec![A::ScopeKind.value(scope.kind().as_str())];
         correlation_attributes(scope, None, &mut attributes);
-        if let TraceCause::Linked(links) = cause {
+        if links.omitted() > 0 {
             attributes.push(A::LinksOmitted.value(i64::from(links.omitted())));
         }
         let span = self
@@ -378,9 +388,9 @@ impl TraceScopeFactory for OtelTelemetry {
             .span_builder(definition.name)
             .with_kind(definition.kind)
             .with_attributes(attributes)
-            .with_links(links)
+            .with_links(span_links)
             .with_start_time(epoch_ms(started_at_ms))
-            .start_with_context(self.tracer.as_ref(), &parent);
+            .start_with_context(self.tracer.as_ref(), &parent_context);
         let anchor = carrier(span.span_context())
             .map(TraceAnchor::Context)
             .unwrap_or(TraceAnchor::Untraced);
@@ -460,9 +470,6 @@ impl HostOperation {
         if let Some(mut span) = self.span.take() {
             if span.is_recording() {
                 span.set_attribute(A::AdmissionOutcome.value(outcome.as_str()));
-                if outcome == TraceCandidateOutcome::Selected {
-                    span.update_name(DomainSpan::Send.definition().name);
-                }
             }
             span.end();
         }
@@ -570,6 +577,16 @@ impl TraceAdmissionCandidate for AdmissionCandidate {
 impl Drop for AdmissionCandidate {
     fn drop(&mut self) {
         self.finish(TraceCandidateOutcome::Refused);
+    }
+}
+
+fn producer(kind: ProducerKind) -> DomainSpan {
+    match kind {
+        ProducerKind::Send => DomainSpan::Send,
+        ProducerKind::SendBatch => DomainSpan::SendBatch,
+        ProducerKind::ProcessStart => DomainSpan::ProcessStart,
+        ProducerKind::ToolIntentSubmit => DomainSpan::IntentSubmit,
+        ProducerKind::PluginInvoke => DomainSpan::PluginInvoke,
     }
 }
 

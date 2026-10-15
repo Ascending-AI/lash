@@ -590,7 +590,11 @@ async fn end(
             };
             refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
         })?;
-    super::turn_trace::ended(services.tracing(), row, traced);
+    let delivered = drive
+        .as_ref()
+        .map(|drive| drive.delivered_inputs())
+        .unwrap_or_default();
+    super::turn_trace::ended(services.tracing(), row, traced, &delivered);
     if let Some(mut drive) = drive {
         drive.committed().await;
         // The commit moved the head: the next turn loads it again.

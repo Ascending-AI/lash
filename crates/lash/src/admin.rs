@@ -140,6 +140,7 @@ impl SessionAdmin {
     pub fn injection(&self) -> InjectionAdmin {
         InjectionAdmin {
             context: self.context.clone(),
+            trace: lash_core::TraceCall::default(),
         }
     }
 

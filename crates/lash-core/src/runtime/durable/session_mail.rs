@@ -142,15 +142,30 @@ pub async fn drain_session_mail(
     };
     let admit = match admission(&mailbox)? {
         Some(Head::Run(admitted)) => Some(admitted),
-        Some(Head::Input { run, inputs }) => Some(AdmittedInputs {
-            run,
-            admission: RunAdmissionRecord::Turn {
-                took: AdmittedTurnRows::Inputs {
-                    ids: composed_inputs(cx, tx, &session, inputs, batching).await?,
+        Some(Head::Input { run, inputs }) => {
+            let ids = composed_inputs(cx, tx, &session, inputs.clone(), batching).await?;
+            // Each taken input's retained cause, in admission order: the
+            // head's parents the turn, the others are its links.
+            let causes = ids
+                .as_slice()
+                .iter()
+                .map(|id| {
+                    inputs
+                        .iter()
+                        .find(|input| input.input == *id)
+                        .map(|input| input.trace_cause.clone())
+                        .unwrap_or_default()
+                })
+                .collect();
+            Some(AdmittedInputs {
+                run,
+                admission: RunAdmissionRecord::Turn {
+                    took: AdmittedTurnRows::Inputs { ids },
+                    trace: None,
                 },
-                trace: None,
-            },
-        }),
+                causes,
+            })
+        }
         None => None,
     };
     // A turn binds what it took; a command or operation run binds nothing.
@@ -254,6 +269,7 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<Head>, SessionMailError>
         return Ok(Some(Head::Run(AdmittedInputs {
             run: run_of(batch.batch.as_str())?,
             admission,
+            causes: Vec::new(),
         })));
     }
     let Some(head) = mailbox.inputs.iter().min_by_key(|input| input.enqueue_seq) else {
@@ -307,7 +323,8 @@ pub fn frame_task_run(frame_key: &crate::FrameKey) -> TurnId {
 /// together (ADR 0101 §3), and every retry of that commit mails the same
 /// follow-on. Any other outcome mails nothing. `agent_frame_switches` is the
 /// switching run's admitted depth; the mailed input retains its successor
-/// depth through owner changes.
+/// depth through owner changes. The follow-on continues the switching
+/// turn's request, so `switching` (that turn's span) is its cause.
 ///
 /// # Errors
 ///
@@ -317,6 +334,7 @@ pub fn follow_on_mail(
     session: &SessionId,
     outcome: &crate::TurnOutcome,
     agent_frame_switches: u32,
+    switching: Option<lash_trace::TraceParent>,
 ) -> Result<Option<SessionMailWrite>, SessionMailError> {
     let crate::TurnOutcome::AgentFrameSwitch {
         frame_key,
@@ -346,7 +364,8 @@ pub fn follow_on_mail(
         run.as_str(),
     ))
     .with_source_key(run.as_str())
-    .with_run_spec(run_spec);
+    .with_run_spec(run_spec)
+    .with_trace_parent(switching);
     let draft_json = serde_json::to_string(&draft).map_err(|error| {
         SessionMailError::Undecodable(format!(
             "the follow-on of frame {}: {error}",

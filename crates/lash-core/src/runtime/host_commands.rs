@@ -215,6 +215,7 @@ impl LashRuntime {
         operation: HostPluginOperation,
         name: String,
         args: serde_json::Value,
+        parent: Option<lash_trace::TraceParent>,
         completion: crate::QueuedWorkCompletion,
         run_controller: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
@@ -255,7 +256,8 @@ impl LashRuntime {
             }
         };
         let ran =
-            Box::pin(self.run_host_plugin_operation(&name, args, &batch_id, task.as_ref())).await?;
+            Box::pin(self.run_host_plugin_operation(&name, args, &batch_id, task.as_ref(), parent))
+                .await?;
         let outcome = match ran {
             Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled) => {
                 // Nothing of a cancelled task stays resident: the
@@ -312,6 +314,7 @@ impl LashRuntime {
         args: serde_json::Value,
         batch_id: &crate::BatchId,
         task: Option<&crate::ActorContext>,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<
         Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError>,
         RuntimeError,
@@ -377,29 +380,27 @@ impl LashRuntime {
             Err(error) => return Ok(Err(error)),
         };
         Ok(self
-            .fold_host_plugin_operation(
-                plugin_id,
-                outcome.output,
-                outcome.events,
-                outcome.directives,
-                draft,
-                batch_id,
-            )
+            .fold_host_plugin_operation(plugin_id, outcome, draft, batch_id, parent)
             .await)
     }
 
     /// Fold what a host plugin operation's code did into the boundary's
     /// resident state: its graph appends, its runtime events, its plugin
-    /// state and the turns it queued.
+    /// state and the turns it queued, which retain `parent`, the
+    /// operation's producer, as their cause.
     async fn fold_host_plugin_operation(
         &mut self,
         plugin_id: String,
-        output: serde_json::Value,
-        events: Vec<crate::PluginRuntimeEvent>,
-        directives: Vec<crate::PluginRuntimeDirective>,
+        outcome: crate::plugin::PluginOperationOutcome<serde_json::Value>,
         draft: super::turn_commit_draft::TurnGraphAppendDraft,
         batch_id: &crate::BatchId,
+        parent: Option<lash_trace::TraceParent>,
     ) -> Result<crate::runtime::PluginOperationCommandOutcome, PluginOperationInvokeError> {
+        let crate::plugin::PluginOperationOutcome {
+            output,
+            events,
+            directives,
+        } = outcome;
         draft
             .fold_into_final_state(&mut self.state)
             .map_err(|error| PluginOperationInvokeError::Failed(Box::new(error.into())))?;
@@ -464,7 +465,7 @@ impl LashRuntime {
                 crate::TurnInputIngress::NextTurn,
                 crate::RunSpec::default(),
                 false,
-                lash_trace::TraceCause::Root,
+                parent,
             )
             .await
             .map_err(|error| PluginOperationInvokeError::AdmissionRefused(Box::new(error)))?

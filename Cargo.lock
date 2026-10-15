@@ -2370,6 +2370,7 @@ dependencies = [
  "lash-internal-core-ids",
  "lash-internal-core-store",
  "lash-internal-sansio",
+ "lash-internal-trace",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

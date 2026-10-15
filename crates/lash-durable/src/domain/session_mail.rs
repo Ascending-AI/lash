@@ -36,6 +36,9 @@ pub struct MailInput {
     /// `None` for next-turn input. An active-turn input whose turn is not
     /// the session's unfinished one is next-turn input by rule.
     pub active_turn: Option<TurnId>,
+    /// What caused it, as its acceptance retained it: the parent of the
+    /// turn it heads, or a link of the turn it joins.
+    pub trace_cause: lash_trace::TraceCause,
 }
 
 /// The run session mail's next-turn input opens when the session admits it:

@@ -24,7 +24,7 @@ fn run_scope() -> TraceScopeId {
 
 /// P1: a valid context survives the codec, sampled or not; a malformed parent
 /// is absent; a bad tracestate does not cost a valid parent; the limits and
-/// zero ids are enforced; root, parent and linked causes round-trip.
+/// zero ids are enforced; no cause and a parent cause round-trip.
 #[test]
 fn carrier_codec_preserves_valid_context_and_rejects_invalid_fields() {
     let sampled =
@@ -157,23 +157,18 @@ fn carrier_codec_preserves_valid_context_and_rejects_invalid_fields() {
         assert!(serde_json::from_value::<TraceCarrier>(stored).is_err());
     }
 
-    // Root, parent and linked causes keep their relation through storage.
-    let linked = TraceCause::Linked([carrier(1), carrier(2)].into_iter().collect());
-    for cause in [
-        TraceCause::Root,
-        TraceCause::Parent(sampled.clone()),
-        linked,
-    ] {
+    // No cause and a parent keep their relation through storage.
+    for cause in [TraceCause::None, TraceCause::Parent(sampled.clone())] {
         let stored = serde_json::to_string(&cause).unwrap();
         assert_eq!(serde_json::from_str::<TraceCause>(&stored).unwrap(), cause);
     }
     assert_eq!(
-        serde_json::to_value(TraceCause::Root).unwrap(),
-        json!({ "relation": "root" })
+        serde_json::to_value(TraceCause::None).unwrap(),
+        json!({ "kind": "none" })
     );
     assert_eq!(
         serde_json::to_value(TraceCause::Parent(unsampled)).unwrap(),
-        json!({ "relation": "parent", "from": { "traceparent": UNSAMPLED } })
+        json!({ "kind": "parent", "traceparent": UNSAMPLED })
     );
 }
 
@@ -199,24 +194,17 @@ fn links_keep_the_first_sixty_four_distinct_spans_in_admission_order() {
         serde_json::from_value::<TraceLinks>(json!({ "contexts": [carrier(1), carrier(1)] }))
             .is_err()
     );
-
-    assert_eq!(TraceCause::linked(TraceLinks::new()), TraceCause::Root);
-    assert_eq!(TraceCause::linked_to(None), TraceCause::Root);
-    assert_eq!(
-        TraceCause::linked_to(Some(carrier(9))).contexts(),
-        [carrier(9)]
-    );
 }
 
 #[test]
 fn a_retained_scope_yields_no_permit_and_an_inserted_one_does() {
-    let candidate = UntracedScopes.propose(&run_scope(), &TraceCause::Root, 1_700_000_000_000);
-    let scope = DurableTraceScope {
-        scope: run_scope(),
-        cause: TraceCause::linked_to(Some(carrier(3))),
-        anchor: candidate.anchor(),
-        started_at_ms: 1_700_000_000_000,
-    };
+    let parent = TraceCause::Parent(carrier(3)).as_parent();
+    let (scope, candidate) = (&UntracedScopes as &dyn TraceScopeFactory).propose_scope(
+        run_scope(),
+        parent.as_ref(),
+        [carrier(4)].into_iter().collect(),
+        1_700_000_000_000,
+    );
     assert_eq!(scope.anchor, TraceAnchor::Untraced);
     assert_eq!(UntracedScopes.capture_current(), None);
 
@@ -225,10 +213,8 @@ fn a_retained_scope_yields_no_permit_and_an_inserted_one_does() {
         stored,
         json!({
             "scope": { "owner": { "kind": "turn", "session_id": "session", "turn_id": "run" } },
-            "cause": {
-                "relation": "linked",
-                "from": { "contexts": [{ "traceparent": carrier(3).traceparent() }] },
-            },
+            "cause": { "kind": "parent", "traceparent": carrier(3).traceparent() },
+            "links": { "contexts": [{ "traceparent": carrier(4).traceparent() }] },
             "started_at_ms": 1_700_000_000_000_u64,
         })
     );
@@ -248,6 +234,25 @@ fn a_retained_scope_yields_no_permit_and_an_inserted_one_does() {
     assert_eq!(existing.outcome(), TraceCandidateOutcome::Reused);
     assert_eq!(existing.scope(), &scope);
     candidate.settle(inserted.outcome());
+}
+
+/// No admission makes a root: a scope admitted with no parent is
+/// unobserved, links nothing and proposes no candidate, and its children
+/// have no parent either.
+#[test]
+fn a_scope_admitted_without_a_parent_is_unobserved() {
+    let (scope, candidate) = (&UntracedScopes as &dyn TraceScopeFactory).propose_scope(
+        run_scope(),
+        None,
+        [carrier(4)].into_iter().collect(),
+        1,
+    );
+    assert_eq!(scope.cause, TraceCause::None);
+    assert!(scope.links.is_empty());
+    assert_eq!(scope.anchor, TraceAnchor::Untraced);
+    assert_eq!(scope.as_parent(), None);
+    assert!(scope.offer().is_empty());
+    candidate.settle(TraceCandidateOutcome::Selected);
 }
 
 #[test]
@@ -300,33 +305,46 @@ fn record_identity_is_stable_per_fact_and_distinct_per_attempt() {
     assert_eq!(first.id, id);
 }
 
-/// The cause of a scope that admits several rows: one row's cause is the
-/// scope's, an owned invocation heading the rows keeps its parent, and
-/// independent producers fan in as links in admission order.
+/// The cause of a scope that admits several rows: the head row's producer
+/// is its parent, every other row's producer is a link in admission order,
+/// and a head with no cause admits the scope unobserved.
 #[test]
-fn an_admitting_scope_takes_its_members_causes_in_admission_order() {
-    let linked = |span| TraceCause::linked_to(Some(carrier(span)));
-    assert_eq!(TraceCause::of_admitted([]), TraceCause::Root);
+fn an_admitting_scope_parents_its_head_and_links_the_rest() {
+    let caused = |span| TraceCause::Parent(carrier(span));
+    let (parent, links) = TraceCause::of_admitted([]);
+    assert_eq!(parent, None);
+    assert!(links.is_empty());
+    let (parent, links) = TraceCause::of_admitted([&TraceCause::None, &caused(1)]);
+    assert_eq!(parent, None, "a head with no cause is unobserved");
+    assert!(links.is_empty());
+    let (parent, links) = TraceCause::of_admitted([&caused(1)]);
     assert_eq!(
-        TraceCause::of_admitted([&TraceCause::Root]),
-        TraceCause::Root
+        parent.map(|parent| parent.carrier().clone()),
+        Some(carrier(1))
     );
-    assert_eq!(TraceCause::of_admitted([&linked(1)]), linked(1));
+    assert!(links.is_empty());
 
-    let parent = TraceCause::Parent(carrier(9));
-    assert_eq!(TraceCause::of_admitted([&parent, &linked(1)]), parent);
-
-    let fan_in = TraceCause::of_admitted([&linked(1), &TraceCause::Root, &parent, &linked(1)]);
+    let (parent, links) = TraceCause::of_admitted([
+        &caused(9),
+        &caused(1),
+        &TraceCause::None,
+        &caused(9),
+        &caused(2),
+        &caused(1),
+    ]);
     assert_eq!(
-        fan_in
+        parent.map(|parent| parent.carrier().clone()),
+        Some(carrier(9))
+    );
+    assert_eq!(
+        links
             .contexts()
             .iter()
             .map(TraceCarrier::span_id)
             .collect::<Vec<_>>(),
-        [carrier(1).span_id(), carrier(9).span_id()],
-        "each producer is linked once, in the order its row was admitted"
+        [carrier(1).span_id(), carrier(2).span_id()],
+        "each other producer is linked once, in the order its row was admitted; the parent is never a link"
     );
-    assert!(matches!(fan_in, TraceCause::Linked(_)));
 }
 
 /// TRACE-CARRIER-POLICY: host-selected cuts stay inside the W3C and stored-link ceilings.

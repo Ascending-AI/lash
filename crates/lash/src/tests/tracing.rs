@@ -736,7 +736,9 @@ async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() -> Result<()
 }
 
 /// An `echo_tool` whose completion the law resolves out of band.
-struct PendingEchoTool(tokio::sync::mpsc::UnboundedSender<(lash_core::PinnedKey, String)>);
+pub(super) struct PendingEchoTool(
+    pub(super) tokio::sync::mpsc::UnboundedSender<(lash_core::PinnedKey, String)>,
+);
 
 #[async_trait]
 impl ToolProvider for PendingEchoTool {

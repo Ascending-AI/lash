@@ -66,18 +66,19 @@ impl RuntimeExecutionContext<'_> {
                 error.to_string(),
             )
         })?;
-        let mut scope = crate::trace::tool_trace_scope(
+        let admitted = crate::trace::tool_trace_scope(
             &opener,
             tracing.scope.as_ref(),
             call_id,
             requested_at_ms,
         );
-        let candidate =
-            tracing
-                .runtime
-                .scopes()
-                .propose(&scope.scope, &scope.cause, scope.started_at_ms);
-        scope.anchor = candidate.anchor();
+        let parent = admitted.cause.as_parent();
+        let (scope, candidate) = tracing.runtime.scopes().propose_scope(
+            admitted.scope,
+            parent.as_ref(),
+            admitted.links,
+            admitted.started_at_ms,
+        );
         Ok(Some(crate::runtime::actor::round::TraceProposal {
             scope,
             candidate,

@@ -377,7 +377,7 @@ pub struct QueuedWorkBatch {
     pub terminal: Option<crate::store::IngressTerminal>,
     /// What caused the batch, as its first enqueue retained it
     /// ([`QueuedWorkBatchDraft::trace_cause`]).
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_none")]
     pub trace_cause: lash_trace::TraceCause,
 }
 /// Receiver-side result of an idempotent queued-work enqueue.
@@ -414,7 +414,7 @@ pub struct QueuedWorkBatchDraft {
     /// enqueue that inserts the batch retains it beside the row; an absorbed
     /// re-enqueue reads the retained cause back. It is no part of the
     /// submission digest.
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_none")]
     pub trace_cause: lash_trace::TraceCause,
 }
 impl QueuedWorkBatchDraft {
@@ -431,13 +431,14 @@ impl QueuedWorkBatchDraft {
             authority: QueuedWorkAuthority::default(),
             merge_key: None,
             payload,
-            trace_cause: lash_trace::TraceCause::Root,
+            trace_cause: lash_trace::TraceCause::None,
         }
     }
 
-    /// Sets what caused the batch ([`Self::trace_cause`]).
-    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
-        self.trace_cause = trace_cause;
+    /// Sets what caused the batch ([`Self::trace_cause`]): the parent
+    /// the work it admits takes, or none when it is unobserved.
+    pub fn with_trace_parent(mut self, parent: Option<lash_trace::TraceParent>) -> Self {
+        self.trace_cause = lash_trace::TraceCause::from(parent);
         self
     }
 

@@ -483,12 +483,18 @@ impl TurnServices for SimServices {
     /// A [`TurnScript::Round`] turn is traced, so its first `model.start`
     /// carries the record of its admission's export, which the matrix cuts
     /// (FIG-5998).
-    fn propose_turn_trace(&self, cx: &ActorContext, run: &TurnId) -> Option<TraceProposal> {
+    fn propose_turn_trace(
+        &self,
+        cx: &ActorContext,
+        run: &TurnId,
+        _inputs: &[lash::tracing::TraceCause],
+    ) -> Option<TraceProposal> {
         let session = session_id(cx.actor().id());
         if TurnScript::of(&session) != Some(TurnScript::Round) {
             return None;
         }
-        let anchor = lash::tracing::TraceAnchor::Context(told_carrier()?);
+        let told = told_carrier()?;
+        let anchor = lash::tracing::TraceAnchor::Context(told.clone());
         let scope = lash::tracing::TraceScopeId::admission(lash::tracing::TraceScopeOwner::Turn {
             session_id: session,
             turn_id: run.clone(),
@@ -496,7 +502,8 @@ impl TurnServices for SimServices {
         Some(TraceProposal {
             scope: lash::tracing::DurableTraceScope {
                 scope,
-                cause: lash::tracing::TraceCause::Root,
+                cause: lash::tracing::TraceCause::Parent(told),
+                links: lash::tracing::TraceLinks::new(),
                 anchor: anchor.clone(),
                 started_at_ms: 0,
             },

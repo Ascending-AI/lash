@@ -780,15 +780,21 @@ async fn stage<'a>(
         .registry
         .prepare_process_registration(registration, observers)
         .await?;
-    let candidate = stores.tracing.map(|tracing| {
-        tracing.scopes().propose(
-            &lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Process {
-                process_id: prepared.process_id().clone(),
-            }),
-            prepared.trace().cause(),
-            prepared.prepared_at_ms(),
-        )
-    });
+    // An unobserved start (no parent) proposes no candidate: no admission
+    // makes a trace root.
+    let candidate = stores
+        .tracing
+        .zip(prepared.trace().cause().as_parent())
+        .map(|(tracing, parent)| {
+            tracing.scopes().propose(
+                &lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Process {
+                    process_id: prepared.process_id().clone(),
+                }),
+                &parent,
+                &prepared.trace().links(),
+                prepared.prepared_at_ms(),
+            )
+        });
     let anchor = candidate.as_ref().map_or_else(
         || prepared.trace().anchor().clone(),
         |candidate| candidate.anchor(),

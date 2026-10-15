@@ -263,9 +263,9 @@ impl RuntimeEffectCommand {
     /// replay compares.
     pub fn without_trace_provenance(&self) -> Option<Self> {
         match self {
-            Self::AcceptTurnInput { draft } if !draft.trace_cause.is_root() => {
+            Self::AcceptTurnInput { draft } if !draft.trace_cause.is_none() => {
                 let mut draft = draft.clone();
-                draft.trace_cause = lash_trace::TraceCause::Root;
+                draft.trace_cause = lash_trace::TraceCause::None;
                 Some(Self::AcceptTurnInput { draft })
             }
             Self::Process { command } => {

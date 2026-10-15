@@ -104,23 +104,24 @@ impl SendTarget {
         }
     }
 
-    /// The caller's trace context now, as the core's telemetry adapter sees
-    /// it. Synchronous: a send snapshots before its first await.
-    pub(crate) fn capture_trace_context(&self) -> Option<lash_core::TraceCarrier> {
+    /// The core's telemetry adapter, which captures the caller's context
+    /// and opens a send's producer span.
+    pub(crate) fn trace_scopes(&self) -> Arc<dyn lash_core::TraceScopeFactory> {
         match self {
-            Self::Live(session) => session.binding.trace_scopes().capture_current(),
-            Self::Durable(durable) => durable.trace_scopes().capture_current(),
+            Self::Live(session) => session.binding.trace_scopes(),
+            Self::Durable(durable) => Arc::clone(durable.trace_scopes()),
         }
     }
 
-    pub(crate) fn begin_host_send(
+    /// Open the producer span of a `kind` host call making `call`'s trace
+    /// choices. Synchronous: a send opens it before its first await.
+    pub(crate) fn open_producer(
         &self,
-        parent: Option<&lash_core::TraceCarrier>,
+        kind: lash_core::ProducerKind,
+        call: &lash_core::TraceCall,
     ) -> Option<Box<dyn lash_core::TraceHostOperation>> {
-        match self {
-            Self::Live(session) => session.binding.trace_scopes().begin_host_send(parent),
-            Self::Durable(durable) => durable.trace_scopes().begin_host_send(parent),
-        }
+        let scopes = self.trace_scopes();
+        scopes.open_producer(call.producer(kind, scopes.as_ref()))
     }
 
     /// The live replay position now: a cursor taken before an acceptance
@@ -229,50 +230,9 @@ pub struct SendBuilder {
     pub(crate) ingress: TurnInputIngress,
     pub(crate) run_spec: RunSpec,
     pub(crate) pin: bool,
-    pub(crate) trace: SendTraceContext,
+    pub(crate) trace: lash_core::TraceCall,
     /// The first run options that did not serialize, refused at acceptance.
     pub(crate) options_error: Option<lash_core::RunOptionsEncodeError>,
-}
-
-/// The trace context a send links its input to.
-#[derive(Clone, Debug, Default)]
-pub(crate) enum SendTraceContext {
-    /// Not chosen yet: the acceptance snapshots the caller's context on its
-    /// first poll.
-    #[default]
-    Ambient,
-    /// Chosen by the caller, or snapshotted when the caller asked: the
-    /// acceptance consults nothing else.
-    Captured(Option<lash_core::TraceCarrier>),
-}
-
-impl SendTraceContext {
-    pub(crate) fn set_context(&mut self, context: lash_core::TraceCarrier) {
-        *self = Self::Captured(Some(context));
-    }
-    pub(crate) fn capture(&mut self, capture: impl FnOnce() -> Option<lash_core::TraceCarrier>) {
-        *self = Self::Captured(capture());
-    }
-    /// The cause the submission carries: a link to the captured context,
-    /// snapshotting it from `target` now when none was chosen.
-    pub(crate) fn into_context(self, target: &SendTarget) -> Option<lash_core::TraceCarrier> {
-        match self {
-            Self::Ambient => target.capture_trace_context(),
-            Self::Captured(context) => context,
-        }
-    }
-
-    /// The cause for a submission that captures through
-    /// `scopes` directly.
-    pub(crate) fn cause_through(
-        &self,
-        scopes: &dyn lash_core::TraceScopeFactory,
-    ) -> lash_core::TraceCause {
-        lash_core::TraceCause::linked_to(match self {
-            Self::Ambient => scopes.capture_current(),
-            Self::Captured(context) => context.clone(),
-        })
-    }
 }
 
 impl SendBuilder {
@@ -284,21 +244,29 @@ impl SendBuilder {
             ingress: TurnInputIngress::NextTurn,
             run_spec: RunSpec::default(),
             pin: false,
-            trace: SendTraceContext::Ambient,
+            trace: lash_core::TraceCall::default(),
             options_error: None,
         }
     }
 
-    /// Link this input to `context`, the trace context of whatever caused
-    /// it. An explicit context wins over the caller's ambient one, which is
-    /// then never consulted.
+    /// Open this send's `lash.send` producer span under `context`, the
+    /// trace context of whatever caused it. An explicit context wins over
+    /// the caller's ambient one, which is then never consulted.
     ///
-    /// The link is telemetry beside the submission, not part of it: the
-    /// first acceptance of an [`id`](Self::id) retains the context it was
-    /// given, and a retry under another context is the same submission and
-    /// keeps the first one.
+    /// The context is telemetry beside the submission, not part of it: the
+    /// input retains the producer as its cause, the first acceptance of an
+    /// [`id`](Self::id) retains it, and a retry under another context is
+    /// the same submission and keeps the first one. The turn the input
+    /// heads joins its trace.
     pub fn trace_context(mut self, context: lash_core::TraceCarrier) -> Self {
-        self.trace.set_context(context);
+        self.trace.caller = lash_core::TraceCaller::Explicit(Some(context));
+        self
+    }
+
+    /// Open this send's producer span with no caller, detached from the
+    /// ambient context: a new trace root.
+    pub fn trace_context_none(mut self) -> Self {
+        self.trace.caller = lash_core::TraceCaller::Explicit(None);
         self
     }
 
@@ -306,9 +274,19 @@ impl SendBuilder {
     /// telemetry adapter, instead of when the send is first polled. Use it
     /// when the builder is awaited somewhere the caller's context no longer
     /// is, such as a spawned task. With no adapter installed there is
-    /// nothing to capture and the input is linked to nothing.
+    /// nothing to capture and the producer is a root.
     pub fn capture_trace_context(mut self) -> Self {
-        self.trace.capture(|| self.target.capture_trace_context());
+        self.trace.caller =
+            lash_core::TraceCaller::Explicit(self.target.trace_scopes().capture_current());
+        self
+    }
+
+    /// How this send's producer span relates to its caller: its child (the
+    /// default), or, with [`TraceLinkMode::Link`](lash_core::TraceLinkMode::Link),
+    /// a new trace root that links it. The work the send admits takes the
+    /// producer as its parent either way.
+    pub fn trace_link_mode(mut self, mode: lash_core::TraceLinkMode) -> Self {
+        self.trace.link_mode = mode;
         self
     }
 
@@ -448,16 +426,14 @@ impl SendBuilder {
         if let Some(error) = options_error {
             return Err(error.into());
         }
-        // The caller's context is snapshotted once, here, on the first poll
-        // and before the first await: nothing later changes the edge.
-        let parent = trace.into_context(&target);
-        let host_send = target.begin_host_send(parent.as_ref());
-        let trace_cause = lash_core::TraceCause::linked_to(
-            host_send
-                .as_ref()
-                .map(|operation| operation.carrier())
-                .or(parent),
-        );
+        // The producer opens once, here, on the first poll and before the
+        // first await, under the caller's context: nothing later changes the
+        // edge. The input retains it as its cause.
+        let host_send = target.open_producer(lash_core::ProducerKind::Send, &trace);
+        let parent = host_send
+            .as_deref()
+            .map(<dyn lash_core::TraceHostOperation>::parent);
+        let trace_cause = lash_core::TraceCause::from(parent.clone());
         let context = target.context().await?;
         // The host id names the run; the shift executes the run's turns under
         // it, so the input carries no turn id of its own. An input sent
@@ -489,7 +465,7 @@ impl SendBuilder {
                 ingress,
                 run_spec,
                 pin,
-                trace_cause.clone(),
+                parent,
             )
             .await?
             .pop()

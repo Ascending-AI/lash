@@ -25,7 +25,7 @@ const WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// What a host installs to observe a core: a record sink and an
 /// OpenTelemetry adapter over SDK providers it owns.
-struct Observed {
+pub(super) struct Observed {
     sink: Arc<crate::testing::RecordingTraceSink>,
     spans: InMemorySpanExporter,
     metrics: InMemoryMetricExporter,
@@ -35,7 +35,9 @@ struct Observed {
 
 impl Observed {
     /// The observers, and `builder` with them installed.
-    fn install(builder: crate::core::LashCoreBuilder) -> (Self, crate::core::LashCoreBuilder) {
+    pub(super) fn install(
+        builder: crate::core::LashCoreBuilder,
+    ) -> (Self, crate::core::LashCoreBuilder) {
         let sink = Arc::new(crate::testing::RecordingTraceSink::new());
         let spans = InMemorySpanExporter::default();
         let tracer = SdkTracerProvider::builder()
@@ -71,7 +73,7 @@ impl Observed {
     }
 
     /// Every exported span whose name is, or starts with, `name`.
-    fn spans(&self, name: &str) -> Vec<SpanData> {
+    pub(super) fn spans(&self, name: &str) -> Vec<SpanData> {
         self.spans
             .get_finished_spans()
             .expect("exported spans")
@@ -110,7 +112,7 @@ impl Observed {
     }
 
     /// Until `ready` holds, within [`WITHIN`].
-    async fn until(&self, what: &str, ready: impl Fn(&Self) -> bool + Send + Sync) {
+    pub(super) async fn until(&self, what: &str, ready: impl Fn(&Self) -> bool + Send + Sync) {
         tokio::time::timeout(WITHIN, async {
             while !ready(self) {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -121,7 +123,7 @@ impl Observed {
     }
 }
 
-fn attribute(span: &SpanData, key: &str) -> Option<String> {
+pub(super) fn attribute(span: &SpanData, key: &str) -> Option<String> {
     span.attributes
         .iter()
         .find(|attribute| attribute.key.as_str() == key)

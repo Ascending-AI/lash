@@ -34,17 +34,30 @@ fn scope_id() -> TraceScopeId {
         turn_id: "turn".into(),
     })
 }
-fn admit(adapter: &OtelTelemetry, cause: TraceCause) -> DurableTraceScope {
-    let scope = scope_id();
-    let candidate = adapter.propose(&scope, &cause, 1000);
-    let anchor = candidate.anchor();
+/// The parent a retained cause naming `carrier` gives the work it admits.
+fn parent_of(carrier: TraceCarrier) -> TraceParent {
+    crate::TraceCause::Parent(carrier)
+        .as_parent()
+        .expect("a parent cause")
+}
+/// The producer the tests' admissions are caused by.
+fn producer() -> TraceParent {
+    parent_of(context(1))
+}
+/// A scope admitted under `parent` and selected.
+fn admit_under(adapter: &OtelTelemetry, parent: &TraceParent) -> DurableTraceScope {
+    let (scope, candidate) = (adapter as &dyn TraceScopeFactory).propose_scope(
+        scope_id(),
+        Some(parent),
+        TraceLinks::new(),
+        1000,
+    );
     candidate.settle(TraceCandidateOutcome::Selected);
-    DurableTraceScope {
-        scope,
-        cause,
-        anchor,
-        started_at_ms: 1000,
-    }
+    scope
+}
+/// A scope admitted under [`producer`] and selected.
+fn admit(adapter: &OtelTelemetry) -> DurableTraceScope {
+    admit_under(adapter, &producer())
 }
 /// A record as the runtime hands it over under the standard content policy.
 fn record(scope: &DurableTraceScope, event: TraceEvent, terminal_ms: u64) -> TraceRecord {
@@ -99,13 +112,11 @@ fn reconciled_admissions_are_exported_once_by_identity() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
     let retained = |anchor: TraceAnchor| DurableTraceScope {
-        scope: scope_id(),
-        cause: TraceCause::Root,
         anchor,
-        started_at_ms: 1000,
+        ..DurableTraceScope::admit(scope_id(), Some(&producer()), TraceLinks::new(), 1000)
     };
 
-    let deferred = adapter.propose(&scope_id(), &TraceCause::Root, 1000);
+    let deferred = adapter.propose(&scope_id(), &producer(), &TraceLinks::new(), 1000);
     let anchor = deferred.anchor();
     deferred.defer();
     assert!(exporter.get_finished_spans().unwrap().is_empty());
@@ -137,9 +148,9 @@ fn reconciled_admissions_are_exported_once_by_identity() {
     );
 
     adapter
-        .propose(&scope_id(), &TraceCause::Root, 1000)
+        .propose(&scope_id(), &producer(), &TraceLinks::new(), 1000)
         .defer();
-    let selected = admit(&adapter, TraceCause::Root);
+    let selected = admit(&adapter);
     adapter.export_admitted(&selected);
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 4);
@@ -160,16 +171,14 @@ fn reconciled_admissions_are_exported_once_by_identity() {
 fn a_deferred_admission_ends_when_it_was_deferred() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let candidate = adapter.propose(&scope_id(), &TraceCause::Root, 1000);
+    let candidate = adapter.propose(&scope_id(), &producer(), &TraceLinks::new(), 1000);
     let anchor = candidate.anchor();
     candidate.defer();
     let deferred = SystemTime::now();
     std::thread::sleep(Duration::from_millis(5));
     adapter.export_admitted(&DurableTraceScope {
-        scope: scope_id(),
-        cause: TraceCause::Root,
         anchor,
-        started_at_ms: 1000,
+        ..DurableTraceScope::admit(scope_id(), Some(&producer()), TraceLinks::new(), 1000)
     });
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 1);
@@ -182,7 +191,7 @@ fn a_deferred_admission_ends_when_it_was_deferred() {
 }
 
 #[test]
-fn explicit_run_ignores_ambient_context() {
+fn an_admission_takes_its_retained_parent_never_the_ambient_context() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let host = provider.tracer("host").start("host");
     let host_id = host.span_context().trace_id();
@@ -192,15 +201,18 @@ fn explicit_run_ignores_ambient_context() {
         adapter.capture_current().unwrap().trace_id().to_bytes(),
         host_id.to_bytes()
     );
-    admit(&adapter, TraceCause::Root);
+    admit(&adapter);
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 1);
-    assert_ne!(
-        spans[0].span_context.trace_id(),
-        host_id,
-        "a root must not inherit ambient host context"
+    assert_eq!(
+        spans[0].span_context.trace_id().to_bytes(),
+        context(1).trace_id().to_bytes(),
+        "an admission must not inherit ambient host context"
     );
-    assert_eq!(spans[0].parent_span_id, SpanId::INVALID);
+    assert_eq!(
+        spans[0].parent_span_id.to_bytes(),
+        context(1).span_id().to_bytes()
+    );
 }
 
 #[test]
@@ -215,7 +227,7 @@ fn carrier_sdk_conversion_preserves_unsampled_flags_state_and_remote_provenance(
     assert!(carrier(&SpanContext::empty_context()).is_none());
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOff);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit_under(&adapter, &parent_of(context(0)));
     let TraceAnchor::Context(anchor) = &scope.anchor else {
         panic!("unsampled context must be retained");
     };
@@ -234,43 +246,50 @@ fn admission_selection_parent_links_and_dropped_candidates_are_explicit() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
     let cause = context(1);
-    let parented = admit(&adapter, TraceCause::Parent(cause.clone()));
-    let TraceAnchor::Context(anchor) = parented.anchor else {
+    let fan_in = TraceCarrier::parse_w3c(
+        "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+        None,
+    )
+    .unwrap();
+    let (parented, candidate) = (&adapter as &dyn TraceScopeFactory).propose_scope(
+        scope_id(),
+        Some(&parent_of(cause.clone())),
+        [fan_in.clone()].into_iter().collect(),
+        1000,
+    );
+    candidate.settle(TraceCandidateOutcome::Selected);
+    let TraceAnchor::Context(anchor) = &parented.anchor else {
         panic!("anchor");
     };
     assert_eq!(anchor.trace_id(), cause.trace_id());
-    admit(&adapter, TraceCause::linked_to(Some(cause.clone())));
     adapter
-        .propose(&scope_id(), &TraceCause::Root, 1000)
+        .propose(&scope_id(), &producer(), &TraceLinks::new(), 1000)
         .settle(TraceCandidateOutcome::Reused);
-    drop(adapter.propose(&scope_id(), &TraceCause::Root, 1000));
+    drop(adapter.propose(&scope_id(), &producer(), &TraceLinks::new(), 1000));
     let spans = exporter.get_finished_spans().unwrap();
-    assert_eq!(spans.len(), 4);
+    assert_eq!(spans.len(), 3);
     for span in &spans {
         assert_eq!(span.start_time, epoch_ms(1000));
+        assert_eq!(
+            span.parent_span_id.to_bytes(),
+            cause.span_id().to_bytes(),
+            "every admission is its parent's child"
+        );
     }
+    assert_eq!(spans[0].links.len(), 1);
     assert_eq!(
-        spans[0].parent_span_id.to_bytes(),
-        cause.span_id().to_bytes()
+        spans[0].links[0].span_context,
+        span_context(&fan_in).unwrap()
     );
-    assert_eq!(spans[1].parent_span_id, SpanId::INVALID);
-    assert_ne!(
-        spans[1].span_context.trace_id().to_bytes(),
-        cause.trace_id().to_bytes()
-    );
-    assert_eq!(spans[1].links.len(), 1);
-    assert_eq!(
-        spans[1].links[0].span_context,
-        span_context(&cause).unwrap()
-    );
-    assert_eq!(spans[2].name, "lash.admission.attempt");
+    let spans = &spans[1..];
+    assert_eq!(spans[0].name, "lash.admission.attempt");
     assert!(
-        spans[2]
+        spans[0]
             .attributes
             .contains(&A::AdmissionOutcome.value("reused"))
     );
     assert!(
-        spans[3]
+        spans[1]
             .attributes
             .contains(&A::AdmissionOutcome.value("refused"))
     );
@@ -280,7 +299,7 @@ fn admission_selection_parent_links_and_dropped_candidates_are_explicit() {
 fn completion_uses_retained_anchor_and_times_after_adapter_recreation() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     let serialized = serde_json::to_string(&scope).unwrap();
     drop(adapter);
     let scope: DurableTraceScope = serde_json::from_str(&serialized).unwrap();
@@ -335,7 +354,7 @@ fn emitted_domain_shape_matches_registry() {
     }
     let (provider, meter, exporter, metrics) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     adapter.project(
         &scope,
         None,
@@ -552,7 +571,7 @@ fn disabled_replay_and_unsampled_paths_do_not_serialize_payloads() {
             ..OtelOptions::standard()
         },
     );
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     let mut event = completed(&scope);
     event
         .context
@@ -589,7 +608,7 @@ fn providers_are_isolated_and_sampling_is_decided_for_the_new_child() {
     let b = OtelTelemetry::new(&second, &second_meter, OtelOptions::default());
     let (unsampled, unsampled_meter, _, _) = providers(Sampler::AlwaysOff);
     let original = OtelTelemetry::new(&unsampled, &unsampled_meter, OtelOptions::default());
-    let scope = admit(&original, TraceCause::Parent(context(0)));
+    let scope = admit_under(&original, &parent_of(context(0)));
     assert!(!scope.anchor.context().unwrap().flags().is_sampled());
     a.project(
         &scope,
@@ -619,7 +638,7 @@ fn providers_are_isolated_and_sampling_is_decided_for_the_new_child() {
             .iter()
             .all(|r| r.scope_metrics().all(|s| s.metrics().next().is_none()))
     );
-    let scope = admit(&b, TraceCause::Root);
+    let scope = admit(&b);
     b.project(
         &scope,
         None,
@@ -642,7 +661,7 @@ fn payload_limits_and_permit_classes_are_enforced() {
             ..OtelOptions::standard()
         },
     );
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     let mut event = completed(&scope);
     event.content = crate::TelemetryContent::Captured;
     event
@@ -685,7 +704,7 @@ fn payload_limits_and_permit_classes_are_enforced() {
 fn domain_subject_owns_the_span_and_intent_kind_attribute() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     let subjects = std::iter::once(TraceDomainSubject::Process {}).chain(
         lash_sansio::ToolIntentKind::ALL
             .iter()
@@ -725,7 +744,7 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
 fn provider_attempts_use_reported_identity_and_never_project_aggregate_calls() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     for (ordinal, served_by, outcome) in [
         (1, Some("provider-a"), AttemptOutcome::Failed),
         (2, Some("provider-b"), AttemptOutcome::Completed),
@@ -808,7 +827,7 @@ fn provider_attempts_use_reported_identity_and_never_project_aggregate_calls() {
 fn tool_and_code_completions_use_explicit_scope_and_local_leaf_durations() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     let events = [
         (
             TraceEvent::ToolCallCompleted {
@@ -902,34 +921,64 @@ fn tool_and_code_completions_use_explicit_scope_and_local_leaf_durations() {
 }
 
 #[test]
-fn host_send_is_a_short_producer_and_retained_acceptances_remain_attempts() {
+fn producers_are_named_by_their_host_call_parent_or_link_their_caller_and_record_their_outcome() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let parent = context(1);
-    let accepted = adapter
-        .begin_host_send(Some(&parent))
-        .expect("host operation");
+    let caller = context(1);
+    let open = |kind, link_mode| {
+        adapter
+            .open_producer(ProducerSpec {
+                kind,
+                caller: Some(caller.clone()),
+                link_mode,
+            })
+            .expect("a producer")
+    };
+    let accepted = open(ProducerKind::Send, TraceLinkMode::Parent);
     let accepted_id = accepted.carrier().span_id().to_bytes();
     accepted.settle(TraceCandidateOutcome::Selected);
-    let retained = adapter
-        .begin_host_send(Some(&parent))
-        .expect("retry operation");
+    let retained = open(ProducerKind::Send, TraceLinkMode::Parent);
     assert_ne!(retained.carrier().span_id().to_bytes(), accepted_id);
     retained.settle(TraceCandidateOutcome::Reused);
+    let linked = open(ProducerKind::ProcessStart, TraceLinkMode::Link);
+    assert_ne!(linked.carrier().trace_id(), caller.trace_id());
+    drop(linked);
     let spans = exporter.get_finished_spans().expect("finished operations");
-    assert_eq!(spans.len(), 2);
+    assert_eq!(spans.len(), 3);
+    for (span, outcome) in spans.iter().zip(["selected", "reused", "refused"]) {
+        assert_eq!(span.span_kind, opentelemetry::trace::SpanKind::Producer);
+        assert!(
+            span.attributes
+                .contains(&A::AdmissionOutcome.value(outcome)),
+            "{span:?}"
+        );
+    }
     assert_eq!(spans[0].name, "lash.send");
-    assert_eq!(spans[1].name, "lash.send.attempt");
+    assert_eq!(spans[1].name, "lash.send");
+    for span in &spans[..2] {
+        assert_eq!(span.parent_span_id.to_bytes(), caller.span_id().to_bytes());
+        assert_eq!(
+            span.span_context.trace_id().to_bytes(),
+            caller.trace_id().to_bytes()
+        );
+        assert!(span.links.is_empty());
+    }
+    assert_eq!(spans[2].name, "lash.process.start");
+    assert_eq!(spans[2].parent_span_id, SpanId::INVALID);
+    assert_eq!(spans[2].links.len(), 1);
     assert_eq!(
-        spans[0].parent_span_id.to_bytes(),
-        parent.span_id().to_bytes()
+        spans[2].links[0].span_context,
+        span_context(&caller).unwrap()
     );
-    assert_eq!(
-        spans[0].span_context.trace_id().to_bytes(),
-        parent.trace_id().to_bytes()
+    assert!(
+        UntracedScopes
+            .open_producer(ProducerSpec {
+                kind: ProducerKind::Send,
+                caller: Some(caller),
+                link_mode: TraceLinkMode::Parent,
+            })
+            .is_none()
     );
-    assert_eq!(spans[0].span_kind, opentelemetry::trace::SpanKind::Producer);
-    assert!(UntracedScopes.begin_host_send(Some(&parent)).is_none());
 }
 
 /// A failed cell reports its own closed cause, independently of a turn's recovery.
@@ -937,7 +986,7 @@ fn host_send_is_a_short_producer_and_retained_acceptances_remain_attempts() {
 fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     let events = [
         (
             TraceEvent::ExecCodeCompleted {
@@ -1099,15 +1148,13 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
     ];
     for (owner, run, process) in owners {
         let id = TraceScopeId::admission(owner);
-        let candidate = adapter.propose(&id, &TraceCause::Root, 1000);
-        let anchor = candidate.anchor();
+        let (scope, candidate) = (&adapter as &dyn TraceScopeFactory).propose_scope(
+            id,
+            Some(&producer()),
+            TraceLinks::new(),
+            1000,
+        );
         candidate.settle(TraceCandidateOutcome::Selected);
-        let scope = DurableTraceScope {
-            scope: id,
-            cause: TraceCause::Root,
-            anchor,
-            started_at_ms: 1000,
-        };
         let mut event = record(
             &scope,
             TraceEvent::LlmAttemptCompleted {
@@ -1197,7 +1244,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
 fn failure_attributes_preserve_typed_classes_and_model_http_status() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     let tool = |outcome, attempts| TraceEvent::ToolCallCompleted {
         call_id: lash_sansio::ToolCallId::fixture("call"),
         provider_call_id: None,
@@ -1402,7 +1449,7 @@ fn host_and_lash_versions_accompany_exported_spans_and_metric_points() {
         .with_reader(PeriodicReader::builder(metrics.clone()).build())
         .build();
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::standard());
-    let scope = admit(&adapter, TraceCause::Root);
+    let scope = admit(&adapter);
     adapter.project(
         &scope,
         None,

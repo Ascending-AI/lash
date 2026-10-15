@@ -171,7 +171,8 @@ pub(super) mod tests {
                 session_id: "s".into(),
                 turn_id: "t".into(),
             }),
-            cause: lash_trace::TraceCause::Root,
+            cause: lash_trace::TraceCause::None,
+            links: lash_trace::TraceLinks::new(),
             anchor: lash_trace::TraceAnchor::Untraced,
             started_at_ms: 1,
         };

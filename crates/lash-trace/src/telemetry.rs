@@ -568,81 +568,160 @@ impl schemars::JsonSchema for TraceLinks {
     }
 }
 
-/// How an admitted operation relates to what caused it.
+/// What caused an admitted operation, as its first acceptance retained it.
 ///
 /// The first accepted cause is retained: a retry of the same business
-/// submission under another context reads this one back, and an operation
-/// first admitted as `Root` stays `Root`.
+/// submission under another context reads this one back. It is stored data;
+/// lash builds it only from a [`TraceParent`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "relation", content = "from", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TraceCause {
-    /// No cause: the operation starts a trace of its own. An adapter starts
-    /// it under an explicit empty context, never the ambient one.
+    /// No provenance. The scope is unobserved: it has no anchor and records
+    /// no span. Also the canonical value of effect-envelope canonicalization
+    /// and the decode of a NULL column. Never a trace root.
     #[default]
-    Root,
+    None,
     /// The operation is an owned invocation of this span.
     Parent(TraceCarrier),
-    /// The operation is independently admitted work these spans communicated
-    /// with; it starts its own trace and links them.
-    Linked(TraceLinks),
+}
+
+impl From<Option<TraceParent>> for TraceCause {
+    fn from(parent: Option<TraceParent>) -> Self {
+        parent.map_or(Self::None, |parent| Self::Parent(parent.0))
+    }
 }
 
 impl TraceCause {
-    /// A linked cause, or `Root` when there is nothing to link.
-    pub fn linked(links: TraceLinks) -> Self {
-        if links.is_empty() {
-            Self::Root
-        } else {
-            Self::Linked(links)
-        }
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
     }
 
-    /// A cause linking one producer, or `Root` when it had no context.
-    pub fn linked_to(producer: Option<TraceCarrier>) -> Self {
-        Self::linked(producer.into_iter().collect())
-    }
-
-    /// Every context this cause names, parent or links.
-    pub fn contexts(&self) -> &[TraceCarrier] {
+    /// The parent work this cause admits takes: the span it names.
+    pub fn as_parent(&self) -> Option<TraceParent> {
         match self {
-            Self::Root => &[],
-            Self::Parent(parent) => std::slice::from_ref(parent),
-            Self::Linked(links) => links.contexts(),
+            Self::None => None,
+            Self::Parent(parent) => Some(TraceParent(parent.clone())),
         }
     }
 
-    pub fn is_root(&self) -> bool {
-        matches!(self, Self::Root)
-    }
-
-    /// The cause of a scope that admits the work `members` caused, in
-    /// admission order.
-    ///
-    /// One member's cause is the scope's. Several are fan-in: an owned
-    /// invocation heading them keeps its parent, and otherwise the scope
-    /// links every producer.
-    pub fn of_admitted<'a>(members: impl IntoIterator<Item = &'a Self>) -> Self {
+    /// The parent and links of a scope that admits the work `members`
+    /// caused, in admission order: the head member's parent, and every
+    /// other member's parent as a link (fan-in), at most
+    /// [`TRACE_LINK_LIMIT`] of them. A head with no cause admits the scope
+    /// unobserved.
+    pub fn of_admitted<'a>(
+        members: impl IntoIterator<Item = &'a Self>,
+    ) -> (Option<TraceParent>, TraceLinks) {
         let mut members = members.into_iter();
-        let Some(head) = members.next() else {
-            return Self::Root;
-        };
-        if let Self::Parent(_) = head {
-            return head.clone();
+        let parent = members.next().and_then(Self::as_parent);
+        let mut links = TraceLinks::new();
+        if let Some(head) = &parent {
+            for member in members {
+                if let Self::Parent(context) = member
+                    && !context.same_span(&head.0)
+                {
+                    links.push(context.clone());
+                }
+            }
         }
-        let mut links: TraceLinks = head.linked_contexts();
-        for member in members {
-            links.merge(member.linked_contexts());
-        }
-        Self::linked(links)
+        (parent, links)
     }
+}
 
-    fn linked_contexts(&self) -> TraceLinks {
+/// What admitted work retains as its parent. Only a producer span, an
+/// observed retained scope or a retained cause makes one; nothing builds
+/// one from a carrier a caller supplies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceParent(TraceCarrier);
+
+impl TraceParent {
+    pub fn carrier(&self) -> &TraceCarrier {
+        &self.0
+    }
+}
+
+/// How a producer span relates to its caller's context. One spelling on
+/// every producer entry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TraceLinkMode {
+    /// The producer is the caller's child.
+    #[default]
+    Parent,
+    /// The producer is a new trace root that links the caller.
+    Link,
+}
+
+/// The host call a producer span stands for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ProducerKind {
+    /// A send of one input.
+    Send,
+    /// A batch send.
+    SendBatch,
+    /// A host process start.
+    ProcessStart,
+    /// A host tool-intent submission.
+    ToolIntentSubmit,
+    /// A plugin operation invoked through the host admin surface.
+    PluginInvoke,
+}
+
+impl ProducerKind {
+    /// The producer span's name.
+    pub fn as_str(self) -> &'static str {
         match self {
-            Self::Root => TraceLinks::new(),
-            Self::Parent(parent) => std::iter::once(parent.clone()).collect(),
-            Self::Linked(links) => links.clone(),
+            Self::Send => "lash.send",
+            Self::SendBatch => "lash.send.batch",
+            Self::ProcessStart => "lash.process.start",
+            Self::ToolIntentSubmit => "lash.tool_intent.submit",
+            Self::PluginInvoke => "lash.plugin.invoke",
         }
     }
+}
+
+/// Which caller context a producer span takes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum TraceCaller {
+    /// The caller's ambient context, captured once, when the host call
+    /// opens its producer.
+    #[default]
+    Ambient,
+    /// A context the host chose (`None`: detached, a trace root); the
+    /// ambient one is never consulted.
+    Explicit(Option<TraceCarrier>),
+}
+
+/// The per-call trace choices of a producer entry: its caller context and
+/// how its producer relates to it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TraceCall {
+    pub caller: TraceCaller,
+    pub link_mode: TraceLinkMode,
+}
+
+impl TraceCall {
+    /// The producer of a `kind` host call making these choices, its
+    /// ambient caller captured through `scopes` now.
+    pub fn producer(&self, kind: ProducerKind, scopes: &dyn TraceScopeFactory) -> ProducerSpec {
+        ProducerSpec {
+            kind,
+            caller: match &self.caller {
+                TraceCaller::Ambient => scopes.capture_current(),
+                TraceCaller::Explicit(caller) => caller.clone(),
+            },
+            link_mode: self.link_mode,
+        }
+    }
+}
+
+/// What a producer is opened from: the host call it stands for, its
+/// caller's context (the explicit one, else the ambient one, captured once)
+/// and how it relates to that caller.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProducerSpec {
+    pub kind: ProducerKind,
+    pub caller: Option<TraceCarrier>,
+    pub link_mode: TraceLinkMode,
 }
 
 /// The durable owner of a trace scope: the admitted thing whose work the
@@ -774,25 +853,27 @@ impl TraceAnchor {
     }
 }
 
-/// The retained telemetry of one admitted scope: what caused it, the anchor
-/// its children hang under, and when it started.
+/// The retained telemetry of one admitted scope: what caused it, the
+/// fan-in it links, the anchor its children hang under, and when it
+/// started.
 ///
 /// It is written once, by the admission that inserts its owner, in the same
-/// write. Every later admission of that owner reads it back unchanged.
+/// write. Every later admission of that owner reads it back unchanged. A
+/// scope with no cause is unobserved: it has no anchor.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DurableTraceScope {
     pub scope: TraceScopeId,
-    #[serde(default, skip_serializing_if = "is_root_cause")]
+    #[serde(default, skip_serializing_if = "TraceCause::is_none")]
     pub cause: TraceCause,
+    /// The admitted members beyond the parent: the other inputs' producers
+    /// of a fan-in turn, in admission order.
+    #[serde(default, skip_serializing_if = "TraceLinks::is_empty")]
+    pub links: TraceLinks,
     #[serde(default, skip_serializing_if = "is_untraced")]
     pub anchor: TraceAnchor,
     /// Wall-clock epoch milliseconds of the first admission.
     pub started_at_ms: u64,
-}
-
-fn is_root_cause(cause: &TraceCause) -> bool {
-    matches!(cause, TraceCause::Root)
 }
 
 fn is_untraced(anchor: &TraceAnchor) -> bool {
@@ -800,30 +881,44 @@ fn is_untraced(anchor: &TraceAnchor) -> bool {
 }
 
 impl DurableTraceScope {
-    /// The context a child of this scope is admitted under: its anchor as
-    /// the owning parent. An untraced scope gives its children no parent.
-    pub fn parent_cause(&self) -> TraceCause {
-        match &self.anchor {
-            TraceAnchor::Untraced => TraceCause::Root,
-            TraceAnchor::Context(context) => TraceCause::Parent(context.clone()),
+    /// The scope `scope` admits under `parent`, linking `links`, before an
+    /// adapter anchors it. With no parent it is unobserved and links
+    /// nothing: there is no way to make an observed scope without one.
+    pub fn admit(
+        scope: TraceScopeId,
+        parent: Option<&TraceParent>,
+        links: TraceLinks,
+        started_at_ms: u64,
+    ) -> Self {
+        Self {
+            scope,
+            cause: TraceCause::from(parent.cloned()),
+            links: if parent.is_some() {
+                links
+            } else {
+                TraceLinks::new()
+            },
+            anchor: TraceAnchor::Untraced,
+            started_at_ms,
         }
     }
 
-    /// The cause of independent work this scope produced: a link to its
-    /// anchor.
-    pub fn linked_cause(&self) -> TraceCause {
-        TraceCause::linked_to(self.anchor.context().cloned())
+    /// The parent a child of this scope is admitted under: its anchor. An
+    /// untraced scope gives its children none, so they are unobserved.
+    pub fn as_parent(&self) -> Option<TraceParent> {
+        self.anchor.context().cloned().map(TraceParent)
     }
 
-    /// The cause and anchor this scope retains, as an offer: what a typed
-    /// handler input carries for a scope its store already admitted.
+    /// The cause, links and anchor this scope retains, as an offer: what a
+    /// typed handler input carries for a scope its store already admitted.
     pub fn offer(&self) -> TraceScopeOffer {
-        TraceScopeOffer::new(self.cause.clone(), self.anchor.clone())
+        TraceScopeOffer::new(self.cause.clone(), self.links.clone(), self.anchor.clone())
     }
 }
 
 /// What an admission offers its store for the scope the store may insert:
-/// the cause the caller was given and the anchor its candidate proposed.
+/// the cause the caller was given, the links it admits and the anchor its
+/// candidate proposed.
 ///
 /// The store that inserts the owning row builds the [`DurableTraceScope`]
 /// from it, with the owner id and start time that same write records. A
@@ -831,9 +926,9 @@ impl DurableTraceScope {
 /// the retained scope. Like every trace field, an offer is no part of any
 /// business identity.
 ///
-/// An empty offer (a root cause, no anchor) is one word wide, so the
+/// An empty offer (no cause, no links, no anchor) is one word wide, so the
 /// requests and commands that carry one pay nothing for the common
-/// untraced case.
+/// unobserved case.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "TraceScopeOfferWire", into = "TraceScopeOfferWire")]
 pub struct TraceScopeOffer(Option<Box<TraceScopeOfferWire>>);
@@ -842,31 +937,57 @@ pub struct TraceScopeOffer(Option<Box<TraceScopeOfferWire>>);
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "TraceScopeOffer")]
 struct TraceScopeOfferWire {
-    #[serde(default, skip_serializing_if = "is_root_cause")]
+    #[serde(default, skip_serializing_if = "TraceCause::is_none")]
     cause: TraceCause,
+    #[serde(default, skip_serializing_if = "TraceLinks::is_empty")]
+    links: TraceLinks,
     #[serde(default, skip_serializing_if = "is_untraced")]
     anchor: TraceAnchor,
 }
 
-static RUN_CAUSE: TraceCause = TraceCause::Root;
+static NO_CAUSE: TraceCause = TraceCause::None;
 static UNTRACED_ANCHOR: TraceAnchor = TraceAnchor::Untraced;
 
 impl TraceScopeOffer {
-    pub fn new(cause: TraceCause, anchor: TraceAnchor) -> Self {
-        if is_root_cause(&cause) && is_untraced(&anchor) {
+    pub fn new(cause: TraceCause, links: TraceLinks, anchor: TraceAnchor) -> Self {
+        if cause.is_none() && links.is_empty() && is_untraced(&anchor) {
             return Self(None);
         }
-        Self(Some(Box::new(TraceScopeOfferWire { cause, anchor })))
+        Self(Some(Box::new(TraceScopeOfferWire {
+            cause,
+            links,
+            anchor,
+        })))
     }
 
-    /// An offer with no candidate anchor: the cause alone is retained.
-    pub fn caused_by(cause: TraceCause) -> Self {
-        Self::new(cause, TraceAnchor::Untraced)
+    /// An offer of `parent` as the cause, with no candidate anchor yet.
+    pub fn caused_by(parent: Option<TraceParent>) -> Self {
+        Self::new(
+            TraceCause::from(parent),
+            TraceLinks::new(),
+            TraceAnchor::Untraced,
+        )
+    }
+
+    /// The same offer anchored at `anchor`, the anchor its candidate
+    /// proposed.
+    #[must_use]
+    pub fn anchored(self, anchor: TraceAnchor) -> Self {
+        let TraceScopeOfferWire { cause, links, .. } =
+            self.0.map(|offer| *offer).unwrap_or_default();
+        Self::new(cause, links, anchor)
     }
 
     /// The cause the caller was given.
     pub fn cause(&self) -> &TraceCause {
-        self.0.as_ref().map_or(&RUN_CAUSE, |offer| &offer.cause)
+        self.0.as_ref().map_or(&NO_CAUSE, |offer| &offer.cause)
+    }
+
+    /// The fan-in the caller admits beyond its parent.
+    pub fn links(&self) -> TraceLinks {
+        self.0
+            .as_ref()
+            .map_or_else(TraceLinks::new, |offer| offer.links.clone())
     }
 
     /// The anchor the caller's admission candidate proposed.
@@ -876,7 +997,7 @@ impl TraceScopeOffer {
             .map_or(&UNTRACED_ANCHOR, |offer| &offer.anchor)
     }
 
-    /// Whether the offer says nothing: a root cause and no anchor.
+    /// Whether the offer says nothing: no cause, no links and no anchor.
     pub fn is_empty(&self) -> bool {
         self.0.is_none()
     }
@@ -884,10 +1005,15 @@ impl TraceScopeOffer {
     /// The scope the inserting admission retains for `scope`, started at
     /// `started_at_ms`.
     pub fn into_scope(self, scope: TraceScopeId, started_at_ms: u64) -> DurableTraceScope {
-        let TraceScopeOfferWire { cause, anchor } = self.0.map(|offer| *offer).unwrap_or_default();
+        let TraceScopeOfferWire {
+            cause,
+            links,
+            anchor,
+        } = self.0.map(|offer| *offer).unwrap_or_default();
         DurableTraceScope {
             scope,
             cause,
+            links,
             anchor,
             started_at_ms,
         }
@@ -896,7 +1022,7 @@ impl TraceScopeOffer {
 
 impl From<TraceScopeOfferWire> for TraceScopeOffer {
     fn from(wire: TraceScopeOfferWire) -> Self {
-        Self::new(wire.cause, wire.anchor)
+        Self::new(wire.cause, wire.links, wire.anchor)
     }
 }
 
@@ -1021,39 +1147,52 @@ pub trait TraceAdmissionCandidate: Send {
     }
 }
 
-/// A short host operation. Its carrier names this call, never a durable owner.
+/// A producer span: the one span a host call that admits durable work
+/// opens, before its first await. Its carrier names this call, never a
+/// durable owner; the work the call admits takes it as its parent.
 pub trait TraceHostOperation: Send {
     fn carrier(&self) -> TraceCarrier;
-    /// Finish after the ingress commit. A retained acceptance remains an attempt.
+    /// Finish after the ingress commit: `Selected` when this call's
+    /// acceptance retained the cause, `Reused` when a retry read back an
+    /// earlier one, `Refused` when nothing was retained. Dropping an
+    /// unsettled producer refuses it.
     fn settle(self: Box<Self>, outcome: TraceCandidateOutcome);
+}
+
+impl dyn TraceHostOperation {
+    /// The parent the work this call admits retains.
+    pub fn parent(&self) -> TraceParent {
+        TraceParent(self.carrier())
+    }
 }
 
 /// The single identity-producing telemetry adapter of a runtime.
 ///
-/// It mints admission anchors and reads the host's ambient context; it never
-/// owns persistence. A runtime without an adapter uses [`UntracedScopes`].
+/// It opens producer spans, mints admission anchors under a parent and
+/// reads the host's ambient context; it never owns persistence. A runtime
+/// without an adapter uses [`UntracedScopes`]. Every trace root is a
+/// producer: an admission always has a parent, or it is unobserved.
 pub trait TraceScopeFactory: Send + Sync {
     /// Snapshots the caller's current context, if the host has one. Only a
     /// facade entry point calls this, once per submission and before its
     /// first await; engine code passes explicit values.
     fn capture_current(&self) -> Option<TraceCarrier>;
 
-    /// Begin a host send under its captured parent, before the first await.
-    /// No installed adapter means no operation or carrier.
-    fn begin_host_send(
-        &self,
-        _parent: Option<&TraceCarrier>,
-    ) -> Option<Box<dyn TraceHostOperation>> {
+    /// Open the producer span of one host call, before its first await.
+    /// No installed adapter means no producer: the call's work is admitted
+    /// unobserved.
+    fn open_producer(&self, _spec: ProducerSpec) -> Option<Box<dyn TraceHostOperation>> {
         None
     }
 
-    /// Starts an admission candidate for `scope` under `cause` at the
-    /// same `started_at_ms` the durable scope retains. The adapter uses
-    /// this instant instead of reading its own clock.
+    /// Starts an admission candidate for `scope` under `parent`, linking
+    /// `links`, at the same `started_at_ms` the durable scope retains. The
+    /// adapter uses this instant instead of reading its own clock.
     fn propose(
         &self,
         scope: &TraceScopeId,
-        cause: &TraceCause,
+        parent: &TraceParent,
+        links: &TraceLinks,
         started_at_ms: u64,
     ) -> Box<dyn TraceAdmissionCandidate>;
 
@@ -1066,8 +1205,35 @@ pub trait TraceScopeFactory: Send + Sync {
     fn export_admitted(&self, _scope: &DurableTraceScope) {}
 }
 
-/// The factory of a runtime with no telemetry adapter: every scope is
-/// admitted [`TraceAnchor::Untraced`] and nothing is captured.
+impl dyn TraceScopeFactory {
+    /// The scope `scope` admits under `parent`, linking `links`, anchored by
+    /// the candidate this adapter proposes for it. With no parent the scope
+    /// is unobserved and its candidate proposes nothing.
+    pub fn propose_scope(
+        &self,
+        scope: TraceScopeId,
+        parent: Option<&TraceParent>,
+        links: TraceLinks,
+        started_at_ms: u64,
+    ) -> (DurableTraceScope, Box<dyn TraceAdmissionCandidate>) {
+        let mut admitted = DurableTraceScope::admit(scope, parent, links, started_at_ms);
+        let candidate: Box<dyn TraceAdmissionCandidate> = match parent {
+            Some(parent) => self.propose(
+                &admitted.scope,
+                parent,
+                &admitted.links,
+                admitted.started_at_ms,
+            ),
+            None => Box::new(UntracedCandidate),
+        };
+        admitted.anchor = candidate.anchor();
+        (admitted, candidate)
+    }
+}
+
+/// The factory of a runtime with no telemetry adapter: no producer opens,
+/// every scope is admitted [`TraceAnchor::Untraced`] and nothing is
+/// captured.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UntracedScopes;
 
@@ -1089,7 +1255,8 @@ impl TraceScopeFactory for UntracedScopes {
     fn propose(
         &self,
         _scope: &TraceScopeId,
-        _cause: &TraceCause,
+        _parent: &TraceParent,
+        _links: &TraceLinks,
         _started_at_ms: u64,
     ) -> Box<dyn TraceAdmissionCandidate> {
         Box::new(UntracedCandidate)

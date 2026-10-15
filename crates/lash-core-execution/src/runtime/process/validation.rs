@@ -484,7 +484,6 @@ pub fn prepare_process_event_append(
             request.replay,
         ),
         fact,
-        trace_cause: request.trace_cause,
         occurred_at: occurred_at_ms,
     };
     let mut projected_record = record.clone();
