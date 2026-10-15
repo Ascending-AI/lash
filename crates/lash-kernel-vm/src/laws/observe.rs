@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
+use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
-use lash_kernel_state::ParkedRun;
+use lash_kernel_state::paged::SealBudget;
 
 use super::embedder::{Embedder, ROOMY, Setup};
 use crate::observe::{CodeKind, GuestContext, GuestProfile, LibKind, WorkReport};
@@ -71,12 +72,13 @@ fn setup(layout: Layout, slice: u64) -> Setup {
     }
 }
 
-/// What a run shows its embedder: every step, each park's exported state,
-/// what it printed and requested, and its charge.
+/// What a run shows its embedder: every step, the checkpoint root each
+/// park seals, what it printed and requested, and its charge.
 #[derive(Debug, PartialEq)]
 struct Seen {
     steps: Vec<Step>,
-    exports: Vec<ParkedRun>,
+    /// Each park's sealed CheckpointRoot, encoded: its pages by digest.
+    exports: Vec<Vec<u8>>,
     printed: Vec<Datum>,
     requests: Vec<Request>,
     charged: u64,
@@ -114,7 +116,15 @@ fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
             Step::Ended(_) => break,
             Step::Slice => {}
             Step::Parked(_) => {
-                seen.exports.push(embedder.machine.export().unwrap());
+                let sealed = embedder
+                    .machine
+                    .seal(SealBudget {
+                        pages: u64::MAX,
+                        bytes: u64::MAX,
+                    })
+                    .unwrap()
+                    .unwrap();
+                seen.exports.push(encode_body(&sealed.root));
                 let next = super::embedder::label(&embedder.pending[0]);
                 embedder.deliver(&next);
             }
@@ -128,7 +138,7 @@ fn run(setup: Setup, observing: Observing) -> (Seen, Option<WorkReport>) {
 
 /// Observing a run, by counting its work or publishing its context or
 /// both, leaves its results, failures, charges, parks, prints, requests
-/// and exported states as they are: under the natural layout and one that
+/// and sealed roots as they are: under the natural layout and one that
 /// takes every general native call, whole and in slices.
 #[test]
 fn observing_a_run_changes_nothing_it_can_observe() {
@@ -421,7 +431,7 @@ fn counted_run(
         }
         if rebuild {
             hops += 1;
-            embedder.relay(
+            embedder.reopen(
                 Layout(hops.wrapping_mul(0x9e37_79b9) | 1),
                 hops.is_multiple_of(2),
             );
@@ -432,7 +442,7 @@ fn counted_run(
             enable(&mut embedder.machine);
         }
         if matches!(step, Step::Parked(_)) {
-            super::parked::deliver_next(&mut embedder);
+            embedder.deliver_next();
         }
     }
 }
@@ -441,7 +451,6 @@ fn counted_run(
 /// slices and fresh run segments; each individual delta equals its trace.
 #[test]
 fn counts_are_layout_independent_and_add_exactly_across_rebuilds() {
-    use super::parked::*;
     for text in [
         EXPRESSIONS,
         HELPER_FROM_TWO_PLACES,
@@ -531,6 +540,32 @@ main {
     }
 }
 
+/// The sites of every action in the document's own units: the children of
+/// statements that [`lash_kernel_doc::Document::site_ordinals`] leaves out.
+fn action_sites(document: &lash_kernel_doc::Document) -> Vec<lash_kernel_doc::Site> {
+    use lash_kernel_doc::{Node, Site, Unit};
+    let mut pending = vec![(Site::new(Unit::Main, vec![]), Node::Block(&document.main))];
+    pending.extend(document.functions.iter().map(|(name, function)| {
+        (
+            Site::new(Unit::Function(name.clone()), vec![]),
+            Node::Block(&function.body),
+        )
+    }));
+    let mut actions = Vec::new();
+    while let Some((site, node)) = pending.pop() {
+        if matches!(node, Node::Action(_)) {
+            actions.push(site.clone());
+        }
+        pending.extend(
+            node.children()
+                .into_iter()
+                .enumerate()
+                .map(|(index, child)| (site.child(index as u32), child)),
+        );
+    }
+    actions
+}
+
 /// FIG-6369 (d): on raise-free paths each of the eight identity-bearing
 /// action kinds advances its task's occurrence counter exactly once. The saved
 /// count is last occurrence + 1. Read-bound Perform has no identity (K-EFF-012)
@@ -558,6 +593,7 @@ main {
     let mut embedder = Embedder::new(source);
     let (program, _) = embedder.program(true);
     let ordinals = program.document.site_ordinals();
+    let actions = action_sites(&program.document);
     embedder.machine.set_observe(crate::Observe::Counts);
     let mut total = std::collections::BTreeMap::<u32, u64>::new();
     loop {
@@ -573,20 +609,20 @@ main {
             break;
         }
         if matches!(step, Step::Parked(_)) {
-            let parked = embedder.machine.export().unwrap();
             let mut occurrences = std::collections::BTreeMap::<u32, u64>::new();
-            for task in parked.tasks {
-                for occurrence in task.handle.occurrences {
-                    let mut site = occurrence.site;
+            for site in &actions {
+                let count = embedder.machine.occurrences_at(site).unwrap();
+                if count > 0 {
+                    let mut site = site.clone();
                     site.path.pop(); // action -> its statement
-                    *occurrences.entry(ordinals[&site]).or_default() += occurrence.count;
+                    *occurrences.entry(ordinals[&site]).or_default() += count;
                 }
             }
             assert!(!occurrences.is_empty());
             for (ordinal, count) in occurrences {
                 assert_eq!(total[&ordinal], count);
             }
-            super::parked::deliver_next(&mut embedder);
+            embedder.deliver_next();
         }
     }
 }
@@ -611,12 +647,16 @@ fn a_checkpoint_omits_counts_and_off_starts_no_observer() {
     );
     counted.machine.set_observe(crate::Observe::Counts);
     assert_eq!(plain.run(), counted.run());
+    let budget = SealBudget {
+        pages: u64::MAX,
+        bytes: u64::MAX,
+    };
     assert_eq!(
-        plain.machine.export().unwrap(),
-        counted.machine.export().unwrap()
+        encode_body(&plain.machine.seal(budget).unwrap().unwrap().root),
+        encode_body(&counted.machine.seal(budget).unwrap().unwrap().root)
     );
     assert!(plain.machine.take_ran().is_empty());
-    counted.relay(Layout(123), false);
+    counted.reopen(Layout(123), false);
     counted.machine.set_observe(crate::Observe::Counts);
     assert!(counted.machine.take_ran().is_empty());
 }
@@ -655,3 +695,174 @@ fn position_observation_does_not_discard_counts_at_host_reads() {
     ));
     assert_eq!(embedder.machine.take_ran(), vec![(1, 1), (2, 1)]);
 }
+
+const EXPRESSIONS: &str = r#"
+main {
+  let m = map{"a": [1, (2, 3)], "b": {k: text.concat("x", "y")}}
+  let n = num.add(list.len(m["a"]), pair.twice(4))
+  let got = perform echo(n) as Any
+  let t = (got, m["b"].k, [got, n])
+  let doubled = invoke pair.twice(got)
+  let again = perform echo(t) as Any
+  return (again, m, num.add(n, doubled))
+}
+"#;
+
+const HELPER_FROM_TWO_PLACES: &str = r#"
+fn fetch(tag) {
+  let r = perform echo(tag) as Any
+  return (tag, r)
+}
+main {
+  let a = call fetch("a")
+  let out = []
+  for t in ["b", "c"] {
+    let v = call fetch(t)
+    set out[list.len(out)] = v
+  }
+  let d = call fetch("d")
+  return (a, out, d)
+}
+"#;
+
+const CALLBACK_IN_MAP: &str = r#"
+main {
+  let seen = 0
+  let f = fn(x) {
+    let r = perform echo(x) as Any
+    set seen = num.add(seen, 1)
+    return (r, seen)
+  }
+  let xs = ["p", "q", "r"]
+  let ys = invoke each.map(f, xs)
+  return (ys, seen)
+}
+"#;
+
+/// A cleanup block that waits, entered normally, by a throw of a list no
+/// variable names, and by `continue`.
+const CLEANUP_WITH_A_WAIT: &str = r#"
+main {
+  let log = []
+  for mode in [0, 1, 2] {
+    try {
+      try {
+        if num.lt(mode, 1) {
+          set log[list.len(log)] = "body"
+        } else {
+          if num.lt(mode, 2) { throw [mode, "thrown"] } else { continue }
+        }
+      } finally {
+        let got = perform echo(mode) as Any
+        set log[list.len(log)] = got
+      }
+    } catch e {
+      set log[list.len(log)] = e
+    }
+  }
+  return log
+}
+"#;
+
+const FAN_OUT_WITH_ONE_ENDED: &str = r#"
+fn worker(tag) {
+  let r = perform echo(tag) as Any
+  let s = perform echo(r) as Any
+  print ("end", tag)
+  return (tag, s)
+}
+fn quick(tag) { return tag }
+main {
+  let hs = []
+  for tag in ["a", "b"] {
+    let h = spawn call worker(tag)
+    set hs[list.len(hs)] = h
+  }
+  let q = spawn call quick("q")
+  set hs[list.len(hs)] = q
+  let rs = join all hs
+  return rs
+}
+"#;
+
+const CANCELLED_MID_CLEANUP: &str = r#"
+fn guarded(tag) {
+  try {
+    let r = perform echo(tag) as Any
+    return r
+  } finally {
+    let c = perform echo("cleanup") as Any
+    print ("cleaned", c)
+  }
+}
+main {
+  let h = spawn call guarded("g")
+  do cancel h
+  let out = "unset"
+  try { set out = join h } catch e { set out = e.kind }
+  return out
+}
+"#;
+
+/// `K-ITER-003`, `K-KEY-003`, `K-KEY-005`: removals on both sides of a
+/// live cursor, including removing every entry and then reinserting.
+const TABLE_CHURN: &str = r#"
+main {
+  let m = map{1.0: "first", 2: "two", 3: "three", 4: "four"}
+  let s = set{1.0, 2, 3, 4}
+  let child = [41]
+  set m[4] = child
+  do perform echo(m) as Any
+  set m[4] = (child, "nested")
+  do perform echo(m) as Any
+  set m[4] = "scalar again"
+  let keyed = map{ident.ref(child): "reachable key"}
+  do perform echo(0) as Any
+  remove keyed[ident.ref(child)]
+  set keyed[2] = "scalar after removal"
+  do perform echo(0) as Any
+  let keys = []
+  let first = true
+  for key in m {
+    set keys[list.len(keys)] = key
+    if first {
+      set first = false
+      remove m[1] remove m[2] remove m[3]
+      set m[1] = "again" set m[4.0] = "updated"
+      remove s[1] remove s[2] remove s[3]
+      set s[1] = true set s[4.0] = true
+    }
+    let row = (key, m, s)
+    do perform echo(row) as Any
+  }
+  set first = true
+  for key in s {
+    set keys[list.len(keys)] = key
+    if first {
+      set first = false
+      remove s[4] remove s[1]
+      set s[2.0] = true set s[2] = true
+    }
+    let row = (key, s)
+    do perform echo(row) as Any
+  }
+  return (keys, m, s)
+}
+"#;
+
+/// `K-TASK-024`, `K-MACH-008`: requests handed out in request order, though
+/// the task that requested first is numbered after the one that requested
+/// second. A run rebuilt at a slice before the park restores the requests
+/// it has not handed out.
+const REQUESTS_OUT_OF_TASK_ORDER: &str = r#"
+fn later(i) { do yield let r = [i, i] return r }
+fn worker(tag) { let r = perform echo(tag) as Any return r }
+main {
+  let l = spawn call later(1)
+  let w = spawn call worker("w0")
+  let mine = perform echo("w1") as Any
+  let theirs = join w
+  let other = join l
+  return (mine, theirs, other)
+}
+"#;

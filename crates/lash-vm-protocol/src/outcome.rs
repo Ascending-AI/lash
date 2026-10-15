@@ -14,8 +14,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::checkpoint::{CheckpointRefusal, KernelRestoreRefusal};
 use crate::codec::CodecRefusal;
-use crate::graph_state::{GraphStateRefusal, KernelRestoreRefusal};
 use crate::message::HeaderRefusal;
 use crate::version::ProtocolVersionRefusal;
 
@@ -127,8 +127,10 @@ pub enum Exchange {
     Run,
     /// The parent was answering the machine's host read.
     HostRead,
+    /// The parent was answering the machine's page exchange.
+    Pages,
     Deliver,
-    Export,
+    Seal,
     Prepare,
     Reset,
 }
@@ -139,8 +141,9 @@ impl std::fmt::Display for Exchange {
             Self::Handshake => "as its handshake",
             Self::Run => "mid-run",
             Self::HostRead => "while its host read was answered",
+            Self::Pages => "while its page exchange was answered",
             Self::Deliver => "in answer to a delivery",
-            Self::Export => "in answer to an export",
+            Self::Seal => "in answer to a seal",
             Self::Prepare => "in answer to pure work",
             Self::Reset => "in answer to a reset",
         })
@@ -174,6 +177,10 @@ pub enum SequenceFault {
     RepeatedReadId,
     #[error("a host read was answered with another message")]
     ReadOtherControl,
+    #[error("an answer answers no pending page exchange")]
+    NoPendingPages,
+    #[error("a page answer names another exchange than the pending one")]
+    WrongPageExchange,
     #[error("the exchange needs a started run")]
     NoRun,
     #[error("the run already ended")]
@@ -212,7 +219,7 @@ pub enum PayloadKind {
     /// Document position hints (`entered`, each task's last) alongside
     /// exact statement-start count deltas (`ran`) since the previous frame.
     Sites,
-    ParkedRun,
+    Checkpoint,
     ServiceRequest,
     ServiceResponse,
 }
@@ -282,9 +289,9 @@ pub enum ProtocolBreach {
         payload: PayloadKind,
         detail: Detail,
     },
-    /// Graph state the worker itself produced fails the parent's check.
-    #[error("the worker's graph state is refused: {refusal}")]
-    GraphState { refusal: GraphStateRefusal },
+    /// A checkpoint root the worker itself sealed fails the parent's check.
+    #[error("the worker's checkpoint is refused: {refusal}")]
+    Checkpoint { refusal: CheckpointRefusal },
     #[error("the machine refused a step the protocol drove: {detail}")]
     Machine { detail: Detail },
     #[error("{fault}")]
@@ -302,7 +309,7 @@ pub enum ProtocolBreach {
 pub enum RunInput {
     Document,
     Start,
-    ParkedRun,
+    Checkpoint,
 }
 
 impl std::fmt::Display for RunInput {
@@ -310,7 +317,7 @@ impl std::fmt::Display for RunInput {
         f.write_str(match self {
             Self::Document => "document",
             Self::Start => "start",
-            Self::ParkedRun => "parked run",
+            Self::Checkpoint => "checkpoint",
         })
     }
 }
@@ -325,13 +332,13 @@ pub enum RunRefusal {
         source: Box<lash_sansio::SchemaAdmissionError>,
     },
     #[error("{refusal}")]
-    GraphState { refusal: GraphStateRefusal },
+    Checkpoint { refusal: CheckpointRefusal },
     /// The run's session or process recorded a dialect this worker's
     /// embedding does not install: the host that built the worker did not
     /// name it. Refused before the document is read or anything runs.
     #[error("the run is written in the dialect `{dialect}`, which this worker does not install")]
     DialectNotInstalled { dialect: String },
-    /// The worker will not resume the parked graph state: its pinned
+    /// The worker will not resume the checkpoint: its pinned
     /// release, a function or native it needs, or a wait's admission.
     #[error("{refusal}")]
     Restore { refusal: KernelRestoreRefusal },
@@ -390,6 +397,11 @@ pub enum InfrastructureOutcome {
     RunRefused { refusal: RunRefusal },
     #[error("the run exhausted its {limit:?} limit")]
     WorkerLimitExceeded { limit: WorkerLimit },
+    /// The parent's page service refused the run's page exchange (FIG-6190):
+    /// infrastructure, never a guest outcome. The activation ends and its
+    /// execution resumes from its last committed root.
+    #[error("the run's page exchange is refused: {refusal}")]
+    PageRefused { refusal: crate::page::PageRefusal },
 }
 
 impl InfrastructureOutcome {
@@ -400,6 +412,13 @@ impl InfrastructureOutcome {
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::WorkerLimitExceeded { limit } => limit.is_host_verdict(),
+            // A page the store lacks or holds corrupt is so on every
+            // attempt; a lease, deadline, quota or transport refusal is the
+            // host's moment.
+            Self::PageRefused { refusal } => !matches!(
+                refusal,
+                crate::page::PageRefusal::Missing | crate::page::PageRefusal::Corrupt
+            ),
             Self::RunRefused { .. } | Self::WorkerDeployment { .. } => false,
             Self::WorkerCrashed { .. }
             | Self::WorkerUnresponsive { .. }
@@ -415,31 +434,16 @@ impl InfrastructureOutcome {
         }
     }
 
-    /// Parked graph state the parent holds fails the structural check
-    /// before a worker is handed it.
-    pub fn input_graph_state(refusal: GraphStateRefusal) -> Self {
-        match refusal {
-            GraphStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
-            refusal => RunRefusal::GraphState { refusal }.into(),
-        }
+    /// A committed checkpoint's header fails the structural check before
+    /// a worker is handed it: the same on every attempt.
+    pub fn input_checkpoint(refusal: CheckpointRefusal) -> Self {
+        RunRefusal::Checkpoint { refusal }.into()
     }
 
-    /// Graph state a worker produced fails the parent's structural check.
-    /// Its size is the run's limit; anything else is the worker's breach.
-    pub fn output_graph_state(refusal: GraphStateRefusal) -> Self {
-        match refusal {
-            GraphStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
-            refusal => ProtocolBreach::GraphState { refusal }.into(),
-        }
-    }
-
-    fn state_limit(limit: u64, len: u64) -> Self {
-        Self::WorkerLimitExceeded {
-            limit: WorkerLimit::VmState {
-                size: len,
-                bound: limit,
-            },
-        }
+    /// A checkpoint a worker sealed fails the parent's structural check:
+    /// the worker's breach.
+    pub fn output_checkpoint(refusal: CheckpointRefusal) -> Self {
+        ProtocolBreach::Checkpoint { refusal }.into()
     }
 }
 
@@ -492,9 +496,11 @@ impl WorkerRefusal {
             InfrastructureOutcome::RunRefused { refusal } => Some(crate::WorkerMessage::Refused {
                 refusal: Self::Run(refusal),
             }),
+            // The page service's refusal is the parent's own evidence.
             InfrastructureOutcome::WorkerDeployment { .. }
             | InfrastructureOutcome::WorkerCrashed { .. }
-            | InfrastructureOutcome::WorkerUnresponsive { .. } => None,
+            | InfrastructureOutcome::WorkerUnresponsive { .. }
+            | InfrastructureOutcome::PageRefused { .. } => None,
         }
     }
 }
@@ -549,7 +555,8 @@ impl From<CodecRefusal> for InfrastructureOutcome {
             | CodecRefusal::DepthExceeded { .. }
             | CodecRefusal::NodeLimitExceeded { .. }
             | CodecRefusal::Malformed { .. }
-            | CodecRefusal::TrailingBytes { .. }) => ProtocolBreach::Frame { refusal }.into(),
+            | CodecRefusal::TrailingBytes { .. }
+            | CodecRefusal::PageBatch { .. }) => ProtocolBreach::Frame { refusal }.into(),
         }
     }
 }
@@ -558,7 +565,7 @@ impl From<CodecRefusal> for InfrastructureOutcome {
 mod tests {
     use super::*;
     use crate::{
-        ExecutionLease, FrameCodec, FrameEpoch, MessageFence, OwnerEpoch, VmOwner, WorkerFrame,
+        ExecutionLease, FrameCodec, FrameEpoch, MessageFence, OwnerEpoch, WorkerFrame,
         WorkerMessage,
     };
 
@@ -567,27 +574,27 @@ mod tests {
     #[test]
     fn a_refused_input_state_is_terminal_and_a_broken_frame_is_retryable() {
         for refusal in [
-            GraphStateRefusal::WrongDocument {
+            CheckpointRefusal::WrongDocument {
                 expected: "a".into(),
                 found: "b".into(),
             },
-            GraphStateRefusal::WrongOwner {
-                expected: VmOwner::new("a"),
-                found: VmOwner::new("b"),
+            CheckpointRefusal::WrongOwner {
+                expected: "a".into(),
+                found: "b".into(),
             },
-            GraphStateRefusal::SealMismatch,
+            CheckpointRefusal::WrongRootKind { found: 7 },
         ] {
-            let outcome = InfrastructureOutcome::input_graph_state(refusal.clone());
+            let outcome = InfrastructureOutcome::input_checkpoint(refusal.clone());
             assert_eq!(
                 outcome,
                 InfrastructureOutcome::RunRefused {
-                    refusal: RunRefusal::GraphState {
+                    refusal: RunRefusal::Checkpoint {
                         refusal: refusal.clone()
                     }
                 }
             );
             assert!(!outcome.is_retryable());
-            assert!(InfrastructureOutcome::output_graph_state(refusal).is_retryable());
+            assert!(InfrastructureOutcome::output_checkpoint(refusal).is_retryable());
         }
         assert!(
             !InfrastructureOutcome::from(CodecRefusal::FrameTooLarge {

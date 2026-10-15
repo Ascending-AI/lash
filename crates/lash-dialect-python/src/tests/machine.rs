@@ -13,12 +13,14 @@ use lash_kernel_doc::{
     Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Param, Signature,
     Timestamp, Type,
 };
+use lash_kernel_state::paged::AllocationCensus;
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, Park, PreparedLibrary, Program,
-    Request, RunError, Start, Step, Target, WaitId, register_machine_functions,
+    Bounds, End, Host, KernelMachine, Machine, Outcome, Park, PreparedLibrary, Program, Request,
+    RunError, Step, WaitId, register_machine_functions,
 };
 use serde::Deserialize;
 
+use super::pages::{self, Session};
 use crate::define_helpers;
 
 struct Installed {
@@ -270,9 +272,9 @@ fn ending(end: End) -> String {
 fn start(
     source: &str,
     effects: BTreeMap<EffectName, Signature>,
-    bindings: Bindings,
+    session: Session,
 ) -> (KernelMachine, String) {
-    let names: BTreeSet<Name> = bindings.variables.keys().cloned().collect();
+    let names = session.names();
     let lowered = lower_with(source, &effects, &names).unwrap_or_else(|error| panic!("{error}"));
     let text = lash_kernel_doc::print_document(&lowered.document);
     if let Err(invalid) =
@@ -287,16 +289,11 @@ fn start(
         panic!("{refusal:?}\n{text}");
     }
     let program = Program {
+        release: pages::RELEASE,
         document: Arc::new(lowered.document),
         library: installed().prepared.clone(),
     };
-    let start = Start {
-        target: Target::Main,
-        args: Vec::new(),
-        bindings,
-    };
-    let machine =
-        KernelMachine::start(program, BOUNDS, start).unwrap_or_else(|error| panic!("{error}"));
+    let machine = pages::start(program, BOUNDS, &session);
     (machine, text)
 }
 
@@ -306,22 +303,18 @@ fn start(
 fn builtin_range_loop_uses_constant_space() {
     let lowered = lower("for i in range(100000):\n    print(i)\n    break\nprint(i)\n").unwrap();
     let program = Program {
+        release: pages::RELEASE,
         document: Arc::new(lowered.document),
         library: installed().prepared.clone(),
     };
-    let mut machine = KernelMachine::start(
+    let mut machine = pages::start(
         program,
         Bounds {
             memory: 64 << 10,
             ..BOUNDS
         },
-        Start {
-            target: Target::Main,
-            args: Vec::new(),
-            bindings: Bindings::default(),
-        },
-    )
-    .unwrap();
+        &Session::default(),
+    );
     let mut console = Console::default();
     assert!(matches!(
         machine.run(&mut console, u64::MAX).unwrap(),
@@ -338,10 +331,10 @@ fn builtin_range_loop_uses_constant_space() {
 pub(crate) fn drive(
     source: &str,
     effects: BTreeMap<EffectName, Signature>,
-    bindings: Bindings,
+    session: Session,
     mut at_park: impl FnMut(Vec<String>, Park, &str) -> Vec<(WaitId, Outcome)>,
 ) -> (Vec<String>, End) {
-    let (mut machine, text) = start(source, effects, bindings);
+    let (mut machine, text) = start(source, effects, session);
     let mut console = Console::default();
     loop {
         let step = machine
@@ -366,7 +359,7 @@ pub(crate) fn drive(
 /// next batch of `deliveries` is delivered, in the order it lists; once the
 /// script is used up, the oldest pending request.
 pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
-    run_cell(source, deliveries, Bindings::default()).0
+    run_cell(source, deliveries, Session::default()).0
 }
 
 /// The lines a cell that calls no tool prints, and how it ends.
@@ -379,13 +372,13 @@ pub(crate) fn output(source: &str) -> (Vec<String>, String) {
 /// Runs the cells of one session in order, each starting with the
 /// bindings the one before it left, and gives every line they printed.
 pub(crate) fn session(cells: &[&str]) -> Vec<String> {
-    let mut bindings = Bindings::default();
+    let mut session = Session::default();
     let mut lines = Vec::new();
     for cell in cells {
-        let (recorded, carried) = run_cell(cell, &[], bindings);
+        let (recorded, carried) = run_cell(cell, &[], session);
         assert_eq!(recorded.end, "ok", "{cell}");
         lines.extend(recorded.lines().into_iter().map(str::to_string));
-        bindings = carried.unwrap_or_default();
+        session = carried.unwrap_or_default();
     }
     lines
 }
@@ -395,13 +388,13 @@ pub(crate) fn session(cells: &[&str]) -> Vec<String> {
 fn run_cell(
     source: &str,
     deliveries: &[Vec<String>],
-    bindings: Bindings,
-) -> (Recorded, Option<Bindings>) {
+    session: Session,
+) -> (Recorded, Option<Session>) {
     let mut pending: Vec<Request> = Vec::new();
     let mut script = deliveries.iter();
     let mut epochs = Vec::new();
     let mut delivered = Vec::new();
-    let (logged, end) = drive(source, effects(), bindings, |logged, park, text| {
+    let (logged, end) = drive(source, effects(), session.clone(), |logged, park, text| {
         pending.retain(|request| {
             let wait = match request {
                 Request::Effect(effect) => effect.wait,
@@ -443,7 +436,10 @@ fn run_cell(
         logged,
     });
     let carried = match &end {
-        End::Finished(finished) => Some(finished.bindings.clone()),
+        End::Finished(finished) => Some(Session {
+            root: finished.carry,
+            source: session.source.clone(),
+        }),
         _ => None,
     };
     (
@@ -472,7 +468,7 @@ fn integer_arithmetic_runs_directly_and_accounts_for_its_body() {
     // guarded helpers, independently of constant/local lowering.
     let source =
         "def arithmetic(a, b):\n    c = a + b\n    d = a - b\n    a += b\narithmetic(7, 3)\n";
-    let (mut machine, _) = start(source, effects(), Bindings::default());
+    let (mut machine, _) = start(source, effects(), Session::default());
     machine.count_work();
     assert!(matches!(
         machine.run(&mut Console::default(), u64::MAX).unwrap(),
@@ -623,16 +619,8 @@ fn arithmetic_observation(
     bounds: Bounds,
     rebuild: bool,
 ) -> (End, Vec<String>, Vec<String>, u64) {
-    let mut machine = KernelMachine::start(
-        program.clone(),
-        bounds,
-        Start {
-            target: Target::Main,
-            args: Vec::new(),
-            bindings: Bindings::default(),
-        },
-    )
-    .expect("the arithmetic document starts");
+    let session = Session::default();
+    let mut machine = pages::start(program.clone(), bounds, &session);
     let mut host = Console::default();
     let mut requests = Vec::new();
     loop {
@@ -643,15 +631,27 @@ fn arithmetic_observation(
             return (end, host.lines, requests, machine.meters().charged);
         }
         if rebuild {
-            let state = machine
-                .export()
-                .expect("every arithmetic safe point exports");
-            // Use the serialized state, rather than keeping any prepared
-            // execution coordinates from the previous machine.
-            let bytes = serde_json::to_vec(&state).expect("state serializes");
-            let state = serde_json::from_slice(&bytes).expect("state deserializes");
-            machine = KernelMachine::import(program.clone(), bounds, state)
-                .expect("every arithmetic safe point imports");
+            let sealed = machine.seal(pages::BUDGET).unwrap().unwrap();
+            let heap = lash_kernel_state::paged::PagedHeap::open_header(
+                sealed.root.heap,
+                Box::new(session.source.clone()),
+                lash_kernel_state::paged::EditEpoch(2),
+            )
+            .unwrap();
+            let census = lash_kernel_state::paged::census_impl::Census::restore(
+                heap.certificate(),
+                lash_kernel_doc::heap::LogicalBytes(bounds.memory),
+            )
+            .unwrap();
+            machine = KernelMachine::open(
+                program.clone(),
+                bounds,
+                &sealed.root,
+                Vec::new(),
+                Box::new(session.source.clone()),
+                Box::new(census),
+            )
+            .unwrap();
         }
         if let Step::Parked(park) = step {
             for request in park.requests {
@@ -669,7 +669,7 @@ fn arithmetic_observation(
 /// document's result, effects, aliases and exact body charge across slices.
 /// Previous definitions held beside them still resolve their original pins.
 #[test]
-fn arithmetic_successors_and_held_previous_definitions_resume_exactly() {
+fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
     use lash_kernel_dialect::Library;
     let current = installed().prepared.registry();
     let names = ["py.add", "py.iadd", "py.sub"];
@@ -707,6 +707,7 @@ fn arithmetic_successors_and_held_previous_definitions_resume_exactly() {
         )
         .expect("the arithmetic witness lowers");
         let program = Program {
+            release: pages::RELEASE,
             document: Arc::new(lowered.document),
             library: prepared.clone(),
         };
@@ -921,7 +922,7 @@ except TypeError:
 /// (including an await in the loop) restores the exact facts' values,
 /// requests, result and charge; no compiler fact becomes runtime state.
 #[test]
-fn integer_facts_resume_a_parked_loop_exactly() {
+fn paged_integer_loop_keeps_facts_across_await() {
     let source = r#"
 s = 9223372036854775807
 for i in range(3):
@@ -933,6 +934,7 @@ print(s)
     assert!(!kernel_text(source).contains("py.iadd"));
     let lowered = lower(source).expect("the integer loop lowers");
     let program = Program {
+        release: pages::RELEASE,
         document: Arc::new(lowered.document),
         library: installed().prepared.clone(),
     };

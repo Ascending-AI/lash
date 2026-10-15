@@ -51,6 +51,8 @@ mod generated_surface;
 mod obligation_cases;
 #[path = "cross_backend_store_differential/observations.rs"]
 mod observations;
+#[path = "cross_backend_store_differential/page_store_cases.rs"]
+mod page_store_cases;
 #[path = "cross_backend_store_differential/plugin_state_case.rs"]
 mod plugin_state_case;
 #[path = "cross_backend_store_differential/process_event_pages.rs"]
@@ -1924,6 +1926,7 @@ async fn cross_backend_store_differential_agrees() {
     verify_independent_session_meta_layout(sqlite_root.path(), &postgres).await;
     let run_nonce = run_nonce();
     obligation_cases::compare_obligation_ledgers(sqlite_root.path(), &postgres, &run_nonce).await;
+    page_store_cases::compare_page_stores(sqlite_root.path(), &database_url).await;
 
     process_event_pages::compare_bounded_process_event_pages(
         sqlite_root.path(),

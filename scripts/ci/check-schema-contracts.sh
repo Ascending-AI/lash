@@ -33,7 +33,6 @@ generators=(
   "lash-internal-core-execution process_event_schema_generator"
   "lash-kernel-doc kernel_schema_generator"
   "lash-kernel-edit kernel_edit_schema_generator"
-  "lash-kernel-state parked_schema_generator"
 )
 if [[ "$context" == untrusted ]]; then
   build_args=()

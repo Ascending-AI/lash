@@ -53,6 +53,7 @@ pub mod node_wake_payload;
 mod node_wakes;
 mod port;
 mod probe;
+mod retirement;
 pub mod runner;
 mod tx;
 
@@ -61,7 +62,7 @@ pub use dispatch::ActorDispatch;
 pub use domain::{DomainRefusal, DomainWrite, DurableReads, MailAnswer, MailDomainWrite};
 pub use dues::{DueSource, Dues};
 pub use durable_config::{
-    DurableConfig, DurableConfigError, DurableSettings, GroupCommit, Notifier,
+    DurableConfig, DurableConfigError, DurableSettings, GroupCommit, Notifier, RetirementSettings,
 };
 pub use error::{DurableError, Fenced, MailRefusal, StoreFailure, StoreFailureKind};
 pub use formats::{FormatSet, FormatSurface, fleet_writable};

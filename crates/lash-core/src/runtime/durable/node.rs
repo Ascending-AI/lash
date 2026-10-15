@@ -136,6 +136,7 @@ pub async fn serve(
             lease: backend.config().lease(),
             max_active: settings.max_active,
             claim_batch: settings.claim_batch,
+            retirement: settings.retirement,
         },
         activation,
     )

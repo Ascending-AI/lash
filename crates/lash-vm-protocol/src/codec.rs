@@ -90,6 +90,10 @@ pub enum CodecRefusal {
     Malformed { reason: Detail },
     #[error("frame is followed by {extra} unread bytes")]
     TrailingBytes { extra: u64 },
+    /// A page exchange names more than [`crate::PAGE_BATCH_PAGES`] pages or
+    /// carries more than [`crate::PAGE_BATCH_BYTES`] envelope bytes.
+    #[error("a page exchange of {pages} pages and {bytes} bytes exceeds its batch bound")]
+    PageBatch { pages: u64, bytes: u64 },
 }
 
 /// Encodes and decodes frames under one set of bounds.
@@ -117,10 +121,12 @@ impl FrameCodec {
     }
 
     pub fn encode_parent(&self, frame: &ParentFrame) -> Result<Vec<u8>, CodecRefusal> {
+        parent_batch(&frame.message)?;
         self.encode(frame)
     }
 
     pub fn encode_worker(&self, frame: &WorkerFrame) -> Result<Vec<u8>, CodecRefusal> {
+        worker_batch(&frame.message)?;
         if let crate::WorkerMessage::Refused { refusal } = &frame.message {
             let mut frame = frame.clone();
             frame.message = crate::WorkerMessage::Refused {
@@ -140,14 +146,20 @@ impl FrameCodec {
         self.encode(frame)
     }
 
-    /// Decodes exactly one parent frame; bytes past it are refused.
+    /// Decodes exactly one parent frame; bytes past it are refused, and so
+    /// is a page reply past its batch bound.
     pub fn decode_parent(&self, bytes: &[u8]) -> Result<ParentFrame, CodecRefusal> {
-        self.decode_exact(bytes)
+        let frame: ParentFrame = self.decode_exact(bytes)?;
+        parent_batch(&frame.message)?;
+        Ok(frame)
     }
 
-    /// Decodes exactly one worker frame; bytes past it are refused.
+    /// Decodes exactly one worker frame; bytes past it are refused, and so
+    /// is a page request past its batch bound.
     pub fn decode_worker(&self, bytes: &[u8]) -> Result<WorkerFrame, CodecRefusal> {
-        self.decode_exact(bytes)
+        let frame: WorkerFrame = self.decode_exact(bytes)?;
+        worker_batch(&frame.message)?;
+        Ok(frame)
     }
 
     fn encode<T: Serialize>(&self, frame: &T) -> Result<Vec<u8>, CodecRefusal> {
@@ -276,6 +288,89 @@ impl FrameCodec {
             reason: Detail::new(error),
         })
     }
+}
+
+/// The pages and envelope bytes of a page request.
+fn request_batch(request: &crate::page::PageRequest) -> (usize, u64) {
+    match request {
+        crate::page::PageRequest::Read { pages } => (pages.len(), 0),
+        crate::page::PageRequest::Seal { pages, .. } => (
+            pages.len(),
+            pages.iter().map(|page| page.envelope.len() as u64).sum(),
+        ),
+    }
+}
+
+/// Refuses a parent frame whose page reply, or the grants a run returns for
+/// a carried seal batch, is past its batch bound.
+fn parent_batch(message: &crate::ParentMessage) -> Result<(), CodecRefusal> {
+    match message {
+        crate::ParentMessage::Pages { reply, .. } => page_batch(reply_batch(reply)),
+        crate::ParentMessage::Run { start, sealed, .. } => {
+            page_batch((sealed.len(), 0))?;
+            start
+                .as_ref()
+                .map_or(Ok(()), |start| page_batch(read_batch(&start.warm)))
+        }
+        crate::ParentMessage::Start(start) => page_batch(read_batch(&start.warm)),
+        _ => Ok(()),
+    }
+}
+
+/// Refuses a worker frame whose page request or carried seal batch is past
+/// its batch bound.
+fn worker_batch(message: &crate::WorkerMessage) -> Result<(), CodecRefusal> {
+    match message {
+        crate::WorkerMessage::Pages { request, .. } => page_batch(request_batch(request)),
+        crate::WorkerMessage::Parked {
+            seal: Some(batch), ..
+        }
+        | crate::WorkerMessage::Sealed {
+            seal: Some(batch), ..
+        }
+        | crate::WorkerMessage::Ended {
+            seal: Some(batch), ..
+        } => page_batch((
+            batch.pages.len(),
+            batch
+                .pages
+                .iter()
+                .map(|page| page.envelope.len() as u64)
+                .sum(),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The pages and envelope bytes of read pages.
+fn read_batch(pages: &[crate::page::ReadPage]) -> (usize, u64) {
+    (
+        pages.len(),
+        pages
+            .iter()
+            .map(|read| read.page.envelope.len() as u64)
+            .sum(),
+    )
+}
+
+/// The pages and envelope bytes of a page reply.
+fn reply_batch(reply: &crate::page::PageReply) -> (usize, u64) {
+    match reply {
+        crate::page::PageReply::Read { pages } => read_batch(pages),
+        crate::page::PageReply::Sealed { pages } => (pages.len(), 0),
+        crate::page::PageReply::Refused(_) => (0, 0),
+    }
+}
+
+/// Refuses a page exchange past its batch bound, in either direction.
+fn page_batch((pages, bytes): (usize, u64)) -> Result<(), CodecRefusal> {
+    if pages > crate::PAGE_BATCH_PAGES || bytes > crate::PAGE_BATCH_BYTES {
+        return Err(CodecRefusal::PageBatch {
+            pages: pages as u64,
+            bytes,
+        });
+    }
+    Ok(())
 }
 
 /// Room for a control frame, so the small frames of an effect exchange are

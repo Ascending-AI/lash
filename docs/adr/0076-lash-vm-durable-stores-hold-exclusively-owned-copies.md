@@ -2,93 +2,91 @@
 
 ## Context
 
-TypeScript bindings can refer to the same mutable heap object. A durable
-snapshot or continuation must preserve that identity so mutation through one
-alias remains visible through another after restore. A detached host value
-cannot represent every value that the VM can retain.
+Guest bindings can refer to the same mutable heap object. Durable state must
+preserve that identity, so a mutation through one alias stays visible
+through another after a park, a resume in another worker or the next cell.
+A detached host value cannot represent every value the machine can retain.
 
 ## Decision
 
-The VM uses reference semantics. Name, slot, global, and container stores can
-share heap references. They do not universally copy the stored graph.
-Operation-specific copies do not change this language-wide aliasing rule.
-TypeScript targets the shared IR and VM under ADR 0096.
+The kernel uses reference semantics. Bindings, object fields, collection
+members and task records share heap references (`EntityId`s); they never
+universally copy the graph they reach. Operation-specific copies do not
+change this language-wide aliasing rule.
 
-### Validated durable graphs
+### The durable form is the heap itself
 
-A snapshot writer first tries the forest validator. A heap that satisfies it
-uses the forest form. Otherwise the writer requires `validate_persisted_graph`
-and sets the wire's `reference_semantics` flag. The flag records the heap's
-representation, rather than an authoring dialect.
+The machine's state is one persistent heap
+([ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)).
+An object is one directory entry under one identity, and every holder names
+that identity. A checkpoint seals the pages a stretch changed and names the
+heap header; resume opens the same directory. So aliases, cycles, live
+iteration and first-written key spelling survive parks, worker resets and
+cell boundaries without a separate shape for durable graphs, and with no
+validator that chooses between a forest and a shared form. Page shapes,
+summaries and child membership are checked when a page is read (ADR 0145
+§3). Physical page sharing never merges identities, and equal objects stay
+distinct.
 
-Shared-graph validation permits multiple roots or members to name one object.
-It requires every reference to resolve, every object to be reachable, valid
-object shapes, and an acyclic graph. Depth and memory bounds still apply.
-Snapshot and continuation encode, decode, and resume validate the applicable
-form. The forest form is an encoding choice for heaps that fit it, not a ban
-on aliases in programs.
+The persistent roots are the checkpoint root's trees: tasks and their
+frames (bindings, loops, `finally` departures, iterated values and library
+arguments), waits, joins and a session cell's bindings. The memory census
+traces from the same roots, plus the registers, pins, native arguments and
+fresh entities of the statement under way.
 
-VM roots include slots, globals, operands, iterator state, and function frames.
-The common root traversal supports collection and durable validation. Pending
-operands can alias slot values, including when assignment runs inside another
-expression. A suspension preserves those references.
+### Session roots and the host view
 
-### Runtime roots and the host view
-
-Runtime roots own a heap-backed state's bindings. `host_view` derives the
-host-facing globals from those roots. It omits the whole binding when export
-encounters a function, an exotic without a detached host shape, or an exported
-value containing a pending-tool handle. It never exposes a partial value.
-
-An omitted binding can still exist in the roots. Existence checks and global
-patch outcomes read the roots, not the host view. The wire stores roots and
-heap objects; decoding derives the view through the same function as live
-installation. A state with a hidden binding therefore round-trips without
-losing either the binding or its host-view omission.
-
-Closures are private to their compiled execution. A continuation can retain
-them against that program. At execution completion the runtime drops bindings
-that reach functions and records expired names for later diagnostics. Other
-unprojectable bindings remain in the roots while the view omits them. Explicit
-host-boundary uses of functions or unprojectable exotics return typed errors.
+A session's carried bindings and saved functions are heap roots in its
+`SessionRoot` (ADR 0145 §9). The host reads them through
+`lash_kernel_vm::SessionEditor`: a binding whose value is data is copied out
+as a `Datum`; one that is not data, a function reference, is listed by name
+as `SessionValue::Opaque`. It never exposes a partial value. A binding that
+reaches a closure or a task handle is not carried to the next cell
+(`K-SES-003`), and the session lists its name with why.
 
 ### Host results are copies
 
-A value a host returns enters the guest as new heap objects. It never aliases
-a guest object, including when an in-process host answers with the very value
-it received as an argument: the guest then holds two objects, and a write
-through one is invisible through the other. Every ability's answer passes
-through one entry point in the VM, which rebuilds the value before the heap
-imports it. Identity lookup at import is for values the VM's own instructions
-exported, not for a host's.
+A value a host returns enters the guest as new heap objects. It never
+aliases a guest object, including when an in-process host answers with the
+very value it received as an argument: the guest then holds two objects, and
+a write through one is invisible through the other. A committed outcome is
+frozen once and delivered as a fresh identity family over its frozen pages,
+so equal subtrees at distinct positions are distinct objects, and two
+deliveries of one frozen value are two families.
 
 A host across a wire can only return a copy. So can a run parked on an
-operation and resumed from its bytes, which is answered with an outcome its
+operation and resumed from its root, which is answered with an outcome its
 host held. Applying the same rule to a host that answers at once makes a
-parked run and a straight run leave byte-identical state.
+parked run and a straight run reach the same state.
 
 ## Alternatives considered
 
-Copying on every durable store changes TypeScript mutation and identity.
-Requiring a forest at every boundary refuses valid aliasing programs. The graph
-form preserves identity while the validator enforces durability bounds.
+Copying on every durable store changes guest mutation and identity.
+Requiring a forest at every boundary refuses valid aliasing programs. A
+separate durable graph shape, encoded at park and rebuilt at resume, costs
+the whole retained state at every boundary; the heap's own directory keeps
+identity at the cost of what changed.
 
-Using the host view as authoritative state loses bindings that have no detached
-host shape. Serializing both roots and view creates two records to reconcile.
-One derivation keeps the view consistent with the restored roots.
+Using the host view as authoritative state loses bindings that have no
+detached host shape. Persisting both the roots and the view creates two
+records to reconcile.
 
 ## Consequences
 
-Aliases survive snapshots and continuations. Cycles and malformed durable graphs
-are refused at the boundary. Host-visible globals are a projection, so an absent
-entry alone does not prove that a name is absent from runtime state. Durable
-consumers inspect the representation flag and use the matching validator.
+Aliases and cycles survive parks, resumes and cells. Host-visible bindings
+are a projection, so an absent entry alone does not prove that a name is
+absent from the session: the session's descriptor lists every name it binds
+and every name it does not carry.
 
 ## Code references
 
-- `crates/lash-vm/src/runtime/state.rs:445-480,699-740` derives the view and selects the wire form.
-- `crates/lash-vm/src/runtime/heap/validation.rs:163-255` validates shared graphs.
-- `crates/lash-vm/src/runtime/state/expired.rs` removes completed-execution function bindings.
-- `crates/lash-typescript/tests/dialect.rs:310-365,410-416` asserts alias preservation across suspension.
-- `crates/lash-vm/src/runtime/vm/effects.rs` (`Vm::perform`) and `AbilityOutcome::into_fresh` make host results copies; `crates/lash-typescript/tests/corpus_laws/vm_instance.rs` holds the parked-versus-straight law.
-- `crates/lash-vm/src/runtime/state/tests.rs:1697-1714` asserts hidden-binding round trips.
+- `crates/lash-kernel-state/src/paged/directory.rs`: the object directory
+  and the frame and task records.
+- `crates/lash-kernel-state/src/paged/laws/heap.rs`
+  (`aliases_see_one_mutation_across_seal_and_open`,
+  `cycles_seal_as_a_page_dag`).
+- `crates/lash-kernel-vm/src/session_editor.rs`: the host's view of a
+  carried session.
+- `crates/lash-kernel-state/src/paged/family_impl/laws.rs`
+  (`a_noop_next_cell_copies_nothing`): carried aliases keep their
+  identities.

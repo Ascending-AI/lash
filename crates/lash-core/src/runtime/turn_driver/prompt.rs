@@ -169,7 +169,8 @@ impl RuntimeTurnDriver<'static> {
             &self.session_id,
             self.session.fleet_format(),
         )
-        .with_prompt_history(history);
+        .with_prompt_history(history)
+        .with_session_pages(self.session_pages.clone());
         if let Some(recorded_render) = recorded_render {
             context = context.with_recorded_render(recorded_render);
         }

@@ -15,10 +15,8 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{Document, FunctionCatalog, FunctionDefinition, KernelVersion};
-use lash_kernel_state::ParkedRun;
 
-use crate::carry::carry;
-use crate::migration::{DocumentRefusal, Migration, ParkedRefusal, Rewritten};
+use crate::migration::{DocumentRefusal, Migration, Rewritten};
 use crate::rewrite::{redeclare, replace_functions, unchanged};
 
 const FROM: KernelVersion = KernelVersion::One;
@@ -29,7 +27,6 @@ pub(crate) const MIGRATION: Migration = Migration {
     to: TO,
     definition,
     document,
-    parked,
 };
 
 fn definition(written: &FunctionDefinition) -> Result<FunctionDefinition, DocumentRefusal> {
@@ -72,18 +69,4 @@ fn document(
         correspondence,
         functions,
     })
-}
-
-fn parked(
-    parked: &ParkedRun,
-    base: &Document,
-    rewritten: &Rewritten,
-) -> Result<ParkedRun, ParkedRefusal> {
-    if parked.run.kernel != FROM.number() {
-        return Err(ParkedRefusal::Version {
-            found: parked.run.kernel,
-            from: FROM.number(),
-        });
-    }
-    carry(parked, base, rewritten, TO)
 }

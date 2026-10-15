@@ -14,7 +14,7 @@ pub const GRAMMAR_VECTORS: &str = r##"{
     "magic": "4c415348",
     "max_node_bytes": 65536,
     "max_root_bytes": 4096,
-    "reserved_future_kinds": [
+    "semantic_kinds": [
       1000,
       1999
     ]
@@ -67,6 +67,24 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "expected": "70020a5ce01495e071d67fbfbffe5746bd32792d66bb1cc68c0bb6b92327fa73",
       "name": "overlong kind",
       "refusal": "NonCanonical { node: Some(NodeId(70020a5ce01495e071d67fbfbffe5746bd32792d66bb1cc68c0bb6b92327fa73)), reason: NonMinimalVarint }"
+    },
+    {
+      "envelope": "4c41534810000100",
+      "expected": "6a957eeee0673de568e3e8553d285f935afa0c659b5daa597259422f08a65ebb",
+      "name": "KernelWhole",
+      "refusal": "RetiredFormat { node: Some(NodeId(6a957eeee0673de568e3e8553d285f935afa0c659b5daa597259422f08a65ebb)), kind: 16, format: \"KernelWhole\" }"
+    },
+    {
+      "envelope": "4c4153481b000100",
+      "expected": "07cfb44ffa703f162fe1c33e7df124aa14ecf37684d3a81dbd76a6a744a1657f",
+      "name": "TerminalWhole",
+      "refusal": "RetiredFormat { node: Some(NodeId(07cfb44ffa703f162fe1c33e7df124aa14ecf37684d3a81dbd76a6a744a1657f)), kind: 27, format: \"TerminalWhole\" }"
+    },
+    {
+      "envelope": "4c4153481d000100",
+      "expected": "c52cac593689c506577466c18473ce02a71cd6f73fb31de09269a04e02312406",
+      "name": "SessionExecution",
+      "refusal": "RetiredFormat { node: Some(NodeId(c52cac593689c506577466c18473ce02a71cd6f73fb31de09269a04e02312406)), kind: 29, format: \"SessionExecution\" }"
     },
     {
       "envelope": "4c4153480802020202020202020202020202020202020202020202020202020202020202020201010101010101010101010101010101010101010101010101010101010101010609020b000b01",
@@ -334,13 +352,6 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "shape": "Enveloped"
     },
     {
-      "bound": 4096,
-      "kind": 16,
-      "name": "KernelWhole",
-      "owner": "Kernel",
-      "shape": "Enveloped"
-    },
-    {
       "bound": 65536,
       "kind": 17,
       "name": "EffectMembership",
@@ -411,24 +422,10 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "shape": "Direct"
     },
     {
-      "bound": 65536,
-      "kind": 27,
-      "name": "TerminalWhole",
-      "owner": "Kernel",
-      "shape": "Enveloped"
-    },
-    {
       "bound": 4096,
       "kind": 28,
       "name": "CellEnd",
       "owner": "Host",
-      "shape": "Enveloped"
-    },
-    {
-      "bound": 4096,
-      "kind": 29,
-      "name": "SessionExecution",
-      "owner": "Cell",
       "shape": "Enveloped"
     },
     {
@@ -514,6 +511,69 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "name": "WrittenTable",
       "owner": "Kernel",
       "shape": "Enveloped"
+    },
+    {
+      "bound": 4096,
+      "kind": 1000,
+      "name": "CheckpointRoot",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1001,
+      "name": "SequenceIndex",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1002,
+      "name": "SequenceLeaf",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1003,
+      "name": "KeyedIndex",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1004,
+      "name": "KeyedLeaf",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1005,
+      "name": "PayloadLeaf",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1006,
+      "name": "PayloadIndex",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1007,
+      "name": "FrozenRoot",
+      "owner": "Kernel",
+      "shape": "Direct"
+    },
+    {
+      "bound": 65536,
+      "kind": 1008,
+      "name": "SessionRoot",
+      "owner": "Kernel",
+      "shape": "Direct"
     }
   ],
   "root_sources": [
@@ -600,6 +660,18 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "postgres": "lash_turn_phases.answer_ref",
       "source": "answer",
       "sqlite": "turn_phases.answer_ref"
+    },
+    {
+      "number": 15,
+      "postgres": "lash_root_leases.root_ref",
+      "source": "lease",
+      "sqlite": "root_leases.root_ref"
+    },
+    {
+      "number": 16,
+      "postgres": "lash_retirement_holds.root_ref",
+      "source": "retirement",
+      "sqlite": "retirement_holds.root_ref"
     }
   ]
 }"##;

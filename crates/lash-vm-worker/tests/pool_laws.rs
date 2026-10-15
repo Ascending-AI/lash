@@ -5,14 +5,30 @@
 )]
 //! A pooled worker hosts one kernel machine for one execution (kernel spec
 //! §9 rule 5): the parent drives it a slice at a time, answers its host
-//! reads, and can stop at any park and carry on in another process.
+//! reads and its page exchanges, and can stop at any park and carry on in
+//! another process from the checkpoint root the park sealed.
 
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::stage::{StageLeaseId, StageSpool as _};
+use lash_durable::DurableError;
+use lash_durable::domain::pages::{RootLease, StoredPage};
+use lash_kernel_doc::heap::{PageGrant, PageRef};
 use lash_kernel_doc::{
     Datum, EffectIdentity, Float, Handle, Integer, Name, Timestamp, parse_document,
 };
-use lash_kernel_vm::{Bindings, Bound, End, Outcome, Request, RunError, Start as RunStart, Target};
+use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
+use lash_kernel_vm::{Bound, End, Outcome, Request, RunError, Target};
+use lash_vm_broker::kernel::MachinePark;
+use lash_vm_broker::kernel::pages::{
+    ActivationPages, CapabilityKey, LeasedReads, PageExchange as _, PageLimits, SharedSpool,
+    SpoolRoot, answer_page,
+};
 use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, ProjectionRead, StartWire};
 use lash_vm_client::*;
+use lash_vm_protocol::page::PageCapability;
 use lash_vm_protocol::*;
 
 const SLICE: u64 = 1_000_000;
@@ -57,7 +73,6 @@ macro_rules! under_each_embedding {
 under_each_embedding!(
     a_parked_run_carries_on_in_another_worker_without_asking_again,
     parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same,
-    a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission,
     a_typescript_cell_lowered_in_the_worker_parks_and_resumes,
     a_parked_run_is_refused_under_another_document,
     host_reads_are_answered_by_the_parent_and_prints_arrive_in_order,
@@ -137,35 +152,263 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
             wire::encode(
                 PayloadKind::Start,
                 &StartWire::of(
-                    RunStart {
-                        target,
-                        args,
-                        bindings: Bindings::default(),
-                    },
+                    target,
+                    args,
+                    None,
                     &lash_kernel_vm::EffectModes::recorded(),
+                    Vec::new(),
                 ),
             )
             .expect("start"),
         ),
         bounds: bounds(),
-        export: Some(binding()),
+        binding: BINDING,
+        save: None,
+        warm: Vec::new(),
         observe_sites: false,
         observe_counts: false,
     }
 }
 
+/// The run resumed from `root`, the checkpoint root a park sealed, with the
+/// admission of each wait it stands on.
+fn resumed(
+    dialect: &str,
+    document: &EncodedPayload,
+    root: PageCapability,
+    admissions: Vec<EncodedPayload>,
+) -> Start {
+    Start {
+        owner: owner(),
+        dialect: dialect.into(),
+        document: document.clone(),
+        from: StartFrom::Checkpoint(CheckpointStart { root, admissions }),
+        bounds: bounds(),
+        binding: BINDING,
+        save: None,
+        warm: Vec::new(),
+        observe_sites: false,
+        observe_counts: false,
+    }
+}
+
+/// The owner binding every run here is bound to: the parent stages the
+/// node, the worker names its digest in each root it seals.
+const BINDING: [u8; 32] = [5; 32];
+
+/// A store the laws' page service never reads: nothing here commits, so a
+/// run reads only what its activation staged.
+struct Unread;
+
+#[async_trait::async_trait]
+impl LeasedReads for Unread {
+    async fn read_pages(
+        &self,
+        _lease: &RootLease,
+        _pages: &[NodeId],
+    ) -> Result<Vec<StoredPage>, DurableError> {
+        panic!("nothing committed is read")
+    }
+    async fn renew_root_lease(&self, _lease: &RootLease) -> Result<RootLease, DurableError> {
+        panic!("no lease is held")
+    }
+}
+
+/// The parent's page service for one execution: every activation of it
+/// seals into one spool, and a worker that resumes it reads the checkpoint
+/// root its park sealed under the stage capability the park returned.
+struct Parent {
+    runtime: tokio::runtime::Runtime,
+    pages: ActivationPages<Unread>,
+    spool: SharedSpool,
+    _spools: tempfile::TempDir,
+    /// The page exchanges the parent answered.
+    replies: u64,
+    /// The stage capability the parent issued for each page a hand-over
+    /// frame's seal batch carried.
+    grants: std::collections::HashMap<[u8; 32], PageCapability>,
+}
+
+impl Parent {
+    /// The page service of runs pinning `dialect`'s helper release.
+    fn new(dialect: &str) -> Self {
+        let directory = tempfile::tempdir().expect("spool directory");
+        let spools = SpoolRoot::open(directory.path(), 1 << 30).expect("spools");
+        let spool = SharedSpool::new(spools.spool(StageLeaseId(1)).expect("spool"));
+        let releases = lash_vm_broker::kernel::state::release_manifests().expect("releases");
+        let release = releases
+            .manifests
+            .current(dialect)
+            .expect("the dialect's helper release");
+        let pages = ActivationPages::new(
+            Arc::new(Unread),
+            None,
+            Duration::from_secs(20),
+            CapabilityKey::fresh(),
+            1,
+            Box::new(spool.clone()),
+            Instant::now() + Duration::from_secs(600),
+            PageLimits::within(
+                PoolConfig::standard(WorkerEntry::helper("unused"))
+                    .protocol
+                    .decode,
+            ),
+        )
+        .with_references([NodeId(release.0), NodeId(BINDING)]);
+        Self {
+            runtime: tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime"),
+            pages,
+            spool,
+            _spools: directory,
+            replies: 0,
+            grants: std::collections::HashMap::new(),
+        }
+    }
+
+    /// `step`, past the page exchanges it asks the parent to answer.
+    fn answer(
+        &mut self,
+        worker: &mut Checkout,
+        step: Result<RunStep, PoolError>,
+    ) -> Result<RunStep, PoolError> {
+        let mut step = step?;
+        while let RunStep::Pages { id, request } = step {
+            let reply = self.runtime.block_on(self.pages.serve(request));
+            self.replies += 1;
+            step = worker.page_reply(id, reply)?;
+        }
+        // The batch a hand-over frame carried: admitted, and its grants
+        // handed to the run's next slice.
+        if let RunStep::Parked {
+            seal: Some(batch), ..
+        }
+        | RunStep::Ended {
+            seal: Some(batch), ..
+        }
+        | RunStep::Sealed {
+            seal: Some(batch), ..
+        } = &step
+        {
+            let sealed = self
+                .pages
+                .admit(batch.clone())
+                .expect("the parent admits the batch");
+            self.grants.extend(
+                sealed
+                    .iter()
+                    .map(|capability| (capability.page, *capability)),
+            );
+            worker.grant(sealed);
+        }
+        Ok(step)
+    }
+
+    /// The stage capability the parent issued for the page `id` a run
+    /// sealed.
+    fn granted(&self, id: [u8; 32]) -> PageCapability {
+        *self.grants.get(&id).expect("the parent granted the page")
+    }
+
+    /// One slice of `worker`'s run.
+    fn run(
+        &mut self,
+        worker: &mut Checkout,
+        slice: u64,
+        cancel: bool,
+    ) -> Result<RunStep, PoolError> {
+        let step = worker.run(slice, cancel);
+        self.answer(worker, step)
+    }
+
+    /// The value the session a finished cell carries binds `name` to,
+    /// read from the pages its run staged.
+    fn carried(&self, end: &EndWire, name: &str) -> Option<Datum> {
+        let EndWire::Finished {
+            carry: Some(carry), ..
+        } = end
+        else {
+            panic!("the cell finishes with a carry: {end:?}")
+        };
+        let session = carry
+            .session(|_| Ok(PageGrant::NONE))
+            .expect("the carry decodes");
+        let mut editor = lash_kernel_vm::SessionEditor::open(
+            Some(&session),
+            Box::new(Staged(self.spool.clone())),
+        )
+        .expect("the session opens");
+        match editor.get(&Name::new(name)).expect("the binding reads") {
+            Some(lash_kernel_vm::SessionValue::Data(value)) => Some(value),
+            Some(other) => panic!("`{name}` is not data: {other:?}"),
+            None => None,
+        }
+    }
+}
+
+/// The pages a run staged, read back.
+struct Staged(SharedSpool);
+
+impl PageSource for Staged {
+    fn read(
+        &mut self,
+        pages: &[PageRef],
+    ) -> Result<Vec<PageAnswer>, lash_kernel_doc::heap::HeapFault> {
+        pages
+            .iter()
+            .map(|page| {
+                let bytes = self
+                    .0
+                    .read(&NodeId(page.id.0))
+                    .map_err(|_| lash_kernel_doc::heap::HeapFault::Missing { page: page.id })?;
+                answer_page(*page, &bytes, |_| Ok(PageGrant::NONE))
+            })
+            .collect()
+    }
+
+    fn seal(&mut self, _page: PageBody) -> Result<PageRef, lash_kernel_doc::heap::HeapFault> {
+        Err(lash_kernel_doc::heap::HeapFault::Malformed(
+            "a read-back seals nothing".into(),
+        ))
+    }
+}
+
 /// The one effect the park requests: its wait and its argument.
 fn requested(step: RunStep) -> (u64, Datum) {
-    let RunStep::Parked { park, .. } = step else {
+    let (wait, argument, _, _) = admitted(step);
+    (wait, argument)
+}
+
+/// The one effect the park requests, as the parent's admission freezes it,
+/// and the checkpoint root the park sealed.
+fn admitted(step: RunStep) -> (u64, Datum, EncodedPayload, [u8; 32]) {
+    let RunStep::Parked {
+        park, candidate, ..
+    } = step
+    else {
         panic!("the run parks: {step:?}")
     };
     let park: ParkWire = wire::decode(PayloadKind::Park, &park).expect("park");
-    let park = lash_kernel_vm::Park::try_from(park).expect("canonical park");
+    let park = MachinePark::try_from(park).expect("canonical park");
     let [Request::Effect(request)] = &park.requests[..] else {
         panic!("one effect: {park:?}")
     };
     assert_eq!(request.effect.to_string(), "echo");
-    (request.wait.0, request.args[0].clone())
+    let admission = lash_vm_broker::kernel::state::admission(&lash_kernel_state::AdmittedWait {
+        identity: request.identity.clone(),
+        request: lash_kernel_state::AdmittedRequest::Effect {
+            effect: request.effect.clone(),
+            args: request.args.clone(),
+        },
+    });
+    (
+        request.wait.0,
+        request.args[0].clone(),
+        admission,
+        candidate.expect("the park seals its checkpoint root"),
+    )
 }
 
 fn completed(value: Datum) -> EncodedPayload {
@@ -176,36 +419,18 @@ fn completed(value: Datum) -> EncodedPayload {
     .expect("outcome")
 }
 
-fn ended(step: RunStep) -> End {
+/// How the run ended, as it crossed.
+fn ended_wire(step: RunStep) -> EndWire {
     let RunStep::Ended { end, .. } = step else {
         panic!("the run ends: {step:?}")
     };
-    let end: EndWire = wire::decode(PayloadKind::End, &end).expect("end");
-    // The read decodes the release's nodes beside the end's own, so the
-    // end's size does not bound it.
-    end.map_or(End::Cancelled, |state| {
-        lash_vm_client::graph::read_end(
-            &state,
-            lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 30),
-        )
+    wire::decode(PayloadKind::End, &end).expect("end")
+}
+
+fn ended(step: RunStep) -> End {
+    ended_wire(step)
+        .into_end(|_| Ok(PageGrant::NONE))
         .expect("the end reads back")
-    })
-}
-
-/// The one cell every run here is bound to.
-fn binding() -> EncodedPayload {
-    EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(
-        &lash_core_store::checkpoint_graph::bodies::OwnerBinding::Cell {
-            session: "session-A".into(),
-            turn: "turn-1".into(),
-            cell: "cell-1".into(),
-        },
-    ))
-}
-
-/// The run's state at its park, bound to its cell.
-fn export(checkout: &mut Checkout) -> SealedGraphState {
-    checkout.export_graph(binding()).expect("export graph")
 }
 
 fn int(value: i64) -> Datum {
@@ -223,31 +448,31 @@ main {
 }"#;
 
 /// Runs `document`, which performs `echo` three times in turn, answering
-/// each with its argument: the worker is killed at the second park, after
-/// the state is exported, and another worker carries on from the state.
-/// Returns how the run finished and every argument `echo` was asked with.
+/// each with its argument: the worker is killed at the second park, and
+/// another worker carries on from the checkpoint root that park sealed.
+/// Returns how the run ended and every argument `echo` was asked with.
 fn killed_at_a_park_and_resumed(
     pool: &WorkerPool,
+    parent: &mut Parent,
+    dialect: &str,
     identity: &str,
     document: &EncodedPayload,
-) -> (lash_kernel_vm::Finished, Vec<Datum>) {
+) -> (EndWire, Vec<Datum>) {
     let mut asked = Vec::new();
     let mut first = checkout(pool);
     let pid = first.pid().expect("pid");
+    let mut start = fresh(document, Target::Main, Vec::new());
+    start.dialect = dialect.into();
     first
-        .start(
-            fresh(document, Target::Main, Vec::new()),
-            identity,
-            ExecutionClass::Cell,
-        )
+        .start(start, identity, ExecutionClass::Cell)
         .expect("start");
-    let (wait, argument) = requested(first.run(SLICE, false).expect("run"));
+    let (wait, argument) = requested(parent.run(&mut first, SLICE, false).expect("run"));
     asked.push(argument.clone());
     first.deliver(wait, completed(argument)).expect("deliver");
-    let (wait, argument, admission) = admitted(first.run(SLICE, false).expect("run"));
+    let (wait, argument, admission, root) =
+        admitted(parent.run(&mut first, SLICE, false).expect("run"));
+    let root = parent.granted(root);
     asked.push(argument.clone());
-    let state = export(&mut first);
-    assert_eq!(state.document(), identity);
     // Killed at the park: the worker is discarded, not reset.
     drop(first);
 
@@ -255,60 +480,55 @@ fn killed_at_a_park_and_resumed(
     assert_ne!(second.pid(), Some(pid));
     second
         .start(
-            Start {
-                owner: owner(),
-                dialect: DIALECT.into(),
-                document: document.clone(),
-                from: StartFrom::ParkedGraph(ParkedGraph {
-                    state,
-                    admissions: vec![admission],
-                }),
-                bounds: bounds(),
-                export: Some(binding()),
-                observe_sites: false,
-                observe_counts: false,
-            },
+            resumed(dialect, document, root, vec![admission]),
             identity,
             ExecutionClass::Cell,
         )
         .expect("resume");
     second.deliver(wait, completed(argument)).expect("deliver");
-    let (wait, argument) = requested(second.run(SLICE, false).expect("run"));
-    asked.push(argument.clone());
-    second.deliver(wait, completed(argument)).expect("deliver");
-    let End::Finished(finished) = ended(second.run(SLICE, false).expect("run")) else {
-        panic!("the run finishes")
+    let end = loop {
+        let step = parent.run(&mut second, SLICE, false).expect("run");
+        if !matches!(step, RunStep::Parked { .. }) {
+            break ended_wire(step);
+        }
+        let (wait, argument) = requested(step);
+        asked.push(argument.clone());
+        second.deliver(wait, completed(argument)).expect("deliver");
     };
     second
         .release()
         .expect("the worker resets at the run's end");
-    (finished, asked)
+    (end, asked)
 }
 
-/// Targets 1 and 2: a run that loops over effects parks at each, its state
-/// is exported at the park, its worker is killed, and another worker carries
-/// on from the state. The effect answered before the export is not asked
-/// for again.
+/// Targets 1 and 2: a run that loops over effects parks at each, sealing
+/// its checkpoint root; its worker is killed, and another worker carries
+/// on from the root. The effect answered before the kill is not asked for
+/// again.
 fn a_parked_run_carries_on_in_another_worker_without_asking_again() {
     let pool = WorkerPool::new(config("")).expect("pool");
+    let mut parent = Parent::new(DIALECT);
     let (identity, document) = document(TOOL_LOOP);
-    let (finished, asked) = killed_at_a_park_and_resumed(&pool, &identity, &document);
-    assert_eq!(finished.result, int(6));
+    let (end, asked) =
+        killed_at_a_park_and_resumed(&pool, &mut parent, DIALECT, &identity, &document);
+    let EndWire::Finished { result, .. } = end else {
+        panic!("the run finishes: {end:?}")
+    };
+    assert_eq!(result, int(6));
     assert_eq!(asked, [int(1), int(2), int(3)], "each effect is asked once");
 }
 
-/// FIG-5921: a run's start crosses with its first slice, the outcomes it
-/// waits on with its next, and a saved park's state with the park, each in
-/// one frame. Parts that outgrow one frame together cross apart, and the
-/// run goes on the same: a resumed run's start and a large outcome each
-/// cross alone before the slice, and a park whose state and request
-/// together outgrow a frame hands the state over when the parent asks for
-/// it.
+/// FIG-5921: a run's start crosses with its first slice and the outcomes it
+/// waits on with its next, each in one frame. Parts that outgrow one frame
+/// together cross apart, and the run goes on the same: a resumed run's
+/// start and a large outcome each cross alone before the slice. A park's
+/// state never crosses: it is pages the parent's service staged.
 fn parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same() {
     const FRAME: u32 = 64 * 1024;
     let mut config = config("");
     config.protocol.decode.max_frame_bytes = FRAME;
     let pool = WorkerPool::new(config).expect("pool");
+    let mut parent = Parent::new(DIALECT);
     let sent = || pool.measurements().counters.ipc_sent_messages;
     // Never run: it makes the document, and so each start, large.
     let padding = "p".repeat(30 * 1024);
@@ -331,28 +551,14 @@ main {{
             ExecutionClass::Cell,
         )
         .expect("start");
-    let (wait, _, admission) = admitted(first.run(SLICE, false).expect("run"));
-    let before = sent();
-    let state = export(&mut first);
-    assert_eq!(sent(), before, "a small park carries its state");
+    let (wait, _, admission, root) = admitted(parent.run(&mut first, SLICE, false).expect("run"));
+    let root = parent.granted(root);
     drop(first);
 
     let mut second = checkout(&pool);
     second
         .start(
-            Start {
-                owner: owner(),
-                dialect: DIALECT.into(),
-                document: document.clone(),
-                from: StartFrom::ParkedGraph(ParkedGraph {
-                    state,
-                    admissions: vec![admission],
-                }),
-                bounds: bounds(),
-                export: Some(binding()),
-                observe_sites: false,
-                observe_counts: false,
-            },
+            resumed(DIALECT, &document, root, vec![admission]),
             &identity,
             ExecutionClass::Cell,
         )
@@ -360,108 +566,15 @@ main {{
     second
         .deliver(wait, completed(large.clone()))
         .expect("deliver");
-    let before = sent();
-    let (_, argument) = requested(second.run(SLICE, false).expect("run"));
+    let before = (sent(), parent.replies);
+    let (_, argument) = requested(parent.run(&mut second, SLICE, false).expect("run"));
     assert_eq!(argument, large, "the large outcome was delivered");
     assert_eq!(
-        sent() - before,
+        (sent() - before.0) - (parent.replies - before.1),
         3,
         "the start, the outcome and the slice cross apart"
     );
-    let before = sent();
-    let state = export(&mut second);
-    assert_eq!(state.document(), identity);
-    assert_eq!(sent() - before, 1, "the parent asks for the large state");
     second.release().expect("release at the park");
-}
-
-/// The one effect the park requests, as the parent's admission freezes it.
-fn admitted(step: RunStep) -> (u64, Datum, EncodedPayload) {
-    let RunStep::Parked { park, .. } = step else {
-        panic!("the run parks: {step:?}")
-    };
-    let park: ParkWire = wire::decode(PayloadKind::Park, &park).expect("park");
-    let park = lash_kernel_vm::Park::try_from(park).expect("canonical park");
-    let [Request::Effect(request)] = &park.requests[..] else {
-        panic!("one effect: {park:?}")
-    };
-    let admission = lash_vm_client::graph::admission(&lash_kernel_state::AdmittedWait {
-        identity: request.identity.clone(),
-        request: lash_kernel_state::AdmittedRequest::Effect {
-            effect: request.effect.clone(),
-            args: request.args.clone(),
-        },
-    });
-    (request.wait.0, request.args[0].clone(), admission)
-}
-
-/// FIG-5887 §3: a run exported at a park as checkpoint graph state, its
-/// worker killed, resumes in another worker from the state and the
-/// admission of the wait it holds, and finishes without asking again. The
-/// state alone, without the admission, is refused with the kernel's typed
-/// refusal.
-fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() {
-    let pool = WorkerPool::new(config("")).expect("pool");
-    let (identity, document) = document(TOOL_LOOP);
-    let mut first = checkout(&pool);
-    first
-        .start(
-            fresh(&document, Target::Main, Vec::new()),
-            &identity,
-            ExecutionClass::Cell,
-        )
-        .expect("start");
-    let (wait, argument) = requested(first.run(SLICE, false).expect("run"));
-    first.deliver(wait, completed(argument)).expect("deliver");
-    let (wait, argument, admission) = admitted(first.run(SLICE, false).expect("run"));
-    let state = export(&mut first);
-    assert_eq!(state.document(), identity);
-    drop(first);
-
-    let resume = |admissions: Vec<EncodedPayload>| Start {
-        owner: owner(),
-        dialect: DIALECT.into(),
-        document: document.clone(),
-        from: StartFrom::ParkedGraph(ParkedGraph {
-            state: state.clone(),
-            admissions,
-        }),
-        bounds: bounds(),
-        export: Some(binding()),
-        observe_sites: false,
-        observe_counts: false,
-    };
-    let mut refused = checkout(&pool);
-    refused
-        .start(resume(Vec::new()), &identity, ExecutionClass::Cell)
-        .expect("the parent takes the state");
-    let refusal = refused
-        .run(SLICE, false)
-        .expect_err("a wait with no admission");
-    assert!(
-        matches!(
-            refusal,
-            PoolError::Infrastructure(InfrastructureOutcome::RunRefused {
-                refusal: RunRefusal::Restore {
-                    refusal: KernelRestoreRefusal::AdmissionUnresolved { .. },
-                }
-            })
-        ),
-        "{refusal:?}"
-    );
-
-    let mut second = checkout(&pool);
-    second
-        .start(resume(vec![admission]), &identity, ExecutionClass::Cell)
-        .expect("resume from graph state");
-    second.deliver(wait, completed(argument)).expect("deliver");
-    let (wait, argument) = requested(second.run(SLICE, false).expect("run"));
-    assert_eq!(argument, int(3), "the answered effects are not asked again");
-    second.deliver(wait, completed(argument)).expect("deliver");
-    let End::Finished(finished) = ended(second.run(SLICE, false).expect("run")) else {
-        panic!("the run finishes")
-    };
-    assert_eq!(finished.result, int(6));
 }
 
 /// Targets 1 and 5: a TypeScript cell is lowered in the worker against the
@@ -516,11 +629,13 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
     .expect("identity")
     .to_string();
     let document = wire::wrap(PayloadKind::Document, &document).expect("payload");
-    let (finished, asked) = killed_at_a_park_and_resumed(&pool, &identity, &document);
+    let mut parent = Parent::new(DIALECT);
+    let (end, asked) =
+        killed_at_a_park_and_resumed(&pool, &mut parent, DIALECT, &identity, &document);
     assert_eq!(asked.len(), 3, "each call is asked once: {asked:?}");
     assert_eq!(
-        format!("{:?}", finished.bindings.variables.get(&Name::new("total"))),
-        format!("{:?}", Some(lash_kernel_doc::Value::Float(Float::new(6.0)))),
+        parent.carried(&end, "total"),
+        Some(Datum::Float(Float::new(6.0)))
     );
 }
 
@@ -536,40 +651,34 @@ fn a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name() {
         document(TOOL_LOOP)
     };
     let python = |from: StartFrom| Start {
-        owner: owner(),
         dialect: "python".into(),
-        document: document.clone(),
         from,
-        bounds: bounds(),
-        export: Some(binding()),
-        observe_sites: false,
-        observe_counts: false,
+        ..fresh(&document, Target::Main, Vec::new())
     };
     let new_run = || python(fresh(&document, Target::Main, Vec::new()).from);
 
     // A host that names Python runs it, to a park another worker resumes.
     let pool = WorkerPool::new(config("")).expect("pool");
+    let mut parent = Parent::new("python");
     let mut worker = checkout(&pool);
     worker
         .start(new_run(), &identity, ExecutionClass::Cell)
         .expect("start");
-    let (_, _, admission) = admitted(worker.run(SLICE, false).expect("a Python run"));
-    let state = export(&mut worker);
+    let (_, _, admission, root) =
+        admitted(parent.run(&mut worker, SLICE, false).expect("a Python run"));
+    let root = parent.granted(root);
     worker.release().expect("release at the park");
     drop(pool);
 
     // A host that names TypeScript alone refuses both starts.
     HOST_DIALECTS.set("typescript");
     let pool = WorkerPool::new(config("")).expect("pool");
-    let parked = python(StartFrom::ParkedGraph(ParkedGraph {
-        state,
-        admissions: vec![admission],
-    }));
+    let parked = resumed("python", &document, root, vec![admission]);
     for (start, from) in [(new_run(), "a new run"), (parked, "a parked run")] {
         let mut worker = checkout(&pool);
         let refused = worker
             .start(start, &identity, ExecutionClass::Cell)
-            .and_then(|()| worker.run(SLICE, false))
+            .and_then(|()| parent.run(&mut worker, SLICE, false))
             .expect_err("the worker installs no Python");
         assert!(
             matches!(
@@ -635,72 +744,22 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
     .expect("identity")
     .to_string();
     let document = wire::wrap(PayloadKind::Document, &document).expect("payload");
-    let mut start = fresh(&document, Target::Main, Vec::new());
-    start.dialect = "python".into();
-    // The worker that lowered the cell starts its run.
-    worker
-        .start(start, &identity, ExecutionClass::Cell)
-        .expect("start");
-    // Its first park is exported and the worker killed: another resumes it
-    // only on the release it pinned, which holds Python's helpers and no
-    // other dialect's.
-    let (wait, argument, admission) = admitted(
-        worker
-            .run(SLICE, false)
-            .expect("no system call the confinement forbids"),
-    );
-    let state = export(&mut worker);
-    drop(worker);
-    let mut worker = checkout(&pool);
-    worker
-        .start(
-            Start {
-                owner: owner(),
-                dialect: "python".into(),
-                document: document.clone(),
-                from: StartFrom::ParkedGraph(ParkedGraph {
-                    state,
-                    admissions: vec![admission],
-                }),
-                bounds: bounds(),
-                export: Some(binding()),
-                observe_sites: false,
-                observe_counts: false,
-            },
-            &identity,
-            ExecutionClass::Cell,
-        )
-        .expect("resumed on Python's release");
-    worker.deliver(wait, completed(argument)).expect("deliver");
-    let mut asked = 1;
-    let finished = loop {
-        let step = worker
-            .run(SLICE, false)
-            .expect("no system call the confinement forbids");
-        if !matches!(step, RunStep::Parked { .. }) {
-            break ended(step);
-        }
-        let (wait, argument) = requested(step);
-        asked += 1;
-        worker.deliver(wait, completed(argument)).expect("deliver");
-    };
-    let End::Finished(finished) = finished else {
-        panic!("the cell finishes: {finished:?}")
-    };
-    assert_eq!(asked, 3, "each call is asked once");
-    assert_eq!(
-        format!("{:?}", finished.bindings.variables.get(&Name::new("total"))),
-        format!("{:?}", Some(lash_kernel_doc::Value::Int(Integer::from(6)))),
-    );
-    worker
-        .release()
-        .expect("the worker resets at the run's end");
+    worker.release().expect("reset");
+    // Its first park seals its root and the worker is killed: another
+    // resumes it only on the release it pinned, which holds Python's
+    // helpers and no other dialect's.
+    let mut parent = Parent::new("python");
+    let (end, asked) =
+        killed_at_a_park_and_resumed(&pool, &mut parent, "python", &identity, &document);
+    assert_eq!(asked.len(), 3, "each call is asked once");
+    assert_eq!(parent.carried(&end, "total"), Some(int(6)));
 }
 
 /// A parked run names its document; a worker handed another document
 /// refuses the state before any machine is built.
 fn a_parked_run_is_refused_under_another_document() {
     let pool = WorkerPool::new(config("")).expect("pool");
+    let mut parent = Parent::new(DIALECT);
     let (identity, document_a) = document(TOOL_LOOP);
     let (other, document_b) = document("main { let got = perform echo(1) as Any return got }");
     let mut worker = checkout(&pool);
@@ -711,36 +770,25 @@ fn a_parked_run_is_refused_under_another_document() {
             ExecutionClass::Cell,
         )
         .expect("start");
-    let (_, _, admission) = admitted(worker.run(SLICE, false).expect("run"));
-    let state = export(&mut worker);
+    let (_, _, admission, root) = admitted(parent.run(&mut worker, SLICE, false).expect("run"));
+    let root = parent.granted(root);
     worker.release().expect("release at the park");
 
     let mut next = checkout(&pool);
     let refused = next
         .start(
-            Start {
-                owner: owner(),
-                dialect: DIALECT.into(),
-                document: document_b,
-                from: StartFrom::ParkedGraph(ParkedGraph {
-                    state,
-                    admissions: vec![admission],
-                }),
-                bounds: bounds(),
-                export: Some(binding()),
-                observe_sites: false,
-                observe_counts: false,
-            },
+            resumed(DIALECT, &document_b, root, vec![admission]),
             &other,
             ExecutionClass::Cell,
         )
-        .expect_err("another document's state");
+        .and_then(|()| parent.run(&mut next, SLICE, false))
+        .expect_err("another document's root");
     assert!(
         matches!(
             refused,
             PoolError::Infrastructure(InfrastructureOutcome::RunRefused {
-                refusal: RunRefusal::GraphState {
-                    refusal: GraphStateRefusal::WrongDocument { .. },
+                refusal: RunRefusal::Restore {
+                    refusal: KernelRestoreRefusal::DocumentMismatch { .. },
                 }
             })
         ),
@@ -771,7 +819,8 @@ main { }"#,
     worker
         .start(start, &identity, ExecutionClass::Process)
         .expect("start");
-    let (wait, argument) = requested(worker.run(SLICE, false).expect("run"));
+    let mut parent = Parent::new(DIALECT);
+    let (wait, argument) = requested(parent.run(&mut worker, SLICE, false).expect("run"));
     let entered: Vec<Vec<EffectIdentity>> = worker
         .take_sites()
         .iter()
@@ -796,7 +845,7 @@ main { }"#,
         [1]
     );
     worker.deliver(wait, completed(argument)).expect("deliver");
-    let end = ended(worker.run(SLICE, false).expect("run"));
+    let end = ended(parent.run(&mut worker, SLICE, false).expect("run"));
     assert!(
         worker.take_sites().is_empty(),
         "no site was entered after the park"
@@ -842,8 +891,9 @@ main { }"#,
     let now = Timestamp {
         nanoseconds: Integer::from(1_700_000_000),
     };
+    let mut parent = Parent::new(DIALECT);
     let mut kinds = Vec::new();
-    let mut step = worker.run(SLICE, false).expect("run");
+    let mut step = parent.run(&mut worker, SLICE, false).expect("run");
     let end = loop {
         match step {
             RunStep::HostRead { id, kind, request } => {
@@ -863,7 +913,8 @@ main { }"#,
                     HostReadKind::Effect => panic!("the run binds no read"),
                 }
                 .expect("answer");
-                step = worker.host_answer(id, answer).expect("answered");
+                let answered = worker.host_answer(id, answer);
+                step = parent.answer(&mut worker, answered).expect("answered");
             }
             other => break ended(other),
         }
@@ -952,6 +1003,7 @@ fn a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused() {
 /// reaped, and leaves the parent with a pool that hands out a replacement.
 fn worker_crash_mid_run_leaves_the_parent_running() {
     let pool = WorkerPool::new(config("abort")).expect("pool");
+    let mut parent = Parent::new(DIALECT);
     let (identity, document) = document(TOOL_LOOP);
     let mut worker = checkout(&pool);
     let pid = worker.pid().expect("pid");
@@ -962,12 +1014,12 @@ fn worker_crash_mid_run_leaves_the_parent_running() {
             ExecutionClass::Cell,
         )
         .expect("start");
-    let (wait, argument) = requested(worker.run(SLICE, false).expect("run"));
+    let (wait, argument) = requested(parent.run(&mut worker, SLICE, false).expect("run"));
     worker
         .deliver(wait, completed(argument))
         .expect("the outcome waits for the next slice");
     assert!(matches!(
-        worker.run(SLICE, false),
+        parent.run(&mut worker, SLICE, false),
         Err(PoolError::Infrastructure(
             InfrastructureOutcome::WorkerCrashed { .. }
         ))
@@ -1352,6 +1404,12 @@ main {}"#,
         )
         .unwrap(),
     );
+    struct Uncommitted;
+    impl lash_vm_broker::kernel::pages::CommittedPages for Uncommitted {
+        fn page(&self, _: &NodeId) -> Option<Arc<[u8]>> {
+            None
+        }
+    }
     let embedding = lash_vm_worker::built_dialects(&WorkerTuning::standard()).unwrap();
     let start = || RunStart {
         target: Target::Entry(Name::new("go")),
@@ -1359,10 +1417,13 @@ main {}"#,
             kind: "table".into(),
             id: "row".into(),
         })],
-        bindings: Bindings::default(),
+        session: None,
+        modes: lash_kernel_vm::EffectModes::reading([
+            lash_kernel_doc::EffectName::new("live").unwrap()
+        ]),
+        host: Vec::new(),
+        save: None,
     };
-    let modes =
-        lash_kernel_vm::EffectModes::reading([lash_kernel_doc::EffectName::new("live").unwrap()]);
     let roomy = lash_kernel_vm::Bounds {
         charge: 1_000_000,
         memory: 64 << 20,
@@ -1371,14 +1432,40 @@ main {}"#,
         requests_per_park: 10,
         join_members: 10,
     };
-    let mut direct = KernelMachine::start_reading(
+    let spools = tempfile::tempdir().unwrap();
+    let spools = SpoolRoot::open(spools.path(), 1 << 30).unwrap();
+    let direct_start = start();
+    let mut direct = KernelMachine::start(
         Program {
+            release: lash_kernel_doc::heap::PageId([0; 32]),
             document: Arc::clone(&document),
             library: PreparedLibrary::new(Arc::clone(embedding.registry().unwrap())),
         },
         roomy,
-        start(),
-        modes.clone(),
+        lash_kernel_vm::CellStart {
+            owner: lash_kernel_doc::heap::PageId([0; 32]),
+            target: direct_start.target,
+            args: direct_start.args,
+            session: None,
+            modes: direct_start.modes,
+            host: Vec::new(),
+        },
+        Box::new(lash_vm_broker::kernel::pages::LocalPages::new(
+            Uncommitted,
+            Box::new(spools.spool(StageLeaseId(1)).unwrap()),
+        )),
+        Box::new(
+            <lash_kernel_state::paged::census_impl::Census as lash_kernel_state::paged::AllocationCensus>::restore(
+                lash_kernel_state::paged::AccountingCertificate {
+                    metric: lash_kernel_state::paged::AccountingMetric::LocalCostV1,
+                    upper: lash_kernel_doc::heap::LogicalBytes(0),
+                    entities: 0,
+                    refinements: 0,
+                },
+                lash_kernel_doc::heap::LogicalBytes(roomy.memory),
+            )
+            .unwrap(),
+        ),
     )
     .unwrap();
     direct.set_observe(Observe::Counts);
@@ -1400,11 +1487,23 @@ main {}"#,
     }
     let expected = direct.take_ran();
     assert!(!expected.is_empty());
-    let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Cell {
-        session: "session-A".into(),
-        turn: "count-turn".into(),
-        cell: "count-cell".into(),
-    };
+    // The activation's page service: its parks seal into a spool, and the
+    // run reads nothing committed.
+    let database = tempfile::tempdir().unwrap();
+    let store: Arc<dyn lash_durable::domain::pages::PageStore> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open(
+            database.path().join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .unwrap()
+        .durable_store(),
+    );
+    let release = lash_vm_broker::kernel::state::release_manifests()
+        .unwrap()
+        .manifests
+        .current(DIALECT)
+        .unwrap();
     HOST_DIALECTS.set("typescript");
     for live in [false, true] {
         let host = Arc::new(CountingHost {
@@ -1420,15 +1519,27 @@ main {}"#,
             &document,
             DIALECT,
             start(),
-            modes.clone(),
             roomy,
         )
         .unwrap();
-        let mut remote = machines.start(&binding).await.unwrap();
+        let pages: lash_vm_broker::kernel::pages::SharedPages = Arc::new(tokio::sync::Mutex::new(
+            ActivationPages::new(
+                Arc::clone(&store),
+                None,
+                Duration::from_secs(20),
+                CapabilityKey::fresh(),
+                1,
+                Box::new(spools.spool(StageLeaseId(2 + u64::from(live))).unwrap()),
+                Instant::now() + Duration::from_secs(600),
+                PageLimits::within(config("").protocol.decode),
+            )
+            .with_references([NodeId(release.0), NodeId(BINDING)]),
+        ));
+        let mut remote = machines.start(NodeId(BINDING), pages).await.unwrap();
         loop {
             match remote.run(0, false).await.unwrap() {
-                Step::Ended(End::Finished(_)) => break,
-                Step::Parked(park) => {
+                lash_vm_broker::kernel::MachineStep::Ended(End::Finished(_)) => break,
+                lash_vm_broker::kernel::MachineStep::Parked(park) => {
                     for request in park.requests {
                         let Request::Effect(request) = request else {
                             panic!("an effect")
@@ -1439,7 +1550,7 @@ main {}"#,
                             .unwrap();
                     }
                 }
-                Step::Slice => {}
+                lash_vm_broker::kernel::MachineStep::Slice => {}
                 other => panic!("remote run: {other:?}"),
             }
         }

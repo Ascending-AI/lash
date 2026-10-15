@@ -35,10 +35,12 @@ bindings a session of one dialect saved are refused by a state of another.
 
 Each cell is its own document (`K-SES-001`). What carries between cells is
 the session's bindings: the variables `main` left, and the objects they
-reach, which stay shared (`K-SES-002`). The protocol saves them per root
-with `lash-kernel-state` fragments: one fragment per binding, inline in the
-root when small and a content-addressed leaf otherwise, so a capture writes
-only the bindings that changed.
+reach, which stay shared (`K-SES-002`). They live on the kernel's
+persistent heap: a cell's end seals its carry, a binding tree and a
+saved-function tree over the same heap, into a `SessionRoot`, and the next
+cell adopts those roots without copying, renaming or loading a binding
+([ADR 0145](0145-kernel-execution-and-its-checkpoints-share-one-persistent-heap.md)
+§9). A capture writes only the pages the cell changed.
 
 A function or a task does not outlive its cell (`K-SES-003`). A binding
 that reaches one is not carried, and the run's end names it. A later cell

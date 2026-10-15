@@ -7,7 +7,7 @@
 //! settle beside work still running, and is refused before anything runs.
 
 use lash_kernel_doc::{Datum, EffectName, Name, Param, Signature, Type};
-use lash_kernel_vm::{Bindings, End, Outcome, Request};
+use lash_kernel_vm::{End, Outcome, Request};
 
 use super::machine;
 
@@ -36,7 +36,7 @@ fn a_control_call_ends_the_program_and_nothing_after_it_runs() {
     let (lines, end) = machine::drive(
         "print('before')\nawait control_finish(1)\nprint('after')\n",
         effects(),
-        Bindings::default(),
+        super::pages::Session::default(),
         |lines, park, _| {
             assert_eq!(lines, ["before"]);
             park.requests

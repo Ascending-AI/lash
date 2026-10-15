@@ -46,16 +46,57 @@ pub struct EngineState {
     pub format: EngineStateFormat,
     /// The engine's own encoding of its state.
     pub bytes: Vec<u8>,
+    /// The persistent-heap root the state stands on: the CheckpointRoot
+    /// page a step's outcome published ([`EngineStepAnswer::Paged`]), which
+    /// the process's execution root owns from the advance that names it
+    /// (FIG-6193). None for an engine that keeps no heap.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "page_hex")]
+    pub pages: Option<lash_core_store::checkpoint_graph::NodeId>,
 }
 
 impl EngineState {
     /// The state of a process before [`EngineEvent::Started`]: no bytes.
     #[must_use]
     pub fn empty(format: EngineStateFormat) -> Self {
+        Self::of(format, Vec::new())
+    }
+
+    /// A state of `bytes` in `format`, standing on no heap.
+    #[must_use]
+    pub fn of(format: EngineStateFormat, bytes: Vec<u8>) -> Self {
         Self {
             format,
-            bytes: Vec::new(),
+            bytes,
+            pages: None,
         }
+    }
+}
+
+/// A heap root as JSON text: its lowercase hex.
+mod page_hex {
+    use lash_core_store::checkpoint_graph::NodeId;
+    use serde::{Deserialize as _, Deserializer, Serializer};
+
+    #[expect(clippy::ref_option, reason = "serde's `with` signature")]
+    pub(super) fn serialize<S: Serializer>(
+        page: &Option<NodeId>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match page {
+            Some(page) => serializer.serialize_some(&page.to_hex()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<NodeId>, D::Error> {
+        Option::<String>::deserialize(deserializer)?
+            .map(|text| {
+                NodeId::from_hex(&text)
+                    .ok_or_else(|| serde::de::Error::custom("a heap root is 64 lowercase hex"))
+            })
+            .transpose()
     }
 }
 
@@ -291,7 +332,101 @@ pub struct EngineStepRun {
     pub kind: EngineStepKind,
     /// The body's input.
     pub input: serde_json::Value,
+    /// The activation's heap page publication, for a body whose outcome
+    /// publishes pages ([`EngineStepAnswer::Paged`]); None on a store that
+    /// holds no heap pages.
+    pub pages: Option<StepPages>,
 }
+
+/// What an engine step reads and stages heap pages under: the store's page
+/// publication and the process actor's fence, whose leases its reads hold.
+#[derive(Clone)]
+pub struct StepPages {
+    pub store: std::sync::Arc<dyn lash_durable::domain::pages::PageStore>,
+    pub actor: lash_durable::ActorKey,
+    pub epoch: lash_durable::Epoch,
+}
+
+impl std::fmt::Debug for StepPages {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StepPages")
+            .field("actor", &self.actor)
+            .field("epoch", &self.epoch)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The heap pages an engine step's outcome publishes (FIG-6193, P1): a
+/// CheckpointRoot the body staged, which the step's outcome record names
+/// and owns. The lifecycle publishes it with the outcome's run fact in one
+/// fenced transaction, owned by that fact
+/// ([`CandidateOwner::RunFactAppend`](lash_durable::domain::pages::CandidateOwner::RunFactAppend)),
+/// and settles or abandons the staging after.
+#[async_trait::async_trait]
+pub trait StepPublication: Send + Sync {
+    /// The CheckpointRoot page the outcome names.
+    fn root(&self) -> lash_core_store::checkpoint_graph::NodeId;
+
+    /// The candidate rooted at [`root`](Self::root), with no base,
+    /// published under `commit`, and its semantic admission. What the
+    /// pages name beyond the heap and the store may not hold yet, such as
+    /// the release the root pins, is staged in the outcome's `tx`.
+    ///
+    /// # Errors
+    ///
+    /// The staging's refusal: nothing is published, and the outcome is not
+    /// recorded.
+    async fn publication(
+        &self,
+        tx: &mut lash_durable::ActorTx,
+        commit: lash_core_store::checkpoint_graph::CommitId,
+    ) -> Result<
+        (
+            Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>,
+            lash_durable::domain::pages::SemanticAdmission,
+        ),
+        lash_durable::DurableError,
+    >;
+
+    /// The publication under `commit` committed: the pages are the
+    /// store's, and the staging lets them go.
+    async fn settled(&self, commit: lash_core_store::checkpoint_graph::CommitId);
+
+    /// The publication under `commit` was refused before it entered the
+    /// store: the staging keeps its pages, and the outcome publishes them
+    /// again under a new commit.
+    async fn withdrawn(&self, commit: lash_core_store::checkpoint_graph::CommitId);
+
+    /// Nothing was published: the staging is dropped, and none of its
+    /// pages is ever reachable.
+    async fn abandoned(&self);
+}
+
+/// An engine step outcome's [`StepPublication`], compared by its root.
+#[derive(Clone)]
+pub struct StepCandidate(pub std::sync::Arc<dyn StepPublication>);
+
+impl StepCandidate {
+    /// The CheckpointRoot the outcome names.
+    #[must_use]
+    pub fn root(&self) -> lash_core_store::checkpoint_graph::NodeId {
+        self.0.root()
+    }
+}
+
+impl std::fmt::Debug for StepCandidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("StepCandidate").field(&self.root()).finish()
+    }
+}
+
+impl PartialEq for StepCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.root() == other.root()
+    }
+}
+
+impl Eq for StepCandidate {}
 
 /// Which host capacity an engine step's attempt did not get: the closed set
 /// of verdicts a [`CapacityVerdict`] names. Each is the host's, read live,
@@ -369,6 +504,13 @@ impl CapacityVerdict {
 pub enum EngineStepAnswer {
     /// Its outcome, recorded as the attempt's.
     Settled(Box<SettledOutput>),
+    /// Its completion, recorded as the attempt's with the heap pages it
+    /// publishes: the outcome's run fact names `candidate`'s root and owns
+    /// it from the commit that records both.
+    Paged {
+        output: Box<SettledOutput>,
+        candidate: StepCandidate,
+    },
     /// The host lacked capacity for the attempt; see [`CapacityVerdict`].
     Capacity(CapacityVerdict),
 }

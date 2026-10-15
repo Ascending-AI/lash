@@ -7,12 +7,17 @@ use std::time::Instant;
 
 use crate::PoolError;
 use crate::embedding::Embedding;
-use crate::graph::{self, GraphStateFailure};
-use crate::host::{Wire, WireHost};
-use lash_core_store::checkpoint_graph::bodies::OwnerBinding;
-use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal, NodeKind};
+use crate::host::{PagePort, Wire, WireHost, WirePageSource, grant_of, link_grant};
+use lash_kernel_doc::graph_tokens::{ChildRef, decode_body};
+use lash_kernel_doc::heap::{LogicalBytes, PageId, PageRef};
 use lash_kernel_doc::{Datum, Document};
-use lash_kernel_vm::{Bounds, KernelMachine, Machine, Program, Step};
+use lash_kernel_state::AdmittedWait;
+use lash_kernel_state::paged::census_impl::Census;
+use lash_kernel_state::paged::{
+    AccountingCertificate, AccountingMetric, AllocationCensus, CheckpointRoot, PageSource,
+    SealBudget, heap_accounting,
+};
+use lash_kernel_vm::{Bounds, CellStart, KernelMachine, Machine, OpenError, Program, Step};
 #[cfg(test)]
 use lash_vm_client::ipc::read_frame;
 use lash_vm_client::ipc::{Bootstrap, FrameSource, write_frame, write_frames};
@@ -22,28 +27,15 @@ use lash_vm_protocol::*;
 /// The one run a worker hosts between resets.
 struct Hosted {
     machine: KernelMachine,
-    /// The identity of the document the run executes, as its parked state
-    /// names it.
-    document: String,
-    /// The kernel version the document states, which its parked state is
-    /// sealed under.
-    kernel: u32,
     /// The run's heap bound, which also bounds what one slice may print
     /// (FIG-4458).
     memory: u64,
     ended: bool,
-    /// The release manifest the run pins: the one its graph state named
-    /// when it resumed, and for a run started here the release the build
-    /// writes for the run's dialect.
-    release: lash_kernel_doc::graph_tokens::ChildRef,
-    /// The execution the run's state is bound to at each park that requests
-    /// something, as its start named it.
-    export: Option<EncodedPayload>,
-    /// The export of the run's last park that its `Parked` did not carry:
-    /// one that failed, or that did not fit one frame with the park. The
-    /// parent's `ExportGraph` takes it, failure included, as if the export
-    /// ran then.
-    staged: Option<Result<SealedGraphState, PoolError>>,
+    /// The root the run's last park sealed, until a delivery or a slice
+    /// moves the run on: a `Seal` there answers with it.
+    sealed: Option<[u8; 32]>,
+    /// The run's page port: what the run hands the parent crosses first.
+    port: PagePort,
     /// Whether the parent observes the document sites the run enters.
     observe_sites: bool,
 }
@@ -77,6 +69,7 @@ pub(crate) struct Fences {
     pub incoming: Option<MessageFence>,
     pub outgoing: MessageFence,
     pub next_read: u64,
+    pub next_page: u64,
 }
 
 impl Fences {
@@ -154,6 +147,7 @@ impl<'embedding> Server<'embedding> {
                 incoming: None,
                 outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
                 next_read: 0,
+                next_page: 0,
             })),
             owner: None,
             prepared: false,
@@ -308,6 +302,7 @@ impl<'embedding> Server<'embedding> {
                     deliveries,
                     slice,
                     cancel,
+                    sealed,
                 } => {
                     if let Some(start) = &start {
                         self.admit_start(start)?;
@@ -316,6 +311,9 @@ impl<'embedding> Server<'embedding> {
                     if let Some(start) = start {
                         self.hosted = Some(self.start(*start)?);
                     }
+                    // The grants for the batch that crossed with the last
+                    // hand-over, before anything reads or references it.
+                    self.running()?.port.grant(sealed).map_err(heap_fault)?;
                     for delivery in deliveries {
                         self.deliver(delivery)?;
                     }
@@ -333,17 +331,19 @@ impl<'embedding> Server<'embedding> {
                     self.progress(WorkerPhase::Serializing)?;
                     self.respond(WorkerMessage::Delivered)?;
                 }
-                ParentMessage::ExportGraph { binding } => {
+                ParentMessage::Seal => {
                     self.progress(WorkerPhase::Computing)?;
-                    let exported = match self.staged_export(&binding) {
-                        Some(staged) => staged,
-                        None => self.export_graph(&binding),
-                    };
-                    let message = match exported {
+                    let message = match self.seal() {
                         Err(PoolError::Infrastructure(
                             InfrastructureOutcome::WorkerLimitExceeded { limit },
                         )) => WorkerMessage::LimitExceeded { limit },
-                        result => WorkerMessage::ExportedGraph { state: result? },
+                        result => {
+                            let candidate = result?;
+                            WorkerMessage::Sealed {
+                                seal: self.running()?.port.take_batch(),
+                                candidate,
+                            }
+                        }
                     };
                     self.progress(WorkerPhase::Serializing)?;
                     self.respond(message)?;
@@ -351,6 +351,10 @@ impl<'embedding> Server<'embedding> {
                 ParentMessage::HostAnswer { .. } => {
                     // A read is answered inside the slice that made it.
                     return Err(PoolError::breach(SequenceFault::NoPendingRead));
+                }
+                ParentMessage::Pages { .. } => {
+                    // So is a page exchange.
+                    return Err(PoolError::breach(SequenceFault::NoPendingPages));
                 }
                 ParentMessage::Cancel => {
                     // Physical cancellation never decides the durable winner.
@@ -370,6 +374,10 @@ impl<'embedding> Server<'embedding> {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .next_read = 0;
+                    self.fences
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .next_page = 0;
                     self.send(WorkerMessage::ResetDone {
                         cpu_nanos: cpu_nanos()?,
                     })?;
@@ -401,24 +409,39 @@ impl<'embedding> Server<'embedding> {
     fn deliver(&mut self, delivery: Delivery) -> Result<(), PoolError> {
         let outcome: OutcomeWire = self.decode(PayloadKind::Outcome, &delivery.outcome)?;
         let hosted = self.running()?;
-        hosted.staged = None;
+        hosted.sealed = None;
         hosted
             .machine
             .deliver(lash_kernel_vm::WaitId(delivery.wait), outcome.into())
             .map_err(machine_breach)?;
         Ok(())
     }
-    /// The export the run's last park made under `binding`, if it made one
-    /// its `Parked` did not carry.
-    fn staged_export(
-        &mut self,
-        binding: &EncodedPayload,
-    ) -> Option<Result<SealedGraphState, PoolError>> {
-        let hosted = self.hosted.as_mut()?;
-        if hosted.export.as_ref() != Some(binding) {
-            return None;
+    /// Seals the run as it stands at this safe point: its changed pages and
+    /// a checkpoint root, which cross to the parent's staging with the
+    /// frame that hands the run over. Returns the root's page.
+    fn seal(&mut self) -> Result<[u8; 32], PoolError> {
+        let hosted = self.running()?;
+        if let Some(sealed) = hosted.sealed {
+            return Ok(sealed);
         }
-        hosted.staged.take()
+        let root = loop {
+            let sealed = hosted
+                .machine
+                .seal(SealBudget {
+                    pages: u64::MAX,
+                    bytes: u64::MAX,
+                })
+                .map_err(|error| match error {
+                    lash_kernel_vm::SealError::Heap(fault) => heap_fault(fault),
+                    other => machine_breach(other),
+                })?;
+            if let Some(sealed) = sealed {
+                break sealed;
+            }
+        };
+        let candidate = root.page.id.0;
+        hosted.sealed = Some(candidate);
+        Ok(candidate)
     }
     /// The run's host wire, on this socket and under this run's fences.
     fn wire(&mut self) -> Result<Arc<Wire>, PoolError> {
@@ -462,16 +485,17 @@ impl<'embedding> Server<'embedding> {
             Some(hosted) => Ok(hosted),
         }
     }
-    /// A machine for the run: one that has executed nothing, or one rebuilt
-    /// from the parked state. The document is validated and compiled against
-    /// the registry this worker assembled when it started, with each function
-    /// redeclared for the document's kernel version when that is a
-    /// successor's; nothing is loaded from the document.
+    /// A machine for the run: one that has executed nothing, or one opened
+    /// on a committed checkpoint root, its heap read and sealed through the
+    /// parent's page service. The document is validated and compiled
+    /// against the registry this worker assembled when it started, with
+    /// each function redeclared for the document's kernel version when that
+    /// is a successor's; nothing is loaded from the document.
     fn start(&mut self, start: Start) -> Result<Hosted, PoolError> {
         self.wire = None;
         // The run's dialect is what its session or process recorded at
         // creation. A worker whose host did not name that dialect refuses
-        // before it reads the document or the parked state (FIG-5990).
+        // before it reads the document or the checkpoint (FIG-5990).
         if !self.embedding.installs(&start.dialect) {
             return Err(PoolError::refused(RunRefusal::DialectNotInstalled {
                 dialect: start.dialect,
@@ -484,8 +508,7 @@ impl<'embedding> Server<'embedding> {
                 detail: Detail::new(error),
             })
         };
-        let (program, identity) = self.program(&start.document)?;
-        let kernel = program.document.manifest.kernel;
+        let (mut program, identity) = self.program(&start.document)?;
         let bounds = Bounds {
             charge: start.bounds.charge,
             memory: start.bounds.memory,
@@ -494,73 +517,132 @@ impl<'embedding> Server<'embedding> {
             requests_per_park: start.bounds.requests_per_park,
             join_members: start.bounds.join_members,
         };
-        let (mut machine, release) = match start.from {
+        let owner = PageId(start.binding);
+        let mut source = WirePageSource::new(self.wire()?, self.bootstrap.tuning.pages.clean_bytes);
+        let port = source.port();
+        port.warm(&start.warm).map_err(heap_fault)?;
+        let manifests = &self
+            .embedding
+            .release_manifests()
+            .map_err(machine_breach)?
+            .manifests;
+        let save = start
+            .save
+            .as_ref()
+            .map(|payload| {
+                self.codec.check_payload(&payload.0)?;
+                let save: wire::SaveWire = wire::decode(PayloadKind::Start, payload)
+                    .map_err(|error| undecodable(RunInput::Start, &error))?;
+                Ok::<_, PoolError>(crate::save::DialectSave {
+                    values: self
+                        .embedding
+                        .dialects
+                        .get(&start.dialect)
+                        .and_then(|package| package.function_values.clone()),
+                    controls: save.controls,
+                    written: save.written,
+                })
+            })
+            .transpose()?;
+        let mut machine = match start.from {
             StartFrom::Fresh(payload) => {
                 self.codec.check_payload(&payload.0)?;
                 let from: StartWire = wire::decode(PayloadKind::Start, &payload)
                     .map_err(|error| undecodable(RunInput::Start, &error))?;
-                let release = self
-                    .embedding
-                    .release_manifests()
-                    .map_err(machine_breach)?
-                    .manifests
-                    .current(&start.dialect)
-                    .ok_or_else(|| {
-                        machine_breach(format!(
-                            "the build holds no helper release of the dialect `{}`",
-                            start.dialect
-                        ))
-                    })?;
-                let (from, modes) = from.into_start();
-                let machine = KernelMachine::start_with_data_limits(
+                let release = manifests.current(&start.dialect).ok_or_else(|| {
+                    machine_breach(format!(
+                        "the build holds no helper release of the dialect `{}`",
+                        start.dialect
+                    ))
+                })?;
+                program.release = PageId(release.0);
+                let session = from
+                    .session
+                    .as_ref()
+                    .map(|carry| carry.session(link_grant))
+                    .transpose()
+                    .map_err(|error| undecodable(RunInput::Start, &error))?;
+                let census = census(
+                    session
+                        .as_ref()
+                        .map(|session| heap_accounting(&mut source, session.heap))
+                        .transpose()
+                        .map_err(heap_fault)?,
+                    bounds.memory,
+                )?;
+                KernelMachine::start_with_data_limits(
                     program,
                     bounds,
-                    from,
+                    CellStart {
+                        owner,
+                        target: from.target(),
+                        modes: from.modes(),
+                        args: from.args,
+                        session,
+                        host: from.host,
+                    },
                     self.bootstrap.tuning.kernel_data,
-                    modes,
+                    Box::new(source),
+                    census,
                 )
-                .map_err(|error| {
-                    PoolError::refused(RunRefusal::Start {
+                .map_err(|error| match error {
+                    lash_kernel_vm::StartError::Heap(fault) => heap_fault(fault),
+                    error => PoolError::refused(RunRefusal::Start {
                         detail: Detail::new(error),
-                    })
-                })?;
-                (machine, release)
+                    }),
+                })?
             }
-            StartFrom::ParkedGraph(parked) => {
-                parked
-                    .state
-                    .check(&GraphStateExpectation {
-                        owner: &start.owner,
-                        kernel: lash_vm_client::kernel_reads(),
-                        document: Some(&identity),
-                        root_kinds: &[NodeKind::KERNEL_WHOLE.0],
-                        max_nodes: self.bootstrap.state,
-                        max_bytes: self.bootstrap.state,
-                    })
-                    .map_err(InfrastructureOutcome::input_graph_state)?;
-                let manifests = self.embedding.release_manifests().map_err(|error| {
-                    PoolError::breach(ProtocolBreach::Machine {
-                        detail: Detail::new(error),
+            StartFrom::Checkpoint(checkpoint) => {
+                // The root's bounded header first, through the page
+                // exchange; then only what the run touches.
+                let page = PageRef {
+                    id: PageId(checkpoint.root.page),
+                    grant: grant_of(&checkpoint.root),
+                };
+                let answers = source.read(&[page]).map_err(heap_fault)?;
+                let answer = answers
+                    .first()
+                    .ok_or_else(|| undecodable(RunInput::Checkpoint, &"the root was not read"))?;
+                let root = CheckpointRoot::of_answer(answer).map_err(|fault| {
+                    PoolError::refused(RunRefusal::Checkpoint {
+                        refusal: CheckpointRefusal::Malformed {
+                            problem: fault.to_string(),
+                        },
                     })
                 })?;
-                let registry = Arc::clone(program.library.registry());
-                // A large value shared by many references is one leaf but
-                // reads back whole at each: the logical body is bounded by
-                // the state and the run's heap together.
-                let limits = DecodeLimits {
-                    kernel_data: self.bootstrap.tuning.kernel_data,
-                    logical_bytes: self.bootstrap.state.saturating_add(bounds.memory),
-                    ..DecodeLimits::within_total(self.bootstrap.state)
-                };
-                let (machine, pinned) =
-                    graph::import_parked(program, bounds, &parked, manifests, &registry, limits)
-                        .map_err(|failure| match failure {
-                            GraphStateFailure::Restore(refusal) => {
-                                PoolError::refused(RunRefusal::Restore { refusal })
-                            }
-                            other => undecodable(RunInput::ParkedRun, &other),
-                        })?;
-                (machine, pinned)
+                if root.owner != owner {
+                    return Err(PoolError::refused(RunRefusal::Checkpoint {
+                        refusal: CheckpointRefusal::WrongOwner {
+                            expected: hex(&owner.0),
+                            found: hex(&root.owner.0),
+                        },
+                    }));
+                }
+                if manifests.dialect_of(&ChildRef(root.release.0)).is_none() {
+                    return Err(PoolError::refused(RunRefusal::Restore {
+                        refusal: KernelRestoreRefusal::ReleaseMismatch {
+                            pinned: hex(&root.release.0),
+                        },
+                    }));
+                }
+                program.release = root.release;
+                let admissions = checkpoint
+                    .admissions
+                    .iter()
+                    .map(|admission| decode_body::<AdmittedWait>(&admission.0))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| undecodable(RunInput::Checkpoint, &error))?;
+                let census = census(
+                    Some(heap_accounting(&mut source, root.heap).map_err(heap_fault)?),
+                    bounds.memory,
+                )?;
+                KernelMachine::open(program, bounds, &root, admissions, Box::new(source), census)
+                    .map_err(|error| match error {
+                        OpenError::Heap(fault) => heap_fault(fault),
+                        error => PoolError::refused(RunRefusal::Restore {
+                            refusal: restore_refusal(error),
+                        }),
+                    })?
             }
         };
         machine.set_observe(if start.observe_counts {
@@ -568,15 +650,16 @@ impl<'embedding> Server<'embedding> {
         } else {
             lash_kernel_vm::Observe::Off
         });
+        let _ = identity;
+        if let Some(save) = save {
+            machine.set_cell_save(Box::new(save));
+        }
         Ok(Hosted {
             machine,
-            document: identity,
-            kernel,
             memory: start.bounds.memory,
             ended: false,
-            release,
-            export: start.export,
-            staged: None,
+            sealed: None,
+            port,
             observe_sites: start.observe_sites,
         })
     }
@@ -621,7 +704,9 @@ impl<'embedding> Server<'embedding> {
                 detail: Detail::new(error),
             })
         })?;
+        // A run's start names the release it pins.
         let program = Program {
+            release: PageId([0; 32]),
             document: Arc::new(document),
             library: library.clone(),
         };
@@ -658,11 +743,15 @@ impl<'embedding> Server<'embedding> {
                 .observe_sites
                 .then(crate::host::EnteredSites::default),
         };
-        hosted.staged = None;
+        hosted.sealed = None;
+        let port = hosted.port.clone();
         let step = hosted
             .machine
             .run(&mut host, slice)
-            .map_err(machine_breach)?;
+            .map_err(|error| match error {
+                lash_kernel_vm::MachineError::Heap(fault) => heap_fault(fault),
+                other => machine_breach(other),
+            })?;
         if hosted.observe_sites || !matches!(step, Step::Slice) {
             host.ran.extend(hosted.machine.take_ran());
         }
@@ -676,19 +765,17 @@ impl<'embedding> Server<'embedding> {
             memory: meters.memory,
             live_tasks: meters.live_tasks,
         };
-        // A park that requests something is saved as it stands, so its
-        // state is exported now, where the parent would ask for it next.
-        let export = match &step {
-            Step::Parked(park) if requests_something(park) => hosted.export.clone(),
+        // A park that requests something is saved as it stands, so it is
+        // sealed now, where the parent would ask for it next. What it
+        // sealed crosses with the park, and a finished cell's carry with
+        // the run's end.
+        let candidate = match &step {
+            Step::Parked(park) if requests_something(park) => Some(self.seal()?),
             _ => None,
         };
-        let state = match export.map(|binding| self.export_graph(&binding)) {
-            Some(Ok(state)) => Some(state),
-            Some(Err(failure)) => {
-                self.running()?.staged = Some(Err(failure));
-                None
-            }
-            None => None,
+        let seal = match &step {
+            Step::Parked(_) | Step::Ended(_) => port.take_batch(),
+            Step::Slice => None,
         };
         self.progress(WorkerPhase::Serializing)?;
         let Some(chunks) = self.printed_chunks(&host.printed, memory)? else {
@@ -704,15 +791,21 @@ impl<'embedding> Server<'embedding> {
             Step::Parked(park) => WorkerMessage::Parked {
                 park: self.encode(PayloadKind::Park, &ParkWire::from(park))?,
                 meters,
-                state,
+                seal,
+                candidate,
                 sites,
             },
             Step::Slice => WorkerMessage::Slice { meters, sites },
             Step::Ended(end) => {
-                let end: EndWire = self.end_state(&end)?;
+                // A finished cell's carry crosses to the parent's staging
+                // with the run's end: each of its pages is named by the
+                // capability its seal or read granted, or as a page of the
+                // batch that crosses with it.
+                let end = EndWire::of(end, |page| port.link(page));
                 WorkerMessage::Ended {
                     end: self.encode(PayloadKind::End, &end)?,
                     meters,
+                    seal,
                     sites,
                 }
             }
@@ -769,7 +862,8 @@ impl<'embedding> Server<'embedding> {
                     refusal @ (CodecRefusal::Truncated { .. }
                     | CodecRefusal::BadMagic
                     | CodecRefusal::Malformed { .. }
-                    | CodecRefusal::TrailingBytes { .. }),
+                    | CodecRefusal::TrailingBytes { .. }
+                    | CodecRefusal::PageBatch { .. }),
                 ) => return Err(refusal.into()),
             }
             if chunker.bytes() > budget {
@@ -778,44 +872,6 @@ impl<'embedding> Server<'embedding> {
         }
         Ok(Some(chunker.finish()))
     }
-    /// The run's end as TerminalWhole graph state, sealed under its owner,
-    /// the kernel version and its document; none for a cancelled run.
-    fn end_state(&self, end: &lash_kernel_vm::End) -> Result<EndWire, PoolError> {
-        let owner = self
-            .owner
-            .clone()
-            .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?;
-        let bound = self.bootstrap.state;
-        let hosted = self
-            .hosted
-            .as_ref()
-            .ok_or_else(|| PoolError::breach(SequenceFault::NoRun))?;
-        graph::export_end(end, owner, hosted.kernel, &hosted.document, bound)
-            .map_err(|failure| state_failure(failure, bound))
-    }
-    /// The run's state at this park as checkpoint graph state, bound to the
-    /// execution `binding` names and pinning the run's release.
-    fn export_graph(&mut self, binding: &EncodedPayload) -> Result<SealedGraphState, PoolError> {
-        let owner = self
-            .owner
-            .clone()
-            .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?;
-        let binding: OwnerBinding = lash_kernel_doc::graph_tokens::decode_body(&binding.0)
-            .map_err(|error| PoolError::payload(PayloadKind::ParkedRun, error))?;
-        let bound = self.bootstrap.state;
-        let hosted = self.running()?;
-        let release = hosted.release;
-        graph::export_parked(
-            &mut hosted.machine,
-            owner,
-            &binding,
-            release,
-            &hosted.document,
-            bound,
-        )
-        .map_err(|failure| state_failure(failure, bound))
-    }
-
     /// Sends the step's answer, and hands its message back.
     fn respond(&mut self, message: WorkerMessage) -> Result<WorkerMessage, PoolError> {
         // Encode while the serialization deadline is active. Reserve the
@@ -828,41 +884,6 @@ impl<'embedding> Server<'embedding> {
         fence.next_header();
         let header = fence.next_header();
         let (message, bytes) = match encode_worker(&self.codec, header, message) {
-            // A state that does not fit one frame with its park waits for
-            // the parent's `ExportGraph`, which then carries it alone.
-            (
-                WorkerMessage::Parked {
-                    park,
-                    meters,
-                    state: Some(state),
-                    sites,
-                },
-                bytes,
-            ) if !bytes
-                .as_ref()
-                .is_ok_and(|bytes| self.codec.check_frame(bytes).is_ok()) =>
-            {
-                self.running()?.staged = Some(Ok(state));
-                let parked = WorkerMessage::Parked {
-                    park,
-                    meters,
-                    state: None,
-                    sites,
-                };
-                match encode_worker(&self.codec, header, parked) {
-                    (
-                        message,
-                        Err(PoolError::Infrastructure(
-                            InfrastructureOutcome::WorkerLimitExceeded { limit },
-                        )),
-                    ) => (
-                        message,
-                        encode_worker(&self.codec, header, WorkerMessage::LimitExceeded { limit })
-                            .1?,
-                    ),
-                    (message, bytes) => (message, bytes?),
-                }
-            }
             (
                 message,
                 Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
@@ -874,20 +895,8 @@ impl<'embedding> Server<'embedding> {
             ),
             (message, bytes) => (message, bytes?),
         };
-        let graph_bytes = match &message {
-            WorkerMessage::Parked {
-                state: Some(state), ..
-            }
-            | WorkerMessage::ExportedGraph { state } => state
-                .nodes()
-                .iter()
-                .map(|node| node.bytes.capacity())
-                .sum::<usize>(),
-            _ => 0,
-        };
         crate::perf_witness::buffer(
             bytes.capacity()
-                + graph_bytes
                 + self
                     .inbound
                     .lock()
@@ -961,23 +970,61 @@ pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {
         .saturating_add(time.tv_nsec as u64))
 }
 
-/// A state that did not stage: over the state bound, the run's limit, and
-/// otherwise the machine's breach.
-fn state_failure(failure: GraphStateFailure, bound: u64) -> PoolError {
-    match failure {
-        GraphStateFailure::Graph(GraphRefusal::EncodeMemoryLimit) => {
-            InfrastructureOutcome::WorkerLimitExceeded {
-                // The staging stopped at the bound: the state is larger
-                // than it.
-                limit: WorkerLimit::VmState {
-                    size: bound.saturating_add(1),
-                    bound,
-                },
-            }
-            .into()
+/// A census over a heap whose persisted accounting is `accounting` (a
+/// fresh heap's when none), held to the run's heap bound.
+fn census(
+    accounting: Option<AccountingCertificate>,
+    memory: u64,
+) -> Result<Box<dyn AllocationCensus>, PoolError> {
+    let accounting = accounting.unwrap_or(AccountingCertificate {
+        metric: AccountingMetric::LocalCostV1,
+        upper: LogicalBytes(0),
+        entities: 0,
+        refinements: 0,
+    });
+    Census::restore(accounting, LogicalBytes(memory))
+        .map(|census| Box::new(census) as Box<dyn AllocationCensus>)
+        .map_err(machine_breach)
+}
+
+/// A heap fault as the worker reports it: a host outcome of the
+/// activation, never the guest's.
+fn heap_fault(fault: lash_kernel_doc::heap::HeapFault) -> PoolError {
+    PoolError::breach(ProtocolBreach::Machine {
+        detail: Detail::new(fault),
+    })
+}
+
+/// The kernel's refusal of a root as the protocol carries it.
+fn restore_refusal(error: OpenError) -> KernelRestoreRefusal {
+    match error {
+        OpenError::MissingFunction { function } => KernelRestoreRefusal::MissingFunction {
+            function: function.to_string(),
+        },
+        OpenError::NotAdmitted(invalid) => KernelRestoreRefusal::NotAdmitted {
+            reason: invalid.to_string(),
+        },
+        OpenError::DocumentMismatch { parked, given } => KernelRestoreRefusal::DocumentMismatch {
+            parked: parked.to_string(),
+            given: given.to_string(),
+        },
+        OpenError::KernelVersion { parked, supported } => {
+            KernelRestoreRefusal::KernelVersion { parked, supported }
         }
-        other => machine_breach(other),
+        other => KernelRestoreRefusal::Malformed {
+            problem: other.to_string(),
+        },
     }
+}
+
+fn hex(bytes: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+    bytes
+        .iter()
+        .fold(String::with_capacity(64), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
 }
 
 fn machine_breach(error: impl std::fmt::Display) -> PoolError {
@@ -990,8 +1037,8 @@ fn machine_breach(error: impl std::fmt::Display) -> PoolError {
 mod tests {
     use super::*;
 
-    /// FIG-6148: fresh activations and a resumed process prepare identical
-    /// content once per worker, without changing charge or restored state.
+    /// FIG-6148: activations of one process prepare identical content once
+    /// per worker, without changing charge.
     #[test]
     fn process_activations_decode_one_document_per_worker() {
         let config =
@@ -1024,20 +1071,19 @@ mod tests {
                 wire::encode(
                     PayloadKind::Start,
                     &StartWire::of(
-                        lash_kernel_vm::Start {
-                            target: lash_kernel_vm::Target::Entry(lash_kernel_doc::Name::new(
-                                "work",
-                            )),
-                            args: Vec::new(),
-                            bindings: Default::default(),
-                        },
+                        lash_kernel_vm::Target::Entry(lash_kernel_doc::Name::new("work")),
+                        Vec::new(),
+                        None,
                         &lash_kernel_vm::EffectModes::recorded(),
+                        Vec::new(),
                     ),
                 )
                 .expect("start"),
             ),
             bounds: config.run_bounds,
-            export: None,
+            binding: [3; 32],
+            save: None,
+            warm: Vec::new(),
             observe_sites: false,
             observe_counts: false,
         };
@@ -1068,17 +1114,6 @@ mod tests {
             first.machine.run(&mut Quiet, 1).expect("slice"),
             Step::Slice
         );
-        let parked = graph::export_parked(
-            &mut first.machine,
-            start.owner.clone(),
-            &OwnerBinding::Process {
-                process: "law".to_owned(),
-            },
-            first.release,
-            &first.document,
-            config.protocol.max_vm_state_bytes,
-        )
-        .expect("export");
         let meters = first.machine.meters();
         drop(first);
         let mut second = server.start(start.clone()).expect("second activation");
@@ -1087,25 +1122,10 @@ mod tests {
             Step::Slice
         );
         assert_eq!(second.machine.meters().charged, meters.charged);
-        let end = second.machine.run(&mut Quiet, u64::MAX).expect("end");
-        let final_meters = second.machine.meters();
         drop(second);
-        let mut resumed = start.clone();
-        resumed.from = StartFrom::ParkedGraph(ParkedGraph {
-            state: parked,
-            admissions: Vec::new(),
-        });
-        let mut restored = server.start(resumed).expect("resumed activation");
-        assert_eq!(restored.machine.meters().charged, meters.charged);
-        assert_eq!(
-            restored.machine.run(&mut Quiet, u64::MAX).expect("end"),
-            end
-        );
-        assert_eq!(restored.machine.meters().charged, final_meters.charged);
-        assert!(final_meters.charged > 0);
         assert_eq!(
             server.document_decodes, 1,
-            "three activations share one preparation"
+            "two activations share one preparation"
         );
         // Another format cannot reuse the earlier document's preparation.
         let mut changed = document;

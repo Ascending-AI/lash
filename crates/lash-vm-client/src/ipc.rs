@@ -166,24 +166,13 @@ impl Worker {
         }
         let frame = self.codec.decode_worker(&bytes).map_err(PoolError::from)?;
         if let Some(measurements) = &self.measurements {
-            let graph_bytes = match &frame.message {
-                lash_vm_protocol::WorkerMessage::Parked {
-                    state: Some(state), ..
-                }
-                | lash_vm_protocol::WorkerMessage::ExportedGraph { state } => state
-                    .nodes()
-                    .iter()
-                    .map(|node| node.bytes.capacity())
-                    .sum::<usize>(),
-                _ => 0,
-            };
             let mut measurements = measurements
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             measurements.counters.peak_buffer_bytes = measurements
                 .counters
                 .peak_buffer_bytes
-                .max((bytes.capacity() + graph_bytes + self.inbound.buffer_capacity()) as u64);
+                .max((bytes.capacity() + self.inbound.buffer_capacity()) as u64);
         }
         Ok(frame)
     }

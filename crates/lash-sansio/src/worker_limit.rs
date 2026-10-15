@@ -17,7 +17,7 @@ pub enum WorkerFrameKind {
     Slice,
     Ended,
     Delivered,
-    Exported,
+    Sealed,
     Cancelled,
     ResetDone,
     Prepared,

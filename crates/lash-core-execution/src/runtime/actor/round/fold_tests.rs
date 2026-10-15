@@ -41,7 +41,14 @@ fn a_presentation_marker_derives_its_members_in_admission_order() {
         ],
     );
     for member in members.iter().rev() {
-        settle(&mut tx, member, SettledOutput::Interrupted, Vec::new()).unwrap();
+        settle(
+            &mut tx,
+            member,
+            SettledOutput::Interrupted,
+            Vec::new(),
+            None,
+        )
+        .unwrap();
     }
     let next = Ordinal(rows(&tx).rows.len() as u64);
     present(&mut tx, next);
@@ -231,8 +238,22 @@ fn a_gap_in_a_runs_ordinals_is_refused() {
 fn a_second_final_of_a_call_is_refused() {
     let mut tx = opened();
     let members = admitted(&mut tx, vec![draft("a", "once", ExecutionPolicy::Once)]);
-    settle(&mut tx, &members[0], SettledOutput::Interrupted, Vec::new()).unwrap();
-    settle(&mut tx, &members[0], SettledOutput::Interrupted, Vec::new()).unwrap();
+    settle(
+        &mut tx,
+        &members[0],
+        SettledOutput::Interrupted,
+        Vec::new(),
+        None,
+    )
+    .unwrap();
+    settle(
+        &mut tx,
+        &members[0],
+        SettledOutput::Interrupted,
+        Vec::new(),
+        None,
+    )
+    .unwrap();
     assert_eq!(
         fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()),
         Err(FoldRefusal::SecondFinal(ToolCallId::fixture("a")))
@@ -284,7 +305,7 @@ fn a_call_whose_retry_is_due_ends_at_its_failed_attempt() {
     let due = fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).unwrap();
     let view = due.round(RUN).unwrap();
     let execution = view.execution(&view.members()[0]);
-    settle(&mut tx, &execution, failed(), Vec::new()).unwrap();
+    settle(&mut tx, &execution, failed(), Vec::new(), None).unwrap();
     assert_eq!(
         recoveries(&fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).unwrap()),
         vec![Recovery::Settled(failed())]

@@ -331,14 +331,15 @@ pub use process::{
     ResolvedProcessDefinition, ResolvedStartTarget, RetiredProcessStatus,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, StagedProcessStart, StartCx,
-    StartCxError, StartKey, StepName, StepRequest, StoreRealization, TerminalProcessStatus,
-    WaitKind, WaitSiteUnavailable, WaitState, WatchedRegistry, WeakProcessEngineRegistry,
-    allocate_process_event_sequence, apply_process_event_projection, artifact_store_plugin_error,
-    check_links, check_retained_start, current_epoch_ms, fold_process_record, hold_process_env,
-    lifetime, load_process_env, mint_process_id, prepare_process_event_append,
-    prepare_process_registration, prepare_process_transition, process_child_session_id,
-    process_session_id, process_session_turn_id, reconcile_session_process_observer_intents,
-    terminal_append_request, tool_failure_code, watch_process_registry,
+    StartCxError, StartKey, StepCandidate, StepName, StepPages, StepPublication, StepRequest,
+    StoreRealization, TerminalProcessStatus, WaitKind, WaitSiteUnavailable, WaitState,
+    WatchedRegistry, WeakProcessEngineRegistry, allocate_process_event_sequence,
+    apply_process_event_projection, artifact_store_plugin_error, check_links, check_retained_start,
+    current_epoch_ms, fold_process_record, hold_process_env, lifetime, load_process_env,
+    mint_process_id, prepare_process_event_append, prepare_process_registration,
+    prepare_process_transition, process_child_session_id, process_session_id,
+    process_session_turn_id, reconcile_session_process_observer_intents, terminal_append_request,
+    tool_failure_code, watch_process_registry,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{

@@ -91,12 +91,6 @@ enum Build {
     HelpersClosing,
 }
 
-/// A core over `stores`: of build N when `previous`, else of build N+1.
-fn core(stores: &Arc<dyn StoreSet>, previous: bool, boot: &str) -> (lash::Backend, lash::LashCore) {
-    let build = if previous { Build::N } else { Build::NPlus1 };
-    serving(stores, build, boot, &[])
-}
-
 /// A core of `build` over `stores`, serving a model that answers each call
 /// with the next of `cells`, a TypeScript cell.
 fn serving(
@@ -400,99 +394,12 @@ async fn survey(backend: &lash::Backend) -> serde_json::Value {
     serde_json::to_value(&survey).expect("the survey encodes")
 }
 
-/// `worker()` sleeps inside `collection.map`'s kernel body, through the
-/// closure it hands it. It sleeps twice: a sleep's deadline is counted from
-/// its run's admission, which a cold worker's start can outlast, so only
-/// the second is sure to park the process.
-fn library_body_worker() -> String {
-    let functions = lash::vm::standard_functions().expect("the shipped library assembles");
-    let map = functions
-        .iter()
-        .find(|(_, function)| {
-            function.definition.name.to_string() == "collection.map"
-                && function.definition.kernel == KernelVersion::One.number()
-        })
-        .map(|(identity, _)| *identity)
-        .expect("the shipped library has collection.map");
-    format!(
-        r#"kernel 1
-numbers float
-use collection.map = @{map}
-entry worker() -> Any
-
-fn worker() {{
-  let nap = fn(x) {{ do sleep 1500 return x }}
-  let items = ["first", "second"]
-  let out = invoke collection.map(items, nap)
-  return out
-}}
-
-main {{
-  finish null
-}}
-"#
-    )
-}
-
-/// FIG-6127 / D2: the survey and claim refuse a format-incompatible pinned
-/// helper release by name, leaving the process in its original format.
+/// A run parked by build N is never carried: no migrator carries its
+/// heap pages. Build N+1 interprets the version it parked under and holds
+/// every function its document reaches, so it claims the process and
+/// resumes the run in that version, to its end (FIG-6193).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_process_format_carry_refuses_helpers_missing_from_its_pinned_release() {
-    let stores: Arc<dyn StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("an in-memory store set opens"),
-    );
-    let (old_backend, old) = core(&stores, true, "build-n");
-    let payload = payload(&old_backend, &library_body_worker()).await;
-    let process = start(&old, payload).await;
-    let actor = ActorKey::process(process.as_str()).expect("a process actor key");
-    let processes = old.processes();
-    let row = tokio::select! {
-        row = waiting(&old_backend, &actor) => row,
-        output = processes.await_output(&process) => {
-            panic!("the process ended instead of sleeping: {output:?}")
-        }
-    };
-    assert_eq!(row.state, ActorState::Waiting);
-    old.drain().await.expect("build N's node drains");
-
-    let survey = survey(&old_backend).await;
-    assert_eq!(survey["checked"], 1, "{survey}");
-    let listed = &survey["refused"][0];
-    assert_eq!(listed["process"], serde_json::json!(process), "{survey}");
-    assert_eq!(listed["refusal"]["refused"], "parked", "{survey}");
-    assert_eq!(
-        listed["refusal"]["refusal"]["reason"], "state_not_carried",
-        "{survey}"
-    );
-    assert!(
-        listed["refusal"]["refusal"]["detail"]
-            .as_str()
-            .expect("the pinned-release reason")
-            .contains("helper release 1.0"),
-        "{survey}"
-    );
-
-    let (new_backend, _new) = core(&stores, false, "build-n-plus-1");
-    let parked = in_state(&new_backend, &actor, ActorState::Parked).await;
-    let reason: serde_json::Value =
-        serde_json::from_str(parked.park.as_deref().expect("a parked actor says why"))
-            .expect("the park reason is JSON");
-    assert_eq!(reason["reason"], "migration_refused", "{reason}");
-    assert_eq!(reason["refusal"], listed["refusal"], "{reason}");
-    assert!(
-        parked
-            .formats
-            .as_str()
-            .contains(&engine_format(KernelVersion::One)),
-        "the refused process is as build N left it: {:?}",
-        parked.formats
-    );
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_process_parked_by_build_n_is_claimed_migrated_and_resumed_by_build_n_plus_1() {
+async fn a_process_parked_by_build_n_is_resumed_by_build_n_plus_1_in_the_version_it_parked_under() {
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -563,11 +470,14 @@ async fn a_process_parked_by_build_n_is_claimed_migrated_and_resumed_by_build_n_
         ended
             .formats
             .as_str()
-            .contains(&engine_format(KernelVersion::SyntheticNext)),
-        "the process ended in build N+1's format set, having been migrated at the claim: {:?}",
+            .contains(&engine_format(KernelVersion::One))
+            && !ended
+                .formats
+                .as_str()
+                .contains(&engine_format(KernelVersion::SyntheticNext)),
+        "the process ended in the version it parked under, never carried: {:?}",
         ended.formats
     );
-    assert_ne!(ended.formats, written);
 }
 
 /// What `process` was launched under: its environment's reference, its
@@ -656,18 +566,14 @@ fn cell_finishes(view: &lash::persistence::SessionReadView) -> Vec<serde_json::V
         .collect()
 }
 
-/// The two-build claim law of a session (kernel spec §6): a session of
-/// build N saves a function, and its next turn's cell parks in a `sleep`
-/// with a call of that function still ahead of it. Build N dies. Build
-/// N+1 claims the session, which is in build N's format set: restoring the
-/// turn, it carries the cell's document, parked run and ledger to its own
-/// kernel version and moves the session to its own format set in one
-/// commit, and the cell resumes, calling the function its document
-/// declares, to the answer it would have reached.
-/// FIG-6127 / D2: a cell whose retained helper manifest cannot supply the
-/// next kernel encoding parks typed, with its original snapshot intact.
+/// The two-build claim law of a session (kernel spec §6), its refusal: a
+/// turn's cell of build N parks in a `sleep` and build N dies. Build N+1
+/// claims the session, which is in build N's format set: no migrator
+/// carries the parked cell's heap pages to its kernel version (FIG-6193),
+/// so the session parks typed, in build N's format set, its cell's roots
+/// as build N left them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_session_cell_format_carry_refuses_helpers_missing_from_its_pinned_release() {
+async fn a_session_cell_parked_by_build_n_is_carried_onto_no_kernel_version_and_parks_typed() {
     const SESSION: &str = "kernel-two-build-session";
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
@@ -717,13 +623,6 @@ async fn a_session_cell_format_carry_refuses_helpers_missing_from_its_pinned_rel
         refusal["refusal"]["reason"], "state_not_carried",
         "{listed}"
     );
-    assert!(
-        refusal["refusal"]["detail"]
-            .as_str()
-            .expect("the release reason")
-            .contains("helper release 1.0"),
-        "{listed}"
-    );
     let session = lash::SessionId::fixture(SESSION);
     let turn = backend
         .durable()
@@ -744,7 +643,7 @@ async fn a_session_cell_format_carry_refuses_helpers_missing_from_its_pinned_rel
             .expect("a JSON park reason");
     assert_eq!(reason["reason"], "undecodable_state", "{reason}");
     assert!(
-        reason.to_string().contains("helper release 1.0"),
+        reason.to_string().contains("carried by no migrator"),
         "{reason}"
     );
     assert_eq!(parked.formats, written);
@@ -757,12 +656,6 @@ async fn a_session_cell_format_carry_refuses_helpers_missing_from_its_pinned_rel
         roots,
         "a refused carry publishes no rewritten cell",
     );
-}
-
-/// `worker()` of [`WORKER`], its sleep an hour long: a process that no node
-/// claims within a law's time unless something wakes it.
-fn long_sleeper() -> String {
-    WORKER.replace("do sleep 1500", "do sleep 3600000")
 }
 
 /// The row of `actor` once its format set is no longer `written`.
@@ -807,141 +700,6 @@ async fn idle_session(
 
 /// The binding turn of [`idle_session`].
 const BIND: &str = "function double(n: number) { return n * 2; }\nawait control.finish('bound');";
-
-/// FIG-5787: a process that waits on a long timer and a session that runs
-/// no turn are not claimed by build N+1 within its window, so they would
-/// be stranded under the build that closes it. The operator's sweep wakes
-/// both: a node of build N+1 claims each and carries it to its own formats,
-/// the process at its claim and the idle session outside a turn. Once
-/// build N+1 drains, the closing build, which no longer reads build N's
-/// formats, starts, decodes the process and runs a turn of the session
-/// that calls the function it saved under build N.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_idle_process_and_an_idle_session_are_swept_by_build_n_plus_1_and_read_by_the_closing_build()
- {
-    const SESSION: &str = "kernel-sweep-session";
-    let stores: Arc<dyn StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("an in-memory store set opens"),
-    );
-    let (old_backend, old) = idling(&stores, Build::N, "build-n", &[BIND]);
-    let payload = payload(&old_backend, &long_sleeper()).await;
-    let process = start(&old, payload).await;
-    let process_actor = ActorKey::process(process.as_str()).expect("a process actor key");
-    let session_actor = ActorKey::session(SESSION).expect("a session actor key");
-    let process_written = waiting(&old_backend, &process_actor).await.formats;
-    let session_written = idle_session(&old_backend, &old, SESSION).await;
-    old.drain().await.expect("build N's node drains");
-    let listed = survey(&old_backend).await;
-    assert_eq!(listed["unmigrated"], 2, "{listed}");
-    assert_eq!(
-        listed["sessions"],
-        serde_json::json!([{"session": SESSION, "refused": []}]),
-        "{listed}"
-    );
-
-    let (new_backend, new) = serving(&stores, Build::NPlus1, "build-n-plus-1", &[]);
-    let swept = lash::vm::sweep_kernel_migration(&new_backend)
-        .await
-        .expect("the sweep wakes what is left");
-    assert_eq!(
-        serde_json::to_value(&swept).expect("the sweep encodes"),
-        serde_json::json!({"processes": 1, "sessions": 1})
-    );
-    let process_row = carried_from(&new_backend, &process_actor, &process_written).await;
-    let session_row = carried_from(&new_backend, &session_actor, &session_written).await;
-    assert!(
-        process_row
-            .formats
-            .as_str()
-            .contains(&engine_format(KernelVersion::SyntheticNext)),
-        "the process is in build N+1's format set: {:?}",
-        process_row.formats
-    );
-    assert_eq!(
-        &session_row.formats,
-        new_backend.formats().session(),
-        "the idle session is in build N+1's format set"
-    );
-    let listed = survey(&new_backend).await;
-    assert_eq!(listed["unmigrated"], 0, "{listed}");
-    new.drain().await.expect("build N+1's node drains");
-
-    let (closing_backend, closing) = serving(
-        &stores,
-        Build::Closing,
-        "build-closing",
-        &["await control.finish(double(4));"],
-    );
-    // The closing build reads the swept process: woken, its node claims
-    // it, decodes its state and lets it wait for its timer again, where a
-    // state it did not read would park it.
-    let before = new_backend
-        .durable()
-        .actor(&process_actor)
-        .await
-        .expect("the actor row is read")
-        .expect("the process has its actor");
-    let mut wake = lash_core::durable_port::MailTx::new();
-    wake.wake(process_actor.clone());
-    closing_backend
-        .commit_mail(wake, lash_core::durable_port::CommitLabel::MAIL_PROCESS)
-        .await
-        .expect("the process is woken");
-    let mut last = None;
-    for _ in 0..6000 {
-        let row = closing_backend
-            .durable()
-            .actor(&process_actor)
-            .await
-            .expect("the actor row is read")
-            .expect("the process has its actor");
-        assert_ne!(
-            row.state,
-            ActorState::Parked,
-            "the closing build did not read the swept process: {row:?}"
-        );
-        if row.revision > before.revision && row.state == ActorState::Waiting {
-            last = Some(row);
-            break;
-        }
-        last = Some(row);
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(
-        last.as_ref()
-            .is_some_and(|row| row.revision > before.revision && row.state == ActorState::Waiting),
-        "the closing build's node did not take the woken process up: {last:?}"
-    );
-    let read = tokio::time::timeout(
-        Duration::from_secs(60),
-        session(&closing, SESSION)
-            .await
-            .send(lash::TurnInput::text("call it"))
-            .output(),
-    )
-    .await
-    .expect("the closing build's turn ends within a minute")
-    .expect("the closing build's turn");
-    assert!(read.is_success(), "the closing build's turn: {read:?}");
-    assert_eq!(
-        cell_finishes(
-            &closing
-                .session(lash::SessionId::fixture(SESSION))
-                .durable()
-                .await
-                .expect("durable session")
-                .read()
-                .await
-                .expect("committed read")
-                .expect("head")
-        )
-        .last(),
-        Some(&serde_json::json!(8)),
-        "the closing build called the function the session saved under build N"
-    );
-}
 
 /// FIG-5787 (ADR 0115 §3.5, drain by release): the build that closes the
 /// window does not start while a session is still in build N's formats,
@@ -1098,7 +856,7 @@ main {{
 /// HELPER-PIN (FIG-6074 law 16, D2), the pin: a process build N parked
 /// inside `ts.array.forEach`, a helper the later build changes, depends on
 /// build N's helper release; the listing names it, with the typed reason
-/// its run would not carry onto the changed helper. A node of the later
+/// its parked run would not carry onto the changed helper. A node of the later
 /// build claims it, leaves it on the functions it pins, and resumes it on
 /// the helper's old body to its answer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1129,13 +887,9 @@ async fn a_process_parked_inside_a_changed_helper_stays_pinned_and_resumes_on_th
         serde_json::json!([released_for_each()]),
         "{listed}"
     );
+    assert_eq!(dependent["refused"]["refused"], "parked", "{listed}");
     assert_eq!(
-        dependent["refused"]["refused"], "parked_inside_changed",
-        "{listed}"
-    );
-    assert_eq!(
-        dependent["refused"]["function"],
-        serde_json::json!(released_for_each()),
+        dependent["refused"]["refusal"]["reason"], "state_not_carried",
         "{listed}"
     );
 
@@ -1375,12 +1129,6 @@ fn current_for_each() -> String {
         .to_string()
 }
 
-/// [`after_for_each_sleeper`] over this build's `ts.array.forEach`: the
-/// document a host names as the sleeper's successor.
-fn successor_sleeper() -> String {
-    after_for_each_sleeper().replace(&released_for_each(), &current_for_each())
-}
-
 /// The record of `process`.
 async fn record(
     backend: &lash::Backend,
@@ -1407,23 +1155,6 @@ async fn pair(
     }
 }
 
-/// The record of `process` once its owner carried it onto `payload`.
-async fn carried_onto(
-    backend: &lash::Backend,
-    process: &lash_core::ProcessId,
-    payload: &serde_json::Value,
-) -> lash_core::ProcessRecord {
-    for _ in 0..3000 {
-        let record = record(backend, process).await;
-        if matches!(record.input.as_ref(), lash_core::ProcessInput::Engine { payload: now, .. } if now == payload)
-        {
-            return record;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("the process was not carried onto its successor within half a minute")
-}
-
 /// The kinds of the events `process` committed, in order.
 async fn event_kinds(
     core: &lash::LashCore,
@@ -1447,18 +1178,13 @@ async fn event_kinds(
     events.into_iter().map(|event| event.kind).collect()
 }
 
-/// HELPER-PIN (FIG-6074 law 16, D2) and SUCCESSOR-PAIR-CARRIES-WAITS
-/// (FIG-6121 law 17), the retirement: the build that stops retaining build
-/// N's helpers does not start while a process build N wrote still pins
-/// one, and its refusal names how many and the command that lists them.
-/// The process stands outside the helper it pins, so its run would carry
-/// onto the changed helper. A node of the later build still leaves it
-/// pinned until its host names a successor pair over the later helpers;
-/// carried onto it, the process no longer depends on build N's release,
-/// the closing build starts, and a node of it serves the process.
+/// HELPER-PIN (FIG-6074 law 16, D2), the retirement: the build that stops
+/// retaining build N's helpers does not start while a process build N
+/// parked still pins one, and its refusal names how many and the command
+/// that lists them. The listing names the process with the typed reason
+/// its parked run carries onto no successor (FIG-6193).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allowed_after_its_host_carries_it()
- {
+async fn retiring_a_helper_release_is_refused_while_a_parked_run_depends_on_it() {
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -1471,9 +1197,16 @@ async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allo
     waiting(&old_backend, &actor).await;
     old.drain().await.expect("build N's node drains");
     let listed = survey(&old_backend).await;
+    let dependent = &listed["helper_processes"][0];
+    assert_eq!(dependent["process"], serde_json::json!(process), "{listed}");
     assert_eq!(
-        listed["helper_processes"],
-        serde_json::json!([{"process": process, "functions": [released_for_each()], "refused": null}]),
+        dependent["functions"],
+        serde_json::json!([released_for_each()]),
+        "{listed}"
+    );
+    assert_eq!(dependent["refused"]["refused"], "parked", "{listed}");
+    assert_eq!(
+        dependent["refused"]["refusal"]["reason"], "state_not_carried",
         "{listed}"
     );
 
@@ -1495,96 +1228,6 @@ async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allo
         other => panic!("the closing build started over a dependent run: {other:?}"),
     }
     drop(refusing);
-
-    // A node of the later build holds the process on the helpers it pins:
-    // nothing it does carries the run off them.
-    let (new_backend, new) = serving(&stores, Build::Helpers, "build-helpers", &[]);
-    let listed = survey(&new_backend).await;
-    assert_eq!(
-        listed["helper_processes"],
-        serde_json::json!([{"process": process, "functions": [released_for_each()], "refused": null}]),
-        "{listed}"
-    );
-    let (_, env_ref) = pair(&new_backend, &process).await;
-    let successor = payload(&new_backend, &successor_sleeper()).await;
-    let asked = new
-        .processes()
-        .succeed(
-            &process,
-            lash::process::ProcessSuccessor::new(successor.clone(), env_ref.clone()),
-        )
-        .await
-        .expect("the successor pair is requested");
-    assert_eq!(asked, lash::process::ProcessSuccession::Requested);
-    let carried = carried_onto(&new_backend, &process, &successor).await;
-    assert_eq!(carried.env_ref(), Some(&env_ref));
-    // The carried run is written against the later helpers: its actor is
-    // in the later build's own set, which no retirement of release 1.0
-    // strands.
-    let lash_core::ProcessInput::Engine { kind, .. } = carried.input.as_ref() else {
-        panic!("a kernel process runs an engine");
-    };
-    let stamped = new_backend
-        .durable()
-        .actor(&actor)
-        .await
-        .expect("the process actor is read")
-        .expect("the process actor exists")
-        .formats;
-    let (node, _) =
-        lash::testing::node_activation(&new, Arc::new(lash_core::durable_port::NoProbe))
-            .expect("the later build's node activation");
-    assert_eq!(Some(&stamped), node.formats().process(kind));
-    let listed = survey(&new_backend).await;
-    assert!(
-        listed.get("helper_processes").is_none(),
-        "the carried process pins only the later helpers: {listed}"
-    );
-    assert_eq!(
-        new.processes()
-            .succeed(
-                &process,
-                lash::process::ProcessSuccessor::new(successor.clone(), env_ref),
-            )
-            .await
-            .expect("a resend is answered"),
-        lash::process::ProcessSuccession::AlreadyCurrent,
-        "a resend of the pair the process runs records nothing"
-    );
-    assert_eq!(
-        event_kinds(&new, &process)
-            .await
-            .into_iter()
-            .filter(|kind| *kind == lash::process::ProcessEventKind::Succeeded)
-            .count(),
-        1
-    );
-    new.drain().await.expect("the later build's node drains");
-
-    let (_closing_backend, closing) =
-        serving(&stores, Build::HelpersClosing, "build-helpers-closing", &[]);
-    let started = tokio::time::timeout(Duration::from_secs(5), closing.node_stopped()).await;
-    assert!(
-        started.is_err(),
-        "the closing build's node serves once no run depends on the retired helpers: {started:?}"
-    );
-    closing
-        .processes()
-        .cancel(&process, closing.effect_host())
-        .await
-        .expect("the cancel is requested");
-    let ended = tokio::time::timeout(
-        Duration::from_secs(60),
-        closing.processes().await_output(&process),
-    )
-    .await
-    .expect("a node of the closing build ends the carried process within a minute")
-    .expect("its end is read");
-    assert!(
-        matches!(&ended, lash_core::ProcessAwaitOutput::Settled { output }
-            if matches!(output.outcome, lash_core::ToolCallOutcome::Cancelled(_))),
-        "{ended:?}"
-    );
 }
 
 /// `worker()` calls helper release 1.0's `ts.array.forEach` with a
@@ -1594,13 +1237,14 @@ fn long_inside_for_each_worker() -> String {
     inside_for_each_worker().replace("do sleep 1500", "do sleep 4000")
 }
 
-/// SUCCESSOR-PAIR-CARRIES-WAITS (FIG-6121 law 17), the refusal: a run that
-/// stands inside `ts.array.forEach`, which the later build changed, has no
-/// correspondence onto a successor over the later helper. The host's
-/// request is refused with the typed reason, nothing is recorded, and the
-/// process goes on as written to its answer.
+/// SUCCESSOR-PAIR-CARRIES-WAITS (FIG-6121 law 17), the refusal: a parked
+/// run is carried onto no successor, since no migrator carries its heap
+/// pages (FIG-6193); here it stands inside `ts.array.forEach`, which the
+/// later build changed. The host's request is refused with the typed
+/// reason, nothing is recorded, and the process goes on as written to its
+/// answer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_successor_no_correspondence_carries_the_run_onto_is_refused_and_the_process_goes_on() {
+async fn a_successor_pair_for_a_parked_run_is_refused_and_the_process_goes_on() {
     let stores: Arc<dyn StoreSet> = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -1637,8 +1281,11 @@ async fn a_successor_no_correspondence_carries_the_run_onto_is_refused_and_the_p
     let lash::process::ProcessSuccessorRefusal::Engine { refusal, .. } = *refusal else {
         panic!("the engine refused the carry: {refusal:?}");
     };
-    assert_eq!(refusal["refused"], "parked_inside_changed", "{refusal}");
-    assert_eq!(refusal["function"], serde_json::json!(released_for_each()));
+    assert_eq!(refusal["refused"], "parked", "{refusal}");
+    assert_eq!(
+        refusal["refusal"]["reason"], "state_not_carried",
+        "{refusal}"
+    );
 
     let output = tokio::time::timeout(
         Duration::from_secs(60),
@@ -1691,13 +1338,14 @@ main {
 
 fn hold_definition() -> lash::tools::ToolDefinition {
     use lash::tools::ToolDefinitionBindingExt as _;
-    let object = serde_json::json!({ "type": "object", "additionalProperties": true });
+    // It answers the text `"released"`: its output schema admits that
+    // answer at settle (FIG-6330).
     lash::tools::ToolDefinition::raw(
         HOLD_TOOL,
         HOLD_TOOL,
         "Holds, then answers.",
-        object.clone(),
-        object,
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+        serde_json::json!({ "type": "string" }),
     )
     .expect("the hold tool's schemas")
     .with_execution(Duration::from_secs(120))
@@ -2159,164 +1807,6 @@ async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error(
 }
 
 // --- SUCCESSOR-PAIR-CARRIES-WAITS (FIG-6121 law 17, D2) --------------------
-
-/// `worker()` calls `ts.array.forEach` of identity `for_each`, then
-/// performs the hold tool once and answers what it answered.
-fn holding_after_for_each(for_each: &str) -> String {
-    format!(
-        r#"kernel 1
-numbers float
-use ts.array.forEach = @{for_each}
-effect hold.run(input: Any) -> Any
-entry worker() -> Any
-
-fn worker() {{
-  let note = fn(this, args) {{ return null }}
-  let items = ["first", "second"]
-  let args = [note]
-  let out = invoke ts.array.forEach(items, args)
-  let request = {{n: 1}}
-  let got = perform hold.run(request) as Any
-  return got
-}}
-
-main {{
-  finish null
-}}
-"#
-    )
-}
-
-/// The env a held process's successor runs under: the hold tool linked as
-/// before, under another call budget, so the pair names another env.
-fn successor_hold_environment() -> lash::process::ProcessEnv {
-    lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(32))
-        .component(HOLD, &())
-        .link_tool(
-            HOLD.tool_provider(lash::tool_provider_key!("body")),
-            &hold_definition(),
-        )
-        .build()
-        .expect("the environment builds")
-}
-
-/// SUCCESSOR-PAIR-CARRIES-WAITS (FIG-6121 law 17, D2): a process written
-/// against helper release 1.0 has called `ts.array.forEach` and stands at
-/// an admitted hold step whose body runs. Its host names a successor pair:
-/// the document over this build's `ts.array.forEach` and an env that links
-/// the hold tool as before. While the body runs the run is not at rest, so
-/// the owner records the request and applies nothing; its node dies, and
-/// the process is still on its old pair. A node of the same build claims
-/// it, carries it onto the successor pair in one commit and resumes it
-/// there. The admitted step keeps its call and its tool: its body runs
-/// again under the same call id, nothing is re-matched, and the process
-/// answers what the step answered.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_host_carries_a_process_onto_a_successor_pair_and_its_admitted_step_keeps_its_call() {
-    let stores: Arc<dyn StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("an in-memory store set opens"),
-    );
-    let seen = Arc::new(Holds::default());
-    let helpers = |boot: &str, holds: bool| {
-        serving_under(
-            &stores,
-            Build::Helpers,
-            boot,
-            &[],
-            lash::durable::DurableSettings::standard(),
-            vec![hold_component(holds, &seen)],
-            None,
-        )
-    };
-    let env = hold_environment();
-    let (backend, first) = helpers("successor-before", true);
-    let written = payload_under(
-        &first,
-        &backend,
-        &env,
-        &holding_after_for_each(&released_for_each()),
-    )
-    .await;
-    let process = start_under(&first, &env, written.clone()).await;
-    tokio::time::timeout(Duration::from_secs(60), seen.entered.notified())
-        .await
-        .expect("the hold step is delivered");
-    let before = record(&backend, &process).await;
-    let (old_payload, old_env) = pair(&backend, &process).await;
-    assert_eq!(old_payload, written);
-
-    let successor_env = successor_hold_environment();
-    let env_ref = first
-        .host_artifacts()
-        .publish_process_env(&lash_core::HostArtifactPin::mint(), &successor_env)
-        .await
-        .expect("the successor env is published");
-    assert_ne!(env_ref, old_env, "the successor names another env");
-    let successor = payload_under(
-        &first,
-        &backend,
-        &successor_env,
-        &holding_after_for_each(&current_for_each()),
-    )
-    .await;
-    let asked = first
-        .processes()
-        .succeed(
-            &process,
-            lash::process::ProcessSuccessor::new(successor.clone(), env_ref.clone()),
-        )
-        .await
-        .expect("the successor pair is requested");
-    assert_eq!(asked, lash::process::ProcessSuccession::Requested);
-    first.shutdown().await.expect("the node stops");
-    drop(first);
-    assert_eq!(
-        pair(&backend, &process).await,
-        (old_payload, old_env),
-        "a crash before the apply leaves the old pair"
-    );
-
-    let (_, second) = helpers("successor-after", false);
-    let output = tokio::time::timeout(
-        Duration::from_secs(60),
-        second.processes().await_output(&process),
-    )
-    .await
-    .expect("the process ends within a minute")
-    .expect("its end is read");
-    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
-        panic!("the process ended without an answer: {output:?}");
-    };
-    assert!(output.is_success(), "{output:?}");
-    assert_eq!(output.value_for_projection(), serde_json::json!("released"));
-    let after = record(&backend, &process).await;
-    assert_eq!(
-        pair(&backend, &process).await,
-        (successor, env_ref),
-        "the process ran on its successor pair"
-    );
-    assert_ne!(
-        after.identity.definition_id, before.identity.definition_id,
-        "the record names the successor's definition"
-    );
-    let calls = seen.calls.lock().expect("the deliveries").clone();
-    assert_eq!(calls.len(), 2, "one delivery per owner: {calls:?}");
-    assert_eq!(
-        calls[0], calls[1],
-        "the admitted step ran again under its call and its tool"
-    );
-    assert_eq!(
-        event_kinds(&second, &process)
-            .await
-            .into_iter()
-            .filter(|kind| *kind == lash::process::ProcessEventKind::Succeeded)
-            .count(),
-        1
-    );
-    second.shutdown().await.expect("the node stops");
-}
 
 /// Law 9: takeover checks an already admitted call before its body is resumed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

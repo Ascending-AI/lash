@@ -5,6 +5,13 @@
     reason = "integration law setup treats malformed corpus and machine failures as failed laws"
 )]
 
+#[expect(
+    dead_code,
+    reason = "the adapter only needs the ordinary start fixture"
+)]
+#[path = "../src/tests/pages.rs"]
+mod pages;
+
 #[path = "../shared/helper_differential/comparison.rs"]
 mod comparison;
 

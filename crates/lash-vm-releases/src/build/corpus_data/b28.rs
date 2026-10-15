@@ -142,5 +142,6 @@ pub(super) const DATA: &str = r####"{
 "28f566244a48a8ff4341212825a73f72b323168ee7703727bfa0730a4041e3a9":[{"text":"https://example.org/?x=🦀"},{"text":""},{"text":""}],
 "28f57c58edf7e638a70da81102c74a7ffcc8e1a43bd529a257ea858bdcf35081":{"charge":1243,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `h` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "28f958abefcdef5573fda48b893140885d70d9a775a190f2a873ae15e405c979":{"charge":264,"outcome":"raised \"type_error\" \"Expected text or absent base\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"28fa5e80589301a88b75495e3fe94163af22521943fb117d97f52a17ef5af96e":[{"int":"-7918498158997171236"},{"float":"3.4697928563297986e-268"}]
+"28fa5e80589301a88b75495e3fe94163af22521943fb117d97f52a17ef5af96e":[{"int":"-7918498158997171236"},{"float":"3.4697928563297986e-268"}],
+"28ff7b2c8b4d240c7ddc1e07d46a003d7d87e45dded393822caf1358639be063":{"charge":16568,"outcome":"memory","prepared_difference":null,"reservations":[],"reserved":0,"spent":0}
 }"####;

@@ -1,0 +1,173 @@
+//! Pressure-only accounting. A certificate certifies the allocated census,
+//! including garbage, rather than the cache or the last marked live set.
+
+mod membership;
+mod trace;
+
+pub use membership::FamilyMembership;
+pub use trace::{TraceLimits, TraceStats};
+
+use lash_kernel_doc::heap::LogicalBytes;
+
+use super::census::{
+    AccountingCertificate, AccountingMetric, AllocationCensus, CensusFault, CensusGraph,
+    LogicalPermit, MIN_ENTITY_COST, PendingReservation, RefinedDecision, ReservationDecision,
+    TransientRoots,
+};
+
+/// The admitted census ledger. No operation except `refine` traverses the
+/// graph, and restoring a certificate does not reconstruct any objects.
+pub struct Census {
+    certificate: AccountingCertificate,
+    bound: LogicalBytes,
+    limits: TraceLimits,
+    last_trace: TraceStats,
+}
+
+impl Census {
+    /// Host limits change the ability to finish a proof, never its verdict.
+    pub fn set_trace_limits(&mut self, limits: TraceLimits) -> Result<(), CensusFault> {
+        limits.validate()?;
+        self.limits = limits;
+        Ok(())
+    }
+
+    /// Full accounting validation for a foreign population whose individual
+    /// summaries have already been checked against their semantic pages.
+    /// Ordinary admitted restore never runs this walk.
+    pub fn validate_population(
+        certificate: AccountingCertificate,
+        graph: &mut dyn CensusGraph,
+        limits: TraceLimits,
+    ) -> Result<(), CensusFault> {
+        Self::validate(certificate)?;
+        limits.validate()?;
+        let (cost, entities) = trace::population_cost(graph, limits)?;
+        if entities != certificate.entities || cost > certificate.upper {
+            return Err(malformed(
+                "certificate undercounts the validated population",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn last_trace_stats(&self) -> TraceStats {
+        self.last_trace
+    }
+
+    fn validate(certificate: AccountingCertificate) -> Result<(), CensusFault> {
+        let minimum = certificate
+            .entities
+            .checked_mul(MIN_ENTITY_COST.0)
+            .ok_or_else(|| malformed("entity minimum overflow"))?;
+        if certificate.upper.0 < minimum {
+            return Err(malformed("upper bound is below the census entity minimum"));
+        }
+        Ok(())
+    }
+}
+
+impl AllocationCensus for Census {
+    fn restore(
+        certificate: AccountingCertificate,
+        bound: LogicalBytes,
+    ) -> Result<Self, CensusFault> {
+        Self::validate(certificate)?;
+        Ok(Self {
+            certificate,
+            bound,
+            limits: TraceLimits::default(),
+            last_trace: TraceStats::default(),
+        })
+    }
+
+    fn certificate(&self) -> AccountingCertificate {
+        self.certificate
+    }
+
+    fn added(&mut self, cost: LogicalBytes, entities: u64) -> Result<(), CensusFault> {
+        let minimum = entities
+            .checked_mul(MIN_ENTITY_COST.0)
+            .ok_or_else(|| malformed("entity minimum overflow"))?;
+        if cost.0 < minimum {
+            return Err(malformed("entity cost is below its minimum"));
+        }
+        let mut next = self.certificate;
+        next.upper = LogicalBytes(
+            next.upper
+                .0
+                .checked_add(cost.0)
+                .ok_or_else(|| malformed("census addition overflow"))?,
+        );
+        next.entities = next
+            .entities
+            .checked_add(entities)
+            .ok_or_else(|| malformed("entity count overflow"))?;
+        Self::validate(next)?;
+        self.certificate = next;
+        Ok(())
+    }
+
+    fn changed(&mut self, before: LogicalBytes, after: LogicalBytes) -> Result<(), CensusFault> {
+        let mut next = self.certificate;
+        next.upper = LogicalBytes(
+            next.upper
+                .0
+                .checked_sub(before.0)
+                .and_then(|remaining| remaining.checked_add(after.0))
+                .ok_or_else(|| malformed("local cost change overflow or underflow"))?,
+        );
+        Self::validate(next)?;
+        self.certificate = next;
+        Ok(())
+    }
+
+    fn reserve(&mut self, bytes: LogicalBytes) -> ReservationDecision {
+        let total = self.certificate.upper.0.checked_add(bytes.0);
+        if total.is_some_and(|total| total <= self.bound.0) {
+            ReservationDecision::Granted(LogicalPermit { bytes })
+        } else {
+            ReservationDecision::NeedsPrecision(PendingReservation {
+                bytes,
+                overflowed: total.is_none(),
+            })
+        }
+    }
+
+    fn refine(
+        &mut self,
+        graph: &mut dyn CensusGraph,
+        transient: &TransientRoots<'_>,
+        pending: PendingReservation,
+    ) -> Result<RefinedDecision, CensusFault> {
+        // All fallible marking finishes before any sweep. A failure never
+        // installs a certificate or returns a partial guest decision.
+        let refinements = self
+            .certificate
+            .refinements
+            .checked_add(1)
+            .ok_or_else(|| malformed("refinement count overflow"))?;
+        let proof = trace::trace(graph, transient, self.limits)?;
+        let next = AccountingCertificate {
+            metric: AccountingMetric::LocalCostV1,
+            upper: proof.reachable,
+            entities: proof.entities,
+            refinements,
+        };
+        Self::validate(next)?;
+        self.last_trace = proof.sweep(graph)?;
+        self.certificate = next;
+        Ok(match next.upper.0.checked_add(pending.bytes.0) {
+            Some(total) if total <= self.bound.0 => RefinedDecision::Granted(LogicalPermit {
+                bytes: pending.bytes,
+            }),
+            _ => RefinedDecision::Refused {
+                reachable: next.upper,
+            },
+        })
+    }
+}
+
+fn malformed(reason: &str) -> CensusFault {
+    CensusFault::Malformed(reason.to_owned())
+}

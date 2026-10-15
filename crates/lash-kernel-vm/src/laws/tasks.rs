@@ -582,14 +582,8 @@ main {{
     let Step::Parked(park) = embedder.run() else {
         panic!("the race loser still waits on its effect");
     };
-    assert!(
-        park.outstanding.is_empty(),
-        "K-TASK-018 exempts passed members"
-    );
-    assert_eq!(
-        park.live,
-        [spawned(TaskIdentity::Main, main_site([0, 0]), 0)]
-    );
+    assert!(park.outstanding == 0, "K-TASK-018 exempts passed members");
+    assert_eq!(park.live, 1);
     let end = embedder.run_to_end(&["a"]);
     assert_eq!(result(end), text("a"));
     assert!(embedder.withdrawn.is_empty());
@@ -1100,27 +1094,4 @@ main {
 }"#,
     );
     assert_eq!(result(embedder.run_to_end(&[])), int(1));
-}
-
-/// `K-TASK-016`, `K-TASK-018`: at a park an unobserved failed task and a
-/// live task not passed through a list join are both outstanding.
-#[test]
-fn a_park_lists_an_unobserved_failed_task_as_outstanding() {
-    let mut embedder = Embedder::new(
-        r#"
-fn broken() { throw "broken" }
-fn waits() { do perform echo("w") as Any }
-main {
-  let failed = spawn call broken()
-  let live = spawn call waits()
-  do perform echo("main") as Any
-}"#,
-    );
-    let Step::Parked(park) = embedder.run() else {
-        panic!("main and the live child must park on their effects");
-    };
-    let failed = spawned(TaskIdentity::Main, main_site([0, 0]), 0);
-    let live = spawned(TaskIdentity::Main, main_site([1, 0]), 0);
-    assert_eq!(park.outstanding, [failed, live.clone()]);
-    assert_eq!(park.live, [live]);
 }

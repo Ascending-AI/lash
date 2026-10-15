@@ -14,8 +14,16 @@ use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::stage::StageLeaseId;
+use lash_durable::DurableError;
+use lash_durable::domain::pages::{RootLease, StoredPage};
 use lash_kernel_doc::{Datum, EffectName, Name, Param, Signature, Type};
-use lash_kernel_vm::{Outcome, Request as RunRequest, Start as RunStart, Target};
+use lash_kernel_vm::{Outcome, Request as RunRequest, Target};
+use lash_vm_broker::kernel::MachinePark;
+use lash_vm_broker::kernel::pages::{
+    ActivationPages, CapabilityKey, LeasedReads, PageExchange, PageLimits, SpoolRoot,
+};
 use lash_vm_client::ipc::{Bootstrap, read_frame, write_frame};
 use lash_vm_client::service::{Request, Response};
 use lash_vm_client::wire::{self, OutcomeWire, ParkWire, StartWire};
@@ -63,13 +71,35 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
 
-/// The parent's end of one worker's socket, driving it as the pool does.
+/// A store a fresh cell's page service never reads: the cell reads only
+/// what it stages.
+struct Unread;
+
+#[async_trait::async_trait]
+impl LeasedReads for Unread {
+    async fn read_pages(
+        &self,
+        _lease: &RootLease,
+        _pages: &[NodeId],
+    ) -> Result<Vec<StoredPage>, DurableError> {
+        panic!("a fresh cell reads no committed page")
+    }
+    async fn renew_root_lease(&self, _lease: &RootLease) -> Result<RootLease, DurableError> {
+        panic!("a fresh cell holds no lease")
+    }
+}
+
+/// The parent's end of one worker's socket, driving it as the pool does,
+/// with the page service its parks seal into.
 struct Parent {
     pipe: UnixStream,
     codec: FrameCodec,
     outgoing: MessageFence,
     incoming: MessageFence,
     lease: u64,
+    spools: SpoolRoot,
+    pages: Option<ActivationPages<Unread>>,
+    runtime: tokio::runtime::Runtime,
 }
 
 impl Parent {
@@ -78,10 +108,49 @@ impl Parent {
         let lease = ExecutionLease(self.lease);
         self.outgoing = MessageFence::new(lease, OwnerEpoch(0), FrameEpoch(0));
         self.incoming = MessageFence::new(lease, OwnerEpoch(0), FrameEpoch(0));
+        self.pages = Some(
+            ActivationPages::new(
+            Arc::new(Unread),
+            None,
+            Duration::from_secs(20),
+            CapabilityKey::fresh(),
+            self.lease,
+            Box::new(self.spools.spool(StageLeaseId(self.lease)).expect("spool")),
+            Instant::now() + Duration::from_secs(120),
+            PageLimits::within(self.codec.limits()),
+        )
+        // The host nodes a parked root names: its release and its binding.
+        .with_references([release(), NodeId(BINDING)]),
+        );
     }
 
-    /// The worker's answer to `message`, past its progress.
-    fn exchange(&mut self, message: ParentMessage) -> WorkerMessage {
+    /// The worker's answer to `message`, past its progress and its page
+    /// exchanges.
+    fn exchange(&mut self, mut message: ParentMessage) -> WorkerMessage {
+        loop {
+            match self.send(message) {
+                WorkerMessage::Pages { id, request } => {
+                    let pages = self.pages.as_mut().expect("a lease's page service");
+                    let reply = self.runtime.block_on(pages.serve(request));
+                    message = ParentMessage::Pages { id, reply };
+                }
+                answer => return answer,
+            }
+        }
+    }
+
+    /// The grants for a seal batch a hand-over frame carried, which the
+    /// run's next slice takes.
+    fn admit(
+        &mut self,
+        seal: Option<lash_vm_protocol::page::SealBatch>,
+    ) -> Vec<lash_vm_protocol::page::PageCapability> {
+        let pages = self.pages.as_mut().expect("a lease's page service");
+        seal.map(|batch| pages.admit(batch).expect("the parent admits the batch"))
+            .unwrap_or_default()
+    }
+
+    fn send(&mut self, message: ParentMessage) -> WorkerMessage {
         let bytes = self
             .codec
             .encode_parent(&ParentFrame {
@@ -110,6 +179,15 @@ impl Parent {
             }
         }
     }
+}
+
+/// The owner binding each turn's run names.
+const BINDING: [u8; 32] = [5; 32];
+
+/// The helper release the build holds of the cell's dialect.
+fn release() -> NodeId {
+    let releases = lash_vm_broker::kernel::state::release_manifests().expect("releases");
+    NodeId(releases.manifests.current(DIALECT).expect("a release").0)
 }
 
 fn tool() -> Signature {
@@ -168,41 +246,44 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
             wire::encode(
                 PayloadKind::Start,
                 &StartWire::of(
-                    RunStart {
-                        target: Target::Main,
-                        args: Vec::new(),
-                        bindings: Default::default(),
-                    },
+                    Target::Main,
+                    Vec::new(),
+                    None,
                     &lash_kernel_vm::EffectModes::recorded(),
+                    Vec::new(),
                 ),
             )
             .expect("start"),
         ),
         bounds,
-        export: Some(EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(
-            &lash_core_store::checkpoint_graph::bodies::OwnerBinding::Cell {
-                session: "session".into(),
-                turn: "turn".into(),
-                cell: "cell".into(),
-            },
-        ))),
+        binding: BINDING,
+        save: None,
+        warm: Vec::new(),
         observe_sites: false,
         observe_counts: false,
     };
     let mut start = Some(Box::new(start));
     let mut deliveries = Vec::new();
+    let mut sealed = Vec::new();
     loop {
         let step = parent.exchange(ParentMessage::Run {
             start: start.take(),
             deliveries: std::mem::take(&mut deliveries),
             slice: 1_000_000,
             cancel: false,
+            sealed: std::mem::take(&mut sealed),
         });
         match step {
-            WorkerMessage::Parked { park, state, .. } => {
-                assert!(state.is_some(), "the park carries its state");
+            WorkerMessage::Parked {
+                park,
+                candidate,
+                seal,
+                ..
+            } => {
+                assert!(candidate.is_some(), "the park carries its sealed root");
+                sealed = parent.admit(seal);
                 let park: ParkWire = wire::decode(PayloadKind::Park, &park).expect("park");
-                let park = lash_kernel_vm::Park::try_from(park).expect("canonical park");
+                let park = MachinePark::try_from(park).expect("canonical park");
                 for request in park.requests {
                     let RunRequest::Effect(effect) = request else {
                         panic!("the cell performs effects")
@@ -259,12 +340,19 @@ fn a_ready_worker_serves_its_first_turn_at_a_warm_turns_cost() {
             server.run(&mut hook).expect("serve");
         }
     });
+    let spools = tempfile::tempdir().expect("spool directory");
     let mut parent = Parent {
         pipe,
         codec: codec.clone(),
         outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
         incoming: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
         lease: 0,
+        spools: SpoolRoot::open(spools.path(), 1 << 30).expect("spools"),
+        pages: None,
+        runtime: tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime"),
     };
     let ready = read_frame(
         &mut parent.pipe,

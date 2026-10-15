@@ -595,13 +595,10 @@ fn plain_record_fresh_literal_field_aliases_keep_admission() {
 /// Neither a literal nor a static/computed field write may certify it plain.
 #[test]
 fn plain_record_restored_brand_markers_keep_admission() {
-    let bindings = lash_kernel_vm::Bindings {
-        variables: BTreeMap::from([(
-            lash_kernel_doc::Name::new("marker"),
-            lash_kernel_doc::Value::Tuple(std::sync::Arc::from([])),
-        )]),
-        ..Default::default()
-    };
+    let bindings = super::pages::Session::seeded([(
+        lash_kernel_doc::Name::new("marker"),
+        lash_kernel_doc::Datum::Tuple(Vec::new()),
+    )]);
     let sources = [
         "const r = {}; r.__ts_type = 'brand:date'; r.__ts_brand = marker; await finish(r.__ts_brand === undefined);",
         "const r = {}; r.__ts_type = 'brand:date'; const key = '__ts_brand'; r[key] = marker; await finish(r.__ts_brand === undefined);",
@@ -781,24 +778,19 @@ fn stable_paths_keep_hop_failures_and_lazy_evaluation() {
 fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
     use lash_kernel_doc::{Datum, Name};
     let source = "let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = { leaf: 7 }; } await finish(sum);";
-    use lash_kernel_doc::{Float, Object, ObjectId, Value};
-    let bindings = lash_kernel_vm::Bindings {
-        variables: BTreeMap::from([(Name::new("r"), Value::Record(ObjectId(0)))]),
-        objects: BTreeMap::from([
-            (
-                ObjectId(0),
-                Object::Record(vec![("a".into(), Value::Record(ObjectId(1)))]),
-            ),
-            (
-                ObjectId(1),
-                Object::Record(vec![("b".into(), Value::Record(ObjectId(2)))]),
-            ),
-            (
-                ObjectId(2),
-                Object::Record(vec![("leaf".into(), Value::Float(Float::new(1.0)))]),
-            ),
-        ]),
-    };
+    let bindings = super::pages::Session::seeded([(
+        Name::new("r"),
+        Datum::Record(vec![(
+            "a".into(),
+            Datum::Record(vec![(
+                "b".into(),
+                Datum::Record(vec![(
+                    "leaf".into(),
+                    Datum::Float(lash_kernel_doc::Float::new(1.0)),
+                )]),
+            )]),
+        )]),
+    )]);
     assert_eq!(
         super::machine::end_with_bindings(source, bindings),
         super::machine::Ended::Finished(Datum::Float(lash_kernel_doc::Float::new(8.0)))

@@ -2,12 +2,11 @@
 //! §11, gate 5) and the rules each function states.
 
 use std::collections::BTreeSet;
-use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, Element, ErrorValue, FunctionDefinition, FunctionRegistry, GuardExceeded, Integer,
-    Measure, NativeCall, NativeError, NativeHeap, Object, ObjectId, Operand, Value, WorkCounter,
+    Datum, ErrorDatum, FunctionDefinition, FunctionRegistry, GuardExceeded, Integer, Measure,
+    NativeCall, NativeError, Operand, Value, WorkCounter,
 };
 
 use crate::{
@@ -15,170 +14,19 @@ use crate::{
     SYNTAX_ERROR, register,
 };
 
-/// A run's heap, as far as a native function sees one.
-#[derive(Clone, Debug, Default, PartialEq)]
-struct Heap {
-    objects: Vec<Object>,
-    /// The most a call may reserve; `None` is no limit.
-    room: Option<u64>,
-    reserved: u64,
-}
+use super::testsupport::{Fixture, fresh};
+use lash_kernel_state::paged::{PagedHeap, SemanticHeap};
 
-impl Heap {
-    fn get(&self, object: ObjectId) -> Option<&Object> {
-        self.objects.get(usize::try_from(object.0).ok()?)
-    }
-
-    fn record(&mut self, fields: &[(&str, Value)]) -> Value {
-        let fields = fields
-            .iter()
-            .map(|(name, value)| (name.to_string(), value.clone()))
-            .collect();
-        Value::Record(self.allocate(Object::Record(fields)).unwrap())
-    }
-
-    fn regex(&mut self, pattern: &str, flags: &str, last_index: i64) -> Value {
-        self.record(&[
-            ("brand", Value::text(BRAND)),
-            ("pattern", Value::text(pattern)),
-            ("flags", Value::text(flags)),
-            ("lastIndex", int(last_index)),
-        ])
-    }
-
-    /// The value as a tree, so results in two heaps compare.
-    fn datum(&self, value: &Value) -> Datum {
-        let object = || self.get(value.object().unwrap()).unwrap();
-        match value {
-            Value::Null => Datum::Null,
-            Value::Bool(flag) => Datum::Bool(*flag),
-            Value::Int(integer) => Datum::Int(integer.clone()),
-            Value::Text(text) => Datum::Text(text.to_string()),
-            Value::List(_) => match object() {
-                Object::List(items) => {
-                    Datum::List(items.iter().map(|item| self.datum(item)).collect())
-                }
-                other => panic!("not a list: {other:?}"),
-            },
-            Value::Record(_) => match object() {
-                Object::Record(fields) => Datum::Record(
-                    fields
-                        .iter()
-                        .map(|(name, value)| (name.clone(), self.datum(value)))
-                        .collect(),
-                ),
-                other => panic!("not a record: {other:?}"),
-            },
-            other => panic!("no function returns {other:?}"),
-        }
-    }
-
-    /// A value's size (`K-CHG-004`).
-    fn size(&self, value: &Value) -> u64 {
-        match value {
-            Value::Int(integer) => 1 + integer.bits().div_ceil(64),
-            Value::Text(text) => 1 + text.len() as u64,
-            Value::List(_) | Value::Record(_) => 1 + self.len(value.object().unwrap()) as u64,
-            _ => 1,
-        }
-    }
-
-    /// A value's deep size (`K-CHG-005`).
-    fn deep_size(&self, value: &Value, seen: &mut BTreeSet<ObjectId>) -> u64 {
-        let Some(object) = value.object() else {
-            return self.size(value);
-        };
-        if !seen.insert(object) {
-            return 0;
-        }
-        let mut total = self.size(value);
-        self.visit(object, &mut |element| {
-            let (Element::Item(held) | Element::Field { value: held, .. }) = element else {
-                panic!("no function returns a map");
-            };
-            total += self.deep_size(held, seen);
-            ControlFlow::Continue(())
-        });
-        total
-    }
-}
-
-impl NativeHeap for Heap {
-    fn len(&self, object: ObjectId) -> usize {
-        match self.get(object) {
-            Some(Object::List(items) | Object::Set(items)) => items.len(),
-            Some(Object::Map(entries)) => entries.len(),
-            Some(Object::Record(fields)) => fields.len(),
-            _ => 0,
-        }
-    }
-
-    fn list_get(&self, list: ObjectId, index: usize) -> Option<Value> {
-        match self.get(list)? {
-            Object::List(items) => items.get(index).cloned(),
-            _ => None,
-        }
-    }
-
-    fn map_get(&self, map: ObjectId, key: &Value) -> Option<Value> {
-        match self.get(map)? {
-            Object::Map(entries) => entries
-                .iter()
-                .find(|(candidate, _)| candidate == key)
-                .map(|(_, value)| value.clone()),
-            _ => None,
-        }
-    }
-
-    fn set_contains(&self, set: ObjectId, member: &Value) -> bool {
-        matches!(self.get(set), Some(Object::Set(members)) if members.contains(member))
-    }
-
-    fn record_get(&self, record: ObjectId, field: &str) -> Option<Value> {
-        match self.get(record)? {
-            Object::Record(fields) => fields
-                .iter()
-                .find(|(name, _)| name == field)
-                .map(|(_, value)| value.clone()),
-            _ => None,
-        }
-    }
-
-    fn visit(&self, object: ObjectId, visitor: &mut dyn FnMut(Element<'_>) -> ControlFlow<()>) {
-        let _ = match self.get(object) {
-            Some(Object::List(items) | Object::Set(items)) => items
-                .iter()
-                .try_for_each(|item| visitor(Element::Item(item))),
-            Some(Object::Map(entries)) => entries
-                .iter()
-                .try_for_each(|(key, value)| visitor(Element::Entry { key, value })),
-            Some(Object::Record(fields)) => fields
-                .iter()
-                .try_for_each(|(name, value)| visitor(Element::Field { name, value })),
-            _ => ControlFlow::Continue(()),
-        };
-    }
-
-    fn allocate(&mut self, object: Object) -> Result<ObjectId, NativeError> {
-        self.objects.push(object);
-        Ok(ObjectId(self.objects.len() as u64 - 1))
-    }
-
-    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
-        let reserved = self
-            .reserved
-            .saturating_add(values.saturating_mul(16))
-            .saturating_add(bytes);
-        if self.room.is_some_and(|room| reserved > room) {
-            return Err(NativeError::Memory);
-        }
-        self.reserved = reserved;
-        Ok(())
-    }
+#[derive(Debug, PartialEq)]
+enum Failure {
+    Raised(lash_kernel_doc::ErrorDatum),
+    Guard(GuardExceeded),
+    Memory,
+    Heap(lash_kernel_doc::heap::HeapFault),
 }
 
 fn int(value: i64) -> Value {
-    Value::Int(Integer::from(value))
+    Value::Int(value.into())
 }
 
 /// The work limit a call runs under.
@@ -193,14 +41,14 @@ enum Limit {
 /// what the definition's formula charges for it.
 #[derive(Debug, PartialEq)]
 struct Run {
-    outcome: Result<Datum, NativeError>,
+    outcome: Result<Datum, Failure>,
     spent: u64,
     charge: u64,
 }
 
 fn measure(
     definition: &FunctionDefinition,
-    heap: &Heap,
+    heap: &PagedHeap,
     args: &[Value],
     result: Option<&Value>,
     operand: &Operand,
@@ -234,16 +82,22 @@ fn run(
     engine: &Arc<Engine>,
     operation: Operation,
     limit: Limit,
-    arguments: &dyn Fn(&mut Heap) -> Vec<Value>,
+    arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>,
 ) -> Run {
     let mut registry = FunctionRegistry::new();
     let functions = register(&mut registry, engine).unwrap();
     let registered = registry.get(&functions.get(operation)).unwrap();
     let definition = registered.definition().as_ref();
 
-    let mut heap = Heap::default();
-    let args = arguments(&mut heap);
-    let before = heap.clone();
+    let mut heap = fresh();
+    let args = arguments(&mut heap)
+        .into_iter()
+        .map(|value| heap.canonical_value(value).unwrap())
+        .collect::<Vec<_>>();
+    let before = args
+        .iter()
+        .map(|value| heap.datum(value))
+        .collect::<Vec<_>>();
     let limit =
         match (limit, &definition.guard) {
             (Limit::Exactly(limit), _) => Some(limit),
@@ -259,12 +113,28 @@ fn run(
         counter: &mut counter,
     });
     // No function changes an object that existed (`K-LIB-007`).
-    assert_eq!(heap.objects[..before.objects.len()], before.objects[..]);
+    assert_eq!(
+        args.iter()
+            .map(|value| heap.datum(value))
+            .collect::<Vec<_>>(),
+        before
+    );
     let charge = definition.charge.evaluate(&mut |operand, how| {
         measure(definition, &heap, &args, result.as_ref().ok(), operand, how)
     });
     Run {
-        outcome: result.map(|value| heap.datum(&value)),
+        outcome: match result {
+            Ok(value) => Ok(heap.datum(&value)),
+            Err(NativeError::Raised(error)) => {
+                let Datum::Error(error) = heap.datum(&Value::Error(error)) else {
+                    unreachable!()
+                };
+                Err(Failure::Raised(*error))
+            }
+            Err(NativeError::Guard(error)) => Err(Failure::Guard(error)),
+            Err(NativeError::Memory) => Err(Failure::Memory),
+            Err(NativeError::Heap(error)) => Err(Failure::Heap(error)),
+        },
         spent: counter.spent(),
         charge,
     }
@@ -280,7 +150,7 @@ fn cold() -> Arc<Engine> {
 fn cold_and_warm(
     operation: Operation,
     limit: Limit,
-    arguments: &dyn Fn(&mut Heap) -> Vec<Value>,
+    arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>,
 ) -> Run {
     let engine = cold();
     assert_eq!(engine.cached_patterns(), 0);
@@ -307,7 +177,7 @@ fn arguments<'a>(
     pattern: &'a str,
     flags: &'a str,
     input: &'a str,
-) -> impl Fn(&mut Heap) -> Vec<Value> + 'a {
+) -> impl Fn(&mut PagedHeap) -> Vec<Value> + 'a {
     move |heap| {
         let mut args = vec![heap.regex(pattern, flags, 0), Value::text(input)];
         if operation == Operation::Replace {
@@ -317,9 +187,9 @@ fn arguments<'a>(
     }
 }
 
-fn raised(outcome: &Result<Datum, NativeError>) -> &ErrorValue {
+fn raised(outcome: &Result<Datum, Failure>) -> &ErrorDatum {
     match outcome {
-        Err(NativeError::Raised(error)) => error,
+        Err(Failure::Raised(error)) => error,
         other => panic!("expected a raised error, got {other:?}"),
     }
 }
@@ -328,18 +198,18 @@ fn raised(outcome: &Result<Datum, NativeError>) -> &ErrorValue {
 /// its groups, so it is reserved as it is kept. A heap with no room for it
 /// refuses the call, which the guard's work limit alone would let finish.
 #[test]
-fn a_result_the_heap_has_no_room_for_is_refused_at_its_reservation() {
+fn a_regex_expansion_refuses_under_the_real_census() {
     let input = "a".repeat(200);
     for operation in [Operation::MatchAll, Operation::Replace, Operation::Split] {
         let arguments = arguments(operation, "(a)", "g", &input);
         let roomy = run(&cold(), operation, Limit::Stated, &arguments);
-        assert!(roomy.outcome.is_ok(), "{operation:?}: {:?}", roomy.outcome);
+        assert!(roomy.outcome.is_ok());
         let tight = run(&cold(), operation, Limit::Stated, &|heap| {
             let args = arguments(heap);
-            heap.room = Some(1 << 10);
+            super::testsupport::limit_to_extra(heap, &args, 1 << 10);
             args
         });
-        assert_eq!(tight.outcome, Err(NativeError::Memory), "{operation:?}");
+        assert_eq!(tight.outcome, Err(Failure::Memory), "{operation:?}");
     }
 }
 
@@ -371,7 +241,7 @@ fn results_charges_and_guard_failures_are_equal_cold_and_warm() {
             let below = cold_and_warm(operation, Limit::Exactly(needed - 1), &arguments);
             assert_eq!(
                 below.outcome,
-                Err(NativeError::Guard(GuardExceeded { limit: needed - 1 })),
+                Err(Failure::Guard(GuardExceeded { limit: needed - 1 })),
                 "{operation:?} one unit below its threshold"
             );
         }
@@ -389,7 +259,7 @@ fn runaway_backtracking_ends_at_the_stated_limit_cold_and_warm() {
         let limit = crate::GUARD_BASE + crate::GUARD_PER_INPUT_UNIT * (1 + input.len() as u64);
         assert_eq!(
             run.outcome,
-            Err(NativeError::Guard(GuardExceeded { limit })),
+            Err(Failure::Guard(GuardExceeded { limit })),
             "{operation:?}"
         );
         assert_eq!(run.spent, limit, "{operation:?}");
@@ -409,7 +279,7 @@ fn a_pattern_that_fails_to_compile_is_equal_cold_and_warm() {
         let none = cold_and_warm(operation, Limit::Exactly(0), &arguments);
         assert_eq!(none, stated, "{operation:?} under a limit of zero");
     }
-    let check = |heap: &mut Heap| {
+    let check = |heap: &mut PagedHeap| {
         let _ = heap;
         vec![Value::text("a(b"), Value::text("")]
     };
@@ -428,13 +298,13 @@ fn the_cache_is_bounded_by_the_size_the_embedder_sets() {
     assert_eq!(engine.cached_patterns(), 2);
 }
 
-fn call(operation: Operation, arguments: &dyn Fn(&mut Heap) -> Vec<Value>) -> Datum {
+fn call(operation: Operation, arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>) -> Datum {
     run(&cold(), operation, Limit::Stated, arguments)
         .outcome
         .unwrap()
 }
 
-fn error(operation: Operation, arguments: &dyn Fn(&mut Heap) -> Vec<Value>) -> ErrorValue {
+fn error(operation: Operation, arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>) -> ErrorDatum {
     raised(&run(&cold(), operation, Limit::Stated, arguments).outcome).clone()
 }
 
@@ -628,7 +498,7 @@ fn split_splices_captures_and_honours_the_limit() {
 #[test]
 fn half_a_surrogate_pair_in_a_result_is_a_typed_error() {
     let dot = |flags: &'static str| {
-        move |heap: &mut Heap| vec![heap.regex(".", flags, 0), Value::text("\u{1f600}")]
+        move |heap: &mut PagedHeap| vec![heap.regex(".", flags, 0), Value::text("\u{1f600}")]
     };
     assert_eq!(error(Operation::Exec, &dot("")).kind, LONE_SURROGATE_ERROR);
     assert_eq!(
@@ -645,7 +515,7 @@ fn half_a_surrogate_pair_in_a_result_is_a_typed_error() {
 #[test]
 fn compile_check_returns_the_regex_record_or_a_syntax_error() {
     let check = |pattern: &str, flags: &str| {
-        let arguments = move |_: &mut Heap| vec![Value::text(pattern), Value::text(flags)];
+        let arguments = move |_: &mut PagedHeap| vec![Value::text(pattern), Value::text(flags)];
         run(&cold(), Operation::CompileCheck, Limit::Stated, &arguments).outcome
     };
     assert_eq!(
@@ -681,7 +551,8 @@ fn compile_check_returns_the_regex_record_or_a_syntax_error() {
 /// a `number_range`.
 #[test]
 fn operands_of_the_wrong_shape_are_typed_errors() {
-    let kind = |arguments: &dyn Fn(&mut Heap) -> Vec<Value>| error(Operation::Exec, arguments).kind;
+    let kind =
+        |arguments: &dyn Fn(&mut PagedHeap) -> Vec<Value>| error(Operation::Exec, arguments).kind;
     assert_eq!(
         kind(&|heap| {
             let regex = heap.record(&[

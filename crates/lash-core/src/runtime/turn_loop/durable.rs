@@ -380,6 +380,7 @@ impl LashRuntime {
             held_response: None,
             cell_start,
             answered_cell_close: None,
+            session_pages: committed_session_pages(&controller, &self.state),
             host: self.host.clone(),
             turn_id: run.clone(),
             scoped_effect_controller: controller.clone(),
@@ -492,4 +493,26 @@ fn opening_user_message(
         }),
         reply_marker: None,
     }
+}
+
+/// Where `state`'s committed head holds the session's execution state: the
+/// head revision's row, at its checkpoint. None for a session that
+/// committed no checkpoint yet, or a store that publishes no heap pages.
+fn committed_session_pages(
+    cx: &ActorContext,
+    state: &crate::RuntimeSessionState,
+) -> Option<crate::plugin::SessionPages> {
+    let store = cx.pages().ok()?;
+    let root =
+        lash_core_store::checkpoint_graph::NodeId::from_hex(&state.checkpoint_ref.as_ref()?.0)?;
+    Some(crate::plugin::SessionPages {
+        store,
+        actor: cx.actor().clone(),
+        epoch: cx.epoch(),
+        owner: lash_durable::domain::graph::RootOwner::SessionRevision {
+            session: state.session_id.clone(),
+            revision: state.head_revision,
+        },
+        root,
+    })
 }

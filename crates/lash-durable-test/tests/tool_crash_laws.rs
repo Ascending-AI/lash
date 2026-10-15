@@ -1817,6 +1817,7 @@ impl lash_core_execution::ProcessEngine for StateEngine {
         let state = lash_core_execution::EngineState {
             format: self.state_format(),
             bytes: serde_json::to_vec(&settled).map_err(engine_failure)?,
+            pages: None,
         };
         Ok((state, action))
     }

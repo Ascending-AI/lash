@@ -274,7 +274,7 @@ impl CheckpointBindingFixture {
     }
 
     pub(super) async fn acknowledge_capture(&self) {
-        self.fixture.lock().await.acknowledge_capture();
+        self.fixture.lock().await.acknowledge_capture().await;
     }
 }
 

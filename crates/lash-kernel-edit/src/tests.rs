@@ -13,8 +13,14 @@ use lash_kernel_doc::{
     parse_definition, parse_document,
 };
 
+use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageGrant, PageId, PageRef};
+use lash_kernel_state::paged::census_impl::Census;
+use lash_kernel_state::paged::{
+    AccountingCertificate, AccountingMetric, AllocationCensus as _, PageAnswer, PageBody,
+    PageSource,
+};
 use lash_kernel_vm::{
-    Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, Start, Step, Target,
+    Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Program, Request, Step, Target,
 };
 
 use crate::apply::Working;
@@ -196,10 +202,48 @@ impl Host for Printer {
     }
 }
 
+/// The pages a law's run seals, kept in memory.
+#[derive(Default)]
+struct Pages(BTreeMap<PageId, PageAnswer>);
+
+impl PageSource for Pages {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        pages
+            .iter()
+            .map(|page| {
+                self.0
+                    .get(&page.id)
+                    .cloned()
+                    .ok_or(HeapFault::Missing { page: page.id })
+            })
+            .collect()
+    }
+
+    fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+        let mut tokens = body.kind.0.to_be_bytes().to_vec();
+        tokens.extend_from_slice(&body.tokens);
+        let page = PageRef {
+            id: PageId(lash_kernel_doc::heap_values::key_digest(&tokens)),
+            grant: PageGrant::NONE,
+        };
+        self.0.insert(
+            page.id,
+            PageAnswer {
+                page,
+                kind: body.kind,
+                tokens: body.tokens.into(),
+                children: body.children,
+            },
+        );
+        Ok(page)
+    }
+}
+
 /// Runs `document`'s `main` on the kernel machine to its end, answering
 /// every effect with `answer`.
 fn run(document: &Document, answer: &Datum) -> Ran {
     let program = Program {
+        release: PageId([8; 32]),
         document: Arc::new(document.clone()),
         library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     };
@@ -211,12 +255,32 @@ fn run(document: &Document, answer: &Datum) -> Ran {
         requests_per_park: 4,
         join_members: 4,
     };
-    let start = Start {
+    let start = CellStart {
+        owner: PageId([9; 32]),
         target: Target::Main,
         args: Vec::new(),
-        bindings: Default::default(),
+        session: None,
+        modes: Default::default(),
+        host: Vec::new(),
     };
-    let mut machine = KernelMachine::start(program, bounds, start).unwrap();
+    let census = Census::restore(
+        AccountingCertificate {
+            metric: AccountingMetric::LocalCostV1,
+            upper: LogicalBytes(0),
+            entities: 0,
+            refinements: 0,
+        },
+        LogicalBytes(bounds.memory),
+    )
+    .unwrap();
+    let mut machine = KernelMachine::start(
+        program,
+        bounds,
+        start,
+        Box::new(Pages::default()),
+        Box::new(census),
+    )
+    .unwrap();
     let mut host = Printer::default();
     let mut effects = Vec::new();
     loop {

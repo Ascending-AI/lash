@@ -13,9 +13,9 @@
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
+use lash_kernel_doc::heap::{ErrorRef, FieldName, IntRef, Payload};
 use lash_kernel_doc::{
-    ErrorValue, Integer, NativeCall, NativeError, NativeFunction, NativeHeap, Object, Value,
-    WorkCounter,
+    Integer, NativeCall, NativeError, NativeFunction, NativeHeap, Object, Value, WorkCounter,
 };
 use num_traits::ToPrimitive;
 
@@ -38,13 +38,13 @@ impl NativeFunction for Function {
         } = call;
         let arg = |index: usize| args.get(index).unwrap_or(&Value::Absent);
         if self.operation == Operation::CompileCheck {
-            let pattern = text_arg(arg(0), "pattern")?;
-            let flags = text_arg(arg(1), "flags")?;
-            let flags = self.engine.check(pattern, flags).map_err(syntax_error)?;
-            return regex_value(heap, pattern, flags);
+            let pattern = text_arg(arg(0), "pattern", heap)?;
+            let flags = text_arg(arg(1), "flags", heap)?;
+            let flags = self.engine.check(&pattern, &flags).map_err(syntax_error)?;
+            return regex_value(heap, &pattern, flags);
         }
         let regex = Regex::read(heap, arg(0))?;
-        let input = text_arg(arg(1), "input")?;
+        let input = text_arg(arg(1), "input", heap)?;
         let program = self
             .engine
             .program(&regex.pattern, regex.flags)
@@ -69,6 +69,7 @@ impl NativeFunction for Function {
                     }
                     None => Value::Null,
                 };
+                let last_index = heap.int(last_index)?;
                 record(
                     heap,
                     [("match", found), ("lastIndex", Value::Int(last_index))],
@@ -76,6 +77,7 @@ impl NativeFunction for Function {
             }
             Operation::Test => {
                 let (found, last_index) = subject.exec(counter)?;
+                let last_index = heap.int(last_index)?;
                 record(
                     heap,
                     [
@@ -95,8 +97,9 @@ impl NativeFunction for Function {
                 heap.allocate(Object::List(matches)).map(Value::List)
             }
             Operation::Replace => {
-                let replacement = text_arg(arg(2), "replacement")?;
-                let (text, last_index) = subject.replace(replacement, heap, counter)?;
+                let replacement = text_arg(arg(2), "replacement", heap)?;
+                let (text, last_index) = subject.replace(&replacement, heap, counter)?;
+                let last_index = heap.int(last_index)?;
                 record(
                     heap,
                     [("text", text), ("lastIndex", Value::Int(last_index))],
@@ -105,13 +108,14 @@ impl NativeFunction for Function {
             Operation::Split => {
                 let limit = match arg(2) {
                     Value::Absent => usize::MAX,
-                    Value::Int(limit) if limit.is_negative() => {
+                    Value::Int(limit) if negative(limit) => {
                         return Err(raised(
                             "number_range",
                             "`limit` is negative: give the most pieces to return",
                         ));
                     }
-                    Value::Int(limit) => limit.to_usize().unwrap_or(usize::MAX),
+                    Value::Int(IntRef::Inline(limit)) => limit.to_usize().unwrap_or(usize::MAX),
+                    Value::Int(IntRef::Paged { .. }) => usize::MAX,
                     other => return Err(wrong_type("limit", "an integer", other)),
                 };
                 let pieces = subject.split(limit, heap, counter)?;
@@ -145,28 +149,34 @@ impl Regex {
     /// Reads `{brand, pattern, flags, lastIndex}`: exactly those fields, a
     /// brand of [`BRAND`], and a `lastIndex` that is an integer of zero or
     /// more.
-    fn read(heap: &dyn NativeHeap, value: &Value) -> Result<Self, NativeError> {
+    fn read(heap: &mut dyn NativeHeap, value: &Value) -> Result<Self, NativeError> {
         let Value::Record(record) = value else {
             return Err(wrong_type("regex", "a regex record", value));
         };
-        let field = |name: &str| heap.record_get(*record, name);
+        let field = |name: &str| heap.record_get(*record, FieldName::Static(name));
         let (Some(Value::Text(brand)), Some(Value::Text(pattern)), Some(Value::Text(flags))) =
-            (field("brand"), field("pattern"), field("flags"))
+            (field("brand")?, field("pattern")?, field("flags")?)
         else {
             return Err(not_a_regex());
         };
-        let Some(Value::Int(last_index)) = field("lastIndex") else {
+        let Some(Value::Int(last_index)) = field("lastIndex")? else {
             return Err(not_a_regex());
         };
-        if brand.as_ref() != BRAND || heap.len(*record) != 4 {
+        if !heap.equal(&Value::Text(brand), &Value::text(BRAND))? || heap.len(*record)? != 4 {
             return Err(not_a_regex());
         }
-        if last_index.is_negative() {
+        if negative(&last_index) {
             return Err(raised(
                 "number_range",
                 "the regex's `lastIndex` is negative: it counts UTF-16 code units from the start of the input",
             ));
         }
+        let pattern = text_arg(&Value::Text(pattern), "pattern", heap)?;
+        let flags = text_arg(&Value::Text(flags), "flags", heap)?;
+        let last_index = match last_index {
+            IntRef::Inline(value) => value,
+            paged => heap.materialize_int(&paged)?,
+        };
         Ok(Self {
             pattern,
             flags: Flags::parse(&flags).map_err(syntax_error)?,
@@ -355,7 +365,7 @@ impl Subject<'_> {
             let fields = found
                 .named
                 .iter()
-                .map(|(name, range)| Ok((name.clone(), group(heap, range)?)))
+                .map(|(name, range)| Ok((heap.text(name)?, group(heap, range)?)))
                 .collect::<Result<Vec<_>, NativeError>>()?;
             heap.allocate(Object::Record(fields)).map(Value::Record)?
         };
@@ -363,7 +373,14 @@ impl Subject<'_> {
         record(
             heap,
             [
-                ("index", Value::Int(Integer::new(found.range.start))),
+                (
+                    "index",
+                    Value::Int(
+                        u64::try_from(found.range.start)
+                            .map_err(|_| NativeError::Memory)?
+                            .into(),
+                    ),
+                ),
                 ("groups", groups),
                 ("named", named),
             ],
@@ -442,9 +459,8 @@ fn text_value(heap: &mut dyn NativeHeap, units: &[u16]) -> Result<Value, NativeE
         .map(|unit| unit.map_or(0, char::len_utf8))
         .sum();
     heap.reserve(0, 2 * bytes as u64)?;
-    text_from_units(units)
-        .map(Value::text)
-        .ok_or_else(lone_surrogate)
+    let text = text_from_units(units).ok_or_else(lone_surrogate)?;
+    Ok(Value::Text(heap.text(&text)?))
 }
 
 /// A replacement's output: every unit written is spent first, as work, and
@@ -563,9 +579,9 @@ fn regex_value(
         heap,
         [
             ("brand", Value::text(BRAND)),
-            ("pattern", Value::Text(pattern.clone())),
+            ("pattern", Value::text(pattern.clone())),
             ("flags", Value::text(flags.canonical())),
-            ("lastIndex", Value::Int(Integer::new(0))),
+            ("lastIndex", Value::Int(0i32.into())),
         ],
     )
 }
@@ -576,20 +592,34 @@ fn record<const N: usize>(
 ) -> Result<Value, NativeError> {
     let fields = fields
         .into_iter()
-        .map(|(name, value)| (name.to_string(), value))
+        .map(|(name, value)| {
+            let Value::Text(name) = Value::text(name) else {
+                unreachable!()
+            };
+            (name, value)
+        })
         .collect();
     heap.allocate(Object::Record(fields)).map(Value::Record)
 }
 
-fn text_arg<'a>(value: &'a Value, name: &str) -> Result<&'a Arc<str>, NativeError> {
+fn text_arg(value: &Value, name: &str, heap: &mut dyn NativeHeap) -> Result<Arc<str>, NativeError> {
     match value {
-        Value::Text(text) => Ok(text),
+        Value::Text(text) => match &text.body {
+            Payload::Resident(text) => Ok(text.clone()),
+            Payload::Paged(_) => heap.materialize_text(text),
+        },
         other => Err(wrong_type(name, "a text", other)),
+    }
+}
+fn negative(value: &IntRef) -> bool {
+    match value {
+        IntRef::Inline(i) => i.is_negative(),
+        IntRef::Paged { summary, .. } => summary.negative,
     }
 }
 
 fn raised(kind: &str, message: impl Into<String>) -> NativeError {
-    NativeError::Raised(ErrorValue::new(kind, message))
+    NativeError::Raised(Arc::new(ErrorRef::new(kind, &message.into())))
 }
 
 fn wrong_type(name: &str, wanted: &str, found: &Value) -> NativeError {

@@ -372,7 +372,7 @@ fn roots_are_bounded_at_4_kib_and_spill_into_streams() {
         body.into_bytes()
     };
     let inline_len =
-        |count: usize| envelope_len(NodeKind::KERNEL_WHOLE, 0, units(count).len() + 3) as u64;
+        |count: usize| envelope_len(NodeKind::HOST_ROOT, 0, units(count).len() + 3) as u64;
     let edge = (1..10_000)
         .find(|count| inline_len(*count + 1) > MAX_ROOT_BYTES)
         .unwrap();
@@ -381,13 +381,13 @@ fn roots_are_bounded_at_4_kib_and_spill_into_streams() {
         let mut staging = staging();
         let body = units(count);
         let id = staging
-            .encode(NodeKind::KERNEL_WHOLE, TypedBody::logical(&body))
+            .encode(NodeKind::HOST_ROOT, TypedBody::logical(&body))
             .unwrap();
         let root = staging.get(&id).unwrap();
         assert!(root.len() <= MAX_ROOT_BYTES);
         let envelope = root.envelope().unwrap();
         assert_eq!(envelope.body[1], u8::from(streams), "variant at {count}");
-        assert_eq!(logical(&staging, id, NodeKind::KERNEL_WHOLE).unwrap(), body);
+        assert_eq!(logical(&staging, id, NodeKind::HOST_ROOT).unwrap(), body);
     }
 
     let mut staging = staging();
@@ -399,7 +399,7 @@ fn roots_are_bounded_at_4_kib_and_spill_into_streams() {
     }
     let body = body.into_bytes();
     let id = staging
-        .encode(NodeKind::SESSION_EXECUTION, TypedBody::logical(&body))
+        .encode(NodeKind::SESSION_MANIFEST, TypedBody::logical(&body))
         .unwrap();
     let kinds = |kind: NodeKind| {
         staging
@@ -416,7 +416,7 @@ fn roots_are_bounded_at_4_kib_and_spill_into_streams() {
     );
     assert_eq!(kinds(NodeKind::WHOLE_STREAM), 1);
     assert_eq!(
-        logical(&staging, id, NodeKind::SESSION_EXECUTION).unwrap(),
+        logical(&staging, id, NodeKind::SESSION_MANIFEST).unwrap(),
         body
     );
     for node in staging.nodes().values() {
@@ -457,13 +457,14 @@ fn every_envelope_refusal_names_its_cause() {
             limit: 4
         })
     );
-    // A future kind passes the generic check, so a reader can follow its
-    // children, and is refused by an execution decoder.
-    let future = raw(1_000, &[], &[0x00]);
+    // A semantic kind this build does not register passes the generic
+    // check, so a reader can follow its children, and is refused by an
+    // execution decoder.
+    let future = raw(1_999, &[], &[0x00]);
     assert!(check_envelope(&future.bytes, future.id, &limits()).is_ok());
     assert_eq!(
-        logical(&source([future.clone()]), future.id, NodeKind(1_000)),
-        Err(GraphRefusal::UnsupportedKind(1_000))
+        logical(&source([future.clone()]), future.id, NodeKind(1_999)),
+        Err(GraphRefusal::UnsupportedKind(1_999))
     );
 }
 
@@ -521,6 +522,20 @@ fn envelope_refusals() -> Vec<(&'static str, EncodedNode, GraphRefusal)> {
         overlong.clone(),
         with_node(&overlong, CanonicalFault::NonMinimalVarint),
     ));
+    // A pre-heap image's whole-state roots are refused by kind, naming
+    // their format, before any body is read (FIG-6193).
+    for &(kind, format) in NodeKind::RETIRED {
+        let retired = raw(kind.0, &[], &[0x00]);
+        cases.push((
+            format,
+            retired.clone(),
+            GraphRefusal::RetiredFormat {
+                node: Some(retired.id),
+                kind: kind.0,
+                format,
+            },
+        ));
+    }
     let unsorted = raw(
         8,
         &[child_b, child_a],
@@ -893,6 +908,7 @@ fn grammar_vectors() -> serde_json::Value {
     use serde_json::json;
     let registry: Vec<_> = REGISTRY
         .iter()
+        .chain(SEMANTIC_REGISTRY)
         .map(|spec| {
             json!({
                 "kind": spec.kind.0,
@@ -1010,7 +1026,7 @@ fn grammar_vectors() -> serde_json::Value {
             "inline_token_max": INLINE_TOKEN_MAX,
             "leaf_payload_max": LEAF_PAYLOAD_MAX,
             "index_fanout": INDEX_FANOUT,
-            "reserved_future_kinds": [*NodeKind::RESERVED_FUTURE.start(), *NodeKind::RESERVED_FUTURE.end()],
+            "semantic_kinds": [*NodeKind::SEMANTIC.start(), *NodeKind::SEMANTIC.end()],
         },
         "registry": registry,
         "root_sources": roots,

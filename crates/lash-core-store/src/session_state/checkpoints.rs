@@ -134,7 +134,7 @@ impl RuntimeSessionState {
     }
 
     /// Replaces the session's protocol execution state with `capture`, a
-    /// complete SessionExecution root (FIG-5887 §6), or clears it: a
+    /// session descriptor page (ADR 0145 §9), or clears it: a
     /// materialized frame switch clears it, since the new frame starts
     /// with no globals.
     ///

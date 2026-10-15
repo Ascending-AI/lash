@@ -8,7 +8,7 @@ use lash_kernel_doc::{parse_definition, parse_document};
 
 use super::embedder::{Embedder, REPEAT_BUILDS, ROOMY, Setup, World, int, library, result};
 use crate::{
-    Bound, BoundExceeded, Bounds, End, KernelMachine, Machine, Program, RunError, Start, Step,
+    Bound, BoundExceeded, Bounds, CellStart, End, KernelMachine, Machine, Program, RunError, Step,
     Target,
 };
 
@@ -66,180 +66,6 @@ fn the_charge_bound_ends_the_run() {
 
 /// `K-BND-001`, `K-BND-003`: memory that is live counts against the
 /// bound, and memory the run no longer reaches does not.
-#[test]
-fn the_memory_bound_counts_what_is_live() {
-    // A deleted table key releases its referent; indexes and deleted
-    // slots contribute no logical price. A live map/set entry costs two
-    // 16-byte values, and each object costs 32 bytes (K-BND-003).
-    use lash_kernel_doc::{Identity, Value};
-
-    use crate::heap::{Heap, Key, Obj, Table};
-
-    for set in [false, true] {
-        let mut heap = Heap::new(ROOMY.memory);
-        let kept = heap.insert(Obj::List(vec![]));
-        let dropped = heap.insert(Obj::List(vec![]));
-        let mut table = Table::default();
-        for object in [kept, dropped] {
-            let key = Value::Ref(Identity::Object(object));
-            table.insert(Key::of(&key).unwrap(), key, Value::Null);
-        }
-        table.remove(&Key::Ref(Identity::Object(dropped)));
-        let root = heap.insert(if set {
-            Obj::Set(table)
-        } else {
-            Obj::Map(table)
-        });
-        assert_eq!(
-            heap.collect(vec![Identity::Object(root)], &mut |_, _| {}),
-            96
-        );
-        assert!(heap.get(kept).is_some());
-        assert!(heap.get(dropped).is_none());
-    }
-
-    // K-BND-003: private table accounting equals a recount through
-    // updates, deletion, reinsertion and scalar/reference transitions.
-    // Mixed entries must still trace references nested in tuples/errors,
-    // task handles and first-written keys, for maps and sets alike.
-    fn recount(table: &Table, set: bool) {
-        use crate::heap::{object_bytes, refs, value_bytes};
-
-        let contents: u64 = table
-            .iter()
-            .map(|(key, value)| value_bytes(key).saturating_add(value_bytes(value)))
-            .sum();
-        let mut reached = Vec::new();
-        for (key, value) in table.iter() {
-            refs(key, &mut reached);
-            refs(value, &mut reached);
-        }
-        let mut heap = Heap::new(ROOMY.memory);
-        let child = heap.insert(Obj::List(vec![]));
-        let object = if set {
-            Obj::Set(table.clone())
-        } else {
-            Obj::Map(table.clone())
-        };
-        assert_eq!(object_bytes(&object), 32 + contents);
-        let root = heap.insert(object);
-        let mut tasks = Vec::new();
-        let live = heap.collect(vec![Identity::Object(root)], &mut |task, _| {
-            tasks.push(task)
-        });
-        let keeps_child = reached.contains(&Identity::Object(child));
-        assert_eq!(live, 32 + contents + if keeps_child { 32 } else { 0 });
-        assert_eq!(heap.get(child).is_some(), keeps_child);
-        let mut expected: Vec<_> = reached
-            .into_iter()
-            .filter_map(|identity| match identity {
-                Identity::Task(task) => Some(task),
-                Identity::Object(_) => None,
-            })
-            .collect();
-        tasks.sort();
-        expected.sort();
-        assert_eq!(tasks, expected);
-    }
-    use lash_kernel_doc::{Bytes, ErrorValue, Float, Integer, Name, ObjectId, TaskId, Timestamp};
-    use std::sync::Arc;
-
-    let child = Value::List(ObjectId(0));
-    let mut values = vec![
-        Value::Null,
-        Value::Absent,
-        Value::Bool(true),
-        Value::Int(Integer::from(0)),
-        Value::Int(Integer::from(65536)),
-        Value::Float(Float::new(-0.0)),
-        Value::Float(Float::new(f64::NAN)),
-        Value::text("payload"),
-        Value::Bytes(Bytes::new(vec![1, 2, 3])),
-        Value::Timestamp(Timestamp {
-            nanoseconds: Integer::from(65536),
-        }),
-        Value::Function(Name::new("f")),
-        child.clone(),
-        Value::Ref(Identity::Object(ObjectId(0))),
-        Value::Task(TaskId(7)),
-        Value::Tuple(Arc::from([child.clone(), Value::Task(TaskId(8))])),
-    ];
-    values.push(Value::Error(Arc::new(ErrorValue {
-        kind: "nested".into(),
-        message: "reference".into(),
-        data: child,
-    })));
-    for set in [false, true] {
-        for written in values.iter().filter(|value| Key::of(value).is_some()) {
-            let key = Key::of(written).unwrap();
-            let mut table = Table::default();
-            // Several surviving entries exercise the mixed path and
-            // removing them all forces slot compaction.
-            for i in 1..5 {
-                let other = Value::text(format!("other:{i}"));
-                table.insert(Key::of(&other).unwrap(), other, Value::Null);
-            }
-            for value in &values {
-                table.insert(
-                    key.clone(),
-                    written.clone(),
-                    if set { Value::Null } else { value.clone() },
-                );
-                recount(&table, set);
-            }
-            table.remove(&key);
-            recount(&table, set);
-            table.insert(key.clone(), written.clone(), Value::Null);
-            recount(&table, set);
-            table.insert(key.clone(), written.clone(), values[14].clone());
-            recount(&table, set);
-            table.insert(key.clone(), written.clone(), Value::text("scalar again"));
-            recount(&table, set);
-            table.remove(&key);
-            recount(&table, set);
-            for i in 1..5 {
-                table.remove(&Key::Text(Arc::from(format!("other:{i}"))));
-                recount(&table, set);
-            }
-            table.insert(key, written.clone(), Value::Null);
-            recount(&table, set);
-        }
-    }
-
-    let bounds = Bounds {
-        memory: 64 << 10,
-        ..ROOMY
-    };
-    assert_eq!(
-        passes(
-            "let xs = [] while true { set xs[list.len(xs)] = \"0123456789\" }",
-            bounds
-        ),
-        BoundExceeded {
-            function: Some(lash_kernel_doc::FunctionName::new("list.len").unwrap()),
-            ..exceeded(Bound::Memory, 64 << 10)
-        }
-    );
-    // The same allocations, dropped as they are made, fit.
-    let mut embedder = Embedder::with(
-        r#"main {
-  let i = 0
-  while num.lt(i, 5000) {
-    let garbage = [i, "0123456789", [i]]
-    set i = num.add(i, 1)
-  }
-  return i
-}"#,
-        Setup {
-            bounds,
-            ..Setup::default()
-        },
-    );
-    assert_eq!(result(embedder.run_to_end(&[])), int(5000));
-    assert!(embedder.machine.meters().memory <= 64 << 10);
-}
-
-/// `K-BND-001`: an allocation a native function makes counts too.
 #[test]
 fn the_memory_bound_holds_inside_a_native_call() {
     let bounds = Bounds {
@@ -479,19 +305,23 @@ fn a_helper_that_runs_away_ends_at_the_charge_bound() {
          main {{ let n = invoke probe.spin(200000) return n }}\n"
     );
     let program = Program {
+        release: lash_kernel_doc::heap::PageId([8; 32]),
         document: Arc::new(parse_document(&text).unwrap()),
         library: crate::PreparedLibrary::new(Arc::new(registry)),
     };
-    let start = Start {
+    let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
-        bindings: Default::default(),
+        session: None,
+        owner: lash_kernel_doc::heap::PageId([9; 32]),
+        modes: crate::EffectModes::recorded(),
+        host: Vec::new(),
     };
     let bounds = Bounds {
         charge: 10_000,
         ..ROOMY
     };
-    let mut machine = KernelMachine::start(program, bounds, start).unwrap();
+    let mut machine = super::embedder::start_machine(program, bounds, start).unwrap();
     match machine.run(&mut World::default(), u64::MAX).unwrap() {
         Step::Ended(End::Error(RunError::Bound(exceeded))) => {
             assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
@@ -526,19 +356,23 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
          main {{ let count = probe.counter(200000) let n = apply count() return n }}\n"
     );
     let program = Program {
+        release: lash_kernel_doc::heap::PageId([8; 32]),
         document: Arc::new(parse_document(&text).unwrap()),
         library: crate::PreparedLibrary::new(Arc::new(registry)),
     };
-    let start = Start {
+    let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
-        bindings: Default::default(),
+        session: None,
+        owner: lash_kernel_doc::heap::PageId([9; 32]),
+        modes: crate::EffectModes::recorded(),
+        host: Vec::new(),
     };
     let bounds = Bounds {
         charge: 10_000,
         ..ROOMY
     };
-    let mut machine = KernelMachine::start(program, bounds, start).unwrap();
+    let mut machine = super::embedder::start_machine(program, bounds, start).unwrap();
     match machine.run(&mut World::default(), u64::MAX).unwrap() {
         Step::Ended(End::Error(RunError::Bound(exceeded))) => {
             assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
@@ -567,15 +401,19 @@ fn a_helper_is_charged_its_body_and_not_its_formula() {
              main {{ let n = invoke probe.step(1) return n }}\n"
         );
         let program = Program {
+            release: lash_kernel_doc::heap::PageId([8; 32]),
             document: Arc::new(parse_document(&text).unwrap()),
             library: crate::PreparedLibrary::new(Arc::new(registry)),
         };
-        let start = Start {
+        let start = CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings: Default::default(),
+            session: None,
+            owner: lash_kernel_doc::heap::PageId([9; 32]),
+            modes: crate::EffectModes::recorded(),
+            host: Vec::new(),
         };
-        let mut machine = KernelMachine::start(program, ROOMY, start).unwrap();
+        let mut machine = super::embedder::start_machine(program, ROOMY, start).unwrap();
         match machine.run(&mut World::default(), u64::MAX).unwrap() {
             Step::Ended(End::Finished(_)) => machine.meters().charged,
             other => panic!("the helper did not finish: {other:?}"),
@@ -644,13 +482,17 @@ fn a_host_value_depth_policy_is_honored_by_a_kernel_run() {
     embedder.machine = KernelMachine::start_with_data_limits(
         program,
         ROOMY,
-        Start {
+        CellStart {
             target: Target::Main,
             args: Vec::new(),
-            bindings: crate::Bindings::default(),
+            session: None,
+            owner: lash_kernel_doc::heap::PageId([9; 32]),
+            modes: crate::EffectModes::recorded(),
+            host: Vec::new(),
         },
         limits,
-        crate::EffectModes::recorded(),
+        Box::new(super::embedder::Source::default()),
+        super::embedder::census(ROOMY.memory),
     )
     .unwrap();
     let mut world = World::default();

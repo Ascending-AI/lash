@@ -25,9 +25,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::args_os()
         .nth(1)
         .ok_or("usage: native_corpus <checkout root>")?;
-    let extend = std::env::args_os()
-        .nth(2)
-        .is_some_and(|flag| flag == "--extend");
+    let mode = std::env::args_os().nth(2);
+    let extend = mode.as_ref().is_some_and(|flag| flag == "--extend");
+    let audit = mode.as_ref().is_some_and(|flag| flag == "--audit");
     let mut recorded = corpus::Corpus::recorded()?;
     let release = declared::RETAINED_HELPER_RELEASES
         .last()
@@ -38,7 +38,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     lash_kernel_lib::register_text_json(&mut registry)?;
     lash_kernel_vm::register_machine_functions(&mut registry)?;
     lash_kernel_lib::register_collections(&mut registry)?;
-    recorded.record_new(&registry, declared::PYTHON, release)?;
+    if !audit {
+        recorded.record_new(&registry, declared::PYTHON, release)?;
+    }
     if extend {
         recorded.extend_generated(&registry, declared::PYTHON, release)?;
     }
@@ -48,6 +50,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     lash_ext_date_ecma::register(&mut registry)?;
     lash_ext_url_whatwg::register(&mut registry)?;
+    if audit {
+        for dialect in [declared::PYTHON, declared::TYPESCRIPT] {
+            for difference in recorded.audit(&registry, dialect, release)? {
+                println!("{}", serde_json::to_string(&difference)?);
+            }
+        }
+        return Ok(());
+    }
     recorded.record_new(&registry, declared::TYPESCRIPT, release)?;
     if extend {
         recorded.extend_generated(&registry, declared::TYPESCRIPT, release)?;

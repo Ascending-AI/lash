@@ -67,8 +67,6 @@ pub(crate) enum Event {
     },
     /// Its fast path answered.
     NativeFast,
-    /// It is called again after a collection.
-    NativeRetry,
     /// Its guard counted this much work.
     GuardWork(u64),
     /// It returned or raised, and was charged.
@@ -76,8 +74,6 @@ pub(crate) enum Event {
     /// A library function's formula is evaluated.
     FormulaEnter(LibId),
     FormulaExit,
-    CollectEnter,
-    CollectExit,
 }
 
 /// What one machine observes.
@@ -120,14 +116,13 @@ impl Observer {
                     work.native_enter(task.0 as usize, lib.0);
                 }
                 Event::NativeFast => work.native_fast(),
-                Event::NativeRetry => work.native_retry(),
                 Event::GuardWork(units) => work.guard_work(units),
                 Event::NativeExit => {
                     work.flush(charged, allocated);
                     work.native_exit();
                 }
                 Event::FormulaEnter(lib) => work.formula(lib.0),
-                Event::FormulaExit | Event::CollectEnter | Event::CollectExit => {}
+                Event::FormulaExit => {}
             }
         }
         if let Some(context) = &mut self.context {
@@ -139,12 +134,8 @@ impl Observer {
                 Event::Pop { task } => context.pop(task.0),
                 Event::NativeEnter { lib, .. } => context.enter(GuestPhase::Native(lib.0)),
                 Event::FormulaEnter(lib) => context.enter(GuestPhase::Formula(lib.0)),
-                Event::CollectEnter => context.enter(GuestPhase::Collect),
-                Event::NativeExit | Event::FormulaExit | Event::CollectExit => context.leave(),
-                Event::TaskEnded(_)
-                | Event::NativeFast
-                | Event::NativeRetry
-                | Event::GuardWork(_) => {}
+                Event::NativeExit | Event::FormulaExit => context.leave(),
+                Event::TaskEnded(_) | Event::NativeFast | Event::GuardWork(_) => {}
             }
         }
     }

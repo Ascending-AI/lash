@@ -34,10 +34,9 @@ use crate::graph_tokens::{
     CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending,
 };
 use crate::{
-    Bytes, ClosureObject, Datum, DocumentId, EffectIdentity, ErrorDatum, ErrorValue, Float,
-    FunctionId, Handle, Identity, Integer, JoinMode, LoopIteration, Name, NumberPolicy,
-    NumberToken, Object, ObjectId, QualifiedName, Site, SpawnIdentity, TaskId, TaskIdentity,
-    Timestamp, Unit, Value,
+    Bytes, Datum, DocumentId, EffectIdentity, ErrorDatum, Float, FunctionId, Handle, Integer,
+    JoinMode, LoopIteration, Name, NumberPolicy, NumberToken, QualifiedName, Site, SpawnIdentity,
+    TaskId, TaskIdentity, Timestamp, Unit,
 };
 
 /// The deepest a decoded value, form or type may nest, in recursive
@@ -318,7 +317,7 @@ macro_rules! handle_codec {
     )*};
 }
 
-handle_codec!(ObjectId, TaskId);
+handle_codec!(TaskId);
 
 macro_rules! unit_enum_codec {
     ($($name:ident { $($variant:ident = $number:literal),* $(,)? })*) => {$(
@@ -463,25 +462,6 @@ impl TokenCodec for EffectIdentity {
     }
 }
 
-impl TokenCodec for Identity {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.sum(self.codec_variant(), 1);
-        match self {
-            Self::Object(id) => id.encode(out),
-            Self::Task(id) => id.encode(out),
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Ok(
-            match variant(input, |variant| (variant <= 1).then_some(1))? {
-                0 => Self::Object(ObjectId::decode(input)?),
-                _ => Self::Task(TaskId::decode(input)?),
-            },
-        )
-    }
-}
-
 // Values.
 
 impl TokenCodec for Handle {
@@ -497,162 +477,6 @@ impl TokenCodec for Handle {
             kind: String::decode(input)?,
             id: String::decode(input)?,
         })
-    }
-}
-
-impl TokenCodec for ErrorValue {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
-        out.text(&self.kind);
-        out.text(&self.message);
-        self.data.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
-        Ok(Self {
-            kind: String::decode(input)?,
-            message: String::decode(input)?,
-            data: Value::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for Value {
-    fn encode(&self, out: &mut TokenWriter) {
-        let number = self.codec_variant();
-        match self {
-            Self::Null | Self::Absent => out.sum(number, 0),
-            Self::Bool(value) => {
-                out.sum(number, 1);
-                out.bool(*value);
-            }
-            Self::Int(value) => {
-                out.sum(number, 1);
-                value.encode(out);
-            }
-            Self::Float(value) => {
-                out.sum(number, 1);
-                value.encode(out);
-            }
-            Self::Text(value) => {
-                out.sum(number, 1);
-                out.text(value);
-            }
-            Self::Bytes(value) => {
-                out.sum(number, 1);
-                value.encode(out);
-            }
-            Self::Timestamp(value) => {
-                out.sum(number, 1);
-                value.encode(out);
-            }
-            Self::Tuple(members) => {
-                out.sum(number, 1);
-                members.encode(out);
-            }
-            Self::List(id)
-            | Self::Map(id)
-            | Self::Set(id)
-            | Self::Record(id)
-            | Self::Closure(id) => {
-                out.sum(number, 1);
-                id.encode(out);
-            }
-            Self::Error(error) => {
-                out.sum(number, 1);
-                error.encode(out);
-            }
-            Self::Task(id) => {
-                out.sum(number, 1);
-                id.encode(out);
-            }
-            Self::Function(name) => {
-                out.sum(number, 1);
-                name.encode(out);
-            }
-            Self::Handle(handle) => {
-                out.sum(number, 1);
-                handle.encode(out);
-            }
-            Self::Ref(identity) => {
-                out.sum(number, 1);
-                identity.encode(out);
-            }
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.nested(|input| {
-            let number = variant(input, |variant| match variant {
-                0 | 1 => Some(0),
-                2..=18 => Some(1),
-                _ => None,
-            })?;
-            Ok(match number {
-                0 => Self::Null,
-                1 => Self::Absent,
-                2 => Self::Bool(input.bool()?),
-                3 => Self::Int(Integer::decode(input)?),
-                4 => Self::Float(Float::decode(input)?),
-                5 => Self::Text(Arc::decode(input)?),
-                6 => Self::Bytes(Bytes::decode(input)?),
-                7 => Self::Timestamp(Timestamp::decode(input)?),
-                8 => Self::Tuple(Arc::decode(input)?),
-                9 => Self::List(ObjectId::decode(input)?),
-                10 => Self::Map(ObjectId::decode(input)?),
-                11 => Self::Set(ObjectId::decode(input)?),
-                12 => Self::Record(ObjectId::decode(input)?),
-                13 => Self::Closure(ObjectId::decode(input)?),
-                14 => Self::Error(Arc::decode(input)?),
-                15 => Self::Task(TaskId::decode(input)?),
-                16 => Self::Function(Name::decode(input)?),
-                17 => Self::Handle(Arc::decode(input)?),
-                _ => Self::Ref(Identity::decode(input)?),
-            })
-        })
-    }
-}
-
-impl TokenCodec for ClosureObject {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.site.encode(out);
-        self.captures.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            site: Site::decode(input)?,
-            captures: Vec::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for Object {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.sum(self.codec_variant(), 1);
-        match self {
-            Self::List(items) | Self::Set(items) => items.encode(out),
-            Self::Map(entries) => entries.encode(out),
-            Self::Record(fields) => fields.encode(out),
-            Self::Closure(closure) => closure.encode(out),
-            Self::Variable(value) => value.encode(out),
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Ok(
-            match variant(input, |variant| (variant <= 5).then_some(1))? {
-                0 => Self::List(Vec::decode(input)?),
-                1 => Self::Map(Vec::decode(input)?),
-                2 => Self::Set(Vec::decode(input)?),
-                3 => Self::Record(Vec::decode(input)?),
-                4 => Self::Closure(ClosureObject::decode(input)?),
-                _ => Self::Variable(Value::decode(input)?),
-            },
-        )
     }
 }
 
@@ -770,3 +594,571 @@ mod forms;
 #[cfg(test)]
 #[path = "graph_codec_tests.rs"]
 mod tests;
+
+/// Canonical codecs for semantic heap descriptors. Grants are activation
+/// authority and are deliberately absent from the durable grammar.
+pub mod heap_values {
+    use super::{invalid, variant};
+    use crate::graph_tokens::{ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter};
+    use crate::heap::*;
+    use crate::{Float, Integer, TaskId, Timestamp};
+    use num_bigint::{BigInt, Sign};
+    use num_traits::FromPrimitive;
+    use sha2::{Digest, Sha256};
+    use std::sync::Arc;
+
+    macro_rules! record {
+        ($name:ident { $($field:ident : $ty:ty),+ $(,)? }) => {
+            impl TokenCodec for $name {
+                fn encode(&self, out: &mut TokenWriter) {
+                    out.seq([$(stringify!($field)),+].len() as u64);
+                    $(self.$field.encode(out);)+
+                }
+                fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+                    input.expect_struct([$(stringify!($field)),+].len() as u64)?;
+                    Ok(Self { $($field: <$ty>::decode(input)?),+ })
+                }
+            }
+        };
+    }
+    macro_rules! scalar {
+        ($name:ident) => {
+            impl TokenCodec for $name {
+                fn encode(&self, out: &mut TokenWriter) {
+                    out.unsigned(self.0);
+                }
+                fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+                    input.unsigned().map(Self)
+                }
+            }
+        };
+    }
+    scalar!(FamilyId);
+    scalar!(LogicalBytes);
+    record!(EntityId {
+        family: FamilyId,
+        ordinal: u64
+    });
+    record!(TextSummary {
+        utf8_bytes: u64,
+        chars: u64,
+        utf16_units: u64
+    });
+    record!(IntSummary {
+        bits: u64,
+        negative: bool
+    });
+    record!(TupleSummary {
+        len: u64,
+        task_edges: u64,
+        cost: LogicalBytes,
+        has_edges: bool,
+        depth: u32
+    });
+
+    impl TokenCodec for PageId {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.child(ChildRef(self.0));
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            input.child().map(|id| Self(id.0))
+        }
+    }
+    impl TokenCodec for PageRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            self.id.encode(out);
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            Ok(Self {
+                id: PageId::decode(input)?,
+                grant: PageGrant::NONE,
+            })
+        }
+    }
+    impl TokenCodec for Identity {
+        fn encode(&self, out: &mut TokenWriter) {
+            match self {
+                Self::Object(id) => {
+                    out.sum(0, 1);
+                    id.encode(out);
+                }
+                Self::Task(id) => {
+                    out.sum(1, 1);
+                    id.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            Ok(match variant(input, |v| (v <= 1).then_some(1))? {
+                0 => Self::Object(EntityId::decode(input)?),
+                _ => Self::Task(TaskId::decode(input)?),
+            })
+        }
+    }
+    impl TokenCodec for TextRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(2);
+            self.summary.encode(out);
+            match &self.body {
+                Payload::Resident(text) => {
+                    out.sum(0, 1);
+                    out.text(text);
+                }
+                Payload::Paged(page) => {
+                    out.sum(1, 1);
+                    page.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            input.expect_struct(2)?;
+            let summary = TextSummary::decode(input)?;
+            let body = match variant(input, |v| (v <= 1).then_some(1))? {
+                0 => {
+                    let text = input.text()?;
+                    if text.len() as u64 > IMMUTABLE_INLINE_MAX || summary != text_summary(text) {
+                        return Err(invalid("invalid inline text descriptor"));
+                    }
+                    Payload::Resident(Arc::from(text))
+                }
+                _ => {
+                    if summary.utf8_bytes <= IMMUTABLE_INLINE_MAX {
+                        return Err(invalid("a short text must be inline"));
+                    }
+                    Payload::Paged(PageRef::decode(input)?)
+                }
+            };
+            Ok(Self {
+                summary,
+                body,
+                normal: Default::default(),
+            })
+        }
+    }
+    impl TokenCodec for BytesRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(2);
+            out.unsigned(self.len);
+            match &self.body {
+                Payload::Resident(bytes) => {
+                    out.sum(0, 1);
+                    out.bytes(bytes);
+                }
+                Payload::Paged(page) => {
+                    out.sum(1, 1);
+                    page.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            input.expect_struct(2)?;
+            let len = input.unsigned()?;
+            let body = match variant(input, |v| (v <= 1).then_some(1))? {
+                0 => {
+                    let bytes = input.bytes()?;
+                    if bytes.len() as u64 != len || len > IMMUTABLE_INLINE_MAX {
+                        return Err(invalid("invalid inline bytes descriptor"));
+                    }
+                    Payload::Resident(Arc::from(bytes))
+                }
+                _ => {
+                    if len <= IMMUTABLE_INLINE_MAX {
+                        return Err(invalid("short bytes must be inline"));
+                    }
+                    Payload::Paged(PageRef::decode(input)?)
+                }
+            };
+            Ok(Self {
+                len,
+                body,
+                normal: Default::default(),
+            })
+        }
+    }
+    impl TokenCodec for IntRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            match self {
+                Self::Inline(int) => {
+                    out.sum(0, 1);
+                    int.encode(out);
+                }
+                Self::Paged {
+                    summary, digits, ..
+                } => {
+                    out.sum(1, 2);
+                    summary.encode(out);
+                    digits.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            Ok(
+                match variant(input, |v| match v {
+                    0 => Some(1),
+                    1 => Some(2),
+                    _ => None,
+                })? {
+                    0 => {
+                        let int = Integer::decode(input)?;
+                        if int.bits().div_ceil(8) > IMMUTABLE_INLINE_MAX {
+                            return Err(invalid("a large integer must be paged"));
+                        }
+                        Self::Inline(int)
+                    }
+                    _ => {
+                        let summary = IntSummary::decode(input)?;
+                        if summary.bits.div_ceil(8) <= IMMUTABLE_INLINE_MAX {
+                            return Err(invalid("a short integer must be inline"));
+                        }
+                        Self::Paged {
+                            normal: Default::default(),
+                            summary,
+                            digits: PageRef::decode(input)?,
+                        }
+                    }
+                },
+            )
+        }
+    }
+    impl TokenCodec for Payload<Value> {
+        fn encode(&self, out: &mut TokenWriter) {
+            match self {
+                Self::Resident(v) => {
+                    out.sum(0, 1);
+                    v.encode(out);
+                }
+                Self::Paged(p) => {
+                    out.sum(1, 1);
+                    p.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            Ok(match variant(input, |v| (v <= 1).then_some(1))? {
+                0 => Self::Resident(Arc::new(Value::decode(input)?)),
+                _ => Self::Paged(PageRef::decode(input)?),
+            })
+        }
+    }
+    impl TokenCodec for ErrorRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(8);
+            self.kind.encode(out);
+            self.message.encode(out);
+            self.data.encode(out);
+            self.depth.encode(out);
+            self.cost.encode(out);
+            self.has_edges.encode(out);
+            self.family.encode(out);
+            self.task_edges.encode(out);
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            decode_error(input, None)
+        }
+    }
+    fn decode_error(
+        input: &mut TokenReader<'_>,
+        family: Option<FamilyId>,
+    ) -> Result<ErrorRef, TokenError> {
+        input.expect_struct(8)?;
+        let kind = TextRef::decode(input)?;
+        let message = TextRef::decode(input)?;
+        let data = match variant(input, |v| (v <= 1).then_some(1))? {
+            0 => Payload::Resident(Arc::new(decode_value_with_family(input, family)?)),
+            _ => Payload::Paged(PageRef::decode(input)?),
+        };
+        let depth = u32::decode(input)?;
+        if depth == 0 || depth > 128 {
+            return Err(invalid("error depth exceeds K-VAL-034"));
+        }
+        let cost = LogicalBytes::decode(input)?;
+        let has_edges = bool::decode(input)?;
+        let declared = Option::<FamilyId>::decode(input)?;
+        if family.is_some() && declared.is_some() && family != declared {
+            return Err(invalid("error family context mismatch"));
+        }
+        let family = declared.or(family);
+        let task_edges = u64::decode(input)?;
+        if let Payload::Resident(value) = &data {
+            if task_count(value) != task_edges
+                || nesting(value) + 1 != depth
+                || contains_edges(value) != has_edges
+            {
+                return Err(invalid("error edge/depth summary mismatch"));
+            }
+            let expected = kind
+                .summary
+                .utf8_bytes
+                .checked_add(message.summary.utf8_bytes)
+                .and_then(|v| v.checked_add(local_cost(value)))
+                .ok_or_else(|| invalid("error cost overflow"))?;
+            if expected != cost.0 {
+                return Err(invalid("error cost summary mismatch"));
+            }
+        }
+        Ok(ErrorRef {
+            kind,
+            message,
+            data,
+            depth,
+            cost,
+            has_edges,
+            family,
+            task_edges,
+        })
+    }
+    impl TokenCodec for TupleRef {
+        fn encode(&self, out: &mut TokenWriter) {
+            out.seq(3);
+            self.summary.encode(out);
+            self.family.encode(out);
+            match &self.body {
+                Payload::Resident(values) => {
+                    out.sum(0, 1);
+                    values.encode(out);
+                }
+                Payload::Paged(page) => {
+                    out.sum(1, 1);
+                    page.encode(out);
+                }
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            decode_tuple(input, None)
+        }
+    }
+    fn decode_tuple(
+        input: &mut TokenReader<'_>,
+        inherited: Option<FamilyId>,
+    ) -> Result<TupleRef, TokenError> {
+        input.expect_struct(3)?;
+        let summary = TupleSummary::decode(input)?;
+        let declared = Option::<FamilyId>::decode(input)?;
+        if inherited.is_some() && declared.is_some() && inherited != declared {
+            return Err(invalid("tuple family context mismatch"));
+        }
+        let family = declared.or(inherited);
+        if summary.depth > 128 {
+            return Err(invalid("tuple depth exceeds K-VAL-034"));
+        }
+        let body = match variant(input, |v| (v <= 1).then_some(1))? {
+            0 => {
+                let count = input.seq()?;
+                if count != summary.len {
+                    return Err(invalid("tuple length mismatch"));
+                }
+                let mut values = Vec::new();
+                for _ in 0..count {
+                    values.push(decode_value_with_family(input, family)?);
+                }
+                let count = values.iter().try_fold(0u64, |n, v| {
+                    n.checked_add(task_count(v))
+                        .ok_or_else(|| invalid("tuple task-edge overflow"))
+                })?;
+                let cost = values.iter().try_fold(0u64, |n, v| {
+                    n.checked_add(local_cost(v))
+                        .ok_or_else(|| invalid("tuple cost overflow"))
+                })?;
+                let depth = values.iter().map(nesting).max().unwrap_or(0) + 1;
+                if count != summary.task_edges
+                    || cost != summary.cost.0
+                    || depth != summary.depth
+                    || values.iter().any(contains_edges) != summary.has_edges
+                {
+                    return Err(invalid("tuple aggregate mismatch"));
+                }
+                Payload::Resident(Arc::from(values))
+            }
+            _ => Payload::Paged(PageRef::decode(input)?),
+        };
+        Ok(TupleRef {
+            normal: Default::default(),
+            summary,
+            family,
+            body,
+        })
+    }
+    impl TokenCodec for Value {
+        fn encode(&self, out: &mut TokenWriter) {
+            macro_rules! one {
+                ($n:expr, $v:expr) => {{
+                    out.sum($n, 1);
+                    $v.encode(out);
+                }};
+            }
+            match self {
+                Self::Null => out.sum(0, 0),
+                Self::Absent => out.sum(1, 0),
+                Self::Bool(v) => one!(2, v),
+                Self::Int(v) => one!(3, v),
+                Self::Float(v) => one!(4, v),
+                Self::Text(v) => one!(5, v),
+                Self::Bytes(v) => one!(6, v),
+                Self::Timestamp(v) => one!(7, v),
+                Self::Tuple(v) => one!(8, v),
+                Self::List(v) => one!(9, v),
+                Self::Map(v) => one!(10, v),
+                Self::Set(v) => one!(11, v),
+                Self::Record(v) => one!(12, v),
+                Self::Closure(v) => one!(13, v),
+                Self::Error(v) => one!(14, v),
+                Self::Task(v) => one!(15, v),
+                Self::Function(v) => one!(16, v),
+                Self::Handle(v) => one!(17, v),
+                Self::Ref(v) => one!(18, v),
+            }
+        }
+        fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+            decode_value_with_family(input, None)
+        }
+    }
+    /// A relative occurrence has a distinct grammar tag. It cannot be decoded
+    /// without a family supplied by the frozen body's authenticated link.
+    pub fn encode_relative(kind: u32, ordinal: u64, out: &mut TokenWriter) {
+        out.sum(19, 2);
+        out.unsigned(u64::from(kind));
+        out.unsigned(ordinal);
+    }
+    fn absolute_entity(
+        input: &mut TokenReader<'_>,
+        family: Option<FamilyId>,
+    ) -> Result<EntityId, TokenError> {
+        let id = EntityId::decode(input)?;
+        if Some(id.family) == family {
+            return Err(invalid("absolute reference under its own family context"));
+        }
+        Ok(id)
+    }
+    pub fn decode_value_with_family(
+        input: &mut TokenReader<'_>,
+        family: Option<FamilyId>,
+    ) -> Result<Value, TokenError> {
+        input.nested(|input| {
+            Ok(
+                match variant(input, |v| match v {
+                    0 | 1 => Some(0),
+                    2..=18 => Some(1),
+                    19 => Some(2),
+                    _ => None,
+                })? {
+                    0 => Value::Null,
+                    1 => Value::Absent,
+                    2 => Value::Bool(bool::decode(input)?),
+                    3 => Value::Int(IntRef::decode(input)?),
+                    4 => Value::Float(Float::decode(input)?),
+                    5 => Value::Text(TextRef::decode(input)?),
+                    6 => Value::Bytes(BytesRef::decode(input)?),
+                    7 => Value::Timestamp(Timestamp::decode(input)?),
+                    8 => Value::Tuple(decode_tuple(input, family)?),
+                    9 => Value::List(absolute_entity(input, family)?),
+                    10 => Value::Map(absolute_entity(input, family)?),
+                    11 => Value::Set(absolute_entity(input, family)?),
+                    12 => Value::Record(absolute_entity(input, family)?),
+                    13 => Value::Closure(absolute_entity(input, family)?),
+                    14 => Value::Error(Arc::new(decode_error(input, family)?)),
+                    15 => Value::Task(TaskId::decode(input)?),
+                    16 => Value::Function(TextRef::decode(input)?),
+                    17 => Value::Handle(Arc::decode(input)?),
+                    18 => {
+                        let identity = Identity::decode(input)?;
+                        if matches!(identity, Identity::Object(id) if Some(id.family) == family) {
+                            return Err(invalid("absolute reference under its own family context"));
+                        }
+                        Value::Ref(identity)
+                    }
+                    _ => {
+                        let kind = input.unsigned_u32()?;
+                        let ordinal = input.unsigned()?;
+                        let id = EntityId {
+                            family: family.ok_or_else(|| {
+                                invalid("relative reference without family context")
+                            })?,
+                            ordinal,
+                        };
+                        match kind {
+                            0 => Value::List(id),
+                            1 => Value::Map(id),
+                            2 => Value::Set(id),
+                            3 => Value::Record(id),
+                            4 => Value::Closure(id),
+                            5 => Value::Ref(Identity::Object(id)),
+                            _ => return Err(invalid("unknown relative reference kind")),
+                        }
+                    }
+                },
+            )
+        })
+    }
+
+    /// LocalCostV1 prices immutable data at each holding location.
+    pub fn local_cost(value: &Value) -> u64 {
+        16u64.saturating_add(match value {
+            Value::Int(IntRef::Inline(v)) => v.bits().div_ceil(8),
+            Value::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
+            Value::Text(v) => v.summary.utf8_bytes,
+            Value::Bytes(v) => v.len,
+            Value::Timestamp(v) => v.nanoseconds.bits().div_ceil(8),
+            Value::Tuple(v) => v.summary.cost.0,
+            Value::Error(v) => v.cost.0,
+            Value::Function(v) => v.summary.utf8_bytes,
+            Value::Handle(v) => (v.kind.len() + v.id.len()) as u64,
+            _ => 0,
+        })
+    }
+    fn nesting(value: &Value) -> u32 {
+        match value {
+            Value::Tuple(t) => t.summary.depth,
+            Value::Error(e) => e.depth,
+            _ => 0,
+        }
+    }
+    fn contains_edges(value: &Value) -> bool {
+        matches!(
+            value,
+            Value::List(_)
+                | Value::Map(_)
+                | Value::Set(_)
+                | Value::Record(_)
+                | Value::Closure(_)
+                | Value::Task(_)
+                | Value::Ref(_)
+        ) || matches!(value, Value::Tuple(t) if t.summary.has_edges)
+            || matches!(value, Value::Error(e) if e.has_edges)
+    }
+    pub fn task_count(value: &Value) -> u64 {
+        match value {
+            Value::Task(_) | Value::Ref(Identity::Task(_)) => 1,
+            Value::Tuple(t) => t.summary.task_edges,
+            Value::Error(e) => e.task_edges,
+            _ => 0,
+        }
+    }
+    pub fn text_summary(text: &str) -> TextSummary {
+        TextSummary {
+            utf8_bytes: text.len() as u64,
+            chars: text.chars().count() as u64,
+            utf16_units: text.encode_utf16().count() as u64,
+        }
+    }
+    /// Canonical long-key digest, distinct from page hashing (D-KEY).
+    pub fn key_digest(tokens: &[u8]) -> [u8; 32] {
+        let mut hash = Sha256::new();
+        hash.update(b"lash.normal-key.v1\0");
+        hash.update(tokens);
+        hash.finalize().into()
+    }
+    pub fn integral_float(float: f64) -> Option<Integer> {
+        (float.is_finite() && float.fract() == 0.0)
+            .then(|| BigInt::from_f64(float).map(Integer::new))
+            .flatten()
+    }
+    pub fn integer_digits(int: &Integer) -> Vec<u8> {
+        int.as_bigint().to_bytes_le().1
+    }
+    pub fn integer_from_digits(negative: bool, digits: &[u8]) -> Integer {
+        Integer::new(BigInt::from_bytes_le(
+            if negative { Sign::Minus } else { Sign::Plus },
+            digits,
+        ))
+    }
+}

@@ -33,6 +33,9 @@ mod graph_codec;
 /// of the document vocabulary.
 #[doc(hidden)]
 pub mod graph_tokens;
+/// The persistent semantic heap's frozen target vocabulary (FIG-6195): the
+/// heap cutover moves it to the crate root.
+pub mod heap;
 mod identity;
 mod name;
 mod native;
@@ -62,14 +65,17 @@ pub use function::{
 pub use graph_codec::{
     FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, FrozenDatum, MAX_DECODE_DEPTH,
 };
+pub use heap::{
+    Element, EntityId, FamilyId, Identity, NativeCall, NativeError, NativeFunction, NativeHeap,
+    Object, PreparedNative, Value,
+};
 pub use identity::{EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
 pub use name::{
     DocumentId, EffectName, FunctionId, FunctionName, InvalidIdentity, InvalidQualifiedName, Name,
     QualifiedName,
 };
 pub use native::{
-    Element, FunctionCatalog, FunctionRegistry, GuardExceeded, NativeCall, NativeError,
-    NativeFunction, NativeHeap, PreparedNative, RegisteredFunction, RegistryError,
+    FunctionCatalog, FunctionRegistry, GuardExceeded, RegisteredFunction, RegistryError,
     ValidatedFunctions, WorkCounter,
 };
 pub use number::{
@@ -85,10 +91,8 @@ pub use validate::{
     validate_annotations, validate_definition, validate_definition_with_limits, validate_document,
     validate_document_with_limits,
 };
-pub use value::{
-    Bytes, ClosureObject, Datum, ErrorDatum, ErrorValue, Handle, Identity, InvalidBytes, Object,
-    ObjectId, TaskId, Timestamp, Value, ValueKind,
-};
+pub use value::{Bytes, Datum, ErrorDatum, Handle, InvalidBytes, TaskId, Timestamp, ValueKind};
+
 pub use version::KernelVersion;
 
 /// Internal registration facts shared by the checker and library assembly.
@@ -96,3 +100,5 @@ pub use version::KernelVersion;
 pub mod core_support {
     pub use crate::native::RegisteredFunctionCoreSupport;
 }
+
+pub use graph_codec::heap_values;

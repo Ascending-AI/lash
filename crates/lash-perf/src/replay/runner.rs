@@ -158,10 +158,39 @@ struct Lane {
     inputs: Vec<(ScriptedTurn, String)>,
 }
 
+/// The node's settings with page retirement left to the rounds' gaps: the
+/// background sweep fires on wall-clock time, so whichever round it lands
+/// in would carry another round's deletes. Retirement is maintenance, like
+/// artifact cleanup, and settles between rounds the same way (FIG-6321).
+fn replay_settings() -> lash_durable::DurableSettings {
+    let mut settings = lash_durable::DurableSettings::standard();
+    settings.retirement.every = Duration::from_secs(24 * 60 * 60);
+    settings
+}
+
+/// Runs page retirement until a step finds nothing left to do.
+async fn retire(pages: Option<&dyn lash_durable::domain::pages::PageStore>) -> Result<()> {
+    let Some(pages) = pages else {
+        return Ok(());
+    };
+    let budget = lash_durable::domain::pages::RetirementBudget {
+        nodes: lash_durable::RetirementSettings::MAX_BATCH_NODES,
+    };
+    while pages
+        .retire_step(budget)
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"))?
+        != lash_durable::domain::pages::RetirementProgress::default()
+    {}
+    Ok(())
+}
+
 /// Run `workload` once and return its receipt.
 pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadReceipt> {
     let (stores, probe, keep) = open_stores(&options.store, &workload.name).await?;
+    let pages = stores.durable_store().pages();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
+        .config(replay_settings())
         .build()
         .map_err(|error| anyhow::anyhow!("build the durable backend: {error}"))?;
     let mut book = ScriptBook::new(workload.protocol);
@@ -237,6 +266,9 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             .settle()
             .await
             .context("settle between-round artifact cleanup")?;
+        retire(pages.as_deref())
+            .await
+            .context("retire the pages the last round left behind")?;
         let before = meter.read(model_calls).await;
         let started = Instant::now();
         let outcomes = tokio::time::timeout(

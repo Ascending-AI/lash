@@ -12,16 +12,8 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ast::Site;
 use crate::name::{Name, parse_hex, string_schema, write_hex};
 use crate::number::{Float, Integer, NumberToken};
-
-/// The identity of a heap object within one run.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(transparent)]
-pub struct ObjectId(pub u64);
 
 /// A task's handle within one run. `main` is task 0 and every `spawn` takes
 /// the next number (`K-TASK-002`).
@@ -110,47 +102,6 @@ pub struct Handle {
     pub id: String,
 }
 
-/// The thing an identity key names (`K-KEY-004`).
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum Identity {
-    Object(ObjectId),
-    Task(TaskId),
-}
-
-/// A kernel value: immutable data in place, or the identity of a heap
-/// object.
-///
-/// Cloning is cheap: text, bytes, tuples and errors are shared.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Value {
-    Null,
-    Absent,
-    Bool(bool),
-    Int(Integer),
-    Float(Float),
-    Text(Arc<str>),
-    Bytes(Bytes),
-    Timestamp(Timestamp),
-    Tuple(Arc<[Value]>),
-    List(ObjectId),
-    Map(ObjectId),
-    Set(ObjectId),
-    Record(ObjectId),
-    Closure(ObjectId),
-    Error(Arc<ErrorValue>),
-    Task(TaskId),
-    /// A closed declared function of the document, by name.
-    Function(Name),
-    Handle(Arc<Handle>),
-    /// The identity of a heap object or a task, as `ref(x)` takes it: an
-    /// immutable value that is a legal map key (`K-KEY-004`).
-    Ref(Identity),
-}
-
 /// The kind of a value: one per row of the value table, plus `ref`.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
@@ -176,96 +127,6 @@ pub enum ValueKind {
     Function,
     Handle,
     Ref,
-}
-
-impl Value {
-    pub fn text(text: impl Into<Arc<str>>) -> Self {
-        Self::Text(text.into())
-    }
-
-    pub fn kind(&self) -> ValueKind {
-        match self {
-            Self::Null => ValueKind::Null,
-            Self::Absent => ValueKind::Absent,
-            Self::Bool(_) => ValueKind::Bool,
-            Self::Int(_) => ValueKind::Int,
-            Self::Float(_) => ValueKind::Float,
-            Self::Text(_) => ValueKind::Text,
-            Self::Bytes(_) => ValueKind::Bytes,
-            Self::Timestamp(_) => ValueKind::Timestamp,
-            Self::Tuple(_) => ValueKind::Tuple,
-            Self::List(_) => ValueKind::List,
-            Self::Map(_) => ValueKind::Map,
-            Self::Set(_) => ValueKind::Set,
-            Self::Record(_) => ValueKind::Record,
-            Self::Closure(_) => ValueKind::Closure,
-            Self::Error(_) => ValueKind::Error,
-            Self::Task(_) => ValueKind::Task,
-            Self::Function(_) => ValueKind::Function,
-            Self::Handle(_) => ValueKind::Handle,
-            Self::Ref(_) => ValueKind::Ref,
-        }
-    }
-
-    /// The heap object the value names, when it is one.
-    pub fn object(&self) -> Option<ObjectId> {
-        match self {
-            Self::List(id)
-            | Self::Map(id)
-            | Self::Set(id)
-            | Self::Record(id)
-            | Self::Closure(id) => Some(*id),
-            _ => None,
-        }
-    }
-}
-
-/// An error value: what `throw` raises and `catch` binds.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ErrorValue {
-    /// The error's kind: a kernel kind (`K-ERR-002`), one a library function
-    /// declares, or one a program chose.
-    pub kind: String,
-    pub message: String,
-    pub data: Value,
-}
-
-impl ErrorValue {
-    pub fn new(kind: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            kind: kind.into(),
-            message: message.into(),
-            data: Value::Null,
-        }
-    }
-}
-
-/// What a heap object holds.
-///
-/// A map, a set and a record list their contents in insertion order. A map
-/// key and a set member are legal keys (`K-KEY-001`).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Object {
-    List(Vec<Value>),
-    Map(Vec<(Value, Value)>),
-    Set(Vec<Value>),
-    Record(Vec<(String, Value)>),
-    Closure(ClosureObject),
-    /// A variable a closure shares with its defining scope (`K-CLO-001`).
-    Variable(Value),
-}
-
-/// A closure as data: the closure expression it was made from and the
-/// variables it shares.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ClosureObject {
-    /// The site of the closure expression.
-    pub site: Site,
-    /// Each captured variable, as the [`Object::Variable`] it shares.
-    pub captures: Vec<(Name, ObjectId)>,
 }
 
 /// A value copied across the effect boundary: an effect argument, an effect

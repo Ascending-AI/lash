@@ -96,23 +96,30 @@ async fn parked_and_resumed(
     )
     .await;
     assert!(resumed.error().is_none(), "{lang:?}: {:?}", resumed.error());
+    // The turn's phase commit roots the session the resumed cell left, as
+    // it does before any later cell reads it.
+    crate::testing::commit_working(&mut state, host).await;
     state
 }
 
-/// The functions `state` holds, by binding.
-fn saved(state: &CodeModeExecutionState) -> Vec<(String, lash_kernel_dialect::SavedFunction)> {
+/// The functions `state` holds, by binding, as the session hands them to
+/// its next cell's lowering.
+fn saved(state: &CodeModeExecutionState) -> Vec<(String, lash_vm_client::service::LowerFunction)> {
     state
-        .bindings()
-        .held_functions()
+        .lowering_functions()
         .into_iter()
-        .map(|(name, held)| (name.to_string(), held.function.clone()))
+        .map(|(name, function)| (name.to_string(), function))
         .collect()
+}
+
+/// `functions` as data: what two sessions compare equal by.
+fn as_data(functions: &[(String, lash_vm_client::service::LowerFunction)]) -> serde_json::Value {
+    serde_json::to_value(functions).expect("saved functions encode")
 }
 
 /// The kernel signature `state`'s function `name` is started under.
 fn start_of(state: &CodeModeExecutionState, name: &str) -> Option<lash_kernel_doc::Signature> {
-    state.bindings().held_functions()[&lash_kernel_doc::Name::new(name)]
-        .function
+    state.lowering_functions()[&lash_kernel_doc::Name::new(name)]
         .written
         .as_ref()
         .and_then(|written| written.start.clone())
@@ -140,6 +147,7 @@ async fn a_resumed_cell_saves_the_functions_an_uninterrupted_one_does() {
         )
         .await;
         assert!(ran.error().is_none(), "{lang:?}: {:?}", ran.error());
+        crate::testing::commit_working(&mut straight, &straight_host).await;
 
         let kept = saved(&resumed);
         assert_eq!(
@@ -153,7 +161,7 @@ async fn a_resumed_cell_saves_the_functions_an_uninterrupted_one_does() {
             kept.iter().all(|(_, function)| function.written.is_some()),
             "{lang:?}: every saved function keeps what its source wrote: {kept:#?}"
         );
-        assert_eq!(kept, saved(&straight), "{lang:?}");
+        assert_eq!(as_data(&kept), as_data(&saved(&straight)), "{lang:?}");
 
         let mut answers = Vec::new();
         for (state, host) in [(&mut resumed, &host), (&mut straight, &straight_host)] {
@@ -189,6 +197,7 @@ async fn a_later_cell_calls_a_resumed_cells_function_alike_with_or_without_a_map
             "await control_finish([await scale(2, extra=4), await scale(extra=0, x=5), await scale(1)])",
         )
         .await;
+        crate::testing::commit_working(&mut state, &host).await;
         let refused = run_cell(
             &mut state,
             cell_context(&host, SESSION, TURN, "exec-code:2", tools.clone()),

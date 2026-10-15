@@ -15,6 +15,24 @@ use crate::observe::{
 use crate::{Observe, RanDelta};
 
 impl KernelMachine {
+    /// The occurrence counter each live task holds for the action at
+    /// `site`, summed: what an identity-bearing start there has advanced.
+    #[cfg(test)]
+    pub(crate) fn occurrences_at(
+        &mut self,
+        site: &lash_kernel_doc::Site,
+    ) -> Result<u64, lash_kernel_doc::heap::HeapFault> {
+        let key = lash_kernel_state::paged::metadata::metadata_key(site);
+        let access = self.heap.access.clone();
+        let mut total = 0;
+        for index in 0..self.tasks.len() {
+            if let Some(task) = self.tasks.get_mut(index)? {
+                total += task.record.occurrences.get(&key, &access)?.unwrap_or(0);
+            }
+        }
+        Ok(total)
+    }
+
     /// Selects observation for this machine. A resumed machine starts Off
     /// with zero counts; the caller chooses the new run segment's option.
     pub fn set_observe(&mut self, observe: Observe) {
@@ -88,7 +106,7 @@ impl KernelMachine {
             self.exe.code_count(),
             self.exe.lib_count(),
             self.charged,
-            self.heap.allocated(),
+            self.heap.next_ordinal(),
         );
         self.observer_mut().work = Some(counting);
     }
@@ -101,7 +119,7 @@ impl KernelMachine {
             counting,
             &GuestSymbols::of(&self.exe),
             self.charged,
-            self.heap.allocated(),
+            self.heap.next_ordinal(),
         ))
     }
 
@@ -138,10 +156,9 @@ impl KernelMachine {
             #[cfg(any(test, feature = "perf-witness"))]
             if let Event::Statement { task, .. } = event
                 && let Some(trace) = &mut observer.trace
-                && let Some(Control::Block { block, next }) = self.tasks[task.0 as usize]
-                    .frames
-                    .last()
-                    .and_then(|frame| frame.control.last())
+                && let Ok(Some(running)) = self.tasks.get_mut(task.0 as usize)
+                && let Ok(Some(frame)) = running.frames.last_mut()
+                && let Some(Control::Block { block, next }) = frame.control.last()
                 && !matches!(
                     self.exe.block(*block).site.unit,
                     lash_kernel_doc::Unit::Library(_)
@@ -151,7 +168,7 @@ impl KernelMachine {
                 // compiled ordinal lookup used by the accumulator.
                 trace.push(self.exe.block(*block).site.child((*next - 1) as u32));
             }
-            observer.on(event, self.charged, self.heap.allocated());
+            observer.on(event, self.charged, self.heap.next_ordinal());
         }
     }
 
@@ -215,18 +232,26 @@ impl KernelMachine {
         let Some(observer) = self.observer.as_deref_mut() else {
             return;
         };
-        let frames = self
-            .tasks
-            .get(task.0 as usize)
-            .map_or(&[][..], |running| running.frames.as_slice());
+        let frames = self.tasks.cached_frames(task);
         if let Some(work) = &mut observer.work {
-            work.flush(self.charged, self.heap.allocated());
-            work.step(task.0 as usize, frames.iter().map(|frame| frame.code.0));
+            work.flush(self.charged, self.heap.next_ordinal());
+            work.step(
+                task.0 as usize,
+                frames.as_ref().map(|(len, known)| {
+                    (
+                        *len,
+                        known.iter().map(|(index, frame)| (*index, frame.code.0)),
+                    )
+                }),
+            );
         }
         if let Some(context) = &mut observer.context
             && context.task() != Some(task.0)
         {
-            context.republish(task.0, frames.iter().map(|frame| token(exe, frame)));
+            let known = frames
+                .as_ref()
+                .map_or(&[][..], |(_, known)| known.as_slice());
+            context.republish(task.0, known.iter().map(|(_, frame)| token(exe, frame)));
         }
     }
 }

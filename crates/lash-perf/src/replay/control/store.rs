@@ -16,6 +16,10 @@ impl DurableStore for ObservedStore {
         self.observe("now", self.inner.now()).await
     }
 
+    fn pages(&self) -> Option<std::sync::Arc<dyn lash_durable::domain::pages::PageStore>> {
+        self.inner.pages()
+    }
+
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
         self.observe("register_node", self.inner.register_node(spec))
             .await

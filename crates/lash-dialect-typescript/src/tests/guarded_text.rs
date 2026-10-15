@@ -4,9 +4,7 @@
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Name, Timestamp, parse_document};
-use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Program, RunError, Start, Step, Target,
-};
+use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
 
 use super::machine;
 
@@ -74,7 +72,7 @@ fn program() -> &'static Program {
         source = source.replacen("numbers float\n", &format!("numbers float\nuse error.new = @{id}\n"), 1);
         let mut document = parse_document(&source).unwrap_or_else(|error| panic!("{error}\n{source}"));
         document.manifest.functions = lash_kernel_check::requirements(&document, registry.as_ref()).functions;
-        Program { document: Arc::new(document), library: machine::prepared().clone() }
+        Program { release: super::pages::RELEASE, document: Arc::new(document), library: machine::prepared().clone() }
     })
 }
 
@@ -97,7 +95,7 @@ fn run(
     method: usize,
     mode: u8,
 ) -> (String, Vec<Datum>) {
-    let mut machine = KernelMachine::start(
+    let mut machine = super::pages::start(
         program().clone(),
         Bounds {
             charge: 1_000_000,
@@ -107,7 +105,7 @@ fn run(
             requests_per_park: 10,
             join_members: 10,
         },
-        Start {
+        CellStart {
             target: Target::Entry(Name::new(entry)),
             args: vec![
                 value.clone(),
@@ -115,7 +113,10 @@ fn run(
                 Datum::Int(Integer::from(method as i64)),
                 Datum::Int(Integer::from(i64::from(mode))),
             ],
-            bindings: Bindings::default(),
+            session: None,
+            owner: super::pages::OWNER,
+            modes: Default::default(),
+            host: Vec::new(),
         },
     )
     .unwrap();

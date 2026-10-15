@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, ensure};
 use lash::tools::{StaticToolExecute, StaticToolProvider, ToolProviderRegistration, ToolReads};
-use lash::workflow::document::{Datum, ErrorDatum, Handle};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core_execution::StoreSet;
 use lash_sansio::sync::MutexExt as _;
@@ -25,16 +24,14 @@ const PAYLOADS: [usize; 2] = [32, 16_384];
 enum Variant {
     Recorded,
     Read,
-    Projection,
     Mixed,
 }
 impl Variant {
-    const ALL: [Self; 4] = [Self::Recorded, Self::Read, Self::Projection, Self::Mixed];
+    const ALL: [Self; 3] = [Self::Recorded, Self::Read, Self::Mixed];
     fn name(self) -> &'static str {
         match self {
             Self::Recorded => "repeatable",
             Self::Read => "read",
-            Self::Projection => "projection",
             Self::Mixed => "read-write-read",
         }
     }
@@ -50,8 +47,7 @@ impl Variant {
     }
 }
 
-/// Every adapter uses the same fixed local provider, including the projection
-/// control. The previous answer is the next request: reordering, skipping, or
+/// Every adapter uses the same fixed local provider. The previous answer is the next request: reordering, skipping, or
 /// losing a value refuses the benchmark. The write observes the first answer.
 struct Answers {
     payload: usize,
@@ -106,20 +102,6 @@ impl ToolReads for Adapter {
         Ok(json!(self.0.read_args(call.args)))
     }
 }
-#[async_trait::async_trait]
-impl lash::vm::ProjectionProvider for Adapter {
-    fn kind(&self) -> &str {
-        "benchmark"
-    }
-    async fn read(&self, handle: &Handle, request: &Datum) -> Result<Datum, ErrorDatum> {
-        assert_eq!(handle.id, "fixed");
-        let Datum::Text(previous) = request else {
-            panic!("projection string request")
-        };
-        Ok(Datum::Text(self.0.answer(previous)))
-    }
-}
-
 fn definition(
     name: &str,
     policy: lash::tools::ExecutionPolicy,
@@ -138,9 +120,7 @@ fn definition(
 }
 
 fn source(python: bool, variant: Variant, payload: usize) -> String {
-    let call = if variant == Variant::Projection {
-        "projection_read(r)"
-    } else if python {
+    let call = if python {
         "await tools_bench_read({\"previous\": r})"
     } else {
         "await tools.bench_read({previous: r})"
@@ -168,42 +148,6 @@ fn source(python: bool, variant: Variant, payload: usize) -> String {
     };
     let dialect = if python { "python" } else { "typescript" };
     format!("<{dialect}>\n{body}\n</{dialect}>")
-}
-
-/// A host-seeded kernel function is the projection handle interface. It is
-/// called from each dialect under its normal saved-function calling convention.
-/// Seeding is outside the window; no tool is recorded to mint a handle.
-fn projection_seed(python: bool) -> Result<lash::rlm::RlmSeed> {
-    use lash::workflow::document::parse_document;
-    let (params, request) = if python {
-        ("previous", "previous")
-    } else {
-        ("this, args", "args[0]")
-    };
-    let numbers = if python { "by_spelling" } else { "float" };
-    let resource = resource_definition()?.identity()?;
-    let document = parse_document(&format!(
-        "kernel 1\nnumbers {numbers}\nuse bench.resource = @{resource}\nentry projection_read({params_types}) -> Text\n\
-         fn projection_read({params}) {{ let resource = bench.resource() return read(resource, {request}) }}\nmain {{}}",
-        params_types = if python {
-            "previous: Any"
-        } else {
-            "this: Any, args: Any"
-        },
-    ))?;
-    let token = (!python).then(|| {
-        json!({"tag":"ts.function",
-        "before":[Datum::Text("".into()), Datum::Text("projection_read".into()),
-            Datum::Float(lash::workflow::document::Float::new(1.0))],
-        "after":[Datum::Record(Vec::new())]})
-    });
-    let saved = json!({"name":"projection_read", "document":document,
-        "captures":{},
-        "helper_owners":[], "token":token});
-    Ok(lash::rlm::RlmSeed {
-        functions: serde_json::Map::from_iter([("projection_read".into(), saved)]),
-        ..Default::default()
-    })
 }
 
 type ReadStores = (
@@ -269,7 +213,7 @@ fn facts(transactions: &[Transaction]) -> BTreeMap<String, usize> {
 /// from this invocation. A new label or fact fails even on the first sample.
 /// Tracing adds no commit and no fact: the geometry is the same traced or
 /// not.
-fn assert_geometry(variant: Variant, payload: usize, transactions: &[Transaction]) -> Result<()> {
+fn assert_geometry(variant: Variant, transactions: &[Transaction]) -> Result<()> {
     let labels = crate::support::by_label(transactions);
     let actual_facts = facts(transactions);
     let recorded = variant.recorded();
@@ -279,14 +223,7 @@ fn assert_geometry(variant: Variant, payload: usize, transactions: &[Transaction
         ("turn.admit", 1),
         ("turn.commit", 1),
     ]);
-    if variant != Variant::Projection {
-        expected.insert("model.done+cell.snapshot+admit", 1);
-    } else if payload == PAYLOADS[1] {
-        // ADR 0142: the large projection chain outlasts its first compute
-        // slice, so the held derived model response commits alone. A Read plan
-        // already committed it before the first statement.
-        expected.insert("model.done", 1);
-    }
+    expected.insert("model.done+cell.snapshot+admit", 1);
     let admissions = match variant {
         Variant::Recorded => READS - 1,
         Variant::Mixed => 1,
@@ -314,42 +251,13 @@ fn assert_geometry(variant: Variant, payload: usize, transactions: &[Transaction
     Ok(())
 }
 
-/// Pure fixture factory: the host projection still answers through the
-/// production read exchange. This function does no I/O and creates one fixed
-/// handle; no shipped helper or kernel-library definition is changed.
-fn resource_definition() -> Result<lash::workflow::document::FunctionDefinition> {
-    Ok(lash::workflow::document::parse_definition(
-        "function bench.resource() -> Handle(\"benchmark\")\nkernel 1\ncharge 1\nnative\n",
-    )?)
-}
-struct Resource;
-impl lash::workflow::document::NativeFunction for Resource {
-    fn call(
-        &self,
-        call: lash::workflow::document::NativeCall<'_>,
-    ) -> Result<lash::workflow::document::Value, lash::workflow::document::NativeError> {
-        call.heap.reserve(1, 32)?;
-        Ok(lash::workflow::document::Value::Handle(Arc::new(Handle {
-            kind: "benchmark".into(),
-            id: "fixed".into(),
-        })))
-    }
-}
 fn embedding(
     tuning: &lash::vm::WorkerTuning,
 ) -> Result<lash_vm_worker::Embedding, lash_vm_worker::EmbedError> {
-    let mut embedder = lash_vm_worker::Embedder::kernel()?
+    lash_vm_worker::Embedder::kernel()?
         .dialect(lash_vm_worker::typescript(tuning))?
-        .dialect(lash_vm_worker::python())?;
-    embedder
-        .registry()
-        .register(
-            resource_definition()
-                .map_err(|e| lash_vm_worker::EmbedError::Registry(e.to_string()))?,
-            Some(Arc::new(Resource)),
-        )
-        .map_err(|e| lash_vm_worker::EmbedError::Registry(e.to_string()))?;
-    embedder.finish()
+        .dialect(lash_vm_worker::python())?
+        .finish()
 }
 pub fn worker_entry() -> Result<bool, lash::vm::PoolError> {
     lash_vm_worker::worker_entry(&embedding)
@@ -437,9 +345,7 @@ async fn measure_with_stores(
         calls: Mutex::new(0),
         writes: Mutex::new(Vec::new()),
     });
-    let backend = lash::durable::DurableBackendBuilder::new(recorded)
-        .projection_provider(Arc::new(Adapter(answers.clone())))
-        .build()?;
+    let backend = lash::durable::DurableBackendBuilder::new(recorded).build()?;
     let pool = workers.pool()?; // warm before measurement, reused by all samples
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
@@ -549,21 +455,6 @@ async fn measure_with_stores(
         );
         core.session(session_id.clone()).create(creation).await?;
         let session = core.session(session_id.clone()).open().await?;
-        if variant == Variant::Projection {
-            let seed = projection_seed(python)?;
-            let admin = session.admin();
-            admin
-                .protocol()
-                .apply_session_extension(
-                    lash_core::ProtocolSessionExtension::new(move |fleet| {
-                        lash::rlm::rlm_seed_initial_nodes(seed.clone(), fleet)
-                    }),
-                    "projection-seed",
-                )
-                .await?
-                .settle_with(&admin.commands(), lash::testing::admin_fixture_outcome)
-                .await?;
-        }
         cleanup.settle().await?;
         let from = recorder.now_us();
         let ipc_before = pool.measurements().counters;
@@ -617,7 +508,7 @@ async fn measure_with_stores(
             answers.writes.lock_recover().len() == usize::from(variant == Variant::Mixed),
             "{id}: mixed write count"
         );
-        assert_geometry(variant, payload, &transactions)?;
+        assert_geometry(variant, &transactions)?;
         eprintln!("READ_COUNTS {id}: commits={labels:?}; facts={facts:?}");
         latencies.push(elapsed_us);
         if let Some(plan) = plan {

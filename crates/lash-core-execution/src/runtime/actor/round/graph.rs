@@ -1024,15 +1024,17 @@ pub enum RoundFact {
     /// 5: the round's presentation, in admitted order.
     Present,
     /// 6: the attempt started at `start` settled the call, with the plugin
-    /// state its completion resolved (as a tree), at `ended_at_ms`: the
-    /// store's clock at the commit that retains it, the member's end. An
-    /// outcome retained before members kept their end has none: its three
-    /// fields decode, and encode back, as they were stored.
+    /// state its completion resolved (as a tree), the CheckpointRoot of the
+    /// heap pages it published, which the fact owns (FIG-6193), and
+    /// `ended_at_ms`: the store's clock at the commit that retains it, the
+    /// member's end. An outcome retained before members kept their end has
+    /// none: its four fields decode, and encode back, as they were stored.
     Outcome {
         start: u64,
         output: SettledFact,
         state: Vec<lash_core_store::tool_run::StateResolution>,
         ended_at_ms: Option<u64>,
+        pages: Option<NodeId>,
     },
     /// 7: a cell's report: a reference to its ReportView over the
     /// original outcomes, never a re-admission or a re-settlement.
@@ -1093,6 +1095,12 @@ impl RoundFact {
                 if let Some(material) = &output.material {
                     decoder.child_kind(id, material.node(), &[material.kind()])?;
                 }
+                if let Self::Outcome {
+                    pages: Some(pages), ..
+                } = &fact
+                {
+                    decoder.child_kind(id, *pages, &[NodeKind::CHECKPOINT_ROOT])?;
+                }
             }
             Self::CellReport { report } => {
                 decoder.child_kind(id, *report, &[NodeKind::REPORT_VIEW])?;
@@ -1146,11 +1154,13 @@ impl TokenCodec for RoundFact {
                 output,
                 state,
                 ended_at_ms,
+                pages,
             } => {
-                out.sum(variant, 3 + u64::from(ended_at_ms.is_some()));
+                out.sum(variant, 4 + u64::from(ended_at_ms.is_some()));
                 out.unsigned(*start);
                 output.encode(out);
                 encode_tree(state, out);
+                pages.encode(out);
                 if let Some(ended_at_ms) = ended_at_ms {
                     out.unsigned(*ended_at_ms);
                 }
@@ -1204,15 +1214,16 @@ impl TokenCodec for RoundFact {
             }
             RunFactKind::XOutcome => {
                 // An outcome retained before members kept their end has
-                // three fields.
-                let ended = fields == 4;
+                // four fields.
+                let ended = fields == 5;
                 if !ended {
-                    expect(3)?;
+                    expect(4)?;
                 }
                 Self::Outcome {
                     start: input.unsigned()?,
                     output: SettledFact::decode(input)?,
                     state: decode_tree(input)?,
+                    pages: Option::decode(input)?,
                     ended_at_ms: if ended { Some(input.unsigned()?) } else { None },
                 }
             }

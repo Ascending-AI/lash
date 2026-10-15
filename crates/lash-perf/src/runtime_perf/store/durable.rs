@@ -17,6 +17,10 @@ impl DurableStore for RuntimePerfDurableStore {
         self.inner.now().await
     }
 
+    fn pages(&self) -> Option<std::sync::Arc<dyn lash_durable::domain::pages::PageStore>> {
+        self.inner.pages()
+    }
+
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
         self.inner.register_node(spec).await
     }

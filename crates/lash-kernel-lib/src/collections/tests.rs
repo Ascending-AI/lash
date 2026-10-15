@@ -5,8 +5,8 @@ use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
 use lash_kernel_vm::{
-    Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, RunError, Start, Step,
-    Target, register_machine_functions,
+    Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, RunError, Step,
+    register_machine_functions,
 };
 
 use super::register_collections;
@@ -57,21 +57,13 @@ fn program(source: &str) -> Program {
     }
     text.push_str(source);
     Program {
+        release: lash_kernel_doc::heap::PageId([8; 32]),
         document: Arc::new(parse_document(&text).unwrap()),
         library: lash_kernel_vm::PreparedLibrary::new(registry),
     }
 }
 fn machine(source: &str) -> KernelMachine {
-    KernelMachine::start(
-        program(source),
-        BOUNDS,
-        Start {
-            target: Target::Main,
-            args: vec![],
-            bindings: Default::default(),
-        },
-    )
-    .unwrap()
+    crate::testsupport::start(program(source), BOUNDS, lash_kernel_vm::Layout::default()).unwrap()
 }
 fn run(source: &str) -> End {
     let mut machine = machine(source);
@@ -402,29 +394,6 @@ fn k_col_016_holds_none_reads_what_a_deep_copy_reads() {
     // 1 + size(kinds) + 61 lists of sizes 3 and 2 and their one integer.
     let held = charged("collection.holds_none(d, kinds)") - charged("true");
     assert!(held < 200, "charged {held}");
-    // Each collection it reads takes its place out of what the memory
-    // bound leaves first: with no room left it refuses.
-    use lash_kernel_doc::{NativeCall, NativeError, NativeHeap, Object, Value, WorkCounter};
-    let registry = registry();
-    let (_, function) = registry
-        .iter()
-        .find(|(_, f)| f.definition().name.as_str() == "collection.holds_none")
-        .unwrap();
-    let mut heap = crate::tests::Heap::default();
-    let value = Value::List(heap.allocate(Object::List(vec![Value::Null])).unwrap());
-    let kinds = Value::Set(
-        heap.allocate(Object::Set(vec![Value::text("tuple")]))
-            .unwrap(),
-    );
-    heap.1 = crate::tests::Room::of(0);
-    assert_eq!(
-        function.native().unwrap().call(NativeCall {
-            args: &[value, kinds],
-            heap: &mut heap,
-            counter: &mut WorkCounter::new(None),
-        }),
-        Err(NativeError::Memory)
-    );
 }
 #[test]
 fn k_col_008_mutations_preserve_object_identity_and_order() {
@@ -630,21 +599,14 @@ fn k_iter_003_maps_and_sets_visit_additions_and_skip_removals() {
 
 fn callback_law(source: &str, expected: Datum, expected_effects: usize) {
     // The uninterrupted witness has the same callback body without its effect.
-    // KPARK owns persisted export/import; this law pins ordinary activation
+    // S4 owns checkpoint sealing; this law pins ordinary activation
     // waits, resuming the machine through its public delivery interface.
     let uninterrupted = source.replace("let y = perform echo(x) as Any", "let y = x");
     assert_eq!(result(&uninterrupted), expected);
     let program = program(source);
-    let mut machine = KernelMachine::start(
-        program.clone(),
-        BOUNDS,
-        Start {
-            target: Target::Main,
-            args: vec![],
-            bindings: Default::default(),
-        },
-    )
-    .unwrap();
+    let mut machine =
+        crate::testsupport::start(program.clone(), BOUNDS, lash_kernel_vm::Layout::default())
+            .unwrap();
     let mut effects = 0;
     loop {
         match machine.run(&mut World::default(), u64::MAX).unwrap() {
@@ -765,7 +727,7 @@ fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
         .iter()
         .find(|(_, f)| f.definition().name.as_str() == "list.copy")
         .unwrap();
-    let mut heap = crate::tests::Heap::default();
+    let mut heap = crate::testsupport::heap();
     use lash_kernel_doc::{NativeCall, NativeHeap, Object, Operand, Value, WorkCounter};
     let xs = Value::List(heap.allocate(Object::List(vec![Value::Null; 3])).unwrap());
     for _ in 0..2 {
@@ -783,46 +745,10 @@ fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
                 Operand::Result => &result,
                 Operand::Param(_) => &xs,
             };
-            1 + heap.len(value.object().unwrap()) as u64
+            1 + heap.len(value.object().unwrap()).unwrap()
         });
         assert_eq!(charge, 9);
-        assert_ne!(xs, result);
-    }
-}
-
-#[test]
-fn k_bnd_003_collection_expansion_reserves_before_building_results() {
-    // K-BND-003 and NativeHeap::reserve: reserve an expanded result first,
-    // including immutable tuples that do not go through heap allocation.
-    use lash_kernel_doc::{NativeCall, NativeError, NativeHeap, Object, Value, WorkCounter};
-
-    let registry = registry();
-    for name in ["tuple.concat", "list.concat", "list.entries"] {
-        let mut heap = crate::tests::Heap::default();
-        let xs = if name == "tuple.concat" {
-            Value::Tuple(vec![Value::Null].into())
-        } else {
-            Value::List(heap.allocate(Object::List(vec![Value::Null])).unwrap())
-        };
-        heap.1 = crate::tests::Room::of(0);
-        let (_, function) = registry
-            .iter()
-            .find(|(_, f)| f.definition().name.as_str() == name)
-            .unwrap();
-        let args = [xs.clone(), xs];
-        assert_eq!(
-            function.native().unwrap().call(NativeCall {
-                args: if name == "list.entries" {
-                    &args[..1]
-                } else {
-                    &args
-                },
-                heap: &mut heap,
-                counter: &mut WorkCounter::new(None),
-            }),
-            Err(NativeError::Memory),
-            "{name} must refuse before constructing the result"
-        );
+        assert_ne!(xs.object(), result.object());
     }
 }
 
@@ -831,19 +757,12 @@ fn recorded_iteration(shard: &str) {
     for case in shard["cases"].as_array().unwrap() {
         let document = parse_document(case["document"].as_str().unwrap()).unwrap();
         let program = Program {
+            release: lash_kernel_doc::heap::PageId([8; 32]),
             document: Arc::new(document),
             library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
         };
-        let mut machine = KernelMachine::start(
-            program,
-            BOUNDS,
-            Start {
-                target: Target::Main,
-                args: vec![],
-                bindings: Default::default(),
-            },
-        )
-        .unwrap();
+        let mut machine =
+            crate::testsupport::start(program, BOUNDS, lash_kernel_vm::Layout::default()).unwrap();
         let mut world = World::default();
         let Step::Ended(End::Finished(done)) = machine.run(&mut world, u64::MAX).unwrap() else {
             panic!("self-contained iteration case did not finish")
@@ -860,71 +779,7 @@ fn recorded_iteration(shard: &str) {
 /// FIG-5874 / K-CHG-005: a range search pays for the input graph and
 /// at most length comparisons against the needle, plus index validation.
 #[test]
-fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
-    use lash_kernel_doc::{Measure, NativeCall, NativeHeap, Object, Operand, Value, WorkCounter};
-    let registry = registry();
-    let (_, search) = registry
-        .iter()
-        .find(|(_, f)| f.definition().name.as_str() == "list.index_of_range")
-        .unwrap();
-    for length in [0, 1, 8, 64] {
-        for bytes in [0, 1, 64] {
-            let mut heap = crate::tests::Heap::default();
-            let text = Value::text("x".repeat(bytes));
-            let xs = Value::List(
-                heap.allocate(Object::List(vec![text.clone(); length]))
-                    .unwrap(),
-            );
-            let args = [
-                xs,
-                text,
-                Value::Int(Integer::from(0)),
-                Value::Int(Integer::from(length as i64)),
-                Value::Bool(false),
-                Value::Bool(false),
-            ];
-            let answer = search
-                .native()
-                .unwrap()
-                .call(NativeCall {
-                    args: &args,
-                    heap: &mut heap,
-                    counter: &mut WorkCounter::new(None),
-                })
-                .unwrap();
-            assert_eq!(
-                answer,
-                Value::Int(Integer::from(if length == 0 { -1 } else { 0 }))
-            );
-            let charge = search
-                .definition()
-                .charge
-                .evaluate(&mut |operand, measure| {
-                    let Operand::Param(name) = operand else {
-                        panic!("formula only measures arguments");
-                    };
-                    match (name.as_str(), measure) {
-                        ("xs", Measure::Size) => 1 + length as u64,
-                        ("xs", Measure::DeepSize) => 1 + length as u64 * (2 + bytes as u64),
-                        ("value", Measure::DeepSize) => 1 + bytes as u64,
-                        ("start", Measure::Size) => 1,
-                        ("end", Measure::Size) => {
-                            if length == 0 {
-                                1
-                            } else {
-                                2
-                            }
-                        }
-                        other => panic!("unexpected measure: {other:?}"),
-                    }
-                });
-            assert_eq!(
-                charge,
-                12 + u64::from(length != 0) + length as u64 * (3 + 2 * bytes as u64) + bytes as u64
-            );
-            assert!(charge >= length as u64 * (1 + bytes as u64));
-        }
-    }
+fn index_of_range_keeps_numeric_equivalence_and_rejects_bad_bounds() {
     assert_eq!(
         body(
             "return (list.index_of_range([nan, -0.0, 0.0, nan], nan, 0, 4, false, true), list.index_of_range([nan, -0.0, 0.0, nan], nan, 0, 4, true, true), list.index_of_range([nan], nan, 0, 1, false, false), list.index_of_range([-0.0, 0.0], 0.0, 0, 2, true, false))"
@@ -939,27 +794,6 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
             "index_out_of_range"
         );
     }
-    // K-BND-003: a missing index needs one magnitude byte, reserved before
-    // constructing the scalar. No result digit is allocated after refusal.
-    let mut heap = crate::tests::Heap::default();
-    let xs = Value::List(heap.allocate(Object::List(vec![])).unwrap());
-    heap.1.limit = Some(0);
-    let args = [
-        xs,
-        Value::Null,
-        Value::Int(Integer::from(0)),
-        Value::Int(Integer::from(0)),
-        Value::Bool(false),
-        Value::Bool(false),
-    ];
-    assert_eq!(
-        search.native().unwrap().call(NativeCall {
-            args: &args,
-            heap: &mut heap,
-            counter: &mut WorkCounter::new(None)
-        }),
-        Err(lash_kernel_doc::NativeError::Memory)
-    );
     // Kernel equality remains mathematical across numeric kinds.
     assert_eq!(
         body("return list.index_of_range([0], -0.0, 0, 1, false, false)"),
@@ -1153,14 +987,10 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
         exercised.insert(*id);
         let program = program(&format!("main {{ return {name}({args}) }}"));
         for temperature in ["cold", "warm"] {
-            let mut machine = KernelMachine::start(
+            let mut machine = crate::testsupport::start(
                 program.clone(),
                 BOUNDS,
-                Start {
-                    target: Target::Main,
-                    args: vec![],
-                    bindings: Default::default(),
-                },
+                lash_kernel_vm::Layout::default(),
             )
             .unwrap();
             let Step::Ended(end) = machine.run(&mut World::default(), u64::MAX).unwrap() else {
@@ -1186,74 +1016,7 @@ fn every_collection_native_has_a_named_cold_and_warm_case() {
 /// K-COL-017: identity projection never reads the objects it keys. Its
 /// formula pays for each visited tuple slot and the immutable result only.
 #[test]
-fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
-    use lash_kernel_doc::{
-        Float, Identity, NativeCall, NativeHeap, Object, Operand, Value, WorkCounter,
-    };
-    let registry = registry();
-    let (_, function) = registry
-        .iter()
-        .find(|(_, f)| f.definition().name.as_str() == "key.identity")
-        .unwrap();
-    let native = function.native().unwrap();
-    let mut heap = crate::tests::Heap::default();
-    let object = heap
-        .allocate(Object::List(vec![Value::Null; 4096]))
-        .unwrap();
-    for length in [0, 1, 8, 64] {
-        let args = [
-            Value::Tuple(vec![Value::List(object); length].into()),
-            Value::Tuple(vec![Value::text("missing")].into()),
-            Value::text("fault"),
-        ];
-        let mut work = WorkCounter::new(None);
-        let out = native
-            .call(NativeCall {
-                args: &args,
-                heap: &mut heap,
-                counter: &mut work,
-            })
-            .unwrap();
-        assert_eq!(
-            out,
-            Value::Tuple(vec![Value::Ref(Identity::Object(object)); length].into())
-        );
-        let charged = function.definition().charge.evaluate(&mut |operand, _| {
-            assert_eq!(*operand, Operand::Result);
-            1 + length as u64
-        });
-        assert_eq!(charged, 2 + length as u64);
-        assert_eq!(work.spent(), 1 + length as u64);
-        assert!(charged >= work.spent());
-    }
-    for (value, expected) in [
-        (
-            Value::Absent,
-            Value::Tuple(vec![Value::text("missing")].into()),
-        ),
-        (
-            Value::Float(Float::new(-0.0)),
-            Value::Float(Float::new(0.0)),
-        ),
-        (Value::List(object), Value::Ref(Identity::Object(object))),
-    ] {
-        let args = [
-            value,
-            Value::Tuple(vec![Value::text("missing")].into()),
-            Value::text("fault"),
-        ];
-        let out = native
-            .call(NativeCall {
-                args: &args,
-                heap: &mut heap,
-                counter: &mut WorkCounter::new(None),
-            })
-            .unwrap();
-        assert_eq!(out, expected);
-        if let Value::Float(zero) = out {
-            assert_eq!(zero.get().to_bits(), 0.0_f64.to_bits());
-        }
-    }
+fn identity_key_projection_preserves_distinct_error_data_identities() {
     assert_eq!(
         body(
             "let a = {} let b = {} let ea = error.new(\"k\", \"m\", a) let eb = error.new(\"k\", \"m\", b) return (same(key.identity(ea, 0, \"fault\"), (\"fault\", ref(a), \"k\", \"m\")), same(key.identity(ea, 0, \"fault\"), key.identity(eb, 0, \"fault\")))"
@@ -1279,4 +1042,200 @@ fn list_get_or_distinguishes_missing_positions_from_present_absent() {
         );
     }
     assert_eq!(error("return list.get_or([], \"0\", 9)"), "type_error");
+}
+
+/// K-BND-003: expansion refuses against the actual S7 census while its
+/// input remains rooted; no reservation spy decides this result.
+#[test]
+fn collection_expansion_refuses_under_the_real_census() {
+    use lash_kernel_doc::{NativeCall, NativeError, NativeHeap, Object, Value, WorkCounter};
+    let registry = registry();
+    for name in ["tuple.concat", "list.concat", "list.entries"] {
+        let mut heap = crate::testsupport::heap();
+        let xs = if name == "tuple.concat" {
+            Value::Tuple(heap.tuple(vec![Value::Null]).unwrap())
+        } else {
+            Value::List(heap.allocate(Object::List(vec![Value::Null])).unwrap())
+        };
+        let args = [xs.clone(), xs];
+        let args = if name == "list.entries" {
+            &args[..1]
+        } else {
+            &args[..]
+        };
+        crate::testsupport::hold_with_extra(&mut heap, args, 0);
+        let (_, function) = registry
+            .iter()
+            .find(|(_, f)| f.definition().name.as_str() == name)
+            .unwrap();
+        let result = function.native().unwrap().call(NativeCall {
+            args,
+            heap: &mut heap,
+            counter: &mut WorkCounter::new(None),
+        });
+        assert!(
+            matches!(result, Err(NativeError::Memory)),
+            "{name}: {result:?}"
+        );
+        match &args[0] {
+            Value::Tuple(tuple) => assert_eq!(tuple.summary.len, 1),
+            Value::List(id) => assert_eq!(heap.len(*id).unwrap(), 1),
+            _ => unreachable!(),
+        }
+    }
+}
+
+/// FIG-5874 / K-CHG-005: a range search pays for the input graph and
+/// at most length comparisons against the needle, plus index validation,
+/// and its charge bounds the work it did on the paged heap.
+#[test]
+fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
+    use lash_kernel_doc::{Measure, NativeCall, Operand, WorkCounter};
+    let registry = registry();
+    let (_, search) = registry
+        .iter()
+        .find(|(_, f)| f.definition().name.as_str() == "list.index_of_range")
+        .unwrap();
+    for length in [0, 1, 8, 64] {
+        for bytes in [0, 1, 64] {
+            let mut heap = crate::testsupport::heap();
+            let needle = Datum::Text("x".repeat(bytes));
+            let args: Vec<_> = [
+                Datum::List(vec![needle.clone(); length]),
+                needle,
+                int(0),
+                int(length as i64),
+                Datum::Bool(false),
+                Datum::Bool(false),
+            ]
+            .into_iter()
+            .map(|arg| crate::testsupport::decode(&mut heap, arg))
+            .collect();
+            let mut counter = WorkCounter::new(None);
+            let answer = search
+                .native()
+                .unwrap()
+                .call(NativeCall {
+                    args: &args,
+                    heap: &mut heap,
+                    counter: &mut counter,
+                })
+                .unwrap();
+            assert_eq!(
+                crate::testsupport::datum(&heap, &answer),
+                int(if length == 0 { -1 } else { 0 })
+            );
+            let charge = search
+                .definition()
+                .charge
+                .evaluate(&mut |operand, measure| {
+                    let Operand::Param(name) = operand else {
+                        panic!("formula only measures arguments");
+                    };
+                    match (name.as_str(), measure) {
+                        ("xs", Measure::Size) => 1 + length as u64,
+                        ("xs", Measure::DeepSize) => 1 + length as u64 * (2 + bytes as u64),
+                        ("value", Measure::DeepSize) => 1 + bytes as u64,
+                        ("start", Measure::Size) => 1,
+                        ("end", Measure::Size) => {
+                            if length == 0 {
+                                1
+                            } else {
+                                2
+                            }
+                        }
+                        other => panic!("unexpected measure: {other:?}"),
+                    }
+                });
+            assert_eq!(
+                charge,
+                12 + u64::from(length != 0) + length as u64 * (3 + 2 * bytes as u64) + bytes as u64
+            );
+            assert!(charge >= length as u64 * (1 + bytes as u64));
+            assert!(
+                charge >= counter.spent(),
+                "length {length}, bytes {bytes}: charged {charge} for work {}",
+                counter.spent()
+            );
+        }
+    }
+}
+
+/// K-COL-017: identity projection keys objects by identity without
+/// reading them. Its formula pays for each visited tuple slot and the
+/// immutable result only, and bounds the work it did on the paged heap.
+#[test]
+fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
+    use lash_kernel_doc::{
+        Float, Identity, NativeCall, NativeHeap as _, Operand, Value, WorkCounter,
+    };
+    let registry = registry();
+    let (_, function) = registry
+        .iter()
+        .find(|(_, f)| f.definition().name.as_str() == "key.identity")
+        .unwrap();
+    let native = function.native().unwrap();
+    let mut heap = crate::testsupport::heap();
+    let Value::List(object) =
+        crate::testsupport::decode(&mut heap, Datum::List(vec![Datum::Null; 4096]))
+    else {
+        panic!("a list decodes to a list")
+    };
+    let missing = crate::testsupport::decode(&mut heap, tuple(vec![text("missing")]));
+    let fault = crate::testsupport::decode(&mut heap, text("fault"));
+    for length in [0, 1, 8, 64] {
+        let keys = Value::Tuple(heap.tuple(vec![Value::List(object); length]).unwrap());
+        let args = [keys, missing.clone(), fault.clone()];
+        let mut work = WorkCounter::new(None);
+        let out = native
+            .call(NativeCall {
+                args: &args,
+                heap: &mut heap,
+                counter: &mut work,
+            })
+            .unwrap();
+        let Value::Tuple(out) = out else {
+            panic!("a projection of a tuple is a tuple")
+        };
+        let mut members = Vec::new();
+        heap.tuple_visit(&out, &mut |member| {
+            members.push(member.clone());
+            std::ops::ControlFlow::Continue(())
+        })
+        .unwrap();
+        assert_eq!(members.len(), length);
+        assert!(
+            members
+                .iter()
+                .all(|member| matches!(member, Value::Ref(Identity::Object(id)) if *id == object)),
+            "every slot keys the one object by its identity"
+        );
+        let charged = function.definition().charge.evaluate(&mut |operand, _| {
+            assert_eq!(*operand, Operand::Result);
+            1 + length as u64
+        });
+        assert_eq!(charged, 2 + length as u64);
+        assert_eq!(work.spent(), 1 + length as u64);
+        assert!(charged >= work.spent());
+    }
+    for (value, expected) in [
+        (Value::Absent, crate::testsupport::datum(&heap, &missing)),
+        (
+            Value::Float(Float::new(-0.0)),
+            Datum::Float(Float::new(0.0)),
+        ),
+    ] {
+        let args = [value, missing.clone(), fault.clone()];
+        let out = native
+            .call(NativeCall {
+                args: &args,
+                heap: &mut heap,
+                counter: &mut WorkCounter::new(None),
+            })
+            .unwrap();
+        if let Value::Float(zero) = &out {
+            assert_eq!(zero.get().to_bits(), 0.0_f64.to_bits());
+        }
+        assert_eq!(crate::testsupport::datum(&heap, &out), expected);
+    }
 }

@@ -468,6 +468,7 @@ impl RuntimeTurnDriver<'_> {
             .with_tracing(tracing)
             .with_code_block_graph_key(code_block_graph_key)
             .with_cell_end(self.cell_end.clone())
+            .with_session_pages(self.session_pages.clone())
             .with_held_response(self.held_response.clone());
         let context = context.with_parent_invocation(invocation);
         let result = match code_executor {

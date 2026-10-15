@@ -8,8 +8,8 @@ use lash_kernel_doc::{
     Timestamp, Type,
 };
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
-    Request, RunError, Start, Step, Target,
+    Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, RunError,
+    Step, Target,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -111,8 +111,9 @@ impl Runner {
         let mut admission = lash_kernel_check::Environment::new(&self.library);
         admission.effects = effects;
         lash_kernel_check::admit(&lowered.document, &admission).map_err(|e| format!("{e:?}"))?;
-        let mut machine = KernelMachine::start(
+        let mut machine = crate::pages::start(
             Program {
+                release: crate::pages::RELEASE,
                 document: Arc::new(lowered.document),
                 library: self.prepared.clone(),
             },
@@ -124,10 +125,13 @@ impl Runner {
                 requests_per_park: 100,
                 join_members: 100,
             },
-            Start {
+            CellStart {
                 target: Target::Main,
                 args: vec![],
-                bindings: Bindings::default(),
+                session: None,
+                owner: crate::pages::OWNER,
+                modes: Default::default(),
+                host: Vec::new(),
             },
         )
         .map_err(|e| e.to_string())?;

@@ -71,6 +71,7 @@ pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
 };
 pub(crate) use head_commit::{SessionHints, apply_store_commit};
+mod pages;
 mod park;
 pub(crate) mod processes;
 mod prompts;
@@ -106,7 +107,7 @@ pub(crate) struct Committing<'a> {
     /// The fleet format the transaction's fence read: registry rows a
     /// domain write touches are encoded under it.
     pub(crate) fleet: lash_core_execution::FleetFormat,
-    /// The roots its writes retired, peeled before it commits.
+    /// The roots its writes retired, held before it commits.
     pub(crate) retired: Retired,
 }
 
@@ -121,11 +122,12 @@ impl Committing<'_> {
     }
 }
 
-/// The roots a transaction's writes retired: what it peels before it
-/// commits (FIG-5949). A turn's terminal retires its PhaseRoot alone: the
-/// TurnContent under it is the transcript the session's next turn names
-/// again, so it waits for the orphan audit rather than being reinstalled
-/// (the TurnContent ordering constraint).
+/// The roots a transaction's writes retired: what it holds for the
+/// retirement steps before it commits (FIG-5949, FIG-6191). A turn's
+/// terminal retires its PhaseRoot alone: the TurnContent under it is the
+/// transcript the session's next turn names again, so it waits for the
+/// orphan audit rather than being reinstalled (the TurnContent ordering
+/// constraint).
 #[derive(Default)]
 pub(crate) struct Retired {
     roots: std::sync::Mutex<(
@@ -147,17 +149,17 @@ impl Retired {
         }
     }
 
-    /// `root` was retired: peel its closure.
+    /// `root` was retired: retire its closure.
     pub(crate) fn closure(&self, root: &lash_core_store::checkpoint_graph::NodeId) {
         self.record(false, root.to_hex());
     }
 
-    /// A stored root reference was retired: peel its closure.
+    /// A stored root reference was retired: retire its closure.
     pub(crate) fn stored(&self, root: impl Into<String>) {
         self.record(false, root.into());
     }
 
-    /// An ended turn's PhaseRoot was retired: peel it alone.
+    /// An ended turn's PhaseRoot was retired: retire it alone.
     pub(crate) fn phase_end(&self, root: impl Into<String>) {
         self.record(true, root.into());
     }
@@ -928,6 +930,10 @@ impl DurableStore for PostgresDurableStore {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
         self.read(|connection| Box::pin(self.instant_on(connection)))
             .await
+    }
+
+    fn pages(&self) -> Option<std::sync::Arc<dyn lash_durable::domain::pages::PageStore>> {
+        Some(std::sync::Arc::new(self.clone()))
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {

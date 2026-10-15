@@ -52,6 +52,92 @@ async fn a_kernel_process_decodes_and_resumes_from_its_1_0_image() {
     assert!(end.to_string().contains("\"done\""), "{end}");
 }
 
+/// FIG-6193: a pre-heap image is refused with a typed refusal naming its
+/// format, never misread. The persistent heap replaced the whole-state
+/// parked run in place under the 1.0 freeze, with no reader for the old
+/// shape. A parked cell's KernelWhole root stops its execution root's
+/// graph read before any of its body is decoded; a kernel process's state,
+/// which carried its sealed KernelWhole graph inline, is refused by the
+/// engine that would advance it.
+#[tokio::test(flavor = "current_thread")]
+async fn pre_heap_images_are_refused_naming_their_format() {
+    use lash_core_store::checkpoint_graph::{GraphReadPolicy, GraphRefusal};
+    use lash_durable::DurableReads as _;
+    use lash_durable::domain::RootOwner;
+    let limits = GraphReadPolicy::standard();
+    let kernel_whole = |refusal: &GraphRefusal| {
+        matches!(
+            refusal,
+            GraphRefusal::RetiredFormat {
+                kind: 16,
+                format: "KernelWhole",
+                ..
+            }
+        )
+    };
+
+    let (stores, _dir) = images::open(&images::PRE_HEAP_SESSION, SimClock::new()).await;
+    let reads = stores.durable_store();
+    let cells = reads
+        .cell_roots_within(
+            &lash_sansio::SessionId::try_from("v0-session".to_owned()).unwrap(),
+            &lash_sansio::TurnId::try_from("v0-turn".to_owned()).unwrap(),
+            8,
+        )
+        .await
+        .expect("the image's cell roots list");
+    assert_eq!(cells.len(), 1, "the image parks one cell");
+    let refused = reads
+        .hydrate(
+            RootOwner::Exec(cells[0].exec.clone()),
+            Some(cells[0].root),
+            limits.execution(),
+        )
+        .await
+        .map(|_| ())
+        .expect_err("a pre-heap parked cell is never read");
+    assert!(
+        matches!(&refused, lash_durable::DurableError::Graph(refusal) if kernel_whole(refusal)),
+        "{refused:?}"
+    );
+
+    let clock = SimClock::new();
+    let (stores, _dir) = images::open(&images::PRE_HEAP_LASH_VM, Arc::clone(&clock)).await;
+    let (_, engine) = build(Arc::new(stores.clone()), &clock);
+    let (_, written_by, state) =
+        lash_core_execution::runtime::actor::process::state_graph::read_engine_state(
+            &stores.durable_store(),
+            &kernel_images::process(),
+            limits.engine(),
+        )
+        .await
+        .expect("the process's execution root reads")
+        .expect("the image parks the process");
+    assert_eq!(written_by, LASH_VM_ENGINE_KIND);
+    let refused = lash_core_execution::ProcessEngine::advance(
+        engine.as_ref(),
+        state,
+        lash_core_execution::EngineEvent::Woke,
+    )
+    .map(|_| ())
+    .expect_err("a pre-heap parked run is never advanced")
+    .into_plugin_error();
+    let named = GraphRefusal::RetiredFormat {
+        node: None,
+        kind: 16,
+        format: "KernelWhole",
+    }
+    .to_string();
+    assert!(
+        matches!(
+            &refused,
+            lash_core_execution::PluginError::StoredDataCorrupt { record_kind, message }
+                if record_kind == "kernel process engine state" && *message == named
+        ),
+        "{refused:?}"
+    );
+}
+
 /// Fixture coverage: every set the shipped build writes has a committed
 /// image whose actor is stored in it, and every image is in one of them.
 #[tokio::test(flavor = "current_thread")]

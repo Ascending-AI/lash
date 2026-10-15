@@ -213,23 +213,18 @@ pub fn session_request_from_meta_for_test(
     request
 }
 
-/// A complete SessionExecution graph whose root holds `state`: a text past
-/// the inline bound is one shared leaf beneath it, as a protocol's large
-/// binding is. Store conformance asserts what a commit installs and a load
-/// returns of it, never what it means.
+/// A complete session execution graph whose root holds `state`: one
+/// session descriptor page, a persistent-heap page as a session's committed
+/// execution state is (FIG-6193). Store conformance asserts what a commit
+/// installs and a load returns of it, never what it means.
 pub fn execution_graph(state: &str) -> crate::plugin::ExecutionGraphCapture {
-    use crate::checkpoint_graph::{EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody};
-    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-    let mut body = crate::checkpoint_graph::TokenWriter::new();
+    use crate::checkpoint_graph::{MAX_NODE_BYTES, NodeKind, TokenWriter, node::frame_direct};
+    let mut body = TokenWriter::new();
     body.text(state);
-    let root = staging
-        .encode(
-            NodeKind::SESSION_EXECUTION,
-            TypedBody::logical(&body.into_bytes()),
-        )
-        .expect("a text body stages");
+    let root = frame_direct(NodeKind::SESSION_ROOT, &body.into_bytes(), MAX_NODE_BYTES)
+        .expect("a text body frames");
     crate::plugin::ExecutionGraphCapture::Replace {
-        root,
-        nodes: staging.into_nodes(),
+        root: root.id,
+        nodes: [(root.id, root)].into(),
     }
 }

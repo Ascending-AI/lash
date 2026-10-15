@@ -34,6 +34,7 @@ swc_ecma_parser = { workspace = true }
 
 [dev-dependencies]
 lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-kernel-state = { workspace = true }
 lash-dialect-python = { path = "../lash-dialect-python" }
 arbitrary = "1"
 stats_alloc = "0.1"

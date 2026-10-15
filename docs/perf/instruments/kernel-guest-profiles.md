@@ -6,7 +6,7 @@ guest functions: `main`, declared functions, closures, TypeScript and Python
 helpers and kernel library bodies, and to the natives they call. Both are
 opt-in per machine (`KernelMachine::count_work`,
 `KernelMachine::publish_context`) and derived: nothing they hold enters a
-parked run, and neither changes a result, error, charge, park or export
+parked run, and neither changes a result, error, charge, park or seal
 (`observing_a_run_changes_nothing_it_can_observe`). The machine starts no
 thread for them; the sampler is the harness's.
 

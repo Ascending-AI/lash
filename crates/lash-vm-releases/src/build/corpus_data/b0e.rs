@@ -34,6 +34,7 @@ pub(super) const DATA: &str = r####"{
 "0e32fe014bc7f677e4f6c9ad9b11da07f02d3f2db8b850275a7d30c9b926e50c":[{"int":"-4005256980956056557"}],
 "0e33e481804d265d3d445ed49a499e7af59473a3b2cd7f2dcc112ab2f535b35a":[{"int":"-2627469328058316277"},{"float":"8.274981823080223e-262"}],
 "0e38d55935008ea922e98125ec0de72099517488b5c5534af11f859741a2aba6":{"charge":69,"outcome":"ok {\"float\":\"7.427254972274743e18\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"0e3961fd9c884562afabe987657a2d0b354d892dabee86ac03905ce17377690a":{"charge":172,"outcome":"memory","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0e3aa063ff56ba2a1e31d86991f4126844cd512d263e01ededd5864627f0ff82":{"charge":525,"outcome":"raised \"type_error\" \"JSON verbatim kinds must be text\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0e3d03219c7cdc60b3a20f09ea23eee0e495f8d8f536e296345f286e93ff5308":{"charge":5,"outcome":"ok {\"int\":\"4267738424979695842\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "0e3fb5578ba358868a071a5ae8601308e4eea548eef8dbcb267945a8a26b3f91":{"charge":11,"outcome":"ok {\"float\":\"8.847016122346449e83\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
