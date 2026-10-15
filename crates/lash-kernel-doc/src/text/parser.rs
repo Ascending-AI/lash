@@ -784,7 +784,11 @@ impl Parser {
             offset += 2;
         }
         let single = offset == 1;
-        let reserved = single && (self.is_word("fn") || self.is_word("read"));
+        let reserved = single
+            && (self.is_word("fn")
+                || self.is_word("read")
+                || self.is_word("if")
+                || self.is_word("let"));
         self.peek_at(offset) == &Token::LParen && !reserved
     }
 
@@ -858,6 +862,26 @@ impl Parser {
             }
             Token::Quoted(name) => Ok(Expr::Variable(Name::new(name))),
             Token::Word(word) => match word.as_str() {
+                "if" => {
+                    self.expect(&Token::LParen)?;
+                    let cond = Box::new(self.expr()?);
+                    self.expect(&Token::Comma)?;
+                    let then = Box::new(self.expr()?);
+                    self.expect(&Token::Comma)?;
+                    let r#else = Box::new(self.expr()?);
+                    self.expect(&Token::RParen)?;
+                    Ok(Expr::If { cond, then, r#else })
+                }
+                "let" => {
+                    self.expect(&Token::LParen)?;
+                    let name = self.name()?;
+                    self.expect(&Token::Equals)?;
+                    let value = Box::new(self.expr()?);
+                    self.expect(&Token::Comma)?;
+                    let body = Box::new(self.expr()?);
+                    self.expect(&Token::RParen)?;
+                    Ok(Expr::Let { name, value, body })
+                }
                 "clock" => Ok(Expr::Clock),
                 "random" => Ok(Expr::Random),
                 "read" => {

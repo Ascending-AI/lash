@@ -341,6 +341,16 @@ pub enum AtomNode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExprNode {
+    If {
+        cond: NodeId,
+        then: NodeId,
+        r#else: NodeId,
+    },
+    Let {
+        binding: BindingId,
+        value: NodeId,
+        body: NodeId,
+    },
     Literal(Literal),
     Variable(Reference),
     Tuple(Vec<NodeId>),
@@ -446,6 +456,8 @@ impl GraphNode {
                 ExprNode::Member(member) => member.push_children(&mut out),
                 ExprNode::Closure { body, .. } => out.push(*body),
                 ExprNode::Call { args, .. } => out.extend(args),
+                ExprNode::If { cond, then, r#else } => out.extend([*cond, *then, *r#else]),
+                ExprNode::Let { value, body, .. } => out.extend([*value, *body]),
                 ExprNode::Read { handle, request } => out.extend([*handle, *request]),
             },
         }
@@ -453,7 +465,7 @@ impl GraphNode {
     }
 }
 
-/// A scope: one block (`K-FORM-003`). A function's parameters, a `for`
+/// A scope opened by a block or an expression binding (`K-FORM-003`, `K-EVAL-002`). A function's parameters, a `for`
 /// binding and a `catch` binding are declared in the scope of the body they
 /// belong to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -462,6 +474,7 @@ pub struct Scope {
     /// The enclosing scope. A closure body's is the scope that writes the
     /// closure; a unit body has none.
     pub parent: Option<ScopeId>,
+    /// The block containing the scope; expression scopes share their enclosing block.
     pub block: NodeId,
     /// The variables declared here, in declaration order. A later one of the
     /// same name shadows an earlier one from its declaration on.

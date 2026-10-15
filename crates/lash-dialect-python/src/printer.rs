@@ -364,6 +364,20 @@ impl Renderer<'_> {
                     self.expr(arg);
                 }
             }
+            k::Expr::If { cond, then, r#else } => {
+                self.out.write("with k.choose(");
+                self.suite();
+                self.expr(cond);
+                self.expr(then);
+                self.expr(r#else);
+            }
+            k::Expr::Let { name, value, body } => {
+                self.out.write("with k.bind(");
+                self.out.json(name.as_str());
+                self.suite();
+                self.expr(value);
+                self.expr(body);
+            }
             k::Expr::Read(read) => {
                 self.out.write("with k.read(");
                 self.suite();

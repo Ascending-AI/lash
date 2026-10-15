@@ -16,6 +16,7 @@ mod annotate;
 mod calls;
 mod expressions;
 mod format;
+mod lazy;
 mod range;
 mod repairs;
 mod saved;
@@ -46,6 +47,8 @@ pub(crate) struct Note {
     span: Option<Span>,
     blocks: Vec<Vec<Note>>,
     written: Option<lash_kernel_dialect::Written>,
+    /// Calling conventions of closures folded below this statement.
+    nested_written: Vec<(Vec<u32>, lash_kernel_dialect::Written)>,
 }
 
 /// Kernel statements with their notes.
@@ -342,6 +345,7 @@ pub(crate) fn lower(
                 span: None,
                 blocks: Vec::new(),
                 written: None,
+                nested_written: Vec::new(),
             }],
         };
         lowerer.span = None;
@@ -679,6 +683,7 @@ impl Lowerer<'_> {
             span: self.span,
             blocks,
             written: None,
+            nested_written: Vec::new(),
         });
     }
 
@@ -708,6 +713,15 @@ impl Lowerer<'_> {
     }
 
     fn append(&mut self, buf: Buf) {
+        if self.kernel_depth == 0 {
+            for stmt in &buf.stmts {
+                if let Stmt::Let { name, .. } = stmt
+                    && !self.scopes[0].bindings.locals.contains(name.as_str())
+                {
+                    self.private.insert(name.clone());
+                }
+            }
+        }
         self.buf.stmts.extend(buf.stmts);
         self.buf.notes.extend(buf.notes);
     }
@@ -889,11 +903,26 @@ impl Lowerer<'_> {
 
     /// Writes `value` to a place.
     fn store(&mut self, place: Place, value: Operand) {
+        let value_slot = match &place {
+            Place::Variable(_) => 0,
+            Place::Member(lash_kernel_doc::Member::Field { .. }) => 1,
+            Place::Member(lash_kernel_doc::Member::Index { .. }) => 2,
+        };
         match self.take_binding(&value) {
             Some((rhs, note)) => {
                 self.push(Stmt::Assign { place, value: rhs }, note.blocks);
                 if let Some(assigned) = self.buf.notes.last_mut() {
                     assigned.written = note.written;
+                    assigned.nested_written = note
+                        .nested_written
+                        .into_iter()
+                        .map(|(mut path, written)| {
+                            if let Some(slot) = path.first_mut() {
+                                *slot = value_slot;
+                            }
+                            (path, written)
+                        })
+                        .collect();
                 }
             }
             None => self.emit(Stmt::Assign {
@@ -906,6 +935,7 @@ impl Lowerer<'_> {
     /// Drops a value nothing reads, keeping the statement that made it.
     fn discard(&mut self, value: Operand) {
         if let Some((rhs, note)) = self.take_binding(&value) {
+            let nested_written = note.nested_written;
             match rhs {
                 Rhs::Action(action) => self.push(Stmt::Do { action }, note.blocks),
                 // An expression of natives changes nothing, but it may
@@ -920,6 +950,9 @@ impl Lowerer<'_> {
                         note.blocks,
                     );
                 }
+            }
+            if let Some(note) = self.buf.notes.last_mut() {
+                note.nested_written = nested_written;
             }
         } else if !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)) {
             let name = self.temp();

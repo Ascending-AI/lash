@@ -63,6 +63,40 @@ impl Reader {
             return readable;
         }
         match expr {
+            s::Expr::Cond(value) => Ok(k::Expr::If {
+                cond: Box::new(self.expression(&value.test)?),
+                then: Box::new(self.expression(&value.cons)?),
+                r#else: Box::new(self.expression(&value.alt)?),
+            }),
+            s::Expr::Call(call) if call.args.len() == 1 && call.args[0].spread.is_none() => {
+                let s::Callee::Expr(callee) = &call.callee else {
+                    return Err(invalid("expected scoped expression", Some(expr.span())));
+                };
+                let mut callee = callee.as_ref();
+                while let s::Expr::Paren(paren) = callee {
+                    callee = &paren.expr;
+                }
+                let s::Expr::Arrow(arrow) = callee else {
+                    return Err(invalid("expected scoped expression", Some(expr.span())));
+                };
+                let [s::Pat::Ident(binding)] = arrow.params.as_slice() else {
+                    return Err(invalid(
+                        "a scoped expression binds one name",
+                        Some(expr.span()),
+                    ));
+                };
+                let s::BlockStmtOrExpr::Expr(body) = arrow.body.as_ref() else {
+                    return Err(invalid(
+                        "a scoped expression has an expression body",
+                        Some(expr.span()),
+                    ));
+                };
+                Ok(k::Expr::Let {
+                    name: self.name(&binding.id)?,
+                    value: Box::new(self.expression(&call.args[0].expr)?),
+                    body: Box::new(self.expression(body)?),
+                })
+            }
             s::Expr::Paren(value) => self.expression(&value.expr),
             s::Expr::Ident(ident) => Ok(k::Expr::Variable(self.name(ident)?)),
             s::Expr::Fn(_) => {

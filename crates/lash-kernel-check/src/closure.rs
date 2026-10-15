@@ -281,7 +281,8 @@ fn closure_bindings(graph: &Graph) -> BTreeSet<BindingId> {
     let mut other = BTreeSet::new();
     for node in &graph.nodes {
         let (binding, value) = match &node.kind {
-            NodeKind::Stmt(StmtNode::Let { binding, value }) => (*binding, *value),
+            NodeKind::Stmt(StmtNode::Let { binding, value })
+            | NodeKind::Expr(ExprNode::Let { binding, value, .. }) => (*binding, *value),
             NodeKind::Stmt(StmtNode::Assign {
                 place: PlaceNode::Variable(Reference::Binding(binding)),
                 value,
@@ -349,7 +350,8 @@ fn function_targets(graph: &Graph) -> BTreeMap<BindingId, BTreeSet<Name>> {
         let mut changed = false;
         for node in graph.nodes() {
             let (binding, value) = match &node.kind {
-                NodeKind::Stmt(StmtNode::Let { binding, value })
+                NodeKind::Expr(ExprNode::Let { binding, value, .. })
+                | NodeKind::Stmt(StmtNode::Let { binding, value })
                 | NodeKind::Stmt(StmtNode::Assign {
                     place: PlaceNode::Variable(Reference::Binding(binding)),
                     value,
@@ -421,6 +423,8 @@ fn targets_of(
             };
             targets_of(graph, *target, targets)
         }
+        NodeKind::Expr(ExprNode::If { then, r#else, .. }) => union(&[*then, *r#else]),
+        NodeKind::Expr(ExprNode::Let { body, .. }) => targets_of(graph, *body, targets),
         NodeKind::Expr(ExprNode::Call { args, .. }) => union(args),
         NodeKind::Action(ActionNode::Call { args, .. } | ActionNode::Spawn { args, .. }) => args
             .iter()

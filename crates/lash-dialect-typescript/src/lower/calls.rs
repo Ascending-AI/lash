@@ -1227,50 +1227,46 @@ impl Lowerer<'_> {
         base: &ast::Expr,
         operations: &[ast::OptionalOperation],
     ) -> Lowering<(Operand, Operand)> {
-        let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
-        let place = Place::Variable(super::statements::variable_of(&result));
-        let receiver = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
-        let receiver_place = Place::Variable(super::statements::variable_of(&receiver));
-        let link = match base {
-            ast::Expr::Member {
-                object, property, ..
-            } if self.global_path(base).is_none() => {
-                let object = self.lower_expr(object)?;
-                let object = self.pin(object);
-                let key = self.lower_key(property)?;
-                Link::Member { object, key }
-            }
-            ast::Expr::OptionalChain { base, operations } => {
-                let (value, receiver) = self.optional_reference(base, operations)?;
-                Link::Value { value, receiver }
-            }
-            _ => {
-                let value = self.lower_expr(base)?;
-                Link::Value {
-                    value: self.pin(value),
-                    receiver: Operand::undefined(),
+        let pair = self.expression_block(|this| {
+            let link = match base {
+                ast::Expr::Member {
+                    object, property, ..
+                } if this.global_path(base).is_none() => {
+                    let object = this.lower_expr(object)?;
+                    let object = this.pin(object);
+                    let key = this.lower_key(property)?;
+                    Link::Member { object, key }
                 }
-            }
-        };
-        self.chain(link, operations, &place, &receiver_place)?;
-        Ok((result, receiver))
+                ast::Expr::OptionalChain { base, operations } => {
+                    let (value, receiver) = this.optional_reference(base, operations)?;
+                    Link::Value { value, receiver }
+                }
+                _ => {
+                    let value = this.lower_expr(base)?;
+                    Link::Value {
+                        value: this.pin(value),
+                        receiver: Operand::undefined(),
+                    }
+                }
+            };
+            this.chain(link, operations)
+        })?;
+        let pair = self.pin(pair);
+        let value = self.let_expr(Self::element(&pair, 0), Ty::Unknown);
+        let receiver = self.let_expr(Self::element(&pair, 1), Ty::Unknown);
+        Ok((value, receiver))
     }
 
-    fn chain(
-        &mut self,
-        link: Link,
-        operations: &[ast::OptionalOperation],
-        place: &Place,
-        receiver_place: &Place,
-    ) -> Lowering<()> {
+    fn chain(&mut self, link: Link, operations: &[ast::OptionalOperation]) -> Lowering<Operand> {
         let Some((operation, rest)) = operations.split_first() else {
             let (value, receiver) = match link {
                 Link::Value { value, receiver } => (value, receiver),
                 Link::Member { object, key } => (self.get_member(&object, &key)?, object),
             };
-            self.store(place.clone(), value);
-            self.store(receiver_place.clone(), receiver);
-            return Ok(());
+            return Ok(self.let_expr(
+                Expr::Tuple(vec![value.expr(), receiver.expr()]),
+                Ty::Unknown,
+            ));
         };
         match operation {
             ast::OptionalOperation::Member { property, optional } => {
@@ -1287,8 +1283,6 @@ impl Lowerer<'_> {
                             key,
                         },
                         rest,
-                        place,
-                        receiver_place,
                     )
                 })
             }
@@ -1307,8 +1301,6 @@ impl Lowerer<'_> {
                             receiver: Operand::undefined(),
                         },
                         rest,
-                        place,
-                        receiver_place,
                     )
                 })
             }
@@ -1321,14 +1313,23 @@ impl Lowerer<'_> {
         &mut self,
         optional: bool,
         value: &Operand,
-        lower: impl FnOnce(&mut Self) -> Lowering<()>,
-    ) -> Lowering<()> {
+        lower: impl FnOnce(&mut Self) -> Lowering<Operand>,
+    ) -> Lowering<Operand> {
         if !optional {
             return lower(self);
         }
-        let nullish = self.invoke("ts.is_nullish", std::slice::from_ref(value), Ty::Bool)?;
-        let onward = self.block(lower)?;
-        self.emit_if(nullish.expr(), Buf::default(), onward);
-        Ok(())
+        let nullish = self.nullish_condition(value)?;
+        let onward = self.value_block(lower)?;
+        let absent = self.let_expr(
+            Expr::Tuple(vec![Expr::Literal(Literal::Absent); 2]),
+            Ty::Unknown,
+        );
+        if self.branch_expression(&onward.0, onward.1.expr()).is_none() {
+            let place = Place::Variable(super::statements::variable_of(&absent));
+            let branch = self.store_branch(onward, place);
+            self.emit_if(nullish, Buf::default(), branch);
+            return Ok(absent);
+        }
+        Ok(self.choose(nullish, (Buf::default(), absent), onward))
     }
 }

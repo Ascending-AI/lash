@@ -479,6 +479,28 @@ impl Linker {
             },
             Expr::Clock => ExprNode::Clock,
             Expr::Random => ExprNode::Random,
+            Expr::If { cond, then, r#else } => ExprNode::If {
+                cond: self.expr(cond, slots.take(), id, scope),
+                then: self.expr(then, slots.take(), id, scope),
+                r#else: self.expr(r#else, slots.take(), id, scope),
+            },
+            Expr::Let { name, value, body } => {
+                let value = self.expr(value, slots.take(), id, scope);
+                let inner = ScopeId(self.graph.scopes.len() as u32);
+                self.graph.scopes.push(Scope {
+                    id: inner,
+                    parent: Some(scope),
+                    block: self.graph.scope(scope).block,
+                    bindings: Vec::new(),
+                });
+                let binding = self.declare(name, BindingKind::Let, id, inner);
+                let body = self.expr(body, slots.take(), id, inner);
+                ExprNode::Let {
+                    binding,
+                    value,
+                    body,
+                }
+            }
             Expr::Read(read) => ExprNode::Read {
                 handle: self.expr(&read.handle, slots.take(), id, scope),
                 request: self.expr(&read.request, slots.take(), id, scope),

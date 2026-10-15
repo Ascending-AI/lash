@@ -478,6 +478,24 @@ impl<'a> Printer<'a> {
             }
             Expr::Clock => self.out.push_str("clock"),
             Expr::Random => self.out.push_str("random"),
+            Expr::If { cond, then, r#else } => {
+                self.out.push_str("if(");
+                self.expr(cond);
+                self.out.push_str(", ");
+                self.expr(then);
+                self.out.push_str(", ");
+                self.expr(r#else);
+                self.out.push(')');
+            }
+            Expr::Let { name, value, body } => {
+                self.out.push_str("let(");
+                self.name(name);
+                self.out.push_str(" = ");
+                self.expr(value);
+                self.out.push_str(", ");
+                self.expr(body);
+                self.out.push(')');
+            }
             Expr::Read(read) => {
                 self.out.push_str("read(");
                 self.expr(&read.handle);

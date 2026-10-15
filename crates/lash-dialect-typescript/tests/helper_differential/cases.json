@@ -8054,5 +8054,130 @@
     "id": "typescript/operand-order/raise-before-tool",
     "dialect": "typescript",
     "source": "const n = null; function tool() { return observe('issued'); } try { [n.x, tool()]; } catch (e) { await observe('raised'); }"
+  },
+  {
+    "id": "typescript/lazy_expression/conditional_true_raise",
+    "dialect": "typescript",
+    "source": "await observe(true ? 7 : null.missing);"
+  },
+  {
+    "id": "typescript/lazy_expression/conditional_false_raise",
+    "dialect": "typescript",
+    "source": "await observe(false ? null.missing : 8);"
+  },
+  {
+    "id": "typescript/lazy_expression/and_raise",
+    "dialect": "typescript",
+    "source": "await observe(false && null.missing);"
+  },
+  {
+    "id": "typescript/lazy_expression/or_raise",
+    "dialect": "typescript",
+    "source": "await observe(true || null.missing);"
+  },
+  {
+    "id": "typescript/lazy_expression/nullish_raise",
+    "dialect": "typescript",
+    "source": "await observe(0 ?? null.missing);"
+  },
+  {
+    "id": "typescript/lazy_expression/optional_raise",
+    "dialect": "typescript",
+    "source": "let value = null; await observe(value?.[null.missing]);"
+  },
+  {
+    "id": "typescript/lazy_expression/optional_chain_skip",
+    "dialect": "typescript",
+    "source": "let value = null; await observe(value?.a.b[null.missing]);"
+  },
+  {
+    "id": "typescript/lazy_expression/conditional_native",
+    "dialect": "typescript",
+    "source": "await observe(true ? 1 + 2 : 3 + 4);"
+  },
+  {
+    "id": "typescript/lazy_expression/conditional_count",
+    "dialect": "typescript",
+    "source": "let seen=[]; function tick(x) { seen.push(x); return x; } await observe(tick(0) ? tick(1) : tick(2)); await observe(seen);"
+  },
+  {
+    "id": "typescript/lazy_expression/and_count",
+    "dialect": "typescript",
+    "source": "let seen=[]; function tick(x) { seen.push(x); return x; } await observe(tick(0) && tick(1)); await observe(tick(2) && tick(3)); await observe(seen);"
+  },
+  {
+    "id": "typescript/lazy_expression/or_count",
+    "dialect": "typescript",
+    "source": "let seen=[]; function tick(x) { seen.push(x); return x; } await observe(tick(1) || tick(2)); await observe(tick(0) || tick(3)); await observe(seen);"
+  },
+  {
+    "id": "typescript/lazy_expression/nullish_count",
+    "dialect": "typescript",
+    "source": "let seen=[]; function tick(x) { seen.push(x); return x; } await observe(tick(null) ?? tick(2)); await observe(tick(false) ?? tick(3)); await observe(seen);"
+  },
+  {
+    "id": "typescript/lazy_expression/optional_once",
+    "dialect": "typescript",
+    "source": "let seen=[]; function receiver() { seen.push(1); return {a:{b:7}}; } await observe(receiver()?.a?.b); await observe(seen);"
+  },
+  {
+    "id": "typescript/lazy_expression/optional_key_order",
+    "dialect": "typescript",
+    "source": "let seen=[]; function receiver(x) { seen.push(1); return x; } function key() { seen.push(2); return \"a\"; } await observe(receiver(null)?.[key()]); await observe(receiver({a:7})?.[key()]); await observe(seen);"
+  },
+  {
+    "id": "typescript/lazy_expression/optional_method_receiver",
+    "dialect": "typescript",
+    "source": "let seen=[]; let value={n:3, method(x) { seen.push(this.n); return {n:this.n+x}; }}; await observe(value?.method(4)?.n); await observe(seen);"
+  },
+  {
+    "id": "typescript/lazy_expression/nested_lazy",
+    "dialect": "typescript",
+    "source": "await observe(true ? (false && null.missing) : null.missing);"
+  },
+  {
+    "id": "python/lazy_expression/conditional_true_raise",
+    "dialect": "python",
+    "source": "await observe(7 if True else 1 // 0)"
+  },
+  {
+    "id": "python/lazy_expression/conditional_false_raise",
+    "dialect": "python",
+    "source": "await observe(1 // 0 if False else 8)"
+  },
+  {
+    "id": "python/lazy_expression/and_raise",
+    "dialect": "python",
+    "source": "await observe(False and 1 // 0)"
+  },
+  {
+    "id": "python/lazy_expression/or_raise",
+    "dialect": "python",
+    "source": "await observe(True or 1 // 0)"
+  },
+  {
+    "id": "python/lazy_expression/conditional_native",
+    "dialect": "python",
+    "source": "await observe((1 + 2) if True else (3 + 4))"
+  },
+  {
+    "id": "python/lazy_expression/conditional_count",
+    "dialect": "python",
+    "source": "seen=[]\ndef tick(x):\n    seen.append(x)\n    return x\nawait observe(tick(1) if tick(0) else tick(2))\nawait observe(seen)"
+  },
+  {
+    "id": "python/lazy_expression/and_count",
+    "dialect": "python",
+    "source": "seen=[]\ndef tick(x):\n    seen.append(x)\n    return x\nawait observe(tick(0) and tick(1) and tick(2))\nawait observe(tick(3) and tick(4) and tick(5))\nawait observe(seen)"
+  },
+  {
+    "id": "python/lazy_expression/or_count",
+    "dialect": "python",
+    "source": "seen=[]\ndef tick(x):\n    seen.append(x)\n    return x\nawait observe(tick(1) or tick(2) or tick(3))\nawait observe(tick(0) or tick(0) or tick(4))\nawait observe(seen)"
+  },
+  {
+    "id": "python/lazy_expression/nested_lazy",
+    "dialect": "python",
+    "source": "await observe((False and 1 // 0) if True else 1 // 0)"
   }
 ]

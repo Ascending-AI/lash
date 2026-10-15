@@ -51,6 +51,7 @@ private t1, `let`
 fn start(count, label) {{
   let xs = [1, -2, 3.5, -0.0, nan, inf, -inf, 1e21, 1.5e-7, 123456789012345678901234567890]
   let t = (xs, "a\n\"b\"\t\u{{1f600}}\\", b"00ff", null, absent, true, false)
+  let chosen = if(true, let(x = 7, x), 0)
   let one = (t,)
   let none = ()
   let m = map{{"k": 1, (1, "two"): xs}}
@@ -205,7 +206,9 @@ fn kernel_text_round_trips_documents_that_use_every_form() {
         "expr:clock",
         "expr:closure",
         "expr:field",
+        "expr:if",
         "expr:index",
+        "expr:let",
         "expr:list",
         "expr:literal",
         "expr:map",
@@ -325,6 +328,8 @@ fn collect_forms(node: Node<'_>, forms: &mut std::collections::BTreeSet<&'static
                 Expr::Call { .. } => "expr:call",
                 Expr::Clock => "expr:clock",
                 Expr::Random => "expr:random",
+                Expr::If { .. } => "expr:if",
+                Expr::Let { .. } => "expr:let",
                 Expr::Read(_) => "expr:read",
             });
         }

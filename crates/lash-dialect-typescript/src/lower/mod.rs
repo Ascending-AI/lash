@@ -29,6 +29,7 @@ mod async_fn;
 mod calls;
 mod expressions;
 mod functions;
+mod lazy;
 mod patterns;
 mod positional;
 mod primitive_methods;
@@ -216,6 +217,8 @@ pub(crate) struct Note {
     pub(crate) span: Option<SourceSpan>,
     /// What the function the statement binds is, as its source wrote it.
     pub(crate) written: Option<lash_kernel_dialect::Written>,
+    /// Calling conventions of closures folded below this statement.
+    nested_written: Vec<(Vec<u32>, lash_kernel_dialect::Written)>,
     /// The notes of the statement's blocks, in the order a walk of its
     /// children meets them.
     pub(crate) blocks: Vec<Vec<Note>>,
@@ -864,6 +867,7 @@ impl Lowerer<'_> {
         self.buf.notes.push(Note {
             span: self.span,
             written: None,
+            nested_written: Vec::new(),
             blocks,
         });
     }
@@ -890,6 +894,16 @@ impl Lowerer<'_> {
             this.pop_scope();
             result
         })
+    }
+
+    fn append(&mut self, buf: Buf) {
+        for statement in &buf.stmts {
+            if let Stmt::Let { name, .. } = statement {
+                self.note_private(name);
+            }
+        }
+        self.buf.stmts.extend(buf.stmts);
+        self.buf.notes.extend(buf.notes);
     }
 
     fn emit_if(&mut self, condition: Expr, then_block: Buf, else_block: Buf) {
@@ -1133,34 +1147,54 @@ impl Lowerer<'_> {
     /// Declares `name` with `value`, reusing the statement that computed
     /// the value when it is the last one emitted.
     fn bind(&mut self, name: Name, value: Operand) {
-        let (rhs, blocks) = match self.take_binding_of(&value) {
+        let (rhs, blocks, nested_written) = match self.take_binding_of(&value) {
             Some((rhs, note)) => {
                 self.written = note.written;
-                (rhs, note.blocks)
+                (rhs, note.blocks, note.nested_written)
             }
-            None => (Rhs::Expr(value.expr()), Vec::new()),
+            None => (Rhs::Expr(value.expr()), Vec::new(), Vec::new()),
         };
         self.push(Stmt::Let { name, value: rhs }, blocks);
         self.note_written();
+        if let Some(note) = self.buf.notes.last_mut() {
+            note.nested_written = nested_written;
+        }
     }
 
     /// Assigns `value` to a place whose parts are already atoms.
     fn store(&mut self, place: Place, value: Operand) {
-        let (rhs, blocks) = match self.take_binding_of(&value) {
+        let value_slot = match &place {
+            Place::Variable(_) => 0,
+            Place::Member(lash_kernel_doc::Member::Field { .. }) => 1,
+            Place::Member(lash_kernel_doc::Member::Index { .. }) => 2,
+        };
+        let (rhs, blocks, nested_written) = match self.take_binding_of(&value) {
             Some((rhs, note)) => {
                 self.written = note.written;
-                (rhs, note.blocks)
+                (rhs, note.blocks, note.nested_written)
             }
-            None => (Rhs::Expr(value.expr()), Vec::new()),
+            None => (Rhs::Expr(value.expr()), Vec::new(), Vec::new()),
         };
         self.push(Stmt::Assign { place, value: rhs }, blocks);
         self.note_written();
+        if let Some(note) = self.buf.notes.last_mut() {
+            note.nested_written = nested_written
+                .into_iter()
+                .map(|(mut path, written)| {
+                    if let Some(slot) = path.first_mut() {
+                        *slot = value_slot;
+                    }
+                    (path, written)
+                })
+                .collect();
+        }
     }
 
     /// Drops the name of a value nothing reads: the statement that computed
     /// it runs for its effect alone.
     fn discard(&mut self, value: Operand) {
         if let Some((rhs, note)) = self.take_binding_of(&value) {
+            let nested_written = note.nested_written;
             match rhs {
                 Rhs::Action(action) => self.push(Stmt::Do { action }, note.blocks),
                 Rhs::Expr(expr) => {
@@ -1176,6 +1210,9 @@ impl Lowerer<'_> {
                         note.blocks,
                     );
                 }
+            }
+            if let Some(note) = self.buf.notes.last_mut() {
+                note.nested_written = nested_written;
             }
         } else if !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)) {
             let _ = self.let_expr(value.expr, value.ty);
@@ -1230,11 +1267,6 @@ impl Lowerer<'_> {
         let result = lower(self);
         let inner = std::mem::replace(&mut self.buf, outer);
         result.map(|value| (inner, value))
-    }
-
-    fn append(&mut self, buf: Buf) {
-        self.buf.stmts.extend(buf.stmts);
-        self.buf.notes.extend(buf.notes);
     }
 
     /// Commit operand buffers in source order, pinning only before later statements.

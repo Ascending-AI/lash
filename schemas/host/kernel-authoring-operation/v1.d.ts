@@ -246,6 +246,18 @@ export type Expr = ({
 } | {
   "variable": Name;
 } | {
+  "if": {
+    "cond": Expr;
+    "else": Expr;
+    "then": Expr;
+  };
+} | {
+  "let": {
+    "body": Expr;
+    "name": Name;
+    "value": Expr;
+  };
+} | {
   "tuple": Array<Expr>;
 } | {
   "list": Array<Expr>;

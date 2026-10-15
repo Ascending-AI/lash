@@ -80,32 +80,13 @@ impl Lowerer<'_> {
             PyExpr::BoolOp(operation) => self.bool_op(operation),
             PyExpr::Compare(compare) => self.compare(compare),
             PyExpr::If(conditional) => {
-                let result = self.temp();
-                self.emit(Stmt::Let {
-                    name: result.clone(),
-                    value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-                });
                 let test = self.expr(&conditional.test)?;
                 let condition = self.truth(test)?;
-                let mut types = Vec::new();
-                let mut branch = |this: &mut Self, value: &PyExpr| {
-                    this.block(|this| {
-                        let value = this.expr(value)?;
-                        types.push(value.ty);
-                        this.store(Place::Variable(result.clone()), value);
-                        Ok(())
-                    })
-                };
-                let then_block = branch(self, &conditional.body)?;
-                let else_block = branch(self, &conditional.orelse)?;
-                self.emit_if(condition, then_block, else_block);
-                let ty = if types[0] == types[1] {
-                    types[0]
-                } else {
-                    Ty::Unknown
-                };
-                Ok(Operand::temp(result, ty))
+                let then_branch = self.value_block(|this| this.expr(&conditional.body))?;
+                let else_branch = self.value_block(|this| this.expr(&conditional.orelse))?;
+                Ok(self.choose(condition, then_branch, else_branch))
             }
+
             PyExpr::Lambda(lambda) => {
                 let defaults = match lambda.parameters.as_deref() {
                     Some(parameters) => self.defaults(parameters)?,
@@ -368,44 +349,52 @@ impl Lowerer<'_> {
         let Some((first, rest)) = operation.values.split_first() else {
             return Ok(Operand::none());
         };
-        let first = self.expr(first)?;
-        let mut all_bool = first.ty == Ty::Bool;
-        let ty = first.ty;
-        let result = self.temp();
-        self.emit(Stmt::Let {
-            name: result.clone(),
-            value: Rhs::Expr(first.expr),
-        });
-        let is_and = operation.op == ast::BoolOp::And;
-        self.bool_rest(rest, &result, ty, is_and, &mut all_bool)?;
-        let ty = if all_bool { Ty::Bool } else { Ty::Unknown };
-        Ok(Operand::temp(result, ty))
+        self.expression_block(|this| {
+            let first = this.expr(first)?;
+            this.bool_rest(first, rest, operation.op == ast::BoolOp::And)
+        })
     }
 
-    fn bool_rest(
-        &mut self,
-        rest: &[PyExpr],
-        result: &Name,
-        ty: Ty,
-        is_and: bool,
-        all_bool: &mut bool,
-    ) -> Lowering<()> {
+    fn bool_rest(&mut self, left: Operand, rest: &[PyExpr], is_and: bool) -> Lowering<Operand> {
         let Some((next, rest)) = rest.split_first() else {
-            return Ok(());
+            return Ok(left);
         };
-        let mut condition = self.truth(Operand::temp(result.clone(), ty))?;
-        if !is_and {
-            condition = self.not(condition)?;
-        }
-        let then_block = self.block(|this| {
-            let value = this.expr(next)?;
-            let ty = value.ty;
-            *all_bool &= ty == Ty::Bool;
-            this.store(Place::Variable(result.clone()), value);
-            this.bool_rest(rest, result, ty, is_and, all_bool)
+        let result = self.temp();
+        let ty = left.ty;
+        self.emit(Stmt::Let {
+            name: result.clone(),
+            value: Rhs::Expr(left.expr),
+        });
+        let left = Operand::temp(result.clone(), ty);
+        let condition = self.truth(left.clone())?;
+        let right = self.value_block(|this| {
+            let next = this.expr(next)?;
+            this.bool_rest(next, rest, is_and)
         })?;
-        self.emit_if(condition, then_block, Buf::default());
-        Ok(())
+        if self
+            .branch_expression(&right.0, right.1.expr.clone())
+            .is_none()
+        {
+            let ty = if left.ty == right.1.ty {
+                left.ty
+            } else {
+                Ty::Unknown
+            };
+            let condition = if is_and {
+                condition
+            } else {
+                self.not(condition)?
+            };
+            let branch = self.store_branch(right, Place::Variable(result.clone()));
+            self.emit_if(condition, branch, Buf::default());
+            return Ok(Operand::temp(result, ty));
+        }
+        let held = (Buf::default(), left);
+        Ok(if is_and {
+            self.choose(condition, right, held)
+        } else {
+            self.choose(condition, held, right)
+        })
     }
 
     /// One comparison, on operands already lowered.

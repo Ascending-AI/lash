@@ -348,6 +348,8 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
             k::Expr::Clock => "Clock",
             k::Expr::Random => "Random",
             k::Expr::Read(_) => "Read",
+            k::Expr::If { .. } => "IfExpression",
+            k::Expr::Let { .. } => "LetExpression",
         },
     }
 }

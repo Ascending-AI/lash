@@ -212,6 +212,23 @@ impl Graph {
 
     fn expr(&mut self, expr: &Expr, scope: &Scope, owner: usize) -> Slot {
         match expr {
+            Expr::If { cond, then, r#else } => {
+                self.expr(cond, scope, owner);
+                let result = self.slot();
+                let then = self.expr(then, scope, owner);
+                let otherwise = self.expr(r#else, scope, owner);
+                self.alias(then, result);
+                self.alias(otherwise, result);
+                result
+            }
+            Expr::Let { name, value, body } => {
+                let value = self.expr(value, scope, owner);
+                let binding = self.slot();
+                self.alias(value, binding);
+                let mut inner = scope.clone();
+                inner.insert(name.clone(), binding);
+                self.expr(body, &inner, owner)
+            }
             Expr::Variable(name) => Self::variable(scope, name),
             Expr::Literal(value) => self.literal(value),
             Expr::Member(member) => self.member(member, scope, owner),
@@ -630,5 +647,26 @@ fn argument_apply_changes_total_census() {
     assert_eq!(
         diff(pinned, &changed),
         "- helper total\n+ helper operation\n"
+    );
+
+    // K-EVAL-001/002: the initializer sees the outer origin, and even an
+    // unselected branch contributes its closure to the conservative census.
+    let conditional = lash_kernel_doc::parse_definition(
+        r#"function helper(value: Any) -> Any
+kernel 1
+charge 1
+body {
+  return let(value = value, if(true, fn() { return null }, fn() {
+    let observed = apply value()
+    return observed
+  }))
+}
+"#,
+    )
+    .expect("conditional closures and an expression-local alias");
+    let id = conditional.identity().expect("conditional identity");
+    assert_eq!(
+        census(&BTreeMap::from([(id, conditional)]), &BTreeSet::from([id])),
+        "helper\toperation\n"
     );
 }

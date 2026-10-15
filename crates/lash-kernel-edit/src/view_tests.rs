@@ -797,3 +797,44 @@ fn a_replayed_path_maps_statement_and_scope_steps_in_task_order() {
             .all(|step| step.task == TaskIdentity::Main)
     );
 }
+
+/// K-FORM-003 and K-EVAL-002: each expression child is addressable,
+/// and only the Let body can see its binding.
+#[test]
+fn expression_let_bindings_are_available_only_in_the_body() {
+    let document = parse_document(
+        r#"kernel 1
+numbers float
+entry demo(source: Int) -> Any
+fn demo(source) { return (let(source = source, if(true, source, 0)), source) }
+main { finish null }
+"#,
+    )
+    .unwrap();
+    let view = view_of(&document, "demo");
+    let binding = view
+        .dataflow
+        .bindings
+        .iter()
+        .find(|binding| binding.kind == BindingKind::Let)
+        .unwrap();
+    assert!(binding.value_site.is_some());
+    for expression in &view.dataflow.expressions {
+        let inside = expression.site.path.starts_with(&[0, 0, 0, 1]);
+        assert_eq!(
+            expression.available.contains(&binding.id),
+            inside,
+            "{}",
+            expression.site
+        );
+    }
+    assert_eq!(
+        view.dataflow
+            .expressions
+            .iter()
+            .find(|expression| expression.site.path == [0, 0, 0, 1, 1])
+            .unwrap()
+            .references,
+        vec![binding.id]
+    );
+}

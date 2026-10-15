@@ -470,3 +470,60 @@ fn every_step_saves_the_same_image_in_every_layout() {
     }
     println!("saved images: programs={} steps={steps}", programs.len());
 }
+
+/// K-EVAL-001/002, K-CHG-002 and K-MACH-008: only a selected branch
+/// runs, bindings evaluate once, and jumps preserve that contract in every layout.
+#[test]
+fn conditional_regions_are_lazy_and_expression_bindings_evaluate_once_in_every_layout() {
+    let mut charge = None;
+    for layout in [Layout(0), Layout(1), Layout(0x5eed)] {
+        for skipped in ["null.missing", "(clock, clock, clock)"] {
+            let program = format!(
+                r#"
+entry go(h: Handle("table")) -> Any
+fn go(h) {{
+  finish (if(read(h, true), read(h, "then"), {skipped}), if(read(h, false), {skipped}, read(h, "else")), let(x = read(h, "bound"), (x, x)))
+}}
+main {{ finish null }}
+"#
+            );
+            let mut embedder = Embedder::with(
+                &program,
+                Setup {
+                    layout,
+                    start: Start {
+                        target: Target::Entry(Name::new("go")),
+                        args: vec![Datum::Handle(lash_kernel_doc::Handle {
+                            kind: "table".into(),
+                            id: "one".into(),
+                        })],
+                        bindings: Bindings::default(),
+                    },
+                    ..Setup::default()
+                },
+            );
+            embedder.machine.verify_stream().unwrap();
+            let end = embedder.run_to_end(&[]);
+            assert_eq!(
+                super::embedder::result(end),
+                Datum::Tuple(vec![
+                    Datum::Text("then".into()),
+                    Datum::Text("else".into()),
+                    Datum::Tuple(vec![Datum::Text("bound".into()); 2])
+                ])
+            );
+            assert_eq!(
+                embedder.world.reads,
+                vec![
+                    Datum::Bool(true),
+                    Datum::Text("then".into()),
+                    Datum::Bool(false),
+                    Datum::Text("else".into()),
+                    Datum::Text("bound".into())
+                ]
+            );
+            let charged = embedder.machine.meters().charged;
+            assert_eq!(*charge.get_or_insert(charged), charged);
+        }
+    }
+}

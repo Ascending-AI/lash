@@ -785,6 +785,7 @@ struct Scopes {
 #[derive(Clone, Copy)]
 enum Declared {
     Slot(Slot),
+    ScopedSlot(Slot),
     Session,
 }
 
@@ -1198,7 +1199,7 @@ impl Compiler<'_> {
         let declares = declared
             .into_iter()
             .filter_map(|(_, declared)| match declared {
-                Declared::Slot(slot) => Some(slot),
+                Declared::Slot(slot) | Declared::ScopedSlot(slot) => Some(slot),
                 Declared::Session => None,
             })
             .collect();
@@ -1245,12 +1246,12 @@ impl Compiler<'_> {
             .iter()
             .rev()
             .flat_map(|block| block.iter().rev())
-            .find(|(declared, _)| declared == name)
+            .find(|(declared, kind)| declared == name && !matches!(kind, Declared::ScopedSlot(_)))
             .map(|(_, declared)| *declared);
         match declared {
             Some(Declared::Slot(slot)) => return Var::Local(Local::unplaced(slot)),
             Some(Declared::Session) => return Var::Session(name.clone()),
-            None => {}
+            None | Some(Declared::ScopedSlot(_)) => {}
         }
         if level == 0 {
             return if scopes.main {
@@ -1324,8 +1325,17 @@ impl Placer<'_> {
             match op {
                 Op::Local { local, .. }
                 | Op::ChargeLocal { local, .. }
+                | Op::LetEnd { local }
                 | Op::WriteLocal { local, .. } => {
                     local.at = self.positions[local.slot as usize];
+                }
+                Op::LetBind { local, src } => {
+                    let (local, src) = (self.place_ref(*local), *src);
+                    *op = if self.slots[local.slot as usize].shared {
+                        Op::LetBindShared { local, src }
+                    } else {
+                        Op::LetBind { local, src }
+                    };
                 }
                 Op::Bind { local, src } => {
                     let (local, src) = (self.place_ref(*local), *src);

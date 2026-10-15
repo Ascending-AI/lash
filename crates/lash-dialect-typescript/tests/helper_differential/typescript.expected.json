@@ -18289,6 +18289,261 @@
           ]
         }
       ]
+    },
+    "typescript/lazy_expression/conditional_true_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "401c000000000000"
+        }
+      ]
+    },
+    "typescript/lazy_expression/conditional_false_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "4020000000000000"
+        }
+      ]
+    },
+    "typescript/lazy_expression/and_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "bool",
+          "value": false
+        }
+      ]
+    },
+    "typescript/lazy_expression/or_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "bool",
+          "value": true
+        }
+      ]
+    },
+    "typescript/lazy_expression/nullish_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "0000000000000000"
+        }
+      ]
+    },
+    "typescript/lazy_expression/optional_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "undefined"
+        }
+      ]
+    },
+    "typescript/lazy_expression/optional_chain_skip": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "undefined"
+        }
+      ]
+    },
+    "typescript/lazy_expression/conditional_native": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "4008000000000000"
+        }
+      ]
+    },
+    "typescript/lazy_expression/conditional_count": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "4000000000000000"
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "float",
+              "bits": "0000000000000000"
+            },
+            {
+              "type": "float",
+              "bits": "4000000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    "typescript/lazy_expression/and_count": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "0000000000000000"
+        },
+        {
+          "type": "float",
+          "bits": "4008000000000000"
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "float",
+              "bits": "0000000000000000"
+            },
+            {
+              "type": "float",
+              "bits": "4000000000000000"
+            },
+            {
+              "type": "float",
+              "bits": "4008000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    "typescript/lazy_expression/or_count": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "3ff0000000000000"
+        },
+        {
+          "type": "float",
+          "bits": "4008000000000000"
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "float",
+              "bits": "3ff0000000000000"
+            },
+            {
+              "type": "float",
+              "bits": "0000000000000000"
+            },
+            {
+              "type": "float",
+              "bits": "4008000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    "typescript/lazy_expression/nullish_count": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "4000000000000000"
+        },
+        {
+          "type": "bool",
+          "value": false
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "float",
+              "bits": "4000000000000000"
+            },
+            {
+              "type": "bool",
+              "value": false
+            }
+          ]
+        }
+      ]
+    },
+    "typescript/lazy_expression/optional_once": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "401c000000000000"
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "float",
+              "bits": "3ff0000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    "typescript/lazy_expression/optional_key_order": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "undefined"
+        },
+        {
+          "type": "float",
+          "bits": "401c000000000000"
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "float",
+              "bits": "3ff0000000000000"
+            },
+            {
+              "type": "float",
+              "bits": "3ff0000000000000"
+            },
+            {
+              "type": "float",
+              "bits": "4000000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    "typescript/lazy_expression/optional_method_receiver": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "401c000000000000"
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "float",
+              "bits": "4008000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    "typescript/lazy_expression/nested_lazy": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "bool",
+          "value": false
+        }
+      ]
     }
   }
 }

@@ -498,6 +498,18 @@ impl TokenCodec for Expr {
                 args.encode(out);
             }
             Self::Clock | Self::Random => out.sum(number, 0),
+            Self::If { cond, then, r#else } => {
+                out.sum(number, 3);
+                cond.encode(out);
+                then.encode(out);
+                r#else.encode(out);
+            }
+            Self::Let { name, value, body } => {
+                out.sum(number, 3);
+                name.encode(out);
+                value.encode(out);
+                body.encode(out);
+            }
             Self::Read(read) => {
                 out.sum(number, 1);
                 read.encode(out);
@@ -510,6 +522,7 @@ impl TokenCodec for Expr {
             let number = variant(input, |variant| match variant {
                 0..=8 | 12 => Some(1),
                 9 => Some(2),
+                13 | 14 => Some(3),
                 10 | 11 => Some(0),
                 _ => None,
             })?;
@@ -529,7 +542,17 @@ impl TokenCodec for Expr {
                 },
                 10 => Self::Clock,
                 11 => Self::Random,
-                _ => Self::Read(Box::decode(input)?),
+                12 => Self::Read(Box::decode(input)?),
+                13 => Self::If {
+                    cond: Box::decode(input)?,
+                    then: Box::decode(input)?,
+                    r#else: Box::decode(input)?,
+                },
+                _ => Self::Let {
+                    name: Name::decode(input)?,
+                    value: Box::decode(input)?,
+                    body: Box::decode(input)?,
+                },
             })
         })
     }

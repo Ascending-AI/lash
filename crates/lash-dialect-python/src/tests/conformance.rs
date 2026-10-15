@@ -152,3 +152,41 @@ fn admitted_basics_keep_cpython_observations_and_dispositions() {
     );
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
+
+/// K-CLO-001: folding a conditional keeps each source function's calling convention.
+#[test]
+fn conditional_functions_keep_their_written_signatures() {
+    for source in [
+        "f = (lambda left: left) if True else (lambda right: right)",
+        "(lambda left: left) if True else (lambda right: right)",
+        "holder = {}\nholder['f'] = (lambda left: left) if True else (lambda right: right)",
+    ] {
+        let lowered = super::machine::lower(source).unwrap();
+        assert_eq!(lowered.written.len(), 2);
+        for site in lowered.written.keys() {
+            let mut node = lash_kernel_doc::Node::Block(&lowered.document.main);
+            for child in &site.path {
+                node = node.children()[*child as usize];
+            }
+            assert!(
+                matches!(
+                    node,
+                    lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Closure(_))
+                ),
+                "{site}"
+            );
+        }
+        assert!(
+            lowered
+                .written
+                .values()
+                .any(|written| written.signature.contains("left"))
+        );
+        assert!(
+            lowered
+                .written
+                .values()
+                .any(|written| written.signature.contains("right"))
+        );
+    }
+}

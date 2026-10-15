@@ -188,6 +188,18 @@ pub enum Literal {
 pub enum Expr {
     Literal(Literal),
     Variable(Name),
+    /// Evaluates the condition, then only the selected branch.
+    If {
+        cond: Box<Expr>,
+        then: Box<Expr>,
+        r#else: Box<Expr>,
+    },
+    /// Evaluates `value` before binding `name`, visible only in `body`.
+    Let {
+        name: Name,
+        value: Box<Expr>,
+        body: Box<Expr>,
+    },
     Tuple(Vec<Expr>),
     List(Vec<Expr>),
     Map(Vec<MapEntry>),
@@ -411,6 +423,12 @@ impl<'a> Node<'a> {
                 Expr::Member(member) => push_member(member, &mut out),
                 Expr::Closure(closure) => out.push(Node::Block(&closure.body)),
                 Expr::Call { args, .. } => out.extend(args.iter().map(Node::Expr)),
+                Expr::If { cond, then, r#else } => {
+                    out.extend([Node::Expr(cond), Node::Expr(then), Node::Expr(r#else)]);
+                }
+                Expr::Let { value, body, .. } => {
+                    out.extend([Node::Expr(value), Node::Expr(body)]);
+                }
                 Expr::Read(read) => {
                     out.push(Node::Expr(&read.handle));
                     out.push(Node::Expr(&read.request));

@@ -417,7 +417,8 @@ pub fn derive(
                 assigned: binding.assigned,
                 captured: binding.captured,
                 value_site: match declaration.kind {
-                    NodeKind::Stmt(StmtNode::Let { value, .. }) => {
+                    NodeKind::Stmt(StmtNode::Let { value, .. })
+                    | NodeKind::Expr(ExprNode::Let { value, .. }) => {
                         Some(graph.node(value).site.clone())
                     }
                     _ => None,
@@ -557,6 +558,8 @@ impl<'a> Walk<'a> {
                     | ExprNode::Record(_)
                     | ExprNode::Member(_)
                     | ExprNode::Call { .. }
+                    | ExprNode::If { .. }
+                    | ExprNode::Let { .. }
                     | ExprNode::Clock
                     | ExprNode::Random
                     | ExprNode::Read { .. } => {}
@@ -802,6 +805,8 @@ fn direct_references(kind: &NodeKind) -> Vec<BindingId> {
             | ExprNode::Record(_)
             | ExprNode::Member(_)
             | ExprNode::Call { .. }
+            | ExprNode::If { .. }
+            | ExprNode::Let { .. }
             | ExprNode::Clock
             | ExprNode::Random
             | ExprNode::Read { .. } => Vec::new(),
@@ -878,6 +883,9 @@ fn references(graph: &Graph, id: NodeId) -> Vec<usize> {
             for child in node.children() {
                 collect(graph, child, out);
             }
+            if let NodeKind::Expr(ExprNode::Let { binding, .. }) = node.kind {
+                out.remove(&binding.index());
+            }
         }
     }
     let mut out = std::collections::BTreeSet::new();
@@ -897,6 +905,7 @@ fn available(graph: &Graph, node: &GraphNode) -> Vec<usize> {
             let binding = graph.binding(*binding_id);
             let declaration = graph.node(binding.declared_at);
             if binding.kind == lash_kernel_check::BindingKind::Let
+                && !matches!(declaration.kind, NodeKind::Expr(ExprNode::Let { .. }))
                 && (declaration.id.index() >= node.id.index()
                     || (declaration.site.unit == node.site.unit
                         && node.site.path.starts_with(&declaration.site.path)))

@@ -54,6 +54,7 @@ impl Lowerer<'_> {
                 span: self.span,
                 blocks: Vec::new(),
                 written: None,
+                nested_written: Vec::new(),
             }],
         }
     }

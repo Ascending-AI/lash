@@ -4510,6 +4510,150 @@
     "python/iteration/dict-table-compaction": {
       "type": "observations",
       "value": []
+    },
+    "python/lazy_expression/conditional_true_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "int",
+          "value": "7"
+        }
+      ]
+    },
+    "python/lazy_expression/conditional_false_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "int",
+          "value": "8"
+        }
+      ]
+    },
+    "python/lazy_expression/and_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "bool",
+          "value": false
+        }
+      ]
+    },
+    "python/lazy_expression/or_raise": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "bool",
+          "value": true
+        }
+      ]
+    },
+    "python/lazy_expression/conditional_native": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "int",
+          "value": "3"
+        }
+      ]
+    },
+    "python/lazy_expression/conditional_count": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "int",
+          "value": "2"
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "0"
+            },
+            {
+              "type": "int",
+              "value": "2"
+            }
+          ]
+        }
+      ]
+    },
+    "python/lazy_expression/and_count": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "int",
+          "value": "0"
+        },
+        {
+          "type": "int",
+          "value": "5"
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "0"
+            },
+            {
+              "type": "int",
+              "value": "3"
+            },
+            {
+              "type": "int",
+              "value": "4"
+            },
+            {
+              "type": "int",
+              "value": "5"
+            }
+          ]
+        }
+      ]
+    },
+    "python/lazy_expression/or_count": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "int",
+          "value": "1"
+        },
+        {
+          "type": "int",
+          "value": "4"
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "1"
+            },
+            {
+              "type": "int",
+              "value": "0"
+            },
+            {
+              "type": "int",
+              "value": "0"
+            },
+            {
+              "type": "int",
+              "value": "4"
+            }
+          ]
+        }
+      ]
+    },
+    "python/lazy_expression/nested_lazy": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "bool",
+          "value": false
+        }
+      ]
     }
   }
 }

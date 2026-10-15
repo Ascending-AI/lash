@@ -50,6 +50,8 @@ fn scan(
                 | Expr::Record(_)
                 | Expr::Member(_)
                 | Expr::Closure(_)
+                | Expr::If { .. }
+                | Expr::Let { .. }
                 | Expr::Clock
                 | Expr::Random
                 | Expr::Read(_) => {}

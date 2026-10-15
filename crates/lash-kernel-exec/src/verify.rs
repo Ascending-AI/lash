@@ -97,6 +97,8 @@ pub enum KirError {
     Unwritten { stmt: usize, op: u32, reg: Reg },
     #[error("op {op} of statement {stmt} has operands of the wrong count")]
     Arity { stmt: usize, op: u32 },
+    #[error("op {op} of statement {stmt} jumps outside its expression range")]
+    InvalidJump { stmt: usize, op: u32 },
 }
 
 /// Checks every statement of a stream (see the module documentation),
@@ -128,9 +130,21 @@ fn range(
         return Err(KirError::Range { stmt, range });
     }
     let mut written = vec![false; ranges.regs as usize];
+    let mut fallthrough = true;
+    let mut incoming = vec![None::<Vec<bool>>; range.len as usize];
     let last = range.end() - 1;
     for at in range.start..range.end() {
+        if let Some(other) = incoming[(at - range.start) as usize].take() {
+            if fallthrough {
+                for (slot, other) in written.iter_mut().zip(other) {
+                    *slot &= other;
+                }
+            } else {
+                written = other;
+            }
+        }
         let op = &ops[at as usize];
+        fallthrough = !matches!(op, Op::Jump { .. });
         let kind = op.kind();
         if kind.is_terminator() && at != last {
             return Err(KirError::EarlyTerminator { stmt, op: at });
@@ -153,6 +167,23 @@ fn range(
                     op: at,
                     operand,
                 });
+            }
+        }
+        if let Op::Jump { skip } | Op::JumpIfFalse { skip, .. } = *op {
+            let Some(target) = at
+                .checked_add(1)
+                .and_then(|next| next.checked_add(skip))
+                .filter(|target| *target <= last)
+            else {
+                return Err(KirError::InvalidJump { stmt, op: at });
+            };
+            let state = &mut incoming[(target - range.start) as usize];
+            if let Some(state) = state {
+                for (slot, value) in state.iter_mut().zip(&written) {
+                    *slot &= value;
+                }
+            } else {
+                *state = Some(written.clone());
             }
         }
         let arity = match *op {
@@ -230,6 +261,33 @@ mod tests {
             verify_stream(ops, &[(ranges, 0)], &tables)
         };
         assert_eq!(check(&[c(0), Op::End], 2), Ok(()));
+        assert_eq!(
+            check(&[c(0), Op::Jump { skip: u32::MAX }, Op::End], 3),
+            Err(KirError::InvalidJump { stmt: 0, op: 1 })
+        );
+        let branch = |otherwise| {
+            vec![
+                c(0),
+                Op::JumpIfFalse {
+                    cond: Reg(0),
+                    skip: 2,
+                },
+                c(1),
+                Op::Jump { skip: 1 },
+                c(otherwise),
+                Op::Print { src: Reg(1) },
+            ]
+        };
+        assert_eq!(check(&branch(1), 6), Ok(()));
+        assert_eq!(
+            check(&branch(0), 6),
+            Err(KirError::Unwritten {
+                stmt: 0,
+                op: 5,
+                reg: Reg(1)
+            })
+        );
+
         assert_eq!(
             check(&[c(0), Op::End, c(1), Op::End], 4),
             Err(KirError::EarlyTerminator { stmt: 0, op: 1 })

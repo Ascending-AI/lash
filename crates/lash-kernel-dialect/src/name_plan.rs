@@ -32,7 +32,8 @@ impl NamePlan {
             let mut stack = vec![root];
             while let Some(node) = stack.pop() {
                 match node {
-                    k::Node::Stmt(k::Stmt::Let { name, .. }) => add(name),
+                    k::Node::Stmt(k::Stmt::Let { name, .. })
+                    | k::Node::Expr(k::Expr::Let { name, .. }) => add(name),
                     k::Node::Stmt(k::Stmt::Assign {
                         place: k::Place::Variable(name),
                         ..

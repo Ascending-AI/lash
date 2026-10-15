@@ -169,6 +169,7 @@ main {{
   if roll {{
     fail "no"
   }}
+  print if(true, let(scoped = got, scoped), null)
   finish got
 }}
 "#,
@@ -268,6 +269,8 @@ fn form(kind: &NodeKind) -> &'static str {
             ExprNode::Call { .. } => "expr:call",
             ExprNode::Clock => "expr:clock",
             ExprNode::Random => "expr:random",
+            ExprNode::If { .. } => "expr:if",
+            ExprNode::Let { .. } => "expr:let",
             ExprNode::Read { .. } => "expr:read",
         },
     }
@@ -359,6 +362,8 @@ fn walking_the_graph_view_reaches_every_node_and_slot() {
         "expr:call",
         "expr:clock",
         "expr:closure",
+        "expr:if",
+        "expr:let",
         "expr:list",
         "expr:literal",
         "expr:map",
@@ -1197,4 +1202,26 @@ fn an_effect_signature_mismatch_locates_the_first_incompatible_nested_type() {
             provided: Type::Text
         }
     );
+}
+
+/// K-EVAL-001/002 and K-FORM-003: both branches contribute facets;
+/// the expression binding shadows only in the body, including closures.
+#[test]
+fn conditional_facets_join_and_expression_let_scopes_do_not_escape() {
+    let library = library();
+    let doc = document(
+        "kernel 1\nnumbers float\nmain { let x = 1 let chosen = let(x = x, if(true, x, \"text\")) print x }",
+    );
+    let graph = derive(&doc, &library.catalog).unwrap();
+    let chosen = graph
+        .nodes()
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Expr(ExprNode::If { .. })))
+        .unwrap();
+    assert_eq!(chosen.facet, Some(Type::Union(vec![Type::Int, Type::Text])));
+    let refused = refusals(
+        "kernel 1\nnumbers float\nfn f() { return (let(x = 1, x), x) }\nmain { finish null }",
+        &environment(&library),
+    );
+    assert!(refused.iter().any(|error| matches!(&error.reason, RefusalReason::UnboundVariable { name } if name.as_str() == "x")));
 }

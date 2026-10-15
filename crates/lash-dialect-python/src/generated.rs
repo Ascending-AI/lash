@@ -1111,6 +1111,23 @@ impl<'a> Reader<'a> {
                 self.scope = parent;
                 k::Expr::Closure(Box::new(k::Closure { params, body }))
             }
+            "choose" => {
+                c.end(true)?;
+                k::Expr::If {
+                    cond: Box::new(self.expr(i, d)?),
+                    then: Box::new(self.expr(i, d)?),
+                    r#else: Box::new(self.expr(i, d)?),
+                }
+            }
+            "bind" => {
+                let name = k::Name::new(c.string()?);
+                c.end(true)?;
+                k::Expr::Let {
+                    name,
+                    value: Box::new(self.expr(i, d)?),
+                    body: Box::new(self.expr(i, d)?),
+                }
+            }
             "read" => {
                 c.end(true)?;
                 k::Expr::Read(Box::new(k::ProjectionRead {

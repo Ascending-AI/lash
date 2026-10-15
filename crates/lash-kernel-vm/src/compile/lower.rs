@@ -487,6 +487,51 @@ impl Compiler<'_> {
             },
             doc::Expr::Clock => ops.push(Op::Clock { dst }),
             doc::Expr::Random => ops.push(Op::Random { dst }),
+            doc::Expr::If { cond, then, r#else } => {
+                self.child(0, |c| c.expr(ops, cond, dst));
+                let test = ops.ops.len();
+                ops.push(Op::JumpIfFalse { cond: dst, skip: 0 });
+                self.child(1, |c| c.expr(ops, then, dst));
+                let jump = ops.ops.len();
+                ops.push(Op::Jump { skip: 0 });
+                let otherwise = ops.ops.len();
+                self.child(2, |c| c.expr(ops, r#else, dst));
+                let end = ops.ops.len();
+                ops.ops[test] = Op::JumpIfFalse {
+                    cond: dst,
+                    skip: (otherwise - test - 1) as u32,
+                };
+                ops.ops[jump] = Op::Jump {
+                    skip: (end - jump - 1) as u32,
+                };
+            }
+            doc::Expr::Let { name, value, body } => {
+                self.child(0, |c| c.expr(ops, value, dst));
+                if let Some(scopes) = self.scopes.last_mut() {
+                    scopes.blocks.push(Vec::new());
+                }
+                let slot = self.declare(name);
+                let local = LocalRef { slot, at: slot };
+                ops.push(Op::LetBind { local, src: dst });
+                self.child(1, |c| c.expr(ops, body, dst));
+                ops.push(Op::LetEnd { local });
+                if let Some(scopes) = self.scopes.last_mut() {
+                    let declared = scopes.blocks.pop().unwrap_or_default();
+                    if let Some(block) = scopes.blocks.last_mut() {
+                        block.extend(declared.into_iter().map(|(name, declared)| {
+                            (
+                                name,
+                                match declared {
+                                    super::Declared::Slot(slot) => {
+                                        super::Declared::ScopedSlot(slot)
+                                    }
+                                    other => other,
+                                },
+                            )
+                        }));
+                    }
+                }
+            }
             doc::Expr::Read(read) => {
                 self.child(0, |c| c.expr(ops, &read.handle, dst));
                 self.child(1, |c| c.expr(ops, &read.request, dst.next()));

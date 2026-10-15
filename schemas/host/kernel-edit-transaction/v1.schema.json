@@ -976,6 +976,66 @@
         },
         {
           "additionalProperties": false,
+          "description": "Evaluates the condition, then only the selected branch.",
+          "properties": {
+            "if": {
+              "additionalProperties": false,
+              "properties": {
+                "cond": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "else": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "then": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "cond",
+                "then",
+                "else"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "if"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Evaluates `value` before binding `name`, visible only in `body`.",
+          "properties": {
+            "let": {
+              "additionalProperties": false,
+              "properties": {
+                "body": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "name": {
+                  "$ref": "#/$defs/Name"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "name",
+                "value",
+                "body"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "let"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "tuple": {
               "items": {

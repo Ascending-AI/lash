@@ -204,6 +204,8 @@ impl CodecVariant for Expr {
             Self::Clock => 10,
             Self::Random => 11,
             Self::Read(..) => 12,
+            Self::If { .. } => 13,
+            Self::Let { .. } => 14,
         }
     }
 }

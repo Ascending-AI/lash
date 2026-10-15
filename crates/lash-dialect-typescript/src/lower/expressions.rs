@@ -286,22 +286,13 @@ impl Lowerer<'_> {
                 let shown = self.narrowing(test);
                 let test = self.lower_expr(test)?;
                 let condition = self.condition(test)?;
-                let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
-                let name = super::statements::variable_of(&result);
-                let place = Place::Variable(name.clone());
-                let mut ty = Ty::Never;
-                let mut branch = |this: &mut Self, shown: Vec<(String, Ty)>, value: &ast::Expr| {
-                    this.block(|this| {
-                        let value = this.narrowed(shown, |this| this.lower_expr(value))?;
-                        ty = ty.join(&value.ty);
-                        this.store(place.clone(), value);
-                        Ok(())
-                    })
-                };
-                let then_block = branch(self, shown.when_true, consequent)?;
-                let else_block = branch(self, shown.when_false, alternate)?;
-                self.emit_if(condition, then_block, else_block);
-                Ok(Operand::variable(name, ty))
+                let then_branch = self.value_block(|this| {
+                    this.narrowed(shown.when_true, |this| this.lower_expr(consequent))
+                })?;
+                let else_branch = self.value_block(|this| {
+                    this.narrowed(shown.when_false, |this| this.lower_expr(alternate))
+                })?;
+                Ok(self.choose(condition, then_branch, else_branch))
             }
             ast::Expr::Template {
                 quasis,
@@ -724,25 +715,33 @@ impl Lowerer<'_> {
         left: Operand,
         right: impl FnOnce(&mut Self) -> Lowering<Operand>,
     ) -> Lowering<Operand> {
-        let result = self.temp();
-        self.bind(result.clone(), left.clone());
-        let held = Operand::variable(result.clone(), left.ty.clone());
-        let mut ty = left.ty;
-        let test = match op {
-            LogicalOp::And | LogicalOp::Or => self.condition(held)?,
-            LogicalOp::Nullish => self.invoke("ts.is_nullish", &[held], Ty::Bool)?.expr(),
-        };
-        let branch = self.block(|this| {
-            let value = right(this)?;
-            ty = ty.join(&value.ty);
-            this.store(Place::Variable(result.clone()), value);
-            Ok(())
-        })?;
-        match op {
-            LogicalOp::And | LogicalOp::Nullish => self.emit_if(test, branch, Buf::default()),
-            LogicalOp::Or => self.emit_if(test, Buf::default(), branch),
-        }
-        Ok(Operand::variable(result, ty))
+        self.expression_block(|this| {
+            let result = this.temp();
+            let left_ty = left.ty.clone();
+            this.bind(result.clone(), left);
+            let left = Operand::variable(result.clone(), left_ty);
+            let test = match op {
+                LogicalOp::And | LogicalOp::Or => this.condition(left.clone())?,
+                LogicalOp::Nullish => this.nullish_condition(&left)?,
+            };
+            let right = this.value_block(right)?;
+            if this.branch_expression(&right.0, right.1.expr()).is_none() {
+                let ty = left.ty.join(&right.1.ty);
+                let branch = this.store_branch(right, Place::Variable(result.clone()));
+                match op {
+                    LogicalOp::And | LogicalOp::Nullish => {
+                        this.emit_if(test, branch, Buf::default())
+                    }
+                    LogicalOp::Or => this.emit_if(test, Buf::default(), branch),
+                }
+                return Ok(Operand::variable(result, ty));
+            }
+            let held = (Buf::default(), left);
+            Ok(match op {
+                LogicalOp::And | LogicalOp::Nullish => this.choose(test, right, held),
+                LogicalOp::Or => this.choose(test, held, right),
+            })
+        })
     }
 
     fn lower_template(

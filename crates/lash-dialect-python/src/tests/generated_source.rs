@@ -645,6 +645,16 @@ fn inventory_document() -> k::Document {
                     value: v.clone(),
                 }]),
                 E::Member(Box::new(member)),
+                E::If {
+                    cond: Box::new(E::Literal(L::Bool(true))),
+                    then: Box::new(null.clone()),
+                    r#else: Box::new(v.clone()),
+                },
+                E::Let {
+                    name: "scoped λ".into(),
+                    value: Box::new(v.clone()),
+                    body: Box::new(E::Variable("scoped λ".into())),
+                },
                 E::Clock,
                 E::Random,
                 E::Read(Box::new(k::ProjectionRead {
@@ -913,6 +923,8 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
                 let _ = (function, args);
                 "invoke"
             }
+            k::Expr::If { .. } => "if_expression",
+            k::Expr::Let { .. } => "let_expression",
             k::Expr::Clock => "clock",
             k::Expr::Random => "random",
             k::Expr::Read(read) => {
@@ -1095,6 +1107,8 @@ fn independent_inventory_covers_kernel_variants_and_stored_fields() {
         "fail",
         "literal",
         "variable",
+        "if_expression",
+        "let_expression",
         "tuple",
         "list",
         "set",

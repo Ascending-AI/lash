@@ -1125,6 +1125,17 @@ impl Reads {
                 self.library.insert(*function);
                 args.iter().for_each(|arg| self.expr(arg, bound));
             }
+            Expr::If { cond, then, r#else } => {
+                self.expr(cond, bound);
+                self.expr(then, bound);
+                self.expr(r#else, bound);
+            }
+            Expr::Let { name, value, body } => {
+                self.expr(value, bound);
+                bound.push(name.clone());
+                self.expr(body, bound);
+                bound.pop();
+            }
             Expr::Read(read) => {
                 self.expr(&read.handle, bound);
                 self.expr(&read.request, bound);

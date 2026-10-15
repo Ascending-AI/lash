@@ -143,6 +143,28 @@ impl KernelMachine {
                     }
                     return Ok(Ran::Done);
                 }
+                Op::Jump { skip } => pc += skip as usize,
+                Op::JumpIfFalse { cond, skip } => match self.take(at(base, cond)) {
+                    Value::Bool(true) => {}
+                    Value::Bool(false) => pc += skip as usize,
+                    _ => return raise("type_error", "an `if` condition must be a bool"),
+                },
+                Op::LetBind { local, src } | Op::LetBindShared { local, src } => {
+                    let value = self.take(at(base, src));
+                    self.bind(
+                        task,
+                        local.at,
+                        matches!(op, Op::LetBindShared { .. }),
+                        value,
+                    )?;
+                }
+                Op::LetEnd { local } => {
+                    let frame = self.tasks[task.0 as usize]
+                        .frames
+                        .last_mut()
+                        .ok_or_else(|| fault("an expression local has no frame"))?;
+                    frame.slots[local.at as usize] = SlotState::Empty;
+                }
                 Op::Bind { local, src } => {
                     let value = self.take(at(base, src));
                     self.bind(task, local.at, false, value)?;
@@ -369,6 +391,11 @@ impl KernelMachine {
             | Op::WriteLocal { .. }
             | Op::Branch { .. }
             | Op::Test { .. }
+            | Op::Jump { .. }
+            | Op::JumpIfFalse { .. }
+            | Op::LetBind { .. }
+            | Op::LetBindShared { .. }
+            | Op::LetEnd { .. }
             | Op::End => return Err(fault("the stream's loop runs this op itself").into()),
         };
         Ok(Some(ran))

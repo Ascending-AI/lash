@@ -88,7 +88,7 @@ Rules whose cases need a running machine are pinned by the conformance corpus (`
 
 ## Forms (`K-FORM`)
 
-- **K-FORM-001.** The forms are closed. Statements: `let`, assign, remove, do, `if`, `for`, `while`, `break`, `continue`, `return`, `try`, `throw`, `print`, `finish`, `fail`. Actions (`K-STMT-001`): call, `perform`, `sleep`, `join` on one handle, `join` on a list, `yield`, `spawn`, `cancel`. Expressions: literal, variable, tuple, list, map, set, record, field read, index read, closure, native library call, clock, random, projection read. A form is added only by a new kernel version. There is no operator: arithmetic, comparison and logic are library functions.
+- **K-FORM-001.** The forms are closed. Statements: `let`, assign, remove, do, `if`, `for`, `while`, `break`, `continue`, `return`, `try`, `throw`, `print`, `finish`, `fail`. Actions (`K-STMT-001`): call, `perform`, `sleep`, `join` on one handle, `join` on a list, `yield`, `spawn`, `cancel`. Expressions: literal, variable, tuple, list, map, set, record, field read, index read, closure, native library call, clock, random, projection read, lazy conditional, scoped expression binding. A form is added only by a new kernel version. There is no operator: arithmetic, comparison and logic are library functions.
 - **K-FORM-002.** A literal is null, absent, a bool, an integer, a float, a text, bytes, or a reference to a declared function.
 - **K-FORM-003.** A block opens a scope. `let` declares a variable in the enclosing block, from the statement after it to the block's end: its own right-hand side does not see it, so `let x = f(x)` reads an outer `x`. An inner block may declare the same name again and shadows it. A function's parameters are declared in its body's scope, a `for` binding in the loop body's scope, fresh on each iteration, and a `catch` binding in the catch body's scope. Reading or assigning a variable that no enclosing scope has declared at that point is refused at admission; in a run it raises `unbound_variable`.
 - **K-FORM-004.** `let x = v` binds `v` to a new variable. Assigning to a variable replaces what it holds; it changes no object.
@@ -117,8 +117,8 @@ Rules whose cases need a running machine are pinned by the conformance corpus (`
 
 ## Evaluation (`K-EVAL`)
 
-- **K-EVAL-001.** Evaluation is left to right, operands before operation. An expression's parts are evaluated in the order kernel text writes them.
-- **K-EVAL-002.** `let` evaluates its right-hand side, then binds.
+- **K-EVAL-001.** Evaluation is left to right, operands before operation. An expression's parts are evaluated in the order kernel text writes them. `if(cond, then, else)` first evaluates `cond`, which must be a bool (otherwise it raises `type_error` before either branch), then evaluates only the selected branch. The condition is consumed before the branch runs; the unselected branch is neither evaluated nor charged.
+- **K-EVAL-002.** `let` evaluates its right-hand side, then binds. The expression `let(name = value, body)` evaluates `value` in the outer scope, binds its result to `name` in a fresh scope visible only in `body`, evaluates `body` once, and releases the binding. Its result is the body's result. A closure made in the body shares that binding as usual; the binding is live throughout the body, and never escapes into the enclosing scope.
 - **K-EVAL-003.** An assignment evaluates its right-hand side first (running the action, when it is one), then the place's target, then the place's index, then writes. No part of the place is evaluated before an action waits.
 - **K-EVAL-004.** An action reads its atoms left to right when it starts. A callee held in a variable is read before the arguments.
 - **K-EVAL-005.** A map literal evaluates each entry's key, then its value, before the next entry.

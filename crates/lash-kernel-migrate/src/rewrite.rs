@@ -197,6 +197,15 @@ fn replace_in_expr(expr: &mut Expr, functions: &BTreeMap<FunctionId, FunctionId>
                 replace_in_expr(arg, functions);
             }
         }
+        Expr::If { cond, then, r#else } => {
+            replace_in_expr(cond, functions);
+            replace_in_expr(then, functions);
+            replace_in_expr(r#else, functions);
+        }
+        Expr::Let { value, body, .. } => {
+            replace_in_expr(value, functions);
+            replace_in_expr(body, functions);
+        }
         Expr::Read(read) => {
             replace_in_expr(&mut read.handle, functions);
             replace_in_expr(&mut read.request, functions);

@@ -1495,3 +1495,58 @@ fn extracting_an_entry_refuses_unknown_entries_and_broken_references() {
         ))
     );
 }
+
+/// K-EVAL-001/002, K-CLO-001 and K-EDIT-003: branches are lazy,
+/// expression locals shadow only in their body, survive capture, and are editable.
+#[test]
+fn lazy_expression_branches_and_scoped_captures_round_trip_through_edits() {
+    let library = library();
+    let environment = environment(&library);
+    let mut draft = open(
+        r#"kernel 1
+numbers float
+main {
+  let outer = 9
+  let pair = (if(true, let(outer = outer, outer), null.missing), let(outer = 1, fn() { return outer }))
+  let f = pair[1]
+  let got = apply f()
+  finish (pair[0], outer, got)
+}
+"#,
+    );
+    assert_eq!(
+        run(draft.document(), &Datum::Null).result,
+        Datum::Tuple(vec![
+            Datum::Int(9.into()),
+            Datum::Int(9.into()),
+            Datum::Int(1.into())
+        ])
+    );
+    let branch = main(&[1, 0, 0, 1]);
+    let graph = lash_kernel_check::derive(draft.document(), &library.catalog).unwrap();
+    let view =
+        crate::view::derive(draft.document(), &graph, &Unit::Main, &library.catalog).unwrap();
+    assert!(
+        view.dataflow
+            .expressions
+            .iter()
+            .any(|expression| expression.site == branch)
+    );
+    let replace = Edit::ReplaceExpression {
+        expression: branch,
+        with: Expr::Literal(Literal::Int(42.into())),
+    };
+    draft
+        .apply(&transaction(&draft, vec![replace]), &environment)
+        .unwrap();
+    let printed = lash_kernel_doc::print_document(draft.document());
+    assert_eq!(parse_document(&printed).unwrap(), *draft.document());
+    assert_eq!(
+        run(draft.document(), &Datum::Null).result,
+        Datum::Tuple(vec![
+            Datum::Int(42.into()),
+            Datum::Int(9.into()),
+            Datum::Int(1.into())
+        ])
+    );
+}

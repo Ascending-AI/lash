@@ -240,6 +240,21 @@ impl Typer<'_> {
                 }
                 signature.result
             }
+            ExprNode::If { cond, then, r#else } => {
+                self.value(cond);
+                let then = self.value(then);
+                let otherwise = self.value(r#else);
+                union(vec![then, otherwise])
+            }
+            ExprNode::Let {
+                binding,
+                value,
+                body,
+            } => {
+                let facet = self.value(value);
+                self.bind(binding, &facet);
+                self.value(body)
+            }
             ExprNode::Clock => Type::Timestamp,
             ExprNode::Random => Type::Float,
             ExprNode::Read { handle, request } => {

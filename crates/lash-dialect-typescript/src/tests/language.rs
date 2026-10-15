@@ -304,3 +304,41 @@ fn distinct_functions_are_never_equal() {
         "const a = () => 1; const b = () => 1; function f() {} const g = f; const m = new Map([[a, 1]]); await finish(a !== b && a === a && f === g && Object.is(f, g) && !Object.is(a, b) && [a].includes(a) && ![a].includes(b) && [b, a].indexOf(a) === 1 && m.get(a) === 1 && !m.has(b) && new Set([a, b, a]).size === 2 && typeof a === 'function');",
     );
 }
+
+/// K-CLO-001: folding a conditional keeps each source function's calling convention.
+#[test]
+fn conditional_functions_keep_their_written_signatures() {
+    for source in [
+        "const f = true ? ((left: number) => left) : ((right: string) => right);",
+        "true ? ((left: number) => left) : ((right: string) => right);",
+        "let holder = {}; holder.f = true ? ((left: number) => left) : ((right: string) => right);",
+    ] {
+        let lowered = super::lower(source).unwrap();
+        assert_eq!(lowered.written.len(), 2);
+        for site in lowered.written.keys() {
+            let mut node = lash_kernel_doc::Node::Block(&lowered.document.main);
+            for child in &site.path {
+                node = node.children()[*child as usize];
+            }
+            assert!(
+                matches!(
+                    node,
+                    lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Closure(_))
+                ),
+                "{site}"
+            );
+        }
+        assert!(
+            lowered
+                .written
+                .values()
+                .any(|written| written.signature.contains("left"))
+        );
+        assert!(
+            lowered
+                .written
+                .values()
+                .any(|written| written.signature.contains("right"))
+        );
+    }
+}

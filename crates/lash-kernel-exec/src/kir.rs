@@ -257,6 +257,27 @@ pub enum Op {
     RemoveIndex {
         target: Reg,
     },
+    /// Forward expression control flow, relative to the following op.
+    Jump {
+        skip: u32,
+    },
+    JumpIfFalse {
+        cond: Reg,
+        skip: u32,
+    },
+    /// Binds an expression local and continues within the statement.
+    LetBind {
+        local: LocalRef,
+        src: Reg,
+    },
+    LetBindShared {
+        local: LocalRef,
+        src: Reg,
+    },
+    /// Releases the expression local after its body; captured cells survive.
+    LetEnd {
+        local: LocalRef,
+    },
     /// Enters `then_` or `else_` on the bool in `cond`, or raises.
     Branch {
         cond: Reg,
@@ -332,6 +353,11 @@ pub enum OpKind {
     SetIndex,
     RemoveField,
     RemoveIndex,
+    Jump,
+    JumpIfFalse,
+    LetBind,
+    LetBindShared,
+    LetEnd,
     Branch,
     ForIn,
     While,
@@ -382,6 +408,11 @@ impl OpKind {
         Self::SetIndex,
         Self::RemoveField,
         Self::RemoveIndex,
+        Self::Jump,
+        Self::JumpIfFalse,
+        Self::LetBind,
+        Self::LetBindShared,
+        Self::LetEnd,
         Self::Branch,
         Self::ForIn,
         Self::While,
@@ -423,6 +454,11 @@ impl OpKind {
                 | Self::HostRead
                 | Self::Pin
                 | Self::Act
+                | Self::Jump
+                | Self::JumpIfFalse
+                | Self::LetBind
+                | Self::LetBindShared
+                | Self::LetEnd
         )
     }
 }
@@ -476,6 +512,11 @@ impl Op {
             Self::SetIndex { .. } => OpKind::SetIndex,
             Self::RemoveField { .. } => OpKind::RemoveField,
             Self::RemoveIndex { .. } => OpKind::RemoveIndex,
+            Self::Jump { .. } => OpKind::Jump,
+            Self::JumpIfFalse { .. } => OpKind::JumpIfFalse,
+            Self::LetBind { .. } => OpKind::LetBind,
+            Self::LetBindShared { .. } => OpKind::LetBindShared,
+            Self::LetEnd { .. } => OpKind::LetEnd,
             Self::Branch { .. } => OpKind::Branch,
             Self::ForIn { .. } => OpKind::ForIn,
             Self::While => OpKind::While,
@@ -504,6 +545,8 @@ impl Op {
             | Self::MakeRecord { values: items, .. }
             | Self::Call { args: items, .. } => items.regs().collect(),
             Self::Pin { src }
+            | Self::LetBind { src, .. }
+            | Self::LetBindShared { src, .. }
             | Self::Bind { src, .. }
             | Self::BindShared { src, .. }
             | Self::BindSession { src, .. }
@@ -519,7 +562,9 @@ impl Op {
             Self::SetIndex { target, src } => vec![target, target.next(), src],
             Self::RemoveField { target, .. } => vec![target],
             Self::RemoveIndex { target } => vec![target, target.next()],
-            Self::Branch { cond, .. } | Self::Test { cond } => vec![cond],
+            Self::Branch { cond, .. } | Self::Test { cond } | Self::JumpIfFalse { cond, .. } => {
+                vec![cond]
+            }
             Self::ForIn { iterable } => vec![iterable],
             Self::Charge { .. }
             | Self::ChargeLocal { .. }
@@ -536,6 +581,8 @@ impl Op {
             | Self::Try { .. }
             | Self::Break
             | Self::Continue
+            | Self::Jump { .. }
+            | Self::LetEnd { .. }
             | Self::End => Vec::new(),
         }
     }
@@ -571,6 +618,9 @@ impl Op {
             Self::Const { c, .. } | Self::ChargeConst { c, .. } => vec![O::Const(c)],
             Self::Local { local, .. }
             | Self::ChargeLocal { local, .. }
+            | Self::LetBind { local, .. }
+            | Self::LetBindShared { local, .. }
+            | Self::LetEnd { local }
             | Self::Bind { local, .. }
             | Self::BindShared { local, .. }
             | Self::WriteLocal { local, .. } => vec![O::Local(local)],

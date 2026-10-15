@@ -243,7 +243,9 @@ impl Names {
                     | Stmt::Fail { .. } => {}
                 },
                 Node::Expr(expression) => match expression {
-                    Expr::Variable(name) | Expr::Literal(Literal::Function(name)) => {
+                    Expr::Variable(name)
+                    | Expr::Let { name, .. }
+                    | Expr::Literal(Literal::Function(name)) => {
                         self.reserve(name);
                     }
                     Expr::Closure(closure) => {
@@ -257,6 +259,7 @@ impl Names {
                     | Expr::Record(_)
                     | Expr::Member(_)
                     | Expr::Call { .. }
+                    | Expr::If { .. }
                     | Expr::Clock
                     | Expr::Random
                     | Expr::Read(_) => {}

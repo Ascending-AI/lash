@@ -662,6 +662,24 @@ impl Renderer<'_> {
             }
             k::Expr::Clock => self.out.write("Date.now()"),
             k::Expr::Random => self.out.write("Math.random()"),
+            k::Expr::If { cond, then, r#else } => {
+                self.out.write("(");
+                self.expr(cond);
+                self.out.write(" ? ");
+                self.expr(then);
+                self.out.write(" : ");
+                self.expr(r#else);
+                self.out.write(")");
+            }
+            k::Expr::Let { name, value, body } => {
+                self.out.write("((");
+                self.name(name);
+                self.out.write(") => (");
+                self.expr(body);
+                self.out.write("))(");
+                self.expr(value);
+                self.out.write(")");
+            }
             k::Expr::Read(read) => {
                 self.out.write("projection.read(");
                 self.expr(&read.handle);

@@ -126,6 +126,9 @@ fn names(kind: &NodeKind, binding: BindingId) -> bool {
         },
         NodeKind::Expr(expr) => match expr {
             ExprNode::Variable(reference) => is(reference),
+            ExprNode::Let {
+                binding: declared, ..
+            } => *declared == binding,
             ExprNode::Closure { params, .. } => params.contains(&binding),
             _ => false,
         },
@@ -168,7 +171,7 @@ fn rename_own(node: &mut NodeMut<'_>, from: &Name, to: &Name) {
             }
         }
         NodeMut::Expr(expr) => match expr {
-            Expr::Variable(name) => rename(name),
+            Expr::Variable(name) | Expr::Let { name, .. } => rename(name),
             Expr::Closure(closure) => closure.params.iter_mut().for_each(rename),
             _ => {}
         },

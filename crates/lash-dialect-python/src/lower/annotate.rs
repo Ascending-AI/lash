@@ -48,6 +48,11 @@ fn block(
         {
             written.insert(closure, function.clone());
         }
+        for (path, function) in &note.nested_written {
+            let mut closure = statement_site.clone();
+            closure.path.extend(path);
+            written.insert(closure, function.clone());
+        }
         if let Some(span) = note.span {
             let mut data = BTreeMap::new();
             data.insert(
