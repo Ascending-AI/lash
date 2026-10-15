@@ -15,6 +15,6 @@ workspace = true
 lash = { workspace = true, features = ["testing"] }
 
 [dev-dependencies]
+lash = { workspace = true, features = ["sqlite"] }
 lash-conformance.workspace = true
-lash-sqlite-store = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

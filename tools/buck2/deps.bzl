@@ -85,8 +85,8 @@ PACKAGE_DEPS = {
     "integrator-contract": {
         "build": {},
         "dev": {
+            "lash": "//crates/lash:lash",
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
-            "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "tokio": "//third-party/rust:p0381"
         },
         "normal": {

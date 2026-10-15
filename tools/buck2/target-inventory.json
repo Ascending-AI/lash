@@ -70472,7 +70472,6 @@
       "declared_features": [],
       "dependencies": [
         "lash-internal-conformance",
-        "lash-internal-sqlite-store",
         "lash-runtime",
         "tokio"
       ],
