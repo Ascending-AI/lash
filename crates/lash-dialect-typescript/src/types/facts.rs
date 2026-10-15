@@ -301,6 +301,15 @@ impl Facts {
                 {
                     Ty::Array
                 }
+                Expr::Member {
+                    object,
+                    property: MemberProperty::Field(name),
+                    ..
+                } if name == "split" && self.type_of(object) == Ty::Text => {
+                    // Both the string helper and the primitive split build a
+                    // kernel list. Keep that representation across bindings.
+                    Ty::Array
+                }
                 Expr::Member { .. } => Ty::Unknown,
                 callee => self.type_of(callee).returned(),
             },

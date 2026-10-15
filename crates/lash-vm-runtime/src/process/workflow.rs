@@ -34,7 +34,9 @@ pub struct WorkflowDocument {
 impl WorkflowDocument {
     /// `document` entered at `entry`, with the view `functions` derive.
     /// A decoded [`lash_kernel_doc::FunctionDeclarations`] is sufficient:
-    /// linking requires definitions, not native code or an engine.
+    /// linking requires definitions, not native code or an engine. An entry
+    /// links only the units it executes; the total graph still includes main
+    /// and templates it merely passes to another receiver.
     ///
     /// # Errors
     ///
@@ -45,15 +47,18 @@ impl WorkflowDocument {
         functions: &dyn FunctionCatalog,
     ) -> Result<Self, WorkflowDocumentError> {
         let identity = document.identity()?;
-        let graph = lash_kernel_check::derive(&document, functions)?;
-        if let WorkflowDocumentEntry::Entry { function } = &entry
-            && !document.entries.contains_key(function)
-        {
-            return Err(WorkflowDocumentError::NoSuchEntry {
-                document: identity,
-                entry: function.clone(),
-            });
-        }
+        let graph = match &entry {
+            WorkflowDocumentEntry::Entry { function } => {
+                if !document.entries.contains_key(function) {
+                    return Err(WorkflowDocumentError::NoSuchEntry {
+                        document: identity,
+                        entry: function.clone(),
+                    });
+                }
+                lash_kernel_check::derive_entry(&document, functions, function)?
+            }
+            WorkflowDocumentEntry::Main => lash_kernel_check::derive(&document, functions)?,
+        };
         Ok(Self {
             reference: WorkflowDocumentRef {
                 document: identity,
@@ -522,7 +527,7 @@ fn admit_entry(
             entry: entry.clone(),
         });
     }
-    let graph = lash_kernel_check::derive(document, environment.functions)
+    let graph = lash_kernel_check::derive_entry(document, environment.functions, entry)
         .map_err(WorkflowAdmissionRefusal::Document)?;
     let effects = lash_kernel_check::entry_effects(document, &graph, environment.functions, entry)
         .map_err(WorkflowAdmissionRefusal::EntryEffects)?;

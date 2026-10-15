@@ -175,3 +175,34 @@ fn awaiting_a_value_waits_for_the_process_a_handle_names() {
         .document;
     assert!(!print_document(&plain).contains("processes.await"));
 }
+
+/// FIG-6361: split returns List(Any). Every method sharing the guarded
+/// array dispatch must link as well as execute, including its fallback.
+#[test]
+fn join_on_a_split_result_links_in_a_definition_body() {
+    let source = r#"
+const work = async () => {
+  const w = "a b".split(" ");
+  return [w.join("-"), w.includes("a"), w.indexOf("b"), w.lastIndexOf("a"),
+    w.slice(1).join(""), w.map(x => x).join(""), w.filter(x => true).join("")];
+};
+"#;
+    for declaration in ["const w", "const w: any[]"] {
+        let source = source.replace("const w =", &format!("{declaration} ="));
+        let document = lower(&source).expect("the definition lowers").document;
+        lash_kernel_check::derive(&document, super::library()).expect("the definition body links");
+        let (_, ended) = machine::end_of_entry(document, "work", vec![]);
+        assert_eq!(
+            ended,
+            Datum::List(vec![
+                Datum::Text("a-b".into()),
+                Datum::Bool(true),
+                Datum::Float(1.0.into()),
+                Datum::Float(0.0.into()),
+                Datum::Text("b".into()),
+                Datum::Text("ab".into()),
+                Datum::Text("ab".into()),
+            ])
+        );
+    }
+}

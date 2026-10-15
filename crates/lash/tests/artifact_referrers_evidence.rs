@@ -978,6 +978,42 @@ fn create_definition_cell(binding: &str) -> String {
     format!("const {binding} = {CREATED_SOURCE}; await control.finish('created');")
 }
 
+/// FIG-6361: unrelated split/join code in the defining cell must not
+/// prevent its function from crossing the tool boundary as a definition.
+#[tokio::test]
+async fn a_cell_joining_a_split_result_creates_its_definition() {
+    let fixture = Fixture::new(Backend::Sqlite).await;
+    let core = rlm_core(
+        &fixture,
+        vec![response(
+            "const w = \"a b\".split(\" \"); console.log(w.join(\"-\")); \
+         const fg = async () => 42; await control.finish(fg);",
+        )],
+    );
+    let session = created_session(&core, "split-join-definition")
+        .await
+        .open()
+        .await
+        .expect("session");
+    let output = session
+        .send(TurnInput::text("create the definition"))
+        .output()
+        .await
+        .expect("defining turn");
+    assert!(output.is_success(), "the defining turn: {output:?}");
+    let read = session.durable().read().await.expect("read").expect("head");
+    let definition = last_cell_finish(&read).expect("the cell returns its definition");
+    let id: lash::process::ProcessDefinitionId = serde_json::from_value(definition["id"].clone())
+        .expect("the function crossed as a definition");
+    assert!(matches!(
+        core.host_artifacts()
+            .definition_graph(&id)
+            .await
+            .expect("the cell definition resolves for workflow creation"),
+        lash::workflow::WorkflowRead::Inspected(_)
+    ));
+}
+
 /// FIG-3116: the definition of a process a cell wrote is a code mode value like
 /// any other (ADR 0113 §6). The call's realization publishes its module under
 /// the realizing execution, the cell's global holds it in the frame, and a

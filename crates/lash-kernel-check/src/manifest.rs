@@ -164,21 +164,21 @@ pub(crate) fn reach(
     document: &Document,
     catalog: &dyn FunctionCatalog,
 ) -> (BTreeSet<EffectName>, Reached) {
+    reach_blocks(
+        std::iter::once(&document.main)
+            .chain(document.functions.values().map(|function| &function.body)),
+        catalog,
+    )
+}
+
+pub(crate) fn reach_blocks<'a>(
+    blocks: impl IntoIterator<Item = &'a Block>,
+    catalog: &dyn FunctionCatalog,
+) -> (BTreeSet<EffectName>, Reached) {
     let mut effects = BTreeSet::new();
     let mut direct = BTreeSet::new();
-    scan(
-        &document.main,
-        &mut effects,
-        &mut direct,
-        &mut BTreeSet::new(),
-    );
-    for function in document.functions.values() {
-        scan(
-            &function.body,
-            &mut effects,
-            &mut direct,
-            &mut BTreeSet::new(),
-        );
+    for block in blocks {
+        scan(block, &mut effects, &mut direct, &mut BTreeSet::new());
     }
     let mut reached: Reached = direct.iter().map(|function| (*function, None)).collect();
     let mut pending: Vec<FunctionId> = direct.into_iter().collect();

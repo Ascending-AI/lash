@@ -103,6 +103,48 @@ fn linked_effects(
     catalog: &dyn FunctionCatalog,
     root: Unit,
 ) -> Result<BTreeMap<EffectName, Signature>, EntryEffectsRefusal> {
+    let Linked {
+        reached,
+        effects,
+        held,
+        value_call,
+    } = linked_units(graph, catalog, root);
+    if let Some(site) = value_call
+        && let Some(template) = held.into_iter().find(|name| !reached.contains(name))
+    {
+        return Err(EntryEffectsRefusal::ValueCall { site, template });
+    }
+    effects
+        .into_iter()
+        .map(|effect| match document.manifest.effects.get(&effect) {
+            Some(signature) => Ok((effect, signature.clone())),
+            None => Err(EntryEffectsRefusal::UndeclaredEffect { effect }),
+        })
+        .collect()
+}
+
+/// The declared units an entry executes, using the same call/template
+/// distinction as its linked effects. Closures belong to their owning unit.
+pub(crate) fn executed_units(
+    graph: &Graph,
+    catalog: &dyn FunctionCatalog,
+    entry: &Name,
+) -> BTreeSet<Unit> {
+    linked_units(graph, catalog, Unit::Function(entry.clone()))
+        .reached
+        .into_iter()
+        .map(Unit::Function)
+        .collect()
+}
+
+struct Linked {
+    reached: BTreeSet<Name>,
+    effects: BTreeSet<EffectName>,
+    held: BTreeSet<Name>,
+    value_call: Option<Site>,
+}
+
+fn linked_units(graph: &Graph, catalog: &dyn FunctionCatalog, root: Unit) -> Linked {
     let closures = closure_bindings(graph);
     let targets = function_targets(graph);
     let mut runs: BTreeMap<Unit, Runs> = BTreeMap::new();
@@ -224,18 +266,12 @@ fn linked_effects(
             }
         }
     }
-    if let Some(site) = value_call
-        && let Some(template) = held.into_iter().find(|name| !reached.contains(name))
-    {
-        return Err(EntryEffectsRefusal::ValueCall { site, template });
+    Linked {
+        reached,
+        effects,
+        held,
+        value_call,
     }
-    effects
-        .into_iter()
-        .map(|effect| match document.manifest.effects.get(&effect) {
-            Some(signature) => Ok((effect, signature.clone())),
-            None => Err(EntryEffectsRefusal::UndeclaredEffect { effect }),
-        })
-        .collect()
 }
 
 /// The variables every write of which is a closure literal: a call through

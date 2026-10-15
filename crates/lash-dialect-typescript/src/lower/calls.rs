@@ -1051,11 +1051,12 @@ impl Lowerer<'_> {
                     object,
                     |this| this.call_list_method(object, name, function, args, discard_result),
                     |this| {
-                        let generic = Operand {
-                            ty: Ty::Unknown,
-                            ..object.clone()
-                        };
-                        let method = this.get_member(&generic, &Key::Static(name.into()))?;
+                        // This branch may hold a branded array, but the kernel
+                        // still knows the operand's list facet. Let the member
+                        // helper dispatch it; an inlined record probe cannot
+                        // link against that facet, even behind a kind guard.
+                        let method =
+                            this.read_member(object, &Key::Static(name.into()), Ty::Unknown)?;
                         let method = this.pin(method);
                         let args = this.arguments(args)?;
                         this.apply(method, object.clone(), args, false)

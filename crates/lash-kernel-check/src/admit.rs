@@ -59,6 +59,54 @@ pub fn derive(document: &Document, catalog: &dyn FunctionCatalog) -> Result<Grap
     }
 }
 
+/// Derives the total view of a structurally valid document, checking type
+/// and scope rules only in the functions `entry` executes and their library
+/// callees. A function passed as a template is checked when it is entered;
+/// unrelated `main` code does not participate in definition linking.
+///
+/// # Errors
+///
+/// The entry is undeclared, the document is structurally invalid, a library
+/// definition is missing, or code the entry executes cannot link.
+pub fn derive_entry(
+    document: &Document,
+    catalog: &dyn FunctionCatalog,
+    entry: &Name,
+) -> Result<Graph, Refusal> {
+    if !document.functions.contains_key(entry) {
+        return Err(Refusal {
+            errors: vec![refused(
+                None,
+                RefusalReason::Invalid(InvalidReason::FunctionNotDeclared {
+                    name: entry.clone(),
+                }),
+            )],
+        });
+    }
+    let mut errors = Vec::new();
+    let Some(graph) = check(document, catalog, &mut errors) else {
+        return Err(Refusal { errors });
+    };
+    let units = crate::closure::executed_units(&graph, catalog, entry);
+    let (_, libraries) = manifest::reach_blocks(
+        units.iter().filter_map(|unit| match unit {
+            Unit::Function(name) => document.functions.get(name).map(|function| &function.body),
+            _ => None,
+        }),
+        catalog,
+    );
+    errors.retain(|error| match error.site.as_ref().map(|site| &site.unit) {
+        Some(Unit::Library(function)) => libraries.contains_key(function),
+        Some(unit) => units.contains(unit),
+        None => true,
+    });
+    if errors.is_empty() {
+        Ok(graph)
+    } else {
+        Err(Refusal { errors })
+    }
+}
+
 /// The view of a document whose functions resolve and whose shape is
 /// valid, whatever faults its type and scope rules find: what a reader of
 /// its structure needs, such as an entry's linked-effect set, when the

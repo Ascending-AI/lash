@@ -384,3 +384,48 @@ fn an_entry_signature_refusal_retains_the_same_output_difference_as_main() {
         );
     }
 }
+
+/// FIG-6361: only code the entry executes must link. A passed function
+/// remains a template; calling or spawning it makes its faults relevant.
+#[test]
+fn a_definition_links_its_executed_closure_without_main_or_passed_templates() {
+    let document = k::parse_document(
+        r#"kernel 1
+numbers float
+effect count() -> Int
+entry worker() -> Any
+entry broken() -> Any
+fn broken() { return missing }
+fn worker() { return &broken }
+main { let count = perform count() as Text finish count }
+"#,
+    )
+    .expect("document");
+    let functions = k::FunctionRegistry::default();
+    let entry = WorkflowDocumentEntry::Entry {
+        function: k::Name::new("worker"),
+    };
+    WorkflowDocument::derive(document.clone(), entry.clone(), &functions)
+        .expect("main and the passed template are not executed by worker");
+    WorkflowDocument::admit(
+        document.clone(),
+        entry.clone(),
+        &lash::workflow::graph::Environment::new(&functions),
+    )
+    .expect("entry admission uses the same closure");
+    for action in ["call broken()", "spawn call broken()"] {
+        let mut called = document.clone();
+        called.functions.get_mut(&k::Name::new("worker")).expect("worker").body =
+            k::parse_document(&format!("kernel 1\nnumbers float\nfn broken() {{ return null }}\nmain {{ let got = {action} finish got }}"))
+                .expect("action document").main;
+        let refusal = WorkflowDocument::derive(called, entry.clone(), &functions)
+            .expect_err("an executed function must link");
+        assert!(
+            refusal
+                .to_string()
+                .contains("variable `missing` is not bound here"),
+            "the called template's scope fault is retained for {action}: {refusal}"
+        );
+    }
+    assert!(WorkflowDocument::derive(document, WorkflowDocumentEntry::Main, &functions).is_err());
+}
