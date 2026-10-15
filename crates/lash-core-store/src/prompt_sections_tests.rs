@@ -120,7 +120,7 @@ fn chunked_response_mode_is_recorded_only_outside_the_body() {
             texts
                 .iter()
                 .find(|(blob, _)| blob == reference)
-                .map(|(_, text)| text.as_str())
+                .map(|(_, text)| text.text.as_str())
         };
         let assembled = decoded.assemble(read).unwrap();
         assert_eq!(assembled, template);
@@ -164,7 +164,7 @@ fn growing_requests_submit_new_fragments_and_logarithmic_index_paths() {
                 .filter(|(hash, _)| !held.contains(hash))
                 .collect();
             let logarithm = (ordinal + 1usize).ilog2() as usize + 1;
-            let submitted = fresh.iter().map(|(_, text)| text.len()).sum::<usize>();
+            let submitted = fresh.iter().map(|(_, text)| text.text.len()).sum::<usize>();
             assert!(
                 submitted <= 8192 + 4096 * logarithm,
                 "call {ordinal} submitted {submitted} bytes for one new message"
@@ -178,7 +178,7 @@ fn growing_requests_submit_new_fragments_and_logarithmic_index_paths() {
                 texts
                     .iter()
                     .find(|(hash, _)| hash == reference)
-                    .map(|(_, text)| text.as_str())
+                    .map(|(_, text)| text.text.as_str())
             };
             assert_eq!(index.assemble(read).unwrap(), template);
             held.extend(texts.into_iter().map(|(hash, _)| hash));

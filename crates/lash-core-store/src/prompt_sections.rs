@@ -545,31 +545,68 @@ pub struct ChunkedRequestTemplate {
 /// their own content address; each branch has exactly two edges.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "fragment", rename_all = "snake_case", deny_unknown_fields)]
-pub enum RequestFragment {
+#[serde(bound(deserialize = "Text: Deserialize<'de>, Slot: Deserialize<'de>"))]
+pub enum RequestFragment<Text = String, Slot = Box<lash_sansio::llm::types::AttachmentSlot>> {
     Literal {
-        text: String,
+        #[cfg_attr(
+            any(test, feature = "testing"),
+            serde(deserialize_with = "observe_fragment_decode")
+        )]
+        text: Text,
     },
     Attachment {
-        slot: Box<lash_sansio::llm::types::AttachmentSlot>,
+        #[cfg_attr(
+            any(test, feature = "testing"),
+            serde(deserialize_with = "observe_fragment_decode")
+        )]
+        slot: Slot,
     },
     Branch {
+        #[cfg_attr(
+            any(test, feature = "testing"),
+            serde(deserialize_with = "observe_fragment_decode")
+        )]
         left: PromptTextRef,
         right: PromptTextRef,
     },
 }
 
+#[cfg(any(test, feature = "testing"))]
+std::thread_local! {
+    static FRAGMENT_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(any(test, feature = "testing"))]
+fn observe_fragment_decode<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    FRAGMENT_DECODES.with(|count| count.set(count.get() + 1));
+    T::deserialize(deserializer)
+}
+
 impl RequestFragment {
+    /// Fragment decoder entries on this thread, for admission's no-decode law.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn decodes_on_current_thread() -> usize {
+        FRAGMENT_DECODES.with(std::cell::Cell::get)
+    }
+
     /// Index bodies have a separate content domain from arbitrary audit
     /// text, whose equal spelling must never stand for an installed tree.
     pub fn reference(body: &str) -> PromptTextRef {
-        let mut addressed = b"lash.request-fragment/1\0".to_vec();
-        addressed.extend_from_slice(body.as_bytes());
         PromptTextRef {
-            blob: BlobRef::for_content(&addressed),
+            blob: BlobRef::for_content_parts([
+                b"lash.request-fragment/1\0".as_slice(),
+                body.as_bytes(),
+            ]),
             bytes: u32::try_from(body.len()).unwrap_or(u32::MAX),
         }
     }
+}
 
+impl<Text, Slot> RequestFragment<Text, Slot> {
     pub fn children(&self) -> Vec<String> {
         match self {
             Self::Branch { left, right } => vec![
@@ -579,6 +616,14 @@ impl RequestFragment {
             Self::Literal { .. } | Self::Attachment { .. } => Vec::new(),
         }
     }
+}
+
+/// A fresh fragment's encoding and the edges known by its builder.
+/// Admission installs both without decoding the encoding again.
+#[derive(Debug)]
+pub struct EncodedRequestFragment {
+    pub text: String,
+    pub children: Vec<String>,
 }
 
 /// Why a recorded template could not be assembled as admitted.
@@ -617,27 +662,37 @@ fn chunk_text(text: &str, texts: &mut Vec<(BlobRef, String)>) -> Vec<PromptTextR
 }
 
 /// Store a fragment by its exact encoding, never by re-rendered JSON.
-fn keep_fragment(fragment: &RequestFragment, texts: &mut Vec<(BlobRef, String)>) -> PromptTextRef {
+fn keep_fragment(
+    fragment: &RequestFragment<&str, &lash_sansio::llm::types::AttachmentSlot>,
+    texts: &mut Vec<(BlobRef, EncodedRequestFragment)>,
+) -> PromptTextRef {
     let body = serde_json::to_string(fragment).expect("wire fragments encode");
     let reference = RequestFragment::reference(&body);
-    texts.push((reference.blob.clone(), body));
+    texts.push((
+        reference.blob.clone(),
+        EncodedRequestFragment {
+            text: body,
+            children: fragment.children(),
+        },
+    ));
     reference
 }
 
 /// Keep one exact literal segment as a leaf, including its JSON structure.
-fn literal_fragment(text: &str, texts: &mut Vec<(BlobRef, String)>) -> PromptTextRef {
-    keep_fragment(
-        &RequestFragment::Literal {
-            text: text.to_owned(),
-        },
-        texts,
-    )
+fn literal_fragment(
+    text: &str,
+    texts: &mut Vec<(BlobRef, EncodedRequestFragment)>,
+) -> PromptTextRef {
+    keep_fragment(&RequestFragment::Literal { text }, texts)
 }
 
 /// A canonical append tree: the left subtree is the largest complete
 /// power-of-two prefix smaller than the sequence. Every completed subtree
 /// keeps its address when the sequence grows.
-fn fragment_tree(fragments: &[PromptTextRef], texts: &mut Vec<(BlobRef, String)>) -> PromptTextRef {
+fn fragment_tree(
+    fragments: &[PromptTextRef],
+    texts: &mut Vec<(BlobRef, EncodedRequestFragment)>,
+) -> PromptTextRef {
     if fragments.len() == 1 {
         return fragments[0].clone();
     }
@@ -654,7 +709,7 @@ impl ChunkedRequestTemplate {
     /// request envelope stays together instead of indexing every JSON field.
     pub fn chunk(
         template: &lash_sansio::llm::types::RecordedRequestTemplate,
-    ) -> (Self, Vec<(BlobRef, String)>) {
+    ) -> (Self, Vec<(BlobRef, EncodedRequestFragment)>) {
         use lash_sansio::llm::types::RequestSegment;
         let mut texts = Vec::new();
         let mut fragments = Vec::new();
@@ -669,7 +724,9 @@ impl ChunkedRequestTemplate {
         for segment in template.segments() {
             match segment {
                 RequestSegment::Attachment { slot } => fragments.push(keep_fragment(
-                    &RequestFragment::Attachment { slot: slot.clone() },
+                    &RequestFragment::Attachment {
+                        slot: slot.as_ref(),
+                    },
                     &mut texts,
                 )),
                 RequestSegment::Literal { text } => {
@@ -801,7 +858,10 @@ impl ChunkedRequestTemplate {
                 wire_features: template.wire_features.clone(),
                 root,
                 prefix,
-                inline,
+                inline: inline
+                    .into_iter()
+                    .map(|(hash, fragment)| (hash, fragment.text))
+                    .collect(),
             },
             texts,
         )

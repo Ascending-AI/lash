@@ -239,13 +239,7 @@ pub fn admission_record(
         },
         &serde_json::to_string(response.contract.as_ref())?,
     );
-    let fragments: BTreeMap<_, _> = request_texts
-        .iter()
-        .map(|(hash, body)| {
-            let node: RequestFragment = serde_json::from_str(body)?;
-            Ok((hash.clone(), node.children()))
-        })
-        .collect::<Result<_, serde_json::Error>>()?;
+    let request_texts: BTreeMap<_, _> = request_texts.into_iter().collect();
     let prefix = matches!(call.call, lash_durable::domain::ModelCallId::Turn { .. })
         .then(|| {
             recorded_body
@@ -260,24 +254,35 @@ pub fn admission_record(
         response: recorded_response,
         deadline_ms: deadline.map(|deadline| deadline.0),
     };
-    let stored = |texts: BTreeMap<BlobRef, String>| {
-        texts
-            .into_iter()
+    let snapshot_texts = prompt.map_or_else(Vec::new, |prompt| {
+        prompt
+            .texts
+            .iter()
             .map(|(hash, text)| PromptText {
                 hash: hash.as_str().to_owned(),
-                children: fragments.get(&hash).cloned().unwrap_or_default(),
-                text,
+                children: request_texts
+                    .get(hash)
+                    .map(|fragment| fragment.children.clone())
+                    .unwrap_or_default(),
+                text: text.clone(),
             })
             .collect()
-    };
+    });
     Ok(DomainWrite::Prompt(PromptWrite::Record {
         call,
         snapshot: prompt
             .map(|prompt| serde_json::to_string(&prompt.snapshot))
             .transpose()?,
         request: serde_json::to_string(&request)?,
-        snapshot_texts: prompt.map_or_else(Vec::new, |prompt| stored(prompt.texts.clone())),
-        request_texts: stored(request_texts.into_iter().collect()),
+        snapshot_texts,
+        request_texts: request_texts
+            .into_iter()
+            .map(|(hash, fragment)| PromptText {
+                hash: hash.0,
+                text: fragment.text,
+                children: fragment.children,
+            })
+            .collect(),
         prefix,
     }))
 }

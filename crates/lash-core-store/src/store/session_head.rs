@@ -67,6 +67,16 @@ impl BlobRef {
         ))
     }
 
+    /// Hash one content preimage supplied as borrowed consecutive slices.
+    pub(crate) fn for_content_parts<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> Self {
+        let mut hasher =
+            lash_sansio::core_support::Blake3DomainHasher::new(LASH_BLOB_DOMAIN_VERSION);
+        for part in parts {
+            hasher.update(part);
+        }
+        Self(hasher.finalize_hex())
+    }
+
     /// The raw 32-byte digest whose lowercase hex [`for_content`](Self::for_content)
     /// spells: one hash domain for blobs and checkpoint graph nodes.
     pub fn digest_for_content(content: &[u8]) -> [u8; 32] {
