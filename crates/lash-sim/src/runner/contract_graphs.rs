@@ -133,7 +133,9 @@ impl lash::tracing::ProductObservationSink for ContractGraphs {
         let execution = executions.entry(key).or_default();
         if let lash::tracing::TraceEvent::LanguageExecution { event, .. } = &record.event {
             execution.identity = Some(event.identity.clone());
-            if let lash::tracing::TraceLanguageExecutionPayload::ExecutionStarted = &event.payload {
+            if let lash::tracing::TraceLanguageExecutionPayload::ExecutionStarted { .. } =
+                &event.payload
+            {
                 execution.document = Some(event.identity.document.clone());
             }
         }

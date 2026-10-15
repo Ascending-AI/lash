@@ -81,15 +81,7 @@ pub enum ProcessWorkflowLiveCoverage {
     },
 }
 
-/// Whether a process's runs count the statements they run: the level its
-/// start recorded (FIG-6370). `off` is unobserved, never zero.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessWorkflowObservation {
-    #[default]
-    Off,
-    Counts,
-}
+pub use lash_kernel_doc::RunObservation as ProcessWorkflowObservation;
 
 /// How many times one document statement started, or one empty block was
 /// entered, by its document site ordinal. `committed` sums the process's
@@ -123,6 +115,21 @@ pub struct ProcessWorkflowOverlay {
     pub observation: ProcessWorkflowObservation,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ran: Vec<ProcessWorkflowRan>,
+}
+
+impl ProcessWorkflowOverlay {
+    /// The counts a host passes to `workflow::view::coverage`, including live
+    /// provisional starts. Off remains unobserved even when the vector is empty.
+    pub fn ran_counts(&self) -> lash_kernel_doc::RanCounts {
+        lash_kernel_doc::RanCounts {
+            observation: Some(self.observation),
+            ran: self
+                .ran
+                .iter()
+                .map(|row| (row.ordinal, row.committed.saturating_add(row.provisional)))
+                .collect(),
+        }
+    }
 }
 
 /// An observation from another execution cannot enter a process projection.
@@ -422,7 +429,7 @@ impl ProcessWorkflowOverlayAccumulator {
                 }
                 self.live_document(document)?;
                 self.live_coverage = ProcessWorkflowLiveCoverage::RetainedWindow;
-                if let TraceLanguageExecutionPayload::Ran { ran } = &execution.payload
+                if let TraceLanguageExecutionPayload::Ran { ran, .. } = &execution.payload
                     && !self.ended
                 {
                     self.counted(ran, false);
@@ -676,7 +683,7 @@ mod tests {
                         engine_execution_id: None,
                         generation: None,
                     },
-                    payload: TraceLanguageExecutionPayload::Ran { ran },
+                    payload: TraceLanguageExecutionPayload::Ran { ran, segment: None },
                 },
             })
         };

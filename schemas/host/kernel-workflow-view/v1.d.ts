@@ -479,6 +479,10 @@ export type ScopeView = {
   "depth": number;
   "kind": ScopeKind;
   /**
+   * The document ordinal of this block, including nonempty blocks.
+   */
+  "ordinal": number;
+  /**
    * The statement that opens this block; absent for the entry body.
    */
   "statement"?: (Site | null);
@@ -526,6 +530,10 @@ export type StatementView = {
    * How many statements enclose this one inside the entry's body.
    */
   "depth": number;
+  /**
+   * The document ordinal shared with run counts and replay paths.
+   */
+  "ordinal": number;
   "site": Site;
   /**
    * The statement as the document writes it.

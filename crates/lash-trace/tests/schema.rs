@@ -575,7 +575,20 @@ fn assert_schema_accepts(validator: &jsonschema::Validator, value: &serde_json::
 /// reports them: its start, then the observed sites, then its finish.
 fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
     vec![
-        TraceLanguageExecutionPayload::ExecutionStarted,
+        TraceLanguageExecutionPayload::ExecutionStarted {
+            observation: lash_kernel_doc::RunObservation::Off,
+        },
+        TraceLanguageExecutionPayload::ExecutionStarted {
+            observation: lash_kernel_doc::RunObservation::Counts,
+        },
+        TraceLanguageExecutionPayload::Ran {
+            segment: None,
+            ran: vec![(1, 2)],
+        },
+        TraceLanguageExecutionPayload::Ran {
+            segment: Some("root".into()),
+            ran: vec![(1, 2)],
+        },
         TraceLanguageExecutionPayload::Node {
             at: lash_sansio::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::Started { call_id: None },

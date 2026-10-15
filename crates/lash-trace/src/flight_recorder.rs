@@ -374,7 +374,7 @@ fn operation_outcome(event: &TraceEvent) -> Option<FlightRecorderOutcome> {
                 TraceNodeFact::Cancelled => Some(Outcome::Cancelled),
                 _ => None,
             },
-            TraceLanguageExecutionPayload::ExecutionStarted
+            TraceLanguageExecutionPayload::ExecutionStarted { .. }
             | TraceLanguageExecutionPayload::Ran { .. } => None,
         },
         _ => None,

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
 use lash_sansio::Site;
@@ -252,6 +252,14 @@ pub struct WorkflowExecutionOverlay {
     pub generation: Option<TraceLanguageExecutionGeneration>,
     pub document: WorkflowOverlayDocumentBinding,
     pub coverage: WorkflowOverlayCoverage,
+    /// The start's observation level; None when the start is missing.
+    pub observation: Option<lash_kernel_doc::RunObservation>,
+    /// Cumulative counts, summed over cell activation segments. Read them
+    /// through `workflow::view::coverage` using `ran_counts()`.
+    pub ran: Vec<(u32, u64)>,
+    /// Elementwise maxima per stable activation, retained outside occurrence
+    /// history so duplicate and reordered reports remain exact after resume.
+    pub ran_segments: BTreeMap<String, BTreeMap<u32, u64>>,
     pub status: LanguageExecutionStatus,
     /// Authoritative process settlement, independent of provisional VM outcomes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -278,6 +286,9 @@ struct WorkflowExecutionOverlayWire {
     attempt: Option<u32>,
     document: WorkflowOverlayDocumentBinding,
     coverage: WorkflowOverlayCoverage,
+    observation: Option<lash_kernel_doc::RunObservation>,
+    ran: Vec<(u32, u64)>,
+    ran_segments: BTreeMap<String, BTreeMap<u32, u64>>,
     status: LanguageExecutionStatus,
     settlement: Option<WorkflowOverlaySettlement>,
     sites: Vec<WorkflowOverlaySite>,
@@ -312,6 +323,9 @@ impl<'de> Deserialize<'de> for WorkflowExecutionOverlay {
             generation: wire.attempt.map(TraceLanguageExecutionGeneration::new),
             document: wire.document,
             coverage: wire.coverage,
+            observation: wire.observation,
+            ran: wire.ran,
+            ran_segments: wire.ran_segments,
             status: wire.status,
             settlement: wire.settlement,
             sites: wire.sites,
@@ -327,6 +341,15 @@ impl<'de> Deserialize<'de> for WorkflowExecutionOverlay {
 }
 
 impl WorkflowExecutionOverlay {
+    /// The common input to the workflow coverage helper. Missing starts and
+    /// off executions stay unobserved rather than becoming observed zeros.
+    pub fn ran_counts(&self) -> lash_kernel_doc::RanCounts {
+        lash_kernel_doc::RanCounts {
+            observation: self.observation,
+            ran: self.ran.clone(),
+        }
+    }
+
     /// The execution's key: its subject and, for an attempted execution, its
     /// attempt. Two runs of one document never share it.
     pub fn execution_key(&self) -> String {

@@ -107,7 +107,9 @@ pub struct StepBodyStartedObservation {
 pub enum TraceLanguageExecutionPayload {
     /// The execution began. Its identity names the workflow document and
     /// entry; the document itself is read through facade workflow inspection.
-    ExecutionStarted,
+    ExecutionStarted {
+        observation: lash_kernel_doc::RunObservation,
+    },
     ExecutionFinished {
         status: TraceLanguageExecutionStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -118,10 +120,16 @@ pub enum TraceLanguageExecutionPayload {
         at: lash_sansio::EffectIdentity,
         fact: TraceNodeFact,
     },
-    /// Document statement starts and empty-block entries since the
-    /// execution's previous report, by document site ordinal: a live,
-    /// provisional delta of what an observed run counts (FIG-6370).
-    Ran { ran: Vec<(u32, u64)> },
+    /// Document statement starts and empty-block entries by site ordinal.
+    /// Processes report provisional deltas; cells report cumulative totals
+    /// within a stable activation segment, folded by elementwise maximum.
+    Ran {
+        /// Present for cells: a stable activation id, with cumulative counts
+        /// within that segment. Absent for process live deltas.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        segment: Option<String>,
+        ran: Vec<(u32, u64)>,
+    },
 }
 
 impl TraceLanguageExecutionPayload {
@@ -129,7 +137,9 @@ impl TraceLanguageExecutionPayload {
     /// execution.
     pub fn at(&self) -> Option<&lash_sansio::EffectIdentity> {
         match self {
-            Self::ExecutionStarted | Self::ExecutionFinished { .. } | Self::Ran { .. } => None,
+            Self::ExecutionStarted { .. } | Self::ExecutionFinished { .. } | Self::Ran { .. } => {
+                None
+            }
             Self::Node { at, .. } => Some(at),
         }
     }
@@ -138,7 +148,9 @@ impl TraceLanguageExecutionPayload {
     /// about the whole execution.
     pub fn node_fact(&self) -> Option<&TraceNodeFact> {
         match self {
-            Self::ExecutionStarted | Self::ExecutionFinished { .. } | Self::Ran { .. } => None,
+            Self::ExecutionStarted { .. } | Self::ExecutionFinished { .. } | Self::Ran { .. } => {
+                None
+            }
             Self::Node { fact, .. } => Some(fact),
         }
     }

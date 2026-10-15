@@ -23,6 +23,7 @@ use super::state::{Delivery, Issued, KernelProcessInput};
 pub(super) struct ProcessTrace {
     tracing: PluginExecutionTrace,
     identity: TraceLanguageExecutionIdentity,
+    observation: lash_kernel_doc::RunObservation,
 }
 
 impl ProcessTrace {
@@ -30,12 +31,14 @@ impl ProcessTrace {
         runtime: Option<&lash_core::trace::TraceRuntime>,
         process: &lash_core::ProcessId,
         input: &KernelProcessInput,
+        observation: lash_kernel_doc::RunObservation,
     ) -> Option<Self> {
         let tracing = PluginExecutionTrace::new(runtime?.unreplayed(None));
         if !tracing.observes_language() {
             return None;
         }
         Some(Self {
+            observation,
             tracing,
             identity: TraceLanguageExecutionIdentity {
                 scope: TraceRuntimeScope::none(),
@@ -60,7 +63,9 @@ impl ProcessTrace {
     /// The execution began: it names the document it runs and the entry it
     /// enters it by.
     pub(super) fn started(&self) {
-        self.emit(TraceLanguageExecutionPayload::ExecutionStarted);
+        self.emit(TraceLanguageExecutionPayload::ExecutionStarted {
+            observation: self.observation,
+        });
     }
 
     pub(super) fn finished(&self, outcome: &lash_core::ProcessOutcome) {
@@ -148,7 +153,10 @@ impl ProcessTrace {
     pub(super) fn ran(&self, segment: &str, frame: u64, delta: &lash_kernel_vm::RanDelta) {
         self.emit_keyed(
             Some(format!("ran:{segment}:{frame}")),
-            TraceLanguageExecutionPayload::Ran { ran: delta.clone() },
+            TraceLanguageExecutionPayload::Ran {
+                ran: delta.clone(),
+                segment: None,
+            },
         );
     }
 
@@ -159,7 +167,7 @@ impl ProcessTrace {
     fn emit_keyed(&self, key: Option<String>, payload: TraceLanguageExecutionPayload) {
         use TraceLanguageExecutionPayload as Payload;
         let (suffix, node) = match &payload {
-            Payload::ExecutionStarted => ("started".to_owned(), None),
+            Payload::ExecutionStarted { .. } => ("started".to_owned(), None),
             Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
             Payload::Ran { .. } => (key.unwrap_or_default(), None),
             Payload::Node { at, fact } => {

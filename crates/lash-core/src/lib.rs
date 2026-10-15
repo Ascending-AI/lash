@@ -853,3 +853,6 @@ pub use lash_core_execution::tool_live;
 
 /// Explicit internal process serialization for store implementations.
 pub use lash_core_execution::Durable;
+
+/// Common statement counts supplied to the workflow coverage helper.
+pub use lash_kernel_doc::RanCounts;

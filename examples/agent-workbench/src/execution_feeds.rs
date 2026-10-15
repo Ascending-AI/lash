@@ -181,7 +181,9 @@ impl Cache {
         }
         let graph = self.fed_graph(source, key);
         graph.identity = Some(observation.execution.identity.clone());
-        if let TraceLanguageExecutionPayload::ExecutionStarted = &observation.execution.payload {
+        if let TraceLanguageExecutionPayload::ExecutionStarted { .. } =
+            &observation.execution.payload
+        {
             graph.wants = Some(observation.execution.identity.document.clone());
         }
         if let Err(error) = graph.accumulator.observe(observation) {
@@ -672,7 +674,9 @@ mod tests {
             process_id,
             "started",
             1_000,
-            TraceLanguageExecutionPayload::ExecutionStarted,
+            TraceLanguageExecutionPayload::ExecutionStarted {
+                observation: lash::workflow::document::RunObservation::Off,
+            },
         )
     }
 

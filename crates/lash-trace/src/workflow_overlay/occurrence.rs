@@ -190,7 +190,7 @@ impl ExecutionHistory {
         match &self.get(&WorkflowOverlayExecutionTransition::Started)?.fact {
             WorkflowOverlayFact::Language {
                 document,
-                payload: TraceLanguageExecutionPayload::ExecutionStarted,
+                payload: TraceLanguageExecutionPayload::ExecutionStarted { .. },
             } => Some(document),
             _ => None,
         }
@@ -237,7 +237,7 @@ impl Placement {
                 (&step.at, Transition::StepBody(step.attempt))
             }
             WorkflowOverlayFact::Language { payload, .. } => match payload {
-                Payload::ExecutionStarted => {
+                Payload::ExecutionStarted { .. } => {
                     return Self::Execution(WorkflowOverlayExecutionTransition::Started);
                 }
                 Payload::ExecutionFinished { .. } => {

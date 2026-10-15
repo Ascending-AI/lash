@@ -20,7 +20,9 @@ use std::time::Duration;
 
 fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
-        TraceLanguageExecutionPayload::ExecutionStarted
+        TraceLanguageExecutionPayload::ExecutionStarted {
+            observation: lash_kernel_doc::RunObservation::Off,
+        }
     } else {
         TraceLanguageExecutionPayload::Node {
             at: lash_sansio::effect_identity_fixture("node", occurrence),

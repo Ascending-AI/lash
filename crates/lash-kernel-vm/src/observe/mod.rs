@@ -27,13 +27,7 @@ use lash_kernel_doc::TaskId;
 
 use crate::compile::{CodeId, LibId, StmtId};
 
-/// Per-run observation. Counts are derived and never enter checkpoint state.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Observe {
-    #[default]
-    Off,
-    Counts,
-}
+pub use lash_kernel_doc::RunObservation as Observe;
 
 /// Nonzero statement starts and empty-block entries, keyed by
 /// [`lash_kernel_doc::Document::site_ordinals`]. Deltas add across frames

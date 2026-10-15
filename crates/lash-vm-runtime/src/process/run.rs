@@ -285,6 +285,7 @@ async fn kernel_run(
         engine.trace_runtime.as_ref(),
         &run.process,
         &process_input,
+        settings.observe,
     );
     if let Some(trace) = &trace {
         if input.parked.is_none() {

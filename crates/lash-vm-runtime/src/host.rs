@@ -27,6 +27,9 @@ pub trait EffectReads: Send + Sync {
 /// source, the backend's projection providers, the run's reads, and where
 /// prints go.
 pub struct ParentHost {
+    pub observation: lash_kernel_doc::RunObservation,
+    /// Takes exact deltas from worker frames, outside checkpoint state.
+    pub ran: Arc<dyn Fn(&lash_kernel_vm::RanDelta) + Send + Sync>,
     /// The run's store, whose clock is the run's clock.
     pub store: Arc<DurableSnapshotStore>,
     pub random: Arc<dyn Fn() -> u64 + Send + Sync>,
@@ -39,6 +42,14 @@ pub struct ParentHost {
 
 #[async_trait::async_trait]
 impl RunHost for ParentHost {
+    fn observe(&self) -> lash_kernel_vm::Observe {
+        self.observation
+    }
+
+    fn ran(&self, delta: &lash_kernel_vm::RanDelta) {
+        (self.ran)(delta);
+    }
+
     async fn clock(&self) -> Result<Timestamp, ParentFault> {
         let now = self
             .store

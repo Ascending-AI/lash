@@ -83,10 +83,10 @@ definition starts and with what lash derives from the two:
 Read the graph; do not write it. It is recomputed from the document, and
 there is no edit that writes an edge. `Graph` has no serialized form.
 
-A host that serves a canvas serves `lash::workflow::view::derive(&document)`:
+A host that serves a canvas serves `lash::workflow::view::derive(&document, &functions)`:
 a `WorkflowView`, lash's wire shape (schema `schemas/host/kernel-workflow-view`).
 It holds the entry's `statements` (each with its site, kernel statement,
-block, depth and action site), its `scopes` (every block with its depth,
+block, depth, document ordinal and action site), its `scopes` (every block with its ordinal and depth,
 typed by what opens it: `entry`, `closure`, `then`, `else`, `for`, `while`,
 `try`, `catch`, `finally`), its `dataflow` (bindings, expressions, actions
 with their arguments, lexical availability, parameters, returns and
@@ -311,54 +311,59 @@ a run are yours. Lash stores definitions, not drafts.
 
 ## Showing a run
 
-The document is the static truth. What one execution did is a
-`WorkflowExecutionOverlay` you fold over it from the process's feed. Lash
-keeps no second graph, and events carry no labels, kinds or edges.
+The document is the static truth. A process's observation snapshot carries
+its `ProcessWorkflowOverlay`: committed counts plus any live provisional
+counts, action states and current task positions. Fold its committed events
+and accepted live observations with `ProcessWorkflowOverlayAccumulator`, as
+[Observing processes](observing-processes.md) describes.
+
+Pass that overlay's `ran_counts()` to the view helper:
 
 ```rust,ignore
-let observed = core.processes().observe(&process_id);
-let snapshot = observed.snapshot().await?;
-let mut feed = observed.subscribe_and_recover(snapshot.cursor);
-
-// The snapshot names the document the process runs. Read it once.
-let ProcessReadView::Retained(view) = &snapshot.read_view else { /* gone */ };
-let ProcessDocumentIdentity::Available(reference) = &view.document else { /* none */ };
-let WorkflowDocumentRead::Read(document) =
-    core.host_artifacts().execution_document(reference).await? else { /* not retained */ };
-
-let mut overlay = WorkflowExecutionOverlayAccumulator::default();
-overlay.set_document(document.overlay_document());
-
-while let Some(item) = feed.next().await {
-    match item? {
-        ProcessObservationStreamItem::Event(event) => match &event.payload {
-            ProcessObservationEventPayload::LanguageExecution(o) => overlay.observe(o)?,
-            ProcessObservationEventPayload::StepBodyStarted(o) => overlay.step_body_started(o)?,
-            ProcessObservationEventPayload::Committed { event } => { /* a terminal: overlay.settle(..) */ }
-        },
-        ProcessObservationStreamItem::Gap { .. } => overlay.reset_live(),
-    }
-    let view = overlay.snapshot();   // what to draw now
-}
+let canvas = lash::workflow::view::derive(&document, &functions)?;
+let coverage = lash::workflow::view::coverage(&canvas, &overlay.ran_counts());
+// coverage.statements: site and runs; coverage.scopes: block and entries.
 ```
 
+`runs` and `entries` are optional counts. `None` means unobserved; `Some(0)`
+means observed and never run. Observation defaults to `off`, so an empty count
+vector alone never means zero. At `counts`, the helper answers zero for sites
+that never ran. Scope entries tell how often an arm was taken, a loop iterated,
+a catch caught an error or a function was called. Lash interprets the raw
+ordinals; hosts render the helper's answers. A pure expression's statement
+start is evidence of entry, not a claim that every nested call completed.
+Process totals include the overlay's live provisional contribution until its
+next committed count replaces it. Action state and current task position still
+come from `sites` and `current_sites`.
+
+For a retained process segment, request replay through
+`core.processes().replay(..)`. Only `SegmentAnswer::Verified { path }` carries
+a path; pass it to `view::path(&canvas, &path)` for ordered statement and scope
+steps per task. Diverged or unreplayable segments supply no path. Derive a view
+for each document unit you want to show: mapping a view omits other units.
+
+Cells provide counts through `WorkflowExecutionOverlay::ran_counts()` and the
+same `view::coverage` helper. Set `RunSpec::observe` to `RunObservation::Counts`
+for a run that should count its cells. Each cell's `ExecutionStarted` carries
+its actual level, so later runs in the same session can change it. A missing
+start stays unobserved. Cell reports carry cumulative totals within a stable
+activation segment; their overlay deduplicates and sums them independently of
+its occurrence-history limit. Cells offer counts only, with no replay or path
+trace. Hosts persisting cell overlays retain `ran_segments` with the totals
+so folding can continue after reopen.
+
 An occurrence is identified by an `EffectIdentity`: the task (`Main`, or a
-spawned task), the site, the occurrence of that site in that task counted
-from 0, and the iteration of each enclosing loop. The overlay lists the task
-sites that were observed, one row per `(site, task)`, each with the state of
-its latest occurrence (running, waiting, completed, failed, cancelled, or
-incomplete because the process ended first), counts of starts and ends, and
-the call the occurrence is bound to. Tasks a fan-out spawns at one site are
-separate rows.
+spawned task), the site, its zero-based occurrence in that task, and the
+iteration of each enclosing loop. The process overlay lists observed task
+sites, one row per `(site, task)`, with their latest occurrence state and
+occurrence count. `terminal_unobserved` means the process ended without an
+observed terminal for that action. Its first committed entry and latest
+settlement name event sequences; hosts read times from those events. Tasks
+spawned at one site remain separate rows.
 
-The kernel engine reports effect performs and sleeps. It reports no branch
-choice: which arm an `if` took is visible as the sites that ran inside it.
-A site the overlay does not list was not observed; that is not evidence it
-did not run when the overlay's coverage says the start of the execution was
-missed.
-
-Draw a statement from the row of its action's site; take its wording, kind
-and nesting from the document.
+Draw an action's state from its site's row, statement and scope counts from
+`view::coverage`, and wording and nesting from the document. A missing action
+row alone gives no evidence about whether a pure statement ran.
 
 Follow one feed per process. It recovers after a gap, replays what it
 retains to a late subscriber, and delivers the committed facts that settle

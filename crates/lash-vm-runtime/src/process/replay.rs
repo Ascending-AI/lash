@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_core::{ProcessId, SettledOutput};
 use lash_core_execution::runtime::process::steps::{RecordedProcessStep, process_step_call};
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, TaskIdentity, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_vm::{Start, Step, Target};
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::KernelFailure;
@@ -100,31 +100,17 @@ pub enum Unreplayable {
     Unobserved,
 }
 
-/// A segment's statement path: each task's document statement starts and
-/// empty-block entries, in order, as document site ordinals, tasks in the
-/// order they first started one.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReplayPath {
-    pub tasks: Vec<TaskPath>,
-}
+pub use lash_kernel_doc::{ReplayPath, TaskPath};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskPath {
-    pub task: TaskIdentity,
-    pub starts: Vec<u32>,
-}
-
-impl ReplayPath {
-    fn of(path: lash_vm_client::wire::OrdinalPath) -> Self {
-        let mut tasks: Vec<TaskPath> = Vec::new();
-        for (task, starts) in path {
-            match tasks.iter_mut().find(|held| held.task == task) {
-                Some(held) => held.starts.extend(starts),
-                None => tasks.push(TaskPath { task, starts }),
-            }
+fn replay_path(path: lash_vm_client::wire::OrdinalPath) -> ReplayPath {
+    let mut tasks: Vec<TaskPath> = Vec::new();
+    for (task, starts) in path {
+        match tasks.iter_mut().find(|held| held.task == task) {
+            Some(held) => held.starts.extend(starts),
+            None => tasks.push(TaskPath { task, starts }),
         }
-        Self { tasks }
     }
+    ReplayPath { tasks }
 }
 
 /// Why a replay answered nothing: the worker or the store failed it, not
@@ -563,7 +549,7 @@ impl KernelProcessEngine {
         Ok(
             if reached && host.consumed() && driven.ran == *observed.ran {
                 SegmentAnswer::Verified {
-                    path: ReplayPath::of(driven.path),
+                    path: replay_path(driven.path),
                 }
             } else {
                 SegmentAnswer::Diverged

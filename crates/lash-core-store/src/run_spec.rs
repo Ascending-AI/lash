@@ -611,6 +611,13 @@ pub enum RunResolveError {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunSpec {
+    /// Observation for each cell this logical run executes. Each cell records
+    /// the level it actually ran at; another run may choose another level.
+    #[serde(
+        default,
+        skip_serializing_if = "lash_kernel_doc::RunObservation::is_off"
+    )]
+    pub observe: lash_kernel_doc::RunObservation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<DefinitionRef>,
     /// Immutable data the definition reads. Request ids and tracing stay
@@ -650,7 +657,8 @@ impl RunSpec {
     /// Whether this is the empty default spec, which runs under the
     /// session config and is stored as no spec at all.
     pub fn is_default(&self) -> bool {
-        self.definition.is_none()
+        self.observe.is_off()
+            && self.definition.is_none()
             && self.context.is_null()
             && self.overrides.is_empty()
             && self.capabilities.is_empty()

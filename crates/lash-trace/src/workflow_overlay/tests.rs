@@ -110,7 +110,12 @@ fn language(event_key: &str, payload: TraceLanguageExecutionPayload) -> TraceLan
 }
 
 fn started_event(event_key: &str) -> TraceLanguageExecution {
-    language(event_key, TraceLanguageExecutionPayload::ExecutionStarted)
+    language(
+        event_key,
+        TraceLanguageExecutionPayload::ExecutionStarted {
+            observation: lash_kernel_doc::RunObservation::Off,
+        },
+    )
 }
 
 fn started_at(event_key: &str, site: &WorkflowTaskSite, occurrence: u64) -> TraceLanguageExecution {
@@ -1404,4 +1409,53 @@ fn a_host_overlay_mismatch_limit_is_honored() {
     let overlay = accumulator.snapshot().unwrap();
     assert_eq!(overlay.mismatches.len(), 1);
     assert!(overlay.mismatches_truncated);
+}
+
+/// FIG-6371: cell counts are cumulative within an activation and additive
+/// across activations, independent of report order, duplication and history cap.
+#[test]
+fn cell_counts_sum_segments_with_duplicate_and_shuffled_reports() {
+    use lash_kernel_doc::RunObservation;
+    let start = language(
+        "start",
+        TraceLanguageExecutionPayload::ExecutionStarted {
+            observation: RunObservation::Counts,
+        },
+    );
+    let report = |segment: &str, ran| {
+        language(
+            "report",
+            TraceLanguageExecutionPayload::Ran {
+                segment: Some(segment.into()),
+                ran,
+            },
+        )
+    };
+    let records = [
+        record_at(start, 0),
+        record_at(report("first", vec![(1, 1), (2, 2)]), 1),
+        record_at(report("first", vec![(1, 3), (2, 2)]), 2),
+        record_at(report("resumed", vec![(2, 1), (3, 1)]), 3),
+    ];
+    let ordered = fold_workflow_overlay(None, None, &records, 1).unwrap();
+    assert_eq!(ordered.observation, Some(RunObservation::Counts));
+    assert_eq!(ordered.ran, vec![(1, 3), (2, 3), (3, 1)]);
+    let shuffled = records
+        .iter()
+        .rev()
+        .chain(records.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fold_workflow_overlay(None, None, &shuffled, 1).unwrap(),
+        ordered
+    );
+    let restored = serde_json::from_value(serde_json::to_value(&ordered).unwrap()).unwrap();
+    assert_eq!(
+        fold_workflow_overlay(Some(&restored), None, &shuffled, 1).unwrap(),
+        ordered
+    );
+    let off = fold_workflow_overlay(None, None, &[record_at(started_event("off"), 0)], 1).unwrap();
+    assert_eq!(off.ran_counts().observation, Some(RunObservation::Off));
+    assert!(off.ran_counts().ran.is_empty());
 }

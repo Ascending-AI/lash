@@ -105,7 +105,7 @@ fn execution_starts<'r>(
     events
         .iter()
         .filter_map(|event| match &event.payload {
-            TraceLanguageExecutionPayload::ExecutionStarted => {
+            TraceLanguageExecutionPayload::ExecutionStarted { .. } => {
                 Some((*event, &event.identity.document))
             }
             _ => None,
@@ -342,5 +342,139 @@ await control.finish(await processes.await({ handle }));
         "the cell reported its start and await"
     );
     assert!(finished(&events, &process.identity) && finished(&events, &cell.identity));
+    world.shutdown().await;
+}
+
+/// FIG-6371: worker deltas across a cell's parked Once calls sum to the
+/// same counts as the same document with immediately answered reads. A later
+/// cell of the same session can run off and stays unobserved.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_cells_parked_calls_sum_to_unsplit_counts_and_the_next_cell_can_be_off() {
+    use lash::workflow::document::{Datum, ErrorDatum, Handle, RunObservation, Site, Timestamp};
+    use lash_kernel_vm::{
+        Bounds, EffectModes, Host, KernelMachine, Machine, PreparedLibrary, Program, Start, Step,
+        Target,
+    };
+    struct Immediate;
+    impl Host for Immediate {
+        fn clock(&mut self) -> Timestamp {
+            panic!("this cell reads no clock")
+        }
+        fn random(&mut self) -> u64 {
+            panic!("this cell draws no random")
+        }
+        fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
+            panic!("no projections")
+        }
+        fn perform(
+            &mut self,
+            _: &lash::workflow::document::EffectName,
+            args: &[Datum],
+            _: &Site,
+        ) -> Result<Result<Datum, ErrorDatum>, lash_kernel_vm::HostFault> {
+            Ok(Ok(args.first().cloned().unwrap_or(Datum::Null)))
+        }
+        fn print(&mut self, _: &Datum) {}
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+    let sink = Arc::new(RecordingSink::default());
+    let (world, tools) = reading_world(&sink).await;
+    let session = world.session("cell-counts", served::spec(8)).await;
+    world.script(
+        "counted-cell",
+        vec![served::cell(
+            r#"await web.fetch({url: "only"}); await control.finish(null);"#,
+        )],
+    );
+    let output = session
+        .send(lash::TurnInput::text("counted-cell"))
+        .run(lash::RunSpec {
+            observe: RunObservation::Counts,
+            ..lash::RunSpec::default()
+        })
+        .output()
+        .await
+        .expect("counted cell answers");
+    served::assert_answered("counted cell", &output);
+    let reads = tools.read.lock_recover().clone();
+    let document = reads[0].1.as_ref().unwrap();
+    let kernel = document.document();
+    let modes = EffectModes::reading(kernel.manifest.effects.keys().cloned());
+    let embedding = lash::vm::built_worker_dialects(&lash::vm::WorkerTuning::default()).unwrap();
+    let mut unsplit = KernelMachine::start_reading(
+        Program {
+            document: Arc::new(kernel.clone()),
+            library: PreparedLibrary::new(Arc::clone(embedding.registry().unwrap())),
+        },
+        Bounds {
+            charge: 1_000_000,
+            memory: 64 << 20,
+            call_depth: 64,
+            live_tasks: 16,
+            requests_per_park: 16,
+            join_members: 16,
+        },
+        Start {
+            target: Target::Main,
+            args: vec![],
+            bindings: Default::default(),
+        },
+        modes,
+    )
+    .unwrap();
+    unsplit.set_observe(RunObservation::Counts);
+    let ended = unsplit.run(&mut Immediate, u64::MAX).unwrap();
+    assert!(
+        matches!(ended, Step::Ended(lash_kernel_vm::End::Finished(_))),
+        "{ended:?}"
+    );
+    let records = sink.records();
+    let overlay = lash::workflow::fold_workflow_overlay(None, None, &records, 1).unwrap();
+    assert_eq!(overlay.observation, Some(RunObservation::Counts));
+    assert_eq!(overlay.ran, unsplit.take_ran());
+    assert!(
+        records
+            .iter()
+            .filter(|record| matches!(
+                record.event,
+                lash::tracing::TraceEvent::LanguageExecution {
+                    event: TraceLanguageExecution {
+                        payload: TraceLanguageExecutionPayload::Ran { .. },
+                        ..
+                    },
+                    ..
+                }
+            ))
+            .count()
+            >= 2,
+        "counts cross actual parks"
+    );
+    let view = lash::workflow::view::derive(
+        document,
+        lash_vm_runtime::standard_functions().unwrap().as_ref(),
+    )
+    .unwrap();
+    let counted = lash::workflow::view::coverage(&view, &overlay.ran_counts());
+    assert!(counted.statements.iter().any(|row| row.runs == Some(1)));
+
+    let before = records.len();
+    world.script(
+        "off-cell",
+        vec![served::cell("await control.finish(null);")],
+    );
+    let off = session
+        .send(lash::TurnInput::text("off-cell"))
+        .output()
+        .await
+        .unwrap();
+    served::assert_answered("off cell", &off);
+    let records = sink.records();
+    let off = lash::workflow::fold_workflow_overlay(None, None, &records[before..], 1).unwrap();
+    let unobserved = lash::workflow::view::coverage(&view, &off.ran_counts());
+    assert_eq!(unobserved.observation, Some(RunObservation::Off));
+    assert!(unobserved.statements.iter().all(|row| row.runs.is_none()));
+    assert!(off.ran.is_empty());
     world.shutdown().await;
 }

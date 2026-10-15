@@ -114,24 +114,24 @@ execution_sites:
   {"kind":"spawn","loops":[],"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
   {"kind":"sleep","loops":[],"site":{"path":[6,0],"unit":{"function":"notify"}},"statement":{"path":[6],"unit":{"function":"notify"}}}
 scopes:
-  {"block":{"unit":{"function":"notify"}},"depth":0,"kind":"entry"}
-  {"block":{"path":[1,1],"unit":{"function":"notify"}},"depth":1,"kind":"then","statement":{"path":[1],"unit":{"function":"notify"}}}
-  {"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"depth":2,"kind":"for","statement":{"path":[1,1,0],"unit":{"function":"notify"}}}
-  {"block":{"path":[1,2],"unit":{"function":"notify"}},"depth":1,"kind":"else","statement":{"path":[1],"unit":{"function":"notify"}}}
-  {"block":{"path":[2,0],"unit":{"function":"notify"}},"depth":1,"kind":"try","statement":{"path":[2],"unit":{"function":"notify"}}}
-  {"block":{"path":[2,1],"unit":{"function":"notify"}},"depth":1,"kind":"catch","statement":{"path":[2],"unit":{"function":"notify"}}}
+  {"block":{"unit":{"function":"notify"}},"depth":0,"kind":"entry","ordinal":2}
+  {"block":{"path":[1,1],"unit":{"function":"notify"}},"depth":1,"kind":"then","ordinal":5,"statement":{"path":[1],"unit":{"function":"notify"}}}
+  {"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"depth":2,"kind":"for","ordinal":7,"statement":{"path":[1,1,0],"unit":{"function":"notify"}}}
+  {"block":{"path":[1,2],"unit":{"function":"notify"}},"depth":1,"kind":"else","ordinal":9,"statement":{"path":[1],"unit":{"function":"notify"}}}
+  {"block":{"path":[2,0],"unit":{"function":"notify"}},"depth":1,"kind":"try","ordinal":11,"statement":{"path":[2],"unit":{"function":"notify"}}}
+  {"block":{"path":[2,1],"unit":{"function":"notify"}},"depth":1,"kind":"catch","ordinal":13,"statement":{"path":[2],"unit":{"function":"notify"}}}
 statements:
-  {"action":{"path":[0,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[0],"unit":{"function":"notify"}},"statement":{"let":{"name":"sent","value":{"action":{"perform":{"args":[{"variable":"to"}],"effect":"mail.send","result":"any"}}}}}}
-  {"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[1],"unit":{"function":"notify"}},"statement":{"if":{"condition":{"variable":"sent"},"then_block":[{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}]}}}
-  {"block":{"path":[1,1],"unit":{"function":"notify"}},"depth":1,"site":{"path":[1,1,0],"unit":{"function":"notify"}},"statement":{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}}
-  {"action":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"depth":2,"site":{"path":[1,1,0,1,0],"unit":{"function":"notify"}},"statement":{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}}
-  {"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[2],"unit":{"function":"notify"}},"statement":{"try":{"body":[{"return":{"value":{"variable":"sent"}}}],"catch":{"binding":"e","body":[{"fail":{"value":{"variable":"e"}}}]}}}}
-  {"block":{"path":[2,0],"unit":{"function":"notify"}},"depth":1,"site":{"path":[2,0,0],"unit":{"function":"notify"}},"statement":{"return":{"value":{"variable":"sent"}}}}
-  {"block":{"path":[2,1],"unit":{"function":"notify"}},"depth":1,"site":{"path":[2,1,0],"unit":{"function":"notify"}},"statement":{"fail":{"value":{"variable":"e"}}}}
-  {"action":{"path":[3,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[3],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"library":"c4d9bb90b9e1114bd9196a9014d9723a58d66becb5cbd9c5c60f5426e58fab63"}}}}}}
-  {"action":{"path":[4,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[4],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
-  {"action":{"path":[5,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[5],"unit":{"function":"notify"}},"statement":{"do":{"action":{"spawn":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
-  {"action":{"path":[6,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[6],"unit":{"function":"notify"}},"statement":{"do":{"action":{"sleep":{"duration":{"literal":{"int":"10"}}}}}}}
+  {"action":{"path":[0,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":3,"site":{"path":[0],"unit":{"function":"notify"}},"statement":{"let":{"name":"sent","value":{"action":{"perform":{"args":[{"variable":"to"}],"effect":"mail.send","result":"any"}}}}}}
+  {"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":4,"site":{"path":[1],"unit":{"function":"notify"}},"statement":{"if":{"condition":{"variable":"sent"},"then_block":[{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}]}}}
+  {"block":{"path":[1,1],"unit":{"function":"notify"}},"depth":1,"ordinal":6,"site":{"path":[1,1,0],"unit":{"function":"notify"}},"statement":{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}}
+  {"action":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"depth":2,"ordinal":8,"site":{"path":[1,1,0,1,0],"unit":{"function":"notify"}},"statement":{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}}
+  {"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":10,"site":{"path":[2],"unit":{"function":"notify"}},"statement":{"try":{"body":[{"return":{"value":{"variable":"sent"}}}],"catch":{"binding":"e","body":[{"fail":{"value":{"variable":"e"}}}]}}}}
+  {"block":{"path":[2,0],"unit":{"function":"notify"}},"depth":1,"ordinal":12,"site":{"path":[2,0,0],"unit":{"function":"notify"}},"statement":{"return":{"value":{"variable":"sent"}}}}
+  {"block":{"path":[2,1],"unit":{"function":"notify"}},"depth":1,"ordinal":14,"site":{"path":[2,1,0],"unit":{"function":"notify"}},"statement":{"fail":{"value":{"variable":"e"}}}}
+  {"action":{"path":[3,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":15,"site":{"path":[3],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"library":"c4d9bb90b9e1114bd9196a9014d9723a58d66becb5cbd9c5c60f5426e58fab63"}}}}}}
+  {"action":{"path":[4,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":16,"site":{"path":[4],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
+  {"action":{"path":[5,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":17,"site":{"path":[5],"unit":{"function":"notify"}},"statement":{"do":{"action":{"spawn":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
+  {"action":{"path":[6,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":18,"site":{"path":[6],"unit":{"function":"notify"}},"statement":{"do":{"action":{"sleep":{"duration":{"literal":{"int":"10"}}}}}}}
 "#;
 
 /// The serialized view of one workflow with a branch, a loop, a try and
@@ -597,4 +597,199 @@ main { finish null }
         assert_eq!(action.args.len(), 1);
         assert_eq!(action.args[0].name, Some(Name::new(name)));
     }
+}
+
+/// FIG-6371: the digest list path with three topics and one urgent item.
+/// Counts here are the hand-written path, including an untaken arm and
+/// empty else blocks; they are not generated by a second counting algorithm.
+#[test]
+fn coverage_reads_the_digest_list_path_and_empty_arms() {
+    use crate::view::{RanCounts, RunObservation, coverage};
+    let document = parse_document(
+        r#"kernel 1
+numbers float
+entry digest(topics: List(Any), list: Bool, missing: Bool, urgent: Bool) -> Any
+fn digest(topics, list, missing, urgent) {
+  for topic in topics {
+    let selected = topic
+    if list {
+      if missing { set selected = null }
+    } else { set selected = null }
+    if urgent { do sleep 1000 }
+    set selected = topic
+  }
+  return null
+}
+main { finish null }
+"#,
+    )
+    .unwrap();
+    let view = view_of(&document, "digest");
+    // Main occupies 0..2. Function: body=2, for=3, loop body=4,
+    // let=5, if list=6, then=7, if missing=8, then=9, set=10,
+    // empty else=11, outer else=12, set=13, if urgent=14,
+    // then=15, sleep=16, empty else=17, set=18, return=19.
+    let result = coverage(
+        &view,
+        &RanCounts {
+            observation: Some(RunObservation::Counts),
+            ran: vec![
+                (3, 1),
+                (5, 3),
+                (6, 3),
+                (8, 3),
+                (11, 3),
+                (14, 3),
+                (16, 1),
+                (17, 2),
+                (18, 3),
+                (19, 1),
+            ],
+        },
+    );
+    assert_eq!(
+        result
+            .statements
+            .iter()
+            .map(|row| row.runs)
+            .collect::<Vec<_>>(),
+        [
+            Some(1),
+            Some(3),
+            Some(3),
+            Some(3),
+            Some(0),
+            Some(0),
+            Some(3),
+            Some(1),
+            Some(3),
+            Some(1)
+        ]
+    );
+    assert_eq!(
+        result
+            .scopes
+            .iter()
+            .map(|row| row.entries)
+            .collect::<Vec<_>>(),
+        [
+            Some(1),
+            Some(3),
+            Some(3),
+            Some(0),
+            Some(3),
+            Some(0),
+            Some(1),
+            Some(2)
+        ]
+    );
+    for statement in &view.statements {
+        assert_eq!(statement.ordinal, document.site_ordinals()[&statement.site]);
+    }
+    for scope in &view.scopes {
+        assert_eq!(scope.ordinal, document.site_ordinals()[&scope.block]);
+    }
+}
+
+/// FIG-6371: an off process or cell, and a cell without its start, are
+/// unobserved. Empty observed counts mean zero; empty unobserved counts do not.
+#[test]
+fn coverage_keeps_off_and_missing_observation_distinct_from_zero() {
+    use crate::view::{RanCounts, RunObservation, coverage};
+    let document = parse_document("kernel 1\nnumbers float\nentry demo() -> Any\nfn demo() { return null }\nmain { finish null }\n").unwrap();
+    let view = view_of(&document, "demo");
+    for observation in [None, Some(RunObservation::Off)] {
+        let result = coverage(
+            &view,
+            &RanCounts {
+                observation,
+                ran: vec![(3, 9)],
+            },
+        );
+        assert_eq!(result.observation, observation);
+        assert_eq!(result.statements[0].runs, None);
+        assert_eq!(result.scopes[0].entries, None);
+    }
+    let result = coverage(
+        &view,
+        &RanCounts {
+            observation: Some(RunObservation::Counts),
+            ran: vec![],
+        },
+    );
+    assert_eq!(result.statements[0].runs, Some(0));
+    assert_eq!(result.scopes[0].entries, Some(0));
+}
+
+/// FIG-6371: replay mapping retains each task's order and repetitions,
+/// emitting scope entries beside their first statement or empty-block start.
+#[test]
+fn a_replayed_path_maps_statement_and_scope_steps_in_task_order() {
+    use crate::view::{PathSite, ReplayPath, TaskPath, path};
+    use lash_kernel_doc::{SpawnIdentity, TaskIdentity};
+    let document = parse_document("kernel 1\nnumbers float\nentry demo() -> Any\nfn demo() { if true {} return null }\nmain { finish null }\n").unwrap();
+    let view = view_of(&document, "demo");
+    let spawned = TaskIdentity::Spawned(SpawnIdentity {
+        parent: std::sync::Arc::new(TaskIdentity::Main),
+        site: site("demo", &[0]),
+        occurrence: 0,
+    });
+    let steps = path(
+        &view,
+        &ReplayPath {
+            tasks: vec![
+                TaskPath {
+                    task: spawned.clone(),
+                    starts: vec![3, 4, 5, 6],
+                },
+                TaskPath {
+                    task: TaskIdentity::Main,
+                    starts: vec![3, 4, 4, 6],
+                },
+            ],
+        },
+    );
+    let expected = vec![
+        PathSite::Scope {
+            block: site("demo", &[]),
+        },
+        PathSite::Statement {
+            site: site("demo", &[0]),
+        },
+        PathSite::Scope {
+            block: site("demo", &[0, 1]),
+        },
+        PathSite::Scope {
+            block: site("demo", &[0, 2]),
+        },
+        PathSite::Statement {
+            site: site("demo", &[1]),
+        },
+    ];
+    assert_eq!(
+        steps[..5]
+            .iter()
+            .map(|step| step.site.clone())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert!(steps[..5].iter().all(|step| step.task == spawned));
+    assert_eq!(
+        steps[5..]
+            .iter()
+            .map(|step| step.site.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            expected[0].clone(),
+            expected[1].clone(),
+            expected[2].clone(),
+            expected[2].clone(),
+            expected[4].clone()
+        ]
+    );
+    assert!(
+        steps[5..]
+            .iter()
+            .all(|step| step.task == TaskIdentity::Main)
+    );
 }

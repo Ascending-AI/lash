@@ -199,6 +199,14 @@
         }
       ]
     },
+    "RunObservation": {
+      "description": "Per-run observation. Off is unobserved, never a zero count.",
+      "enum": [
+        "off",
+        "counts"
+      ],
+      "type": "string"
+    },
     "Site": {
       "additionalProperties": false,
       "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
@@ -437,10 +445,14 @@
             "kind": {
               "const": "execution_started",
               "type": "string"
+            },
+            "observation": {
+              "$ref": "#/$defs/RunObservation"
             }
           },
           "required": [
-            "kind"
+            "kind",
+            "observation"
           ],
           "type": "object"
         },
@@ -488,7 +500,7 @@
           "type": "object"
         },
         {
-          "description": "Document statement starts and empty-block entries since the\nexecution's previous report, by document site ordinal: a live,\nprovisional delta of what an observed run counts (FIG-6370).",
+          "description": "Document statement starts and empty-block entries by site ordinal.\nProcesses report provisional deltas; cells report cumulative totals\nwithin a stable activation segment, folded by elementwise maximum.",
           "properties": {
             "kind": {
               "const": "ran",
@@ -513,6 +525,13 @@
                 "type": "array"
               },
               "type": "array"
+            },
+            "segment": {
+              "description": "Present for cells: a stable activation id, with cumulative counts\nwithin that segment. Absent for process live deltas.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -2044,6 +2063,53 @@
       "description": "More mismatches were observed than `mismatches` lists.",
       "type": "boolean"
     },
+    "observation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunObservation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The start's observation level; None when the start is missing."
+    },
+    "ran": {
+      "description": "Cumulative counts, summed over cell activation segments. Read them\nthrough `workflow::view::coverage` using `ran_counts()`.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        ],
+        "type": "array"
+      },
+      "type": "array"
+    },
+    "ran_segments": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "patternProperties": {
+          "^\\d+$": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "description": "Elementwise maxima per stable activation, retained outside occurrence\nhistory so duplicate and reordered reports remain exact after resume.",
+      "type": "object"
+    },
     "retention": {
       "items": {
         "$ref": "#/$defs/WorkflowOverlaySiteRetention"
@@ -2091,6 +2157,8 @@
     "subject",
     "document",
     "coverage",
+    "ran",
+    "ran_segments",
     "status",
     "sites",
     "children",

@@ -17,6 +17,12 @@
 
 use std::collections::BTreeMap;
 
+mod coverage;
+pub use coverage::{
+    PathSite, PathStep, ScopeCoverage, StatementCoverage, WorkflowCoverage, coverage, path,
+};
+pub use lash_kernel_doc::{RanCounts, ReplayPath, RunObservation, TaskPath};
+
 use lash_kernel_check::{
     ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, GraphNode, NodeId, NodeKind,
     Reference, StmtNode,
@@ -61,6 +67,8 @@ pub struct WorkflowView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StatementView {
+    /// The document ordinal shared with run counts and replay paths.
+    pub ordinal: u32,
     pub site: Site,
     /// The statement as the document writes it.
     pub statement: Stmt,
@@ -78,6 +86,8 @@ pub struct StatementView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeView {
+    /// The document ordinal of this block, including nonempty blocks.
+    pub ordinal: u32,
     pub block: Site,
     /// The statement that opens this block; absent for the entry body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -355,6 +365,7 @@ pub fn derive(
         Unit::Main | Unit::Library(_) => None,
     };
     let mut walk = Walk {
+        ordinals: document.site_ordinals(),
         document,
         graph,
         functions,
@@ -463,6 +474,7 @@ struct Context {
 }
 
 struct Walk<'a> {
+    ordinals: BTreeMap<Site, u32>,
     document: &'a Document,
     graph: &'a Graph,
     functions: &'a dyn FunctionCatalog,
@@ -495,6 +507,7 @@ impl<'a> Walk<'a> {
             (NodeKind::Block(_), Node::Block(_)) => {
                 let kind = at.opens.ok_or_else(|| mismatch(node))?;
                 self.view.scopes.push(ScopeView {
+                    ordinal: self.ordinals[&node.site],
                     block: node.site.clone(),
                     statement: at.statement.clone(),
                     depth: at.depth,
@@ -581,6 +594,7 @@ impl<'a> Walk<'a> {
     ) {
         let graph = self.graph;
         self.view.statements.push(StatementView {
+            ordinal: self.ordinals[&node.site],
             site: node.site.clone(),
             statement: written.clone(),
             block: at.block.clone(),

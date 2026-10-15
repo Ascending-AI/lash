@@ -34,6 +34,8 @@ mod graph_codec;
 #[doc(hidden)]
 pub mod graph_tokens;
 mod identity;
+mod observation;
+pub use observation::{RanCounts, ReplayPath, RunObservation, TaskPath};
 mod name;
 mod native;
 mod number;

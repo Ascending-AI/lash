@@ -1359,6 +1359,12 @@
         "kind": {
           "$ref": "#/$defs/ScopeKind"
         },
+        "ordinal": {
+          "description": "The document ordinal of this block, including nonempty blocks.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "statement": {
           "anyOf": [
             {
@@ -1372,6 +1378,7 @@
         }
       },
       "required": [
+        "ordinal",
         "block",
         "depth",
         "kind"
@@ -1457,6 +1464,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "ordinal": {
+          "description": "The document ordinal shared with run counts and replay paths.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "site": {
           "$ref": "#/$defs/Site"
         },
@@ -1466,6 +1479,7 @@
         }
       },
       "required": [
+        "ordinal",
         "site",
         "statement",
         "block",

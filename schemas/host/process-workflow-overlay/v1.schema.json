@@ -125,14 +125,6 @@
         }
       ]
     },
-    "ProcessWorkflowObservation": {
-      "description": "Whether a process's runs count the statements they run: the level its\nstart recorded (FIG-6370). `off` is unobserved, never zero.",
-      "enum": [
-        "off",
-        "counts"
-      ],
-      "type": "string"
-    },
     "ProcessWorkflowRan": {
       "description": "How many times one document statement started, or one empty block was\nentered, by its document site ordinal. `committed` sums the process's\n`process.ran` events; `provisional` is what live frames reported since\nthe latest of them, which the next commit replaces.",
       "properties": {
@@ -288,6 +280,14 @@
         "process",
         "effect",
         "task"
+      ],
+      "type": "string"
+    },
+    "RunObservation": {
+      "description": "Per-run observation. Off is unobserved, never a zero count.",
+      "enum": [
+        "off",
+        "counts"
       ],
       "type": "string"
     },
@@ -476,7 +476,7 @@
       "$ref": "#/$defs/ProcessWorkflowLiveCoverage"
     },
     "observation": {
-      "$ref": "#/$defs/ProcessWorkflowObservation"
+      "$ref": "#/$defs/RunObservation"
     },
     "process_id": {
       "type": "string"

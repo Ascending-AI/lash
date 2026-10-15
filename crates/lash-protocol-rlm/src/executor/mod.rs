@@ -727,10 +727,23 @@ async fn run_linked_cell(
     let annotations =
         serde_json::from_str::<lash_kernel_doc::Annotations>(&envelope.annotations).ok();
     let document_identity = document.identity();
+    let segment = match snapshots.root().await {
+        Ok(root) => root.map_or_else(|| "start".to_owned(), |root| root.root.to_string()),
+        Err(error) => {
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
+            );
+        }
+    };
+    let observation = ctx
+        .run_spec()
+        .map_or(lash_kernel_doc::RunObservation::Off, |spec| spec.observe);
     let trace = document_identity
         .as_ref()
         .ok()
-        .and_then(|identity| trace::CellTrace::new(&ctx, *identity, &envelope.dialect));
+        .and_then(|identity| trace::CellTrace::new(&ctx, *identity, &envelope.dialect, segment));
     if let Some(trace) = &trace {
         trace.started();
     }
@@ -819,7 +832,7 @@ async fn run_linked_cell(
     });
     let host = CellHost {
         entries,
-        trace,
+        trace: trace.clone(),
         sites: Mutex::new(open_sites),
         ctx: ctx.clone(),
         boundary,
@@ -834,7 +847,14 @@ async fn run_linked_cell(
     let printed = Arc::clone(&prints);
     let random = std::collections::hash_map::RandomState::new();
     let drawn = std::sync::atomic::AtomicU64::new(0);
+    let counts_trace = trace.clone();
     let run_host = Arc::new(lash_vm_runtime::ParentHost {
+        observation,
+        ran: Arc::new(move |delta| {
+            if let Some(trace) = &counts_trace {
+                trace.ran(delta);
+            }
+        }),
         store: Arc::clone(snapshots),
         random: Arc::new(move || {
             use std::hash::BuildHasher as _;

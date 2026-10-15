@@ -1553,6 +1553,14 @@
         }
       ]
     },
+    "RunObservation": {
+      "description": "Per-run observation. Off is unobserved, never a zero count.",
+      "enum": [
+        "off",
+        "counts"
+      ],
+      "type": "string"
+    },
     "RuntimeOwner": {
       "description": "Who a runtime runs for: a session, or a process named by its minted id.\n\nA session runtime and a process runtime cross the same interfaces \u2014 the\nplugin session, the tool catalog, the attachment facade, the authority a\ntool intent is declared under \u2014 and those interfaces take a\n`RuntimeOwner`. A process runtime is never handed a session id as a\nstand-in for its own identity.",
       "oneOf": [
@@ -2792,10 +2800,14 @@
             "kind": {
               "const": "execution_started",
               "type": "string"
+            },
+            "observation": {
+              "$ref": "#/$defs/RunObservation"
             }
           },
           "required": [
-            "kind"
+            "kind",
+            "observation"
           ],
           "type": "object"
         },
@@ -2843,7 +2855,7 @@
           "type": "object"
         },
         {
-          "description": "Document statement starts and empty-block entries since the\nexecution's previous report, by document site ordinal: a live,\nprovisional delta of what an observed run counts (FIG-6370).",
+          "description": "Document statement starts and empty-block entries by site ordinal.\nProcesses report provisional deltas; cells report cumulative totals\nwithin a stable activation segment, folded by elementwise maximum.",
           "properties": {
             "kind": {
               "const": "ran",
@@ -2868,6 +2880,13 @@
                 "type": "array"
               },
               "type": "array"
+            },
+            "segment": {
+              "description": "Present for cells: a stable activation id, with cumulative counts\nwithin that segment. Absent for process live deltas.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [

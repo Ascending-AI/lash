@@ -10,6 +10,7 @@ pub struct WorkflowExecutionOverlayAccumulator {
     document_state: DocumentState,
     settlement: Option<WorkflowOverlaySettlement>,
     execution_history: ExecutionHistory,
+    ran_segments: BTreeMap<String, BTreeMap<u32, u64>>,
     sites: BTreeMap<WorkflowTaskSite, SiteHistory>,
 }
 
@@ -109,6 +110,7 @@ impl WorkflowExecutionOverlayAccumulator {
             document_state: DocumentState::default(),
             settlement: None,
             execution_history: Default::default(),
+            ran_segments: BTreeMap::new(),
             sites: Default::default(),
         }
     }
@@ -120,6 +122,7 @@ impl WorkflowExecutionOverlayAccumulator {
         let mut accumulator = Self::new(history_limit);
         accumulator.document_state = DocumentState::of(previous);
         accumulator.settlement = previous.settlement;
+        accumulator.ran_segments = previous.ran_segments.clone();
         let sites = &mut accumulator.sites;
         for retention in &previous.retention {
             sites.entry(retention.site.clone()).or_default().retention =
@@ -309,6 +312,7 @@ impl WorkflowExecutionOverlayAccumulator {
     /// The document and durable terminal authority survive the reset.
     pub fn reset_live(&mut self) {
         self.execution_history.clear();
+        self.ran_segments.clear();
         self.sites.clear();
         self.document_state.mismatches.clear();
         self.document_state.truncated = false;
@@ -316,12 +320,34 @@ impl WorkflowExecutionOverlayAccumulator {
 
     fn append(&mut self, observation: Observation) {
         match Placement::of(&observation) {
-            Placement::Unplaced => {}
+            Placement::Unplaced => {
+                if let WorkflowOverlayFact::Language {
+                    document,
+                    payload:
+                        TraceLanguageExecutionPayload::Ran {
+                            segment: Some(segment),
+                            ran,
+                        },
+                } = observation.fact
+                {
+                    if let Some(loaded) = &self.document
+                        && loaded.reference() != document.as_ref()
+                    {
+                        self.document_state.claim(loaded, &document);
+                        return;
+                    }
+                    let totals = self.ran_segments.entry(segment).or_default();
+                    for (ordinal, count) in ran {
+                        let total = totals.entry(ordinal).or_default();
+                        *total = (*total).max(count);
+                    }
+                }
+            }
             Placement::Execution(transition) => {
                 if let Some(document) = &self.document
                     && let WorkflowOverlayFact::Language {
                         document: claimed,
-                        payload: TraceLanguageExecutionPayload::ExecutionStarted,
+                        payload: TraceLanguageExecutionPayload::ExecutionStarted { .. },
                     } = &observation.fact
                 {
                     self.document_state.claim(document, claimed);
@@ -383,6 +409,25 @@ impl WorkflowExecutionOverlayAccumulator {
                 .finished_status()
                 .unwrap_or(LanguageExecutionStatus::Running),
         };
+        let observation = self
+            .execution_history
+            .get(&Execution::Started)
+            .and_then(|started| match &started.fact {
+                WorkflowOverlayFact::Language {
+                    payload: TraceLanguageExecutionPayload::ExecutionStarted { observation },
+                    ..
+                } => Some(*observation),
+                _ => None,
+            });
+        let mut ran = BTreeMap::<u32, u64>::new();
+        if observation == Some(lash_kernel_doc::RunObservation::Counts) {
+            for segment in self.ran_segments.values() {
+                for (ordinal, count) in segment {
+                    let total = ran.entry(*ordinal).or_default();
+                    *total = total.saturating_add(*count);
+                }
+            }
+        }
         Some(WorkflowExecutionOverlay {
             schema_version: TRACE_SCHEMA_VERSION,
             scope: execution
@@ -403,6 +448,9 @@ impl WorkflowExecutionOverlayAccumulator {
             coverage: WorkflowOverlayCoverage {
                 start_observed: self.execution_history.get(&Execution::Started).is_some(),
             },
+            observation,
+            ran: ran.into_iter().collect(),
+            ran_segments: self.ran_segments.clone(),
             status,
             settlement: self.settlement,
             sites,

@@ -199,8 +199,10 @@ pub use lash_kernel_edit::authoring;
 pub mod view {
     pub use lash_kernel_edit::view::{
         ActionView, ArgumentView, AssignmentView, BindingKind, BindingView, CalleeView, Dataflow,
-        ExecutionSiteView, ExpressionView, ReturnView, ScopeKind, ScopeView, SiteKind,
-        StatementView, TYPESCRIPT_DECLARATION, Use, ViewError, WorkflowView,
+        ExecutionSiteView, ExpressionView, PathSite, PathStep, RanCounts, ReplayPath, ReturnView,
+        RunObservation, ScopeCoverage, ScopeKind, ScopeView, SiteKind, StatementCoverage,
+        StatementView, TYPESCRIPT_DECLARATION, TaskPath, Use, ViewError, WorkflowCoverage,
+        WorkflowView, coverage, path,
     };
 
     /// The view of `document` at the entry it is entered at.
