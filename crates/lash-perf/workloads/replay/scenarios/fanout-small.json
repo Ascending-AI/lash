@@ -1,0 +1,35 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "fanout-small",
+  "description": "Explore only. provenance: tau-bench 59a200c6d575d595120f1cb70fea53cef0632f6b p10 session tool count 2 collapsed into one parallel batch. Counterfactual adaptation: observed batches have width one, not 2. Tool input/output bytes use p10.",
+  "protocol": "standard",
+  "turns": [
+    {
+      "repeat": 1,
+      "user": "Continue synthetic task {turn}.",
+      "replies": [
+        {
+          "tool_calls": [
+            {
+              "tool": "fixture_large",
+              "args": {
+                "key": "branch-0Synthetic payload for re",
+                "bytes": 15
+              }
+            },
+            {
+              "tool": "fixture_large",
+              "args": {
+                "key": "branch-1Synthetic payload for re",
+                "bytes": 15
+              }
+            }
+          ]
+        },
+        {
+          "text": "Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic pa"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6586 @@
+{
+  "identity": {
+    "commit": "aa7dc6d77eedb8cf74de6c56320f4662c555d585",
+    "dirty": false,
+    "build": "release",
+    "build_profile": "PROFILE=;OPT_LEVEL=3;DEBUG=;CARGO_ENCODED_RUSTFLAGS=-Copt-level=0\u001f-Cdebuginfo=0\u001f-Cstrip=none\u001f-Cembed-bitcode=no\u001f--deny=unsafe_code\u001f--deny=unexpected_cfgs\u001f--check-cfg=cfg(loom)\u001f--check-cfg=cfg(kani)\u001f--check-cfg=cfg(miri)\u001f--check-cfg=cfg(fuzzing)\u001f--deny=clippy::await_holding_lock\u001f--deny=clippy::disallowed_methods\u001f--deny=clippy::expect_used\u001f--deny=clippy::unwrap_used\u001f--deny=clippy::identity_op\u001f--deny=clippy::manual_clamp\u001f--deny=clippy::manual_filter\u001f--deny=clippy::manual_find\u001f--deny=clippy::manual_flatten\u001f--deny=clippy::manual_map\u001f--deny=clippy::manual_memcpy\u001f--deny=clippy::manual_non_exhaustive\u001f--deny=clippy::manual_ok_or\u001f--deny=clippy::manual_range_contains\u001f--deny=clippy::manual_retain\u001f--deny=clippy::manual_strip\u001f--deny=clippy::manual_try_fold\u001f--deny=clippy::manual_unwrap_or\u001f--deny=clippy::needless_borrow\u001f--deny=clippy::needless_borrowed_reference\u001f--deny=clippy::needless_late_init\u001f--deny=clippy::needless_option_as_deref\u001f--deny=clippy::needless_question_mark\u001f--deny=clippy::needless_update\u001f--deny=clippy::redundant_closure\u001f--deny=clippy::redundant_static_lifetimes\u001f--deny=clippy::unnecessary_filter_map\u001f--deny=clippy::unnecessary_lazy_evaluations\u001f--deny=clippy::unnecessary_sort_by\u001f--deny=clippy::unnecessary_to_owned\u001f--warn=clippy::large_enum_variant\u001f--warn=clippy::large_futures\u001f--warn=clippy::result_large_err\u001f--check-cfg=cfg(docsrs,test)\u001f--check-cfg=cfg(feature,values(\"default\",\"dhat-heap\"))\u001f-Copt-level=3\u001f-Cdebuginfo=0\u001f-Cstrip=debuginfo\u001f-Cembed-bitcode=no\u001f-Cunsafe-allow-abi-mismatch=sanitizer;debug_assertions=false",
+    "allocator": "stats_alloc",
+    "host": "turbo2-sam",
+    "cpus": 32,
+    "load1_at_start": 2.07,
+    "started_at": "2026-10-15T15:13:49.744908253+00:00"
+  },
+  "metrics_window": "One SQLite-file run per scenario, per-session turn; totals include setup; allocation host only.",
+  "workloads": [
+    {
+      "model_calls_total": 14.0,
+      "worker_executions_total": 14.0,
+      "name": "analysis-py-heavy",
+      "script_digest": "165ef4e49ba922a9943fa7df961c77447f254db62ea79bd121a73ccad81a2316",
+      "turns": 14,
+      "steady_turns": 13,
+      "summary": {
+        "ipc_frames": {
+          "unit": "frames",
+          "kind": "counted",
+          "total": 433.0,
+          "per_turn_median": 32.0,
+          "per_turn_p95": 32.0,
+          "per_turn_max": 32.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "ipc_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 500342271.0,
+          "per_turn_median": 38551106.0,
+          "per_turn_p95": 66062673.0,
+          "per_turn_max": 71565008.0,
+          "slope_per_history_turn": 5529662.615,
+          "robust_slope_per_history_turn": 5502315.833,
+          "slope_per_frame_turn": 5529662.615,
+          "robust_slope_per_frame_turn": 5502315.833
+        },
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 8504422153.0,
+          "per_turn_median": 488136912.0,
+          "per_turn_p95": 1405236881.0,
+          "per_turn_max": 1502908785.0,
+          "slope_per_history_turn": 105666893.632,
+          "robust_slope_per_history_turn": 84901410.7,
+          "slope_per_frame_turn": 105666893.632,
+          "robust_slope_per_frame_turn": 84901410.7
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 13287.0,
+          "per_turn_median": 1000.0,
+          "per_turn_p95": 1508.0,
+          "per_turn_max": 1608.0,
+          "slope_per_history_turn": 100.676,
+          "robust_slope_per_history_turn": 100.667,
+          "slope_per_frame_turn": 100.676,
+          "robust_slope_per_frame_turn": 100.667
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 16031.0,
+          "per_turn_median": 1209.0,
+          "per_turn_p95": 1803.0,
+          "per_turn_max": 1922.0,
+          "slope_per_history_turn": 118.357,
+          "robust_slope_per_history_turn": 118.477,
+          "slope_per_frame_turn": 118.357,
+          "robust_slope_per_frame_turn": 118.477
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 7044.6,
+          "per_turn_median": 492.658,
+          "per_turn_p95": 870.692,
+          "per_turn_max": 909.68,
+          "slope_per_history_turn": 56.638,
+          "robust_slope_per_history_turn": 56.618,
+          "slope_per_frame_turn": 56.638,
+          "robust_slope_per_frame_turn": 56.618
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": true,
+          "metrics": {
+            "ipc_frames": 17.0,
+            "ipc_bytes": 7584.0,
+            "allocated_bytes": 7028815.0,
+            "sql_selects": 253.0,
+            "sql_rows_read": 298.0,
+            "wall_ms": 38.206984
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 4707510.0,
+            "allocated_bytes": 173108992.0,
+            "sql_selects": 400.0,
+            "sql_rows_read": 500.0,
+            "wall_ms": 209.11243
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 11039293.0,
+            "allocated_bytes": 239866611.0,
+            "sql_selects": 498.0,
+            "sql_rows_read": 618.0,
+            "wall_ms": 296.059296
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 16542112.0,
+            "allocated_bytes": 289234975.0,
+            "sql_selects": 604.0,
+            "sql_rows_read": 739.0,
+            "wall_ms": 343.751677
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 22044284.0,
+            "allocated_bytes": 347148342.0,
+            "sql_selects": 697.0,
+            "sql_rows_read": 852.0,
+            "wall_ms": 383.81192
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 27546620.0,
+            "allocated_bytes": 406160014.0,
+            "sql_selects": 803.0,
+            "sql_rows_read": 976.0,
+            "wall_ms": 437.55665300000004
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 33049050.0,
+            "allocated_bytes": 446974985.0,
+            "sql_selects": 905.0,
+            "sql_rows_read": 1095.0,
+            "wall_ms": 452.29949600000003
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 38551106.0,
+            "allocated_bytes": 488136912.0,
+            "sql_selects": 1000.0,
+            "sql_rows_read": 1209.0,
+            "wall_ms": 497.289148
+          }
+        },
+        {
+          "turn": 9,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 44053156.0,
+            "allocated_bytes": 589227273.0,
+            "sql_selects": 1101.0,
+            "sql_rows_read": 1329.0,
+            "wall_ms": 492.657569
+          }
+        },
+        {
+          "turn": 10,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 49555093.0,
+            "allocated_bytes": 668603236.0,
+            "sql_selects": 1196.0,
+            "sql_rows_read": 1441.0,
+            "wall_ms": 570.238745
+          }
+        },
+        {
+          "turn": 11,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 55058172.0,
+            "allocated_bytes": 806174601.0,
+            "sql_selects": 1306.0,
+            "sql_rows_read": 1564.0,
+            "wall_ms": 720.775428
+          }
+        },
+        {
+          "turn": 12,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 60560610.0,
+            "allocated_bytes": 1134611731.0,
+            "sql_selects": 1408.0,
+            "sql_rows_read": 1685.0,
+            "wall_ms": 822.4689149999999
+          }
+        },
+        {
+          "turn": 13,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 66062673.0,
+            "allocated_bytes": 1405236881.0,
+            "sql_selects": 1508.0,
+            "sql_rows_read": 1803.0,
+            "wall_ms": 870.691623
+          }
+        },
+        {
+          "turn": 14,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 71565008.0,
+            "allocated_bytes": 1502908785.0,
+            "sql_selects": 1608.0,
+            "sql_rows_read": 1922.0,
+            "wall_ms": 909.68039
+          }
+        }
+      ],
+      "state_growth_bytes_per_turn": 829893.0,
+      "allocation_slope_bytes_per_retained_byte": 127.32592470595607
+    },
+    {
+      "model_calls_total": 4.0,
+      "worker_executions_total": 4.0,
+      "name": "analysis-py-small",
+      "script_digest": "52be280c88125d444b99fd0f714f7ce9da8554a11e07ae7b2d2a67698208996a",
+      "turns": 4,
+      "steady_turns": 3,
+      "summary": {
+        "ipc_frames": {
+          "unit": "frames",
+          "kind": "counted",
+          "total": 83.0,
+          "per_turn_median": 22.0,
+          "per_turn_p95": 22.0,
+          "per_turn_max": 22.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "ipc_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 192617.0,
+          "per_turn_median": 62598.0,
+          "per_turn_p95": 80773.0,
+          "per_turn_max": 80773.0,
+          "slope_per_history_turn": 19555.5,
+          "robust_slope_per_history_turn": 19555.5,
+          "slope_per_frame_turn": 19555.5,
+          "robust_slope_per_frame_turn": 19555.5
+        },
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 33393607.0,
+          "per_turn_median": 9275870.0,
+          "per_turn_p95": 9460420.0,
+          "per_turn_max": 9460420.0,
+          "slope_per_history_turn": 358272.5,
+          "robust_slope_per_history_turn": 358272.5,
+          "slope_per_frame_turn": 358272.5,
+          "robust_slope_per_frame_turn": 358272.5
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 1202.0,
+          "per_turn_median": 318.0,
+          "per_turn_p95": 321.0,
+          "per_turn_max": 321.0,
+          "slope_per_history_turn": 5.5,
+          "robust_slope_per_history_turn": 5.5,
+          "slope_per_frame_turn": 5.5,
+          "robust_slope_per_frame_turn": 5.5
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 1559.0,
+          "per_turn_median": 421.0,
+          "per_turn_p95": 431.0,
+          "per_turn_max": 431.0,
+          "slope_per_history_turn": 11.0,
+          "robust_slope_per_history_turn": 11.0,
+          "slope_per_frame_turn": 11.0,
+          "robust_slope_per_frame_turn": 11.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 127.906,
+          "per_turn_median": 28.133,
+          "per_turn_p95": 33.999,
+          "per_turn_max": 33.999,
+          "slope_per_history_turn": -2.933,
+          "robust_slope_per_history_turn": -2.933,
+          "slope_per_frame_turn": -2.933,
+          "robust_slope_per_frame_turn": -2.933
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": true,
+          "metrics": {
+            "ipc_frames": 17.0,
+            "ipc_bytes": 7584.0,
+            "allocated_bytes": 5913442.0,
+            "sql_selects": 253.0,
+            "sql_rows_read": 298.0,
+            "wall_ms": 40.205987
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 41662.0,
+            "allocated_bytes": 8743875.0,
+            "sql_selects": 310.0,
+            "sql_rows_read": 409.0,
+            "wall_ms": 33.999003
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 62598.0,
+            "allocated_bytes": 9275870.0,
+            "sql_selects": 318.0,
+            "sql_rows_read": 421.0,
+            "wall_ms": 25.568331999999998
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 80773.0,
+            "allocated_bytes": 9460420.0,
+            "sql_selects": 321.0,
+            "sql_rows_read": 431.0,
+            "wall_ms": 28.13271
+          }
+        }
+      ],
+      "state_growth_bytes_per_turn": 2667.0,
+      "allocation_slope_bytes_per_retained_byte": 134.33539557555306
+    },
+    {
+      "model_calls_total": 6.0,
+      "worker_executions_total": 6.0,
+      "name": "analysis-py-typical",
+      "script_digest": "cf0d229cd781a3d5961038259d5f702fb5b3e541da4f7e15a4fe602178ed1294",
+      "turns": 6,
+      "steady_turns": 5,
+      "summary": {
+        "ipc_frames": {
+          "unit": "frames",
+          "kind": "counted",
+          "total": 127.0,
+          "per_turn_median": 22.0,
+          "per_turn_p95": 22.0,
+          "per_turn_max": 22.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "ipc_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 3170670.0,
+          "per_turn_median": 638820.0,
+          "per_turn_p95": 1046403.0,
+          "per_turn_max": 1046403.0,
+          "slope_per_history_turn": 209981.8,
+          "robust_slope_per_history_turn": 203882.5,
+          "slope_per_frame_turn": 209981.8,
+          "robust_slope_per_frame_turn": 203882.5
+        },
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 104724283.0,
+          "per_turn_median": 19655106.0,
+          "per_turn_p95": 24098199.0,
+          "per_turn_max": 24098199.0,
+          "slope_per_history_turn": 2108646.0,
+          "robust_slope_per_history_turn": 2107981.417,
+          "slope_per_frame_turn": 2108646.0,
+          "robust_slope_per_frame_turn": 2107981.417
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 1908.0,
+          "per_turn_median": 331.0,
+          "per_turn_p95": 343.0,
+          "per_turn_max": 343.0,
+          "slope_per_history_turn": 6.6,
+          "robust_slope_per_history_turn": 6.75,
+          "slope_per_frame_turn": 6.6,
+          "robust_slope_per_frame_turn": 6.75
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 2512.0,
+          "per_turn_median": 443.0,
+          "per_turn_p95": 466.0,
+          "per_turn_max": 466.0,
+          "slope_per_history_turn": 11.8,
+          "robust_slope_per_history_turn": 11.875,
+          "slope_per_frame_turn": 11.8,
+          "robust_slope_per_frame_turn": 11.875
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 240.266,
+          "per_turn_median": 39.881,
+          "per_turn_p95": 47.294,
+          "per_turn_max": 47.294,
+          "slope_per_history_turn": 2.353,
+          "robust_slope_per_history_turn": 2.668,
+          "slope_per_frame_turn": 2.353,
+          "robust_slope_per_frame_turn": 2.668
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": true,
+          "metrics": {
+            "ipc_frames": 17.0,
+            "ipc_bytes": 7598.0,
+            "allocated_bytes": 5807217.0,
+            "sql_selects": 249.0,
+            "sql_rows_read": 294.0,
+            "wall_ms": 33.004611000000004
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 200343.0,
+            "allocated_bytes": 15430841.0,
+            "sql_selects": 317.0,
+            "sql_rows_read": 419.0,
+            "wall_ms": 39.881056
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 434904.0,
+            "allocated_bytes": 17990588.0,
+            "sql_selects": 327.0,
+            "sql_rows_read": 433.0,
+            "wall_ms": 34.909496
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 638820.0,
+            "allocated_bytes": 19655106.0,
+            "sql_selects": 331.0,
+            "sql_rows_read": 443.0,
+            "wall_ms": 39.723609
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 842602.0,
+            "allocated_bytes": 21742332.0,
+            "sql_selects": 341.0,
+            "sql_rows_read": 457.0,
+            "wall_ms": 47.29376
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 1046403.0,
+            "allocated_bytes": 24098199.0,
+            "sql_selects": 343.0,
+            "sql_rows_read": 466.0,
+            "wall_ms": 45.453886
+          }
+        }
+      ],
+      "state_growth_bytes_per_turn": 30701.0,
+      "allocation_slope_bytes_per_retained_byte": 68.68330021823394
+    },
+    {
+      "model_calls_total": 14.0,
+      "worker_executions_total": 14.0,
+      "name": "analysis-ts-heavy",
+      "script_digest": "06c395bc27370922889a5d9d5bea621c11a2f967313082990e558cc9b43a6be8",
+      "turns": 14,
+      "steady_turns": 13,
+      "summary": {
+        "ipc_frames": {
+          "unit": "frames",
+          "kind": "counted",
+          "total": 433.0,
+          "per_turn_median": 32.0,
+          "per_turn_p95": 32.0,
+          "per_turn_max": 32.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "ipc_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 500723698.0,
+          "per_turn_median": 38580229.0,
+          "per_turn_p95": 66091786.0,
+          "per_turn_max": 71594120.0,
+          "slope_per_history_turn": 5529666.401,
+          "robust_slope_per_history_turn": 5502314.0,
+          "slope_per_frame_turn": 5529666.401,
+          "robust_slope_per_frame_turn": 5502314.0
+        },
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 8527476489.0,
+          "per_turn_median": 489879404.0,
+          "per_turn_p95": 1406983956.0,
+          "per_turn_max": 1504639625.0,
+          "slope_per_history_turn": 105648780.357,
+          "robust_slope_per_history_turn": 84898973.125,
+          "slope_per_frame_turn": 105648780.357,
+          "robust_slope_per_frame_turn": 84898973.125
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 13281.0,
+          "per_turn_median": 999.0,
+          "per_turn_p95": 1509.0,
+          "per_turn_max": 1607.0,
+          "slope_per_history_turn": 100.462,
+          "robust_slope_per_history_turn": 100.45,
+          "slope_per_frame_turn": 100.462,
+          "robust_slope_per_frame_turn": 100.45
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 16044.0,
+          "per_turn_median": 1208.0,
+          "per_turn_p95": 1803.0,
+          "per_turn_max": 1922.0,
+          "slope_per_history_turn": 117.786,
+          "robust_slope_per_history_turn": 117.75,
+          "slope_per_frame_turn": 117.786,
+          "robust_slope_per_frame_turn": 117.75
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 6855.288,
+          "per_turn_median": 455.779,
+          "per_turn_p95": 910.135,
+          "per_turn_max": 924.57,
+          "slope_per_history_turn": 60.057,
+          "robust_slope_per_history_turn": 57.663,
+          "slope_per_frame_turn": 60.057,
+          "robust_slope_per_frame_turn": 57.663
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": true,
+          "metrics": {
+            "ipc_frames": 17.0,
+            "ipc_bytes": 10658.0,
+            "allocated_bytes": 6996029.0,
+            "sql_selects": 258.0,
+            "sql_rows_read": 302.0,
+            "wall_ms": 84.000861
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 4736485.0,
+            "allocated_bytes": 175518723.0,
+            "sql_selects": 400.0,
+            "sql_rows_read": 505.0,
+            "wall_ms": 190.9284
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 11068409.0,
+            "allocated_bytes": 241536635.0,
+            "sql_selects": 501.0,
+            "sql_rows_read": 624.0,
+            "wall_ms": 292.675047
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 16571235.0,
+            "allocated_bytes": 290881171.0,
+            "sql_selects": 599.0,
+            "sql_rows_read": 740.0,
+            "wall_ms": 280.02873999999997
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 22073410.0,
+            "allocated_bytes": 348866102.0,
+            "sql_selects": 704.0,
+            "sql_rows_read": 860.0,
+            "wall_ms": 334.504069
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 27575723.0,
+            "allocated_bytes": 407887549.0,
+            "sql_selects": 797.0,
+            "sql_rows_read": 972.0,
+            "wall_ms": 359.675003
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 33078180.0,
+            "allocated_bytes": 448739891.0,
+            "sql_selects": 905.0,
+            "sql_rows_read": 1095.0,
+            "wall_ms": 440.90448599999996
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 38580229.0,
+            "allocated_bytes": 489879404.0,
+            "sql_selects": 999.0,
+            "sql_rows_read": 1208.0,
+            "wall_ms": 455.778878
+          }
+        },
+        {
+          "turn": 9,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 44082258.0,
+            "allocated_bytes": 590946971.0,
+            "sql_selects": 1101.0,
+            "sql_rows_read": 1329.0,
+            "wall_ms": 563.884575
+          }
+        },
+        {
+          "turn": 10,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 49584202.0,
+            "allocated_bytes": 670341326.0,
+            "sql_selects": 1199.0,
+            "sql_rows_read": 1443.0,
+            "wall_ms": 632.9441489999999
+          }
+        },
+        {
+          "turn": 11,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 55087288.0,
+            "allocated_bytes": 807912064.0,
+            "sql_selects": 1298.0,
+            "sql_rows_read": 1560.0,
+            "wall_ms": 645.62524
+          }
+        },
+        {
+          "turn": 12,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 60589715.0,
+            "allocated_bytes": 1136347043.0,
+            "sql_selects": 1404.0,
+            "sql_rows_read": 1681.0,
+            "wall_ms": 739.6335200000001
+          }
+        },
+        {
+          "turn": 13,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 66091786.0,
+            "allocated_bytes": 1406983956.0,
+            "sql_selects": 1509.0,
+            "sql_rows_read": 1803.0,
+            "wall_ms": 910.135418
+          }
+        },
+        {
+          "turn": 14,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 32.0,
+            "ipc_bytes": 71594120.0,
+            "allocated_bytes": 1504639625.0,
+            "sql_selects": 1607.0,
+            "sql_rows_read": 1922.0,
+            "wall_ms": 924.569851
+          }
+        }
+      ],
+      "state_growth_bytes_per_turn": 829893.0,
+      "allocation_slope_bytes_per_retained_byte": 127.30409866934652
+    },
+    {
+      "model_calls_total": 4.0,
+      "worker_executions_total": 4.0,
+      "name": "analysis-ts-small",
+      "script_digest": "708dcb996b1195d1587afe92242e6199bc20b0b3694e63b883d50c2aafb8c336",
+      "turns": 4,
+      "steady_turns": 3,
+      "summary": {
+        "ipc_frames": {
+          "unit": "frames",
+          "kind": "counted",
+          "total": 83.0,
+          "per_turn_median": 22.0,
+          "per_turn_p95": 22.0,
+          "per_turn_max": 22.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "ipc_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 282559.0,
+          "per_turn_median": 91599.0,
+          "per_turn_p95": 109776.0,
+          "per_turn_max": 109776.0,
+          "slope_per_history_turn": 19625.0,
+          "robust_slope_per_history_turn": 19625.0,
+          "slope_per_frame_turn": 19625.0,
+          "robust_slope_per_frame_turn": 19625.0
+        },
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 41926661.0,
+          "per_turn_median": 11764245.0,
+          "per_turn_p95": 11944420.0,
+          "per_turn_max": 11944420.0,
+          "slope_per_history_turn": 368912.5,
+          "robust_slope_per_history_turn": 368912.5,
+          "slope_per_frame_turn": 368912.5,
+          "robust_slope_per_frame_turn": 368912.5
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 1209.0,
+          "per_turn_median": 317.0,
+          "per_turn_p95": 324.0,
+          "per_turn_max": 324.0,
+          "slope_per_history_turn": 7.0,
+          "robust_slope_per_history_turn": 7.0,
+          "slope_per_frame_turn": 7.0,
+          "robust_slope_per_frame_turn": 7.0
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 1577.0,
+          "per_turn_median": 425.0,
+          "per_turn_p95": 437.0,
+          "per_turn_max": 437.0,
+          "slope_per_history_turn": 12.0,
+          "robust_slope_per_history_turn": 12.0,
+          "slope_per_frame_turn": 12.0,
+          "robust_slope_per_frame_turn": 12.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 176.562,
+          "per_turn_median": 27.929,
+          "per_turn_p95": 33.064,
+          "per_turn_max": 33.064,
+          "slope_per_history_turn": 0.151,
+          "robust_slope_per_history_turn": 0.151,
+          "slope_per_frame_turn": 0.151,
+          "robust_slope_per_frame_turn": 0.151
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": true,
+          "metrics": {
+            "ipc_frames": 17.0,
+            "ipc_bytes": 10658.0,
+            "allocated_bytes": 7011401.0,
+            "sql_selects": 258.0,
+            "sql_rows_read": 302.0,
+            "wall_ms": 87.94287200000001
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 70526.0,
+            "allocated_bytes": 11206595.0,
+            "sql_selects": 310.0,
+            "sql_rows_read": 413.0,
+            "wall_ms": 27.626908
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 91599.0,
+            "allocated_bytes": 11764245.0,
+            "sql_selects": 317.0,
+            "sql_rows_read": 425.0,
+            "wall_ms": 33.063852
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 109776.0,
+            "allocated_bytes": 11944420.0,
+            "sql_selects": 324.0,
+            "sql_rows_read": 437.0,
+            "wall_ms": 27.928715999999998
+          }
+        }
+      ],
+      "state_growth_bytes_per_turn": 2667.0,
+      "allocation_slope_bytes_per_retained_byte": 138.32489688788903
+    },
+    {
+      "model_calls_total": 6.0,
+      "worker_executions_total": 6.0,
+      "name": "analysis-ts-typical",
+      "script_digest": "6110aee174703c267e52fcb251404699d451a7249cbbd03a0fe73d072aedc8fa",
+      "turns": 6,
+      "steady_turns": 5,
+      "summary": {
+        "ipc_frames": {
+          "unit": "frames",
+          "kind": "counted",
+          "total": 127.0,
+          "per_turn_median": 22.0,
+          "per_turn_p95": 22.0,
+          "per_turn_max": 22.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "ipc_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 3318765.0,
+          "per_turn_median": 667874.0,
+          "per_turn_p95": 1075424.0,
+          "per_turn_max": 1075424.0,
+          "slope_per_history_turn": 210009.3,
+          "robust_slope_per_history_turn": 203893.25,
+          "slope_per_frame_turn": 210009.3,
+          "robust_slope_per_frame_turn": 203893.25
+        },
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 118079620.0,
+          "per_turn_median": 22134164.0,
+          "per_turn_p95": 26568305.0,
+          "per_turn_max": 26568305.0,
+          "slope_per_history_turn": 2113157.2,
+          "robust_slope_per_history_turn": 2100687.833,
+          "slope_per_frame_turn": 2113157.2,
+          "robust_slope_per_frame_turn": 2100687.833
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 1932.0,
+          "per_turn_median": 338.0,
+          "per_turn_p95": 347.0,
+          "per_turn_max": 347.0,
+          "slope_per_history_turn": 6.3,
+          "robust_slope_per_history_turn": 6.375,
+          "slope_per_frame_turn": 6.3,
+          "robust_slope_per_frame_turn": 6.375
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 2551.0,
+          "per_turn_median": 452.0,
+          "per_turn_p95": 473.0,
+          "per_turn_max": 473.0,
+          "slope_per_history_turn": 11.8,
+          "robust_slope_per_history_turn": 11.875,
+          "slope_per_frame_turn": 11.8,
+          "robust_slope_per_frame_turn": 11.875
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 302.839,
+          "per_turn_median": 44.531,
+          "per_turn_p95": 53.45,
+          "per_turn_max": 53.45,
+          "slope_per_history_turn": 3.951,
+          "robust_slope_per_history_turn": 4.326,
+          "slope_per_frame_turn": 3.951,
+          "robust_slope_per_frame_turn": 4.326
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": true,
+          "metrics": {
+            "ipc_frames": 17.0,
+            "ipc_bytes": 10672.0,
+            "allocated_bytes": 6888663.0,
+            "sql_selects": 258.0,
+            "sql_rows_read": 302.0,
+            "wall_ms": 81.53544
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 229226.0,
+            "allocated_bytes": 17919422.0,
+            "sql_selects": 322.0,
+            "sql_rows_read": 426.0,
+            "wall_ms": 34.919295000000005
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 463936.0,
+            "allocated_bytes": 20367630.0,
+            "sql_selects": 327.0,
+            "sql_rows_read": 437.0,
+            "wall_ms": 44.530679
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 667874.0,
+            "allocated_bytes": 22134164.0,
+            "sql_selects": 338.0,
+            "sql_rows_read": 452.0,
+            "wall_ms": 41.428919
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 871633.0,
+            "allocated_bytes": 24201436.0,
+            "sql_selects": 340.0,
+            "sql_rows_read": 461.0,
+            "wall_ms": 46.974118000000004
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 1075424.0,
+            "allocated_bytes": 26568305.0,
+            "sql_selects": 347.0,
+            "sql_rows_read": 473.0,
+            "wall_ms": 53.45027
+          }
+        }
+      ],
+      "state_growth_bytes_per_turn": 30701.0,
+      "allocation_slope_bytes_per_retained_byte": 68.83024005732713
+    },
+    {
+      "model_calls_total": 14.0,
+      "worker_executions_total": null,
+      "name": "chat-heavy",
+      "script_digest": "45f2cce6eaf0a7ef155feff1b62bf77bd7e73af841f285390fc57023dba2c332",
+      "turns": 14,
+      "steady_turns": 14,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 69000161.0,
+          "per_turn_median": 4928331.5,
+          "per_turn_p95": 6280415.0,
+          "per_turn_max": 6364860.0,
+          "slope_per_history_turn": 231593.782,
+          "robust_slope_per_history_turn": 231376.571,
+          "slope_per_frame_turn": 231593.782,
+          "robust_slope_per_frame_turn": 231376.571
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 2609.0,
+          "per_turn_median": 186.5,
+          "per_turn_p95": 191.0,
+          "per_turn_max": 193.0,
+          "slope_per_history_turn": 0.895,
+          "robust_slope_per_history_turn": 0.75,
+          "slope_per_frame_turn": 0.895,
+          "robust_slope_per_frame_turn": 0.75
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 2475.0,
+          "per_turn_median": 177.5,
+          "per_turn_p95": 185.0,
+          "per_turn_max": 186.0,
+          "slope_per_history_turn": 1.527,
+          "robust_slope_per_history_turn": 1.273,
+          "slope_per_frame_turn": 1.527,
+          "robust_slope_per_frame_turn": 1.273
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 150.858,
+          "per_turn_median": 9.557,
+          "per_turn_p95": 15.422,
+          "per_turn_max": 16.675,
+          "slope_per_history_turn": 0.063,
+          "robust_slope_per_history_turn": 0.013,
+          "slope_per_frame_turn": 0.063,
+          "robust_slope_per_frame_turn": 0.013
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 3450884.0,
+            "sql_selects": 172.0,
+            "sql_rows_read": 153.0,
+            "wall_ms": 11.497685
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 3621033.0,
+            "sql_selects": 183.0,
+            "sql_rows_read": 171.0,
+            "wall_ms": 8.61642
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 3879118.0,
+            "sql_selects": 183.0,
+            "sql_rows_read": 171.0,
+            "wall_ms": 9.048373999999999
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4118729.0,
+            "sql_selects": 185.0,
+            "sql_rows_read": 174.0,
+            "wall_ms": 8.843448
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4350474.0,
+            "sql_selects": 191.0,
+            "sql_rows_read": 181.0,
+            "wall_ms": 16.675091
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4568421.0,
+            "sql_selects": 186.0,
+            "sql_rows_read": 177.0,
+            "wall_ms": 9.574364000000001
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4851713.0,
+            "sql_selects": 186.0,
+            "sql_rows_read": 177.0,
+            "wall_ms": 10.072522000000001
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5004950.0,
+            "sql_selects": 188.0,
+            "sql_rows_read": 180.0,
+            "wall_ms": 14.473526
+          }
+        },
+        {
+          "turn": 9,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5306068.0,
+            "sql_selects": 190.0,
+            "sql_rows_read": 185.0,
+            "wall_ms": 9.388273000000002
+          }
+        },
+        {
+          "turn": 10,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5496274.0,
+            "sql_selects": 187.0,
+            "sql_rows_read": 178.0,
+            "wall_ms": 9.604039
+          }
+        },
+        {
+          "turn": 11,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5738365.0,
+            "sql_selects": 186.0,
+            "sql_rows_read": 177.0,
+            "wall_ms": 9.539328
+          }
+        },
+        {
+          "turn": 12,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5968857.0,
+            "sql_selects": 188.0,
+            "sql_rows_read": 180.0,
+            "wall_ms": 9.346665
+          }
+        },
+        {
+          "turn": 13,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6280415.0,
+            "sql_selects": 191.0,
+            "sql_rows_read": 186.0,
+            "wall_ms": 8.756333
+          }
+        },
+        {
+          "turn": 14,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6364860.0,
+            "sql_selects": 193.0,
+            "sql_rows_read": 185.0,
+            "wall_ms": 15.422020999999999
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 1.0,
+      "worker_executions_total": null,
+      "name": "chat-small",
+      "script_digest": "d09b4f3a3e9f45c6cc86fa77794caf3abf5d77095b3753997052213acdedf43b",
+      "turns": 1,
+      "steady_turns": 1,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 2171637.0,
+          "per_turn_median": 2171637.0,
+          "per_turn_p95": 2171637.0,
+          "per_turn_max": 2171637.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 167.0,
+          "per_turn_median": 167.0,
+          "per_turn_p95": 167.0,
+          "per_turn_max": 167.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 151.0,
+          "per_turn_median": 151.0,
+          "per_turn_p95": 151.0,
+          "per_turn_max": 151.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 9.543,
+          "per_turn_median": 9.543,
+          "per_turn_p95": 9.543,
+          "per_turn_max": 9.543,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 2171637.0,
+            "sql_selects": 167.0,
+            "sql_rows_read": 151.0,
+            "wall_ms": 9.543004000000002
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 2.0,
+      "worker_executions_total": null,
+      "name": "chat-typical",
+      "script_digest": "7d3a20f923ef4313a833ae5a23d7ab99e0c84d214b7d9e0ed06494cdf68ef016",
+      "turns": 2,
+      "steady_turns": 2,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 4431593.0,
+          "per_turn_median": 2215796.5,
+          "per_turn_p95": 2217918.0,
+          "per_turn_max": 2217918.0,
+          "slope_per_history_turn": 4243.0,
+          "robust_slope_per_history_turn": 4243.0,
+          "slope_per_frame_turn": 4243.0,
+          "robust_slope_per_frame_turn": 4243.0
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 354.0,
+          "per_turn_median": 177.0,
+          "per_turn_p95": 183.0,
+          "per_turn_max": 183.0,
+          "slope_per_history_turn": 12.0,
+          "robust_slope_per_history_turn": 12.0,
+          "slope_per_frame_turn": 12.0,
+          "robust_slope_per_frame_turn": 12.0
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 323.0,
+          "per_turn_median": 161.5,
+          "per_turn_p95": 171.0,
+          "per_turn_max": 171.0,
+          "slope_per_history_turn": 19.0,
+          "robust_slope_per_history_turn": 19.0,
+          "slope_per_frame_turn": 19.0,
+          "robust_slope_per_frame_turn": 19.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 17.569,
+          "per_turn_median": 8.785,
+          "per_turn_p95": 10.456,
+          "per_turn_max": 10.456,
+          "slope_per_history_turn": -3.342,
+          "robust_slope_per_history_turn": -3.342,
+          "slope_per_frame_turn": -3.342,
+          "robust_slope_per_frame_turn": -3.342
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 2213675.0,
+            "sql_selects": 171.0,
+            "sql_rows_read": 152.0,
+            "wall_ms": 10.455683
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 2217918.0,
+            "sql_selects": 183.0,
+            "sql_rows_read": 171.0,
+            "wall_ms": 7.113771
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 139.0,
+      "worker_executions_total": null,
+      "name": "coding-heavy",
+      "script_digest": "7f68f8c2bb464b9059c39e65d8e3fe2d5b5742a364f3f3738c6f07ada88e59bb",
+      "turns": 28,
+      "steady_turns": 28,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 1806443700.0,
+          "per_turn_median": 64538606.5,
+          "per_turn_p95": 100026956.0,
+          "per_turn_max": 102851849.0,
+          "slope_per_history_turn": 2894439.013,
+          "robust_slope_per_history_turn": 3041706.657,
+          "slope_per_frame_turn": 2894439.013,
+          "robust_slope_per_frame_turn": 3041706.657
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 15270.0,
+          "per_turn_median": 546.5,
+          "per_turn_p95": 574.0,
+          "per_turn_max": 580.0,
+          "slope_per_history_turn": 0.926,
+          "robust_slope_per_history_turn": 1.732,
+          "slope_per_frame_turn": 0.926,
+          "robust_slope_per_frame_turn": 1.732
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 22360.0,
+          "per_turn_median": 799.5,
+          "per_turn_p95": 854.0,
+          "per_turn_max": 861.0,
+          "slope_per_history_turn": 1.213,
+          "robust_slope_per_history_turn": 3.108,
+          "slope_per_frame_turn": 1.213,
+          "robust_slope_per_frame_turn": 3.108
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 2271.49,
+          "per_turn_median": 81.966,
+          "per_turn_p95": 106.221,
+          "per_turn_max": 107.539,
+          "slope_per_history_turn": 2.025,
+          "robust_slope_per_history_turn": 2.047,
+          "slope_per_frame_turn": 2.025,
+          "robust_slope_per_frame_turn": 2.047
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 25155520.0,
+            "sql_selects": 487.0,
+            "sql_rows_read": 738.0,
+            "wall_ms": 50.126092
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 26739999.0,
+            "sql_selects": 528.0,
+            "sql_rows_read": 761.0,
+            "wall_ms": 54.534861
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 30054679.0,
+            "sql_selects": 534.0,
+            "sql_rows_read": 773.0,
+            "wall_ms": 49.807452000000005
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 32748752.0,
+            "sql_selects": 530.0,
+            "sql_rows_read": 771.0,
+            "wall_ms": 66.170946
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 36656621.0,
+            "sql_selects": 538.0,
+            "sql_rows_read": 786.0,
+            "wall_ms": 59.597752
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 39065735.0,
+            "sql_selects": 542.0,
+            "sql_rows_read": 795.0,
+            "wall_ms": 61.54612
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 41877237.0,
+            "sql_selects": 547.0,
+            "sql_rows_read": 798.0,
+            "wall_ms": 69.481418
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 44601476.0,
+            "sql_selects": 534.0,
+            "sql_rows_read": 778.0,
+            "wall_ms": 69.202292
+          }
+        },
+        {
+          "turn": 9,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 49153318.0,
+            "sql_selects": 542.0,
+            "sql_rows_read": 792.0,
+            "wall_ms": 70.642143
+          }
+        },
+        {
+          "turn": 10,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 51835903.0,
+            "sql_selects": 556.0,
+            "sql_rows_read": 815.0,
+            "wall_ms": 75.635753
+          }
+        },
+        {
+          "turn": 11,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 54534591.0,
+            "sql_selects": 546.0,
+            "sql_rows_read": 801.0,
+            "wall_ms": 77.86912699999999
+          }
+        },
+        {
+          "turn": 12,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 57318168.0,
+            "sql_selects": 555.0,
+            "sql_rows_read": 820.0,
+            "wall_ms": 73.319823
+          }
+        },
+        {
+          "turn": 13,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 60409695.0,
+            "sql_selects": 572.0,
+            "sql_rows_read": 847.0,
+            "wall_ms": 82.109129
+          }
+        },
+        {
+          "turn": 14,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 63167798.0,
+            "sql_selects": 528.0,
+            "sql_rows_read": 765.0,
+            "wall_ms": 81.864119
+          }
+        },
+        {
+          "turn": 15,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 65909415.0,
+            "sql_selects": 541.0,
+            "sql_rows_read": 790.0,
+            "wall_ms": 82.06695
+          }
+        },
+        {
+          "turn": 16,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 68712759.0,
+            "sql_selects": 553.0,
+            "sql_rows_read": 809.0,
+            "wall_ms": 75.614624
+          }
+        },
+        {
+          "turn": 17,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 72765325.0,
+            "sql_selects": 544.0,
+            "sql_rows_read": 797.0,
+            "wall_ms": 86.42769899999999
+          }
+        },
+        {
+          "turn": 18,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 78609922.0,
+            "sql_selects": 559.0,
+            "sql_rows_read": 823.0,
+            "wall_ms": 92.094858
+          }
+        },
+        {
+          "turn": 19,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 80137045.0,
+            "sql_selects": 565.0,
+            "sql_rows_read": 833.0,
+            "wall_ms": 91.343784
+          }
+        },
+        {
+          "turn": 20,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 82867051.0,
+            "sql_selects": 555.0,
+            "sql_rows_read": 816.0,
+            "wall_ms": 94.01376
+          }
+        },
+        {
+          "turn": 21,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 85752563.0,
+            "sql_selects": 557.0,
+            "sql_rows_read": 819.0,
+            "wall_ms": 93.07359
+          }
+        },
+        {
+          "turn": 22,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 88560268.0,
+            "sql_selects": 565.0,
+            "sql_rows_read": 830.0,
+            "wall_ms": 95.733577
+          }
+        },
+        {
+          "turn": 23,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 91283183.0,
+            "sql_selects": 568.0,
+            "sql_rows_read": 841.0,
+            "wall_ms": 106.22127
+          }
+        },
+        {
+          "turn": 24,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 94239793.0,
+            "sql_selects": 571.0,
+            "sql_rows_read": 842.0,
+            "wall_ms": 104.216086
+          }
+        },
+        {
+          "turn": 25,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 97155917.0,
+            "sql_selects": 574.0,
+            "sql_rows_read": 854.0,
+            "wall_ms": 100.858444
+          }
+        },
+        {
+          "turn": 26,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 100026956.0,
+            "sql_selects": 580.0,
+            "sql_rows_read": 861.0,
+            "wall_ms": 107.53861
+          }
+        },
+        {
+          "turn": 27,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 102851849.0,
+            "sql_selects": 538.0,
+            "sql_rows_read": 776.0,
+            "wall_ms": 103.741232
+          }
+        },
+        {
+          "turn": 28,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 84252162.0,
+            "sql_selects": 461.0,
+            "sql_rows_read": 629.0,
+            "wall_ms": 96.638491
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 11.0,
+      "worker_executions_total": null,
+      "name": "coding-small",
+      "script_digest": "005b65633933b019865ecd94e3f5bd2e0ddec9e24fd1db7e4a185d6f2da0c029",
+      "turns": 4,
+      "steady_turns": 4,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 27067075.0,
+          "per_turn_median": 6953865.5,
+          "per_turn_p95": 8388737.0,
+          "per_turn_max": 8388737.0,
+          "slope_per_history_turn": -1059443.7,
+          "robust_slope_per_history_turn": -1116342.167,
+          "slope_per_frame_turn": -1059443.7,
+          "robust_slope_per_frame_turn": -1116342.167
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 1283.0,
+          "per_turn_median": 336.0,
+          "per_turn_p95": 350.0,
+          "per_turn_max": 350.0,
+          "slope_per_history_turn": -19.3,
+          "robust_slope_per_history_turn": -8.5,
+          "slope_per_frame_turn": -19.3,
+          "robust_slope_per_frame_turn": -8.5
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 1565.0,
+          "per_turn_median": 418.0,
+          "per_turn_p95": 430.0,
+          "per_turn_max": 430.0,
+          "slope_per_history_turn": -32.5,
+          "robust_slope_per_history_turn": -17.167,
+          "slope_per_frame_turn": -32.5,
+          "robust_slope_per_frame_turn": -17.167
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 84.436,
+          "per_turn_median": 21.648,
+          "per_turn_p95": 26.761,
+          "per_turn_max": 26.761,
+          "slope_per_history_turn": -1.998,
+          "robust_slope_per_history_turn": -2.892,
+          "slope_per_frame_turn": -1.998,
+          "robust_slope_per_frame_turn": -2.892
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8388737.0,
+            "sql_selects": 327.0,
+            "sql_rows_read": 408.0,
+            "wall_ms": 23.290885
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6823889.0,
+            "sql_selects": 345.0,
+            "sql_rows_read": 428.0,
+            "wall_ms": 20.00493
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7083842.0,
+            "sql_selects": 350.0,
+            "sql_rows_read": 430.0,
+            "wall_ms": 26.760976999999997
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4770607.0,
+            "sql_selects": 261.0,
+            "sql_rows_read": 299.0,
+            "wall_ms": 14.379459
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 22.0,
+      "worker_executions_total": null,
+      "name": "coding-typical",
+      "script_digest": "f5dd3cab786f12efc9cc2bf14ca1c8d6080924a3bfbd41def7b74da52fe97057",
+      "turns": 5,
+      "steady_turns": 5,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 65379668.0,
+          "per_turn_median": 14882256.0,
+          "per_turn_p95": 15469109.0,
+          "per_turn_max": 15469109.0,
+          "slope_per_history_turn": -1689256.9,
+          "robust_slope_per_history_turn": -303218.75,
+          "slope_per_frame_turn": -1689256.9,
+          "robust_slope_per_frame_turn": -303218.75
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 2318.0,
+          "per_turn_median": 515.0,
+          "per_turn_p95": 526.0,
+          "per_turn_max": 526.0,
+          "slope_per_history_turn": -40.7,
+          "robust_slope_per_history_turn": 4.75,
+          "slope_per_frame_turn": -40.7,
+          "robust_slope_per_frame_turn": 4.75
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 3180.0,
+          "per_turn_median": 707.0,
+          "per_turn_p95": 729.0,
+          "per_turn_max": 729.0,
+          "slope_per_history_turn": -74.8,
+          "robust_slope_per_history_turn": 4.0,
+          "slope_per_frame_turn": -74.8,
+          "robust_slope_per_frame_turn": 4.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 178.461,
+          "per_turn_median": 39.684,
+          "per_turn_p95": 43.05,
+          "per_turn_max": 43.05,
+          "slope_per_history_turn": -4.095,
+          "robust_slope_per_history_turn": -0.492,
+          "slope_per_frame_turn": -4.095,
+          "robust_slope_per_frame_turn": -0.492
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14882256.0,
+            "sql_selects": 482.0,
+            "sql_rows_read": 701.0,
+            "wall_ms": 37.766785
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14214014.0,
+            "sql_selects": 515.0,
+            "sql_rows_read": 707.0,
+            "wall_ms": 41.462392
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15005865.0,
+            "sql_selects": 522.0,
+            "sql_rows_read": 727.0,
+            "wall_ms": 39.684295
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15469109.0,
+            "sql_selects": 526.0,
+            "sql_rows_read": 729.0,
+            "wall_ms": 43.050372
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5808424.0,
+            "sql_selects": 273.0,
+            "sql_rows_read": 316.0,
+            "wall_ms": 16.497075
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 2.0,
+      "worker_executions_total": null,
+      "name": "fanout-heavy",
+      "script_digest": "4683547d91391cfd3c5ebb8d1b2a69f82160349b6d3843e55af9e96da4f7d0df",
+      "turns": 1,
+      "steady_turns": 1,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 62101695.0,
+          "per_turn_median": 62101695.0,
+          "per_turn_p95": 62101695.0,
+          "per_turn_max": 62101695.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 506.0,
+          "per_turn_median": 506.0,
+          "per_turn_p95": 506.0,
+          "per_turn_max": 506.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 586.0,
+          "per_turn_median": 586.0,
+          "per_turn_p95": 586.0,
+          "per_turn_max": 586.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 76.625,
+          "per_turn_median": 76.625,
+          "per_turn_p95": 76.625,
+          "per_turn_max": 76.625,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 62101695.0,
+            "sql_selects": 506.0,
+            "sql_rows_read": 586.0,
+            "wall_ms": 76.624785
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 2.0,
+      "worker_executions_total": null,
+      "name": "fanout-small",
+      "script_digest": "d382cc76c0eba3535bc038a973898bdac7aee7b6b5c013b016c3ad5ea77aa332",
+      "turns": 1,
+      "steady_turns": 1,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 5069004.0,
+          "per_turn_median": 5069004.0,
+          "per_turn_p95": 5069004.0,
+          "per_turn_max": 5069004.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 265.0,
+          "per_turn_median": 265.0,
+          "per_turn_p95": 265.0,
+          "per_turn_max": 265.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 291.0,
+          "per_turn_median": 291.0,
+          "per_turn_p95": 291.0,
+          "per_turn_max": 291.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 17.958,
+          "per_turn_median": 17.958,
+          "per_turn_p95": 17.958,
+          "per_turn_max": 17.958,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5069004.0,
+            "sql_selects": 265.0,
+            "sql_rows_read": 291.0,
+            "wall_ms": 17.958226
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 2.0,
+      "worker_executions_total": null,
+      "name": "fanout-typical",
+      "script_digest": "5ca453993031433f741c70c7703b5118e276c15d4bb85fc14b21c965354430c7",
+      "turns": 1,
+      "steady_turns": 1,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 10418063.0,
+          "per_turn_median": 10418063.0,
+          "per_turn_p95": 10418063.0,
+          "per_turn_max": 10418063.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 317.0,
+          "per_turn_median": 317.0,
+          "per_turn_p95": 317.0,
+          "per_turn_max": 317.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 359.0,
+          "per_turn_median": 359.0,
+          "per_turn_p95": 359.0,
+          "per_turn_max": 359.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 24.185,
+          "per_turn_median": 24.185,
+          "per_turn_p95": 24.185,
+          "per_turn_max": 24.185,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10418063.0,
+            "sql_selects": 317.0,
+            "sql_rows_read": 359.0,
+            "wall_ms": 24.185178
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 222.0,
+      "worker_executions_total": null,
+      "name": "output-burst-heavy",
+      "script_digest": "92284dfbd2c329d5c0921a71d5d0dd3bc937b6268a5bd1cdc9c0d27a62f52f1f",
+      "turns": 111,
+      "steady_turns": 111,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 1148491652.0,
+          "per_turn_median": 10183045.0,
+          "per_turn_p95": 15466167.0,
+          "per_turn_max": 17862612.0,
+          "slope_per_history_turn": 107485.927,
+          "robust_slope_per_history_turn": 106272.942,
+          "slope_per_frame_turn": 107485.927,
+          "robust_slope_per_frame_turn": 106272.942
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 30846.0,
+          "per_turn_median": 277.0,
+          "per_turn_p95": 288.0,
+          "per_turn_max": 291.0,
+          "slope_per_history_turn": 0.058,
+          "robust_slope_per_history_turn": 0.048,
+          "slope_per_frame_turn": 0.058,
+          "robust_slope_per_frame_turn": 0.048
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 36090.0,
+          "per_turn_median": 325.0,
+          "per_turn_p95": 347.0,
+          "per_turn_max": 351.0,
+          "slope_per_history_turn": 0.217,
+          "robust_slope_per_history_turn": 0.239,
+          "slope_per_frame_turn": 0.217,
+          "robust_slope_per_frame_turn": 0.239
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 2891.406,
+          "per_turn_median": 25.421,
+          "per_turn_p95": 41.798,
+          "per_turn_max": 46.585,
+          "slope_per_history_turn": 0.212,
+          "robust_slope_per_history_turn": 0.195,
+          "slope_per_frame_turn": 0.212,
+          "robust_slope_per_frame_turn": 0.195
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4452458.0,
+            "sql_selects": 253.0,
+            "sql_rows_read": 277.0,
+            "wall_ms": 16.333396999999998
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4541938.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 305.0,
+            "wall_ms": 14.477073
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4661167.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 15.00134
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4703027.0,
+            "sql_selects": 268.0,
+            "sql_rows_read": 302.0,
+            "wall_ms": 20.2709
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4832820.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 305.0,
+            "wall_ms": 15.299582000000001
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5092072.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 19.724380999999997
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5031415.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 311.0,
+            "wall_ms": 14.496759999999998
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5146416.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 14.598972
+          }
+        },
+        {
+          "turn": 9,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5254944.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 14.560661000000001
+          }
+        },
+        {
+          "turn": 10,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5350795.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 20.553932
+          }
+        },
+        {
+          "turn": 11,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5768653.0,
+            "sql_selects": 282.0,
+            "sql_rows_read": 317.0,
+            "wall_ms": 15.924117
+          }
+        },
+        {
+          "turn": 12,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5546451.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 18.632836
+          }
+        },
+        {
+          "turn": 13,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5656597.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 15.542588
+          }
+        },
+        {
+          "turn": 14,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5767435.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 15.086871
+          }
+        },
+        {
+          "turn": 15,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5918901.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 318.0,
+            "wall_ms": 20.910073
+          }
+        },
+        {
+          "turn": 16,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5999094.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 314.0,
+            "wall_ms": 16.529056
+          }
+        },
+        {
+          "turn": 17,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6142887.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 21.740696
+          }
+        },
+        {
+          "turn": 18,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6231953.0,
+            "sql_selects": 277.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 16.101451
+          }
+        },
+        {
+          "turn": 19,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6312742.0,
+            "sql_selects": 277.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 17.219495000000002
+          }
+        },
+        {
+          "turn": 20,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6418235.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 17.360461
+          }
+        },
+        {
+          "turn": 21,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7068638.0,
+            "sql_selects": 273.0,
+            "sql_rows_read": 321.0,
+            "wall_ms": 22.553866999999997
+          }
+        },
+        {
+          "turn": 22,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6626195.0,
+            "sql_selects": 283.0,
+            "sql_rows_read": 328.0,
+            "wall_ms": 17.843831
+          }
+        },
+        {
+          "turn": 23,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6720367.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 20.264588
+          }
+        },
+        {
+          "turn": 24,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6806480.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 16.970496
+          }
+        },
+        {
+          "turn": 25,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6904775.0,
+            "sql_selects": 284.0,
+            "sql_rows_read": 327.0,
+            "wall_ms": 16.72251
+          }
+        },
+        {
+          "turn": 26,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7000313.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 21.681505
+          }
+        },
+        {
+          "turn": 27,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7107059.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 323.0,
+            "wall_ms": 17.373616000000002
+          }
+        },
+        {
+          "turn": 28,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7214918.0,
+            "sql_selects": 273.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 24.120136
+          }
+        },
+        {
+          "turn": 29,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7383844.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 314.0,
+            "wall_ms": 18.537076
+          }
+        },
+        {
+          "turn": 30,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7552836.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 18.599473
+          }
+        },
+        {
+          "turn": 31,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7645779.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 314.0,
+            "wall_ms": 22.970031
+          }
+        },
+        {
+          "turn": 32,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7767680.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 314.0,
+            "wall_ms": 18.924696
+          }
+        },
+        {
+          "turn": 33,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7909824.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 322.0,
+            "wall_ms": 24.525669
+          }
+        },
+        {
+          "turn": 34,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8043993.0,
+            "sql_selects": 283.0,
+            "sql_rows_read": 328.0,
+            "wall_ms": 20.15969
+          }
+        },
+        {
+          "turn": 35,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8131084.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 18.934985
+          }
+        },
+        {
+          "turn": 36,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8181422.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 27.193701
+          }
+        },
+        {
+          "turn": 37,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8289523.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 19.898689
+          }
+        },
+        {
+          "turn": 38,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8373340.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 24.893262
+          }
+        },
+        {
+          "turn": 39,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8536586.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 329.0,
+            "wall_ms": 20.21778
+          }
+        },
+        {
+          "turn": 40,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8593940.0,
+            "sql_selects": 277.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 19.557136
+          }
+        },
+        {
+          "turn": 41,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9807693.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 27.392145
+          }
+        },
+        {
+          "turn": 42,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8769226.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 26.538027
+          }
+        },
+        {
+          "turn": 43,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8881179.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 20.973162
+          }
+        },
+        {
+          "turn": 44,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8962458.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 21.944761
+          }
+        },
+        {
+          "turn": 45,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9106905.0,
+            "sql_selects": 283.0,
+            "sql_rows_read": 335.0,
+            "wall_ms": 28.258476
+          }
+        },
+        {
+          "turn": 46,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9191628.0,
+            "sql_selects": 285.0,
+            "sql_rows_read": 338.0,
+            "wall_ms": 20.991466
+          }
+        },
+        {
+          "turn": 47,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9262711.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 337.0,
+            "wall_ms": 27.532549
+          }
+        },
+        {
+          "turn": 48,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9357408.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 22.075146
+          }
+        },
+        {
+          "turn": 49,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9461544.0,
+            "sql_selects": 282.0,
+            "sql_rows_read": 338.0,
+            "wall_ms": 27.455284
+          }
+        },
+        {
+          "turn": 50,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9576976.0,
+            "sql_selects": 283.0,
+            "sql_rows_read": 338.0,
+            "wall_ms": 21.443707999999997
+          }
+        },
+        {
+          "turn": 51,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9682752.0,
+            "sql_selects": 277.0,
+            "sql_rows_read": 328.0,
+            "wall_ms": 26.908935
+          }
+        },
+        {
+          "turn": 52,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9740074.0,
+            "sql_selects": 270.0,
+            "sql_rows_read": 313.0,
+            "wall_ms": 20.297349
+          }
+        },
+        {
+          "turn": 53,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9823161.0,
+            "sql_selects": 269.0,
+            "sql_rows_read": 313.0,
+            "wall_ms": 26.201183999999998
+          }
+        },
+        {
+          "turn": 54,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9922680.0,
+            "sql_selects": 269.0,
+            "sql_rows_read": 313.0,
+            "wall_ms": 22.264132
+          }
+        },
+        {
+          "turn": 55,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10027780.0,
+            "sql_selects": 273.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 27.973269
+          }
+        },
+        {
+          "turn": 56,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10183045.0,
+            "sql_selects": 271.0,
+            "sql_rows_read": 314.0,
+            "wall_ms": 21.719537
+          }
+        },
+        {
+          "turn": 57,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10444414.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 321.0,
+            "wall_ms": 20.673799
+          }
+        },
+        {
+          "turn": 58,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10490670.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 27.671492
+          }
+        },
+        {
+          "turn": 59,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10588821.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 26.854363
+          }
+        },
+        {
+          "turn": 60,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10702140.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 22.361466
+          }
+        },
+        {
+          "turn": 61,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10945149.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 22.851097
+          }
+        },
+        {
+          "turn": 62,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11068103.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 27.699634
+          }
+        },
+        {
+          "turn": 63,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11155744.0,
+            "sql_selects": 277.0,
+            "sql_rows_read": 328.0,
+            "wall_ms": 28.261422
+          }
+        },
+        {
+          "turn": 64,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11290716.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 328.0,
+            "wall_ms": 26.396651
+          }
+        },
+        {
+          "turn": 65,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11467409.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 25.928340000000002
+          }
+        },
+        {
+          "turn": 66,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11568069.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 29.744994000000002
+          }
+        },
+        {
+          "turn": 67,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11652540.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 28.378933
+          }
+        },
+        {
+          "turn": 68,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11773557.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 23.391624
+          }
+        },
+        {
+          "turn": 69,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11909390.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 333.0,
+            "wall_ms": 23.684586
+          }
+        },
+        {
+          "turn": 70,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11954279.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 29.024989
+          }
+        },
+        {
+          "turn": 71,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12061492.0,
+            "sql_selects": 282.0,
+            "sql_rows_read": 337.0,
+            "wall_ms": 28.839821
+          }
+        },
+        {
+          "turn": 72,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12156132.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 23.669187
+          }
+        },
+        {
+          "turn": 73,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12277291.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 337.0,
+            "wall_ms": 23.380684
+          }
+        },
+        {
+          "turn": 74,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12364188.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 339.0,
+            "wall_ms": 30.036474000000002
+          }
+        },
+        {
+          "turn": 75,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12463666.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 332.0,
+            "wall_ms": 28.897229
+          }
+        },
+        {
+          "turn": 76,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12538089.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 324.0,
+            "wall_ms": 24.614086
+          }
+        },
+        {
+          "turn": 77,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12640399.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 29.470858999999997
+          }
+        },
+        {
+          "turn": 78,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12739204.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 25.941124
+          }
+        },
+        {
+          "turn": 79,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12851171.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 324.0,
+            "wall_ms": 32.869917
+          }
+        },
+        {
+          "turn": 80,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12929793.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 324.0,
+            "wall_ms": 25.420514
+          }
+        },
+        {
+          "turn": 81,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15330141.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 331.0,
+            "wall_ms": 32.801207999999995
+          }
+        },
+        {
+          "turn": 82,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13151065.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 339.0,
+            "wall_ms": 30.290592
+          }
+        },
+        {
+          "turn": 83,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13236979.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 32.712521
+          }
+        },
+        {
+          "turn": 84,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13330868.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 42.158143
+          }
+        },
+        {
+          "turn": 85,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13443744.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 341.0,
+            "wall_ms": 39.250449
+          }
+        },
+        {
+          "turn": 86,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13531784.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 337.0,
+            "wall_ms": 27.487125000000002
+          }
+        },
+        {
+          "turn": 87,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13645207.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 337.0,
+            "wall_ms": 32.12208
+          }
+        },
+        {
+          "turn": 88,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13733110.0,
+            "sql_selects": 284.0,
+            "sql_rows_read": 339.0,
+            "wall_ms": 37.361513
+          }
+        },
+        {
+          "turn": 89,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13835773.0,
+            "sql_selects": 285.0,
+            "sql_rows_read": 338.0,
+            "wall_ms": 35.488647
+          }
+        },
+        {
+          "turn": 90,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13967848.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 340.0,
+            "wall_ms": 46.585437
+          }
+        },
+        {
+          "turn": 91,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14017782.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 29.986419
+          }
+        },
+        {
+          "turn": 92,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14119886.0,
+            "sql_selects": 282.0,
+            "sql_rows_read": 338.0,
+            "wall_ms": 29.879257
+          }
+        },
+        {
+          "turn": 93,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14238633.0,
+            "sql_selects": 288.0,
+            "sql_rows_read": 347.0,
+            "wall_ms": 40.422053999999996
+          }
+        },
+        {
+          "turn": 94,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14326001.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 348.0,
+            "wall_ms": 30.138295
+          }
+        },
+        {
+          "turn": 95,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14423960.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 349.0,
+            "wall_ms": 27.536697
+          }
+        },
+        {
+          "turn": 96,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14546648.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 349.0,
+            "wall_ms": 31.999699
+          }
+        },
+        {
+          "turn": 97,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14627973.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 351.0,
+            "wall_ms": 39.54869
+          }
+        },
+        {
+          "turn": 98,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14717821.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 351.0,
+            "wall_ms": 41.303373
+          }
+        },
+        {
+          "turn": 99,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14811532.0,
+            "sql_selects": 283.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 42.87931
+          }
+        },
+        {
+          "turn": 100,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14880605.0,
+            "sql_selects": 273.0,
+            "sql_rows_read": 316.0,
+            "wall_ms": 35.848855
+          }
+        },
+        {
+          "turn": 101,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14974967.0,
+            "sql_selects": 268.0,
+            "sql_rows_read": 311.0,
+            "wall_ms": 41.648392
+          }
+        },
+        {
+          "turn": 102,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15072860.0,
+            "sql_selects": 270.0,
+            "sql_rows_read": 313.0,
+            "wall_ms": 35.187419999999996
+          }
+        },
+        {
+          "turn": 103,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15169968.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 317.0,
+            "wall_ms": 45.918461
+          }
+        },
+        {
+          "turn": 104,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15262954.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 43.516890000000004
+          }
+        },
+        {
+          "turn": 105,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15377173.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 320.0,
+            "wall_ms": 28.52046
+          }
+        },
+        {
+          "turn": 106,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15466167.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 325.0,
+            "wall_ms": 28.822909
+          }
+        },
+        {
+          "turn": 107,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15629510.0,
+            "sql_selects": 291.0,
+            "sql_rows_read": 330.0,
+            "wall_ms": 39.110375000000005
+          }
+        },
+        {
+          "turn": 108,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15661684.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 324.0,
+            "wall_ms": 31.791447
+          }
+        },
+        {
+          "turn": 109,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15759369.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 32.490984
+          }
+        },
+        {
+          "turn": 110,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15858786.0,
+            "sql_selects": 277.0,
+            "sql_rows_read": 326.0,
+            "wall_ms": 41.798074
+          }
+        },
+        {
+          "turn": 111,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 17862612.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 330.0,
+            "wall_ms": 38.460822
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 14.0,
+      "worker_executions_total": null,
+      "name": "output-burst-small",
+      "script_digest": "cabfe3b6b8338ceaa10f90e3b7545a170a3a9bb1f391cb338639c84726f8826e",
+      "turns": 7,
+      "steady_turns": 7,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 34807940.0,
+          "per_turn_median": 4725467.0,
+          "per_turn_p95": 6512089.0,
+          "per_turn_max": 6512089.0,
+          "slope_per_history_turn": 265231.0,
+          "robust_slope_per_history_turn": 130648.0,
+          "slope_per_frame_turn": 265231.0,
+          "robust_slope_per_frame_turn": 130648.0
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 1897.0,
+          "per_turn_median": 272.0,
+          "per_turn_p95": 276.0,
+          "per_turn_max": 276.0,
+          "slope_per_history_turn": 2.036,
+          "robust_slope_per_history_turn": 1.0,
+          "slope_per_frame_turn": 2.036,
+          "robust_slope_per_frame_turn": 1.0
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 2107.0,
+          "per_turn_median": 303.0,
+          "per_turn_p95": 311.0,
+          "per_turn_max": 311.0,
+          "slope_per_history_turn": 3.429,
+          "robust_slope_per_history_turn": 2.0,
+          "slope_per_frame_turn": 3.429,
+          "robust_slope_per_frame_turn": 2.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 113.81,
+          "per_turn_median": 15.437,
+          "per_turn_p95": 22.907,
+          "per_turn_max": 22.907,
+          "slope_per_history_turn": -0.07,
+          "robust_slope_per_history_turn": -0.091,
+          "slope_per_frame_turn": -0.07,
+          "robust_slope_per_frame_turn": -0.091
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4462898.0,
+            "sql_selects": 257.0,
+            "sql_rows_read": 279.0,
+            "wall_ms": 17.202293
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4531580.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 13.943218
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4662228.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 13.852197
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4725467.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 305.0,
+            "wall_ms": 22.907002
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4823073.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 15.853144
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5090605.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 14.614902
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6512089.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 311.0,
+            "wall_ms": 15.437141
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 34.0,
+      "worker_executions_total": null,
+      "name": "output-burst-typical",
+      "script_digest": "e1d59702a5c4235635aeed7d06b51558e9f4079752557fec9233577e6a208939",
+      "turns": 17,
+      "steady_turns": 17,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 91793194.0,
+          "per_turn_median": 5225424.0,
+          "per_turn_p95": 6005010.0,
+          "per_turn_max": 8040549.0,
+          "slope_per_history_turn": 142304.944,
+          "robust_slope_per_history_turn": 105284.3,
+          "slope_per_frame_turn": 142304.944,
+          "robust_slope_per_frame_turn": 105284.3
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 4657.0,
+          "per_turn_median": 275.0,
+          "per_turn_p95": 278.0,
+          "per_turn_max": 280.0,
+          "slope_per_history_turn": 0.625,
+          "robust_slope_per_history_turn": 0.4,
+          "slope_per_frame_turn": 0.625,
+          "robust_slope_per_frame_turn": 0.4
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 5258.0,
+          "per_turn_median": 314.0,
+          "per_turn_p95": 316.0,
+          "per_turn_max": 318.0,
+          "slope_per_history_turn": 1.471,
+          "robust_slope_per_history_turn": 1.0,
+          "slope_per_frame_turn": 1.471,
+          "robust_slope_per_frame_turn": 1.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 283.988,
+          "per_turn_median": 15.79,
+          "per_turn_p95": 20.726,
+          "per_turn_max": 21.15,
+          "slope_per_history_turn": 0.239,
+          "robust_slope_per_history_turn": 0.237,
+          "slope_per_frame_turn": 0.239,
+          "robust_slope_per_frame_turn": 0.237
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4467273.0,
+            "sql_selects": 257.0,
+            "sql_rows_read": 279.0,
+            "wall_ms": 15.569690000000001
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4536763.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 13.852247
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4662844.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 13.775872999999999
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4721474.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 305.0,
+            "wall_ms": 20.725676
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4831749.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 13.994975
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5092604.0,
+            "sql_selects": 271.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 17.914724
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5032649.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 311.0,
+            "wall_ms": 13.852147
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5149381.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 13.947286
+          }
+        },
+        {
+          "turn": 9,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5225424.0,
+            "sql_selects": 270.0,
+            "sql_rows_read": 313.0,
+            "wall_ms": 15.177591000000001
+          }
+        },
+        {
+          "turn": 10,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5360420.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 316.0,
+            "wall_ms": 20.245853
+          }
+        },
+        {
+          "turn": 11,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5755386.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 15.789654
+          }
+        },
+        {
+          "turn": 12,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5549368.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 19.947311
+          }
+        },
+        {
+          "turn": 13,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5660365.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 15.254327
+          }
+        },
+        {
+          "turn": 14,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5771965.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 314.0,
+            "wall_ms": 15.894732000000001
+          }
+        },
+        {
+          "turn": 15,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5929970.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 318.0,
+            "wall_ms": 21.150134
+          }
+        },
+        {
+          "turn": 16,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6005010.0,
+            "sql_selects": 275.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 17.488341000000002
+          }
+        },
+        {
+          "turn": 17,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8040549.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 19.407484
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 222.0,
+      "worker_executions_total": null,
+      "name": "reread-heavy",
+      "script_digest": "6493eb15c5256dbf762eb3777d92babbb01fac19895add5793295c68cea60926",
+      "turns": 111,
+      "steady_turns": 111,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 2998553502.0,
+          "per_turn_median": 26654747.0,
+          "per_turn_p95": 44753152.0,
+          "per_turn_max": 46407948.0,
+          "slope_per_history_turn": 363722.011,
+          "robust_slope_per_history_turn": 361542.182,
+          "slope_per_frame_turn": 363722.011,
+          "robust_slope_per_frame_turn": 361542.182
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 32161.0,
+          "per_turn_median": 290.0,
+          "per_turn_p95": 298.0,
+          "per_turn_max": 307.0,
+          "slope_per_history_turn": 0.088,
+          "robust_slope_per_history_turn": 0.083,
+          "slope_per_frame_turn": 0.088,
+          "robust_slope_per_frame_turn": 0.083
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 38204.0,
+          "per_turn_median": 346.0,
+          "per_turn_p95": 364.0,
+          "per_turn_max": 372.0,
+          "slope_per_history_turn": 0.276,
+          "robust_slope_per_history_turn": 0.267,
+          "slope_per_frame_turn": 0.276,
+          "robust_slope_per_frame_turn": 0.267
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 4194.283,
+          "per_turn_median": 36.423,
+          "per_turn_p95": 61.622,
+          "per_turn_max": 68.062,
+          "slope_per_history_turn": 0.302,
+          "robust_slope_per_history_turn": 0.301,
+          "slope_per_frame_turn": 0.302,
+          "robust_slope_per_frame_turn": 0.301
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6966780.0,
+            "sql_selects": 258.0,
+            "sql_rows_read": 280.0,
+            "wall_ms": 18.73033
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7185708.0,
+            "sql_selects": 273.0,
+            "sql_rows_read": 309.0,
+            "wall_ms": 17.073040000000002
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7637922.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 319.0,
+            "wall_ms": 17.051189
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 7952844.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 321.0,
+            "wall_ms": 22.521817
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8343013.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 323.0,
+            "wall_ms": 20.215506
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 8827961.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 321.0,
+            "wall_ms": 17.414072
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9010043.0,
+            "sql_selects": 283.0,
+            "sql_rows_read": 329.0,
+            "wall_ms": 16.351251
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9422971.0,
+            "sql_selects": 285.0,
+            "sql_rows_read": 333.0,
+            "wall_ms": 17.629958000000002
+          }
+        },
+        {
+          "turn": 9,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 9858723.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 331.0,
+            "wall_ms": 22.325047
+          }
+        },
+        {
+          "turn": 10,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10172446.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 321.0,
+            "wall_ms": 21.612605
+          }
+        },
+        {
+          "turn": 11,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10828258.0,
+            "sql_selects": 283.0,
+            "sql_rows_read": 329.0,
+            "wall_ms": 19.035574
+          }
+        },
+        {
+          "turn": 12,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 10857307.0,
+            "sql_selects": 285.0,
+            "sql_rows_read": 333.0,
+            "wall_ms": 18.718808
+          }
+        },
+        {
+          "turn": 13,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11200690.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 19.254846999999998
+          }
+        },
+        {
+          "turn": 14,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11538019.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 334.0,
+            "wall_ms": 24.385916
+          }
+        },
+        {
+          "turn": 15,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 11922204.0,
+            "sql_selects": 289.0,
+            "sql_rows_read": 341.0,
+            "wall_ms": 24.408258
+          }
+        },
+        {
+          "turn": 16,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12401783.0,
+            "sql_selects": 292.0,
+            "sql_rows_read": 346.0,
+            "wall_ms": 27.902056
+          }
+        },
+        {
+          "turn": 17,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 12923723.0,
+            "sql_selects": 291.0,
+            "sql_rows_read": 337.0,
+            "wall_ms": 28.826676
+          }
+        },
+        {
+          "turn": 18,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13227199.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 322.0,
+            "wall_ms": 25.386089000000002
+          }
+        },
+        {
+          "turn": 19,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13560368.0,
+            "sql_selects": 284.0,
+            "sql_rows_read": 330.0,
+            "wall_ms": 24.745243
+          }
+        },
+        {
+          "turn": 20,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 13892749.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 334.0,
+            "wall_ms": 26.110232
+          }
+        },
+        {
+          "turn": 21,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14805896.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 29.687786
+          }
+        },
+        {
+          "turn": 22,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14552594.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 334.0,
+            "wall_ms": 34.880352
+          }
+        },
+        {
+          "turn": 23,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 14912534.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 342.0,
+            "wall_ms": 26.844765
+          }
+        },
+        {
+          "turn": 24,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15228896.0,
+            "sql_selects": 292.0,
+            "sql_rows_read": 345.0,
+            "wall_ms": 33.414182000000004
+          }
+        },
+        {
+          "turn": 25,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15569368.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 341.0,
+            "wall_ms": 33.596445
+          }
+        },
+        {
+          "turn": 26,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 15899451.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 36.215866
+          }
+        },
+        {
+          "turn": 27,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 16238107.0,
+            "sql_selects": 293.0,
+            "sql_rows_read": 344.0,
+            "wall_ms": 33.113556
+          }
+        },
+        {
+          "turn": 28,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 16596632.0,
+            "sql_selects": 292.0,
+            "sql_rows_read": 345.0,
+            "wall_ms": 32.41966
+          }
+        },
+        {
+          "turn": 29,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 17015849.0,
+            "sql_selects": 296.0,
+            "sql_rows_read": 350.0,
+            "wall_ms": 42.44921
+          }
+        },
+        {
+          "turn": 30,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 17318694.0,
+            "sql_selects": 293.0,
+            "sql_rows_read": 346.0,
+            "wall_ms": 29.749102
+          }
+        },
+        {
+          "turn": 31,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 17665981.0,
+            "sql_selects": 296.0,
+            "sql_rows_read": 353.0,
+            "wall_ms": 30.803728
+          }
+        },
+        {
+          "turn": 32,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 18019582.0,
+            "sql_selects": 298.0,
+            "sql_rows_read": 358.0,
+            "wall_ms": 36.913911
+          }
+        },
+        {
+          "turn": 33,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 18686290.0,
+            "sql_selects": 294.0,
+            "sql_rows_read": 344.0,
+            "wall_ms": 25.47137
+          }
+        },
+        {
+          "turn": 34,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 19291208.0,
+            "sql_selects": 280.0,
+            "sql_rows_read": 322.0,
+            "wall_ms": 25.837098
+          }
+        },
+        {
+          "turn": 35,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 19632161.0,
+            "sql_selects": 284.0,
+            "sql_rows_read": 329.0,
+            "wall_ms": 31.000308
+          }
+        },
+        {
+          "turn": 36,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 19927872.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 333.0,
+            "wall_ms": 31.249968
+          }
+        },
+        {
+          "turn": 37,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 20289129.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 335.0,
+            "wall_ms": 33.363837000000004
+          }
+        },
+        {
+          "turn": 38,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 20619898.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 337.0,
+            "wall_ms": 35.986154
+          }
+        },
+        {
+          "turn": 39,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 20972782.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 341.0,
+            "wall_ms": 30.719198
+          }
+        },
+        {
+          "turn": 40,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 21293440.0,
+            "sql_selects": 297.0,
+            "sql_rows_read": 350.0,
+            "wall_ms": 36.423035999999996
+          }
+        },
+        {
+          "turn": 41,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 22758935.0,
+            "sql_selects": 289.0,
+            "sql_rows_read": 343.0,
+            "wall_ms": 45.348347999999994
+          }
+        },
+        {
+          "turn": 42,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 21953656.0,
+            "sql_selects": 289.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 41.15058500000001
+          }
+        },
+        {
+          "turn": 43,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 22286182.0,
+            "sql_selects": 291.0,
+            "sql_rows_read": 344.0,
+            "wall_ms": 48.232767
+          }
+        },
+        {
+          "turn": 44,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 22622469.0,
+            "sql_selects": 293.0,
+            "sql_rows_read": 346.0,
+            "wall_ms": 34.234145
+          }
+        },
+        {
+          "turn": 45,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 22979043.0,
+            "sql_selects": 293.0,
+            "sql_rows_read": 350.0,
+            "wall_ms": 36.796279
+          }
+        },
+        {
+          "turn": 46,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 23286460.0,
+            "sql_selects": 291.0,
+            "sql_rows_read": 347.0,
+            "wall_ms": 37.775732
+          }
+        },
+        {
+          "turn": 47,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 23638017.0,
+            "sql_selects": 296.0,
+            "sql_rows_read": 354.0,
+            "wall_ms": 34.780274
+          }
+        },
+        {
+          "turn": 48,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 23956778.0,
+            "sql_selects": 294.0,
+            "sql_rows_read": 356.0,
+            "wall_ms": 28.151434
+          }
+        },
+        {
+          "turn": 49,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 24294485.0,
+            "sql_selects": 292.0,
+            "sql_rows_read": 349.0,
+            "wall_ms": 36.720766000000005
+          }
+        },
+        {
+          "turn": 50,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 24609626.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 333.0,
+            "wall_ms": 27.846901
+          }
+        },
+        {
+          "turn": 51,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 24969777.0,
+            "sql_selects": 288.0,
+            "sql_rows_read": 342.0,
+            "wall_ms": 33.674241
+          }
+        },
+        {
+          "turn": 52,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 25292700.0,
+            "sql_selects": 295.0,
+            "sql_rows_read": 348.0,
+            "wall_ms": 48.346360999999995
+          }
+        },
+        {
+          "turn": 53,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 25621823.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 348.0,
+            "wall_ms": 27.530316
+          }
+        },
+        {
+          "turn": 54,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 25954849.0,
+            "sql_selects": 294.0,
+            "sql_rows_read": 347.0,
+            "wall_ms": 29.070083999999998
+          }
+        },
+        {
+          "turn": 55,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 26289106.0,
+            "sql_selects": 296.0,
+            "sql_rows_read": 356.0,
+            "wall_ms": 35.428653999999995
+          }
+        },
+        {
+          "turn": 56,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 26654747.0,
+            "sql_selects": 292.0,
+            "sql_rows_read": 356.0,
+            "wall_ms": 29.228321
+          }
+        },
+        {
+          "turn": 57,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 27169351.0,
+            "sql_selects": 296.0,
+            "sql_rows_read": 353.0,
+            "wall_ms": 28.735955
+          }
+        },
+        {
+          "turn": 58,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 27418708.0,
+            "sql_selects": 284.0,
+            "sql_rows_read": 344.0,
+            "wall_ms": 39.689085
+          }
+        },
+        {
+          "turn": 59,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 27790438.0,
+            "sql_selects": 292.0,
+            "sql_rows_read": 352.0,
+            "wall_ms": 33.102194000000004
+          }
+        },
+        {
+          "turn": 60,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 28122913.0,
+            "sql_selects": 294.0,
+            "sql_rows_read": 356.0,
+            "wall_ms": 35.437611000000004
+          }
+        },
+        {
+          "turn": 61,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 28455263.0,
+            "sql_selects": 297.0,
+            "sql_rows_read": 362.0,
+            "wall_ms": 44.160111
+          }
+        },
+        {
+          "turn": 62,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 28814008.0,
+            "sql_selects": 298.0,
+            "sql_rows_read": 357.0,
+            "wall_ms": 29.954459
+          }
+        },
+        {
+          "turn": 63,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 29138494.0,
+            "sql_selects": 298.0,
+            "sql_rows_read": 364.0,
+            "wall_ms": 30.993084
+          }
+        },
+        {
+          "turn": 64,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 29530806.0,
+            "sql_selects": 307.0,
+            "sql_rows_read": 372.0,
+            "wall_ms": 45.505854
+          }
+        },
+        {
+          "turn": 65,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 30506328.0,
+            "sql_selects": 295.0,
+            "sql_rows_read": 352.0,
+            "wall_ms": 43.246952
+          }
+        },
+        {
+          "turn": 66,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 31364086.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 323.0,
+            "wall_ms": 58.196684999999995
+          }
+        },
+        {
+          "turn": 67,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 31725812.0,
+            "sql_selects": 288.0,
+            "sql_rows_read": 334.0,
+            "wall_ms": 49.818402999999996
+          }
+        },
+        {
+          "turn": 68,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 32069493.0,
+            "sql_selects": 285.0,
+            "sql_rows_read": 335.0,
+            "wall_ms": 56.698585
+          }
+        },
+        {
+          "turn": 69,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 32393701.0,
+            "sql_selects": 281.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 46.768792
+          }
+        },
+        {
+          "turn": 70,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 32718987.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 34.866366
+          }
+        },
+        {
+          "turn": 71,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 33064813.0,
+            "sql_selects": 289.0,
+            "sql_rows_read": 343.0,
+            "wall_ms": 47.574168
+          }
+        },
+        {
+          "turn": 72,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 33398477.0,
+            "sql_selects": 291.0,
+            "sql_rows_read": 348.0,
+            "wall_ms": 45.793596
+          }
+        },
+        {
+          "turn": 73,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 33760472.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 343.0,
+            "wall_ms": 40.171934
+          }
+        },
+        {
+          "turn": 74,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 34060631.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 336.0,
+            "wall_ms": 48.868615
+          }
+        },
+        {
+          "turn": 75,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 34369707.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 343.0,
+            "wall_ms": 49.794337
+          }
+        },
+        {
+          "turn": 76,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 34731579.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 344.0,
+            "wall_ms": 33.418800999999995
+          }
+        },
+        {
+          "turn": 77,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 35049078.0,
+            "sql_selects": 284.0,
+            "sql_rows_read": 345.0,
+            "wall_ms": 33.118856
+          }
+        },
+        {
+          "turn": 78,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 35396147.0,
+            "sql_selects": 292.0,
+            "sql_rows_read": 349.0,
+            "wall_ms": 42.124189
+          }
+        },
+        {
+          "turn": 79,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 35763983.0,
+            "sql_selects": 296.0,
+            "sql_rows_read": 356.0,
+            "wall_ms": 43.347522
+          }
+        },
+        {
+          "turn": 80,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 36074489.0,
+            "sql_selects": 298.0,
+            "sql_rows_read": 360.0,
+            "wall_ms": 55.436679000000005
+          }
+        },
+        {
+          "turn": 81,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 38661665.0,
+            "sql_selects": 288.0,
+            "sql_rows_read": 349.0,
+            "wall_ms": 48.852655
+          }
+        },
+        {
+          "turn": 82,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 36704383.0,
+            "sql_selects": 283.0,
+            "sql_rows_read": 335.0,
+            "wall_ms": 35.76645
+          }
+        },
+        {
+          "turn": 83,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 37064527.0,
+            "sql_selects": 289.0,
+            "sql_rows_read": 343.0,
+            "wall_ms": 41.450821
+          }
+        },
+        {
+          "turn": 84,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 37383299.0,
+            "sql_selects": 290.0,
+            "sql_rows_read": 348.0,
+            "wall_ms": 38.479336
+          }
+        },
+        {
+          "turn": 85,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 37748221.0,
+            "sql_selects": 289.0,
+            "sql_rows_read": 349.0,
+            "wall_ms": 47.214151
+          }
+        },
+        {
+          "turn": 86,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 38075005.0,
+            "sql_selects": 289.0,
+            "sql_rows_read": 347.0,
+            "wall_ms": 47.522571
+          }
+        },
+        {
+          "turn": 87,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 38435133.0,
+            "sql_selects": 293.0,
+            "sql_rows_read": 357.0,
+            "wall_ms": 62.574216
+          }
+        },
+        {
+          "turn": 88,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 38770557.0,
+            "sql_selects": 295.0,
+            "sql_rows_read": 359.0,
+            "wall_ms": 44.954266
+          }
+        },
+        {
+          "turn": 89,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 39083577.0,
+            "sql_selects": 295.0,
+            "sql_rows_read": 356.0,
+            "wall_ms": 59.117168
+          }
+        },
+        {
+          "turn": 90,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 39451675.0,
+            "sql_selects": 291.0,
+            "sql_rows_read": 347.0,
+            "wall_ms": 47.234369
+          }
+        },
+        {
+          "turn": 91,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 39774191.0,
+            "sql_selects": 296.0,
+            "sql_rows_read": 356.0,
+            "wall_ms": 61.622003
+          }
+        },
+        {
+          "turn": 92,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 40102577.0,
+            "sql_selects": 296.0,
+            "sql_rows_read": 359.0,
+            "wall_ms": 41.150445
+          }
+        },
+        {
+          "turn": 93,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 40451135.0,
+            "sql_selects": 306.0,
+            "sql_rows_read": 364.0,
+            "wall_ms": 56.743459
+          }
+        },
+        {
+          "turn": 94,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 40733311.0,
+            "sql_selects": 292.0,
+            "sql_rows_read": 358.0,
+            "wall_ms": 38.274682
+          }
+        },
+        {
+          "turn": 95,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 41105998.0,
+            "sql_selects": 300.0,
+            "sql_rows_read": 367.0,
+            "wall_ms": 45.074071
+          }
+        },
+        {
+          "turn": 96,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 41459537.0,
+            "sql_selects": 300.0,
+            "sql_rows_read": 371.0,
+            "wall_ms": 49.358225999999995
+          }
+        },
+        {
+          "turn": 97,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 41772344.0,
+            "sql_selects": 294.0,
+            "sql_rows_read": 356.0,
+            "wall_ms": 60.847435
+          }
+        },
+        {
+          "turn": 98,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 42047169.0,
+            "sql_selects": 283.0,
+            "sql_rows_read": 335.0,
+            "wall_ms": 61.855002
+          }
+        },
+        {
+          "turn": 99,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 42393483.0,
+            "sql_selects": 284.0,
+            "sql_rows_read": 342.0,
+            "wall_ms": 37.183277000000004
+          }
+        },
+        {
+          "turn": 100,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 42762024.0,
+            "sql_selects": 288.0,
+            "sql_rows_read": 347.0,
+            "wall_ms": 44.533514000000004
+          }
+        },
+        {
+          "turn": 101,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 43091147.0,
+            "sql_selects": 287.0,
+            "sql_rows_read": 348.0,
+            "wall_ms": 38.111044
+          }
+        },
+        {
+          "turn": 102,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 43397706.0,
+            "sql_selects": 286.0,
+            "sql_rows_read": 346.0,
+            "wall_ms": 45.312169
+          }
+        },
+        {
+          "turn": 103,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 43765889.0,
+            "sql_selects": 293.0,
+            "sql_rows_read": 354.0,
+            "wall_ms": 47.046313999999995
+          }
+        },
+        {
+          "turn": 104,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 44078015.0,
+            "sql_selects": 296.0,
+            "sql_rows_read": 360.0,
+            "wall_ms": 42.479838
+          }
+        },
+        {
+          "turn": 105,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 44432185.0,
+            "sql_selects": 295.0,
+            "sql_rows_read": 355.0,
+            "wall_ms": 50.938792
+          }
+        },
+        {
+          "turn": 106,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 44753152.0,
+            "sql_selects": 289.0,
+            "sql_rows_read": 347.0,
+            "wall_ms": 42.118267
+          }
+        },
+        {
+          "turn": 107,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 45113903.0,
+            "sql_selects": 297.0,
+            "sql_rows_read": 358.0,
+            "wall_ms": 61.988042
+          }
+        },
+        {
+          "turn": 108,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 45393865.0,
+            "sql_selects": 291.0,
+            "sql_rows_read": 357.0,
+            "wall_ms": 52.301126000000004
+          }
+        },
+        {
+          "turn": 109,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 45749204.0,
+            "sql_selects": 297.0,
+            "sql_rows_read": 362.0,
+            "wall_ms": 61.700911999999995
+          }
+        },
+        {
+          "turn": 110,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 46067185.0,
+            "sql_selects": 292.0,
+            "sql_rows_read": 357.0,
+            "wall_ms": 43.440045
+          }
+        },
+        {
+          "turn": 111,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 46407948.0,
+            "sql_selects": 297.0,
+            "sql_rows_read": 367.0,
+            "wall_ms": 68.062427
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 14.0,
+      "worker_executions_total": null,
+      "name": "reread-small",
+      "script_digest": "8c89bccfe0fda5b8800c6ae0abeb78b41a357b33f533708232c91f0e4242e798",
+      "turns": 7,
+      "steady_turns": 7,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 31515892.0,
+          "per_turn_median": 4469135.0,
+          "per_turn_p95": 4783823.0,
+          "per_turn_max": 4783823.0,
+          "slope_per_history_turn": 86750.393,
+          "robust_slope_per_history_turn": 78335.667,
+          "slope_per_frame_turn": 86750.393,
+          "robust_slope_per_frame_turn": 78335.667
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 1868.0,
+          "per_turn_median": 270.0,
+          "per_turn_p95": 270.0,
+          "per_turn_max": 270.0,
+          "slope_per_history_turn": 1.607,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 1.607,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 2095.0,
+          "per_turn_median": 303.0,
+          "per_turn_p95": 304.0,
+          "per_turn_max": 304.0,
+          "slope_per_history_turn": 2.75,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 2.75,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 110.755,
+          "per_turn_median": 13.975,
+          "per_turn_p95": 21.489,
+          "per_turn_max": 21.489,
+          "slope_per_history_turn": -0.012,
+          "robust_slope_per_history_turn": -0.061,
+          "slope_per_frame_turn": -0.012,
+          "robust_slope_per_frame_turn": -0.061
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4270888.0,
+            "sql_selects": 253.0,
+            "sql_rows_read": 277.0,
+            "wall_ms": 16.240642
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4309961.0,
+            "sql_selects": 270.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 13.975138
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4415592.0,
+            "sql_selects": 270.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 13.951614
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4469135.0,
+            "sql_selects": 270.0,
+            "sql_rows_read": 304.0,
+            "wall_ms": 21.488642
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4544968.0,
+            "sql_selects": 266.0,
+            "sql_rows_read": 302.0,
+            "wall_ms": 13.615561
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4783823.0,
+            "sql_selects": 269.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 17.776153
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4721525.0,
+            "sql_selects": 270.0,
+            "sql_rows_read": 303.0,
+            "wall_ms": 13.706973000000001
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 34.0,
+      "worker_executions_total": null,
+      "name": "reread-typical",
+      "script_digest": "176da82daaa736ae9fb2dd649881dcd1f28875a0fcae893d253f60d20b1efed4",
+      "turns": 17,
+      "steady_turns": 17,
+      "summary": {
+        "ipc_frames": null,
+        "ipc_bytes": null,
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 89537920.0,
+          "per_turn_median": 5227486.0,
+          "per_turn_p95": 6007666.0,
+          "per_turn_max": 6145194.0,
+          "slope_per_history_turn": 105658.978,
+          "robust_slope_per_history_turn": 104435.964,
+          "slope_per_frame_turn": 105658.978,
+          "robust_slope_per_frame_turn": 104435.964
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 4664.0,
+          "per_turn_median": 276.0,
+          "per_turn_p95": 279.0,
+          "per_turn_max": 279.0,
+          "slope_per_history_turn": 0.74,
+          "robust_slope_per_history_turn": 0.5,
+          "slope_per_frame_turn": 0.74,
+          "robust_slope_per_frame_turn": 0.5
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 5324.0,
+          "per_turn_median": 318.0,
+          "per_turn_p95": 321.0,
+          "per_turn_max": 321.0,
+          "slope_per_history_turn": 1.551,
+          "robust_slope_per_history_turn": 1.0,
+          "slope_per_frame_turn": 1.551,
+          "robust_slope_per_frame_turn": 1.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 274.586,
+          "per_turn_median": 15.649,
+          "per_turn_p95": 20.424,
+          "per_turn_max": 20.814,
+          "slope_per_history_turn": 0.151,
+          "robust_slope_per_history_turn": 0.177,
+          "slope_per_frame_turn": 0.151,
+          "robust_slope_per_frame_turn": 0.177
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4456738.0,
+            "sql_selects": 257.0,
+            "sql_rows_read": 279.0,
+            "wall_ms": 15.71283
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4506920.0,
+            "sql_selects": 269.0,
+            "sql_rows_read": 307.0,
+            "wall_ms": 12.966439
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4639654.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 307.0,
+            "wall_ms": 13.765232000000001
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4699596.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 309.0,
+            "wall_ms": 20.814202
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 4807021.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 307.0,
+            "wall_ms": 13.145346
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5067850.0,
+            "sql_selects": 272.0,
+            "sql_rows_read": 307.0,
+            "wall_ms": 17.344289999999997
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5007014.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 315.0,
+            "wall_ms": 13.692246
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5118066.0,
+            "sql_selects": 273.0,
+            "sql_rows_read": 318.0,
+            "wall_ms": 14.628889000000001
+          }
+        },
+        {
+          "turn": 9,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5227486.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 319.0,
+            "wall_ms": 15.649731
+          }
+        },
+        {
+          "turn": 10,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5331965.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 321.0,
+            "wall_ms": 19.372137000000002
+          }
+        },
+        {
+          "turn": 11,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5726858.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 319.0,
+            "wall_ms": 14.834586
+          }
+        },
+        {
+          "turn": 12,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5520075.0,
+            "sql_selects": 274.0,
+            "sql_rows_read": 318.0,
+            "wall_ms": 19.942201
+          }
+        },
+        {
+          "turn": 13,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5633459.0,
+            "sql_selects": 279.0,
+            "sql_rows_read": 321.0,
+            "wall_ms": 15.648909
+          }
+        },
+        {
+          "turn": 14,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5738265.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 319.0,
+            "wall_ms": 15.295534
+          }
+        },
+        {
+          "turn": 15,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 5904093.0,
+            "sql_selects": 276.0,
+            "sql_rows_read": 319.0,
+            "wall_ms": 15.112179
+          }
+        },
+        {
+          "turn": 16,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6007666.0,
+            "sql_selects": 277.0,
+            "sql_rows_read": 320.0,
+            "wall_ms": 20.424399
+          }
+        },
+        {
+          "turn": 17,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": null,
+            "ipc_bytes": null,
+            "allocated_bytes": 6145194.0,
+            "sql_selects": 278.0,
+            "sql_rows_read": 319.0,
+            "wall_ms": 16.237237
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 17.0,
+      "worker_executions_total": 17.0,
+      "name": "workflow-heavy",
+      "script_digest": "c743112c06ca1f9a8671013e01244c6ffab554fe827d30219dd2b4bca683b8eb",
+      "turns": 17,
+      "steady_turns": 16,
+      "summary": {
+        "ipc_frames": {
+          "unit": "frames",
+          "kind": "counted",
+          "total": 769.0,
+          "per_turn_median": 47.0,
+          "per_turn_p95": 47.0,
+          "per_turn_max": 47.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "ipc_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 1016991.0,
+          "per_turn_median": 63048.5,
+          "per_turn_p95": 63968.0,
+          "per_turn_max": 64094.0,
+          "slope_per_history_turn": 192.985,
+          "robust_slope_per_history_turn": 142.544,
+          "slope_per_frame_turn": 192.985,
+          "robust_slope_per_frame_turn": 142.544
+        },
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 266835149.0,
+          "per_turn_median": 16231073.5,
+          "per_turn_p95": 17760132.0,
+          "per_turn_max": 17930844.0,
+          "slope_per_history_turn": 210084.693,
+          "robust_slope_per_history_turn": 202676.087,
+          "slope_per_frame_turn": 210084.693,
+          "robust_slope_per_frame_turn": 202676.087
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 8051.0,
+          "per_turn_median": 486.5,
+          "per_turn_p95": 490.0,
+          "per_turn_max": 494.0,
+          "slope_per_history_turn": -0.254,
+          "robust_slope_per_history_turn": -0.236,
+          "slope_per_frame_turn": -0.254,
+          "robust_slope_per_frame_turn": -0.236
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 13993.0,
+          "per_turn_median": 856.0,
+          "per_turn_p95": 857.0,
+          "per_turn_max": 857.0,
+          "slope_per_history_turn": -0.075,
+          "robust_slope_per_history_turn": -0.083,
+          "slope_per_frame_turn": -0.075,
+          "robust_slope_per_frame_turn": -0.083
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 1724.163,
+          "per_turn_median": 98.895,
+          "per_turn_p95": 116.362,
+          "per_turn_max": 123.107,
+          "slope_per_history_turn": 0.315,
+          "robust_slope_per_history_turn": 0.416,
+          "slope_per_frame_turn": 0.315,
+          "robust_slope_per_frame_turn": 0.416
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": true,
+          "metrics": {
+            "ipc_frames": 17.0,
+            "ipc_bytes": 10321.0,
+            "allocated_bytes": 6938904.0,
+            "sql_selects": 258.0,
+            "sql_rows_read": 302.0,
+            "wall_ms": 80.155943
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 59692.0,
+            "allocated_bytes": 14560068.0,
+            "sql_selects": 494.0,
+            "sql_rows_read": 857.0,
+            "wall_ms": 94.047103
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 62157.0,
+            "allocated_bytes": 14951964.0,
+            "sql_selects": 489.0,
+            "sql_rows_read": 857.0,
+            "wall_ms": 110.662221
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 62300.0,
+            "allocated_bytes": 15007378.0,
+            "sql_selects": 490.0,
+            "sql_rows_read": 857.0,
+            "wall_ms": 96.69011800000001
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 62413.0,
+            "allocated_bytes": 15226065.0,
+            "sql_selects": 486.0,
+            "sql_rows_read": 856.0,
+            "wall_ms": 116.36157
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 62546.0,
+            "allocated_bytes": 15829051.0,
+            "sql_selects": 483.0,
+            "sql_rows_read": 853.0,
+            "wall_ms": 95.40873599999999
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 62679.0,
+            "allocated_bytes": 15588479.0,
+            "sql_selects": 488.0,
+            "sql_rows_read": 856.0,
+            "wall_ms": 97.90289100000001
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 62794.0,
+            "allocated_bytes": 15792009.0,
+            "sql_selects": 486.0,
+            "sql_rows_read": 856.0,
+            "wall_ms": 98.402883
+          }
+        },
+        {
+          "turn": 9,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 62927.0,
+            "allocated_bytes": 16160284.0,
+            "sql_selects": 489.0,
+            "sql_rows_read": 857.0,
+            "wall_ms": 107.343282
+          }
+        },
+        {
+          "turn": 10,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 63170.0,
+            "allocated_bytes": 16301863.0,
+            "sql_selects": 485.0,
+            "sql_rows_read": 855.0,
+            "wall_ms": 91.85907399999999
+          }
+        },
+        {
+          "turn": 11,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 63326.0,
+            "allocated_bytes": 17256599.0,
+            "sql_selects": 483.0,
+            "sql_rows_read": 853.0,
+            "wall_ms": 97.622864
+          }
+        },
+        {
+          "turn": 12,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 63468.0,
+            "allocated_bytes": 16627708.0,
+            "sql_selects": 487.0,
+            "sql_rows_read": 855.0,
+            "wall_ms": 99.386975
+          }
+        },
+        {
+          "turn": 13,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 63588.0,
+            "allocated_bytes": 16775028.0,
+            "sql_selects": 486.0,
+            "sql_rows_read": 856.0,
+            "wall_ms": 105.042161
+          }
+        },
+        {
+          "turn": 14,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 63716.0,
+            "allocated_bytes": 16932163.0,
+            "sql_selects": 489.0,
+            "sql_rows_read": 857.0,
+            "wall_ms": 123.10736899999999
+          }
+        },
+        {
+          "turn": 15,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 63832.0,
+            "allocated_bytes": 17196610.0,
+            "sql_selects": 485.0,
+            "sql_rows_read": 855.0,
+            "wall_ms": 109.601513
+          }
+        },
+        {
+          "turn": 16,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 63968.0,
+            "allocated_bytes": 17760132.0,
+            "sql_selects": 488.0,
+            "sql_rows_read": 856.0,
+            "wall_ms": 102.485418
+          }
+        },
+        {
+          "turn": 17,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 47.0,
+            "ipc_bytes": 64094.0,
+            "allocated_bytes": 17930844.0,
+            "sql_selects": 485.0,
+            "sql_rows_read": 855.0,
+            "wall_ms": 98.083171
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 6.0,
+      "worker_executions_total": 6.0,
+      "name": "workflow-small",
+      "script_digest": "497bf3bc8bdbc17d8fa3fe0c13c650c98945284f70c1f146938b6d0ce8fbd05e",
+      "turns": 6,
+      "steady_turns": 5,
+      "summary": {
+        "ipc_frames": {
+          "unit": "frames",
+          "kind": "counted",
+          "total": 127.0,
+          "per_turn_median": 22.0,
+          "per_turn_p95": 22.0,
+          "per_turn_max": 22.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "ipc_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 186414.0,
+          "per_turn_median": 35264.0,
+          "per_turn_p95": 35396.0,
+          "per_turn_max": 35396.0,
+          "slope_per_history_turn": 111.6,
+          "robust_slope_per_history_turn": 67.0,
+          "slope_per_frame_turn": 111.6,
+          "robust_slope_per_frame_turn": 67.0
+        },
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 51181322.0,
+          "per_turn_median": 8788725.0,
+          "per_turn_p95": 9281422.0,
+          "per_turn_max": 9281422.0,
+          "slope_per_history_turn": 152378.4,
+          "robust_slope_per_history_turn": 140071.833,
+          "slope_per_frame_turn": 152378.4,
+          "robust_slope_per_frame_turn": 140071.833
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 1798.0,
+          "per_turn_median": 308.0,
+          "per_turn_p95": 310.0,
+          "per_turn_max": 310.0,
+          "slope_per_history_turn": 0.8,
+          "robust_slope_per_history_turn": 0.583,
+          "slope_per_frame_turn": 0.8,
+          "robust_slope_per_frame_turn": 0.583
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 2336.0,
+          "per_turn_median": 407.0,
+          "per_turn_p95": 409.0,
+          "per_turn_max": 409.0,
+          "slope_per_history_turn": 1.0,
+          "robust_slope_per_history_turn": 1.0,
+          "slope_per_frame_turn": 1.0,
+          "robust_slope_per_frame_turn": 1.0
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 271.642,
+          "per_turn_median": 40.542,
+          "per_turn_p95": 41.455,
+          "per_turn_max": 41.455,
+          "slope_per_history_turn": 2.811,
+          "robust_slope_per_history_turn": 2.635,
+          "slope_per_frame_turn": 2.811,
+          "robust_slope_per_frame_turn": 2.635
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": true,
+          "metrics": {
+            "ipc_frames": 17.0,
+            "ipc_bytes": 10321.0,
+            "allocated_bytes": 6856463.0,
+            "sql_selects": 258.0,
+            "sql_rows_read": 302.0,
+            "wall_ms": 85.069452
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 34905.0,
+            "allocated_bytes": 8582864.0,
+            "sql_selects": 306.0,
+            "sql_rows_read": 405.0,
+            "wall_ms": 30.784692
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 35197.0,
+            "allocated_bytes": 8772590.0,
+            "sql_selects": 306.0,
+            "sql_rows_read": 405.0,
+            "wall_ms": 32.814183
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 35264.0,
+            "allocated_bytes": 8788725.0,
+            "sql_selects": 310.0,
+            "sql_rows_read": 407.0,
+            "wall_ms": 41.454648
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 35331.0,
+            "allocated_bytes": 8899258.0,
+            "sql_selects": 310.0,
+            "sql_rows_read": 409.0,
+            "wall_ms": 40.542161
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 22.0,
+            "ipc_bytes": 35396.0,
+            "allocated_bytes": 9281422.0,
+            "sql_selects": 308.0,
+            "sql_rows_read": 408.0,
+            "wall_ms": 40.97717
+          }
+        }
+      ]
+    },
+    {
+      "model_calls_total": 8.0,
+      "worker_executions_total": 8.0,
+      "name": "workflow-typical",
+      "script_digest": "26f7578f95446c6051b62965d326f62fba99a4fa45fd4e6260687da54baec17a",
+      "turns": 8,
+      "steady_turns": 7,
+      "summary": {
+        "ipc_frames": {
+          "unit": "frames",
+          "kind": "counted",
+          "total": 206.0,
+          "per_turn_median": 27.0,
+          "per_turn_p95": 27.0,
+          "per_turn_max": 27.0,
+          "slope_per_history_turn": 0.0,
+          "robust_slope_per_history_turn": 0.0,
+          "slope_per_frame_turn": 0.0,
+          "robust_slope_per_frame_turn": 0.0
+        },
+        "ipc_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 291365.0,
+          "per_turn_median": 40212.0,
+          "per_turn_p95": 40449.0,
+          "per_turn_max": 40449.0,
+          "slope_per_history_turn": 133.357,
+          "robust_slope_per_history_turn": 81.0,
+          "slope_per_frame_turn": 133.357,
+          "robust_slope_per_frame_turn": 81.0
+        },
+        "allocated_bytes": {
+          "unit": "bytes",
+          "kind": "counted",
+          "total": 78322268.0,
+          "per_turn_median": 10191521.0,
+          "per_turn_p95": 10573828.0,
+          "per_turn_max": 10573828.0,
+          "slope_per_history_turn": 128807.821,
+          "robust_slope_per_history_turn": 126875.667,
+          "slope_per_frame_turn": 128807.821,
+          "robust_slope_per_frame_turn": 126875.667
+        },
+        "sql_selects": {
+          "unit": "statements",
+          "kind": "counted",
+          "total": 2680.0,
+          "per_turn_median": 345.0,
+          "per_turn_p95": 353.0,
+          "per_turn_max": 353.0,
+          "slope_per_history_turn": -0.286,
+          "robust_slope_per_history_turn": -0.25,
+          "slope_per_frame_turn": -0.286,
+          "robust_slope_per_frame_turn": -0.25
+        },
+        "sql_rows_read": {
+          "unit": "rows",
+          "kind": "counted",
+          "total": 3728.0,
+          "per_turn_median": 490.0,
+          "per_turn_p95": 491.0,
+          "per_turn_max": 491.0,
+          "slope_per_history_turn": -0.286,
+          "robust_slope_per_history_turn": -0.25,
+          "slope_per_frame_turn": -0.286,
+          "robust_slope_per_frame_turn": -0.25
+        },
+        "wall_ms": {
+          "unit": "ms",
+          "kind": "timed",
+          "total": 434.921,
+          "per_turn_median": 48.956,
+          "per_turn_p95": 55.44,
+          "per_turn_max": 55.44,
+          "slope_per_history_turn": 1.377,
+          "robust_slope_per_history_turn": 1.256,
+          "slope_per_frame_turn": 1.377,
+          "robust_slope_per_frame_turn": 1.256
+        }
+      },
+      "rounds": [
+        {
+          "turn": 1,
+          "setup": true,
+          "metrics": {
+            "ipc_frames": 17.0,
+            "ipc_bytes": 10335.0,
+            "allocated_bytes": 6861415.0,
+            "sql_selects": 258.0,
+            "sql_rows_read": 302.0,
+            "wall_ms": 88.512665
+          }
+        },
+        {
+          "turn": 2,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 27.0,
+            "ipc_bytes": 39475.0,
+            "allocated_bytes": 9764686.0,
+            "sql_selects": 344.0,
+            "sql_rows_read": 489.0,
+            "wall_ms": 42.189541999999996
+          }
+        },
+        {
+          "turn": 3,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 27.0,
+            "ipc_bytes": 40062.0,
+            "allocated_bytes": 10012706.0,
+            "sql_selects": 348.0,
+            "sql_rows_read": 491.0,
+            "wall_ms": 48.545257
+          }
+        },
+        {
+          "turn": 4,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 27.0,
+            "ipc_bytes": 40141.0,
+            "allocated_bytes": 10003301.0,
+            "sql_selects": 345.0,
+            "sql_rows_read": 490.0,
+            "wall_ms": 46.813306
+          }
+        },
+        {
+          "turn": 5,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 27.0,
+            "ipc_bytes": 40212.0,
+            "allocated_bytes": 10191521.0,
+            "sql_selects": 353.0,
+            "sql_rows_read": 491.0,
+            "wall_ms": 54.737623
+          }
+        },
+        {
+          "turn": 6,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 27.0,
+            "ipc_bytes": 40305.0,
+            "allocated_bytes": 10573828.0,
+            "sql_selects": 342.0,
+            "sql_rows_read": 487.0,
+            "wall_ms": 48.955629
+          }
+        },
+        {
+          "turn": 7,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 27.0,
+            "ipc_bytes": 40386.0,
+            "allocated_bytes": 10388871.0,
+            "sql_selects": 347.0,
+            "sql_rows_read": 490.0,
+            "wall_ms": 55.439614
+          }
+        },
+        {
+          "turn": 8,
+          "setup": false,
+          "metrics": {
+            "ipc_frames": 27.0,
+            "ipc_bytes": 40449.0,
+            "allocated_bytes": 10525940.0,
+            "sql_selects": 343.0,
+            "sql_rows_read": 488.0,
+            "wall_ms": 49.727803
+          }
+        }
+      ]
+    }
+  ]
+}

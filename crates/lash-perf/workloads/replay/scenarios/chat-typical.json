@@ -1,0 +1,17 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "chat-typical",
+  "description": "Explore only. provenance: WildChat-1M 7d6490e462285cf85d91eabea0f9a954fbddcd1f p50 user turns, user bytes and assistant bytes; independent marginals.",
+  "protocol": "standard",
+  "turns": [
+    {
+      "repeat": 2,
+      "user": "Synthetic payload for replay measurements. Synthetic paylo",
+      "replies": [
+        {
+          "text": "Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements.  {turn}"
+        }
+      ]
+    }
+  ]
+}

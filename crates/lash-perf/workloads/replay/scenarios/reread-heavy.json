@@ -1,0 +1,28 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "reread-heavy",
+  "description": "Explore only. provenance: SWE-agent-trajectories 68195a1450865274106246d0d0296a1d6807b88e p99 action counts and output bytes; only 7 distinct opened-file paths versus 111 actions motivates repeated identical reads. One stable key isolates content reuse; it is not an observed read-frequency estimate.",
+  "protocol": "standard",
+  "turns": [
+    {
+      "repeat": 111,
+      "user": "Continue synthetic task {turn}.",
+      "replies": [
+        {
+          "tool_calls": [
+            {
+              "tool": "fixture_large",
+              "args": {
+                "key": "same-file-0Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthet",
+                "bytes": 5620
+              }
+            }
+          ]
+        },
+        {
+          "text": "Rechecked the unchanged synthetic file {turn}."
+        }
+      ]
+    }
+  ]
+}

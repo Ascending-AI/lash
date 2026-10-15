@@ -1,0 +1,37 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "analysis-py-heavy",
+  "description": "Explore only. provenance: Jupyter agent 10a8dd461bb6c580fa25b83cd3b2f6810f1d6385 non_thinking p99 model calls mapped to turns, visible output bytes as previews, and code bytes (minimum executable source may exceed small cells). Growing synthetic table = 8 bytes per printed dataframe cell at p90, divided across turns. Native dataframe heap size is unobserved; backing chunks model file data, not logged tool output.",
+  "protocol": "python",
+  "turns": [
+    {
+      "repeat": 1,
+      "user": "Continue synthetic task {turn}.",
+      "replies": [
+        {
+          "cell": [
+            "chunks = []",
+            "retained = 0",
+            "await control_finish({\"ready\": True})"
+          ]
+        }
+      ],
+      "setup": true
+    },
+    {
+      "repeat": 13,
+      "user": "Continue synthetic task {turn}.",
+      "replies": [
+        {
+          "cell": [
+            "# Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synthetic payload for replay measurements. Synt",
+            "chunk = await tools_fixture_large({\"key\": \"data-{turn}\", \"bytes\": 829893})",
+            "chunks.append(chunk[\"text\"])",
+            "retained = retained + len(chunk[\"text\"])",
+            "await control_finish({\"retained\": retained, \"chunks\": len(chunks), \"preview\": chunk[\"text\"][:2080]})"
+          ]
+        }
+      ]
+    }
+  ]
+}

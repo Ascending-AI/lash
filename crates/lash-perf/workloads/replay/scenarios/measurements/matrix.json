@@ -1,0 +1,221 @@
+[
+  {
+    "name": "chat-small",
+    "protocol": "standard",
+    "turns": 1,
+    "steady_turns": 1,
+    "output_bytes": 146
+  },
+  {
+    "name": "coding-small",
+    "protocol": "standard",
+    "turns": 4,
+    "steady_turns": 4,
+    "calls_per_turn": 2,
+    "total_tools": 7,
+    "output_bytes": 129
+  },
+  {
+    "name": "analysis-ts-small",
+    "protocol": "typescript",
+    "turns": 4,
+    "steady_turns": 3,
+    "calls_per_turn": 1,
+    "output_bytes": 2667,
+    "retained_bytes": 8001,
+    "preview_bytes": 95,
+    "state_percentile": 10,
+    "cell_bytes": 246
+  },
+  {
+    "name": "analysis-py-small",
+    "protocol": "python",
+    "turns": 4,
+    "steady_turns": 3,
+    "calls_per_turn": 1,
+    "output_bytes": 2667,
+    "retained_bytes": 8001,
+    "preview_bytes": 95,
+    "state_percentile": 10,
+    "cell_bytes": 241
+  },
+  {
+    "name": "workflow-small",
+    "protocol": "typescript",
+    "turns": 6,
+    "steady_turns": 5,
+    "calls_per_turn": 1,
+    "delay_ms": 5
+  },
+  {
+    "name": "fanout-small",
+    "protocol": "standard",
+    "turns": 1,
+    "steady_turns": 1,
+    "calls_per_turn": 2,
+    "output_bytes": 15
+  },
+  {
+    "name": "reread-small",
+    "protocol": "standard",
+    "turns": 7,
+    "steady_turns": 7,
+    "calls_per_turn": 1,
+    "output_bytes": 129
+  },
+  {
+    "name": "output-burst-small",
+    "protocol": "standard",
+    "turns": 7,
+    "steady_turns": 7,
+    "calls_per_turn": 1,
+    "output_bytes": 643,
+    "burst_bytes": 4239
+  },
+  {
+    "name": "chat-typical",
+    "protocol": "standard",
+    "turns": 2,
+    "steady_turns": 2,
+    "output_bytes": 903
+  },
+  {
+    "name": "coding-typical",
+    "protocol": "standard",
+    "turns": 5,
+    "steady_turns": 5,
+    "calls_per_turn": 4,
+    "total_tools": 17,
+    "output_bytes": 643
+  },
+  {
+    "name": "analysis-ts-typical",
+    "protocol": "typescript",
+    "turns": 6,
+    "steady_turns": 5,
+    "calls_per_turn": 1,
+    "output_bytes": 30701,
+    "retained_bytes": 153505,
+    "preview_bytes": 380,
+    "state_percentile": 50,
+    "cell_bytes": 475
+  },
+  {
+    "name": "analysis-py-typical",
+    "protocol": "python",
+    "turns": 6,
+    "steady_turns": 5,
+    "calls_per_turn": 1,
+    "output_bytes": 30701,
+    "retained_bytes": 153505,
+    "preview_bytes": 380,
+    "state_percentile": 50,
+    "cell_bytes": 475
+  },
+  {
+    "name": "workflow-typical",
+    "protocol": "typescript",
+    "turns": 8,
+    "steady_turns": 7,
+    "calls_per_turn": 2,
+    "delay_ms": 5
+  },
+  {
+    "name": "fanout-typical",
+    "protocol": "standard",
+    "turns": 1,
+    "steady_turns": 1,
+    "calls_per_turn": 6,
+    "output_bytes": 686
+  },
+  {
+    "name": "reread-typical",
+    "protocol": "standard",
+    "turns": 17,
+    "steady_turns": 17,
+    "calls_per_turn": 1,
+    "output_bytes": 643
+  },
+  {
+    "name": "output-burst-typical",
+    "protocol": "standard",
+    "turns": 17,
+    "steady_turns": 17,
+    "calls_per_turn": 1,
+    "output_bytes": 643,
+    "burst_bytes": 5620
+  },
+  {
+    "name": "chat-heavy",
+    "protocol": "standard",
+    "turns": 14,
+    "steady_turns": 14,
+    "output_bytes": 5367
+  },
+  {
+    "name": "coding-heavy",
+    "protocol": "standard",
+    "turns": 28,
+    "steady_turns": 28,
+    "calls_per_turn": 4,
+    "total_tools": 111,
+    "output_bytes": 5620
+  },
+  {
+    "name": "analysis-ts-heavy",
+    "protocol": "typescript",
+    "turns": 14,
+    "steady_turns": 13,
+    "calls_per_turn": 1,
+    "output_bytes": 829893,
+    "retained_bytes": 10788609,
+    "preview_bytes": 2080,
+    "state_percentile": 90,
+    "cell_bytes": 2144
+  },
+  {
+    "name": "analysis-py-heavy",
+    "protocol": "python",
+    "turns": 14,
+    "steady_turns": 13,
+    "calls_per_turn": 1,
+    "output_bytes": 829893,
+    "retained_bytes": 10788609,
+    "preview_bytes": 2080,
+    "state_percentile": 90,
+    "cell_bytes": 2144
+  },
+  {
+    "name": "workflow-heavy",
+    "protocol": "typescript",
+    "turns": 17,
+    "steady_turns": 16,
+    "calls_per_turn": 6,
+    "delay_ms": 5
+  },
+  {
+    "name": "fanout-heavy",
+    "protocol": "standard",
+    "turns": 1,
+    "steady_turns": 1,
+    "calls_per_turn": 18,
+    "output_bytes": 3370
+  },
+  {
+    "name": "reread-heavy",
+    "protocol": "standard",
+    "turns": 111,
+    "steady_turns": 111,
+    "calls_per_turn": 1,
+    "output_bytes": 5620
+  },
+  {
+    "name": "output-burst-heavy",
+    "protocol": "standard",
+    "turns": 111,
+    "steady_turns": 111,
+    "calls_per_turn": 1,
+    "output_bytes": 643,
+    "burst_bytes": 5620
+  }
+]

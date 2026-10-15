@@ -1,0 +1,39 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "workflow-heavy",
+  "description": "Explore only. provenance: tau-bench 59a200c6d575d595120f1cb70fea53cef0632f6b p99 user turns. Sequential cell parks represent asynchronous workflow steps, compressed to 5 ms each. Steps/turn = 1/2/6 (small floor, p90/p99 calls/user turn); no real multi-day waits or owner crashes are claimed.",
+  "protocol": "typescript",
+  "turns": [
+    {
+      "repeat": 1,
+      "user": "Continue synthetic task {turn}.",
+      "replies": [
+        {
+          "cell": [
+            "let progress = [];",
+            "await control.finish({ ready: true });"
+          ]
+        }
+      ],
+      "setup": true
+    },
+    {
+      "repeat": 16,
+      "user": "Continue synthetic task {turn}.",
+      "replies": [
+        {
+          "cell": [
+            "const phase0 = await tools.fixture_slow({ key: \"phase-{turn}-0\", ms: 5 });",
+            "const phase1 = await tools.fixture_slow({ key: \"phase-{turn}-1\", ms: 5 });",
+            "const phase2 = await tools.fixture_slow({ key: \"phase-{turn}-2\", ms: 5 });",
+            "const phase3 = await tools.fixture_slow({ key: \"phase-{turn}-3\", ms: 5 });",
+            "const phase4 = await tools.fixture_slow({ key: \"phase-{turn}-4\", ms: 5 });",
+            "const phase5 = await tools.fixture_slow({ key: \"phase-{turn}-5\", ms: 5 });",
+            "progress.push({turn});",
+            "await control.finish({ completed: progress.length });"
+          ]
+        }
+      ]
+    }
+  ]
+}

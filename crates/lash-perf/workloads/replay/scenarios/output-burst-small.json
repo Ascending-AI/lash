@@ -1,0 +1,48 @@
+{
+  "format": "lash-perf-replay/1",
+  "name": "output-burst-small",
+  "description": "Explore only. provenance: SWE-agent-trajectories 68195a1450865274106246d0d0296a1d6807b88e p10 action count; ordinary results use p50 (643 bytes), final result p90 (4239 bytes). Isolates tail output from typical turns; frequency and ordering are synthetic.",
+  "protocol": "standard",
+  "turns": [
+    {
+      "repeat": 6,
+      "user": "Continue synthetic task {turn}.",
+      "replies": [
+        {
+          "tool_calls": [
+            {
+              "tool": "fixture_large",
+              "args": {
+                "key": "read-{turn}-0Synthetic payload for replay mea",
+                "bytes": 643
+              }
+            }
+          ]
+        },
+        {
+          "text": "Synthetic small observation {turn}."
+        }
+      ]
+    },
+    {
+      "repeat": 1,
+      "user": "Continue synthetic task {turn}.",
+      "replies": [
+        {
+          "tool_calls": [
+            {
+              "tool": "fixture_large",
+              "args": {
+                "key": "read-{turn}-0Synthetic payload for replay mea",
+                "bytes": 4239
+              }
+            }
+          ]
+        },
+        {
+          "text": "Synthetic output burst {turn}."
+        }
+      ]
+    }
+  ]
+}
