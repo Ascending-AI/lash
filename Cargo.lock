@@ -32,7 +32,6 @@ dependencies = [
  "delegation",
  "dotenvy",
  "futures-util",
- "http",
  "lash-rmcp",
  "lash-runtime",
  "lash-sim",
