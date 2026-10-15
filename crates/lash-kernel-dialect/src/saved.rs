@@ -14,13 +14,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    Action, Annotations, Atom, Callee, Datum, Document, EffectName, Expr, Function, FunctionId,
-    Literal, MapEntry, Member, Name, Node, Object, ObjectId, Place, RecordEntry, Rhs, Signature,
-    Site, Stmt, Unit, Value, ValueKind,
+    Action, Atom, Callee, Datum, Document, EffectName, Expr, Function, FunctionId, Literal,
+    MapEntry, Member, Name, Node, Object, ObjectId, Place, RecordEntry, Rhs, Signature, Site, Stmt,
+    Unit, Value, ValueKind,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::FunctionValues;
+use crate::{FunctionValues, Written};
 
 mod graph;
 
@@ -192,26 +192,6 @@ pub struct Kept {
     pub aliases: BTreeSet<Name>,
 }
 
-/// A saved function as its dialect wrote it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Written {
-    pub dialect: String,
-    /// The function's signature in the dialect's own type syntax.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signature: Option<String>,
-    /// The source text of the statement that bound it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    /// The signature a host starts the function under, where every
-    /// parameter is one a start can name and type.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start: Option<Signature>,
-    /// Dialect-owned call metadata, interpreted only by that dialect's lowerer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<serde_json::Value>,
-}
-
 /// Why a binding that holds a function was not saved.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -292,9 +272,9 @@ pub struct Left<'a> {
     /// ([`crate::Environment::controls`]), as the cell was lowered against
     /// them.
     pub controls: &'a BTreeMap<EffectName, BTreeSet<crate::EffectControl>>,
-    /// The document's annotations, which state what each function's
-    /// source wrote of it ([`WRITTEN`]).
-    pub annotations: Option<&'a Annotations>,
+    /// What the source wrote of each function the document makes, by the
+    /// site of its closure ([`crate::Lowered::written`]).
+    pub written: &'a BTreeMap<Site, Written>,
     /// What the session's dialect holds a function value in. A binding
     /// that holds a token is saved as the closure it holds, with the token.
     pub values: &'a FunctionValues,
@@ -361,44 +341,6 @@ pub fn token_of(
 ) -> Option<Token> {
     Token::frozen(value, values.tag()?, objects, &BTreeMap::new(), |member| {
         matches!(member, Value::Function(_))
-    })
-}
-
-/// The annotation key under which a dialect states, on the statement that
-/// binds a function, what the source wrote of it: an object with the
-/// function's `signature` as text and, where a host may start it, the
-/// kernel signature it is started under as `start`.
-pub const WRITTEN: &str = "function";
-
-/// The annotation key of a statement's byte span in the source: `[start,
-/// end]`.
-const SPAN: &str = "span";
-
-/// What the annotations state of the function the closure at `site` is.
-fn written(annotations: &Annotations, site: &Site) -> Option<Written> {
-    // The closure is the right-hand side of the statement that binds it.
-    let (_, statement) = site.path.split_last()?;
-    let node = annotations
-        .nodes
-        .iter()
-        .find(|node| node.site.unit == site.unit && node.site.path == statement)?;
-    let stated = node.data.get(WRITTEN);
-    let source = node.data.get(SPAN).and_then(|span| {
-        let start = usize::try_from(span.get(0)?.as_u64()?).ok()?;
-        let end = usize::try_from(span.get(1)?.as_u64()?).ok()?;
-        annotations.source.as_deref()?.get(start..end)
-    });
-    Some(Written {
-        dialect: annotations.dialect.clone()?,
-        signature: stated
-            .and_then(|stated| stated.get("signature"))
-            .and_then(|signature| signature.as_str())
-            .map(str::to_owned),
-        source: source.map(str::to_owned),
-        metadata: stated.and_then(|stated| stated.get("metadata")).cloned(),
-        start: stated
-            .and_then(|stated| stated.get("start"))
-            .and_then(|start| serde_json::from_value(start.clone()).ok()),
     })
 }
 
@@ -684,9 +626,7 @@ fn save_closure(
             })
             .collect(),
         helper_owners: owners,
-        written: left
-            .annotations
-            .and_then(|annotations| written(annotations, &object.site)),
+        written: left.written.get(&object.site).cloned(),
         token: None,
     })
 }

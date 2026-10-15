@@ -45,7 +45,7 @@ pub(crate) type Lowering<T> = Result<T, Diagnostic>;
 pub(crate) struct Note {
     span: Option<Span>,
     blocks: Vec<Vec<Note>>,
-    written: Option<serde_json::Value>,
+    written: Option<lash_kernel_dialect::Written>,
 }
 
 /// Kernel statements with their notes.
@@ -382,10 +382,11 @@ pub(crate) fn lower(
             format!("the program lowers to a document the kernel refuses: {invalid}"),
         )
     })?;
-    let annotations = annotate::annotations(&document, &main.notes, source)?;
+    let (annotations, written) = annotate::annotations(&document, &main.notes, source)?;
     Ok(Lowered {
         document,
         annotations,
+        written,
     })
 }
 
@@ -546,7 +547,7 @@ impl Lowerer<'_> {
     }
 
     /// The function `id` names, when a `def` is all that binds it.
-    fn known_def(&self, id: &str) -> Option<scope::Signature> {
+    fn known_def(&self, id: &str) -> Option<lash_kernel_dialect::CallShape> {
         let found = self.variable(id)?;
         self.scopes[found.scope?].bindings.defs.get(id).cloned()
     }

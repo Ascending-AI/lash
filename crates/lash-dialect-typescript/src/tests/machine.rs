@@ -624,7 +624,7 @@ fn numeric_entry_saved_functions_accept_later_unknown_calls() {
             closure_objects: &finished.closures.objects,
             not_carried: &finished.not_carried,
             controls: super::controls(),
-            annotations: Some(&lowered.annotations),
+            written: &lowered.written,
             values: &crate::function_values(),
         },
         &BTreeSet::new(),

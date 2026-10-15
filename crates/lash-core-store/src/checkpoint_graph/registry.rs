@@ -141,6 +141,7 @@ registry! {
     PROCESS_STATE = 38, "ProcessState", Enveloped, Node, Seams;
     TURN_CONTENT = 39, "TurnContent", Enveloped, Node, Integrator;
     CALL_BODY = 40, "CallBody", Enveloped, Node, Host;
+    WRITTEN_TABLE = 41, "WrittenTable", Enveloped, Node, Kernel;
 }
 
 impl NodeKind {

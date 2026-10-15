@@ -507,6 +507,13 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "name": "CallBody",
       "owner": "Host",
       "shape": "Enveloped"
+    },
+    {
+      "bound": 65536,
+      "kind": 41,
+      "name": "WrittenTable",
+      "owner": "Kernel",
+      "shape": "Enveloped"
     }
   ],
   "root_sources": [

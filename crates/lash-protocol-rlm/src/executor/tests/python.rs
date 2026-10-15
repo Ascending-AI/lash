@@ -358,7 +358,7 @@ async fn saved_cell(
 }
 
 /// FIG-5778: cold restore retains Python's keyword/default and async call
-/// metadata as well as the frozen captures and original source.
+/// shape as well as the frozen captures.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_saved_function_is_called_after_a_cold_restore() {
     let host = open_host().await;
@@ -372,18 +372,8 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
         .written
         .as_ref()
         .expect("Python metadata");
-    assert_eq!(
-        written.signature.as_deref(),
-        Some("async (value: int = 14) -> int")
-    );
-    assert_eq!(
-        written.source.as_deref(),
-        Some(code.split_once('\n').expect("def text").1)
-    );
-    assert_eq!(
-        written.metadata.as_ref().expect("call metadata")["is_async"],
-        true
-    );
+    assert_eq!(written.signature, "async (value: int = 14) -> int");
+    assert!(written.call.as_ref().expect("call shape").is_async);
     source
         .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
         .expect("snapshot");
@@ -426,7 +416,7 @@ async fn a_new_session_created_with_a_saved_function_calls_it() {
     .await;
     let functions = source.saved_functions();
     assert_eq!(
-        functions["greet"]["written"]["metadata"]["params"][0]["name"], "name",
+        functions["greet"]["written"]["call"]["params"][0]["name"], "name",
         "{}",
         functions["greet"]
     );

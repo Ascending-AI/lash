@@ -945,7 +945,7 @@ impl DialectSession {
                             .function
                             .written
                             .as_ref()
-                            .and_then(|written| written.signature.as_deref())
+                            .map(|written| written.signature.as_str())
                             .unwrap_or("(...)");
                         (
                             name.to_string(),

@@ -1,48 +1,59 @@
-//! Turns the notes kept beside each statement into annotations keyed by
-//! site, once the document is whole.
+//! Turns the notes kept beside each statement into annotations and the
+//! written table, both keyed by site, once the document is whole.
 
 use std::collections::BTreeMap;
 
+use lash_kernel_dialect::Written;
 use lash_kernel_doc::{Annotations, Document, Node, NodeAnnotation, Site, Stmt, Unit};
 
 use super::{Lowering, Note};
 use crate::diagnostics::{self, Code};
 
+/// The annotation layer of `document`, and what the source wrote of each
+/// function it makes, by the site of the function's closure.
 pub(super) fn annotations(
     document: &Document,
     notes: &[Note],
     source: &str,
-) -> Lowering<Annotations> {
+) -> Lowering<(Annotations, BTreeMap<Site, Written>)> {
     let identity = document
         .identity()
         .map_err(|error| diagnostics::unplaced(Code::InvalidDocument, error.to_string()))?;
     let mut annotations = Annotations::new(identity);
     annotations.dialect = Some(crate::DIALECT.to_string());
     annotations.source = Some(source.to_string());
+    let mut written = BTreeMap::new();
     block(
         &document.main,
         notes,
         &Site::new(Unit::Main, Vec::new()),
         &mut annotations.nodes,
+        &mut written,
     );
-    Ok(annotations)
+    Ok((annotations, written))
 }
 
-fn block(statements: &[Stmt], notes: &[Note], site: &Site, out: &mut Vec<NodeAnnotation>) {
+fn block(
+    statements: &[Stmt],
+    notes: &[Note],
+    site: &Site,
+    out: &mut Vec<NodeAnnotation>,
+    written: &mut BTreeMap<Site, Written>,
+) {
     for (index, (statement, note)) in statements.iter().zip(notes).enumerate() {
         let index = u32::try_from(index).unwrap_or(u32::MAX);
         let statement_site = site.child(index);
-        if note.span.is_some() || note.written.is_some() {
+        if let Some(function) = &note.written
+            && let Some(closure) = lash_kernel_dialect::closure_site(statement, &statement_site)
+        {
+            written.insert(closure, function.clone());
+        }
+        if let Some(span) = note.span {
             let mut data = BTreeMap::new();
-            if let Some(span) = note.span {
-                data.insert(
-                    "span".to_string(),
-                    serde_json::json!([span.start, span.end]),
-                );
-            }
-            if let Some(written) = &note.written {
-                data.insert(lash_kernel_dialect::WRITTEN.to_string(), written.clone());
-            }
+            data.insert(
+                "span".to_string(),
+                serde_json::json!([span.start, span.end]),
+            );
             out.push(NodeAnnotation {
                 site: statement_site.clone(),
                 label: None,
@@ -52,7 +63,7 @@ fn block(statements: &[Stmt], notes: &[Note], site: &Site, out: &mut Vec<NodeAnn
         let mut nested = Vec::new();
         nested_blocks(Node::Stmt(statement), &statement_site, &mut nested);
         for ((inner, inner_site), inner_notes) in nested.into_iter().zip(&note.blocks) {
-            block(inner, inner_notes, &inner_site, out);
+            block(inner, inner_notes, &inner_site, out, written);
         }
     }
 }

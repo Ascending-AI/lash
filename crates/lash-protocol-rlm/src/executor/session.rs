@@ -35,7 +35,7 @@ use lash_core_store::execution_state::{
 };
 use lash_kernel_dialect::{FunctionValues, Kept, NotSaved, SavedFunction};
 use lash_kernel_doc::{
-    Annotations, Document, Identity, KERNEL_VERSION, Name, NumberPolicy, Object, ObjectId, Value,
+    Document, Identity, KERNEL_VERSION, Name, NumberPolicy, Object, ObjectId, Value,
 };
 use lash_kernel_vm::Bindings;
 
@@ -122,7 +122,9 @@ fn check_held(
 /// What a finished cell left a session.
 pub(super) struct CellLeft<'a> {
     pub document: &'a Document,
-    pub annotations: Option<&'a Annotations>,
+    /// What the source wrote of each function the document makes, by the
+    /// site of its closure.
+    pub written: &'a BTreeMap<lash_kernel_doc::Site, lash_kernel_dialect::Written>,
     /// `main`'s top-level bindings that are data.
     pub bindings: Bindings,
     /// The ones the run's end did not carry, and of those the ones that
@@ -223,7 +225,7 @@ impl SessionBindings {
                     closure_objects: &cell.closures.objects,
                     not_carried: &cell.not_carried,
                     controls: &cell.controls,
-                    annotations: cell.annotations,
+                    written: cell.written,
                     values,
                 },
                 &held,

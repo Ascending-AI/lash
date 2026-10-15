@@ -19,6 +19,7 @@ use crate::testing::{DurableHost, cell_context, cell_services, python_workers, r
 mod repeat;
 mod saved_functions;
 mod tool_args;
+mod written;
 
 const SESSION: &str = "cell-laws";
 const TURN: &str = "turn-1";

@@ -1,7 +1,8 @@
 //! Functions as closures of the dialect's calling convention,
 //! `fn(this, args)`.
 
-use lash_kernel_doc::{Expr, Float, Literal, Place, Stmt};
+use lash_kernel_dialect::Written;
+use lash_kernel_doc::{Expr, Float, Literal, Place, SourceLanguage, Stmt};
 
 use super::patterns::Mode;
 use super::{BindingKind, Buf, FunctionFrame, Lowerer, Lowering, Operand, Ty};
@@ -10,8 +11,9 @@ use crate::adapter as ast;
 impl Lowerer<'_> {
     /// What the source wrote of `function`: its signature as text, and the
     /// signature a host starts it under when every parameter is a plain
-    /// name of a durable type.
-    pub(super) fn written(&self, function: &ast::Function) -> serde_json::Value {
+    /// name of a durable type. A call places its arguments by position, so
+    /// it states no call shape.
+    pub(super) fn written(&self, function: &ast::Function) -> Written {
         let text = |span: crate::SourceSpan| self.source.get(span.start..span.end).unwrap_or("");
         let mut params = Vec::with_capacity(function.params.len());
         for param in &function.params {
@@ -29,14 +31,12 @@ impl Lowerer<'_> {
             signature.push_str(" => ");
             signature.push_str(text(annotation.span));
         }
-        let mut written = serde_json::Map::new();
-        written.insert("signature".to_owned(), signature.into());
-        if let Ok(start) = self.process_signature(function)
-            && let Ok(start) = serde_json::to_value(start)
-        {
-            written.insert("start".to_owned(), start);
+        Written {
+            language: SourceLanguage::TypeScript,
+            signature,
+            start: self.process_signature(function).ok(),
+            call: None,
         }
-        serde_json::Value::Object(written)
     }
 
     /// A function's value. Inside its own body a named function expression
@@ -161,9 +161,7 @@ impl Lowerer<'_> {
         self.span = outer_span;
         self.functions.pop();
         let body = body?;
-        if self.in_cell_code() {
-            self.written = Some(self.written(function));
-        }
+        self.written = Some(self.written(function));
         let closure = self.emit_closure(vec![this, args], body);
         Ok(Operand {
             plain: None,
@@ -307,9 +305,7 @@ impl Lowerer<'_> {
             });
             Ok(())
         })?;
-        if self.in_cell_code() {
-            self.written = Some(self.written(function));
-        }
+        self.written = Some(self.written(function));
         let closure = self.emit_closure(vec![this, args], body);
         let closure = Operand {
             ty: self.facts.function(function.return_ty.as_ref()),

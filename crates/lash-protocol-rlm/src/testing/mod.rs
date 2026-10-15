@@ -277,3 +277,62 @@ pub(crate) fn python_workers() -> lash_vm_client::service::Service {
     ];
     lash_vm_client::service::Service::new(lash_vm_client::PoolConfig::codemode(entry))
 }
+
+/// A front end that lowers as the one it wraps does and keeps no map of
+/// where the statements came from: what it lowers has an empty annotation
+/// layer. Nothing a run or a save needs may be missing from such a cell.
+struct Unmapped(Box<dyn lash_kernel_dialect::FrontEnd>);
+
+impl lash_kernel_dialect::FrontEnd for Unmapped {
+    fn lower(
+        &self,
+        source: &str,
+        environment: &lash_kernel_dialect::Environment<'_>,
+    ) -> Result<lash_kernel_dialect::Lowered, lash_kernel_dialect::Diagnostic> {
+        let mut lowered = self.0.lower(source, environment)?;
+        lowered.annotations = lash_kernel_doc::Annotations::new(lowered.annotations.document);
+        Ok(lowered)
+    }
+}
+
+/// The name of [`unmapped_worker_entry`], as libtest spells it.
+const UNMAPPED_WORKER_ENTRY: &str = "testing::unmapped_worker_entry";
+
+/// Both dialects, each lowering with no source map.
+fn unmapped_embedding(
+    tuning: &lash_vm_client::WorkerTuning,
+) -> Result<lash_vm_worker::Embedding, lash_vm_worker::EmbedError> {
+    let unmapped =
+        |front_end| -> Box<dyn lash_kernel_dialect::FrontEnd> { Box::new(Unmapped(front_end)) };
+    lash_vm_worker::Embedder::kernel()?
+        .dialect(lash_vm_worker::typescript(tuning).with_front_end(unmapped))?
+        .dialect(lash_vm_worker::python().with_front_end(unmapped))?
+        .finish()
+}
+
+/// The worker entry of [`unmapped_workers`], as [`python_worker_entry`] is
+/// of [`python_workers`].
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a worker's process ends when its pool closes it, not when libtest returns"
+)]
+fn unmapped_worker_entry() {
+    if lash_vm_worker::worker_entry(&unmapped_embedding).expect("serve as an unmapped worker") {
+        std::process::exit(0);
+    }
+}
+
+/// A worker service whose workers lower both dialects with no source map:
+/// this test binary, entered at [`unmapped_worker_entry`].
+pub(crate) fn unmapped_workers() -> lash_vm_client::service::Service {
+    let mut entry = lash_vm_client::WorkerEntry::reexec().expect("this test binary's path");
+    entry.args = vec![
+        "--exact".to_owned(),
+        "--nocapture".to_owned(),
+        "--test-threads=1".to_owned(),
+        "--".to_owned(),
+        UNMAPPED_WORKER_ENTRY.to_owned(),
+    ];
+    lash_vm_client::service::Service::new(lash_vm_client::PoolConfig::codemode(entry))
+}

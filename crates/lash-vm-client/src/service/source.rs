@@ -71,6 +71,7 @@ impl Service {
             Response::Lowered {
                 document,
                 annotations,
+                written,
                 ..
             } => {
                 let document = std::str::from_utf8(&document)
@@ -82,6 +83,7 @@ impl Service {
                         .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?,
                     annotations: lash_kernel_doc::Annotations::from_json(annotations)
                         .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?,
+                    written,
                 })
             }
             other => Err(refused(other)),

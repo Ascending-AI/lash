@@ -15,7 +15,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{Datum, Document, EffectName, Signature};
+use lash_kernel_dialect::Written;
+use lash_kernel_doc::{Datum, Document, EffectName, Signature, Site};
 use lash_vm_runtime::{HostBoundary, HostEffect};
 
 use super::host::{CellHostLedgers, HostGraph, LedgerCall, LedgerCallState};
@@ -50,6 +51,11 @@ pub struct CellEnvelope {
     /// The document's annotations, as JSON: where each statement came from
     /// in the source.
     pub annotations: String,
+    /// What the source wrote of each function the document makes, by the
+    /// site of its closure: what the cell saves a function it leaves with
+    /// ([`lash_kernel_dialect::Lowered::written`]).
+    #[serde(with = "lash_kernel_dialect::written_table")]
+    pub written: BTreeMap<Site, Written>,
     /// What the dialect's function values are, where its sessions keep the
     /// functions a cell binds ([`lash_kernel_dialect::Package::function_values`]).
     pub function_values: Option<lash_kernel_dialect::FunctionValues>,
@@ -564,6 +570,7 @@ struct EnvelopeBody {
     document_id: lash_kernel_doc::DocumentId,
     document: NodeId,
     annotations: NodeId,
+    written: NodeId,
     function_values: Option<lash_kernel_dialect::FunctionValues>,
     effects: NodeId,
     release: NodeId,
@@ -571,25 +578,27 @@ struct EnvelopeBody {
 
 impl TokenCodec for EnvelopeBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(8);
+        out.seq(9);
         out.text(&self.code);
         out.text(&self.dialect);
         self.document_id.encode(out);
         self.document.encode(out);
         self.annotations.encode(out);
+        self.written.encode(out);
         encode_opt_tree(self.function_values.as_ref(), out);
         self.effects.encode(out);
         self.release.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(8)?;
+        input.expect_struct(9)?;
         Ok(Self {
             code: input.text()?.to_owned(),
             dialect: input.text()?.to_owned(),
             document_id: lash_kernel_doc::DocumentId::decode(input)?,
             document: NodeId::decode(input)?,
             annotations: NodeId::decode(input)?,
+            written: NodeId::decode(input)?,
             function_values: decode_opt_tree(input)?,
             effects: NodeId::decode(input)?,
             release: NodeId::decode(input)?,
@@ -599,8 +608,8 @@ impl TokenCodec for EnvelopeBody {
 
 impl CellEnvelope {
     /// Stages the cell's envelope under the exact helper release `release`
-    /// (a ReleaseManifest), its document and annotations as typed nodes,
-    /// and returns the envelope's node.
+    /// (a ReleaseManifest), its document, annotations and written table as
+    /// typed nodes, and returns the envelope's node.
     ///
     /// # Errors
     ///
@@ -625,6 +634,7 @@ impl CellEnvelope {
             document_id,
             document: staging.encode_value(NodeKind::DOCUMENT, &document)?,
             annotations: staging.encode_value(NodeKind::ANNOTATIONS, &annotations)?,
+            written: staging.encode_value(NodeKind::WRITTEN_TABLE, &self.written)?,
             function_values: self.function_values.clone(),
             effects: staging.encode_value(
                 NodeKind::EFFECT_TABLE,
@@ -664,6 +674,8 @@ impl CellEnvelope {
         }
         let annotations: lash_kernel_doc::Annotations =
             decoder.decode(body.annotations, NodeKind::ANNOTATIONS)?;
+        let written: BTreeMap<Site, Written> =
+            decoder.decode(body.written, NodeKind::WRITTEN_TABLE)?;
         let table: EffectTable = decoder.decode(body.effects, NodeKind::EFFECT_TABLE)?;
         let envelope = Self {
             code: body.code,
@@ -674,6 +686,7 @@ impl CellEnvelope {
             annotations: annotations
                 .to_json()
                 .map_err(|error| graph_invalid(NodeKind::ANNOTATIONS, error))?,
+            written,
             function_values: body.function_values,
             effects: table.effects,
             grants: table.grants,

@@ -137,6 +137,18 @@ result it recorded before. `lashvm` holds no turn checkpoint and the
 retained set's images keep their bytes: a checkpoint without `cell` still
 decodes, and its cell's span then starts when the resuming owner runs it.
 
+FIG-6375 changed two stored shapes in place: a cell envelope (kind 15)
+gained its typed written table (kind 41, `WrittenTable`), and a saved
+function's `Written` (kind 30 member rows) became typed, with its call shape
+in place of open dialect metadata and no source text. `session` was
+re-recorded with its recorder, and set
+`4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1`'s `pending-tool-typescript`,
+`pending-tool-python` and `saved-declared-read` images were re-recorded in
+place on one build rebased onto `origin/main`: each held a kind-15 envelope
+of the old shape. The three kernel images and `lashvm` are byte-identical.
+Every re-recorded image resumed to exactly its previously recorded result;
+no oracle, set id, program, helper catalogue or version changed.
+
 Source `env.sh`, then run the existing recorder locally on the build being
 retained, naming its full commit (use a new build, never an existing set):
 

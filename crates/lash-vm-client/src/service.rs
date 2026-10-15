@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use lash_kernel_doc::{EffectName, Name, Signature};
+use lash_kernel_doc::{EffectName, Name, Signature, Site};
 use lash_vm_protocol::{EncodedPayload, FrameEpoch, OwnerEpoch, VmOwner};
 use serde::{Deserialize, Serialize};
 
@@ -89,6 +89,10 @@ pub enum Response {
         /// Its annotations' JSON encoding.
         #[serde(with = "serde_bytes")]
         annotations: Vec<u8>,
+        /// What the source wrote of each function the document makes, by
+        /// the site of its closure ([`lash_kernel_dialect::Lowered::written`]).
+        #[serde(with = "lash_kernel_dialect::written_table")]
+        written: BTreeMap<Site, lash_kernel_dialect::Written>,
         /// What the dialect's function values are, where its sessions keep
         /// the functions a cell binds for later cells
         /// ([`lash_kernel_dialect::Package::function_values`]).

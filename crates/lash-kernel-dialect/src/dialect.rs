@@ -2,7 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{Annotations, Document, EffectName, FunctionDefinition, Name, Signature};
+use lash_kernel_doc::{
+    Annotations, Document, EffectName, FunctionDefinition, Name, Signature, Site,
+};
 
 use crate::diagnostic::Diagnostic;
 use crate::library::Library;
@@ -79,6 +81,9 @@ pub struct Lowered {
     /// Where each statement came from in the source. It never changes
     /// behaviour or the document's identity (`K-ID-001`).
     pub annotations: Annotations,
+    /// What the source wrote of each function the cell's code makes, by
+    /// the site of its closure.
+    pub written: BTreeMap<Site, crate::Written>,
 }
 
 /// Lowers source in one language to a kernel document.

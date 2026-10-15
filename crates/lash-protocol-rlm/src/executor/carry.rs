@@ -227,6 +227,16 @@ impl KernelCarry {
             carried_cell.annotations =
                 serde_json::to_string(&annotations).map_err(|error| state(error.to_string()))?;
         }
+        // What the source wrote of a function follows its closure's node,
+        // with no source map needed; a closure the rewrite did not keep
+        // makes no function to save.
+        carried_cell.written = std::mem::take(&mut carried_cell.written)
+            .into_iter()
+            .filter_map(|(site, written)| {
+                let site = plan.rewritten.correspondence.successor(&site)?.clone();
+                Some((site, written))
+            })
+            .collect();
         // The carried cell stays in its dialect's release line: its
         // envelope pins the release this build writes for that dialect, as
         // its run does.

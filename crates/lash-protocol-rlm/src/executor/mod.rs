@@ -404,13 +404,14 @@ async fn link_cell(
             reads: candidates.keys().cloned().collect(),
         })
         .await;
-    let (document, annotations, function_values, reached) = match lowered {
+    let (document, annotations, written, function_values, reached) = match lowered {
         Ok(Response::Lowered {
             document,
             annotations,
+            written,
             function_values,
             reads,
-        }) => (document, annotations, function_values, reads),
+        }) => (document, annotations, written, function_values, reads),
         Ok(Response::DialectRefused(mut refusal)) => {
             let feedback =
                 crate::feedback::contribute_repairs(&mut refusal, code, &grant_calls, ctx);
@@ -454,6 +455,7 @@ async fn link_cell(
         dialect: state.dialect().to_owned(),
         document: text(document, "document")?,
         annotations: text(annotations, "annotations")?,
+        written,
         function_values,
         effects: CellEnvelope::record_effects(&boundary),
         grants,
@@ -967,7 +969,7 @@ async fn run_linked_cell(
                     .retain(|name, _| !projected.contains(name.as_str()));
                 let bindings = state.settle_cell(session::CellLeft {
                     document: &host.entries.document,
-                    annotations: annotations.as_ref(),
+                    written: &host.envelope.written,
                     bindings: left,
                     not_carried: finished.not_carried,
                     closures: finished.closures,

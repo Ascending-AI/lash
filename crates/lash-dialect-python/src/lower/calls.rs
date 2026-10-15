@@ -419,7 +419,11 @@ impl Lowerer<'_> {
             slots.resize(signature.params.len(), None);
             for (keyword, value) in call.arguments.keywords.iter().zip(keyword_values) {
                 let name = keyword.arg.as_ref().map_or("", |name| name.id.as_str());
-                match signature.params.iter().position(|param| param.name == name) {
+                match signature
+                    .params
+                    .iter()
+                    .position(|param| param.name.as_str() == name)
+                {
                     None => {
                         problem = Some(format!("got an unexpected keyword argument '{name}'"));
                     }

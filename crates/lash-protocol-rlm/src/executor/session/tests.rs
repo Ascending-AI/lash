@@ -187,7 +187,7 @@ fn a_cell_whose_dialect_declares_no_function_values_keeps_no_function() {
     let mut bindings = super::SessionBindings::default();
     let changes = bindings.settle(super::CellLeft {
         document: &document,
-        annotations: None,
+        written: &Default::default(),
         bindings: lash_kernel_vm::Bindings::default(),
         not_carried: vec![name.clone()],
         closures: lash_kernel_vm::Bindings {

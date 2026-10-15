@@ -260,6 +260,24 @@ impl Dialect {
     pub fn name(&self) -> &str {
         self.name
     }
+
+    /// This dialect, its front end replaced by what `wrap` makes of it.
+    /// Hidden from docs: test support, not dialect surface.
+    #[doc(hidden)]
+    #[cfg(feature = "testing")]
+    #[must_use]
+    pub fn with_front_end(
+        mut self,
+        wrap: impl FnOnce(
+            Box<dyn lash_kernel_dialect::FrontEnd>,
+        ) -> Box<dyn lash_kernel_dialect::FrontEnd>,
+    ) -> Self {
+        self.package = self.package.map(|mut package| {
+            package.front_end = wrap(package.front_end);
+            package
+        });
+        self
+    }
 }
 
 /// A worker's registry while it is assembled.

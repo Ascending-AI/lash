@@ -212,7 +212,7 @@ struct Positional {
 pub(crate) struct Note {
     pub(crate) span: Option<SourceSpan>,
     /// What the function the statement binds is, as its source wrote it.
-    pub(crate) written: Option<serde_json::Value>,
+    pub(crate) written: Option<lash_kernel_dialect::Written>,
     /// The notes of the statement's blocks, in the order a walk of its
     /// children meets them.
     pub(crate) blocks: Vec<Vec<Note>>,
@@ -327,7 +327,7 @@ pub(crate) struct Lowerer<'a> {
     saved_used: BTreeSet<Name>,
     /// What the closure just emitted is, as its source wrote it, until the
     /// statement that binds it takes it.
-    written: Option<serde_json::Value>,
+    written: Option<lash_kernel_dialect::Written>,
     /// Every name the source assigns to.
     assigned: &'a BTreeSet<String>,
 }
@@ -518,10 +518,11 @@ fn lower_program(
             environment.library,
         );
     }
-    let annotations = annotate::annotations(&document, &main.notes, source)?;
+    let (annotations, written) = annotate::annotations(&document, &main.notes, source)?;
     Ok(Lowered {
         document,
         annotations,
+        written,
     })
 }
 

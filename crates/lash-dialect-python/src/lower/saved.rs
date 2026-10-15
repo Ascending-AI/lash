@@ -1,24 +1,25 @@
 //! Python's saved call signature and the entry a saved function starts as.
 
-use lash_kernel_dialect::SavedFunction;
+use lash_kernel_dialect::{CallParam, CallShape, SavedFunction, Written};
 use lash_kernel_doc::{
-    Action, Atom, Callee, Expr, Function, Literal, MapEntry, Name, Param, Rhs, Signature, Stmt,
-    Type,
+    Action, Atom, Callee, Expr, Function, Literal, MapEntry, Name, Param, Rhs, Signature,
+    SourceLanguage, Stmt, Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::Ranged;
 
 use super::{Lowerer, Lowering, Operand};
-use crate::scope::{self, Ty};
+use crate::scope::Ty;
 
-/// A later call needs the parameter names, default slots and coroutine rule.
-/// These are dialect metadata; the kernel never interprets them.
-pub(super) fn call_signature(saved: &SavedFunction) -> Option<scope::Signature> {
+/// A later call needs the parameter names, default slots and coroutine
+/// rule: the call shape Python wrote of the function, which the kernel never
+/// interprets.
+pub(super) fn call_signature(saved: &SavedFunction) -> Option<CallShape> {
     let written = saved.written.as_ref()?;
-    if written.dialect != crate::DIALECT {
+    if written.language != SourceLanguage::Python {
         return None;
     }
-    serde_json::from_value(written.metadata.clone()?).ok()
+    written.call.clone()
 }
 
 impl Lowerer<'_> {
@@ -27,15 +28,15 @@ impl Lowerer<'_> {
         parameters: Option<&ast::Parameters>,
         is_async: bool,
         returns: Option<&PyExpr>,
-    ) -> serde_json::Value {
+    ) -> Written {
         let params = parameters
             .map(|parameters| parameters.args.as_slice())
             .unwrap_or_default();
-        let signature = scope::Signature {
+        let call = CallShape {
             params: params
                 .iter()
-                .map(|param| scope::Param {
-                    name: param.parameter.name.id.to_string(),
+                .map(|param| CallParam {
+                    name: Name::new(param.parameter.name.id.as_str()),
                     has_default: param.default.is_some(),
                 })
                 .collect(),
@@ -62,7 +63,12 @@ impl Lowerer<'_> {
                 .collect(),
             result: parameter_type(returns),
         };
-        serde_json::json!({ "signature": text, "metadata": signature, "start": start })
+        Written {
+            language: SourceLanguage::Python,
+            signature: text,
+            start: Some(start),
+            call: Some(call),
+        }
     }
 
     /// Evaluate a start's input in Python order, replacing only a saved

@@ -56,7 +56,7 @@ impl Lowerer<'_> {
         if let Some(note) = self.buf.notes.last_mut() {
             note.written = None;
         }
-        let written = self.in_cell_code().then(|| self.written(function));
+        let written = self.written(function);
         let this = self.fresh("this");
         let args = self.fresh("args");
         let params = vec![this.clone(), args.clone()];
@@ -72,7 +72,7 @@ impl Lowerer<'_> {
             });
             Ok(())
         })?;
-        self.written = written;
+        self.written = Some(written);
         let closure = self.emit_closure(params, block);
         Ok(self.function_token(function, closure))
     }

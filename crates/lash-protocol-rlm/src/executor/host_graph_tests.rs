@@ -259,6 +259,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         dialect: "typescript".to_owned(),
         document: document.to_json().unwrap(),
         annotations: annotations.to_json().unwrap(),
+        written: std::collections::BTreeMap::new(),
         function_values: None,
         effects: [(
             operation(),

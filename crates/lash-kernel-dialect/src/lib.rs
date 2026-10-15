@@ -21,6 +21,7 @@ mod name_plan;
 pub mod readability;
 mod saved;
 mod source;
+mod written;
 
 #[cfg(test)]
 mod tests;
@@ -35,9 +36,10 @@ pub use name_plan::NamePlan;
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, Constant, DOCUMENT_NODE_KIND,
     FUNCTION_BUNDLE_NODE_KIND, Kept, Left, MemberBody, NotSaved, SavedFunction, Token, Unusable,
-    WRITTEN, Written, closure_of, function_reference, install, save, token_of,
+    closure_of, function_reference, install, save, token_of,
 };
 pub use source::{SourceError, define_functions};
+pub use written::{CallParam, CallShape, Written, closure_site, written_table};
 
 pub use imperative::{
     GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,

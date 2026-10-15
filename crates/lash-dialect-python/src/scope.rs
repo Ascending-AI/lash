@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lash_kernel_dialect::{CallParam, CallShape};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
@@ -56,36 +57,19 @@ impl Ty {
     }
 }
 
-/// One parameter of a function the front end can see.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Param {
-    pub(crate) name: String,
-    pub(crate) has_default: bool,
-}
-
-/// A `def` whose name nothing else binds, so a call of the name is a call
-/// of this function.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct Signature {
-    pub(crate) params: Vec<Param>,
-    pub(crate) is_async: bool,
-}
-
-impl Signature {
-    pub(crate) fn of(parameters: &ast::Parameters, is_async: bool) -> Self {
-        Self {
-            params: parameters
-                .args
-                .iter()
-                .map(|param| Param {
-                    name: param.parameter.name.id.as_str().to_string(),
-                    has_default: param.default.is_some(),
-                })
-                .collect(),
-            is_async,
-        }
+/// The call shape of a `def`'s or a lambda's parameters: their names and
+/// which have defaults, in order, and whether a call makes a coroutine.
+pub(crate) fn call_shape(parameters: &ast::Parameters, is_async: bool) -> CallShape {
+    CallShape {
+        params: parameters
+            .args
+            .iter()
+            .map(|param| CallParam {
+                name: lash_kernel_doc::Name::new(param.parameter.name.id.as_str()),
+                has_default: param.default.is_some(),
+            })
+            .collect(),
+        is_async,
     }
 }
 
@@ -99,7 +83,7 @@ pub(crate) struct Bindings {
     /// The annotated type of a name, where every annotation agrees.
     pub(crate) types: BTreeMap<String, Ty>,
     /// The functions bound once, by a `def`.
-    pub(crate) defs: BTreeMap<String, Signature>,
+    pub(crate) defs: BTreeMap<String, CallShape>,
     /// Those of `defs` that take the exception their caller handles, for a
     /// bare `raise` they reach (`reraisers`).
     pub(crate) reraisers: BTreeSet<String>,
@@ -111,7 +95,7 @@ struct Collector {
     globals: BTreeSet<String>,
     nonlocals: BTreeSet<String>,
     types: BTreeMap<String, Ty>,
-    defs: BTreeMap<String, Signature>,
+    defs: BTreeMap<String, CallShape>,
 }
 
 impl Collector {
@@ -151,10 +135,8 @@ impl Collector {
             Stmt::FunctionDef(def) => {
                 let name = def.name.id.as_str();
                 self.bind(name);
-                self.defs.insert(
-                    name.to_string(),
-                    Signature::of(&def.parameters, def.is_async),
-                );
+                self.defs
+                    .insert(name.to_string(), call_shape(&def.parameters, def.is_async));
             }
             Stmt::Assign(assign) => assign.targets.iter().for_each(|target| self.target(target)),
             Stmt::AugAssign(assign) => self.target(&assign.target),

@@ -21,7 +21,8 @@ use lash_kernel_doc::graph_tokens::{
 };
 use lash_kernel_doc::{Datum, Document, EffectName, Name, Signature, ValueKind};
 
-use super::{CaptureRefusal, Constant, NotSaved, SavedFunction, Token, Written};
+use super::{CaptureRefusal, Constant, NotSaved, SavedFunction, Token};
+use crate::Written;
 
 /// The registry number of a Document node (`checkpoint_graph::NodeKind::DOCUMENT`).
 pub const DOCUMENT_NODE_KIND: u32 = 10;
@@ -269,28 +270,6 @@ impl TokenCodec for MemberBody {
             helper_owners: BTreeSet::decode(input)?,
             written: Option::decode(input)?,
             token: Option::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for Written {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
-        out.text(&self.dialect);
-        self.signature.encode(out);
-        self.source.encode(out);
-        self.start.encode(out);
-        self.metadata.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
-        Ok(Self {
-            dialect: String::decode(input)?,
-            signature: Option::decode(input)?,
-            source: Option::decode(input)?,
-            start: Option::decode(input)?,
-            metadata: Option::decode(input)?,
         })
     }
 }
