@@ -327,12 +327,9 @@ impl ProcessFeedSource {
         };
         let document = self.document(&process).await?;
         let mut workflow = match &document {
-            lash_core::ProcessDocumentIdentity::Available(document) => {
-                Some(lash_core::ProcessWorkflowOverlayAccumulator::new(
-                    self.process_id.clone(),
-                    document.clone(),
-                ))
-            }
+            lash_core::ProcessDocumentIdentity::Available(_) => Some(
+                lash_core::ProcessWorkflowOverlayAccumulator::new(self.process_id.clone()),
+            ),
             _ => None,
         };
         match fold_effects(
@@ -433,7 +430,11 @@ impl ProcessFeedSource {
                         {
                             continue;
                         }
-                        workflow.observe(&event.payload)?;
+                        if let lash_core::ProcessDocumentIdentity::Available(document) =
+                            &view.document
+                        {
+                            workflow.observe(document, &event.payload)?;
+                        }
                     }
                 }
                 lash_core::ProcessReplayOutcome::Gap(reason) => workflow.live_gap(reason),

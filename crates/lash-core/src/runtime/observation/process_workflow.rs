@@ -76,7 +76,9 @@ pub enum ProcessWorkflowLiveCoverage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessWorkflowOverlay {
     pub process_id: ProcessId,
-    pub document: WorkflowDocumentRef,
+    /// Supplied by an accepted live observation, absent in a committed-only fold.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<WorkflowDocumentRef>,
     pub current_sites: Vec<EffectIdentity>,
     pub live_coverage: ProcessWorkflowLiveCoverage,
     pub sites: Vec<ProcessWorkflowSite>,
@@ -101,7 +103,7 @@ struct Site {
 /// Replay duplicates and effect retries never increment the entry count.
 pub struct ProcessWorkflowOverlayAccumulator {
     process_id: ProcessId,
-    document: WorkflowDocumentRef,
+    document: Option<WorkflowDocumentRef>,
     sites: BTreeMap<lash_trace::WorkflowTaskSite, Site>,
     current: BTreeMap<lash_kernel_doc::TaskIdentity, EffectIdentity>,
     live_tasks: BTreeSet<lash_kernel_doc::TaskIdentity>,
@@ -112,10 +114,12 @@ pub struct ProcessWorkflowOverlayAccumulator {
 }
 
 impl ProcessWorkflowOverlayAccumulator {
-    pub fn new(process_id: ProcessId, document: WorkflowDocumentRef) -> Self {
+    /// Start a fold of stored process events without loading a workflow document.
+    /// Live observations supply their document reference to [`Self::observe`].
+    pub fn new(process_id: ProcessId) -> Self {
         Self {
             process_id,
-            document,
+            document: None,
             sites: BTreeMap::new(),
             current: BTreeMap::new(),
             live_tasks: BTreeSet::new(),
@@ -196,6 +200,12 @@ impl ProcessWorkflowOverlayAccumulator {
 
     /// A host's stored, typed lifecycle event, in sequence order. An already
     /// folded sequence is ignored, including commits replayed after a snapshot.
+    ///
+    /// This accepts the durable [`ObservedProcessEvent`], whose decoder expects
+    /// internal terminal records. A host storing projected terminal payloads
+    /// (from `ProcessTerminal::projection` or `ObservedProcessEvent::projection`)
+    /// calls [`Self::finish`] when the stored event's kind is terminal, rather
+    /// than decoding that payload as an `ObservedProcessEvent`.
     pub fn committed(&mut self, event: &ObservedProcessEvent) {
         if event.sequence <= self.through {
             return;
@@ -239,6 +249,15 @@ impl ProcessWorkflowOverlayAccumulator {
         }
     }
 
+    /// Fold a known terminal when the host holds only its projection. After
+    /// folding preceding committed events in sequence order, call this for any
+    /// terminal kind (`event_type.terminal_status().is_some()` on a projected
+    /// event); no terminal payload or workflow document is needed.
+    ///
+    /// Settled site outcomes remain authoritative. Running and waiting sites
+    /// become [`ProcessWorkflowSiteState::TerminalUnobserved`]: the process's
+    /// terminal does not prove that each unfinished action succeeded. Delayed
+    /// live observations cannot leave a terminal process's sites running.
     pub fn finish(&mut self) {
         self.ended = true;
         self.current.clear();
@@ -252,10 +271,27 @@ impl ProcessWorkflowOverlayAccumulator {
         }
     }
 
-    /// Fold exactly what a process feed emits. The process's committed
-    /// terminal stays authoritative when delayed live observations arrive.
+    fn live_document(
+        &mut self,
+        document: &WorkflowDocumentRef,
+    ) -> Result<(), ProcessWorkflowFoldError> {
+        if self.document.as_ref().is_some_and(|held| held != document) {
+            return Err(ProcessWorkflowFoldError::DifferentExecution);
+        }
+        self.document = Some(document.clone());
+        Ok(())
+    }
+
+    /// Fold exactly what a process feed emits. `document` is the expected
+    /// reference for live payloads; accepted live evidence binds the fold to it.
+    /// Committed payloads do not use or retain it. Hosts folding only stored
+    /// events use [`Self::committed`] and need no reference.
+    ///
+    /// The process's committed terminal stays authoritative when delayed live
+    /// observations arrive. Nested effect executions leave this fold unchanged.
     pub fn observe(
         &mut self,
+        document: &WorkflowDocumentRef,
         event: &ProcessObservationEventPayload,
     ) -> Result<(), ProcessWorkflowFoldError> {
         match event {
@@ -264,6 +300,7 @@ impl ProcessWorkflowOverlayAccumulator {
                 if observation.step.process_id != self.process_id {
                     return Err(ProcessWorkflowFoldError::DifferentExecution);
                 }
+                self.live_document(document)?;
                 self.live_coverage = ProcessWorkflowLiveCoverage::RetainedWindow;
                 self.enter_live(&observation.step.at);
                 self.site(
@@ -284,12 +321,13 @@ impl ProcessWorkflowOverlayAccumulator {
                 {
                     return Ok(());
                 }
-                if execution.identity.document != self.document
+                if &execution.identity.document != document
                     || !matches!(&execution.identity.subject,
                     TraceRuntimeSubject::Process { process_id } if process_id == self.process_id)
                 {
                     return Err(ProcessWorkflowFoldError::DifferentExecution);
                 }
+                self.live_document(document)?;
                 self.live_coverage = ProcessWorkflowLiveCoverage::RetainedWindow;
                 if let TraceLanguageExecutionPayload::Node { at, fact } = &execution.payload {
                     let state = match fact {
@@ -352,6 +390,142 @@ mod tests {
         TraceRuntimeScope, WorkflowDocumentEntry,
     };
 
+    /// FIG-6354: committed site evidence is independent of a release document.
+    #[test]
+    fn committed_site_states_do_not_require_a_document() {
+        let process = ProcessId::fixture("committed-workflow");
+        let document = WorkflowDocumentRef {
+            document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
+            entry: WorkflowDocumentEntry::Main,
+        };
+        let mut committed = ProcessWorkflowOverlayAccumulator::new(process.clone());
+        let mut live = ProcessWorkflowOverlayAccumulator::new(process.clone());
+        let at = lash_sansio::effect_identity_fixture("sleep", 1);
+        live.observe(
+            &document,
+            &ProcessObservationEventPayload::LanguageExecution(LanguageExecutionObservation {
+                language: None,
+                observed_at_ms: 1,
+                execution: TraceLanguageExecution {
+                    event_key: "sleep".into(),
+                    identity: TraceLanguageExecutionIdentity {
+                        scope: TraceRuntimeScope::none(),
+                        subject: TraceRuntimeSubject::Process {
+                            process_id: process,
+                        },
+                        document: document.clone(),
+                        entry_name: "main".into(),
+                        engine_execution_id: None,
+                        generation: None,
+                    },
+                    payload: TraceLanguageExecutionPayload::Node {
+                        at: at.clone(),
+                        fact: TraceNodeFact::Started { call_id: None },
+                    },
+                },
+            }),
+        )
+        .expect("live entry");
+        let wait = crate::WaitState {
+            kind: WaitKind::Sleep { until_ms: 3 },
+            since_ms: 2,
+            site: Some(at),
+        };
+        for (sequence, fact) in [
+            ProcessLifecycleFact::Waiting { wait: wait.clone() },
+            ProcessLifecycleFact::Resumed { wait },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let event = ObservedProcessEvent {
+                sequence: sequence as u64 + 1,
+                occurred_at_ms: sequence as u64 + 2,
+                fact,
+            };
+            committed.committed(&event);
+            live.committed(&event);
+            assert_eq!(committed.snapshot().sites, live.snapshot().sites);
+        }
+        assert_eq!(live.snapshot().document, Some(document));
+        let snapshot = committed.snapshot();
+        assert_eq!(snapshot.sites[0].state, ProcessWorkflowSiteState::Completed);
+        assert!(
+            serde_json::to_value(snapshot).expect("snapshot")["document"].is_null(),
+            "committed events supply no document reference"
+        );
+    }
+
+    /// FIG-6354: a host's projected terminal settles sites without decoding
+    /// the internal terminal record or claiming unobserved actions succeeded.
+    #[test]
+    fn a_stored_projected_terminal_settles_unfinished_sites() {
+        let mut overlay =
+            ProcessWorkflowOverlayAccumulator::new(ProcessId::fixture("projected-terminal"));
+        let sleep = crate::WaitState {
+            kind: WaitKind::Sleep { until_ms: 2 },
+            since_ms: 1,
+            site: Some(lash_sansio::effect_identity_fixture("settled", 0)),
+        };
+        let running = crate::WaitState {
+            kind: WaitKind::Process {
+                process_id: ProcessId::fixture("child"),
+            },
+            since_ms: 3,
+            site: Some(lash_sansio::effect_identity_fixture("running", 0)),
+        };
+        let waiting = crate::WaitState {
+            kind: WaitKind::Sleep { until_ms: 100 },
+            since_ms: 5,
+            site: Some(lash_sansio::effect_identity_fixture("waiting", 0)),
+        };
+        let facts = [
+            ProcessLifecycleFact::Waiting {
+                wait: sleep.clone(),
+            },
+            ProcessLifecycleFact::Resumed { wait: sleep },
+            ProcessLifecycleFact::Waiting {
+                wait: running.clone(),
+            },
+            ProcessLifecycleFact::Resumed { wait: running },
+            ProcessLifecycleFact::Waiting { wait: waiting },
+            ProcessLifecycleFact::Terminal {
+                outcome: crate::ProcessTerminal::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::json!("done"),
+                )),
+                authority: None,
+            },
+        ];
+        for (index, fact) in facts.into_iter().enumerate() {
+            let event = ObservedProcessEvent {
+                sequence: index as u64 + 1,
+                occurred_at_ms: index as u64 + 1,
+                fact,
+            };
+            let stored = serde_json::to_value(event.projection()).expect("host event row");
+            let row: crate::ProjectedProcessEvent =
+                serde_json::from_value(stored.clone()).expect("read host row");
+            if row.event_type.terminal_status().is_some() {
+                assert_eq!(row.payload["await_output"]["status"], "completed");
+                overlay.finish();
+            } else {
+                overlay.committed(&serde_json::from_value(stored).expect("typed lifecycle fact"));
+            }
+        }
+        let snapshot = overlay.snapshot();
+        assert!(snapshot.current_sites.is_empty());
+        assert!(snapshot.document.is_none());
+        assert_eq!(snapshot.sites.len(), 3);
+        for site in snapshot.sites {
+            let expected = if site.at == lash_sansio::effect_identity_fixture("settled", 0) {
+                ProcessWorkflowSiteState::Completed
+            } else {
+                ProcessWorkflowSiteState::TerminalUnobserved
+            };
+            assert_eq!(site.state, expected);
+        }
+    }
+
     /// FIG-6323: process feeds also carry effects' nested language executions.
     /// Those executions have their own documents; their sites cannot replace
     /// the parent workflow's current site or contribute to its counts.
@@ -362,7 +536,7 @@ mod tests {
             document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
             entry: WorkflowDocumentEntry::Main,
         };
-        let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone(), document.clone());
+        let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let observation = LanguageExecutionObservation {
             language: None,
             observed_at_ms: 1,
@@ -373,7 +547,7 @@ mod tests {
                     subject: TraceRuntimeSubject::Process {
                         process_id: process.clone(),
                     },
-                    document,
+                    document: document.clone(),
                     entry_name: "main".into(),
                     engine_execution_id: Some(process.to_string()),
                     generation: None,
@@ -385,9 +559,10 @@ mod tests {
             },
         };
         overlay
-            .observe(&ProcessObservationEventPayload::LanguageExecution(
-                observation.clone(),
-            ))
+            .observe(
+                &document,
+                &ProcessObservationEventPayload::LanguageExecution(observation.clone()),
+            )
             .expect("the process's own entry");
         let before = overlay.snapshot();
         let mut nested = observation;
@@ -409,7 +584,10 @@ mod tests {
             fact: TraceNodeFact::Started { call_id: None },
         };
         overlay
-            .observe(&ProcessObservationEventPayload::LanguageExecution(nested))
+            .observe(
+                &document,
+                &ProcessObservationEventPayload::LanguageExecution(nested),
+            )
             .expect("an effect's nested execution is legal on its process feed");
         assert_eq!(overlay.snapshot(), before);
     }

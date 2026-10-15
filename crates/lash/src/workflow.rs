@@ -95,6 +95,10 @@
 //! remain visible through pure computation; committed outcomes and the
 //! process's terminal govern completion. Read labels and edges from the
 //! process's document, never from the overlay.
+//! A host folding only stored events constructs the accumulator with the
+//! process id alone and calls `committed`; no document read is needed. Live
+//! payloads supply their expected document reference to `observe`. For a stored
+//! projected terminal, call `finish` instead of decoding it as a durable event.
 //!
 //! Session cells and an effect's nested language execution have separate
 //! execution identities. Their richer provisional history remains a

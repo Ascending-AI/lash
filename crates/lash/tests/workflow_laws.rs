@@ -819,10 +819,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         assert_eq!(at.site, sleep.site);
         assert_eq!(at.occurrence, occurrence as u64);
     }
-    let mut overlay = lash::workflow::ProcessWorkflowOverlayAccumulator::new(
-        process.clone(),
-        publication.document.reference().clone(),
-    );
+    let mut overlay = lash::workflow::ProcessWorkflowOverlayAccumulator::new(process.clone());
     for event in &events {
         overlay.committed(event);
         if let lash::process::ProcessLifecycleFact::Waiting { wait } = &event.fact {
@@ -933,8 +930,7 @@ main { finish null }
     let snapshot = observed.snapshot().await.expect("snapshot");
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     assert_eq!(finished(&core, &process).await, serde_json::json!("done"));
-    let mut overlay =
-        ProcessWorkflowOverlayAccumulator::new(process, publication.document.reference().clone());
+    let mut overlay = ProcessWorkflowOverlayAccumulator::new(process);
     let mut entries = std::collections::BTreeSet::new();
     loop {
         let item = tokio::time::timeout(std::time::Duration::from_secs(60), feed.next())
@@ -948,7 +944,9 @@ main { finish null }
         // Reconstruct each running stretch from the provisional process
         // observations, before the later committed terminal settles them.
         if let ProcessObservationEventPayload::LanguageExecution(observation) = &event.payload {
-            overlay.observe(&event.payload).expect("same execution");
+            overlay
+                .observe(publication.document.reference(), &event.payload)
+                .expect("same execution");
             if let lash_trace::TraceLanguageExecutionPayload::Node {
                 at,
                 fact: lash_trace::TraceNodeFact::Started { .. },
