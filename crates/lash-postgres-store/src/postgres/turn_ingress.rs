@@ -9,8 +9,9 @@ use std::sync::LazyLock;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::turn_ingress::{
     TurnIngressStatements, cancel_requests::CancelRequestStatements,
-    pending_inputs::PendingInputStatements, queued_batches::QueuedBatchStatements,
-    run_specs::RunSpecStatements, tool_intent_submissions::ToolIntentSubmissionStatements,
+    forsaken_inputs::ForsakenInputStatements, pending_inputs::PendingInputStatements,
+    queued_batches::QueuedBatchStatements, run_specs::RunSpecStatements,
+    tool_intent_submissions::ToolIntentSubmissionStatements,
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
@@ -94,6 +95,8 @@ pub(crate) struct TurnIngressSql {
     pub(crate) pending_inputs_postgres: PendingInputPostgresStatements,
     /// `session_run_specs`, shared.
     pub(crate) run_specs: RunSpecStatements,
+    /// `forsaken_turn_inputs`, shared.
+    pub(crate) forsaken_inputs: ForsakenInputStatements,
     /// `queued_work_batches`, shared.
     pub(crate) queued_batches: QueuedBatchStatements,
     /// `queued_work_batches`, PostgreSQL only.
@@ -115,6 +118,7 @@ static TURN_INGRESS_SQL: LazyLock<TurnIngressSql> = LazyLock::new(|| {
         pending_inputs: PendingInputStatements::render(dialect),
         pending_inputs_postgres: PendingInputPostgresStatements::render(dialect),
         run_specs: RunSpecStatements::render(dialect),
+        forsaken_inputs: ForsakenInputStatements::render(dialect),
         queued_batches: QueuedBatchStatements::render(dialect),
         queued_batches_postgres: QueuedBatchPostgresStatements::render(dialect),
         cancel_requests: CancelRequestStatements::render(dialect),

@@ -25,6 +25,8 @@ pub(super) enum Resolution {
     /// No record of the input exists: it was never accepted, or its
     /// withdrawal was reclaimed.
     Unknown,
+    /// The host forsook the input's id before any input was filed under it.
+    Forsaken,
     /// The run's final physical turn committed with `outcome`.
     Settled { run: TurnId, outcome: TurnOutcome },
     OperationSettled {
@@ -70,6 +72,9 @@ pub(super) async fn resolve_input(
         .map_err(store_error)?;
     if let Some(run) = status.run {
         return resolve_run(parts, &run).await;
+    }
+    if status.forsaken {
+        return Ok(Resolution::Forsaken);
     }
     if !status.open {
         return unbound_input(parts, &receipt.input_id).await;

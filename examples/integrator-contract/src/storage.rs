@@ -276,6 +276,13 @@ impl TurnInputStore for Integrator {
     ) -> Result<Option<String>, StoreError> {
         unreachable!("external signature witness")
     }
+    async fn forsake_turn_input(
+        &self,
+        session_id: &SessionId,
+        source_key: &str,
+    ) -> Result<TurnInputForsaking, StoreError> {
+        unreachable!("external signature witness")
+    }
     async fn enqueue_pending_turn_inputs(
         &self,
         batch: PendingTurnInputBatch,

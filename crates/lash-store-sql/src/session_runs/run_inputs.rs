@@ -16,9 +16,10 @@ crate::statements! {
 
         /// What a follower of input `?2` of session `?1` reads, in one
         /// statement and so one snapshot: the run it is bound to, whether its
-        /// row is still open, and the session's standing fault with its
-        /// instant. A claim binds the input and moves its row in one
-        /// transaction, so no read here sees one without the other.
+        /// row is still open, the session's standing fault with its instant,
+        /// and whether the host forsook its id. A claim binds the input and
+        /// moves its row in one transaction, so no read here sees one
+        /// without the other.
         select_status = "SELECT
              (SELECT b.admitted_run FROM pending_turn_inputs b
               WHERE b.session_id = ?1 AND b.input_id = ?2),
@@ -26,7 +27,9 @@ crate::statements! {
                      WHERE i.session_id = ?1 AND i.input_id = ?2
                        AND {{nonterminal_turn_input_state(i.state)}}),
              (SELECT m.fault_json FROM session_meta m WHERE m.session_id = ?1),
-             (SELECT m.fault_at_ms FROM session_meta m WHERE m.session_id = ?1)";
+             (SELECT m.fault_at_ms FROM session_meta m WHERE m.session_id = ?1),
+             EXISTS (SELECT 1 FROM forsaken_turn_inputs f
+                     WHERE f.session_id = ?1 AND f.input_id = ?2)";
 
         /// Turn scopes of inputs admitted to run `?2` of session `?1`.
         /// The source key names the input's turn; an unkeyed input uses its id.

@@ -28,6 +28,28 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
             .map_err(sqlite_error)?
     }
 
+    async fn forsake_turn_input(
+        &self,
+        session_id: &SessionId,
+        source_key: &str,
+    ) -> Result<lash_core_execution::store::TurnInputForsaking, StoreError> {
+        lash_core_execution::store_backend_support::validate_forsaken_source_key(
+            session_id, source_key,
+        )?;
+        let session_id = session_id.clone();
+        let source_key = source_key.to_string();
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                match forsake_turn_input_conn(tx, &session_id, &source_key, now) {
+                    Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
+                    Err(err) => Ok(TxOutcome::Rollback(Err(err))),
+                }
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn enqueue_pending_turn_inputs(
         &self,
         batch: lash_core_execution::PendingTurnInputBatch,
@@ -487,11 +509,22 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
                 .map_err(sqlite_error)?,
             _ => None,
         };
+        let forsaken = match (&by_source_key, draft.source_key.as_deref()) {
+            (None, Some(source_key)) => tx
+                .query_row(
+                    sql.forsaken_inputs.select_exists.sql(),
+                    params![session_id.as_str(), source_key],
+                    |row| row.get(0),
+                )
+                .map_err(sqlite_error)?,
+            _ => false,
+        };
         let (input_id, inserted) = match support::decide_turn_input_draft_admission(
             draft,
             &submission_digest,
             by_source_key,
             by_input_id,
+            forsaken,
         )? {
             support::TurnInputDraftAdmission::Existing { input_id } => (input_id, None),
             support::TurnInputDraftAdmission::New => {
@@ -581,6 +614,49 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
     // crash between them can leave input that nothing will admit.
     let woken = crate::durable::wake_session_tx(tx, session_id, false, now)?;
     Ok((admitted, woken))
+}
+
+/// Forsake `source_key` of `session_id` under the database write lock the
+/// caller's transaction holds, the lock every admission takes before it reads
+/// the key: the input filed under the key answers, and otherwise the key's
+/// tombstone is written, keeping one an earlier forsake wrote.
+fn forsake_turn_input_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    source_key: &str,
+    now: u64,
+) -> Result<lash_core_execution::store::TurnInputForsaking, StoreError> {
+    use lash_core_execution::store::TurnInputForsaking;
+    ensure_session_not_deleted_conn(tx, session_id)?;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let held: Option<String> = tx
+        .query_row(
+            sql.pending_inputs.select_id_by_source_key.sql(),
+            params![session_id.as_str(), source_key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    if let Some(input_id) = held {
+        return Ok(TurnInputForsaking::Held {
+            input_id: lash_core_execution::InputId::parse(input_id)?,
+        });
+    }
+    ensure_session_not_closing_conn(tx, session_id)?;
+    let input_id =
+        lash_core_execution::store_backend_support::forsaken_input_id(session_id, source_key);
+    crate::conn::cached_execute(
+        tx,
+        sql.forsaken_inputs.insert.sql(),
+        params![
+            session_id.as_str(),
+            source_key,
+            input_id.as_str(),
+            now as i64
+        ],
+    )
+    .map_err(sqlite_error)?;
+    Ok(TurnInputForsaking::Forsaken { input_id })
 }
 
 /// What session `session_id` records about turn `turn_id`, read under the

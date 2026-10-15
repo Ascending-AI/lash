@@ -26,6 +26,10 @@ pub enum TurnInputDraftAdmission {
 /// draft's source key, and `by_input_id` the `(session_id,
 /// submission_digest)` of the row holding its provisioned input id, in any
 /// session. A backend reads `by_input_id` only when `by_source_key` is empty.
+/// `forsaken` is whether the session forsook the draft's source key
+/// ([`TurnInputStore::forsake_turn_input`](crate::store::TurnInputStore::forsake_turn_input)),
+/// read under the same authority: a forsaken key holds no row, and a new
+/// draft under it is [`StoreError::TurnInputForsaken`].
 ///
 /// A source key answers a draft whose digest equals the row's; any other
 /// content is [`StoreError::PendingTurnInputSourceKeyConflict`]. A provisioned
@@ -37,6 +41,7 @@ pub fn decide_turn_input_draft_admission(
     submission_digest: &str,
     by_source_key: Option<(String, String)>,
     by_input_id: Option<(String, String)>,
+    forsaken: bool,
 ) -> Result<TurnInputDraftAdmission, StoreError> {
     if let (Some(source_key), Some((input_id, existing_digest))) =
         (draft.source_key.as_deref(), by_source_key)
@@ -64,7 +69,21 @@ pub fn decide_turn_input_draft_admission(
             input_id: input_id.clone(),
         });
     }
+    if forsaken && let Some(source_key) = draft.source_key.as_deref() {
+        return Err(StoreError::TurnInputForsaken {
+            session_id: draft.session_id.clone(),
+            source_key: source_key.to_string(),
+            input_id: forsaken_input_id(&draft.session_id, source_key),
+        });
+    }
     Ok(TurnInputDraftAdmission::New)
+}
+
+/// The input id a forsaken source key's tombstone carries: the id a send
+/// under the key would have been filed under, so a probe by that id finds
+/// it.
+pub fn forsaken_input_id(session_id: &crate::SessionId, source_key: &str) -> crate::InputId {
+    PendingTurnInputDraft::keyed_input_id(session_id, source_key)
 }
 
 /// The digest `draft` is admitted and compared under.

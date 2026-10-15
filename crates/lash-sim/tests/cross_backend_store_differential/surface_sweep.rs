@@ -112,6 +112,15 @@ pub(super) enum SurfaceMethod {
     EnqueueRunSpecInput,
     /// The retained submission digest, independent of input lifecycle state.
     TurnInputSubmissionDigest,
+    /// [`IngressStore::forsake_turn_input`] of the spec input's key, which an
+    /// input holds (`held`), or of a key nothing holds, which writes its
+    /// tombstone and keeps it when forsaken again.
+    ForsakeTurnInput {
+        held: bool,
+    },
+    /// [`IngressStore::enqueue_pending_turn_input`] under the forsaken key,
+    /// which every backend refuses without residue.
+    EnqueueForsakenInput,
     /// [`IngressStore::enqueue_pending_turn_inputs`] of a batch under the
     /// sweep's run spec that resends the spec input and adds a new one, or
     /// (`conflicting`) adds a new one beside the spec input with changed
@@ -215,6 +224,9 @@ impl SurfaceMethod {
             Self::BoundTurnScopes => "surface:bound_turn_scopes",
             Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
             Self::TurnInputSubmissionDigest => "surface:turn_input_submission_digest",
+            Self::ForsakeTurnInput { held: true } => "surface:forsake_turn_input_held",
+            Self::ForsakeTurnInput { held: false } => "surface:forsake_turn_input",
+            Self::EnqueueForsakenInput => "surface:enqueue_forsaken_input",
             Self::EnqueueTurnInputBatch { conflicting: false } => {
                 "surface:enqueue_turn_input_batch"
             }
@@ -420,6 +432,12 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::CancelPendingTurnInputSuffix),
             surface(SurfaceMethod::CancelPendingTurnInputs),
             surface(SurfaceMethod::TurnInputSubmissionDigest),
+            // A key nothing holds is forsaken, idempotently, and then refuses
+            // its send; a key an input holds answers that input.
+            surface(SurfaceMethod::ForsakeTurnInput { held: false }),
+            surface(SurfaceMethod::ForsakeTurnInput { held: false }),
+            surface(SurfaceMethod::ForsakeTurnInput { held: true }),
+            surface(SurfaceMethod::EnqueueForsakenInput),
             surface(SurfaceMethod::AbortUnknownAttachmentWrite),
             surface(SurfaceMethod::AcquireUnknownAttachmentRefs),
             surface(SurfaceMethod::ForgetUnknownAttachment),
@@ -1013,10 +1031,11 @@ impl BackendRunner {
                 let input = lash_core::InputId::fixture(format!("{session_id}:input"));
                 let status = store.input_status(&session_id, &input).await?;
                 format!(
-                    "run={:?} open={} fault={:?}",
+                    "run={:?} open={} fault={:?} forsaken={}",
                     status.run.map(|run| run.to_string()),
                     status.open,
-                    status.fault.map(|fault| fault.record.code)
+                    status.fault.map(|fault| fault.record.code),
+                    status.forsaken
                 )
             }
             SurfaceMethod::BoundTurnScopes => {
@@ -1048,6 +1067,37 @@ impl BackendRunner {
                     "run_spec_is_interned_hash={}",
                     input.run_spec == surface_run_spec_hash()
                 )
+            }
+            SurfaceMethod::ForsakeTurnInput { held } => {
+                let key = if held {
+                    "surface:run-spec-input"
+                } else {
+                    "surface:forsaken-input"
+                };
+                match store.forsake_turn_input(&session_id, key).await? {
+                    lash_core::store::TurnInputForsaking::Held { .. } => "held".to_string(),
+                    lash_core::store::TurnInputForsaking::Forsaken { input_id } => format!(
+                        "forsaken input_is_keyed={}",
+                        input_id
+                            == PendingTurnInputDraft::keyed_input_id(
+                                &session_id,
+                                "surface:forsaken-input"
+                            )
+                    ),
+                }
+            }
+            SurfaceMethod::EnqueueForsakenInput => {
+                store
+                    .enqueue_pending_turn_input(
+                        PendingTurnInputDraft::new(
+                            &session_id,
+                            TurnInputIngress::NextTurn,
+                            TurnInput::text("input under a forsaken key"),
+                        )
+                        .with_source_key("surface:forsaken-input"),
+                    )
+                    .await?;
+                "accepted".to_string()
             }
             SurfaceMethod::TurnInputSubmissionDigest => {
                 let digest = store

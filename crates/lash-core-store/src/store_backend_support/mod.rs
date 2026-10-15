@@ -24,8 +24,8 @@ pub use process_lifecycle_sql::{
 pub use queued_work_admission::{
     QueuedWorkDraftAdmission, TurnAddressEvidence, decide_queued_work_draft_admission,
     decode_ingress_terminal, decode_trace_cause, encode_trace_cause, queued_work_submission_digest,
-    require_known_turn_address, turn_address_evidence, validate_queued_work_draft,
-    validate_turn_input_source_key,
+    require_known_turn_address, turn_address_evidence, validate_forsaken_source_key,
+    validate_queued_work_draft, validate_turn_input_source_key,
 };
 pub use run_spec_admission::{
     RunSpecAdmission, check_running_run_spec, check_steering_run_spec, steering_run_spec_target,
@@ -34,7 +34,8 @@ pub use session_meta::{
     CausalColumns, SessionMetaCodec, StoredObserverIntent, StoredRelation, guard_rebind_lineage,
 };
 pub use turn_input_batch::{
-    TurnInputDraftAdmission, decide_turn_input_draft_admission, turn_input_submission_digest,
+    TurnInputDraftAdmission, decide_turn_input_draft_admission, forsaken_input_id,
+    turn_input_submission_digest,
 };
 pub use turn_input_lifecycle_sql::{
     accepted_turn_input_state_predicate_sql, active_turn_input_state_predicate_sql,

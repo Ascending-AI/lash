@@ -33,6 +33,7 @@ impl RuntimeErrorCause {
             | Self::MaterialRefused { .. }
             | Self::ProviderFailure { .. }
             | Self::IngressReservedSourceKey { .. }
+            | Self::TurnInputForsaken { .. }
             | Self::Compat { .. }
             | Self::StoredDataCorrupt { .. }
             | Self::ModuleArtifactRefused { .. }

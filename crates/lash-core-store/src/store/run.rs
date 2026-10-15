@@ -286,6 +286,10 @@ pub struct InputStatus {
     pub open: bool,
     /// The session's standing fault.
     pub fault: Option<super::SessionFault>,
+    /// Whether the host forsook the input's id before any input was filed
+    /// under it ([`TurnInputStore::forsake_turn_input`](super::TurnInputStore::forsake_turn_input)).
+    /// A forsaken input has no row, so it is never open and never bound.
+    pub forsaken: bool,
 }
 
 /// A logical run's terminal evidence, as the store answers it.

@@ -635,7 +635,7 @@ fn input_status_conn(
     session_id: &SessionId,
     input: &InputId,
 ) -> Result<InputStatus, StoreError> {
-    let (run, open, fault_json, fault_at_ms) = conn
+    let (run, open, fault_json, fault_at_ms, forsaken) = conn
         .prepare_cached(session_runs_sql().inputs.select_status.sql())
         .and_then(|mut stmt| {
             stmt.query_row(params![session_id.as_str(), input.as_str()], |row| {
@@ -644,6 +644,7 @@ fn input_status_conn(
                     row.get::<_, bool>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, bool>(4)?,
                 ))
             })
         })
@@ -659,6 +660,7 @@ fn input_status_conn(
             fault_json,
             fault_at_ms,
         )?,
+        forsaken,
     })
 }
 

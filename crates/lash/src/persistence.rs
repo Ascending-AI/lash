@@ -200,8 +200,8 @@ pub use lash_core::{
     SessionNodeRecord, SessionReadView, SessionRelation, SessionStateAdmission, StoreBackend,
     StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp,
     StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-    StoreSchemaVerdict, TurnInputAdmission, UndeliveredConfigChange, VacuumReport,
-    facade_support::SessionNodeProjection,
+    StoreSchemaVerdict, TurnInputAdmission, TurnInputForsaking, UndeliveredConfigChange,
+    VacuumReport, facade_support::SessionNodeProjection,
 };
 pub use lash_core::{
     facade_support::BorrowedChronologicalEntry, facade_support::BorrowedChronologicalMessage,

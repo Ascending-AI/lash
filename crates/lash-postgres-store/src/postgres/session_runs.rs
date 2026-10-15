@@ -635,6 +635,7 @@ async fn input_status_conn(
             row.try_get(2).map_err(store_sqlx_error)?,
             row.try_get(3).map_err(store_sqlx_error)?,
         )?,
+        forsaken: row.try_get(4).map_err(store_sqlx_error)?,
     })
 }
 

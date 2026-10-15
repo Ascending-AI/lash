@@ -931,8 +931,40 @@ impl LashSession {
     /// send's response does not attach to learn whether it was accepted: it
     /// sends the same id with the same content again, which accepts the input
     /// exactly once and answers its run.
+    /// A forsaken id answers [`Forsaken`](crate::SendOutcome::Forsaken)
+    /// ([`forsake`](Self::forsake)).
     pub fn attach_id(&self, id: TurnId) -> crate::SendHandle {
         crate::send::attach_id(crate::send::SendTarget::Live(self.clone()), id)
+    }
+
+    /// Close host id `id` for good, so an input lash may never have seen
+    /// has a definite end ([`SendOutcome::Unknown`](crate::SendOutcome::Unknown)
+    /// is provisional; this is how a host ends it without a timer).
+    ///
+    /// One durable write, idempotent, decided in one store transaction
+    /// under the session's write authority, which every send takes too:
+    ///
+    /// * when lash holds an input accepted under `id`, nothing is written
+    ///   and the handle follows that input, exactly as
+    ///   [`attach_id`](Self::attach_id) does: its outcome is the send's;
+    /// * otherwise the id's tombstone is written, or found from an earlier
+    ///   forsake, and the handle answers
+    ///   [`SendOutcome::Forsaken`](crate::SendOutcome::Forsaken). From then
+    ///   on a send under `id` is refused before acceptance with
+    ///   [`RuntimeErrorCode::TurnInputForsaken`](lash_core::RuntimeErrorCode::TurnInputForsaken)
+    ///   ([`RuntimeError::forsaken_input`](lash_core::RuntimeError::forsaken_input)
+    ///   names the input), and [`attach_id`](Self::attach_id) answers
+    ///   `Forsaken`.
+    ///
+    /// A forsake racing a send of the same id: exactly one of them wins.
+    /// Either the send is accepted and the forsake answers its input, or the
+    /// tombstone is written and the send is refused.
+    ///
+    /// The tombstone lives as long as the idempotency record of a settled
+    /// input it stands in for: until the session is deleted. No
+    /// [`vacuum`](lash_core::store::StoreMaintenance::vacuum) reclaims it.
+    pub async fn forsake(&self, id: TurnId) -> Result<crate::SendHandle> {
+        crate::send::forsake(crate::send::SendTarget::Live(self.clone()), id).await
     }
 
     /// Re-await a logical run: after a park verb, or by the host id a send

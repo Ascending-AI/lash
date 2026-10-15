@@ -17,6 +17,7 @@
 //! `(replay_key) -> payload` ingress ledger and has no other home.
 
 pub mod cancel_requests;
+pub mod forsaken_inputs;
 pub mod pending_inputs;
 pub mod queued_batches;
 pub mod run_specs;

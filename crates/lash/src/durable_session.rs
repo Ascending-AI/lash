@@ -426,6 +426,12 @@ impl DurableSession {
         crate::send::attach_id(crate::send::SendTarget::Durable(self.clone()), id)
     }
 
+    /// Close host id `id` for good: see
+    /// [`LashSession::forsake`](crate::LashSession::forsake).
+    pub async fn forsake(&self, id: lash_core::TurnId) -> Result<crate::SendHandle> {
+        crate::send::forsake(crate::send::SendTarget::Durable(self.clone()), id).await
+    }
+
     /// Re-await a logical run by id.
     pub fn run(&self, run: crate::RunId) -> crate::RunHandle {
         crate::send::run(crate::send::SendTarget::Durable(self.clone()), run)

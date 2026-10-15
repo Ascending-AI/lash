@@ -319,6 +319,9 @@ impl SendBuilder {
     /// [`attach_id`](crate::LashSession::attach_id) instead answers only what
     /// lash holds now: [`SendOutcome::Unknown`] when it holds nothing.
     ///
+    /// An id the host [forsook](crate::LashSession::forsake) is refused
+    /// before acceptance, whatever the content.
+    ///
     /// Exactly-once acceptance does not imply exactly-once external actions:
     /// uncommitted work can repeat. See the
     /// [crash contract](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
@@ -568,8 +571,24 @@ pub enum SendOutcome {
     /// accepted as new when the session is live. A host that lost a send's
     /// response re-sends the same id with the same content rather than reading this answer
     /// ([`SendBuilder::id`]).
+    ///
+    /// A host that must end the wait without a timer forsakes the id
+    /// ([`LashSession::forsake`](crate::LashSession::forsake)): that answers
+    /// the input's outcome if a send of it was accepted after all, and
+    /// otherwise [`Forsaken`](Self::Forsaken), after which no send of the id
+    /// is ever accepted.
     #[non_exhaustive]
     Unknown {
+        gaps: Vec<lash_core::facade_support::LiveReplayGap>,
+    },
+    /// The host forsook the id before lash accepted any input under it
+    /// ([`LashSession::forsake`](crate::LashSession::forsake)). This is final:
+    /// the tombstone stays on record until the session is deleted, and a
+    /// send under the id is refused
+    /// ([`RuntimeErrorCode::TurnInputForsaken`](lash_core::RuntimeErrorCode::TurnInputForsaken))
+    /// and runs nothing.
+    #[non_exhaustive]
+    Forsaken {
         gaps: Vec<lash_core::facade_support::LiveReplayGap>,
     },
 }
@@ -599,6 +618,9 @@ pub enum TurnStatus {
     /// No input is recorded yet. This is provisional, not a final refusal:
     /// see [`SendOutcome::Unknown`].
     Unknown,
+    /// The host forsook the id before any input was accepted under it, and
+    /// none ever will be: see [`SendOutcome::Forsaken`].
+    Forsaken,
 }
 
 /// An accepted input the engine was never handed: its ingress obligation
@@ -651,6 +673,7 @@ impl SendOutcome {
             Self::Refused { .. } => TurnStatus::Failed { cause: None },
             Self::Withdrawn { .. } => TurnStatus::Cancelled,
             Self::Unknown { .. } => TurnStatus::Unknown,
+            Self::Forsaken { .. } => TurnStatus::Forsaken,
         }
     }
 
@@ -659,7 +682,10 @@ impl SendOutcome {
             Self::Settled { run, .. } | Self::OperationSettled { run, .. } => Some(run),
             Self::Parked { parked, .. } => Some(&parked.run),
             Self::Refused { run, .. } => run.as_ref(),
-            Self::Stalled { .. } | Self::Withdrawn { .. } | Self::Unknown { .. } => None,
+            Self::Stalled { .. }
+            | Self::Withdrawn { .. }
+            | Self::Unknown { .. }
+            | Self::Forsaken { .. } => None,
         }
     }
 
@@ -671,7 +697,8 @@ impl SendOutcome {
             | Self::Stalled { .. }
             | Self::Refused { .. }
             | Self::Withdrawn { .. }
-            | Self::Unknown { .. } => None,
+            | Self::Unknown { .. }
+            | Self::Forsaken { .. } => None,
         }
     }
 
@@ -684,7 +711,8 @@ impl SendOutcome {
             | Self::Parked { .. }
             | Self::Stalled { .. }
             | Self::Withdrawn { .. }
-            | Self::Unknown { .. } => None,
+            | Self::Unknown { .. }
+            | Self::Forsaken { .. } => None,
         }
     }
 
@@ -696,7 +724,8 @@ impl SendOutcome {
             | Self::Stalled { .. }
             | Self::Refused { .. }
             | Self::Withdrawn { .. }
-            | Self::Unknown { .. } => None,
+            | Self::Unknown { .. }
+            | Self::Forsaken { .. } => None,
         }
     }
 
@@ -710,7 +739,8 @@ impl SendOutcome {
             | Self::Stalled { gaps, .. }
             | Self::Refused { gaps, .. }
             | Self::Withdrawn { gaps }
-            | Self::Unknown { gaps } => gaps,
+            | Self::Unknown { gaps }
+            | Self::Forsaken { gaps } => gaps,
         }
     }
 
@@ -722,7 +752,8 @@ impl SendOutcome {
             | Self::Stalled { gaps, .. }
             | Self::Refused { gaps, .. }
             | Self::Withdrawn { gaps }
-            | Self::Unknown { gaps } => gaps,
+            | Self::Unknown { gaps }
+            | Self::Forsaken { gaps } => gaps,
         }
     }
 }
@@ -1202,6 +1233,26 @@ pub(crate) fn attach_id(target: SendTarget, id: TurnId) -> SendHandle {
     handle.receipt.source_key = Some(id.to_string());
     handle.id = Some(id);
     handle
+}
+
+/// Forsake host id `id` in `target`'s session, then follow it: a handle on
+/// the input accepted under `id` when lash holds one, and otherwise on the
+/// id's tombstone, which answers [`SendOutcome::Forsaken`].
+pub(crate) async fn forsake(target: SendTarget, id: TurnId) -> Result<SendHandle> {
+    let context = target.context().await?;
+    if context
+        .parts
+        .store
+        .load_session_head_meta()
+        .await?
+        .is_none()
+    {
+        return Err(EmbedError::UnknownSession {
+            session_id: context.parts.session_id.clone(),
+        });
+    }
+    context.parts.store.forsake_turn_input(id.as_str()).await?;
+    Ok(attach_id(target, id))
 }
 
 /// A handle on `run`; its cursor is the observation's current position.

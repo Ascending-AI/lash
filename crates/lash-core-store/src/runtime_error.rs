@@ -418,6 +418,10 @@ runtime_error_codes! {
         TurnAddressUnknown = "turn_address_unknown" => Terminal,
         /// Admission refused a source key reserved for another ingress kind.
         IngressReservedSourceKey = "ingress_reserved_source_key" => Terminal,
+        // the host forsook the id; the tombstone stands until the session is deleted.
+        /// A send named an id the host forsook in its session: refused before
+        /// acceptance, with no row and no sequence number.
+        TurnInputForsaken = "turn_input_forsaken" => Terminal,
         // a plugin refusal over the same inputs.
         Plugin = "plugin" => Terminal,
         // the selected queued work cannot be admitted; the same selection is refused again.
@@ -1059,6 +1063,15 @@ impl RuntimeError {
         self
     }
 
+    /// The input a send was refused for because the host forsook its id
+    /// ([`RuntimeErrorCode::TurnInputForsaken`]), from the structured cause.
+    pub fn forsaken_input(&self) -> Option<&crate::InputId> {
+        match self.cause.as_ref()? {
+            RuntimeErrorCause::TurnInputForsaken { input_id } => Some(input_id),
+            _ => None,
+        }
+    }
+
     /// Extracts the deleted session ID for effect-host implementors only from structured
     /// session-deletion causes, returning `None` for all other errors.
     pub fn deleted_session_id(&self) -> Option<&crate::SessionId> {
@@ -1076,6 +1089,7 @@ impl RuntimeError {
             | RuntimeErrorCause::ArtifactReferrerEnded { .. }
             | RuntimeErrorCause::Compat { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }
+            | RuntimeErrorCause::TurnInputForsaken { .. }
             | RuntimeErrorCause::LlmProfileUnavailable { .. }
             | RuntimeErrorCause::AttachmentRetention { .. }
             | RuntimeErrorCause::MaxToolCallsExceeded { .. }

@@ -13,6 +13,7 @@ macro_rules! session_ingress_tests {
         $crate::session_ingress_tests!(@catalogue $fixture; [
             (every_ingress_producer_shares_the_session_sequence, "ingress-shared-sequence"),
             (ingress_reserved_source_keys_are_refused_before_admission, "ingress-reserved-source-keys"),
+            (a_forsake_and_an_admission_of_one_key_have_exactly_one_winner, "forsake-admission-race"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

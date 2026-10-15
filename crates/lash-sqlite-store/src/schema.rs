@@ -316,6 +316,20 @@ CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_bound_run
     ON pending_turn_inputs(session_id, admitted_run)
     WHERE admitted_run IS NOT NULL;
 
+-- The source keys a host forsook before any input was filed under them: no
+-- input is ever admitted under one. A forsake and an admission of one key
+-- are serialized by the session's write authority, so a key holds either a
+-- `pending_turn_inputs` row or a tombstone, never both. `input_id` is the id
+-- a send under the key would carry, for the follower's status read. A
+-- tombstone is deleted with its session; no vacuum reclaims it.
+CREATE TABLE IF NOT EXISTS forsaken_turn_inputs (
+    session_id     TEXT NOT NULL,
+    source_key     TEXT NOT NULL,
+    input_id       TEXT NOT NULL UNIQUE,
+    forsaken_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (session_id, source_key)
+);
+
 -- One row per run spec a session's inputs carry (FIG-3838), interned once per
 -- hash in the transaction that admits the input naming it, immutable, and
 -- owned by the session: reclaimed when the session is deleted. The default

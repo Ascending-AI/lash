@@ -775,6 +775,16 @@ pub trait SessionCommitStore: Send + Sync {
     ) -> Result<Option<SessionMeta>, StoreError>;
 }
 
+/// What [`TurnInputStore::forsake_turn_input`] answered for a source key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnInputForsaking {
+    /// An input is filed under the key: it answers, and nothing was written.
+    Held { input_id: crate::InputId },
+    /// The key's tombstone stands, written now or by an earlier forsake: no
+    /// input is ever admitted under it.
+    Forsaken { input_id: crate::InputId },
+}
+
 /// What [`TurnInputStore::admit_pending_turn_inputs`] committed (FIG-3975).
 ///
 /// The admission's own commit can answer the follow-ups the caller owes
@@ -867,6 +877,29 @@ pub trait TurnInputStore: Send + Sync {
         &self,
         batch: crate::PendingTurnInputBatch,
     ) -> Result<TurnInputAdmission, StoreError>;
+
+    /// Close source key `source_key` of `session_id` for good, as one write
+    /// under the session's write authority, the one every admission takes.
+    ///
+    /// An input already filed under the key answers
+    /// [`TurnInputForsaking::Held`] and nothing is written. Otherwise the
+    /// key's tombstone is written, idempotently, and answers
+    /// [`TurnInputForsaking::Forsaken`]: from then on an admission of any
+    /// draft under the key is refused with
+    /// [`StoreError::TurnInputForsaken`] and stores nothing, and
+    /// [`RunStore::input_status`] of the key's input answers `forsaken`. A
+    /// concurrent admission under the key is serialized against the forsake
+    /// by that authority, so exactly one of them wins.
+    ///
+    /// A tombstone lives as long as the settled input's idempotency record
+    /// it stands in for: until the session is deleted. No vacuum reclaims
+    /// it. A reserved key is refused as an admission refuses it, and a
+    /// deleted or closing session refuses the write.
+    async fn forsake_turn_input(
+        &self,
+        session_id: &SessionId,
+        source_key: &str,
+    ) -> Result<TurnInputForsaking, StoreError>;
 
     /// The run spec `session_id` interned under `hash`, if it holds one
     /// (FIG-3838). Spec rows are immutable; a run reads its spec once, when

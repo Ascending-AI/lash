@@ -439,6 +439,18 @@ before admission returns `Err` synchronously to its sender; it records no
 input and leaves the id reusable. The probe answers from input rows and run
 terminals, so refusals remain distinguishable from absence after a restart.
 
+A host ends `Unknown` by forsaking the id (`session.forsake(id)`, FIG-6333).
+The forsake reads the id's source key under the session's write authority,
+the same authority every admission takes before it reads the key, in one
+transaction on SQLite and PostgreSQL. When an input holds the key, nothing is
+written and the forsake answers that input's outcome. Otherwise it writes the
+key's tombstone (`forsaken_turn_inputs`), idempotently: from then on an
+admission under the key is refused with `TurnInputForsaken` and stores
+nothing, and the probe answers the final `SendOutcome::Forsaken`. A forsake and
+a send of one id are serialized by that authority, so exactly one of them
+wins. A tombstone lives as long as the settled input's idempotency record it
+stands in for: it is deleted with its session, and no vacuum reclaims it.
+
 Evidence: `crates/lash/src/send.rs:634`, `:644`, and
 `crates/lash-core/src/runtime/session_manager/session_init.rs:1`.
 

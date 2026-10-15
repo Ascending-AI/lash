@@ -232,3 +232,101 @@ pub async fn every_ingress_producer_shares_the_session_sequence(handles: Session
         .unwrap_or_else(|error| panic!("enqueue unrelated input: {error}"));
     assert_eq!(unrelated.enqueue_seq, 1, "sessions allocate independently");
 }
+
+/// FIG-6333: a forsake and an admission of one source key are decided under
+/// the session's write authority, so exactly one of them holds the key: the
+/// admission is accepted and the forsake answers its input, or the tombstone
+/// is written and the admission is refused, storing nothing. Each round
+/// races the two on separate tasks; the key's status and a second forsake
+/// agree with the winner.
+#[expect(clippy::expect_used, reason = "conformance-law fixture")]
+pub async fn a_forsake_and_an_admission_of_one_key_have_exactly_one_winner(
+    handles: SessionIngressHandles,
+) {
+    const ROUNDS: usize = 24;
+    let before = (handles.admission_snapshot)().await;
+    let mut accepted = 0;
+    for round in 0..ROUNDS {
+        let key = format!("forsake-race-{round}");
+        let input_id = crate::PendingTurnInputDraft::keyed_input_id(&session(), &key);
+        let draft = crate::PendingTurnInputDraft::new(
+            session(),
+            crate::TurnInputIngress::NextTurn,
+            crate::TurnInput::text("raced input"),
+        )
+        .with_source_key(key.clone())
+        .with_input_id(input_id.clone());
+        let start = Arc::new(tokio::sync::Barrier::new(2));
+        let forsake = tokio::spawn({
+            let (store, start, key) = (
+                Arc::clone(&handles.runtime),
+                Arc::clone(&start),
+                key.clone(),
+            );
+            async move {
+                start.wait().await;
+                store.forsake_turn_input(&session(), &key).await
+            }
+        });
+        let admit = tokio::spawn({
+            let (store, start) = (Arc::clone(&handles.runtime), Arc::clone(&start));
+            async move {
+                start.wait().await;
+                store.enqueue_pending_turn_input(draft).await
+            }
+        });
+        let forsaking = forsake
+            .await
+            .expect("the forsake task completes")
+            .expect("a forsake of a live session's key is answered");
+        let admission = admit.await.expect("the admission task completes");
+        let send_won = match (&forsaking, &admission) {
+            (crate::TurnInputForsaking::Held { input_id: held }, Ok(row)) => {
+                assert_eq!(
+                    *held, row.input_id,
+                    "round {round}: the forsake answers the input"
+                );
+                true
+            }
+            (
+                crate::TurnInputForsaking::Forsaken { input_id: forsaken },
+                Err(crate::StoreError::TurnInputForsaken {
+                    input_id: refused,
+                    source_key,
+                    ..
+                }),
+            ) => {
+                assert_eq!(forsaken, refused, "round {round}");
+                assert_eq!(*source_key, key, "round {round}");
+                false
+            }
+            (forsaking, admission) => panic!(
+                "round {round}: exactly one of a forsake and an admission wins: \
+                 {forsaking:?} / {admission:?}"
+            ),
+        };
+        accepted += i64::from(send_won);
+        let status = handles
+            .runtime
+            .input_status(&session(), &input_id)
+            .await
+            .expect("read the raced key's status");
+        assert_eq!(status.forsaken, !send_won, "round {round}: {status:?}");
+        assert_eq!(status.open, send_won, "round {round}: {status:?}");
+        assert_eq!(
+            handles
+                .runtime
+                .forsake_turn_input(&session(), &key)
+                .await
+                .expect("forsake the raced key again"),
+            forsaking,
+            "round {round}: the verdict is final"
+        );
+    }
+    let after = (handles.admission_snapshot)().await;
+    assert_eq!(
+        after.inputs - before.inputs,
+        accepted,
+        "a refused admission stores no row"
+    );
+}

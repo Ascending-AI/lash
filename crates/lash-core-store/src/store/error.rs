@@ -720,6 +720,17 @@ pub enum StoreError {
         kind: &'static str,
         source_key: String,
     },
+    /// A turn input named a source key its session forsook: the host closed
+    /// the id before lash saw an input under it, so no input is ever
+    /// admitted under it. Nothing was stored.
+    #[error(
+        "session `{session_id}` forsook source key `{source_key}`: no input is admitted under it"
+    )]
+    TurnInputForsaken {
+        session_id: SessionId,
+        source_key: String,
+        input_id: InputId,
+    },
     #[error("monotonic counter `{counter}` cannot advance past {current}")]
     MonotonicCounterOverflow { counter: &'static str, current: u64 },
     #[error(
@@ -1039,6 +1050,7 @@ impl StoreError {
             | Self::SessionClosing { .. }
             | Self::ControlIntentUnknown { .. }
             | Self::IngressReservedSourceKey { .. }
+            | Self::TurnInputForsaken { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::PendingTurnInputSourceKeyConflict { .. }
             | Self::QueuedWorkSourceKeyConflict { .. }
@@ -1134,6 +1146,7 @@ impl StoreError {
             Self::PendingTurnInputRunSpecMismatch { .. } => Code::RunSpecMismatch,
             Self::IngressTurnAddressUnknown { .. } => Code::TurnAddressUnknown,
             Self::IngressReservedSourceKey { .. } => Code::IngressReservedSourceKey,
+            Self::TurnInputForsaken { .. } => Code::TurnInputForsaken,
 
             Self::SessionRelationMismatch { .. }
             | Self::SessionNotFound { .. }
@@ -1233,6 +1246,7 @@ impl StoreError {
             | Self::ControlIntentUnknown { .. }
             | Self::IngressTurnAddressUnknown { .. }
             | Self::IngressReservedSourceKey { .. }
+            | Self::TurnInputForsaken { .. }
             | Self::PendingTurnInputSourceKeyConflict { .. }
             | Self::QueuedWorkSourceKeyConflict { .. }
             | Self::PendingTurnInputIdConflict { .. }
@@ -1347,6 +1361,9 @@ impl StoreError {
                     source_key: source_key.clone(),
                 }),
             }),
+            Self::TurnInputForsaken { input_id, .. } => Some(Cause::TurnInputForsaken {
+                input_id: input_id.clone(),
+            }),
             Self::TurnOutcomeMaterializationRefused { error } => error.cause.clone(),
             _ => None,
         }
@@ -1452,6 +1469,7 @@ impl StoreError {
             Self::SessionClosing { .. } => "SessionClosing",
             Self::ControlIntentUnknown { .. } => "ControlIntentUnknown",
             Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",
+            Self::TurnInputForsaken { .. } => "TurnInputForsaken",
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",
             Self::QueuedWorkSourceKeyConflict { .. } => "QueuedWorkSourceKeyConflict",

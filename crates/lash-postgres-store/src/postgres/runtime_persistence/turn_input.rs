@@ -21,6 +21,25 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         Ok(row.map(|(_, digest)| digest))
     }
 
+    async fn forsake_turn_input(
+        &self,
+        session_id: &SessionId,
+        source_key: &str,
+    ) -> Result<lash_core_execution::store::TurnInputForsaking, StoreError> {
+        lash_core_execution::store_backend_support::validate_forsaken_source_key(
+            session_id, source_key,
+        )?;
+        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        let mut tx = begin_guarded(connection, &self.fence).await?;
+        #[cfg(any(test, feature = "testing"))]
+        self.set_transaction_lease_clock_for_testing(&mut tx)
+            .await?;
+        let now = self.clock.timestamp_ms();
+        let forsaking = forsake_turn_input_tx(&mut tx, session_id, source_key, now).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(forsaking)
+    }
+
     async fn enqueue_pending_turn_inputs(
         &self,
         batch: lash_core_execution::PendingTurnInputBatch,
@@ -348,6 +367,47 @@ impl lash_core_execution::QueuedWorkStore for PostgresStore {
     }
 }
 
+/// Forsake `source_key` of `session_id` in the caller's transaction `tx` at
+/// `now`, under the session's write authority every admission takes before
+/// it reads the key: the input filed under the key answers, and otherwise
+/// the key's tombstone is written, keeping one an earlier forsake wrote.
+async fn forsake_turn_input_tx(
+    tx: &mut crate::guarded_tx::GuardedTx<'_>,
+    session_id: &SessionId,
+    source_key: &str,
+    now: u64,
+) -> Result<lash_core_execution::store::TurnInputForsaking, StoreError> {
+    use lash_core_execution::store::TurnInputForsaking;
+    // The session's write authority, held to the commit, as an admission
+    // takes it: the absence read below holds until this write commits.
+    ensure_session_not_deleted_tx(tx, session_id).await?;
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let held: Option<(String, String)> =
+        crate::observed_sql::query_as(sql.pending_inputs.select_id_by_source_key.sql())
+            .bind(session_id.as_str())
+            .bind(source_key)
+            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(store_sqlx_error)?;
+    if let Some((input_id, _)) = held {
+        return Ok(TurnInputForsaking::Held {
+            input_id: lash_core_execution::InputId::parse(input_id)?,
+        });
+    }
+    ensure_session_not_closing_tx(tx, session_id).await?;
+    let input_id =
+        lash_core_execution::store_backend_support::forsaken_input_id(session_id, source_key);
+    crate::observed_sql::query(sql.forsaken_inputs.insert.sql())
+        .bind(session_id.as_str())
+        .bind(source_key)
+        .bind(input_id.as_str())
+        .bind(now as i64)
+        .execute(crate::observed_sql::executor(&mut ***tx))
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(TurnInputForsaking::Forsaken { input_id })
+}
+
 /// Admit every draft of `batch` in the caller's transaction `tx` at `now`
 /// (FIG-3842): a draft a stored row already answers returns that row, and
 /// every other draft is inserted in request order at the next positions of
@@ -402,11 +462,23 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
                 .map_err(store_sqlx_error)?,
                 _ => None,
             };
+        let forsaken: bool = match (&by_source_key, draft.source_key.as_deref()) {
+            (None, Some(source_key)) => {
+                crate::observed_sql::query_scalar(sql.forsaken_inputs.select_exists.sql())
+                    .bind(session_id.as_str())
+                    .bind(source_key)
+                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
+                    .await
+                    .map_err(store_sqlx_error)?
+            }
+            _ => false,
+        };
         let (input_id, inserted) = match support::decide_turn_input_draft_admission(
             draft,
             &submission_digest,
             by_source_key,
             by_input_id,
+            forsaken,
         )? {
             support::TurnInputDraftAdmission::Existing { input_id } => (input_id, None),
             support::TurnInputDraftAdmission::New => {

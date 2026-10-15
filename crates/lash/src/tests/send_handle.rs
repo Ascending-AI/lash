@@ -13,6 +13,7 @@ use futures_util::StreamExt;
 use tokio::sync::Notify;
 
 mod arrival;
+mod forsake;
 mod pins;
 mod replay_lag;
 

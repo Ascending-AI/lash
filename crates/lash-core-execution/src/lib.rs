@@ -799,8 +799,8 @@ pub use store::{
     SessionLookup, SessionMeta, SessionReferrerState, SessionStateAdmission, SessionStore,
     StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight,
     StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
-    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputStore,
-    VacuumReport, WriterPin, compare_releases, release_stamp_advances,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, TurnInputForsaking,
+    TurnInputStore, VacuumReport, WriterPin, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

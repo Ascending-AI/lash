@@ -135,6 +135,7 @@ pub const TABLES: &[&str] = &[
     process::tombstones::TABLE,
     recovery_leader::TABLE,
     turn_ingress::cancel_requests::TABLE,
+    turn_ingress::forsaken_inputs::TABLE,
     turn_ingress::pending_inputs::TABLE,
     turn_ingress::run_specs::TABLE,
     turn_ingress::queued_batches::TABLE,

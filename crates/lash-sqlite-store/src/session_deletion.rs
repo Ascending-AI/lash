@@ -189,6 +189,7 @@ pub(super) async fn delete_session_from_catalog(
             for statement in [
                 turn_ingress.pending_inputs.delete_by_session.sql(),
                 turn_ingress.run_specs.delete_session.sql(),
+                turn_ingress.forsaken_inputs.delete_by_session.sql(),
                 crate::session_ingress::session_ingress_sql()
                     .delete_sequence
                     .sql(),

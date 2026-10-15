@@ -172,6 +172,13 @@ table lash_fork_lineage
   column fork_node_id text not-null
   column session_id text not-null
   primary-key (session_id, ancestor_session_id)
+table lash_forsaken_turn_inputs
+  column forsaken_at_ms bigint not-null
+  column input_id text not-null
+  column session_id text not-null
+  column source_key text not-null
+  unique (input_id)
+  primary-key (session_id, source_key)
 table lash_graph_nodes
   column body_bytes bigint not-null
   column frame_node_id text not-null

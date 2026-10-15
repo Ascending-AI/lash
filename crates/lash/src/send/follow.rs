@@ -559,10 +559,13 @@ pub(super) async fn follow(
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Err(EmbedError::Runtime(fault));
                 }
-                resolution @ (Resolution::Withdrawn | Resolution::Unknown) => {
+                resolution @ (Resolution::Withdrawn
+                | Resolution::Unknown
+                | Resolution::Forsaken) => {
                     let gaps = observation.gaps;
                     return Ok(Followed::Answered(Box::new(match resolution {
                         Resolution::Withdrawn => SendOutcome::Withdrawn { gaps },
+                        Resolution::Forsaken => SendOutcome::Forsaken { gaps },
                         _ => SendOutcome::Unknown { gaps },
                     })));
                 }

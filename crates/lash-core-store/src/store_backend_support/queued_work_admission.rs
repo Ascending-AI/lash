@@ -48,6 +48,15 @@ pub fn validate_turn_input_source_key(
     require_source_key_kind(&draft.session_id, draft.source_key.as_deref(), "input")
 }
 
+/// Refuse forsaking `source_key` of `session_id` when the key is reserved
+/// for another ingress kind, as an input admission under it is refused.
+pub fn validate_forsaken_source_key(
+    session_id: &SessionId,
+    source_key: &str,
+) -> Result<(), StoreError> {
+    require_source_key_kind(session_id, Some(source_key), "input")
+}
+
 /// How one queued-work draft is answered.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum QueuedWorkDraftAdmission {

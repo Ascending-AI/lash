@@ -277,6 +277,11 @@ store_error_samples! {
         kind: "turn_input",
         source_key: "reserved:sampled".to_string(),
     },
+    TurnInputForsaken { .. } => StoreError::TurnInputForsaken {
+        session_id: session(),
+        source_key: "sampled-forsaken".to_string(),
+        input_id: InputId::from("ti:sampled-forsaken"),
+    },
     MonotonicCounterOverflow { .. } => StoreError::MonotonicCounterOverflow {
         counter: "sampled",
         current: i64::MAX as u64,

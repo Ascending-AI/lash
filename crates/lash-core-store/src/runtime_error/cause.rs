@@ -128,6 +128,12 @@ pub enum RuntimeErrorCause {
         #[serde(flatten)]
         refusal: Box<IngressReservedSourceKeyRefusal>,
     },
+    /// A send named an id its session forsook: the host closed the id
+    /// before lash saw an input under it, and no input is ever admitted
+    /// under it ([`RuntimeErrorCode::TurnInputForsaken`]).
+    TurnInputForsaken {
+        input_id: crate::InputId,
+    },
     StoreRefusal {
         refusal: Box<crate::store::StoreRefusal>,
     },
