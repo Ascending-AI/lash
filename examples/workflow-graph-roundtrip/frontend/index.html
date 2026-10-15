@@ -42,12 +42,18 @@
         ><button data-layout="split" aria-pressed="true">Split</button
         ><button data-layout="code" aria-pressed="false">Code</button>
       </div>
-      <button id="history-button" class="quiet">Execution</button
+      <button id="history-button" class="quiet" aria-pressed="false">
+        Trace</button
       ><span class="mock"><i></i> Mock connections</span>
     </nav>
     <main id="workspace" class="workspace" data-layout="split">
       <section class="canvas-area">
-        <div id="viewport" class="viewport" aria-label="Workflow canvas">
+        <div
+          id="viewport"
+          class="viewport"
+          aria-label="Workflow canvas"
+          tabindex="0"
+        >
           <div id="stage">
             <div id="scene">
               <svg id="wires" aria-hidden="true"></svg>
@@ -87,6 +93,48 @@
           <div id="node-form"></div>
         </aside>
         <div id="result" class="result" role="status" aria-live="polite"></div>
+        <section id="trace" class="trace" hidden aria-label="Run trace">
+          <div class="trace-top">
+            <button id="trace-toggle" class="quiet" aria-expanded="true">
+              Run trace</button
+            ><span class="pill" id="run-status">Not started</span
+            ><button id="approve" hidden>Approve request</button>
+            <div class="scrubber">
+              <button id="replay-back" class="quiet" aria-label="Step back">
+                ‹</button
+              ><input
+                id="replay"
+                type="range"
+                min="0"
+                max="0"
+                value="0"
+                disabled
+                aria-label="Replay the run's path"
+              /><button
+                id="replay-forward"
+                class="quiet"
+                aria-label="Step forward"
+              >
+                ›</button
+              ><span id="replay-label"></span>
+            </div>
+            <button id="clear-run" class="quiet">Clear run</button>
+          </div>
+          <div class="trace-body">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Step</th>
+                  <th>Tool</th>
+                  <th>Result</th>
+                  <th>Duration</th>
+                </tr>
+              </thead>
+              <tbody id="trace-rows"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
       <div
         id="divider"
@@ -238,25 +286,6 @@
           </section>
         </div>
       </div>
-    </dialog>
-    <dialog id="execution">
-      <div class="dialog-top">
-        <h2>Workflow execution</h2>
-        <button data-close="execution" aria-label="Close execution">×</button>
-      </div>
-      <section class="run-panel">
-        <div class="section-label">
-          <h2>Execution</h2>
-          <span class="pill" id="run-status">Not started</span>
-        </div>
-        <p class="help">
-          These effects return local sample data. No provider calls.
-        </p>
-        <button id="approve" hidden>Approve request</button>
-        <div id="run-output">
-          <div class="empty">Run a workflow to see its results.</div>
-        </div>
-      </section>
     </dialog>
     <span id="admission" hidden></span>
     <script type="module" src="/editor.js"></script>

@@ -37,7 +37,7 @@ pub use catalog::{CatalogGroup, SelectWorkflowRequest, WorkflowCatalogEntry};
 pub use contract::{
     AuthoredSource, CallData, DisplayDelta, DisplayState, EditWorkflowRequest,
     EditWorkflowResponse, EnvironmentView, ErrorBody, ErrorDetail, ErrorResponse,
-    OpenWorkflowRequest, RunEvent, RunStatus, WorkflowView,
+    OpenWorkflowRequest, RunEvent, RunPath, RunStatus, WorkflowView,
 };
 pub use runtime::{WorkflowHost, core as workflow_core};
 

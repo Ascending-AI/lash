@@ -155,9 +155,16 @@ h2 {
   display: none;
 }
 .canvas-area {
+  --trace: 0px;
   position: relative;
   min-width: 0;
   overflow: clip;
+}
+.canvas-area.tracing {
+  --trace: 240px;
+}
+.canvas-area.tracing.trace-collapsed {
+  --trace: 42px;
 }
 .divider-handle {
   cursor: col-resize;
@@ -208,8 +215,11 @@ h2 {
 .code-line.linked:hover {
   background: #f4f6f8;
 }
-.code-line.current {
+.code-line.selected {
   background: #fde3db;
+}
+.code-line.selected.open {
+  box-shadow: inset 3px 0 var(--accent);
 }
 .code-line .ln {
   position: sticky;
@@ -223,7 +233,7 @@ h2 {
   background-color: white;
   user-select: none;
 }
-.code-line.current .ln {
+.code-line.selected .ln {
   background-color: inherit;
 }
 .code-line .code {
@@ -279,16 +289,32 @@ h2 {
   padding: 4px 8px;
   font-size: 11px;
 }
+/* The canvas navigates; it never selects text. Touches reach the gesture
+   handlers instead of scrolling the page. */
 .viewport {
   position: absolute;
-  inset: 0;
+  inset: 0 0 var(--trace) 0;
   overflow: auto;
   background-image: radial-gradient(#d4d8dd 0.8px, transparent 0.8px);
   background-size: 22px 22px;
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
 }
-.viewport.dragging {
-  cursor: grabbing;
+.viewport:focus {
+  outline: none;
+}
+.viewport:focus-visible {
+  box-shadow: inset 0 0 0 2px #e66a5055;
+}
+.viewport.hand,
+.viewport.hand * {
+  cursor: grab !important;
+}
+.viewport.panning,
+.viewport.panning * {
+  cursor: grabbing !important;
 }
 #stage {
   position: relative;
@@ -308,8 +334,27 @@ h2 {
   width: 100%;
   height: 100%;
 }
-#wires {
+#wires,
+#flow {
   pointer-events: none;
+}
+#flow > *,
+#wires .wire-hit {
+  pointer-events: auto;
+}
+.wire-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12px;
+  cursor: default;
+}
+.wire:hover .data-wire {
+  opacity: 1;
+}
+.wire.selected .data-wire {
+  stroke: var(--accent);
+  stroke-width: 3px;
+  opacity: 1;
 }
 .wire {
   fill: none;
@@ -444,7 +489,7 @@ h2 {
 }
 .canvas-tools {
   position: absolute;
-  bottom: 27px;
+  bottom: calc(27px + var(--trace));
   left: 30px;
   display: flex;
   align-items: center;
@@ -478,13 +523,13 @@ h2 {
 .add-step {
   position: absolute;
   right: 30px;
-  bottom: 28px;
+  bottom: calc(28px + var(--trace));
   box-shadow: 0 3px 12px #00000005;
   font-size: 12px;
 }
 .result {
   position: absolute;
-  bottom: 82px;
+  bottom: calc(82px + var(--trace));
   left: 30px;
   max-width: min(520px, calc(100% - 60px));
   font-size: 12px;
@@ -510,7 +555,7 @@ h2 {
   position: absolute;
   right: 18px;
   top: 18px;
-  bottom: 82px;
+  bottom: calc(82px + var(--trace));
   width: 340px;
   overflow: auto;
   background: white;
@@ -737,18 +782,6 @@ dialog::backdrop {
 .entry-row input {
   max-width: 130px;
 }
-.run-line {
-  padding: 9px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 13px;
-}
-.run-line.error {
-  color: #b24335;
-}
-.empty {
-  font-size: 12px;
-  color: var(--muted);
-}
 [hidden] {
   display: none !important;
 }
@@ -796,11 +829,11 @@ dialog::backdrop {
   }
   .canvas-tools {
     left: 12px;
-    bottom: 18px;
+    bottom: calc(18px + var(--trace));
   }
   .add-step {
     right: 12px;
-    bottom: 19px;
+    bottom: calc(19px + var(--trace));
   }
   .advanced-layout {
     display: block;
@@ -811,7 +844,7 @@ dialog::backdrop {
   }
   .result {
     left: 12px;
-    bottom: 78px;
+    bottom: calc(78px + var(--trace));
   }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -819,6 +852,14 @@ dialog::backdrop {
     transition:
       border-color 0.15s,
       box-shadow 0.15s;
+  }
+  .data-node.run-active {
+    animation: run-pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes run-pulse {
+  50% {
+    box-shadow: 0 0 0 9px #d49f4512;
   }
 }
 
@@ -914,14 +955,6 @@ dialog::backdrop {
 .call-data .help {
   overflow-wrap: anywhere;
 }
-.trace-link {
-  display: block;
-  width: 100%;
-  text-align: left;
-  margin: 8px 0;
-  font-size: 12px;
-  color: #406f60;
-}
 
 .data-node {
   position: absolute;
@@ -933,6 +966,66 @@ dialog::backdrop {
   overflow: visible;
   cursor: default;
   padding-bottom: 12px;
+}
+/* Nodes and ports keep the normal pointer; the canvas around them grabs. */
+.data-node button {
+  cursor: default;
+}
+.data-node:hover {
+  border-color: #a4adb5;
+}
+.data-node.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.data-node.open {
+  box-shadow: 0 0 0 7px #e66a501f;
+}
+.node-open {
+  display: none;
+  position: absolute;
+  top: -30px;
+  right: 0;
+  padding: 2px 10px;
+  font-size: 11px;
+  border-color: var(--accent);
+  color: #b24a33;
+  cursor: pointer !important;
+}
+.data-node.selected:not(.open) .node-open {
+  display: block;
+}
+.run-count {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: #4f6f8f;
+  background: #edf3f9;
+  border-radius: 9px;
+  padding: 1px 7px;
+}
+.run-count + .data-status {
+  margin-left: 6px;
+}
+.result-chip {
+  position: absolute;
+  left: 10px;
+  top: calc(100% + 6px);
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 10px/1.6 var(--mono);
+  color: #2f5f4b;
+  background: #eef7f2;
+  border: 1px solid #cfe6da;
+  border-radius: 6px;
+  padding: 1px 7px;
+}
+.result-chip.failed {
+  color: #a3372b;
+  background: #fff0ed;
+  border-color: #f0c8c0;
 }
 .data-node-header {
   width: 100%;
@@ -975,18 +1068,24 @@ dialog::backdrop {
 .data-node.value {
   border-color: #b6a2ca;
 }
-.data-node.succeeded {
+/* A run on the canvas: lash's statuses and counts per node. */
+.data-node.run-done {
   border-color: #3a9d73;
 }
-.data-node.failed {
-  border-color: #ce6962;
+.data-node.run-failed {
+  border-color: #ce4a40;
+  border-width: 2px;
 }
-.data-node.started {
+.data-node.run-active {
   border-color: #d49f45;
-  box-shadow: 0 0 0 4px #d49f4518;
+  box-shadow: 0 0 0 4px #d49f4530;
 }
-.data-node.selected {
-  box-shadow: 0 0 0 4px #e66a5020;
+.data-node.run-waiting {
+  border-color: #d49f45;
+  border-style: dashed;
+}
+.data-node.run-skipped {
+  opacity: 0.42;
 }
 .data-status {
   color: #3a9d73;
@@ -1063,6 +1162,14 @@ dialog::backdrop {
   stroke-width: 1.5px;
   stroke-dasharray: 4 4;
 }
+.control-wire.taken {
+  stroke: #3a9d73;
+  stroke-width: 2.5px;
+  stroke-dasharray: none;
+}
+.control-wire.untaken {
+  opacity: 0.35;
+}
 .data-wire {
   fill: none;
   stroke: #6287b1;
@@ -1135,12 +1242,19 @@ dialog::backdrop {
   border-color: currentColor;
 }
 
-.data-node.incomplete {
+.data-node.run-incomplete {
   border-color: #9a8a6d;
   border-style: dashed;
 }
-.data-node.incomplete .data-status {
+.data-node.run-incomplete .data-status {
   color: #796545;
+}
+.data-node.run-failed .data-status {
+  color: #ce4a40;
+}
+.data-node.run-active .data-status,
+.data-node.run-waiting .data-status {
+  color: #b7832c;
 }
 @media (max-width: 760px) {
   .workspace[data-layout="split"] {
@@ -1159,4 +1273,107 @@ dialog::backdrop {
   #example {
     max-width: 150px;
   }
+}
+
+/* The docked run trace: steps in order, and the replay scrubber. */
+.trace {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--trace);
+  display: flex;
+  flex-direction: column;
+  background: white;
+  border-top: 1px solid var(--line);
+  z-index: 6;
+}
+.trace-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  min-height: 41px;
+  border-bottom: 1px solid var(--line);
+}
+.trace-top button {
+  padding: 4px 9px;
+  font-size: 12px;
+}
+#trace-toggle {
+  font-weight: 600;
+}
+#trace-toggle::before {
+  content: "▾ ";
+}
+.trace-collapsed #trace-toggle::before {
+  content: "▸ ";
+}
+.scrubber {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 0;
+}
+.scrubber input {
+  width: min(260px, 30vw);
+}
+#clear-run {
+  color: #8a5a50;
+}
+.trace-body {
+  flex: 1;
+  overflow: auto;
+}
+.trace-collapsed .trace-body {
+  display: none;
+}
+.trace table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.trace th {
+  position: sticky;
+  top: 0;
+  background: #fafbfc;
+  text-align: left;
+  font-weight: 600;
+  color: #7b848c;
+  padding: 4px 12px;
+}
+.trace td {
+  padding: 4px 12px;
+  border-top: 1px solid #f0f2f4;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace td:first-child,
+.trace td:last-child {
+  font: 10px/1.6 var(--mono);
+  color: #8a9299;
+}
+.trace tr.step {
+  cursor: pointer;
+}
+.trace tr.step:hover {
+  background: #f6f8fa;
+}
+.trace tr.selected {
+  background: #fde3db;
+}
+.trace tr.note td {
+  color: #6f767c;
+}
+.trace tr.error td {
+  color: #b24335;
+}
+.trace tr.empty td {
+  color: var(--muted);
+  padding: 12px;
 }

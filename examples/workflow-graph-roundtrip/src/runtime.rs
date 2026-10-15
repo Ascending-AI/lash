@@ -7,15 +7,16 @@ use lash::process::*;
 use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
 use lash::workflow::document::{Document, EffectIdentity, Name, Site};
 use lash::workflow::edit::Draft;
+use lash::workflow::view::{WorkflowCoverage, WorkflowView};
 use lash::workflow::{
-    WorkflowDocument, WorkflowDocumentRead, WorkflowEnvironment,
-    WorkflowExecutionOverlayAccumulator, WorkflowOverlayFact, WorkflowOverlayOccurrence,
-    WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish,
+    ProcessWorkflowOverlay, ReplaySegments, SegmentAnswer, WorkflowDocument, WorkflowDocumentRead,
+    WorkflowEnvironment, WorkflowExecutionOverlayAccumulator, WorkflowOverlayFact,
+    WorkflowOverlayOccurrence, WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish,
 };
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt as _;
 
-use crate::{DisplayDelta, DisplayState, RunEvent, RunStatus};
+use crate::{DisplayDelta, DisplayState, RunEvent, RunPath, RunStatus};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RunError {
@@ -123,10 +124,15 @@ pub(crate) async fn publish(
     let artifacts = core.host_artifacts();
     let environment = environment()?;
     // The kernel settings a run of the saved version states: this build's
-    // dialect and bounds, chosen once at publication.
+    // dialect and bounds, chosen once at publication, observed at `counts`
+    // so the overlay says how often each statement ran and a finished run
+    // replays to its path (FIG-6370). The facade has no typed setter for
+    // the kernel's recorded settings yet; `observe` is their documented
+    // member.
     let settings = core
         .processes()
-        .engine_defaults(LASH_VM_ENGINE_KIND, &serde_json::Value::Null)?;
+        .engine_defaults(LASH_VM_ENGINE_KIND, &serde_json::Value::Null)?
+        .map(counted);
     let result = async {
         let offered = artifacts
             .workflow_environment(&environment)
@@ -168,6 +174,15 @@ pub(crate) async fn publish(
     result
 }
 
+/// `settings` observed at `counts`.
+fn counted(settings: EngineSettings) -> EngineSettings {
+    let mut value = settings.into_value();
+    if let Some(members) = value.as_object_mut() {
+        members.insert("observe".into(), serde_json::json!("counts"));
+    }
+    EngineSettings::new(value)
+}
+
 /// Follows `process` on its one recovering feed and sends what the execution
 /// overlay shows of it until the process ends or the receiver goes away.
 pub(crate) async fn observe(
@@ -182,9 +197,30 @@ pub(crate) async fn observe(
     // The feed retains everything published while the document is read.
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     let document = execution_document(&core, &snapshot.read_view).await?;
+    let view =
+        lash::workflow::view::derive(&document, workflow_environment(&core).await?.functions())
+            .ok();
     let mut overlay = Overlay::new(&document, process, workflow_version, host)?;
+    let mut workflow = process_overlay(&snapshot.read_view);
     let (mut events, mut terminal) = overlay.snapshot(snapshot.read_view)?;
     loop {
+        if let Some(view) = &view {
+            let coverage = overlay.coverage(view, workflow.as_ref(), terminal);
+            if terminal {
+                // The run's own end, which the overlay's exact counts and the
+                // replayed path complete.
+                let path = run_path(&core, &overlay.process, view).await?;
+                if let Some(last) = events.last_mut() {
+                    (last.coverage, last.path) = (coverage, Some(path));
+                }
+            } else if let Some(coverage) = coverage {
+                let mut event =
+                    overlay.event(None, RunStatus::Started, DisplayDelta::default(), None);
+                event.call_only = true;
+                event.coverage = Some(coverage);
+                events.push(event);
+            }
+        }
         for mut event in events {
             if let Some(call_id) = &event.call_id
                 && let Some(record) = core
@@ -218,7 +254,28 @@ pub(crate) async fn observe(
                 "the process observation feed ended".into(),
             ));
         };
-        (events, terminal) = match item? {
+        let item = item?;
+        // Counts change with a run segment's live delta, its committed
+        // delta and the terminal; lash's process overlay folds them, so
+        // read it again rather than counting here.
+        let recount = match &item {
+            ProcessObservationStreamItem::Event(event) => match &event.payload {
+                ProcessObservationEventPayload::LanguageExecution(observation) => matches!(
+                    observation.execution.payload,
+                    TraceLanguageExecutionPayload::Ran { .. }
+                ),
+                ProcessObservationEventPayload::Committed { event } => matches!(
+                    event.fact,
+                    ProcessLifecycleFact::Ran(_) | ProcessLifecycleFact::Terminal { .. }
+                ),
+                ProcessObservationEventPayload::StepBodyStarted(_) => false,
+            },
+            ProcessObservationStreamItem::Gap { .. } => false,
+        };
+        if recount {
+            workflow = process_overlay(&observed.snapshot().await?.read_view);
+        }
+        (events, terminal) = match item {
             ProcessObservationStreamItem::Event(event) => match &event.payload {
                 ProcessObservationEventPayload::LanguageExecution(observation) => {
                     (overlay.language_observation(observation)?, false)
@@ -235,6 +292,7 @@ pub(crate) async fn observe(
             },
             ProcessObservationStreamItem::Gap { replacement, .. } => {
                 let read_view = replacement.into_read_view();
+                workflow = process_overlay(&read_view);
                 // A gap retires provisional history. Applied display operations
                 // remain host state; retained effect evidence rebuilds bindings.
                 for reset in overlay.reset_after_gap() {
@@ -246,6 +304,42 @@ pub(crate) async fn observe(
             }
         };
     }
+}
+
+/// lash's workflow overlay of a retained process.
+fn process_overlay(view: &ProcessReadView) -> Option<ProcessWorkflowOverlay> {
+    match view {
+        ProcessReadView::Retained(view) => view.workflow.clone(),
+        _ => None,
+    }
+}
+
+/// The path a finished run took through `view`: each segment lash's replay
+/// verified, through `workflow::view::path`, in segment order.
+async fn run_path(
+    core: &LashCore,
+    process: &lash::ProcessId,
+    view: &WorkflowView,
+) -> Result<RunPath, RunError> {
+    let mut segments = core
+        .processes()
+        .replay(process, ReplaySegments::All)
+        .await?;
+    segments.sort_by_key(|segment| segment.segment);
+    let mut steps = Vec::new();
+    for segment in segments {
+        match segment.answer {
+            SegmentAnswer::Verified { path } => {
+                steps.extend(lash::workflow::view::path(view, &path));
+            }
+            unverified => {
+                return Ok(RunPath::Unavailable {
+                    reason: format!("segment {}: {unverified:?}", segment.segment),
+                });
+            }
+        }
+    }
+    Ok(RunPath::Verified { steps })
 }
 
 /// The document the process runs, read from lash by the reference the
@@ -307,6 +401,8 @@ struct Overlay {
     completed_calls: BTreeMap<String, Site>,
     delivered: BTreeSet<String>,
     host: Arc<crate::display::HostTools>,
+    /// The coverage last sent.
+    coverage: Option<WorkflowCoverage>,
 }
 
 impl Overlay {
@@ -330,6 +426,7 @@ impl Overlay {
             completed_calls: BTreeMap::new(),
             delivered: BTreeSet::new(),
             host,
+            coverage: None,
         })
     }
 
@@ -358,7 +455,25 @@ impl Overlay {
             call_id: None,
             call: None,
             output: None,
+            coverage: None,
+            path: None,
         }
+    }
+
+    /// The run's coverage of `view` from lash's process overlay
+    /// `workflow`, when it changed since it was last sent or `always`.
+    fn coverage(
+        &mut self,
+        view: &WorkflowView,
+        workflow: Option<&ProcessWorkflowOverlay>,
+        always: bool,
+    ) -> Option<WorkflowCoverage> {
+        let coverage = lash::workflow::view::coverage(view, &workflow?.ran_counts());
+        if self.coverage.as_ref() == Some(&coverage) && !always {
+            return None;
+        }
+        self.coverage = Some(coverage.clone());
+        Some(coverage)
     }
 
     fn reset_after_gap(&mut self) -> Vec<RunEvent> {
@@ -745,6 +860,7 @@ mod tests {
             completed_calls: BTreeMap::new(),
             delivered: BTreeSet::new(),
             host: Arc::new(crate::display::HostTools::default()),
+            coverage: None,
         }
     }
 

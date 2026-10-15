@@ -27,7 +27,18 @@ import {
   kernelLinking,
   sourceMapLinking,
 } from "./codepane.mjs";
-import { clampZoom, fitZoom, wheelFactor, wheelIntent, zoomAt } from "./viewport.mjs";
+import {
+  clampZoom,
+  dragged,
+  frame,
+  neighbour,
+  pinchStep,
+  wheelFactor,
+  wheelIntent,
+  zoomAt,
+} from "./viewport.mjs";
+import { NOTHING, close, escape, open, select } from "./selection.mjs";
+import { armsTaken, chip, counts, nodeState, replayAt } from "./runview.mjs";
 const $ = (id) => document.getElementById(id);
 const approvals = approvalControl(
   $("approve"),
@@ -46,6 +57,9 @@ let workflow,
   finalOutput,
   observationGap = false,
   expandedValues = new Map(),
+  // The selected item and whether its inspector is open (selection.mjs),
+  // and the statement it shows, which Advanced edits.
+  focus = NOTHING,
   selected,
   operations = [],
   plan,
@@ -54,6 +68,16 @@ let workflow,
   running = false;
 let statuses = new Map(),
   statementNodes = new Map();
+// The run on the canvas: lash's site statuses (and their errors), coverage
+// and path, the step the replay scrubber shows, and the trace rows.
+let errors = new Map(),
+  runCounts = counts(undefined),
+  runPath,
+  replay,
+  runEnded = false,
+  runStarted = 0,
+  following = false,
+  traceRows = [];
 const presets = {
   "display.show_message": { text: "Hello from the workbench" },
   "display.set_status": { key: "workflow", value: "Ready" },
@@ -126,7 +150,6 @@ async function action(work) {
   }
 }
 function show(next, correspondence) {
-  approvals.reset();
   $("node-panel").hidden = true;
   $("node-form").replaceChildren();
   const old = selected?.site;
@@ -143,22 +166,19 @@ function show(next, correspondence) {
   workflow = next;
   if (!sameEntry || !correspondence) runInputs = initialInputs(next);
   connecting = undefined;
-  finalOutput = undefined;
-  observationGap = false;
-  statuses = new Map();
-  calls = new Map();
+  resetRun();
   statementNodes = new Map(
     viewOf(next).statements.map((item) => [key(item.site), item.statement]),
   );
   const mapped =
     old &&
     correspondence?.entries?.find((item) => key(item.from) === key(old))?.to;
-  selected =
-    viewOf(next).statements.find(
-      (stmt) =>
-        key(stmt.site) ===
-        key((correspondence ? mapped : old) ?? { unit: "main" }),
-    ) ?? viewOf(next).statements[0];
+  const kept = correspondence ? mapped : old;
+  const statement =
+    kept &&
+    viewOf(next).statements.find((stmt) => key(stmt.site) === key(kept));
+  focus = statement ? select(NOTHING, key(statement.site)) : NOTHING;
+  selected = statement;
   $("revision").textContent = "All changes saved";
   $("admission").textContent = next.definition
     ? "Ready to run"
@@ -169,8 +189,6 @@ function show(next, correspondence) {
   $("source").scrollLeft = 0;
   $("entry").value = next.entry;
   $("direct").value = "[]";
-  $("run-status").textContent = "Not started";
-  $("run-output").textContent = "Run this revision to see its results.";
   const mappedScope =
     previousScope &&
     correspondence?.entries?.find(
@@ -198,14 +216,14 @@ function renderPlacement() {
     }),
   );
 }
-function renderSelection() {
+function renderSelection(reveal) {
   const stmt = selected && statementNodes.get(key(selected.site));
   $("selected-kind").textContent = stmt ? Object.keys(stmt)[0] : "—";
   $("selection").textContent = selected
     ? `${summary(selected.statement)}\nSite ${JSON.stringify(selected.site)}${stmt?.let ? `\nBinding: ${stmt.let.name}` : ""}`
     : "Select a statement on the canvas.";
   $("selection").style.whiteSpace = "pre-wrap";
-  markCode();
+  markCode(reveal);
 }
 function renderPane() {
   document
@@ -317,10 +335,8 @@ $("input-mode").onchange = () => {
       : 'One canonical Expr, e.g. {"variable":"customer"}. Names resolve in the target scope.';
 };
 $("placement").onchange = () => {
-  selected = viewOf(workflow).statements[Number($("placement").value)];
-  renderCanvas();
-  renderSelection();
-  controls();
+  const statement = viewOf(workflow).statements[Number($("placement").value)];
+  if (statement) selectStatementKey(key(statement.site), "both");
 };
 $("preview").onclick = () =>
   action(async () => {
@@ -417,88 +433,233 @@ for (const button of document.querySelectorAll("[data-tab]"))
     tab = button.dataset.tab;
     renderPane();
   };
-function output(text, error = false) {
-  const line = document.createElement("div");
-  line.className = `run-line${error ? " error" : ""}`;
-  line.textContent = text;
-  $("run-output").append(line);
-}
-async function run() {
+// The run on the canvas and in the trace panel. What it shows comes from
+// the run's events: lash's overlay statuses, coverage and replayed path.
+function resetRun() {
   approvals.reset();
-  running = true;
-  controls();
   statuses = new Map();
+  errors = new Map();
   calls = new Map();
+  runCounts = counts(undefined);
+  runPath = undefined;
+  replay = undefined;
+  runEnded = false;
+  following = false;
   finalOutput = undefined;
   observationGap = false;
+  traceRows = [];
+  $("run-status").textContent = "Not started";
+  renderTrace();
+  renderScrubber();
+}
+function runView() {
+  return { statuses, errors, counts: runCounts, ended: runEnded, replay };
+}
+const elapsed = () => Math.round(performance.now() - runStarted);
+// The statement an event's site is: the action site a run reports, or the
+// statement's own site.
+function statementAt(site) {
+  const statements = viewOf(workflow).statements;
+  return (
+    statements.find((s) => s.action && key(s.action) === key(site)) ??
+    statements.find((s) => key(s.site) === key(site))
+  );
+}
+function traceNote(note, error = false) {
+  traceRows.push({ at: elapsed(), note, error });
+}
+// A site's status opens a trace row, and its outcome ends the row.
+function traceStatus(event) {
+  const site = key(event.site);
+  let row = traceRows.findLast(
+    (row) => row.site === site && row.duration === undefined,
+  );
+  if (!row) {
+    const statement = statementAt(event.site);
+    row = {
+      at: elapsed(),
+      site,
+      item: statement && key(statement.site),
+      title: statement ? summary(statement.statement) : "Step",
+      tool: (statement && actionOf(statement)?.perform?.effect) ?? "",
+    };
+    traceRows.push(row);
+  }
+  row.status = event.status;
+  if (event.status === "failed") row.error = event.error ?? "failed";
+  if (!["started", "waiting"].includes(event.status))
+    row.duration = elapsed() - row.at;
+}
+function traceCall(event) {
+  const site = key(event.site);
+  const row = traceRows.findLast(
+    (row) => row.site === site && (row.callId ?? event.callId) === event.callId,
+  );
+  if (!row) return;
+  row.callId = event.callId;
+  if (event.call) row.result = chip(event.call.output, 60);
+}
+function renderTrace() {
+  const body = $("trace-rows");
+  if (!traceRows.length) {
+    const empty = el("tr", "empty");
+    const cell = el("td", null, "Run the workflow to see its steps here.");
+    cell.colSpan = 5;
+    empty.append(cell);
+    body.replaceChildren(empty);
+    return;
+  }
+  body.replaceChildren(
+    ...traceRows.map((row) => {
+      const line = el("tr", row.note ? "note" : `step ${row.status ?? ""}`);
+      if (row.error) line.classList.add("error");
+      const time = `+${(row.at / 1000).toFixed(2)}s`;
+      const cells = row.note
+        ? [time, row.note, "", "", ""]
+        : [
+            time,
+            row.title,
+            row.tool,
+            row.error ??
+              row.result ??
+              (row.status === "incomplete" ? "no recorded outcome" : row.status) ??
+              "",
+            row.duration === undefined ? "…" : `${row.duration} ms`,
+          ];
+      line.append(...cells.map((text) => el("td", null, text)));
+      if (row.item) {
+        line.dataset.item = row.item;
+        line.classList.toggle("selected", row.item === focus.selected);
+        line.onclick = () => selectStatementKey(row.item, "both");
+        line.ondblclick = () => openItem(row.item);
+      }
+      return line;
+    }),
+  );
+}
+function showTrace(shown) {
+  $("trace").hidden = !shown;
+  $("history-button").setAttribute("aria-pressed", String(shown));
+  document.querySelector(".canvas-area").classList.toggle("tracing", shown);
+}
+// The scrubber steps through the statements of the run's verified path.
+function pathStatements() {
+  if (runPath?.state !== "verified") return [];
+  return runPath.steps.flatMap((step, index) =>
+    step.kind === "statement" ? [index] : [],
+  );
+}
+function renderScrubber() {
+  const positions = pathStatements();
+  const input = $("replay");
+  input.disabled = running || !positions.length;
+  input.max = String(Math.max(0, positions.length - 1));
+  if (!replay) input.value = input.max;
+  $("replay-back").disabled = input.disabled || Number(input.value) <= 0;
+  $("replay-forward").disabled = input.disabled || !replay;
+  $("replay-label").textContent =
+    runPath?.state === "unavailable"
+      ? `No replay: ${runPath.reason}`
+      : !positions.length
+        ? running
+          ? "Replay opens when the run ends"
+          : ""
+        : replay
+          ? `Step ${Number(input.value) + 1} of ${positions.length}`
+          : `${positions.length} steps`;
+}
+// Show the run as it stood at statement `position` of its path; the last
+// position is the run's end.
+function scrub(position) {
+  const positions = pathStatements();
+  if (!positions.length) return;
+  const at = Math.max(0, Math.min(positions.length - 1, position));
+  $("replay").value = String(at);
+  replay =
+    at < positions.length - 1
+      ? replayAt(runPath.steps, positions[at])
+      : undefined;
+  renderScrubber();
+  renderCanvas();
+  const statement =
+    replay &&
+    viewOf(workflow).statements.find((s) => key(s.site) === replay.active);
+  if (statement) revealStatement(statement);
+}
+// Keeps the node at `site` in view while the user has not panned since the
+// run started: a tool call while it runs, or any step while it waits.
+// Short internal steps (library calls, yields) are not followed.
+function follow(site, status) {
+  const statement = statementAt(site);
+  if (statement && (status === "waiting" || actionOf(statement)?.perform))
+    revealStatement(statement);
+}
+async function run() {
+  resetRun();
+  running = true;
+  runStarted = performance.now();
+  following = true;
+  showTrace(true);
+  controls();
   renderInvocationOutput();
   if (selected) renderCallData(selected);
   renderCanvas();
-  $("run-output").replaceChildren();
   $("run-status").textContent = "Running";
   const version = workflow.version;
+  const startScope = activeScope;
   let sawTerminal = false;
   let observing = false;
-  const traceLinks = new Map();
   function observe(event) {
     if (event.workflowVersion !== version) {
-      output("Ignored an event for a different workflow revision.", true);
+      traceNote("Ignored an event for a different workflow revision.", true);
+      renderTrace();
       return;
     }
     if (event.reset) {
       statuses.clear();
+      errors.clear();
       calls.clear();
-      traceLinks.clear();
+      traceRows = [];
       finalOutput = undefined;
       observationGap = true;
       sawTerminal = false;
       approvals.reset();
-      $("run-output").replaceChildren();
       $("run-status").textContent = "Recovering observation";
-      output(
+      traceNote(
         event.error ??
           "Observation gap: live evidence was discarded; retained outcomes follow.",
       );
       const display = event.display ?? {};
-      for (const message of display.messages ?? []) output(message);
+      for (const message of display.messages ?? []) traceNote(message);
       for (const [name, value] of Object.entries(display.statuses ?? {}))
-        output(`${name}: ${value}`);
+        traceNote(`${name}: ${value}`);
       for (const [name, items] of Object.entries(display.lists ?? {}))
-        output(`${name}: ${items.join(", ")}`);
+        traceNote(`${name}: ${items.join(", ")}`);
       for (const [name, value] of Object.entries(display.lights ?? {}))
-        output(`${name}: ${value}`);
+        traceNote(`${name}: ${value}`);
       if (display.progress !== undefined)
-        output(`Progress ${display.progress}%`);
+        traceNote(`Progress ${display.progress}%`);
       renderInvocationOutput();
       if (selected) renderCallData(selected);
     }
+    if (event.coverage) runCounts = counts(event.coverage);
+    if (event.path) runPath = event.path;
     if (event.output !== undefined) {
       finalOutput = event.output;
       renderInvocationOutput();
     }
-    if (event.site && !event.callOnly)
+    if (event.site && !event.callOnly) {
       statuses.set(key(event.site), event.status);
+      if (event.error) errors.set(key(event.site), event.error);
+      else errors.delete(key(event.site));
+      traceStatus(event);
+    }
     if (event.site && event.callId) {
       const site = key(event.site);
       const occurrences = calls.get(site) ?? new Map();
       occurrences.set(event.callId, event);
       calls.set(site, occurrences);
-      const node = visualNodes.find(
-        (node) => node.s?.action && key(node.s.action) === site,
-      );
-      if (node) {
-        let button = traceLinks.get(event.callId);
-        if (!button) {
-          button = el("button", "trace-link");
-          button.onclick = () => {
-            $("execution").close();
-            openNode(node);
-          };
-          traceLinks.set(event.callId, button);
-          $("run-output").append(button);
-        }
-        button.textContent = `${node.info.name} · ${event.status} · View data`;
-      }
+      traceCall(event);
       if (selected?.action && key(selected.action) === site)
         renderCallData(selected);
     }
@@ -506,22 +667,30 @@ async function run() {
       $("run-status").textContent = event.status;
       if (event.status === "succeeded" || event.status === "failed")
         sawTerminal = true;
-      output(
-        `${event.status}${event.error ? `: ${event.error}` : ""}`,
+      traceNote(
+        `Run ${event.status}${event.error ? `: ${event.error}` : ""}`,
         event.status === "failed",
       );
     }
     const delta = event.displayDelta ?? {};
-    for (const message of delta.messagesAppended ?? []) output(message);
+    for (const message of delta.messagesAppended ?? []) traceNote(message);
     for (const [name, value] of Object.entries(delta.statuses ?? {}))
-      output(`${name}: ${value}`);
+      traceNote(`${name}: ${value}`);
     for (const [name, items] of Object.entries(delta.listItemsAppended ?? {}))
-      output(`${name}: ${items.join(", ")}`);
+      traceNote(`${name}: ${items.join(", ")}`);
     for (const [name, value] of Object.entries(delta.lights ?? {}))
-      output(`${name}: ${value}`);
-    if (delta.progress !== undefined) output(`Progress ${delta.progress}%`);
+      traceNote(`${name}: ${value}`);
+    if (delta.progress !== undefined) traceNote(`Progress ${delta.progress}%`);
     if (event.approvalKey) approvals.add(event.approvalKey);
     renderCanvas();
+    if (
+      following &&
+      event.site &&
+      ["started", "waiting"].includes(event.status) &&
+      !event.callOnly
+    )
+      follow(event.site, event.status);
+    renderTrace();
   }
   try {
     const response = await fetch("/run", {
@@ -560,7 +729,7 @@ async function run() {
     }
     if (!sawTerminal) {
       $("run-status").textContent = "Disconnected";
-      output(
+      traceNote(
         "Observation ended before a terminal event. The process may still be running.",
         true,
       );
@@ -570,13 +739,23 @@ async function run() {
       $("run-status").textContent = observing
         ? "Observation unavailable"
         : "Could not start";
-    output(errorText(error), true);
+    traceNote(errorText(error), true);
   } finally {
     running = false;
+    runEnded = true;
+    // A run followed to its end returns to the scope it started from.
+    if (following && workflow.version === version && key(activeScope) !== key(startScope)) {
+      activeScope = startScope;
+      renderScopes();
+    }
+    following = false;
     renderInvocationOutput();
     if (selected) renderCallData(selected);
     approvals.reset();
     controls();
+    renderScrubber();
+    renderCanvas();
+    renderTrace();
   }
 }
 const svgIcon = (content) =>
@@ -662,6 +841,7 @@ let zoom = 1,
   graphWidth = 1200,
   graphHeight = 700,
   visualNodes = [],
+  wireItems = new Map(),
   insertAt,
   activeScope;
 function el(tag, cls, text) {
@@ -752,7 +932,7 @@ function model(s) {
     s,
     info: { name, app: "Flow", icon: "status" },
     title: name,
-    subtitle: "Select to inspect",
+    subtitle: "Open to inspect",
     generic: true,
   };
 }
@@ -838,23 +1018,40 @@ function nodeHeight(node) {
     (node.outputs.length ? 21 : 0)
   );
 }
+// A canvas item's key: its statement's site key, `node:<kind>` for a node
+// with no statement, or a wire's `wire:` key.
+const itemOf = (node) => (node.s ? key(node.s.site) : `node:${node.kind}`);
+// What a node shows of the run: the tool's result, the error it failed
+// with, or the workflow's return value on its Return or Finish node.
+function runResult(node, shown) {
+  if (shown.state === "failed" && shown.error) return shown.error;
+  const occurrences = node.s?.action && calls.get(key(node.s.action));
+  const last = occurrences && [...occurrences.values()].at(-1);
+  if (last?.call) return chip(last.call.output);
+  if (node.kind === "output" && node.workflowOutput && finalOutput !== undefined)
+    return `→ ${chip(finalOutput)}`;
+}
+const STATE_GLYPHS = {
+  done: "✓",
+  failed: "!",
+  incomplete: "?",
+  active: "…",
+  waiting: "…",
+};
 function drawNode(node, x, y) {
   const card = el("section", "data-node " + node.kind);
   card.style.left = x + "px";
   card.style.top = y + "px";
-  const state = node.s?.action && statuses.get(key(node.s.action));
+  const item = itemOf(node);
+  card.dataset.item = item;
+  const shown = node.s ? nodeState(node.s, runView()) : {};
+  const state = shown.state;
   if (state) {
-    card.classList.add(state);
+    card.classList.add(`run-${state}`);
     if (state === "incomplete")
       card.title = "Incomplete evidence: this step's outcome was not observed.";
   }
-  if (
-    node.s &&
-    selected &&
-    key(node.s.site) === key(selected.site) &&
-    !$("node-panel").hidden
-  )
-    card.classList.add("selected");
+  card.ondblclick = () => openItem(item);
   const header = el("button", "data-node-header");
   header.setAttribute("aria-label", node.title);
   header.append(icon(node.info.icon));
@@ -864,22 +1061,18 @@ function drawNode(node, x, y) {
     el("small", null, node.subtitle),
   );
   header.append(heading);
-  if (state)
-    header.append(
-      el(
-        "span",
-        "data-status",
-        state === "succeeded"
-          ? "✓"
-          : state === "failed"
-            ? "!"
-            : state === "incomplete"
-              ? "?"
-              : "…",
-      ),
-    );
-  header.onclick = () => openNode(node);
-  card.append(header);
+  if (shown.runs > 0)
+    header.append(el("span", "run-count", `×${shown.runs}`));
+  if (STATE_GLYPHS[state])
+    header.append(el("span", "data-status", STATE_GLYPHS[state]));
+  header.onclick = () => selectItem(item, "code");
+  const opener = el("button", "node-open", "Open");
+  opener.setAttribute("aria-label", `Open ${node.title}`);
+  opener.onclick = () => openItem(item);
+  card.append(header, opener);
+  const result = runResult(node, shown);
+  if (result)
+    card.append(el("div", `result-chip${state === "failed" ? " failed" : ""}`, result));
   const placed = { ...node, x, y, inputPoints: [], outputPoints: [] };
   let row = 74;
   for (const [direction, ports] of [
@@ -919,14 +1112,22 @@ function drawNode(node, x, y) {
         node: placed,
       };
       placed[direction + "Points"].push(point);
+      // A click on an input selects its node, or completes a connection;
+      // a double-click opens its editor. A click on an output starts a
+      // connection from it.
+      button.ondblclick = (event) => {
+        event.stopPropagation();
+        if (direction === "input") openPortOf(node, port);
+        else openItem(item);
+      };
       button.onclick = () => {
         if (direction === "input") {
           if (connecting) connectPort(port, connecting);
-          else openPort(node, port);
-        } else if (port.discarded || port.stored) openNode(node);
+          else selectItem(item, "code");
+        } else if (port.discarded || port.stored) selectItem(item, "code");
         else {
           connecting = port;
-          $("node-panel").hidden = true;
+          setFocus(select(close(focus), item), "code");
           report(
             `Connect ${port.name}: choose an input port, or press Escape to cancel.`,
           );
@@ -970,6 +1171,13 @@ function controlWire(from, to, label) {
   );
   path.setAttribute("class", "control-wire");
   path.setAttribute("marker-end", "url(#arrow)");
+  // A branch's edge shows whether the run took that arm.
+  if (label && from.s) {
+    const arm = armsTaken(viewOf(workflow), runView(), from.s.site)[
+      label === "True" ? "then" : "else"
+    ];
+    if (arm !== undefined) path.classList.add(arm ? "taken" : "untaken");
+  }
   $("wires").append(path);
   if (label) {
     const text = document.createElementNS(ns, "text");
@@ -1051,24 +1259,36 @@ function dataWires() {
         if (!source) continue;
         const edge = document.createElementNS(ns, "path");
         const lift = Math.min(source.y, point.y) - 45;
-        edge.setAttribute(
-          "d",
+        const d =
           point.x > source.x
             ? `M${source.x},${source.y} C${source.x + 90},${source.y} ${point.x - 90},${point.y} ${point.x},${point.y}`
-            : `M${source.x},${source.y} C${source.x + 60},${lift} ${point.x - 60},${lift} ${point.x},${point.y}`,
-        );
+            : `M${source.x},${source.y} C${source.x + 60},${lift} ${point.x - 60},${lift} ${point.x},${point.y}`;
+        edge.setAttribute("d", d);
         edge.setAttribute("class", "data-wire");
         edge.setAttribute("marker-end", "url(#data-arrow)");
+        // A wider transparent stroke takes the wire's clicks: a click
+        // selects the connection and a double-click opens its input.
+        const hit = document.createElementNS(ns, "path");
+        hit.setAttribute("d", d);
+        hit.setAttribute("class", "wire-hit");
+        const item = `wire:${id}>${itemOf(node)}>${point.port.name}`;
+        wireItems.set(item, { node, port: point.port });
+        const group = document.createElementNS(ns, "g");
+        group.setAttribute("class", "wire");
+        group.dataset.item = item;
         const title = document.createElementNS(ns, "title");
         title.textContent = `${sourceNode.title}.${source.port.name} → ${node.title}.${point.port.name}`;
-        edge.append(title);
-        $("wires").append(edge);
+        group.append(title, edge, hit);
+        group.addEventListener("click", () => selectItem(item, "code"));
+        group.addEventListener("dblclick", () => openItem(item));
+        $("wires").append(group);
       }
     }
 }
 function renderCanvas() {
   if (!workflow) return;
   visualNodes = [];
+  wireItems = new Map();
   $("flow").replaceChildren();
   $("wires").innerHTML =
     '<defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#aeb5bc"/></marker><marker id="data-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#6287b1"/></marker></defs>';
@@ -1135,6 +1355,7 @@ function renderCanvas() {
     "_",
     " ",
   );
+  applySelection();
 }
 function panel(title) {
   $("node-panel").hidden = false;
@@ -1217,6 +1438,7 @@ async function applyVisual(changes) {
 }
 function openCatalog(at) {
   if (busy || running) return;
+  setFocus(open(focus));
   insertAt = at ?? startPosition();
   const container = panel("ADD A STEP");
   container.append(
@@ -1233,7 +1455,6 @@ function openCatalog(at) {
     button.onclick = () => newNode(effect);
     container.append(button);
   }
-  renderCanvas();
 }
 function newNode(effect) {
   const container = panel("NEW STEP");
@@ -1496,7 +1717,6 @@ function connectPort(port, source) {
 }
 function openPort(node, port) {
   if (busy) return;
-  selected = node.s;
   const container = panel(
     node.kind === "output" ? "RESULT MAPPING" : "EDIT INPUT",
   );
@@ -1686,7 +1906,7 @@ function openEndStep(node, source) {
   document
     .querySelectorAll(".data-port.chosen")
     .forEach((port) => port.classList.remove("chosen"));
-  selected = node.s;
+  setFocus(open(focus, itemOf(node)));
   const container = panel("END HERE");
   identity(container, node.info);
   container.append(el("h3", null, `${source.name} · ${typeName(source.type)}`));
@@ -1750,11 +1970,8 @@ function renderInvocationOutput() {
       : dataTree(finalOutput),
   );
 }
+// The inspector of an open node. Opening goes through `openItem`.
 function openNode(node) {
-  if (busy) return;
-  selected = node.s;
-  renderPlacement();
-  renderSelection();
   const container = panel(
     node.kind === "input"
       ? "WORKFLOW INPUTS"
@@ -1924,40 +2141,81 @@ function openNode(node) {
       container.append(remove);
     }
   }
-  renderCanvas();
   controls();
 }
-// The stage is the scene's scaled size, so the viewport scrolls exactly
-// over the zoomed graph.
+// The stage is the scene's scaled size padded by half a viewport on every
+// side, so the canvas pans freely even when the graph fits: any edge of the
+// graph can reach the middle of the view.
+let pad = { x: 0, y: 0 };
 function setZoom(value) {
+  const viewport = $("viewport");
   zoom = clampZoom(value);
-  $("scene").style.transform = `scale(${zoom})`;
-  $("stage").style.width = graphWidth * zoom + "px";
-  $("stage").style.height = graphHeight * zoom + "px";
+  const next = { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 };
+  $("scene").style.transform = `translate(${next.x}px, ${next.y}px) scale(${zoom})`;
+  $("stage").style.width = graphWidth * zoom + 2 * next.x + "px";
+  $("stage").style.height = graphHeight * zoom + 2 * next.y + "px";
+  // A resized view keeps the scene where it was.
+  viewport.scrollLeft += next.x - pad.x;
+  viewport.scrollTop += next.y - pad.y;
+  pad = next;
   $("zoom-label").textContent = Math.round(zoom * 100) + "%";
+}
+// The view as zoom and scroll offsets from the scene's top-left corner.
+function sceneView() {
+  const viewport = $("viewport");
+  return {
+    zoom,
+    scrollLeft: viewport.scrollLeft - pad.x,
+    scrollTop: viewport.scrollTop - pad.y,
+  };
+}
+function showScene(view) {
+  setZoom(view.zoom);
+  $("viewport").scrollLeft = view.scrollLeft + pad.x;
+  $("viewport").scrollTop = view.scrollTop + pad.y;
 }
 function zoomAround(next, point) {
   const viewport = $("viewport");
-  const view = zoomAt(
-    { zoom, scrollLeft: viewport.scrollLeft, scrollTop: viewport.scrollTop },
-    point ?? { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 },
-    next,
+  showScene(
+    zoomAt(
+      sceneView(),
+      point ?? { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 },
+      next,
+    ),
   );
-  setZoom(view.zoom);
-  viewport.scrollLeft = view.scrollLeft;
-  viewport.scrollTop = view.scrollTop;
 }
+// Shows the whole graph, centred.
 function fit() {
   const viewport = $("viewport");
   if (!viewport.clientWidth) return;
-  setZoom(
-    fitZoom(
+  showScene(
+    frame(
       { width: viewport.clientWidth, height: viewport.clientHeight },
-      { width: graphWidth, height: graphHeight },
+      { x: 0, y: 0, width: graphWidth, height: graphHeight },
+      30,
     ),
   );
-  viewport.scrollLeft = 0;
-  viewport.scrollTop = 0;
+}
+function zoomStep(direction) {
+  zoomAround(zoom * (direction > 0 ? 1.25 : 0.8));
+}
+// The node an item shows: itself, or a wire's input node.
+function nodeOfItem(item) {
+  return (
+    wireItems.get(item)?.node ?? visualNodes.find((node) => itemOf(node) === item)
+  );
+}
+// Shift+2 frames the selected node; with nothing selected it fits all.
+function zoomToSelection() {
+  const node = nodeOfItem(focus.selected);
+  if (!node) return fit();
+  const viewport = $("viewport");
+  showScene(
+    frame(
+      { width: viewport.clientWidth, height: viewport.clientHeight },
+      { x: node.x, y: node.y, width: cardWidth, height: nodeHeight(node) },
+    ),
+  );
 }
 // The code pane: the workflow as authored source, lash's TypeScript or
 // kernel text, linked to canvas statements where lash gives the lines.
@@ -2012,43 +2270,125 @@ function renderCode() {
     : `<p class="code-empty">${codeNote()}</p>`;
   markCode();
 }
-// Highlights the line the selected statement starts on and scrolls to it.
-// A compound statement spans its whole body, so only its first line is
-// marked.
-function markCode() {
+// Marks the line the selected statement starts on; a compound statement
+// spans its whole body, so only its first line is marked. With `reveal`
+// naming the code pane, scrolls the line into view if it is not.
+function markCode(reveal) {
   const view = $("code-view");
-  view.querySelector(".current")?.classList.remove("current");
+  view
+    .querySelectorAll(".code-line.selected")
+    .forEach((line) => line.classList.remove("selected", "open"));
   const span = selected && codeLinking?.lines(selected.site);
-  if (!span) return;
-  const first = view.children[span.start];
-  first?.classList.add("current");
-  if (first)
-    view.scrollTop = Math.max(0, first.offsetTop - view.offsetTop - view.clientHeight / 3);
+  const first = span && view.children[span.start];
+  if (!first) return;
+  first.classList.add("selected");
+  first.classList.toggle("open", focus.open);
+  if (reveal !== "code" && reveal !== "both") return;
+  const top = first.offsetTop - view.offsetTop;
+  if (top < view.scrollTop || top + first.offsetHeight > view.scrollTop + view.clientHeight)
+    view.scrollTop = Math.max(0, top - view.clientHeight / 3);
 }
-// Selects the statement a code line shows: its scope on the canvas, and
-// its node when the canvas draws one.
-function selectStatement(siteKey) {
-  const statement = viewOf(workflow).statements.find((s) => key(s.site) === siteKey);
-  if (!statement || busy) return;
-  const scope = viewOf(workflow).scopes.find((s) => key(s.block) === key(statement.block));
-  if (scope && key(scope.block) !== key(activeScope)) {
+// The statement an item is: a node's own, or a wire's input node's.
+function statementOfItem(item) {
+  if (item === undefined) return undefined;
+  const wire = wireItems.get(item);
+  if (wire) return wire.node.s;
+  return viewOf(workflow).statements.find((s) => key(s.site) === item);
+}
+// The one place selection and focus change. `reveal` names the pane to
+// scroll to the counterpart: "code", "canvas" or "both"; the pane the user
+// acted in stays where it is.
+function setFocus(next, reveal) {
+  focus = next;
+  selected = statementOfItem(focus.selected);
+  if (!focus.open) {
+    $("node-panel").hidden = true;
+    $("node-form").replaceChildren();
+  }
+  renderPlacement();
+  renderSelection(reveal);
+  applySelection();
+  if (reveal === "canvas" || reveal === "both") revealItem(focus.selected);
+  controls();
+}
+function selectItem(item, reveal) {
+  setFocus(select(focus, item), reveal);
+}
+// Opens an item's inspector: a node's settings, or a connection's input.
+function openItem(item) {
+  if (busy || item === undefined) return;
+  const wire = wireItems.get(item);
+  const node = nodeOfItem(item);
+  if (!node) {
+    const statement = statementOfItem(item);
+    if (statement)
+      report(`${summary(statement.statement)} is not drawn as its own node in this scope.`);
+    return;
+  }
+  connecting = undefined;
+  setFocus(open(focus, item));
+  if (wire) openPort(wire.node, wire.port);
+  else openNode(node);
+  applySelection();
+}
+function openPortOf(node, port) {
+  if (busy) return;
+  setFocus(open(focus, itemOf(node)));
+  openPort(node, port);
+  applySelection();
+}
+// Marks the selected item, and whether it is open, on the canvas and in
+// the trace.
+function applySelection() {
+  for (const element of document.querySelectorAll("#scene [data-item], #trace [data-item]")) {
+    const on = element.dataset.item === focus.selected;
+    element.classList.toggle("selected", on);
+    element.classList.toggle("open", on && focus.open);
+  }
+}
+// Scrolls the canvas to an item's node when it is out of view.
+function revealItem(item) {
+  const node = nodeOfItem(item);
+  if (!node) return;
+  const viewport = $("viewport");
+  const view = sceneView();
+  const left = node.x * zoom - view.scrollLeft,
+    top = node.y * zoom - view.scrollTop;
+  if (
+    left >= 0 &&
+    top >= 0 &&
+    left + cardWidth * zoom <= viewport.clientWidth &&
+    top + 74 * zoom <= viewport.clientHeight
+  )
+    return;
+  showScene({
+    zoom,
+    scrollLeft: node.x * zoom - viewport.clientWidth / 5,
+    scrollTop: node.y * zoom - viewport.clientHeight / 3,
+  });
+}
+// Shows a statement's scope on the canvas and its node in view.
+function revealStatement(statement) {
+  if (key(statement.block) !== key(activeScope)) {
+    const scope = viewOf(workflow).scopes.find(
+      (s) => key(s.block) === key(statement.block),
+    );
+    if (!scope) return;
     activeScope = scope.block;
     renderScopes();
+    renderCanvas();
   }
-  $("node-panel").hidden = true;
-  renderCanvas();
-  const node = visualNodes.find((n) => n.s && key(n.s.site) === siteKey);
-  if (node) {
-    openNode(node);
-    const viewport = $("viewport");
-    viewport.scrollLeft = node.x * zoom - viewport.clientWidth / 5;
-    viewport.scrollTop = node.y * zoom - viewport.clientHeight / 3;
-  } else {
-    selected = statement;
-    renderPlacement();
-    renderSelection();
+  revealItem(key(statement.site));
+}
+// Selects the statement a code line or trace row shows, switching the
+// canvas to its scope.
+function selectStatementKey(siteKey, reveal) {
+  const statement = statementOfItem(siteKey);
+  if (!statement || busy) return;
+  if (reveal === "canvas" || reveal === "both") revealStatement(statement);
+  setFocus(select(focus, siteKey), reveal);
+  if (!visualNodes.some((node) => itemOf(node) === siteKey))
     report(`${summary(statement.statement)} is not drawn as its own node in this scope.`);
-  }
 }
 const LAYOUT_KEY = "workflow-editor.layout",
   SPLIT_KEY = "workflow-editor.split";
@@ -2096,10 +2436,19 @@ function setupCodePane() {
       codeView = button.dataset.code;
       renderCode();
     };
-  $("code-view").onclick = (e) => {
+  // A click on a linked line selects its statement; a double-click opens
+  // its node.
+  const lineSite = (e) => {
     const line = e.target.closest(".code-line");
-    const siteKey = line && codeLinking?.siteAt(Number(line.dataset.line));
-    if (siteKey) selectStatement(siteKey);
+    return line && codeLinking?.siteAt(Number(line.dataset.line));
+  };
+  $("code-view").onclick = (e) => {
+    const siteKey = lineSite(e);
+    if (siteKey) selectStatementKey(siteKey, "canvas");
+  };
+  $("code-view").ondblclick = (e) => {
+    const siteKey = lineSite(e);
+    if (siteKey) openItem(siteKey);
   };
   const divider = $("divider");
   divider.onpointerdown = (e) => {
@@ -2124,18 +2473,28 @@ function setupCodePane() {
 function setupVisual() {
   $("scope").onchange = () => {
     activeScope = viewOf(workflow).scopes[Number($("scope").value)].block;
-    $("node-panel").hidden = true;
+    setFocus(close(focus));
     renderCanvas();
-    controls();
     fit();
   };
   window.addEventListener("resize", fit);
-  $("close-panel").onclick = () => {
-    $("node-panel").hidden = true;
-    renderCanvas();
-  };
+  $("close-panel").onclick = () => setFocus(close(focus));
   $("advanced-button").onclick = () => $("advanced").showModal();
-  $("history-button").onclick = () => $("execution").showModal();
+  $("history-button").onclick = () => showTrace($("trace").hidden);
+  $("trace-toggle").onclick = () => {
+    const collapsed = document
+      .querySelector(".canvas-area")
+      .classList.toggle("trace-collapsed");
+    $("trace-toggle").setAttribute("aria-expanded", String(!collapsed));
+  };
+  $("clear-run").onclick = () => {
+    resetRun();
+    renderCanvas();
+    showTrace(false);
+  };
+  $("replay").oninput = () => scrub(Number($("replay").value));
+  $("replay-back").onclick = () => scrub(Number($("replay").value) - 1);
+  $("replay-forward").onclick = () => scrub(Number($("replay").value) + 1);
   document
     .querySelectorAll("[data-close]")
     .forEach(
@@ -2147,14 +2506,18 @@ function setupVisual() {
       activeScope ? appendPosition(workflow, activeScope) : undefined,
     );
   };
-  $("zoom-in").onclick = () => zoomAround(zoom + 0.1);
-  $("zoom-out").onclick = () => zoomAround(zoom - 0.1);
+  $("zoom-in").onclick = () => zoomStep(1);
+  $("zoom-out").onclick = () => zoomStep(-1);
   $("fit").onclick = fit;
   const viewport = $("viewport");
   viewport.addEventListener(
     "wheel",
     (e) => {
-      if (wheelIntent(e) !== "zoom") return;
+      if (wheelIntent(e) !== "zoom") {
+        // A two-finger scroll pans natively, and stops following the run.
+        following = false;
+        return;
+      }
       e.preventDefault();
       const bounds = viewport.getBoundingClientRect();
       zoomAround(zoom * wheelFactor(e), {
@@ -2164,41 +2527,180 @@ function setupVisual() {
     },
     { passive: false },
   );
-  let drag;
-  viewport.onpointerdown = (e) => {
-    if (e.target.closest("button, input, select, textarea, .data-node")) return;
-    drag = {
-      x: e.clientX,
-      y: e.clientY,
+  // Canvas gestures, for mouse, pen and touch alike. A left press on
+  // anything becomes a pan once it moves past the click slop; Space or the
+  // middle button pans at once; two touches pinch and pan. A pan never
+  // selects. Each press is preventDefault-ed, so no drag selects text.
+  const pointers = new Map();
+  let gesture,
+    pinch,
+    suppressClick = false,
+    hand = false,
+    over = false;
+  const at = (e) => ({ x: e.clientX, y: e.clientY });
+  const setHand = (on) => {
+    hand = on;
+    viewport.classList.toggle("hand", on);
+  };
+  const beginPan = (e) => {
+    gesture.panning = true;
+    following = false;
+    viewport.setPointerCapture(e.pointerId);
+    viewport.classList.add("panning");
+  };
+  viewport.addEventListener("pointerenter", () => (over = true));
+  viewport.addEventListener("pointerleave", () => (over = false));
+  viewport.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("input, select, textarea")) return;
+    e.preventDefault();
+    // A press on the canvas also drops text selected elsewhere on the page.
+    window.getSelection()?.removeAllRanges();
+    viewport.focus({ preventScroll: true });
+    suppressClick = false;
+    pointers.set(e.pointerId, at(e));
+    if (pointers.size === 2) {
+      // A second finger turns the gesture into a pinch.
+      gesture = undefined;
+      pinch = [...pointers.values()];
+      for (const id of pointers.keys()) viewport.setPointerCapture(id);
+      following = false;
+      return;
+    }
+    if (pointers.size > 2 || (e.button !== 0 && e.button !== 1)) return;
+    gesture = {
+      id: e.pointerId,
+      start: at(e),
       left: viewport.scrollLeft,
       top: viewport.scrollTop,
+      panning: false,
     };
-    viewport.setPointerCapture(e.pointerId);
-    viewport.classList.add("dragging");
+    if (hand || e.button === 1) beginPan(e);
+  });
+  viewport.addEventListener("pointermove", (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, at(e));
+    if (pinch && pointers.size === 2) {
+      const next = [...pointers.values()];
+      const step = pinchStep(pinch, next);
+      pinch = next;
+      viewport.scrollLeft -= step.pan.x;
+      viewport.scrollTop -= step.pan.y;
+      const bounds = viewport.getBoundingClientRect();
+      zoomAround(zoom * step.factor, {
+        x: step.center.x - bounds.left,
+        y: step.center.y - bounds.top,
+      });
+      return;
+    }
+    if (!gesture || gesture.id !== e.pointerId) return;
+    if (!gesture.panning && dragged(gesture.start, at(e))) beginPan(e);
+    if (gesture.panning) {
+      viewport.scrollLeft = gesture.left - (e.clientX - gesture.start.x);
+      viewport.scrollTop = gesture.top - (e.clientY - gesture.start.y);
+    }
+  });
+  const release = (e) => {
+    if (!pointers.delete(e.pointerId)) return;
+    if (pinch) {
+      // The click a lifted pinch would make is not a click.
+      suppressClick = true;
+      if (pointers.size < 2) pinch = undefined;
+      return;
+    }
+    if (gesture?.panning) suppressClick = true;
+    gesture = undefined;
+    viewport.classList.remove("panning");
   };
-  viewport.onpointermove = (e) => {
-    if (!drag) return;
-    viewport.scrollLeft = drag.left - (e.clientX - drag.x);
-    viewport.scrollTop = drag.top - (e.clientY - drag.y);
-  };
-  viewport.onpointerup = viewport.onpointercancel = () => {
-    drag = undefined;
-    viewport.classList.remove("dragging");
-  };
+  viewport.addEventListener("pointerup", release);
+  viewport.addEventListener("pointercancel", release);
+  // The click ending a pan lands on the viewport: drop it before any item
+  // sees it.
+  viewport.addEventListener(
+    "click",
+    (e) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    },
+    true,
+  );
+  viewport.addEventListener("click", (e) => {
+    if (e.target.closest("[data-item], button")) return;
+    // A click on empty canvas clears the selection and any pending
+    // connection.
+    connecting = undefined;
+    setFocus(NOTHING);
+  });
+  window.addEventListener("blur", () => setHand(false));
+  document.addEventListener("keyup", (e) => {
+    if (e.code === "Space") setHand(false);
+  });
   document.addEventListener("keydown", (e) => {
+    if (document.querySelector("dialog[open]")) return;
     if (e.key === "Escape") {
-      connecting = undefined;
-      report("");
-      $("node-panel").hidden = true;
-      renderCanvas();
+      if (connecting) {
+        connecting = undefined;
+        report("");
+        document
+          .querySelectorAll(".data-port.chosen")
+          .forEach((port) => port.classList.remove("chosen"));
+      } else setFocus(escape(focus));
+      return;
+    }
+    if (e.target.closest?.("input, textarea, select, [contenteditable]")) return;
+    const canvas = $("workspace").dataset.layout !== "code";
+    if ((e.ctrlKey || e.metaKey) && canvas && ["=", "+", "-", "0"].includes(e.key)) {
+      e.preventDefault();
+      if (e.key === "0") zoomAround(1);
+      else zoomStep(e.key === "-" ? -1 : 1);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.shiftKey && canvas && (e.code === "Digit1" || e.code === "Digit2")) {
+      e.preventDefault();
+      if (e.code === "Digit1") fit();
+      else zoomToSelection();
+      return;
+    }
+    // Enter and Space keep activating a focused control.
+    if (e.target.closest?.("button, a, summary")) return;
+    if (e.code === "Space" && canvas && (over || viewport.contains(e.target))) {
+      e.preventDefault();
+      setHand(true);
+      return;
+    }
+    if (e.key === "Enter" && focus.selected !== undefined && !focus.open) {
+      e.preventDefault();
+      openItem(focus.selected);
+      return;
+    }
+    if (!e.key.startsWith("Arrow")) return;
+    if ($("code-view").contains(e.target)) {
+      if (!codeLinking || !["ArrowUp", "ArrowDown"].includes(e.key)) return;
+      const next = codeLinking.step(
+        selected && key(selected.site),
+        e.key === "ArrowDown" ? 1 : -1,
+      );
+      if (!next) return;
+      e.preventDefault();
+      selectStatementKey(next, "both");
+    } else if (canvas) {
+      e.preventDefault();
+      const centres = visualNodes.map((node) => ({
+        x: node.x + cardWidth / 2,
+        y: node.y + nodeHeight(node) / 2,
+        node,
+      }));
+      const current = nodeOfItem(focus.selected);
+      const from = centres.find((centre) => centre.node === current);
+      const next = from ? neighbour(centres, from, e.key) : centres[0];
+      if (next) setFocus(select(focus, itemOf(next.node)), "both");
     }
   });
 }
 
-$("run").onclick = () => {
-  $("execution").showModal();
-  run();
-};
+$("run").onclick = () => run();
 setupVisual();
 setupCodePane();
 controls();

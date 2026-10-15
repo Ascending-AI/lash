@@ -44,6 +44,16 @@ test("kernel text links each view statement to the line the printer starts it on
   assert.equal(linked.siteAt(5), key(site(0, 0, 0, 0)));
 });
 
+test("arrow keys step through statement lines in line order", () => {
+  const linked = kernelLinking(kernel, view, "demo");
+  const keys = view.statements.map((statement) => key(statement.site));
+  assert.equal(linked.step(keys[1], 1), keys[2], "down from `do` is the `if`");
+  assert.equal(linked.step(keys[2], -1), keys[1]);
+  assert.equal(linked.step(keys[4], 1), undefined, "nothing below the last");
+  assert.equal(linked.step(undefined, 1), keys[0], "from nothing, the first");
+  assert.equal(linked.step(undefined, -1), keys[4], "or the last");
+});
+
 test("kernel text whose lines do not match the view's statements has no linking", () => {
   const reordered = {
     statements: [

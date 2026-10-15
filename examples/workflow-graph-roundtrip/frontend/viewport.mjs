@@ -38,19 +38,74 @@ export function zoomAt(view, point, next) {
   const sceneY = (view.scrollTop + point.y) / view.zoom;
   return {
     zoom,
-    scrollLeft: Math.max(0, sceneX * zoom - point.x),
-    scrollTop: Math.max(0, sceneY * zoom - point.y),
+    scrollLeft: sceneX * zoom - point.x,
+    scrollTop: sceneY * zoom - point.y,
   };
 }
 
-// The zoom that shows a whole `graph` inside `viewport`, leaving `margin`
-// pixels free; never larger than 100%.
-export function fitZoom(viewport, graph, margin = 60) {
-  return clampZoom(
+// A press that moves no further than this many pixels is a click; past it,
+// it is a drag, which pans and never selects.
+export const CLICK_SLOP = 3;
+
+export function dragged(start, point, slop = CLICK_SLOP) {
+  return Math.hypot(point.x - start.x, point.y - start.y) > slop;
+}
+
+const midpoint = ([a, b]) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+const spread = ([a, b]) => Math.hypot(a.x - b.x, a.y - b.y);
+
+// Two fingers moving from `before` to `after`: the canvas scales by the
+// change in their spread around their midpoint, and pans by how far the
+// midpoint moved.
+export function pinchStep(before, after) {
+  const [from, to] = [midpoint(before), midpoint(after)];
+  return {
+    factor: spread(before) ? spread(after) / spread(before) : 1,
+    center: to,
+    pan: { x: to.x - from.x, y: to.y - from.y },
+  };
+}
+
+const ARROWS = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
+
+// The node an arrow key moves the selection to from `from`: the nearest
+// whose centre lies in the arrow's direction, within 45° of it, with
+// distance off the axis counting double. Nodes are `{x, y}` centres.
+export function neighbour(nodes, from, key) {
+  const [ax, ay] = ARROWS[key] ?? [0, 0];
+  let best, bestScore = Infinity;
+  for (const node of nodes) {
+    const dx = node.x - from.x,
+      dy = node.y - from.y;
+    const along = dx * ax + dy * ay,
+      across = Math.abs(ax ? dy : dx);
+    if (node === from || along <= 0 || across > along) continue;
+    const score = along + 2 * across;
+    if (score < bestScore) [best, bestScore] = [node, score];
+  }
+  return best;
+}
+
+// The zoom and scroll offsets that centre scene rectangle `rect` in a
+// `viewport`-sized view with `margin` pixels around it, at no more than
+// 100% and within the zoom bounds. Offsets are from the scene's corner and
+// go negative when the rectangle is smaller than the view.
+export function frame(viewport, rect, margin = 80) {
+  const zoom = clampZoom(
     Math.min(
       1,
-      (viewport.width - margin) / graph.width,
-      (viewport.height - margin) / graph.height,
+      (viewport.width - 2 * margin) / rect.width,
+      (viewport.height - 2 * margin) / rect.height,
     ),
   );
+  return {
+    zoom,
+    scrollLeft: (rect.x + rect.width / 2) * zoom - viewport.width / 2,
+    scrollTop: (rect.y + rect.height / 2) * zoom - viewport.height / 2,
+  };
 }

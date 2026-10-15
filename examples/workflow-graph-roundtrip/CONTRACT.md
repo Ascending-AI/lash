@@ -140,12 +140,15 @@ expanded canonical edits.
 | `displayDelta`, `display` | What this event changed in the host's display, and the display after it. |
 | `error` | A failure or explanation of missing observation evidence. |
 | `reset` | Discard provisional node, call and approval state before applying replacement evidence. |
-| `callOnly` | Call inspection update; does not replace the node’s aggregate status. |
+| `callOnly` | Call inspection or coverage update; does not replace a node’s or the run’s status. |
 | `callId`, `call` | Admitted call identity and retained input/output data when available. |
 | `output` | The workflow’s terminal result when available. |
 | `approvalKey` | The key to resolve when the run is parked on `host.approval`. |
+| `coverage` | Lash's `view::coverage` of the run's view from its process overlay's counts: `observation`, each statement's `runs` and each scope's `entries`. Sent in a `callOnly` event when it changes, and on the last event. |
+| `path` | On the last event: `{"state": "verified", "steps": [...]}`, each verified segment's `view::path` steps in segment order, or `{"state": "unavailable", "reason": ...}`. |
 
-The last event has no `site` and carries the run's terminal status. A
+Runs start observed at `counts`. The last event has no `site` and carries the
+run's terminal status, its final coverage and its path. A
 `run_error` event carries an observation/start error and ends the stream; it does
 not prove the underlying invocation failed. Multiple approval keys can be pending
 at once and must each remain resolvable.

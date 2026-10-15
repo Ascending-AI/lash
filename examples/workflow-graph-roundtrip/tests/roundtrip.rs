@@ -6,8 +6,9 @@
 
 use std::sync::Arc;
 
+use lash::workflow::view::PathSite;
 use serde_json::{Value, json};
-use workflow_graph_roundtrip::{AppState, RunEvent, RunStatus};
+use workflow_graph_roundtrip::{AppState, RunEvent, RunPath, RunStatus};
 
 async fn serve() -> (String, lash::LashCore) {
     let stores = lash::sqlite::SqliteStoreSet::memory()
@@ -557,4 +558,106 @@ async fn every_example_opens_as_its_imported_source_and_runs_with_the_mocks() {
             entry["statements"], entry["scopes"]
         );
     }
+}
+
+/// FIG-6404: a run is observed at `counts`, so the canvas can play it out.
+/// Over two topics, one urgent, the digest's loop body is entered twice and
+/// each of its statements runs twice, each branch runs once, the counts
+/// arrive while the run is live, and the path lash's replay verifies starts
+/// exactly the statements the counts say ran.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_counted_run_reports_each_statement_as_often_as_its_loop_ran_it() {
+    let (base, _) = serve().await;
+    let client = reqwest::Client::new();
+    let opened = answer(
+        client
+            .post(format!("{base}/workflow/select"))
+            .json(&json!({ "id": "digest" }))
+            .send()
+            .await
+            .expect("select"),
+    )
+    .await;
+    let topics = json!([
+        {"title": "Release notes", "urgent": true},
+        {"title": "Team offsite", "urgent": false},
+    ]);
+    let events = run(&client, &base, json!({ "topics": topics })).await;
+    let last = events.last().expect("the run reports");
+    assert_eq!(
+        (last.status, last.output.clone()),
+        (RunStatus::Succeeded, Some(json!({"seen": 2}))),
+        "the digest runs to its end"
+    );
+    assert!(
+        events[..events.len() - 1]
+            .iter()
+            .any(|event| event.coverage.is_some()),
+        "counts arrive while the run is live"
+    );
+    let coverage = serde_json::to_value(last.coverage.as_ref().expect("the end carries coverage"))
+        .expect("coverage encodes");
+    assert_eq!(coverage["observation"], "counts");
+    let view = &opened["view"];
+    let list = |value: &Value| value.as_array().expect("a list").clone();
+    let (statements, scopes) = (list(&view["statements"]), list(&view["scopes"]));
+    let (runs, entries) = (list(&coverage["statements"]), list(&coverage["scopes"]));
+    let count = |value: &Value| value.as_u64().expect("observed at counts");
+    let entered = |scope: &Value| {
+        count(&entries[scopes.iter().position(|s| s == scope).expect("a scope")]["entries"])
+    };
+    let ran_in = |scope: &Value| {
+        statements
+            .iter()
+            .zip(&runs)
+            .filter(|(statement, _)| statement["block"] == scope["block"])
+            .map(|(_, ran)| count(&ran["runs"]))
+            .collect::<Vec<_>>()
+    };
+    // The lowering iterates a list in one loop and other iterables in
+    // another: the list loop ran once per topic, the other never did.
+    let mut loops = scopes
+        .iter()
+        .filter(|scope| scope["kind"] == "for")
+        .map(|scope| (entered(scope), ran_in(scope)))
+        .collect::<Vec<_>>();
+    loops.sort();
+    assert_eq!(loops.len(), 2, "the lowering has two loops: {loops:?}");
+    let (other, list_loop) = (&loops[0], &loops[1]);
+    assert_eq!(list_loop.0, 2, "the loop ran once per topic");
+    assert!(
+        !list_loop.1.is_empty() && list_loop.1.iter().all(|runs| *runs == 2),
+        "each statement in the loop ran once per topic: {list_loop:?}"
+    );
+    assert!(
+        other.0 == 0 && other.1.iter().all(|runs| *runs == 0),
+        "the other loop never ran: {other:?}"
+    );
+    // One topic is urgent and one is not: some `if` took each branch once.
+    assert!(
+        scopes
+            .iter()
+            .filter(|scope| scope["kind"] == "then")
+            .any(|then| {
+                entered(then) == 1
+                    && scopes.iter().any(|other| {
+                        other["kind"] == "else"
+                            && other["statement"] == then["statement"]
+                            && entered(other) == 1
+                    })
+            }),
+        "the urgent test took each branch once"
+    );
+    let Some(RunPath::Verified { steps }) = &last.path else {
+        panic!("the run replays to a verified path: {:?}", last.path);
+    };
+    let started = steps
+        .iter()
+        .filter(|step| matches!(step.site, PathSite::Statement { .. }))
+        .count() as u64;
+    let ran: u64 = runs
+        .iter()
+        .map(|ran| ran["runs"].as_u64().expect("observed"))
+        .sum();
+    assert_eq!(started, ran, "the path starts what the counts say ran");
 }

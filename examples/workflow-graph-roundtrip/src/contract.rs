@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use axum::http::StatusCode;
 use lash::workflow::document::{Document, Name, Site, SourceMap};
 use lash::workflow::edit::Edit;
+use lash::workflow::view::{PathStep, WorkflowCoverage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -157,7 +158,7 @@ pub struct RunEvent {
     /// Replace the client's provisional observation state before applying this event.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reset: bool,
-    /// Inspector or display data that does not update the site's aggregate status.
+    /// Inspector, display or coverage data that does not update a status.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub call_only: bool,
     /// The site the event is about; absent for the run as a whole.
@@ -177,6 +178,29 @@ pub struct RunEvent {
     pub call: Option<CallData>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<Value>,
+    /// How often each statement and scope of the run's view has run so far:
+    /// lash's process overlay read through `workflow::view::coverage`.
+    /// Sent when it changes, and on the terminal event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<WorkflowCoverage>,
+    /// On the terminal event: the statement path the run took, as lash's
+    /// replay verified it, or why it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<RunPath>,
+}
+
+/// A finished run's path through its view: each verified segment's steps
+/// through `workflow::view::path`, in segment order.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum RunPath {
+    Verified {
+        steps: Vec<PathStep>,
+    },
+    /// A segment did not verify; `reason` is lash's answer for it.
+    Unavailable {
+        reason: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -28,12 +28,21 @@ const tagOf = (statement) =>
   typeof statement === "string" ? statement : Object.keys(statement)[0];
 
 // A statement ↔ line correspondence: `lines(site)` is the first and last
-// line (0-based) a statement spans, and `siteAt(line)` the statement a
-// click on `line` means.
+// line (0-based) a statement spans, `siteAt(line)` the statement a click on
+// `line` means, and `step(key, delta)` the statement an arrow key moves to.
 function linking(spans) {
   const bySite = new Map(spans.map((span) => [span.key, span]));
+  const ordered = [...spans].sort((a, b) => a.start - b.start);
   return {
     lines: (site) => bySite.get(siteKey(site)),
+    // The statement starting on the next (`delta` 1) or previous (-1)
+    // statement line; from an unlinked key, the first or last.
+    step(key, delta) {
+      const at = ordered.findIndex((span) => span.key === key);
+      const next =
+        at < 0 ? (delta > 0 ? 0 : ordered.length - 1) : at + delta;
+      return ordered[next]?.key;
+    },
     siteAt(line) {
       // The innermost statement starting on the line, else the innermost
       // one spanning it.

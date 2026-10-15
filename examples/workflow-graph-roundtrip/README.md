@@ -25,13 +25,82 @@ divider position. The graph is a visual workflow editor: app action tiles on a d
 canvas, named and typed ports, true/false paths, and explicit workflow input and
 Return or Finish steps. Blue connections carry values; dashed gray connections show execution
 order. Click an output port and then an input port to connect them, or select a
-source in the input inspector. Click a tile to edit its fields, or a connection's
-**+** to choose another action. Adding,
+source in the input inspector. Double-click a tile (or select it and press
+Enter) to edit its fields, and double-click an input to edit its value; a
+single click only selects. A connection's **+** chooses another action. Adding,
 editing, and deleting steps plan and validate a transaction, then save it through
-the existing version-guarded endpoint. Drag or scroll with two fingers to pan.
-The mouse wheel and a trackpad pinch zoom around the cursor, between 30% and
-160%; **Fit** shows the whole graph, and loading an example fits it.
-**Run workflow** executes the saved document and opens its recorded outputs.
+the existing version-guarded endpoint. **Run workflow** executes the saved
+document and plays the run out on the canvas.
+
+## Navigation
+
+The canvas navigates like Figma, with pointer events, so mouse, pen and touch
+behave alike:
+
+- **Pan**: drag the canvas with the left button, from anywhere: node positions
+  are derived, so a drag that starts on a node pans too. Hold Space and drag
+  (the hand cursor), drag with the middle button, scroll with two fingers on a
+  trackpad, or drag with two fingers on a touch screen. The canvas is padded by
+  half a view on every side, so it pans even when the graph fits.
+- **Zoom** around the cursor with a mouse wheel, Ctrl/Cmd+wheel, or a trackpad
+  or touch pinch, between 30% and 160%. Cmd/Ctrl+`=` and `-` zoom in and out,
+  Cmd/Ctrl+`0` goes to 100%, Shift+1 fits the whole graph (as **Fit** and
+  loading an example do), and Shift+2 frames the selection at up to 100%.
+- **Clicks**: a press is a click until it moves more than 3px; past that it is
+  a pan, which never selects. A click on empty canvas clears the selection.
+- **Cursors**: `grab` over empty canvas, `grabbing` while panning, the normal
+  pointer over nodes and ports.
+- The canvas never selects text: it is `user-select: none`, and a press on it
+  clears text selected elsewhere. The code pane, inputs and inspector fields
+  keep text selection.
+
+## Selecting and opening
+
+Nodes, connections and code lines share two states (`frontend/selection.mjs`):
+
+- **Selected**: a single click on a node, a connection or a linked code line.
+  The item is outlined and its counterpart highlighted: a node's or
+  connection's line in the code pane, a line's node on the canvas. The other
+  pane scrolls to show the counterpart; the pane you clicked in stays put. No
+  inspector or popup opens. Arrow keys move the selection to the nearest node
+  in that direction in the current scope, or, in the code pane, to the next or
+  previous statement line.
+- **Open**: double-click, Enter on the selection, or the selected node's
+  **Open** button opens its inspector. Opening a connection opens the input it
+  feeds. Escape closes the inspector first, then clears the selection.
+
+Hover is a subtle border change; selection an accent outline; an open item
+adds a halo and the inspector panel.
+
+## Runs on the canvas
+
+**Run workflow** starts the saved version observed at statement counts
+(`observe: "counts"` in the kernel's recorded settings, FIG-6370; the facade has
+no typed setter for it yet, so the host sets that documented member of the
+settings it publishes). The run streams lash's overlay: per-site statuses from
+the execution overlay, and the coverage `lash::workflow::view::coverage` computes
+from the process overlay's counts, re-read whenever a segment's counts change.
+On the canvas:
+
+- the node running a tool call pulses, and the canvas follows it across
+  scopes until you pan or scroll it yourself; a waiting step (a sleep, an
+  approval) shows dashed;
+- each executed node is marked done with its run count (×N); after the run,
+  nodes that did not run are dimmed;
+- a branch's taken edge is drawn solid green and its untaken edge faded;
+- a tool node shows its result as a chip, a failed node turns red with its
+  error, and the Return or Finish node shows the workflow's return value.
+  Lash records no value for pure statements, so only tool calls and the
+  return carry chips. Open a node for its full inputs and outputs.
+
+A docked trace panel lists the run's steps in order: time, step, tool, result
+and duration. Clicking a row selects its node and code line; double-clicking
+opens it. When the run ends, the terminal event carries the path lash's replay
+verified for each segment, mapped through `lash::workflow::view::path`; the
+replay scrubber steps through it, moving the active marker and the counts. The
+overlay stays until the document is edited or another run starts; **Clear
+run** removes it, and **Trace** in the toolbar shows or hides the panel. There
+is no results dialog.
 
 The canvas scope selector uses the blocks of Lash's view, including empty
 bodies, named by what opens them. It defaults to the selected entry's own block. Function
@@ -74,9 +143,10 @@ The code pane is read-only and shows the saved revision as:
   of lash's view to its line and checks its keyword. If any statement does not
   match, the tab is shown without linking.
 
-Selecting a node marks the line its statement starts on and scrolls to it.
-Clicking a linked line selects that statement: the canvas switches to its scope
-and opens its node. Edits and imports refresh the pane.
+Selecting a node marks the line its statement starts on and scrolls the pane to
+it. Clicking a linked line selects that statement: the canvas switches to its
+scope and scrolls to its node, without opening it; double-click the line to
+open it. Edits and imports refresh the pane.
 
 **Advanced** contains TypeScript import/export and the
 helper/direct-edit transaction inspector. Queue a direct edit between
@@ -197,9 +267,14 @@ node --test examples/workflow-graph-roundtrip/frontend/*.test.mjs
 
 These pin the unused-closure, opaque-library-call, shared/shadowed-input,
 empty-scope and terminal-insertion rules, zooming around the cursor and the
-wheel/pinch/pan split, and the code pane's statement-to-line linking. The Rust law
+wheel/pinch/pan split, the click-versus-drag slop, two-finger pinch, arrow-key
+neighbours and framing, the select/open/Escape state machine, the code pane's
+statement-to-line linking and line stepping, and how lash's statuses, coverage
+and replay path become node states and taken branches. The Rust law
 `every_example_opens_as_its_imported_source_and_runs_with_the_mocks` imports
-every catalog example and runs it against the mocks. The HTTP regression
+every catalog example and runs it against the mocks, and
+`a_counted_run_reports_each_statement_as_often_as_its_loop_ran_it` pins a
+counted digest run's loop and branch counts and its verified path. The HTTP regression
 `each_edit_response_maps_its_immediate_base` pins per-transaction correspondence
 across consecutive edits. The dataflow value-encoding law preserves integral
 floats, negative zero and typed nested record values.
@@ -223,10 +298,10 @@ Research evidence, URLs and business metrics are synthetic fixtures; the mock
 synthesis and comparison consume their actual mapped inputs.
 
 Each action shows named inputs and result ports. Record outputs also expose
-fields as connection sources. Click an input to edit its constant, select an
-available source or use the canonical expression editor. **Execution data** shows
-each retained call's input and output, with separate occurrences for repeated
-calls. Execution log links open the relevant node. The entry Return or Finish inspector
+fields as connection sources. Double-click an input to edit its constant, select an
+available source or use the canonical expression editor. **Execution data** in an
+open node shows each retained call's input and output, with separate occurrences
+for repeated calls. Trace rows select the relevant node. The entry Return or Finish inspector
 shows the actual terminal result. A nested function Return never borrows the
 workflow's terminal result. Data resets when the document changes or a new run
 begins; this example does not persist a run-history browser.
