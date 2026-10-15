@@ -25,8 +25,7 @@ const SESSION: &str = "cell-laws";
 const TURN: &str = "turn-1";
 
 fn typescript_state() -> CodeModeExecutionState {
-    let dialect = CellDialect::typescript();
-    CodeModeExecutionState::new(dialect.name(), dialect.numbers())
+    crate::testing::session_state(&CellDialect::typescript())
 }
 
 fn typescript_services() -> super::CellServices {
@@ -245,7 +244,7 @@ async fn a_corrupt_descriptor_refuses_the_restore_with_a_typed_cause() {
     use std::collections::BTreeSet;
     use std::error::Error as _;
 
-    use super::snapshot::CodeModeSnapshotError;
+    use super::snapshot::SessionOpenError;
 
     let mut state = typescript_state();
     state
@@ -280,13 +279,40 @@ async fn a_corrupt_descriptor_refuses_the_restore_with_a_typed_cause() {
         .expect_err("a corrupt descriptor refuses the restore");
     let cause = error
         .source()
-        .and_then(|source| source.downcast_ref::<CodeModeSnapshotError>())
+        .and_then(|source| source.downcast_ref::<SessionOpenError>())
         .expect("the public restore error retains its typed cause");
-    assert!(
-        matches!(cause, CodeModeSnapshotError::Descriptor(_)),
-        "{cause}"
-    );
+    assert!(matches!(cause, SessionOpenError::Heap(_)), "{cause}");
     assert!(restored.names().is_empty());
+}
+
+/// Law S1 (FIG-6424): a session stages no page silently — a host that named
+/// no staging directory is refused, not defaulted.
+#[tokio::test]
+async fn a_session_whose_host_names_no_staging_refuses_to_stage() {
+    use std::collections::BTreeSet;
+
+    let dialect = CellDialect::typescript();
+    let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
+    state
+        .patch_globals(
+            &lash_rlm_types::RlmGlobalsPatchPluginBody {
+                set_default: serde_json::Map::from_iter([(
+                    "notes".to_string(),
+                    serde_json::json!("x".repeat(1_000)),
+                )]),
+            },
+            &BTreeSet::new(),
+        )
+        .await
+        .expect("bind a value");
+    let error = state
+        .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
+        .await
+        .expect_err("a session whose host named no staging directory refuses to stage");
+    assert!(
+        error.to_string().contains("named no staging directory"),
+        "{error}"
+    );
 }
 
 async fn open_host() -> DurableHost {
@@ -848,7 +874,7 @@ async fn an_unavailable_deferred_tool_note_is_visible_and_reused_on_redrive() {
         };
         tools.hold.store(true, Ordering::SeqCst);
         {
-            let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
+            let mut state = crate::testing::session_state(&dialect);
             let running = run_cell(
                 &mut state,
                 context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
@@ -864,7 +890,7 @@ async fn an_unavailable_deferred_tool_note_is_visible_and_reused_on_redrive() {
         host.kill_and_resume().await;
         tools.hold.store(false, Ordering::SeqCst);
         let first = run_cell(
-            &mut CodeModeExecutionState::new(dialect.name(), dialect.numbers()),
+            &mut crate::testing::session_state(&dialect),
             context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
             &services,
             code,
@@ -890,7 +916,7 @@ async fn an_unavailable_deferred_tool_note_is_visible_and_reused_on_redrive() {
 
         host.kill_and_resume().await;
         let redriven = run_cell(
-            &mut CodeModeExecutionState::new(dialect.name(), dialect.numbers()),
+            &mut crate::testing::session_state(&dialect),
             context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
             &services,
             code,
@@ -900,7 +926,7 @@ async fn an_unavailable_deferred_tool_note_is_visible_and_reused_on_redrive() {
         assert_eq!(resolver.asked.load(Ordering::SeqCst), 1);
 
         let next = run_cell(
-            &mut CodeModeExecutionState::new(dialect.name(), dialect.numbers()),
+            &mut crate::testing::session_state(&dialect),
             context_with(&host, "exec-code:1", tools, Some(&deferred)),
             &services,
             if dialect.name() == CellDialect::python().name() {
@@ -1088,7 +1114,7 @@ async fn a_cell_that_ends_with_an_unjoined_task_observes_the_typed_error() {
 async fn a_python_session_runs_a_cell_end_to_end() {
     let host = open_host().await;
     let dialect = CellDialect::python();
-    let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
+    let mut state = crate::testing::session_state(&dialect);
     let services = cell_services(&dialect, python_workers());
     let tools = Arc::new(CellTools::default());
 

@@ -109,9 +109,6 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_rlm::{
     CodeModeProjectedBindings, ProjectedBindingError, RlmSeed, rlm_session_projection_extension,
 };
-/// Restore checks retained as the source of
-/// [`crate::SessionError::ExecutionStateRestore`].
-pub use lash_protocol_rlm::{CodeModeSnapshotError, snapshot};
 /// The schema shapes a [`DialectPrompts`] is handed to spell: one reading of a tool's
 /// JSON Schemas, shared by every prompt surface.
 pub use lash_protocol_rlm::{
@@ -148,6 +145,9 @@ pub use lash_protocol_rlm::{RlmProjectorConfig, section_id, section_keys as rlm_
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.
 pub use lash_protocol_rlm::{RlmPromptFeatures, UnsetChannel};
+/// Restore checks retained as the source of
+/// [`crate::SessionError::ExecutionStateRestore`].
+pub use lash_protocol_rlm::{SessionOpenError, snapshot};
 pub use lash_render::{RenderParams, RenderParamsPatch};
 pub use lash_rlm_types::{
     CodeModeProjectedSeedEntry, CodeModeProjectedSeedSnapshot, RlmSeedPluginBody,

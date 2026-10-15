@@ -75,7 +75,7 @@ async fn a_whole_number_reaches_a_tool_as_a_json_integer() {
             cell_services(&dialect, lash_vm_client::service::Service::default())
         };
         let response = run_cell(
-            &mut CodeModeExecutionState::new(dialect.name(), dialect.numbers()),
+            &mut crate::testing::session_state(&dialect),
             cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
             &services,
             code,

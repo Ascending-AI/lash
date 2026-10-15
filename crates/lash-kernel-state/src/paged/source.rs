@@ -18,6 +18,49 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 /// The semantic page format: the canonical record grammar of every page
 /// kind, which a semantic admission names (D-ADM). Frozen at 1.0
 /// (D-FREEZE): a change to a stored record shape is made in place.
+///
+/// version_guard(
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/source.rs",
+///         PageKind, INDEX_FANOUT, SEQUENCE_LEAF_CELLS, KEYED_LEAF_ROWS, PAGE_TARGET_BYTES,
+///         INLINE_BODY_MAX,
+///     ),
+///     file(
+///         path = "crates/lash-kernel-state/src/paged/codec.rs",
+///         cover("macro_rules! record", "macro_rules! tree_root", "record!(CheckpointRoot"),
+///     ),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/root.rs",
+///         KeyedRoot, SequenceRoot, HeapRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind,
+///         CheckpointRoot, JoinerRecord, TaskStateRecord, IncomingRecord, EndedTask, BindingRecord,
+///         FunctionRecord, BoundRecord, LoopRecord, FinallyRecord, EnteredRecord, WaitRecord,
+///         WaitKindRecord, WaitPhase, CommittedOutcomeRecord, ListJoinRecord,
+///     ),
+///     items(path = "crates/lash-kernel-state/src/paged/census.rs", AccountingMetric, AccountingCertificate),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/family.rs",
+///         FrozenSummary, FrozenRef, MembershipRun, FamilyRecord, SessionRoot, DataOnlyCertificate,
+///     ),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/directory.rs",
+///         Body, ObjectHead, Entry, Ordinal, IteratedRecord, FrameRecord, TaskRecord, encode, decode,
+///     ),
+///     items(path = "crates/lash-kernel-state/src/paged/tree.rs", Summary, Link, Branch, Node, Key, load_shared, seal, encode, decode),
+///     items(path = "crates/lash-kernel-state/src/paged/tree/inline.rs", inline_node, seal_nested, encode, decode),
+///     items(path = "crates/lash-kernel-state/src/paged/payload.rs", Part, build, read, encode, decode),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/metadata.rs",
+///         NameRef, UnitRef, SiteRef, TaskIdentityRef, SpawnNode, encode, decode,
+///     ),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/family_impl/mod.rs",
+///         RelativeValue, RelativeEntry, FrozenHeader, encode, decode,
+///     ),
+///     items(path = "crates/lash-kernel-doc/src/graph_codec.rs", encode, decode),
+///     file(path = "crates/lash-core-store/src/checkpoint_graph/registry.rs", cover("SEMANTIC_REGISTRY")),
+/// )
+/// version_surface = "coexist"
+/// format_outside_manifest = "the page grammar beneath the parked-state and code mode snapshot surfaces, which the manifest reports; a semantic admission records it beside the kernel version"
 pub const PAGE_FORMAT: u32 = 1;
 
 /// A semantic page kind: a generic envelope kind number in the range the

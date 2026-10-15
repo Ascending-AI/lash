@@ -19,8 +19,7 @@ impl Lang {
     }
 
     fn state(self) -> CodeModeExecutionState {
-        let dialect = self.dialect();
-        CodeModeExecutionState::new(dialect.name(), dialect.numbers())
+        crate::testing::session_state(&self.dialect())
     }
 
     /// The services of a session of this language whose worker lowers with

@@ -48,6 +48,29 @@ pub(crate) fn recorded_test_render() -> lash_core::RecordedRender {
     }
 }
 
+/// A session's execution state for `dialect`, staging its pages in the
+/// test host's process-private spools.
+pub(crate) fn session_state(
+    dialect: &crate::CellDialect,
+) -> crate::executor::CodeModeExecutionState {
+    static SPOOLS: std::sync::LazyLock<Arc<lash_vm_broker::kernel::pages::SpoolRoot>> =
+        std::sync::LazyLock::new(|| {
+            let mut config = lash_vm_client::service::Service::default().config().clone();
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the test host explicitly chooses a process-private staging directory"
+            )]
+            let dir =
+                std::env::temp_dir().join(format!("lash-rlm-cell-laws-{}", std::process::id()));
+            config.staging_dir = Some(dir);
+            lash_vm_client::service::Service::new(config)
+                .spools()
+                .expect("open the test host's staging directory")
+        });
+    crate::executor::CodeModeExecutionState::new(dialect.name(), dialect.numbers())
+        .staging(Ok(Arc::clone(&SPOOLS)))
+}
+
 /// What a cell of `dialect` needs of its session, with no bounds and the
 /// builtin renderer, on the cell channel.
 pub(crate) fn cell_services(

@@ -98,6 +98,8 @@ pub(crate) enum PageAccessError {
     Store(#[from] lash_durable::DurableError),
     #[error("the session holds pages in the store, and no store was named")]
     NoStore,
+    #[error("the session stages pages, and its host named no staging directory")]
+    NoStaging,
     #[error("the run's pages are not readable: {0}")]
     Run(lash_vm_protocol::page::PageRefusal),
     #[error(transparent)]

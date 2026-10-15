@@ -440,11 +440,6 @@ pub const GUARDED_SURFACES: &[GuardedSurface] = &[
         reads: SurfaceReads::Mutable,
     },
     GuardedSurface {
-        constant: "KERNEL_PARKED_STATE_VERSION",
-        owner: "lash-vm-runtime",
-        reads: SurfaceReads::History { floor: 1 },
-    },
-    GuardedSurface {
         constant: "KERNEL_SAVED_FUNCTION_VERSION",
         owner: "lash-vm-runtime",
         reads: SurfaceReads::History { floor: 1 },

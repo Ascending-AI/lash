@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use lash_core::SessionError;
 use lash_core::plugin::SessionPages;
-use lash_core_store::checkpoint_graph::stage::{ManifestEntry, StageSpool};
+use lash_core_store::checkpoint_graph::stage::{ManifestEntry, StageFault, StageSpool};
 use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId};
 use lash_core_store::execution_state::{
     ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
@@ -34,7 +34,7 @@ use lash_vm_broker::kernel::pages::{ParentSeal, SharedSpool, SpoolRoot, answer_p
 use lash_vm_client::service::LowerFunction;
 
 use super::pages::{PageAccessError, SessionPageAccess};
-use super::snapshot::CodeModeSnapshotError;
+use super::snapshot::SessionOpenError;
 
 mod graph;
 
@@ -126,7 +126,7 @@ pub struct CodeModeExecutionState {
     protected: BTreeSet<Name>,
     view: View,
     pages: SessionPageAccess,
-    spools: Option<Arc<SpoolRoot>>,
+    spools: Option<Result<Arc<SpoolRoot>, StageFault>>,
     kernel: super::KernelCarry,
 }
 
@@ -178,8 +178,8 @@ impl CodeModeExecutionState {
 
     /// This state, staging its turns' pages in spools `spools` opens.
     #[must_use]
-    pub(crate) fn staging(mut self, spools: Option<Arc<SpoolRoot>>) -> Self {
-        self.spools = spools;
+    pub(crate) fn staging(mut self, spools: Result<Arc<SpoolRoot>, StageFault>) -> Self {
+        self.spools = Some(spools);
         self
     }
 
@@ -218,17 +218,9 @@ impl CodeModeExecutionState {
     /// The turn's spool, opened on first use.
     pub(super) fn turn_spool(&mut self) -> Result<SharedSpool, PageAccessError> {
         let spools = match &self.spools {
-            Some(spools) => Arc::clone(spools),
-            None => {
-                #[expect(
-                    clippy::disallowed_methods,
-                    reason = "a session whose host names no staging directory stages where the worker pool's default does (PoolConfig::staging_dir)"
-                )]
-                let fallback = std::env::temp_dir().join("lash-staging");
-                let spools = Arc::new(SpoolRoot::open(&fallback, 1 << 30)?);
-                self.spools = Some(Arc::clone(&spools));
-                spools
-            }
+            Some(Ok(spools)) => Arc::clone(spools),
+            Some(Err(fault)) => return Err(PageAccessError::Staging(fault.clone())),
+            None => return Err(PageAccessError::NoStaging),
         };
         Ok(self.pages.spool(&spools)?)
     }
@@ -285,7 +277,7 @@ impl CodeModeExecutionState {
     /// tool's namespace against (FIG-5824).
     pub(crate) fn persisted_binding_names(
         state: &HydratedExecutionGraph,
-    ) -> Result<BTreeSet<String>, CodeModeSnapshotError> {
+    ) -> Result<BTreeSet<String>, SessionOpenError> {
         Ok(stored_descriptor(state)?
             .names
             .into_iter()
@@ -770,22 +762,22 @@ impl CodeModeExecutionState {
         &mut self,
         graph: &HydratedExecutionGraph,
         purpose: ExecutionGraphPurpose,
-    ) -> Result<(), CodeModeSnapshotError> {
+    ) -> Result<(), SessionOpenError> {
         let read = stored_descriptor(graph)?;
         if read.dialect != self.dialect.as_ref() {
-            return Err(CodeModeSnapshotError::DialectMismatch {
+            return Err(SessionOpenError::Dialect {
                 expected: self.dialect.to_string(),
                 found: read.dialect,
             });
         }
         if read.numbers != self.numbers {
-            return Err(CodeModeSnapshotError::NumberPolicyMismatch {
+            return Err(SessionOpenError::Numbers {
                 expected: self.numbers,
                 found: read.numbers,
             });
         }
         if read.kernel != KERNEL_VERSION {
-            return Err(CodeModeSnapshotError::KernelMismatch {
+            return Err(SessionOpenError::Kernel {
                 expected: KERNEL_VERSION,
                 found: read.kernel,
             });
@@ -969,16 +961,15 @@ impl PageSource for SpoolSeal {
 /// The descriptor a stored state's root page holds.
 fn stored_descriptor(
     graph: &HydratedExecutionGraph,
-) -> Result<graph::SessionDescriptor, CodeModeSnapshotError> {
+) -> Result<graph::SessionDescriptor, SessionOpenError> {
     let mut source = StoredPages(&graph.nodes);
-    graph::read(
+    Ok(graph::read(
         &mut source,
         PageRef {
             id: PageId(graph.root.0),
             grant: PageGrant::NONE,
         },
-    )
-    .map_err(CodeModeSnapshotError::Descriptor)
+    )?)
 }
 
 /// The pages of a stored state the host was handed, read as they are.
@@ -1016,7 +1007,7 @@ impl PageSource for StoredPages<'_> {
 /// The refusal of a state that is not one this build reads.
 pub fn saved_function_pins(
     state: &HydratedExecutionGraph,
-) -> Result<BTreeMap<String, BTreeSet<FunctionId>>, CodeModeSnapshotError> {
+) -> Result<BTreeMap<String, BTreeSet<FunctionId>>, SessionOpenError> {
     Ok(stored_descriptor(state)?
         .functions
         .into_iter()

@@ -766,7 +766,7 @@ impl DialectSession {
     pub(crate) fn new(dialect: CellDialect, services: CodeModeDialectServices) -> Self {
         let state = CodeModeExecutionState::new(dialect.name(), dialect.numbers())
             .carrying(services.kernel.clone())
-            .staging(services.workers.spools().ok())
+            .staging(services.workers.spools())
             .caching(services.workers.page_cache());
         Self {
             dialect,

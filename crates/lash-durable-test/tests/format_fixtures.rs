@@ -215,6 +215,7 @@ fn actor_format_id(format: lash::formats::DurableFormat) -> Option<String> {
         DurableFormat::OutcomeMaterial => {
             Some(lash_core_execution::formats::OUTCOME_MATERIAL_FORMAT_ID)
         }
+        DurableFormat::KernelParkedState => Some("kernel-parked-state"),
         _ => None,
     }
     .map(str::to_owned)
@@ -270,5 +271,5 @@ async fn every_drain_format_is_in_an_actor_format_set() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 4, "the drain formats this build declares");
+    assert_eq!(checked, 5, "the drain formats this build declares");
 }

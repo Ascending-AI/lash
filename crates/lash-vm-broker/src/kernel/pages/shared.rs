@@ -19,7 +19,7 @@ use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_vm_protocol::page::{PageReply, PageRequest};
 
-use super::{ActivationPages, DiskSpool, PageExchange, frame_page, local};
+use super::{ActivationPages, DiskSpool, PageExchange, frame_page, staging};
 
 /// One spool shared by the activations of a session turn. Discarding an
 /// activation's handle keeps the spool: the turn's last handle deletes it.
@@ -115,7 +115,7 @@ impl PageSource for ParentSeal<'_> {
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
         let node = frame_page(&page)?;
         let id = PageId(node.id.0);
-        self.0.seal(node, &|_| true).map_err(local::staging)?;
+        self.0.seal(node, &|_| true).map_err(staging)?;
         Ok(PageRef {
             id,
             grant: PageGrant::NONE,

@@ -34,7 +34,7 @@ pub(crate) use envelope::{
 pub(crate) use host::site_label;
 pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
 pub use session::{CodeModeExecutionState, saved_function_pins};
-pub use snapshot::{CODEMODE_SNAPSHOT_VERSION, CodeModeSnapshotError};
+pub use snapshot::{CODEMODE_SNAPSHOT_VERSION, SessionOpenError};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -1525,7 +1525,8 @@ impl CodeModeCheckpointPerfFixture {
         binding_count: usize,
         payload_bytes: usize,
     ) -> Result<Self, lash_core::SessionError> {
-        let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
+        let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers())
+            .staging(workers.spools());
         let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
         for index in 0..binding_count {
             patch.set_default.insert(
@@ -1599,7 +1600,8 @@ impl CodeModeCheckpointPerfFixture {
         dialect: &crate::CellDialect,
         state: &lash_core::plugin::HydratedExecutionGraph,
     ) -> Result<(), lash_core::SessionError> {
-        let mut restored = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
+        let mut restored = CodeModeExecutionState::new(dialect.name(), dialect.numbers())
+            .staging(lash_vm_client::service::Service::default().spools());
         restored
             .restore_execution_graph(state, lash_core::plugin::ExecutionGraphPurpose::Final)
             .map_err(lash_core::SessionError::from)

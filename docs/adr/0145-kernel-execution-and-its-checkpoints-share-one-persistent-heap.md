@@ -320,15 +320,31 @@ cache answers only for immutable bytes, never for authority. An activation's
 span bounds the host work its exchanges take, not wall time.
 
 Replacing or releasing a root never reclaims inside the publishing
-transaction. The old root becomes a **retirement hold**, a root source in the
-catalog beside owners and leases (`RootSource::ReadLease`,
-`RootSource::RetirementHold`). A retirement step is one transaction: it
-takes holds until its node budget is spent, deletes in digest order the
-nodes under them that no owner, lease or inbound edge keeps, installs holds
-on their surviving children, and reaps expired leases. Steps take row locks
-under the shared graph gate, so they never stop publication, and locks are
-taken in one global order: digest order, with root-catalog and hold rows
-before a step's peel.
+transaction. The old root becomes a **retirement hold** (a
+`retirement_holds` row), a root source in the catalog beside owners and
+leases (`RootSource::ReadLease`, `RootSource::RetirementHold`). A
+retirement step is one transaction. It first reaps expired leases, whose
+roots join its **frontier**. It then continues the frontier, oldest first,
+before it takes the oldest hold, and peels level by level in digest order
+until its node budget is spent, deleting the nodes that no owner, lease,
+hold or inbound edge keeps. Whatever it did not reach, and every node its
+peel skipped, goes back on the frontier (the `retirement_frontier` table)
+in the same transaction. The frontier is no root of the catalog and has no
+foreign key: only steps write or take it, and a frontier node that is gone
+meanwhile is passed over.
+
+Steps run one at a time and never stop publication. On PostgreSQL a step
+takes the transaction advisory lock keyed `lash.pages.retirement`, the
+only lock it ever waits for, and takes holds, expired leases and peel
+locks `FOR UPDATE SKIP LOCKED`, so it passes over whatever a publication
+holds. Every transaction takes its locks in one global order, each class
+in digest order: the retirement key (steps only) or the owner's fence row;
+blob rows; the root catalog's owning rows and the semantic admission; hold
+rows; a step's peel locks; its frontier rows. A publication that meets a
+row a step locked therefore waits for a transaction that waits on nothing
+(`publications_and_retirement_on_two_nodes_never_deadlock`). On SQLite
+every write runs behind the database's one writer, so a step never
+interleaves with a publication.
 
 Each durable node runs a retirement task beside its lease renewal. A sweep
 runs up to `steps_per_sweep` steps of at most `batch_nodes` nodes and stops

@@ -165,7 +165,12 @@ pub struct PageEnvelope {
 
 /// The domain a page's digest is hashed in: a page is stored as the blob of
 /// its envelope, so its digest is that blob's (`lash-core-store`'s
-/// `BlobRef::digest_for_content`).
+/// `BlobRef::digest_for_content`). It must equal
+/// `lash-core-store`'s `LASH_BLOB_DOMAIN_VERSION`: the law
+/// `a_page_crosses_named_by_its_store_content_address` in `lash-vm-worker`
+/// pins it.
+/// version_surface = "coexist"
+/// version_guard(items(PAGE_DIGEST_DOMAIN), items(digest))
 const PAGE_DIGEST_DOMAIN: &str = "lash-blob/v2";
 
 impl PageEnvelope {

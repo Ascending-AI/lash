@@ -25,11 +25,13 @@
 //! - Every refusal is infrastructure ([`PageRefusal`]), and the first one
 //!   ends the activation: every later exchange is refused the same way.
 //!
-//! [`LocalPages`] is the same port for an embedder with no parent: the
+//! `LocalPages` is the same port for an embedder with no parent: the
 //! kernel's [`PageSource`] over committed pages it holds itself and a spool.
+//! Only laws use it; the `testing` feature exposes it.
 
 pub mod cache;
 pub mod capability;
+#[cfg(any(test, feature = "testing"))]
 pub mod local;
 pub mod shared;
 pub mod spool;
@@ -51,7 +53,7 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{PageStore, RootLease, StoredPage};
-use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
+use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageKind};
 use lash_vm_protocol::page::{
     PageAuthority, PageCapability, PageEnvelope, PageRefusal, PageReply, PageRequest, ReadPage,
@@ -59,9 +61,31 @@ use lash_vm_protocol::page::{
 };
 
 pub use capability::CapabilityKey;
+#[cfg(any(test, feature = "testing"))]
 pub use local::{CommittedPages, LocalPages};
 pub use shared::{ParentSeal, SharedPages, SharedSpool, renew_when_due};
 pub use spool::{DiskSpool, SpoolRoot};
+
+/// A spool fault as the heap fault the activation's page port answers.
+pub(super) fn staging(fault: StageFault) -> HeapFault {
+    match fault {
+        StageFault::Quota { .. } => HeapFault::Exhausted {
+            resource: HostResource::StagingBytes,
+        },
+        StageFault::Unauthorized { child, .. } => HeapFault::Unauthorized {
+            page: PageId(child.0),
+        },
+        StageFault::Missing(page) => HeapFault::Missing {
+            page: PageId(page.0),
+        },
+        StageFault::HashMismatch(page) => HeapFault::Corrupt {
+            page: PageId(page.0),
+            reason: "a staged page does not hash to its identity".to_owned(),
+        },
+        StageFault::Ended => HeapFault::LeaseLost,
+        StageFault::Io(error) => HeapFault::Transport(error),
+    }
+}
 
 /// The store reads a page service makes under its root lease: the slice of
 /// [`PageStore`] it consumes, so a layer law can stand a fake store behind

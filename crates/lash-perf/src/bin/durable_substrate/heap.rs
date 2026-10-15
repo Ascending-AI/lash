@@ -1,12 +1,15 @@
 //! HEAP-METER: released-worker retained-state work, independent of wall
 //! time, and the paged heap's counted laws over it: checkpoint work is flat
 //! in H at a fixed change, a cold continuation is flat in H at a fixed
-//! working set, a length read loads no payload and a cell that touches
-//! nothing loads and seals O(1) pages.
+//! working set, a length read loads no payload, a cell that touches
+//! nothing loads and seals O(1) pages, and the bounded retirement steps a
+//! park leaves are flat in H.
 use anyhow::{Context as _, Result, ensure};
 use lash::tools::{StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt as _};
 use lash_core::llm::types::{LlmRequest, LlmRole};
 use lash_core::perf_witness::{Collector, Snapshot};
+use lash_core_execution::StoreSet;
+use lash_durable::domain::pages::{RetirementBudget, RetirementProgress};
 use lash_vm_client::{PoolCounters, WorkerPool};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -44,8 +47,13 @@ const COUNTERS: [&str; 18] = [
 const PAGES_LOADED: usize = 14;
 const PAGES_SEALED: usize = 15;
 const SPOOL_BYTES: usize = 16;
+const RETIREMENT_BATCHES: usize = 17;
 const _: () = assert!(matches!(COUNTERS[PAGES_LOADED].as_bytes(), b"pages_loaded"));
 const _: () = assert!(matches!(COUNTERS[SPOOL_BYTES].as_bytes(), b"spool_bytes"));
+const _: () = assert!(matches!(
+    COUNTERS[RETIREMENT_BATCHES].as_bytes(),
+    b"retirement_batches"
+));
 const LIMIT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -250,13 +258,24 @@ async fn sample_with_stores(
     h: usize,
 ) -> Result<Vec<Row>> {
     let recorder = Arc::new(super::recorder::Recorder::default());
-    let stores = super::recorder::RecordingStores::new(
+    let stores: Arc<dyn StoreSet> = Arc::new(super::recorder::RecordingStores::new(
         Arc::new(stores),
         "heap-meter",
         Arc::clone(&recorder),
         "sqlite",
-    );
-    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).build()?;
+    ));
+    // No background sweep during a sample: the driver still sweeps once at
+    // boot, then waits; each mark drains retirement itself, so an interval
+    // counts the steps its own park left.
+    let mut settings = lash::durable::DurableSettings::standard();
+    settings.retirement.every = Duration::from_secs(3600);
+    let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(&stores))
+        .config(settings)
+        .build()?;
+    let retirement = stores
+        .durable_store()
+        .pages()
+        .context("the durable store publishes heap pages")?;
     let pool = service.pool()?;
     let session_id = lash::SessionId::try_from(format!("heap-{scenario}-{h}"))?;
     let meter = Arc::new(Meter {
@@ -349,6 +368,16 @@ async fn sample_with_stores(
                 }
                 tokio::time::sleep(Duration::from_millis(1)).await;
             };
+            // Drain what the park replaced before the mark: the interval
+            // then counts the bounded steps, never a background sweep's
+            // timing.
+            while retirement
+                .retire_step(RetirementBudget {
+                    nodes: lash::durable::RetirementSettings::standard().batch_nodes,
+                })
+                .await?
+                != RetirementProgress::default()
+            {}
             meter.park(phase);
             ensure!(matches!(core.completions().resolve(call.key.as_str(), lash::Resolution::Ok(serde_json::json!({}))).await?,
                 lash::durable::ResolveAnswer::Resolved), "gate resolution refused");
@@ -382,7 +411,13 @@ async fn sample_with_stores(
         );
         // Every interval steps the machine, crosses frames, commits and
         // seals its park's changed pages; the rest may be zero.
-        for name in ["vm_steps", "ipc_messages", "sql_statements", "pages_sealed"] {
+        for name in [
+            "vm_steps",
+            "ipc_messages",
+            "sql_statements",
+            "retirement_batches",
+            "pages_sealed",
+        ] {
             let index = COUNTERS
                 .iter()
                 .position(|counter| *counter == name)
@@ -438,6 +473,13 @@ fn laws(rows: &[Row]) -> Result<()> {
             row.counts[PAGES_SEALED]
         })?;
         flat(scenario, "spooled bytes", &|row| row.counts[SPOOL_BYTES])?;
+    }
+    // Reclamation at a fixed change D: the bounded steps that retire what
+    // a park replaced, drained at each mark.
+    for scenario in ["list-update", "objects-update", "worker-resets"] {
+        flat(scenario, "retirement steps a park leaves", &|row| {
+            row.counts[RETIREMENT_BATCHES]
+        })?;
     }
     // A cold continuation at a fixed working set W: a released worker
     // resumes and loads only the pages the run touches.

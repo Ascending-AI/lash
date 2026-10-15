@@ -3,8 +3,7 @@
 use super::*;
 
 fn state() -> CodeModeExecutionState {
-    let dialect = CellDialect::python();
-    CodeModeExecutionState::new(dialect.name(), dialect.numbers())
+    crate::testing::session_state(&CellDialect::python())
 }
 
 fn python_services() -> super::super::CellServices {

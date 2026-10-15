@@ -6,8 +6,10 @@
 //! Each is the newest kernel version this build interprets, and each moves
 //! by migration (ADR 0106): a breaking kernel version ships the migration
 //! from the version before it (`lash-kernel-migrate`), and a node of the
-//! new build carries a document and its parked run forward when it takes
-//! over a process the previous build parked. The `synthetic-next` build
+//! new build carries a document forward when it takes over a process the
+//! previous build parked. A parked run is not carried (ADR 0145 §11): a
+//! build that does not interpret it refuses it, and it drains on a build
+//! that does. The `synthetic-next` build
 //! interprets the successor only it knows.
 
 use lash_kernel_doc::KernelVersion;
@@ -49,32 +51,46 @@ pub const KERNEL_DOCUMENT_SCHEMA_VERSION: u32 = 2;
 
 const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == KernelVersion::NEWEST.number());
 
-/// A parked run: the machine's state as a KernelWhole graph root, sealed
-/// under its owner, the kernel version and the document's identity. The
-/// execution root that holds it states the kernel version as its format.
+/// A parked run: the machine's state as a checkpoint root page
+/// (`paged::root::CheckpointRoot`, kind 1000) over the run's persistent heap
+/// (`HeapRoot`), sealed under its owner, the kernel version and the
+/// document's identity. The execution root that holds it states the kernel
+/// version as its format. The record, tree and page codecs beneath the root
+/// are the semantic page format's (`paged::source::PAGE_FORMAT`), which this
+/// guard names, so a page-format change moves this version too.
+///
+/// A parked run is never carried across a kernel version or a helper-release
+/// retirement (ADR 0145 §11): a build that does not interpret it refuses it
+/// (`ParkedRefusal::StateNotCarried`), and it resumes on a build that does.
+/// The surface drains.
 ///
 /// version_guard(
-///     shapes(path = "crates/lash-kernel-state/src/*.rs", cover(KernelWhole)),
-///     shapes(path = "crates/lash-vm-protocol/src/graph_state.rs", cover(SealedGraphState)),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/root.rs",
+///         CheckpointRoot, HeapRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind,
+///     ),
+///     file(path = "crates/lash-kernel-state/src/paged/codec.rs", cover("record!(CheckpointRoot", "record!(HeapRoot")),
+///     items(path = "crates/lash-kernel-state/src/paged/source.rs", PAGE_FORMAT),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// format_manifest = "KernelParkedState"
-/// version_surface = "migrate"
+/// version_surface = "drain"
 pub const KERNEL_PARKED_STATE_VERSION: u32 = 1;
 /// The synthetic successor's parked-run format.
 #[cfg(feature = "synthetic-next")]
 /// format_manifest = "KernelParkedState"
-/// version_surface = "migrate"
+/// version_surface = "drain"
 pub const KERNEL_PARKED_STATE_VERSION: u32 = 2;
 
 const _: () = assert!(KERNEL_PARKED_STATE_VERSION == KernelVersion::NEWEST.number());
 
-/// A saved function: a function a session keeps between cells, as its code
-/// (a kernel document that declares it) and the captures frozen with it.
-/// The code mode session snapshot holds one per function, with the bindings that
-/// hold it, and a session is created with them as an input. Its document
-/// states the kernel version it was written in, and the kernel migration
-/// rewrites each stored one, alone, when its session is restored or seeded.
+/// A saved function: a function a session keeps between cells, held in an
+/// immutable FunctionBundle node with every saved function it uses. Its
+/// code is a kernel document node of its own, its captures are frozen page
+/// references by name, and it names the helper release it was written
+/// against. Its document states the kernel version it was written in, and
+/// the kernel migration rewrites each stored one, alone, when its session
+/// is restored or seeded.
 ///
 /// A saved function is declared in the document of each cell that uses it,
 /// so it is held in the version this build's dialects lower a cell in. The
@@ -82,7 +98,12 @@ const _: () = assert!(KERNEL_PARKED_STATE_VERSION == KernelVersion::NEWEST.numbe
 /// under it.
 ///
 /// version_guard(
-///     shapes(path = "crates/lash-kernel-dialect/src/saved.rs", cover(SavedFunction)),
+///     items(path = "crates/lash-kernel-dialect/src/saved.rs", SavedFunction, Token, NotSaved, CaptureRefusal),
+///     items(
+///         path = "crates/lash-kernel-dialect/src/saved/graph.rs",
+///         DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, BundleBody, MemberBody, VALUE_KINDS, encode,
+///         decode,
+///     ),
 /// )
 /// format_manifest = "KernelSavedFunction"
 /// version_surface = "migrate"

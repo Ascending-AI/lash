@@ -11,7 +11,7 @@ use lash_core_store::checkpoint_graph::stage::{StageFault, StageSpool};
 use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, source::READ_BATCH_PAGES};
 
-use super::{answer_page, frame_page};
+use super::{answer_page, frame_page, staging};
 
 /// Committed pages an in-process embedder holds: a store snapshot, a
 /// fixture, a test's map.
@@ -35,26 +35,6 @@ impl<C: CommittedPages> LocalPages<C> {
     /// The spool, for the embedder's publication.
     pub fn spool(&mut self) -> &mut dyn StageSpool {
         self.spool.as_mut()
-    }
-}
-
-pub(super) fn staging(fault: StageFault) -> HeapFault {
-    match fault {
-        StageFault::Quota { .. } => HeapFault::Exhausted {
-            resource: HostResource::StagingBytes,
-        },
-        StageFault::Unauthorized { child, .. } => HeapFault::Unauthorized {
-            page: PageId(child.0),
-        },
-        StageFault::Missing(page) => HeapFault::Missing {
-            page: PageId(page.0),
-        },
-        StageFault::HashMismatch(page) => HeapFault::Corrupt {
-            page: PageId(page.0),
-            reason: "a staged page does not hash to its identity".to_owned(),
-        },
-        StageFault::Ended => HeapFault::LeaseLost,
-        StageFault::Io(error) => HeapFault::Transport(error),
     }
 }
 

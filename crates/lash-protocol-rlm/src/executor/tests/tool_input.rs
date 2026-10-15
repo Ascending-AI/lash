@@ -206,7 +206,7 @@ async fn tool_input_omission_follows_canonical_schema() {
             let dialect = &spelling.dialect;
             let host = &host;
             async move {
-                let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
+                let mut state = crate::testing::session_state(dialect);
                 run_cell(
                     &mut state,
                     cell_context(host, SESSION, TURN, key, tools),

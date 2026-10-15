@@ -21,6 +21,8 @@ workspace = true
 synthetic-next = ["lash-vm-protocol/synthetic-next"]
 # Counts spooled page bytes for the performance witness.
 perf-witness = ["lash-core-execution/perf-witness"]
+# Exposes LocalPages, the in-process page port only laws use.
+testing = []
 
 # The broker is parent code: it depends on the protocol, the kernel's
 # vocabulary and the parent's identity vocabulary. It drives a machine

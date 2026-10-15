@@ -234,7 +234,7 @@ impl DurableFormat {
             DurableFormat::OutcomeMaterial => UpgradePolicy::Drain,
             DurableFormat::RuntimeCommitReceipt => UpgradePolicy::Migrate,
             DurableFormat::KernelDocument => UpgradePolicy::Migrate,
-            DurableFormat::KernelParkedState => UpgradePolicy::Migrate,
+            DurableFormat::KernelParkedState => UpgradePolicy::Drain,
             DurableFormat::KernelSavedFunction => UpgradePolicy::Migrate,
             DurableFormat::CodeModeSnapshotEnvelope => UpgradePolicy::Migrate,
             DurableFormat::RlmDriverState => UpgradePolicy::Migrate,
