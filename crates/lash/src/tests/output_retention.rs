@@ -948,7 +948,7 @@ struct ControlSession {
 }
 
 #[cfg(feature = "rlm")]
-fn control_cell_response(
+pub(super) fn control_cell_response(
     dialect: &crate::rlm::CellDialect,
     channel: crate::rlm::RlmChannel,
     index: usize,

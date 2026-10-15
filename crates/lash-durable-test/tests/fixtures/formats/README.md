@@ -64,6 +64,16 @@ and all six images of set `4b1b3a0d68` in place on one build rebased onto
 `origin/main`. The set keeps its id, programs and expected results; every
 re-recorded image resumed to the result it recorded before.
 
+FIG-6293 added `result_summary`, a presentation projection of a call's
+committed ledger record, to each executed call that a cell's committed record
+lists. No image bytes changed. A resumed cell commits its record on the
+resuming build, so the three session images of set `4b1b3a0d68` that finish
+their cell (`pending-tool-typescript`, `pending-tool-python`,
+`saved-declared-read`) now carry that member. The orchestrator authorized
+adding exactly that member to those three `expected` oracles, with the value
+computed from each image's own committed ledger record, and changing nothing
+else. A recorded cell without the member renders `result_summary: null`.
+
 Source `env.sh`, then run the existing recorder locally on the build being
 retained, naming its full commit (use a new build, never an existing set):
 

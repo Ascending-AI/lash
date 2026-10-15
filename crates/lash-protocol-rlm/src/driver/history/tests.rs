@@ -118,7 +118,12 @@ fn step_output_text_names_the_session_variables_a_cell_changed() {
     };
 
     assert_eq!(
-        step_output_text(dialect.prompt_vocabulary(), 2, &entry(changes.clone()), 128),
+        step_output_text(
+            dialect.prompt_vocabulary(),
+            2,
+            &entry(changes.clone()),
+            crate::RlmPresentationConfig::standard()
+        ),
         "history[2].output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- removed: scratch\n- not kept (a function or a task does not outlive its cell): increment"
     );
 
@@ -133,7 +138,12 @@ fn step_output_text_names_the_session_variables_a_cell_changed() {
         }
     );
     assert_eq!(
-        step_output_text(dialect.prompt_vocabulary(), 2, &entry(bounded), 128),
+        step_output_text(
+            dialect.prompt_vocabulary(),
+            2,
+            &entry(bounded),
+            crate::RlmPresentationConfig::standard()
+        ),
         "history[2].output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- … 2 more names omitted"
     );
 }
@@ -164,7 +174,12 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
         result: lash_core::CellOutcome::Completed,
     };
 
-    let rendered = step_output_text(dialect.prompt_vocabulary(), 7, &entry, 128);
+    let rendered = step_output_text(
+        dialect.prompt_vocabulary(),
+        7,
+        &entry,
+        crate::RlmPresentationConfig::standard(),
+    );
 
     assert_eq!(
         rendered,
@@ -254,11 +269,16 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
             images: Vec::new(),
             calls: vec![
                 lash_core::ExecutedCall {
+                    result_summary: Some(lash_core::CallResultSummary {
+                        text: "{\"item_id\":\"i-1\"}".to_string(),
+                        truncated: false,
+                    }),
                     operation: "module.ok".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Ok,
-                    call_id: None,
+                    call_id: Some(lash_core::ToolCallId::fixture("module-ok")),
                 },
                 lash_core::ExecutedCall {
+                    result_summary: None,
                     operation: "module.fail".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Err,
                     call_id: None,
@@ -278,16 +298,21 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
     let messages = render(&[event]);
     let observation = observation_text(&messages[1]);
 
-    insta::assert_snapshot!(observation, @r#"
-    Calls:
-    - module.ok → ok
-    - module.fail → err
-
-    read failed at secret.txt; cache failed at .cache/lash/state
-
-    Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell.
-    "#);
-    assert!(observation.contains("Calls:\n- module.ok → ok\n- module.fail → err"));
+    let id =
+        serde_json::to_string(&lash_core::ToolCallId::fixture("module-ok")).expect("an id encodes");
+    assert_eq!(
+        observation,
+        format!(
+            "Calls:\n\
+             {{\"completed_calls\":[\
+             {{\"tool\":\"module.ok\",\"call_id\":{id},\"outcome\":\"ok\",\"result_summary\":{{\"text\":\"{{\\\"item_id\\\":\\\"i-1\\\"}}\",\"truncated\":false}}}},\
+             {{\"tool\":\"module.fail\",\"call_id\":null,\"outcome\":\"err\",\"result_summary\":null}}\
+             ],\"omitted\":{{\"ok\":0,\"err\":0}}}}\n\n\
+             read failed at secret.txt; cache failed at .cache/lash/state\n\n\
+             Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell.\n\n\
+             The completed calls above remain completed even though this cell failed. Do not repeat successful effecting calls when repairing the cell. A failed or interrupted call may still have produced effects; inspect its recorded outcome before deciding to retry."
+        )
+    );
     assert!(!observation.contains("secret: 1"), "arguments stay elided");
     assert!(observation.contains("Next: the defect is in the program"));
     assert!(observation.contains("secret.txt"));
@@ -581,35 +606,4 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
 
     assert!(messages[0].starts_user_segment);
     assert!(!messages[1].starts_user_segment);
-}
-
-/// FIG-6171: the next prompt has the exact pre-change diagnostic tail,
-/// while the durable cell retains every call identity.
-#[test]
-fn the_prompt_call_bound_preserves_the_previous_prompt_bytes() {
-    let calls = (0..130)
-        .map(|index| lash_core::ExecutedCall {
-            operation: format!("tools.call_{index}"),
-            outcome: lash_core::ExecutedCallOutcome::Ok,
-            call_id: Some(lash_core::ToolCallId::fixture(&format!("call-{index}"))),
-        })
-        .collect::<Vec<_>>();
-    let cell = lash_core::CellRecord {
-        calls,
-        ..Default::default()
-    };
-    let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(cell)),
-        lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-            crate::RLM_PROTOCOL_EVENT_VERSION
-        )),
-    ));
-    let messages = render(&[event]);
-    // These are the bytes main renders for the same 130-call fixture: the
-    // final 128 calls and the count of the earlier two, with no call ids.
-    let mut expected = "Calls:\n- … 2 earlier executed calls omitted".to_owned();
-    for index in 2..130 {
-        expected.push_str(&format!("\n- tools.call_{index} → ok"));
-    }
-    assert_eq!(observation_text(&messages[1]), expected);
 }

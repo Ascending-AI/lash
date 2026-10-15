@@ -101,9 +101,9 @@ pub use schema_contract::{
     project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
 };
 pub use session::{
-    BindingChanges, CellControl, CellDefect, CellFailure, CellFailureKind, CellOutcome, CellPrint,
-    CellRecord, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
-    ExecutedCall, ExecutedCallOutcome, TextProjectionMetadata,
+    BindingChanges, CallResultSummary, CellControl, CellDefect, CellFailure, CellFailureKind,
+    CellOutcome, CellPrint, CellRecord, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason,
+    ExecResponse, ExecutedCall, ExecutedCallOutcome, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{

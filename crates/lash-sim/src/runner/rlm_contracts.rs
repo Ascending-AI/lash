@@ -778,6 +778,7 @@ fn rlm_exec_response_with_tool_calls(
     let calls = tool_calls
         .iter()
         .map(|record| lash_core::ExecutedCall {
+            result_summary: None,
             operation: if record.tool == "finish" {
                 "control.finish".into()
             } else {

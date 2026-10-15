@@ -399,9 +399,13 @@ impl Scenario for Wide {
         // The model was told every answer, and no member failed.
         let told = self.seen.lock_recover().last().cloned().unwrap_or_default();
         if !told.contains(TOUCHED)
-            || ["Tool execution failed", "tool was interrupted", "→ err"]
-                .iter()
-                .any(|failed| told.contains(failed))
+            || [
+                "Tool execution failed",
+                "tool was interrupted",
+                "\"outcome\":\"err\"",
+            ]
+            .iter()
+            .any(|failed| told.contains(failed))
         {
             violations.push(format!("the model was told a failed group: {told}"));
         }

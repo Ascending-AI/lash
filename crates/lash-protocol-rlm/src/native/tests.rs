@@ -1675,6 +1675,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             .expect("redeliver the pending execution");
         let mut exec = response(None);
         exec.calls.push(lash_core::ExecutedCall {
+            result_summary: None,
             operation: "tools.app_lookup".into(),
             outcome: lash_core::ExecutedCallOutcome::Ok,
             call_id: Some(lash_core::ToolCallId::fixture("terminal-call")),

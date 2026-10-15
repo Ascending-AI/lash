@@ -5,6 +5,7 @@
 
 #![deny(clippy::future_not_send)]
 
+mod call_feedback;
 mod catalogue_preview;
 mod cell_scan;
 mod cell_value;
@@ -81,6 +82,7 @@ pub mod snapshot {
     pub use lash_kernel_dialect::BundleRefusal;
     pub use lash_kernel_state::{LoadError, Root, SaveError};
 }
+pub use call_feedback::{CallFeedbackPolicy, CallFeedbackPolicyError};
 pub use feedback::{
     CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, SESSION_BINDING_NOT_CARRIED,
 };

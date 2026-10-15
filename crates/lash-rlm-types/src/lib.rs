@@ -313,6 +313,7 @@ mod rlm_step_serde_tests {
                 label: Some("plot".to_string()),
             }],
             calls: vec![lash_sansio::ExecutedCall {
+                result_summary: None,
                 operation: "math.add".to_string(),
                 outcome: lash_sansio::ExecutedCallOutcome::Ok,
                 call_id: Some(lash_sansio::ToolCallId::fixture("math-add")),

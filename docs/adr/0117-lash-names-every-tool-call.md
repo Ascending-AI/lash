@@ -188,9 +188,10 @@ envelopes carry the turn, and collected activity announces it in `TurnStarted`.
 `committed_turns_with_tool_calls` opts into the same ledger decoder for only
 the returned page's turns; `committed_turns` reads no call bodies. Execution pins retire independently of the archival body.
 
-Only the model-facing diagnostic tail is bounded by `prompt_max_tool_calls`.
-Its earlier-call count is derived at render time; it never limits durable
-identities or host-visible bodies.
+Only the model-facing calls block is bounded, by `prompt_max_tool_calls` and the
+session's recorded `CallFeedbackPolicy` (FIG-6293). Its omission counts are
+derived at render time; it never limits durable identities or host-visible
+bodies.
 
 Sources: `crates/lash-sansio/src/session.rs` and
 `crates/lash-core-store/src/transcript/mod.rs`. Law:

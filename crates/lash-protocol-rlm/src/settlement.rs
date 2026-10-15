@@ -75,6 +75,13 @@ pub(crate) fn settle_execution(
                     .find(|call| &call.call_id == call_id)
                     .and_then(|call| call.output.as_turn_control().cloned());
             }
+            // Each call's result summary is projected here, from the
+            // committed records, in the record's own commit (FIG-6293).
+            record.calls = crate::call_feedback::with_result_summaries(
+                response.calls,
+                &response.tool_calls,
+                dialect.presentation().call_feedback.max_result_bytes(),
+            );
             actions.extend(
                 response
                     .tool_calls
@@ -82,7 +89,6 @@ pub(crate) fn settle_execution(
                     .map(tool_call_event)
                     .map(DriverAction::Emit),
             );
-            record.calls = response.calls;
             record.bindings =
                 (*response.bindings).bounded(dialect.presentation().max_binding_change_names);
             record.images = response.printed_images;

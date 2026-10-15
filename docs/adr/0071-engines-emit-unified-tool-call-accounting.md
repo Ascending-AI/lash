@@ -31,9 +31,14 @@ outcomes reference. Execution pins and presentation recipes are reclaimed with
 the consumed cell; only the original typed request and output remain.
 `DurableSession::read_tool_call` and its batch reads expose original typed records
 through the protocol's offline transcript decoder, without a live session.
-`RlmPresentationConfig::prompt_max_tool_calls` bounds only the next prompt's
-operation/outcome tail (128 by default). The scalar accounting truncator and
-durable omission summaries are deleted; the prompt contains no tool body.
+`RlmPresentationConfig::prompt_max_tool_calls` bounds only how many calls the
+next prompt lists (128 by default). Each listed call names its operation,
+outcome and `call_id`, with a result summary: a bounded prefix of the committed
+record's canonical JSON. The summary is projected once, when the cell's record
+commits, and cut by the session's recorded `CallFeedbackPolicy` (FIG-6293). It
+is presentation, never the body: the scalar accounting truncator and durable
+omission summaries stay deleted, and the record under the `call_id` is the only
+home of the body.
 
 ## Attachment commit acquires explicit referrers
 

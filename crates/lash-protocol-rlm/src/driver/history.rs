@@ -201,7 +201,7 @@ pub(super) fn render_history_messages(
                         .projected_index_for_chronological(entry.index)
                         .unwrap_or(entry.index),
                     step,
-                    input.dialect.presentation().prompt_max_tool_calls,
+                    input.dialect.presentation(),
                 );
                 let mut obs_blocks = vec![text_block(obs_text, false)];
                 append_step_image_blocks(step, &mut obs_blocks);
@@ -452,13 +452,13 @@ fn message_text(
 }
 
 /// The user observation message for a step: printed outputs (with re-fetch handles), images,
-/// executed calls, what the cell did to the session's variables, error, and final value.
-/// Never empty.
+/// executed calls with their ids and result summaries, what the cell did to the session's
+/// variables, error, and final value. Never empty.
 pub(crate) fn step_output_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,
     entry: &lash_core::CellRecord,
-    prompt_max_tool_calls: usize,
+    presentation: crate::RlmPresentationConfig,
 ) -> String {
     let mut out = String::new();
     for (output_index, item) in entry.prints.iter().enumerate() {
@@ -498,19 +498,17 @@ pub(crate) fn step_output_text(
             );
         }
     }
-    let omitted = entry.calls.len().saturating_sub(prompt_max_tool_calls);
-    let calls = &entry.calls[omitted..];
-    if !calls.is_empty() {
+    if !entry.calls.is_empty() {
         if !out.is_empty() {
             out.push_str("\n\n");
         }
-        out.push_str("Calls:");
-        if omitted > 0 {
-            let _ = write!(out, "\n- … {} earlier executed calls omitted", omitted);
-        }
-        for call in calls {
-            let _ = write!(out, "\n- {} → {}", call.operation, call.outcome.as_str());
-        }
+        out.push_str("Calls:\n");
+        crate::call_feedback::write_calls_block(
+            &mut out,
+            &entry.calls,
+            presentation.prompt_max_tool_calls,
+            presentation.call_feedback,
+        );
     }
     if !entry.bindings.is_empty() {
         if !out.is_empty() {
@@ -543,6 +541,10 @@ pub(crate) fn step_output_text(
                 out.push_str("\n\n");
             }
             out.push_str(&crate::feedback::render(failure, vocabulary.cell_noun));
+            if !entry.calls.is_empty() {
+                out.push_str("\n\n");
+                out.push_str(crate::call_feedback::FAILED_CELL_CALLS_GUIDANCE);
+            }
         }
         lash_core::CellOutcome::Controlled {
             control:

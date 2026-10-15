@@ -80,10 +80,11 @@ pub use lash_protocol_rlm::is_rlm_protocol_output;
 /// creator states them on its create request (FIG-5296).
 pub use lash_protocol_rlm::rlm_seed_initial_nodes;
 pub use lash_protocol_rlm::{
-    BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound,
-    MemoryBound, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmDiscovery, RlmPresentationConfig,
-    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
-    RlmSessionConfigDecodeError, UnsetBound, rlm_protocol_event,
+    BuiltinCodeRenderer, CallFeedbackPolicy, CallFeedbackPolicyError, CodeRenderer,
+    CodeRendererSlot, ExecutionBounds, InstructionBound, MemoryBound, RLM_PROTOCOL_PLUGIN_ID,
+    RlmChannel, RlmDiscovery, RlmPresentationConfig, RlmProtocolPluginConfig,
+    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
+    UnsetBound, rlm_protocol_event,
 };
 /// The stable codes of the typed observations a cell's failure carries, and
 /// the error kinds a cell's program catches from a tool call.

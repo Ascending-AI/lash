@@ -560,12 +560,14 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
     let mut calls = records
         .iter()
         .map(|record| lash_core::ExecutedCall {
+            result_summary: None,
             operation: "tools.read_file".to_string(),
             outcome: lash_core::ExecutedCallOutcome::Ok,
             call_id: Some(record.call_id.clone()),
         })
         .collect::<Vec<_>>();
     calls.push(lash_core::ExecutedCall {
+        result_summary: None,
         operation: "finish".to_string(),
         outcome: lash_core::ExecutedCallOutcome::Ok,
         call_id: None,

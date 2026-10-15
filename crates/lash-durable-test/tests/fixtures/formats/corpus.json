@@ -2759,7 +2759,11 @@
                       {
                         "call_id": "tc_b824426dfa9d278fcb6102a33bf9400ee196f9cdc781761e74a7a184ba70c75d",
                         "operation": "tools.ext_write",
-                        "outcome": "ok"
+                        "outcome": "ok",
+                        "result_summary": {
+                          "text": "{\"ok\":true,\"wrote\":{\"x\":7.0}}",
+                          "truncated": false
+                        }
                       }
                     ],
                     "code": "const written = await tools.ext_write({ x: 7 });\nconsole.log(written);",
@@ -2905,7 +2909,11 @@
                       {
                         "call_id": "tc_b824426dfa9d278fcb6102a33bf9400ee196f9cdc781761e74a7a184ba70c75d",
                         "operation": "tools_ext_write",
-                        "outcome": "ok"
+                        "outcome": "ok",
+                        "result_summary": {
+                          "text": "{\"ok\":true,\"wrote\":{\"x\":7}}",
+                          "truncated": false
+                        }
                       }
                     ],
                     "code": "written = await tools_ext_write({\"x\": 7})\nprint(written)",
@@ -3052,7 +3060,11 @@
                       {
                         "call_id": "tc_b824426dfa9d278fcb6102a33bf9400ee196f9cdc781761e74a7a184ba70c75d",
                         "operation": "tools.ext_write",
-                        "outcome": "ok"
+                        "outcome": "ok",
+                        "result_summary": {
+                          "text": "{\"ok\":true,\"wrote\":{\"x\":7.0}}",
+                          "truncated": false
+                        }
                       }
                     ],
                     "code": "const read = await tools.ext_read({ x: 7 });\nconst written = await tools.ext_write({ x: read.x });\nconsole.log([read, written]);",

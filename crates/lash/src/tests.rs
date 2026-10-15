@@ -412,6 +412,8 @@ mod assistant_hook_faults;
 #[cfg(feature = "rlm")]
 mod cell_budget;
 #[cfg(feature = "rlm")]
+mod cell_call_feedback;
+#[cfg(feature = "rlm")]
 mod cell_race_loser;
 mod config_transactions;
 mod control_settlement;

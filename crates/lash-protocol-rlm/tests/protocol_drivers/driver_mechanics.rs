@@ -616,6 +616,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                 projection: Default::default(),
             }],
             calls: vec![lash_core::ExecutedCall {
+                result_summary: None,
                 operation: "tools.attachment_tool".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
                 call_id: Some(lash_core::ToolCallId::fixture("replayed-call")),
@@ -977,16 +978,19 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             }],
             calls: vec![
                 lash_core::ExecutedCall {
+                    result_summary: None,
                     operation: "module.ok".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Ok,
                     call_id: Some(lash_core::ToolCallId::fixture("fanout-ok")),
                 },
                 lash_core::ExecutedCall {
+                    result_summary: None,
                     operation: "module.fail".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Err,
                     call_id: Some(lash_core::ToolCallId::fixture("fanout-fail")),
                 },
                 lash_core::ExecutedCall {
+                    result_summary: None,
                     operation: "module.stop".to_string(),
                     outcome: lash_core::ExecutedCallOutcome::Err,
                     call_id: Some(lash_core::ToolCallId::fixture("fanout-cancel")),
@@ -1076,20 +1080,47 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     );
     assert_eq!(entry.prints[0].text, "fanout done");
     assert_eq!(entry.prints[0].value, serde_json::json!("fanout done"));
+    // Each call's result summary is projected from its committed record
+    // (FIG-6293), whatever its outcome.
     assert_eq!(
-        entry.calls,
+        entry.calls[0].result_summary,
+        Some(lash_core::CallResultSummary {
+            text: "\"ok\"".to_string(),
+            truncated: false,
+        })
+    );
+    for (call, says) in entry.calls[1..]
+        .iter()
+        .zip(["failed but captured", "cancelled sibling"])
+    {
+        let summary = call.result_summary.as_ref().expect("a committed record");
+        assert!(summary.text.contains(says), "{}", summary.text);
+    }
+    assert_eq!(
+        entry
+            .calls
+            .iter()
+            .cloned()
+            .map(|call| lash_core::ExecutedCall {
+                result_summary: None,
+                ..call
+            })
+            .collect::<Vec<_>>(),
         vec![
             lash_core::ExecutedCall {
+                result_summary: None,
                 operation: "module.ok".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Ok,
                 call_id: Some(lash_core::ToolCallId::fixture("fanout-ok")),
             },
             lash_core::ExecutedCall {
+                result_summary: None,
                 operation: "module.fail".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Err,
                 call_id: Some(lash_core::ToolCallId::fixture("fanout-fail")),
             },
             lash_core::ExecutedCall {
+                result_summary: None,
                 operation: "module.stop".to_string(),
                 outcome: lash_core::ExecutedCallOutcome::Err,
                 call_id: Some(lash_core::ToolCallId::fixture("fanout-cancel")),

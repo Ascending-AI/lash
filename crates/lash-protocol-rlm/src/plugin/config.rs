@@ -6,8 +6,12 @@ use super::{ExecutionBounds, InstructionBound, MemoryBound};
 pub struct RlmPresentationConfig {
     pub tools: lash_sansio::ToolPresentationConfig,
     pub max_inline_keys: usize,
-    /// The diagnostic call tail in the next prompt; durable history keeps all calls.
+    /// How many of a cell's calls its next prompt lists; durable history
+    /// keeps all calls.
     pub prompt_max_tool_calls: usize,
+    /// The byte cuts of a cell's listed calls: each result's summary, and
+    /// the whole block (FIG-6293).
+    pub call_feedback: crate::CallFeedbackPolicy,
     /// How many binding names a cell's record keeps of what the cell did to
     /// the session's bindings; it counts the rest.
     pub max_binding_change_names: usize,
@@ -23,7 +27,8 @@ impl Default for RlmPresentationConfig {
 }
 impl RlmPresentationConfig {
     /// Standard preset: standard tool/schema presentation, 12 inline
-    /// catalogue keys, 128 calls in the prompt's diagnostic tail,
+    /// catalogue keys, 128 calls listed in the next prompt with 512-byte
+    /// result summaries in a 16 KiB block,
     /// 32 binding-change names and a 24 KiB bound-variables listing, which
     /// leaves room under the standard 32 KiB prompt section.
     /// These historical presentation cuts have no universal workload measurement.
@@ -32,6 +37,7 @@ impl RlmPresentationConfig {
             tools: lash_sansio::ToolPresentationConfig::standard(),
             max_inline_keys: 12,
             prompt_max_tool_calls: 128,
+            call_feedback: crate::CallFeedbackPolicy::standard(),
             max_binding_change_names: 32,
             max_bound_variable_bytes: 24 * 1024,
         }
