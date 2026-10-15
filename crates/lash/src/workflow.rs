@@ -21,6 +21,13 @@
 //! view is derived again on every read. A host draws it; it never stores
 //! or edits it.
 //!
+//! [`view::derive`] is the serialisable read a canvas draws from one
+//! [`WorkflowDocument`]: its entry's statements with their sites, the
+//! blocks a host can select with what opens each, the dataflow ports and
+//! wires are drawn from, and every execution site. It is lash's wire shape
+//! (the `kernel-workflow-view` host schema); labels, layout and styling
+//! stay the host's.
+//!
 //! A place in a document is a [`document::Site`]: the unit (`main`, a
 //! declared function or a library function) and the path of child indexes
 //! to the node. What runs is named by an [`document::EffectIdentity`]: the
@@ -152,6 +159,31 @@ pub mod edit {
 /// Compose expression-valued effect insertions and direct edits into a
 /// canonical transaction, without admission, publication or execution.
 pub use lash_kernel_edit::authoring;
+
+/// The canvas read of a document's entry: statements, scopes, dataflow and
+/// execution sites, as serialisable data with no presentation.
+pub mod view {
+    pub use lash_kernel_edit::view::{
+        ActionView, ArgumentView, AssignmentView, BindingKind, BindingView, Dataflow,
+        ExecutionSiteView, ExpressionView, ReturnView, ScopeKind, ScopeView, SiteKind,
+        StatementView, ViewError, WorkflowView,
+    };
+
+    /// The view of `document` at the entry it is entered at.
+    ///
+    /// # Errors
+    ///
+    /// Never for a [`WorkflowDocument`](super::WorkflowDocument): its graph
+    /// is derived from its own document. The error is the projection's
+    /// refusal of a graph that does not describe the document.
+    pub fn derive(document: &super::WorkflowDocument) -> Result<WorkflowView, ViewError> {
+        lash_kernel_edit::view::derive(
+            document.document(),
+            document.graph(),
+            &document.entry_unit(),
+        )
+    }
+}
 
 pub use lash_trace::{
     DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT, WorkflowExecutionOverlay,

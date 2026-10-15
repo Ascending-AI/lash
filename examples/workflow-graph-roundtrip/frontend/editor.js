@@ -18,6 +18,8 @@ import {
   literal,
   startPosition as scopeStart,
   appendPosition,
+  summary,
+  viewOf,
 } from "./projection.mjs";
 import { approvalControl } from "./approvals.mjs";
 const $ = (id) => document.getElementById(id);
@@ -138,17 +140,17 @@ function show(next, correspondence) {
   statuses = new Map();
   calls = new Map();
   statementNodes = new Map(
-    next.statements.map((item) => [key(item.site), item.statement]),
+    viewOf(next).statements.map((item) => [key(item.site), item.statement]),
   );
   const mapped =
     old &&
     correspondence?.entries?.find((item) => key(item.from) === key(old))?.to;
   selected =
-    next.statements.find(
+    viewOf(next).statements.find(
       (stmt) =>
         key(stmt.site) ===
         key((correspondence ? mapped : old) ?? { unit: "main" }),
-    ) ?? next.statements[0];
+    ) ?? viewOf(next).statements[0];
   $("revision").textContent = "All changes saved";
   $("admission").textContent = next.definition
     ? "Ready to run"
@@ -166,9 +168,9 @@ function show(next, correspondence) {
       (item) => key(item.from) === key(previousScope),
     )?.to;
   activeScope =
-    next.scopes.find(
+    viewOf(next).scopes.find(
       (scope) => mappedScope && key(scope.block) === key(mappedScope),
-    )?.block ?? next.scopes[0]?.block;
+    )?.block ?? viewOf(next).scopes[0]?.block;
   renderScopes();
   renderCanvas();
   renderPlacement();
@@ -178,10 +180,10 @@ function show(next, correspondence) {
 }
 function renderPlacement() {
   $("placement").replaceChildren(
-    ...workflow.statements.map((statement, index) => {
+    ...viewOf(workflow).statements.map((statement, index) => {
       const option = document.createElement("option");
       option.value = String(index);
-      option.textContent = `${"↳ ".repeat(statement.depth)}${statement.summary}`;
+      option.textContent = `${"↳ ".repeat(statement.depth)}${summary(statement.statement)}`;
       option.selected = selected && key(statement.site) === key(selected.site);
       return option;
     }),
@@ -191,7 +193,7 @@ function renderSelection() {
   const stmt = selected && statementNodes.get(key(selected.site));
   $("selected-kind").textContent = stmt ? Object.keys(stmt)[0] : "—";
   $("selection").textContent = selected
-    ? `${selected.summary}\nSite ${JSON.stringify(selected.site)}${stmt?.let ? `\nBinding: ${stmt.let.name}` : ""}`
+    ? `${summary(selected.statement)}\nSite ${JSON.stringify(selected.site)}${stmt?.let ? `\nBinding: ${stmt.let.name}` : ""}`
     : "Select a statement on the canvas.";
   $("selection").style.whiteSpace = "pre-wrap";
 }
@@ -246,7 +248,7 @@ function renderQueue() {
 }
 $("queue-helper").onclick = () =>
   action(async () => {
-    const target = workflow.statements[Number($("placement").value)];
+    const target = viewOf(workflow).statements[Number($("placement").value)];
     if (!target) throw Error("Select an insertion position.");
     const input = JSON.parse($("payload").value);
     const effect = {
@@ -307,7 +309,7 @@ $("input-mode").onchange = () => {
       : 'One canonical Expr, e.g. {"variable":"customer"}. Names resolve in the target scope.';
 };
 $("placement").onchange = () => {
-  selected = workflow.statements[Number($("placement").value)];
+  selected = viewOf(workflow).statements[Number($("placement").value)];
   renderCanvas();
   renderSelection();
   controls();
@@ -640,13 +642,26 @@ function icon(name) {
 function recordInput(s) {
   return canonicalRecordInput(workflow, s);
 }
+// The canvas's names for what opens a block.
+const SCOPE_LABELS = {
+  closure: "Function body",
+  then: "Branch",
+  else: "Branch",
+  for: "Loop body",
+  while: "Loop body",
+  try: "Try block",
+  catch: "Catch block",
+  finally: "Finally block",
+};
 function renderScopes() {
   $("scope").replaceChildren(
-    ...workflow.scopes.map((scope, index) => {
+    ...viewOf(workflow).scopes.map((scope, index) => {
       const option = el(
         "option",
         null,
-        scope.label === "Entry" ? "Workflow entry" : `${scope.label} ${index}`,
+        scope.kind === "entry"
+          ? "Workflow entry"
+          : `${SCOPE_LABELS[scope.kind]} ${index}`,
       );
       option.value = String(index);
       option.selected = key(scope.block) === key(activeScope);
@@ -759,8 +774,8 @@ function project() {
   return decorate(dataView.nodes);
 }
 function positionAfter(s) {
-  const index = workflow.statements.indexOf(s);
-  const next = workflow.statements
+  const index = viewOf(workflow).statements.indexOf(s);
+  const next = viewOf(workflow).statements
     .slice(index + 1)
     .find((t) => key(t.block) === key(s.block));
   return { block: s.block, ...(next ? { before: next.site } : {}) };
@@ -1038,7 +1053,7 @@ function renderCanvas() {
   collect(roots);
   const scopeBindings = rootScope
     ? dataView.parameters
-    : workflow.dataflow.bindings.filter(
+    : viewOf(workflow).dataflow.bindings.filter(
         (binding) =>
           (key(binding.block) === key(activeScope) && binding.kind !== "let") ||
           (used.has(binding.id) && !produced.has(binding.id)),
@@ -1608,7 +1623,7 @@ function openPort(node, port) {
       const binding = name.value.trim();
       const changes = planConstantPromotion(workflow, port, read(), binding);
       await applyVisual(changes.map((direct) => ({ direct })));
-      const created = workflow.dataflow.bindings.find(
+      const created = viewOf(workflow).dataflow.bindings.find(
         (item) => item.name === binding,
       );
       if (created) expandedValues.set(key(created.site), created.site);
@@ -1888,7 +1903,7 @@ function fit() {
 }
 function setupVisual() {
   $("scope").onchange = () => {
-    activeScope = workflow.scopes[Number($("scope").value)].block;
+    activeScope = viewOf(workflow).scopes[Number($("scope").value)].block;
     $("node-panel").hidden = true;
     renderCanvas();
     controls();

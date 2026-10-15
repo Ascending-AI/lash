@@ -1,11 +1,12 @@
 //! The example's HTTP shapes. Property names of the example's own objects
-//! are camelCase; a kernel document, a site, an edit and a correspondence
-//! are lash's own serialized shapes, passed through unchanged.
+//! are camelCase; a kernel document, a site, an edit, a correspondence and
+//! a workflow view are lash's own serialized shapes, passed through
+//! unchanged.
 
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lash::workflow::document::{Document, Name, Site, Stmt};
+use lash::workflow::document::{Document, Name, Site};
 use lash::workflow::edit::{Correspondence, Edit};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -31,52 +32,18 @@ pub struct WorkflowView {
     pub document: Document,
     /// The document in kernel notation.
     pub text: String,
-    /// The entry's statements in document order, each with its site.
-    pub statements: Vec<StatementView>,
-    /// Canonical blocks the host can explicitly select, including empty bodies.
-    pub scopes: Vec<ScopeView>,
-    pub dataflow: crate::dataflow::Dataflow,
-    /// The sites of the document a run can report an occurrence at.
-    pub execution_sites: Vec<ExecutionSiteView>,
+    /// Lash's canvas read of the entry, as `lash::workflow::view::derive`
+    /// answers it; absent when the document has none, and `viewUnavailable`
+    /// then says why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<lash::workflow::view::WorkflowView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_unavailable: Option<String>,
     /// The document as the TypeScript printer spells it: a read-only lens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_unavailable: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScopeView {
-    pub block: Site,
-    pub label: String,
-}
-
-/// One statement of the entry: where it is and how this host words it.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StatementView {
-    pub site: Site,
-    /// Canonical payload for this site's inspector; clients need no AST walker.
-    pub statement: Stmt,
-    /// The block the statement is in.
-    pub block: Site,
-    /// How many blocks enclose the statement inside the entry's body.
-    pub depth: usize,
-    pub summary: String,
-    /// The site of the statement's action, when it has one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub action: Option<Site>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ExecutionSiteView {
-    pub site: Site,
-    pub statement: Site,
-    pub kind: String,
-    /// The loops enclosing the site, outermost first.
-    pub loops: Vec<Site>,
 }
 
 /// What this host offers a workflow document.

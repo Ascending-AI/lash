@@ -15,6 +15,8 @@
 //!
 //! [`authoring`] constructs those transactions from expression-valued effect
 //! inputs mixed with ordinary edits. Admission remains on [`Draft::apply`].
+//! [`view`] is the read a host edits against: an entry's statements, blocks,
+//! dataflow and execution sites, as data.
 //!
 //! The crate depends on `lash-kernel-doc` and `lash-kernel-check` and on no
 //! other lash crate. It links no dialect.
@@ -26,9 +28,12 @@ mod draft;
 mod edit;
 mod refusal;
 mod tree;
+pub mod view;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod view_tests;
 
 pub use correspondence::{Correspondence, Survivor};
 pub use draft::{Applied, Draft};

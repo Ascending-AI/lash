@@ -34,23 +34,25 @@ const message = (name) => ({
 });
 function workflow(statements, body) {
   return {
-    statements,
-    dataflow: {
-      bindings: [],
-      expressions: [],
-      parameters: [],
-      returns: [],
-      assignments: [],
-      actions: statements
-        .filter((s) => actionOf(s))
-        .map((s) => ({
-          site: site([...s.site.path, 0]),
-          statement: s.site,
-          block: s.block,
-          args: [],
-          available: [],
-          resultType: "any",
-        })),
+    view: {
+      statements,
+      dataflow: {
+        bindings: [],
+        expressions: [],
+        parameters: [],
+        returns: [],
+        assignments: [],
+        actions: statements
+          .filter((s) => actionOf(s))
+          .map((s) => ({
+            site: site([...s.site.path, 0]),
+            statement: s.site,
+            block: s.block,
+            args: [],
+            available: [],
+            result_type: "any",
+          })),
+      },
     },
     document: {
       functions: { demo: { body: body ?? statements.map((s) => s.statement) } },

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use workflow_graph_roundtrip::{AppState, RunEvent, RunStatus};
 
-async fn serve() -> String {
+async fn serve() -> (String, lash::LashCore) {
     let stores = lash::sqlite::SqliteStoreSet::memory()
         .await
         .expect("SQLite memory stores");
@@ -17,13 +17,14 @@ async fn serve() -> String {
         .build()
         .expect("the durable backend");
     let host = workflow_graph_roundtrip::workflow_core(backend).expect("workflow core");
+    let core = host.core().clone();
     let state = AppState::new(host).await.expect("workflow state");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a local port");
     let base = format!("http://{}", listener.local_addr().expect("the address"));
     tokio::spawn(workflow_graph_roundtrip::serve(listener, state));
-    base
+    (base, core)
 }
 
 async fn answer(response: reqwest::Response) -> Value {
@@ -86,7 +87,7 @@ async fn run(client: &reqwest::Client, base: &str) -> Vec<RunEvent> {
 /// shows the edited value, and ends.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_document() {
-    let base = serve().await;
+    let (base, core) = serve().await;
     let client = reqwest::Client::new();
     let opened = answer(
         client
@@ -115,12 +116,33 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
         "the TypeScript lens shows the document: {source}"
     );
 
+    // The host serves lash's view of the definition it published, verbatim.
+    let served: lash::workflow::view::WorkflowView =
+        serde_json::from_value(opened["view"].clone()).expect("lash's view");
+    let definition = lash::process::ProcessDefinitionId::parse(
+        opened["definition"].as_str().expect("the definition id"),
+    )
+    .expect("a definition id");
+    let lash::workflow::WorkflowRead::Inspected(published) = core
+        .host_artifacts()
+        .definition_graph(&definition)
+        .await
+        .expect("the definition reads")
+    else {
+        panic!("lash holds the published definition");
+    };
+    assert_eq!(
+        served,
+        lash::workflow::view::derive(&published.document).expect("the view"),
+        "the view is lash's read of the published document"
+    );
+
     // The message the workflow shows first is a text literal of its second
     // statement pair: `let shown_2 = {text: ...}`.
-    let statements = opened["statements"].as_array().expect("statements");
+    let statements = opened["view"]["statements"].as_array().expect("statements");
     let bound = statements
         .iter()
-        .find(|statement| statement["summary"] == "let shown_2 = a value")
+        .find(|statement| statement["statement"]["let"]["name"] == "shown_2")
         .expect("the statement binding the welcome message");
     let record = {
         let mut site = bound["site"].clone();
@@ -228,7 +250,7 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     );
 
     let events = run(&client, &base).await;
-    let sites: Vec<&Value> = workflow["executionSites"]
+    let sites: Vec<&Value> = workflow["view"]["execution_sites"]
         .as_array()
         .expect("execution sites")
         .iter()
@@ -267,7 +289,7 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
 
 #[tokio::test]
 async fn each_edit_response_maps_its_immediate_base() {
-    let base = serve().await;
+    let (base, _) = serve().await;
     let client = reqwest::Client::new();
     let mut previous = answer(
         client
@@ -278,7 +300,7 @@ async fn each_edit_response_maps_its_immediate_base() {
     )
     .await;
     for number in 0..2 {
-        let first = &previous["statements"][0];
+        let first = &previous["view"]["statements"][0];
         let response = answer(client.post(format!("{base}/workflow/edits")).json(&json!({
             "version": previous["version"],
             "edits": [{"insert_statement": {
@@ -302,7 +324,7 @@ async fn each_edit_response_maps_its_immediate_base() {
 /// result and tool call evidence must agree with that exact invocation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn named_inputs_reach_effects_and_the_final_workflow_output() {
-    let base = serve().await;
+    let (base, _) = serve().await;
     let client = reqwest::Client::new();
     let workflow = answer(
         client
@@ -317,8 +339,8 @@ async fn named_inputs_reach_effects_and_the_final_workflow_output() {
         workflow["document"]["entries"]["deep_research"]["params"][0]["ty"],
         "text"
     );
-    assert_eq!(workflow["dataflow"]["bindings"][0]["type"], "any");
-    assert_eq!(workflow["dataflow"]["returns"][0]["type"], "any");
+    assert_eq!(workflow["view"]["dataflow"]["bindings"][0]["type"], "any");
+    assert_eq!(workflow["view"]["dataflow"]["returns"][0]["type"], "any");
     let refused = client
         .post(format!("{base}/run"))
         .json(&json!({"version": 0, "inputs":{"topic":"Should not run"}}))
@@ -353,7 +375,7 @@ async fn named_inputs_reach_effects_and_the_final_workflow_output() {
             .any(|call| call.input["topic"] == "Typed dataflow research")
     );
     assert_eq!(
-        workflow["dataflow"]["parameters"]
+        workflow["view"]["dataflow"]["parameters"]
             .as_array()
             .expect("parameters")
             .len(),
@@ -363,7 +385,7 @@ async fn named_inputs_reach_effects_and_the_final_workflow_output() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn imported_parameterized_entries_can_run_with_named_inputs() {
-    let base = serve().await;
+    let (base, _) = serve().await;
     let client = reqwest::Client::new();
     let before = answer(
         client

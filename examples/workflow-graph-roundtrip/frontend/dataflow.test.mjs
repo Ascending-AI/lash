@@ -38,7 +38,7 @@ test("ending at an output preserves the producer and later code in its lexical b
   };
   const source = { binding: 4, expression: { variable: "report" } };
   const node = { s, outputs: [source] };
-  const workflow = { statements: [s, next] };
+  const workflow = { view: { statements: [s, next] } };
   const original = structuredClone(workflow);
   for (const operation of ["return", "finish"]) {
     assert.deepEqual(planEndAfter(workflow, node, source, operation), [
@@ -101,7 +101,9 @@ test("promotion cannot snapshot a connected or computed While condition outside 
     target: { expression: { unit, path: [1, 0] } },
     context: { block: { unit, path: [] }, statement: { unit, path: [1] } },
   };
-  const workflow = { dataflow: { bindings: [{ id: 0, name: "proceed" }] } };
+  const workflow = {
+    view: { dataflow: { bindings: [{ id: 0, name: "proceed" }] } },
+  };
   const original = structuredClone(workflow);
   for (const value of [
     { variable: "proceed" },

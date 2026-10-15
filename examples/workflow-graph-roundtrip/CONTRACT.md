@@ -5,8 +5,8 @@ The backend listens on `http://127.0.0.1:3031` by default;
 and `OPTIONS` with a `content-type` header.
 
 Property names of the example's own objects are camelCase. A kernel
-document, a site, an edit and a correspondence are lash's own serialized
-shapes and pass through unchanged (snake_case).
+document, a site, an edit, a correspondence and a workflow view are lash's
+own serialized shapes and pass through unchanged (snake_case).
 
 ## Endpoints
 
@@ -49,13 +49,27 @@ here.
 | `definition` | The id of the definition lash admitted this version as. Absent when lash refused it; `notAdmitted` then says why. Such a version is saved and editable but cannot run. |
 | `document` | The kernel document. |
 | `text` | The document in kernel notation. |
-| `statements` | The entry's statements in document order: `{ site, block, depth, summary, statement, action? }`. `action` is the site of the statement's action, which is where a run reports. `summary` is this host's wording. |
-| `scopes` | Canonical graph blocks with labels for the canvas scope selector. |
-| `dataflow` | Canonical bindings, expression sites, lexical availability, callable returns, assignments and effect signatures used to draw and edit ports. Inferred types are the checker’s conservative facets; `Any` is not proof of compatibility. |
-| `executionSites` | The sites a run can report at: `{ site, statement, kind, loops }`. |
+| `view` | Lash's canvas read of the entry, exactly as `lash::workflow::view::derive` answers it: see [The view](#the-view). Absent when the document has none; `viewUnavailable` then says why. |
 | `source` | The exact TypeScript export. Editing this text has no effect until `POST /workflow/source` admits it. Absent with a `sourceUnavailable` reason when the document has no TypeScript spelling. |
 
 A site is `{ "unit": { "function": "onboarding" }, "path": [3, 0] }`.
+
+## The view
+
+`view` is lash's wire shape, not this example's: its schema is
+`schemas/host/kernel-workflow-view`, and every host that serves
+`lash::workflow::view::derive` serves the same JSON.
+
+| Property | Meaning |
+| --- | --- |
+| `statements` | The entry's statements in document order: `{ site, statement, block, depth, action? }`. `statement` is the kernel statement; `action` is the site of its action, which is where a run reports. |
+| `scopes` | Every block of the entry, including empty bodies: `{ block, kind }`, where `kind` is `entry`, `closure`, `then`, `else`, `for`, `while`, `try`, `catch` or `finally`. |
+| `dataflow` | Bindings, expression sites, actions with their arguments, lexical availability, the entry's parameters, returns with the callable they end, and assignments. Inferred types are the checker's conservative facets; `any` is not proof of compatibility. |
+| `execution_sites` | The sites a run can report at: `{ site, statement, kind, loops }`. |
+
+Everything a canvas words or draws is this example's: statement summaries,
+scope names, port labels (an argument with no effect parameter `name` is
+`argumentN`), layout and colours live in `frontend/`.
 
 ## Editing
 
@@ -122,4 +136,4 @@ at once and must each remain resolvable.
 The editor draft and revision are in memory. Publishing retains a Lash workflow
 artifact for execution; this example does not restore an editable draft or a run
 history after a host restart. These HTTP/SSE shapes are example-owned, not Lash
-facade contracts.
+facade contracts; only `view` is Lash's.

@@ -1,4 +1,4 @@
-import { siteKey, statementsIn } from "./projection.mjs";
+import { siteKey, statementsIn, viewOf } from "./projection.mjs";
 
 export function typeName(type) {
   if (!type) return "Any";
@@ -83,27 +83,21 @@ export function fieldsOf(type) {
   return type?.record?.fields ?? [];
 }
 export function buildDataflow(workflow, block, expanded = new Set()) {
-  const data = workflow.dataflow;
-  if (!data)
-    return {
-      nodes: [],
-      bindings: new Map(),
-      expressions: new Map(),
-      hidden: new Set(),
-    };
+  const view = viewOf(workflow);
+  const data = view.dataflow;
   const bindings = new Map(data.bindings.map((b) => [b.id, b]));
   const expressions = new Map(
     data.expressions.map((e) => [siteKey(e.site), e]),
   );
   const actions = new Map(data.actions.map((a) => [siteKey(a.statement), a]));
-  const rows = new Map(workflow.statements.map((s) => [siteKey(s.site), s]));
+  const rows = new Map(view.statements.map((s) => [siteKey(s.site), s]));
   const hidden = new Set();
   const folded = new Map();
   for (const action of data.actions) {
     action.args.forEach((arg, index) => {
       const binding = bindings.get(arg.binding);
       const value =
-        binding?.valueSite && expressions.get(siteKey(binding.valueSite));
+        binding?.value_site && expressions.get(siteKey(binding.value_site));
       const siblings = statementsIn(workflow, action.block);
       const previous =
         siblings[
@@ -188,7 +182,7 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
       const returned = data.returns.find(
         (r) => siteKey(r.statement) === siteKey(s.site),
       );
-      const assignment = data.assignments?.find(
+      const assignment = data.assignments.find(
         (a) => siteKey(a.statement) === siteKey(s.site),
       );
       const wholeInputs = [];
@@ -198,10 +192,11 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
       if (action) {
         kind = "action";
         inputs = action.args.flatMap((arg, index) => {
+          const name = arg.name ?? `argument${index + 1}`;
           const record = folded.get(`${siteKey(action.site)}:${index}`);
           if (record) {
             if (record.expression.record.length)
-              wholeInputs.push(expressionPort(arg.name, arg.type, record));
+              wholeInputs.push(expressionPort(name, arg.type, record));
             return recordPorts(record, arg.type);
           }
           const targetBinding = bindings.get(arg.binding);
@@ -209,7 +204,7 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
           return [
             {
               id: `${siteKey(action.site)}:${index}`,
-              name: arg.name,
+              name,
               type: arg.type,
               expression: arg.atom,
               target: { action: action.site, index },
@@ -219,14 +214,14 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
             },
           ];
         });
-        outputs = outputPorts(binding, action.resultType);
+        outputs = outputPorts(binding, action.result_type);
         if (!binding)
           outputs = [
             {
               name: action.destination
                 ? `writes ${expressionName(action.destination)}`
                 : "result",
-              type: action.resultType,
+              type: action.result_type,
               discarded: !action.destination,
               stored: !!action.destination,
               path: [],
@@ -234,18 +229,18 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
           ];
       } else if (returned) {
         kind = "output";
-        const expr = expressions.get(siteKey(returned.expressionSite));
+        const expr = expressions.get(siteKey(returned.expression_site));
         if (expr)
           inputs = [
             {
               ...expressionPort("result", returned.type, expr),
-              acceptsType: returned.expectedType ?? "any",
+              acceptsType: returned.expected_type ?? "any",
             },
           ];
       } else if (binding) {
         kind = "value";
         const expr =
-          binding.valueSite && expressions.get(siteKey(binding.valueSite));
+          binding.value_site && expressions.get(siteKey(binding.value_site));
         if (expr)
           inputs = expr.expression.record
             ? recordPorts(expr, binding.type)
@@ -259,7 +254,7 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
         outputs = outputPorts(binding);
       } else if (assignment) {
         kind = "write";
-        const expr = expressions.get(siteKey(assignment.valueSite));
+        const expr = expressions.get(siteKey(assignment.value_site));
         if (expr)
           inputs = [
             { ...expressionPort("value", expr.type, expr), acceptsType: "any" },
@@ -416,7 +411,7 @@ export function encodeValue(value, type, original) {
 }
 
 export function availableName(workflow, base = "value") {
-  const names = new Set(workflow.dataflow.bindings.map((b) => b.name));
+  const names = new Set(viewOf(workflow).dataflow.bindings.map((b) => b.name));
   let name = base,
     index = 1;
   while (names.has(name)) name = base + "_" + index++;
@@ -479,7 +474,7 @@ export function planConstantPromotion(workflow, port, value, name) {
     );
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name))
     throw Error("Use a name starting with a letter or underscore.");
-  if (workflow.dataflow.bindings.some((binding) => binding.name === name))
+  if (viewOf(workflow).dataflow.bindings.some((binding) => binding.name === name))
     throw Error("Choose a new value name.");
   return [
     {

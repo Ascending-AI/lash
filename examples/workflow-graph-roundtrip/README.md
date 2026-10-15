@@ -28,8 +28,8 @@ editing, and deleting steps plan and validate a transaction, then save it throug
 the existing version-guarded endpoint. The canvas supports panning and zooming.
 **Run workflow** executes the saved document and opens its recorded outputs.
 
-The canvas scope selector uses blocks from Lash's canonical derived graph,
-including empty bodies. It defaults to the selected entry's own block. Function
+The canvas scope selector uses the blocks of Lash's view, including empty
+bodies, named by what opens them. It defaults to the selected entry's own block. Function
 bodies, loop bodies, and try/catch blocks are inspected explicitly; their actions
 are never silently flattened into the caller's execution sequence. Within a
 selected block, conditions show their true/false branches and calls remain opaque
@@ -66,7 +66,7 @@ unassigned and uncaptured input records can appear inside their consuming action
 Shared records keep their own nodes. Explicit expansion is browser presentation
 state and follows edit correspondence.
 
-The backend derives binding identity, lexical availability, expression sites,
+Lash's view carries binding identity, lexical availability, expression sites,
 assignment destinations and callable ownership from the canonical graph. The
 frontend consumes that metadata without recognizing dialect syntax. The kernel
 checker decides type compatibility during edit admission. Inferred
@@ -160,13 +160,13 @@ node --test examples/workflow-graph-roundtrip/frontend/projection.test.mjs examp
 These pin the unused-closure, opaque-library-call, shared/shadowed-input,
 empty-scope and terminal-insertion rules. The HTTP regression
 `each_edit_response_maps_its_immediate_base` pins per-transaction correspondence
-across consecutive edits. Existing Graph scopes, Sites and Draft edit receipts
-support this behavior; no Lash core API was added. The dataflow value-encoding
-law preserves integral floats, negative zero and typed nested record values.
+across consecutive edits. The dataflow value-encoding law preserves integral
+floats, negative zero and typed nested record values.
 
-Focused Rust laws cover lexical source choices and shadowing, callable return
-ownership and assignment identity, named invocation inputs reaching effects and
-the final output, and imported parameterized entries. Browser checks exercise
+Lash's own laws (`lash-kernel-edit`'s `view_tests`) cover lexical source
+choices and shadowing, callable return ownership and assignment identity. The
+example's Rust laws cover the served view being Lash's, named invocation inputs
+reaching effects and the final output, and imported parameterized entries. Browser checks exercise
 promotion, renaming, rewiring, type mismatch rejection, actual research and KPI
 executions, output reset between runs and mobile layout.
 
@@ -190,9 +190,10 @@ shows the actual terminal result. A nested function Return never borrows the
 workflow's terminal result. Data resets when the document changes or a new run
 begins; this example does not persist a run-history browser.
 
-`src/dataflow.rs` derives the view from the canonical document and graph.
-`frontend/dataflow.mjs` projects ports and plans ordinary canonical
-edits. Neither changes Lash core or introduces a second persisted dataflow graph.
+The backend serves `lash::workflow::view::derive` verbatim: Lash projects the
+canonical document and graph into statements, scopes, dataflow and execution
+sites. `frontend/dataflow.mjs` projects ports from that view and plans ordinary
+canonical edits; it introduces no second persisted dataflow graph.
 The example host owns port labels, layout, expansion state, invocation forms,
 mock defaults and transport. Kernel types, lexical bindings, Sites, edits and
 runtime records remain authoritative.

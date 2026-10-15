@@ -212,27 +212,3 @@ fn check_version(sent: u64, current: u64) -> Result<(), ErrorResponse> {
         Err(ErrorResponse::version_conflict(sent, current))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use lash::workflow::document::{Name, Site, Unit, parse_document};
-
-    #[test]
-    fn closure_body_effects_remain_visible_and_targetable() {
-        let document = parse_document(
-            "kernel 1\nnumbers float\neffect display.show_message(input: Any) -> Any\nentry demo() -> Any\nfn demo() { let task = fn() { let input = {text: \"inside closure\"} do perform display.show_message(input) as Any } return null }\nmain { finish null }\n",
-        ).expect("a kernel closure fixture");
-        let statements = crate::statements(&document, &Name::new("demo"));
-        let effect = statements
-            .iter()
-            .find(|statement| statement.summary.contains("display.show_message"));
-        assert_eq!(
-            effect.map(|statement| &statement.site),
-            Some(&Site::new(
-                Unit::Function(Name::new("demo")),
-                vec![0, 0, 0, 1]
-            )),
-            "TypeScript closure bodies must expose the effect's canonical site to the editor"
-        );
-    }
-}

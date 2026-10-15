@@ -9,7 +9,6 @@ use lash::sync::MutexExt;
 mod authoring_http;
 mod catalog;
 mod contract;
-pub mod dataflow;
 mod display;
 mod runtime;
 mod sample_tools;
@@ -27,11 +26,8 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use lash::workflow::document::{
-    Action, Document, FunctionRegistry, Name, Node, Place, Rhs, Site, Stmt, Unit, print_document,
-};
+use lash::workflow::document::{FunctionRegistry, Name, print_document};
 use lash::workflow::edit::{Draft, Location, Transaction};
-use lash::workflow::graph::{ExprNode, Graph, NodeKind, StmtNode};
 use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -40,8 +36,8 @@ use tokio_stream::wrappers::ReceiverStream;
 pub use catalog::{SelectWorkflowRequest, WorkflowCatalogEntry};
 pub use contract::{
     CallData, DisplayDelta, DisplayState, EditWorkflowRequest, EditWorkflowResponse,
-    EnvironmentView, ErrorBody, ErrorDetail, ErrorResponse, ExecutionSiteView, OpenWorkflowRequest,
-    RunEvent, RunStatus, ScopeView, StatementView, WorkflowView,
+    EnvironmentView, ErrorBody, ErrorDetail, ErrorResponse, OpenWorkflowRequest, RunEvent,
+    RunStatus, WorkflowView,
 };
 pub use runtime::{WorkflowHost, core as workflow_core};
 
@@ -84,25 +80,24 @@ impl SavedWorkflow {
             },
             functions,
         );
-        let (execution_sites, source, source_unavailable) = match &derived {
+        let (view, view_unavailable, source, source_unavailable) = match &derived {
             Ok(derived) => {
-                let sites = derived
-                    .graph()
-                    .execution_sites()
-                    .iter()
-                    .map(|site| ExecutionSiteView {
-                        site: site.site.clone(),
-                        statement: site.statement.clone(),
-                        kind: format!("{:?}", site.kind).to_lowercase(),
-                        loops: site.loops.clone(),
-                    })
-                    .collect();
-                match derived.typescript(Default::default()) {
-                    Ok(printed) => (sites, Some(printed.source), None),
-                    Err(error) => (sites, None, Some(error.to_string())),
-                }
+                let (view, view_unavailable) = match lash::workflow::view::derive(derived) {
+                    Ok(view) => (Some(view), None),
+                    Err(error) => (None, Some(error.to_string())),
+                };
+                let (source, source_unavailable) = match derived.typescript(Default::default()) {
+                    Ok(printed) => (Some(printed.source), None),
+                    Err(error) => (None, Some(error.to_string())),
+                };
+                (view, view_unavailable, source, source_unavailable)
             }
-            Err(refusal) => (Vec::new(), None, Some(refusal.to_string())),
+            Err(refusal) => (
+                None,
+                Some(refusal.to_string()),
+                None,
+                Some(refusal.to_string()),
+            ),
         };
         WorkflowView {
             version: self.version,
@@ -119,136 +114,12 @@ impl SavedWorkflow {
                 .err()
                 .map(|refusal| refusal.to_string()),
             text: print_document(&document),
-            statements: statements(&document, &self.entry),
-            scopes: derived
-                .as_ref()
-                .map(|view| scopes(view.graph(), &self.entry))
-                .unwrap_or_default(),
-            dataflow: derived
-                .as_ref()
-                .map(|view| dataflow::project(&document, view.graph(), &self.entry))
-                .unwrap_or_default(),
-            execution_sites,
+            view,
+            view_unavailable,
             source,
             source_unavailable,
             document,
         }
-    }
-}
-
-fn scopes(graph: &Graph, entry: &Name) -> Vec<ScopeView> {
-    graph
-        .scopes()
-        .iter()
-        .filter_map(|scope| {
-            let block = graph.node(scope.block);
-            if block.site.unit != Unit::Function(entry.clone()) {
-                return None;
-            }
-            let label = match block.parent.map(|id| &graph.node(id).kind) {
-                None => "Entry",
-                Some(NodeKind::Expr(ExprNode::Closure { .. })) => "Function body",
-                Some(NodeKind::Stmt(StmtNode::If { .. })) => "Branch",
-                Some(NodeKind::Stmt(StmtNode::For { .. } | StmtNode::While { .. })) => "Loop body",
-                Some(NodeKind::Stmt(StmtNode::Try { .. })) => "Try block",
-                _ => "Block",
-            };
-            Some(ScopeView {
-                block: block.site.clone(),
-                label: label.to_owned(),
-            })
-        })
-        .collect()
-}
-
-/// The statements of entry `entry` in document order, nested blocks after
-/// the statement that holds them.
-fn statements(document: &Document, entry: &Name) -> Vec<StatementView> {
-    fn nested(node: Node<'_>, at: &Site, depth: usize, out: &mut Vec<StatementView>) {
-        if matches!(node, Node::Block(_)) {
-            block(node, at, depth, out);
-        } else {
-            for (index, child) in (0u32..).zip(node.children()) {
-                nested(child, &at.child(index), depth, out);
-            }
-        }
-    }
-    fn block(node: Node<'_>, at: &Site, depth: usize, out: &mut Vec<StatementView>) {
-        for (index, statement) in (0u32..).zip(node.children()) {
-            let Node::Stmt(written) = statement else {
-                continue;
-            };
-            let site = at.child(index);
-            let parts: Vec<(Site, Node<'_>)> = (0u32..)
-                .zip(statement.children())
-                .map(|(index, part)| (site.child(index), part))
-                .collect();
-            out.push(StatementView {
-                site: site.clone(),
-                statement: written.clone(),
-                block: at.clone(),
-                depth,
-                summary: summary(written),
-                action: parts
-                    .iter()
-                    .find(|(_, part)| matches!(part, Node::Action(_)))
-                    .map(|(site, _)| site.clone()),
-            });
-            for (site, part) in parts {
-                nested(part, &site, depth + 1, out);
-            }
-        }
-    }
-    let Some(function) = document.functions.get(entry) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    block(
-        Node::Block(&function.body),
-        &Site::new(Unit::Function(entry.clone()), Vec::new()),
-        0,
-        &mut out,
-    );
-    out
-}
-
-/// How this host words a statement in its list. The wording is the
-/// example's own; lash's document carries none.
-fn summary(statement: &Stmt) -> String {
-    fn value(value: &Rhs) -> String {
-        match value {
-            Rhs::Action(action) => match action {
-                Action::Perform { effect, .. } => format!("perform {effect}"),
-                Action::Sleep { .. } => "sleep".to_owned(),
-                Action::Call { .. } => "call".to_owned(),
-                Action::Spawn { .. } => "spawn".to_owned(),
-                Action::Join { .. } | Action::JoinMany { .. } => "join".to_owned(),
-                Action::Yield => "yield".to_owned(),
-                Action::Cancel { .. } => "cancel".to_owned(),
-            },
-            Rhs::Expr(_) => "a value".to_owned(),
-        }
-    }
-    match statement {
-        Stmt::Let { name, value: bound } => format!("let {name} = {}", value(bound)),
-        Stmt::Assign {
-            place: Place::Variable(name),
-            value: bound,
-        } => format!("set {name} = {}", value(bound)),
-        Stmt::Assign { value: bound, .. } => format!("set a member = {}", value(bound)),
-        Stmt::Remove { .. } => "remove a member".to_owned(),
-        Stmt::Do { action } => value(&Rhs::Action(action.clone())),
-        Stmt::If { .. } => "if".to_owned(),
-        Stmt::For { binding, .. } => format!("for {binding}"),
-        Stmt::While { .. } => "while".to_owned(),
-        Stmt::Break => "break".to_owned(),
-        Stmt::Continue => "continue".to_owned(),
-        Stmt::Return { .. } => "return".to_owned(),
-        Stmt::Try(_) => "try".to_owned(),
-        Stmt::Throw { .. } => "throw".to_owned(),
-        Stmt::Print { .. } => "print".to_owned(),
-        Stmt::Finish { .. } => "finish".to_owned(),
-        Stmt::Fail { .. } => "fail".to_owned(),
     }
 }
 

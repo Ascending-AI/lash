@@ -31,7 +31,7 @@ Open **Advanced**. The TypeScript pane must contain
 `identity` and the canonical `document` are unchanged. The host revision may
 advance. Save `01-opened.json` and `01-opened.png`.
 
-Find the text expression containing that greeting in `workflow.dataflow.expressions`.
+Find the text expression containing that greeting in `workflow.view.dataflow.expressions`.
 Record its full `site` and the current revision. Do not use a site from an earlier
 revision after an edit.
 

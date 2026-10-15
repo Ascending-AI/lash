@@ -81,7 +81,18 @@ definition starts and with what lash derives from the two:
 | `overlay_document()` | What an execution overlay is held to. |
 
 Read the graph; do not write it. It is recomputed from the document, and
-there is no edit that writes an edge.
+there is no edit that writes an edge. `Graph` has no serialized form.
+
+A host that serves a canvas serves `lash::workflow::view::derive(&document)`:
+a `WorkflowView`, lash's wire shape (schema `schemas/host/kernel-workflow-view`).
+It holds the entry's `statements` (each with its site, kernel statement,
+block, depth and action site), its `scopes` (every block, typed by what opens
+it: `entry`, `closure`, `then`, `else`, `for`, `while`, `try`, `catch`,
+`finally`), its `dataflow` (bindings, expressions, actions with their
+arguments, lexical availability, parameters, returns and assignments) and
+every `execution_sites` entry with its typed `kind`. The projection matches
+every kernel statement and expression kind, so a new kind reaches every host
+through this one read.
 
 A document carries no labels and no presentation. The kernel's annotation
 layer (labels and host data per node) lives beside a draft, not in the
