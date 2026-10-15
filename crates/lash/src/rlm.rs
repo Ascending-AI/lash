@@ -123,13 +123,6 @@ pub use lash_protocol_rlm::{
     FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition,
     read_output_tool_definition,
 };
-/// The RLM protocol's config owner and its command (FIG-4379), and the key
-/// a send states its run options under
-/// ([`SendBuilder::options`](crate::SendBuilder::options), FIG-6021).
-pub use lash_protocol_rlm::{
-    FinishPlacement, RLM_RUN_OPTIONS, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig,
-    RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, SetRlmRender,
-};
 /// What a code-mode prompt discloses (FIG-1435, FIG-1438): which tools a
 /// discovery session lists under its recorded budget and which it leaves to
 /// discovery, how a discovered tool is shown and searched, and the session
@@ -141,6 +134,13 @@ pub use lash_protocol_rlm::{
     GlobalsPage, GlobalsPageView, RlmPromptFacts, SessionGlobal, SessionGlobalKind, SessionGlobals,
     StaleGlobalsPage, ToolCatalogueDisclosure, discovered_tool_doc, discovered_tool_signature,
     discovery_text, tool_catalogue_disclosure,
+};
+/// The RLM protocol's config owner and its command (FIG-4379), and the key
+/// a send states its run options under
+/// ([`SendBuilder::options`](crate::SendBuilder::options), FIG-6021).
+pub use lash_protocol_rlm::{
+    RLM_RUN_OPTIONS, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedBehaviour,
+    RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, SetRlmRender,
 };
 /// The code-mode prompt sections (ADR 0133): the keys the protocol
 /// registers its sections under, and its built-in intro.

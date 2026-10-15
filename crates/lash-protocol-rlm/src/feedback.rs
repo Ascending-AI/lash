@@ -207,26 +207,10 @@ impl CellObservation {
             .with_defect(CellDefect::BindingNotCarried {
                 binding: binding.clone(),
             }),
-            Self::Uncaught(value) => {
-                let mut failure = CellFailure::new(
-                    CellFailureKind::Program,
-                    format!("uncaught {}", datum_text(value)),
-                );
-                // Read the structured cause, never the diagnostic wording:
-                // an uncaught placement refusal stays typed in the cell's
-                // response, activity and durable history too.
-                if let Datum::Error(error) = value
-                    && error.kind == crate::executor::CONTROL_REFUSED
-                    && serde_json::from_value::<lash_core::ToolFailureCause>(
-                        crate::cell_value::datum_json(&error.data),
-                    ).is_ok_and(|cause| cause == lash_core::ToolFailureCause::FinishNotAlone)
-                {
-                    failure.kind = CellFailureKind::Policy;
-                    failure.with_defect(CellDefect::FinishNotAlone)
-                } else {
-                    failure
-                }
-            },
+            Self::Uncaught(value) => CellFailure::new(
+                CellFailureKind::Program,
+                format!("uncaught {}", datum_text(value)),
+            ),
             Self::TasksOutstanding {
                 unfinished,
                 unobserved,

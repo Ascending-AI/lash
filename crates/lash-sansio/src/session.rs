@@ -123,9 +123,6 @@ pub struct CellFailure {
 )]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CellDefect {
-    /// Finish must stand alone, and the cell admitted a non-control
-    /// effecting call before attempting it (FIG-6313).
-    FinishNotAlone,
     /// The cell used a binding an earlier cell left that held a function or
     /// a task: neither outlives the cell that created it, so the binding
     /// was not carried.

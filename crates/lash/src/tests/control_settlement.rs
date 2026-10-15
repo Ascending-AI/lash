@@ -541,128 +541,14 @@ async fn a_batch_member_finish_is_checked_against_its_value_schema() -> Result<(
     Ok(())
 }
 
-/// FIG-6313: the cell's completed tool remains visible before a later,
-/// finish-only cell may end the turn. Reopening under Any keeps Alone pinned.
+/// A finish after an effecting call ends the turn with its value, without
+/// an extra model iteration.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn finish_alone_shows_completed_calls_before_a_later_cell_finishes() -> Result<()> {
-    use crate::rlm::FinishPlacement;
-
+async fn finish_keeps_the_mixed_cell_answer_unchanged() -> Result<()> {
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let provider = scripted_cells(
-        "finish-alone",
-        vec![
-            typescript_block("await control.finish(await tools.app_lookup({}));"),
-            typescript_block("await control.finish({ reviewed: true });"),
-        ],
-        Arc::clone(&requests),
-    );
-    let backend = sqlite_memory_store_backend().await;
-    let make_core = |placement| {
-        let mut config = crate::rlm::RlmProtocolPluginConfig::builder()
-            .channel(crate::rlm::RlmChannel::Cell)
-            .instruction_limit(crate::rlm::InstructionBound::standard())
-            .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
-            .build();
-        config.finish_placement = placement;
-        explicit_ephemeral_facets(LashCore::rlm_builder(
-            backend.clone(),
-            crate::rlm::RlmProtocolPluginFactory::new(
-                config,
-                crate::rlm::CellDialect::typescript(),
-            )
-            .with_worker_service(untimed_fixture_workers()),
-        ))
-        .serve_test_llm_profile(provider.clone(), mock_llm_profile_spec())
-        .tools(crate::tool_provider_key!("tools"), Arc::new(LongTextTools))
-        .build(crate::testing::runtime_lease_owner())
-    };
-    let core = make_core(FinishPlacement::Alone)?;
-    let id = SessionId::parse("finish-alone").expect("session id");
-    let created = core
-        .session(id.clone())
-        .create(crate::SessionCreation::root(mock_session_spec()))
-        .await?;
-    drop(created);
-    core.shutdown().await?;
-
-    let core = make_core(FinishPlacement::Any)?;
-    let session = core.session(id).open().await?;
-    let events = RecordingEvents::default();
-    let report = session
-        .send(TurnInput::text("look up, review, then answer"))
-        .output_into(&events)
-        .await?;
-    assert_eq!(
-        report.outcome,
-        TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "finish".to_owned(),
-            value: serde_json::json!({ "reviewed": true }),
-        })
-    );
-    let requests = requests.lock_recover().clone();
-    assert_eq!(requests.len(), 2, "{requests:?}");
-    let events = events.snapshot().await;
-    assert!(
-        events.iter().any(|activity| matches!(
-            &activity.event,
-            TurnEvent::CodeBlockCompleted { result: lash_core::CellOutcome::Failed(failure), .. }
-                if failure.defect == Some(lash_core::CellDefect::FinishNotAlone)
-                && failure.kind == lash_core::CellFailureKind::Policy
-        )),
-        "{events:?}"
-    );
-    let completed = report
-        .tool_calls
-        .iter()
-        .filter(|call| call.tool == "app_lookup")
-        .collect::<Vec<_>>();
-    let [completed] = completed.as_slice() else {
-        panic!("one completed lookup: {:?}", report.tool_calls);
-    };
-    assert_eq!(
-        completed.output.value_for_projection(),
-        serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789")
-    );
-    assert!(
-        requests[1].contains("finish must be called on its own after the other calls return"),
-        "{}",
-        requests[1]
-    );
-    drop(session);
-    core.shutdown().await?;
-    // FIG-6293 owns these completed-call rows. This assertion deliberately
-    // reads the next model input: no print or saved variable carries the
-    // tool's value, and the later reply does not contain it either.
-    assert!(
-        requests[1].contains(completed.call_id.as_str())
-            && requests[1].contains("abcdefghijklmnopqrstuvwxyz0123456789"),
-        "the completed-call feedback must include the id and result: {}",
-        requests[1]
-    );
-    Ok(())
-}
-
-/// FIG-6313: the Any preset preserves the original one-cell finish and its
-/// serialized protocol behaviour, without an extra model iteration.
-#[cfg(feature = "rlm")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn finish_any_keeps_the_mixed_cell_answer_unchanged() -> Result<()> {
-    let config = crate::rlm::RlmProtocolPluginConfig::builder()
-        .channel(crate::rlm::RlmChannel::Cell)
-        .instruction_limit(crate::rlm::InstructionBound::standard())
-        .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
-        .build();
-    assert!(
-        !serde_json::to_value(config.recorded_behaviour())
-            .expect("behaviour encodes")
-            .as_object()
-            .expect("object")
-            .contains_key("finish_placement")
-    );
-    let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
-    let provider = scripted_cells(
-        "finish-any",
+        "finish-mixed",
         vec![typescript_block(
             "const answer = await tools.app_lookup({}); await control.finish(answer);",
         )],
@@ -674,7 +560,7 @@ async fn finish_any_keeps_the_mixed_cell_answer_unchanged() -> Result<()> {
             .tools(crate::tool_provider_key!("tools"), Arc::new(LongTextTools))
             .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(SessionId::parse("finish-any").expect("session id"))
+        .session(SessionId::parse("finish-mixed").expect("session id"))
         .created()
         .await
         .open()
@@ -692,70 +578,6 @@ async fn finish_any_keeps_the_mixed_cell_answer_unchanged() -> Result<()> {
         .expect("original outcome encodes")
     );
     assert_eq!(requests.lock_recover().len(), 1);
-    drop(session);
-    core.shutdown().await?;
-    Ok(())
-}
-
-/// FIG-6313: values from an earlier cell may feed finish. Prints and the
-/// retained-output presentation reader in the finishing cell do not block it.
-#[cfg(feature = "rlm")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn finish_alone_allows_earlier_results_and_read_only_presentation() -> Result<()> {
-    let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
-    let provider = scripted_cells(
-        "finish-presentation",
-        vec![
-            typescript_block("const answer = await tools.app_lookup({});"),
-            typescript_block(
-                "try { await control.read_output({ archive: {} }); } catch (error) { console.log(String(error)); } await control.finish(answer);",
-            ),
-        ],
-        Arc::clone(&requests),
-    );
-    let mut config = crate::rlm::RlmProtocolPluginConfig::builder()
-        .channel(crate::rlm::RlmChannel::Cell)
-        .instruction_limit(crate::rlm::InstructionBound::standard())
-        .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
-        .build();
-    config.finish_placement = crate::rlm::FinishPlacement::Alone;
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        sqlite_memory_store_backend().await,
-        crate::rlm::RlmProtocolPluginFactory::new(config, crate::rlm::CellDialect::typescript())
-            .with_worker_service(untimed_fixture_workers()),
-    ))
-    .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(crate::tool_provider_key!("tools"), Arc::new(LongTextTools))
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session(SessionId::parse("finish-presentation").expect("session id"))
-        .created()
-        .await
-        .open()
-        .await?;
-    let report = session
-        .send(TurnInput::text("review the result, then answer"))
-        .output()
-        .await?;
-    assert_eq!(
-        report.result.outcome,
-        TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "finish".to_owned(),
-            value: serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789"),
-        }),
-        "{:?}",
-        requests.lock_recover()
-    );
-    assert_eq!(requests.lock_recover().len(), 2);
-    assert!(
-        report
-            .result
-            .tool_calls
-            .iter()
-            .any(|call| call.tool == "read_output" && !call.output.is_success()),
-        "the presentation call ran: {:?}",
-        report.result.tool_calls
-    );
     drop(session);
     core.shutdown().await?;
     Ok(())

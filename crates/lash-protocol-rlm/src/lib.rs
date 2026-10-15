@@ -95,12 +95,12 @@ pub use lash_sansio::{
 };
 pub use lash_vm_runtime::ResolvedToolBinding;
 pub use plugin::{
-    ExecutionBounds, FinishPlacement, HelperReleaseGate, InstructionBound, MemoryBound,
-    RLM_PROTOCOL_PLUGIN_ID, RLM_RUN_OPTIONS, RlmChannel, RlmConfigOwner, RlmConfigRefusal,
-    RlmCreateConfig, RlmDiscovery, RlmPresentationConfig, RlmProtocolPluginConfig,
-    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,
-    RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender,
-    UnsetBound, UnsetChannel, rlm_session_config,
+    ExecutionBounds, HelperReleaseGate, InstructionBound, MemoryBound, RLM_PROTOCOL_PLUGIN_ID,
+    RLM_RUN_OPTIONS, RlmChannel, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmDiscovery,
+    RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
+    RlmProtocolPluginFactory, RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal,
+    RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel,
+    rlm_session_config,
 };
 pub use projection::{
     CodeModeProjectedBindings, ProjectedBindingError, rlm_session_projection_extension,

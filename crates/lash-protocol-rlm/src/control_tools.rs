@@ -72,17 +72,11 @@ impl RlmFinishProvider {
     /// states but no tool admits leaves the untyped finish: the config owner
     /// refuses such a schema before any run records it.
     fn definition(&self, config: &lash_core::OwnerConfigView) -> ToolDefinition {
-        let mut definition = finish_tool_definition_for(self.vocabulary);
-        let recorded = config
+        let definition = finish_tool_definition_for(self.vocabulary);
+        let schema = config
             .decode::<crate::RlmRecordedConfig>(crate::RLM_PROTOCOL_PLUGIN_ID)
             .ok()
-            .flatten();
-        if recorded.as_ref().is_some_and(|recorded| {
-            recorded.behaviour.finish_placement == crate::FinishPlacement::Alone
-        }) {
-            definition.manifest.description.push_str(" Call finish on its own in a later cell after the other calls return; a cell that issued a non-control effecting call cannot finish the turn.");
-        }
-        let schema = recorded
+            .flatten()
             .and_then(|recorded| recorded.finish_value_schema)
             .and_then(|schema| lash_core::JsonSchema::admit(schema).ok());
         match schema {
@@ -123,9 +117,6 @@ impl ToolProvider for RlmFinishProvider {
     }
 }
 
-/// The built-in presentation reader, excluded from effecting-call placement.
-pub(crate) const READ_OUTPUT_TOOL_ID: &str = "tool:read_output";
-
 /// The retained-output reader as a session in `dialect` advertises it.
 /// Include it in restricted tool access to let cells retrieve retained values.
 pub fn read_output_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> ToolDefinition {
@@ -137,7 +128,7 @@ fn read_output_tool_definition_for(
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> ToolDefinition {
     ToolDefinition::raw(
-        READ_OUTPUT_TOOL_ID,
+        "tool:read_output",
         "read_output",
         format!("Read a value retained out of history whole. Pass history[N].output_archive.attachment for a step's print values, in order, or history[N].final_output.attachment for its final value; the retained record's `shape` already says what the value holds. Inline values are already whole in history. Throws a `retained_value_unavailable` failure when the value's bytes are no longer stored. Reads are explicit {cell_noun} calls and never expand the prompt automatically.", cell_noun = vocabulary.cell_noun),
         json!({
