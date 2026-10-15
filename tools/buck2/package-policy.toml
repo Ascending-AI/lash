@@ -555,11 +555,17 @@ lash-internal-postgres-store = ["schema.sql"]
 # the toolchain rustc directly (`ui_fixtures`), reading the harness's own
 # CrateInfo so fixtures see the identical `--extern` set and feature
 # resolution. The fixture set mirrors the registration gates in tests/ui.rs:
-# `rlm_gated` fixtures exist only when `rlm` resolves, and the `store_seam`
+# Feature-gated fixtures exist only when their feature resolves; `store_seam`
 # pins are written for the rlm-without-testing graph, so they stay excluded
 # under the canonical resolution.
 [ui_fixtures.lash-runtime]
 harness = "ui"
+postgres_gated = [
+  "postgres_host_requires_connection",
+]
+codemode_gated = [
+  "registered_function_is_immutable",
+]
 rlm_gated = [
   "linked_module_has_one_carrier",
   "module_artifact_cannot_be_assembled",

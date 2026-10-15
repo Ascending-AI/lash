@@ -1305,12 +1305,12 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
         ui_policy = PACKAGE_POLICY.get("ui_fixtures", {}).get(package["name"])
         if ui_policy and name == f"{ui_policy['harness']}__test":
             # See `[ui_fixtures]` in tools/buck2/package-policy.toml.
-            ui_rlm_gated = set(ui_policy["rlm_gated"])
             ui_store_seam = set(ui_policy["store_seam"])
             ui_dir = ROOT / package_dir / "tests" / "ui"
             fixtures = sorted(p.stem for p in ui_dir.glob("*.stderr"))
-            if "rlm" not in target_features:
-                fixtures = [f for f in fixtures if f not in ui_rlm_gated]
+            for feature in ("rlm", "postgres", "codemode"):
+                if feature not in target_features:
+                    fixtures = [f for f in fixtures if f not in ui_policy[f"{feature}_gated"]]
             if "rlm" not in target_features or "testing" in target_features:
                 fixtures = [f for f in fixtures if f not in ui_store_seam]
             chunks.append(

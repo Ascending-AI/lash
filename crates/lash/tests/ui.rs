@@ -66,8 +66,12 @@ fn facade_compile_time_contracts() {
 }
 
 fn register_facade_contracts(t: &trybuild::TestCases) {
-    t.compile_fail("tests/ui/postgres_host_requires_connection.rs");
-    t.compile_fail("tests/ui/registered_function_is_immutable.rs");
+    if cfg!(feature = "postgres") {
+        t.compile_fail("tests/ui/postgres_host_requires_connection.rs");
+    }
+    if cfg!(feature = "codemode") {
+        t.compile_fail("tests/ui/registered_function_is_immutable.rs");
+    }
     t.compile_fail("tests/ui/runtime_session_service_is_sealed.rs");
 
     t.compile_fail("tests/ui/turn_hooks_hold_only_session_reads.rs");

@@ -1039,8 +1039,9 @@ def main_test_inventory(inventory: dict, outputs: dict[pathlib.Path, str]) -> No
             policy = generate_model.PACKAGE_POLICY["ui_fixtures"][args["package_name"]]
             features = set(args["crate_features"])
             fixtures = sorted(p.stem for p in (ROOT / directory / "tests/ui").glob("*.stderr"))
-            if "rlm" not in features:
-                fixtures = [f for f in fixtures if f not in policy["rlm_gated"]]
+            for feature in ("rlm", "postgres", "codemode"):
+                if feature not in features:
+                    fixtures = [f for f in fixtures if f not in policy[f"{feature}_gated"]]
             if "rlm" not in features or "testing" in features:
                 fixtures = [f for f in fixtures if f not in policy["store_seam"]]
             name = "ui_fixtures" + args["name"][args["name"].index("__fv_"):]
