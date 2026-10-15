@@ -10,180 +10,18 @@
 
 use std::sync::Arc;
 
-use lash_kernel_check::{Environment, Graph, Refusal};
+use lash_kernel_check::Environment;
+pub use lash_kernel_check::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError};
 use lash_kernel_doc::{
-    Document, DocumentId, FunctionCatalog, FunctionRegistry, Name, Signature, Unit,
+    Document, DocumentId, FunctionRegistry, Name, Signature, WorkflowDocumentEntry,
+    WorkflowDocumentRef,
 };
-use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef, WorkflowOverlayDocument};
 
 use super::{
     KernelProcessDefinition, KernelProcessEngine, LASH_VM_ENGINE_KIND, definition_draft,
     entry_signature,
 };
 use crate::HostBoundary;
-
-/// One admitted document as a host reads it, entered where its reference
-/// says: the document and everything derived from it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorkflowDocument {
-    reference: WorkflowDocumentRef,
-    document: Arc<Document>,
-    graph: Arc<Graph>,
-}
-
-impl WorkflowDocument {
-    /// `document` entered at `entry`, with the view `functions` derive.
-    /// A decoded [`lash_kernel_doc::FunctionDeclarations`] is sufficient:
-    /// linking requires definitions, not native code or an engine. An entry
-    /// links only the units it executes; the total graph still includes main
-    /// and templates it merely passes to another receiver.
-    ///
-    /// # Errors
-    ///
-    /// The checker's refusal of a document it cannot link.
-    pub fn derive(
-        document: Document,
-        entry: WorkflowDocumentEntry,
-        functions: &dyn FunctionCatalog,
-    ) -> Result<Self, WorkflowDocumentError> {
-        let identity = document.identity()?;
-        let graph = match &entry {
-            WorkflowDocumentEntry::Entry { function } => {
-                if !document.entries.contains_key(function) {
-                    return Err(WorkflowDocumentError::NoSuchEntry {
-                        document: identity,
-                        entry: function.clone(),
-                    });
-                }
-                lash_kernel_check::derive_entry(&document, functions, function)?
-            }
-            WorkflowDocumentEntry::Main => lash_kernel_check::derive(&document, functions)?,
-        };
-        Ok(Self {
-            reference: WorkflowDocumentRef {
-                document: identity,
-                entry,
-            },
-            document: Arc::new(document),
-            graph: Arc::new(graph),
-        })
-    }
-
-    /// Admit an unstored document against a workflow environment and retain
-    /// the view that admission derives. An entry requires only its called and
-    /// spawned effects; main uses the session-style document admission. This
-    /// publishes nothing and runs no effect. The supplied entry must exist.
-    ///
-    /// # Errors
-    ///
-    /// The checker's refusal or an entry the document does not list.
-    pub fn admit(
-        document: Document,
-        entry: WorkflowDocumentEntry,
-        environment: &Environment<'_>,
-    ) -> Result<Self, WorkflowAdmissionRefusal> {
-        let admitted = match &entry {
-            WorkflowDocumentEntry::Entry { function } => {
-                admit_entry(&document, function, environment)?
-            }
-            WorkflowDocumentEntry::Main => lash_kernel_check::admit(&document, environment)
-                .map_err(WorkflowAdmissionRefusal::Document)?,
-        };
-        Ok(Self {
-            reference: WorkflowDocumentRef {
-                document: admitted.identity,
-                entry,
-            },
-            document: Arc::new(document),
-            graph: Arc::new(admitted.graph),
-        })
-    }
-
-    /// What an execution of this document names it by.
-    pub fn reference(&self) -> &WorkflowDocumentRef {
-        &self.reference
-    }
-
-    /// The document's identity.
-    pub fn identity(&self) -> DocumentId {
-        self.reference.document
-    }
-
-    /// The kernel document: the only authority.
-    pub fn document(&self) -> &Document {
-        &self.document
-    }
-
-    /// The total view derived from the document.
-    pub fn graph(&self) -> &Graph {
-        &self.graph
-    }
-
-    /// The unit an execution enters: `main`, or the entry function.
-    pub fn entry_unit(&self) -> Unit {
-        self.reference.entry.unit()
-    }
-
-    /// The entry function's signature; `None` for `main`.
-    pub fn entry_signature(&self) -> Option<&Signature> {
-        match &self.reference.entry {
-            WorkflowDocumentEntry::Main => None,
-            WorkflowDocumentEntry::Entry { function } => self.document.entries.get(function),
-        }
-    }
-
-    /// Print exact TypeScript, optionally with a disposable source map.
-    /// Printing performs no compilation, comparison, admission or storage.
-    ///
-    /// # Errors
-    ///
-    /// The printer's typed resource or encoding refusal.
-    #[cfg(feature = "typescript")]
-    pub fn typescript(
-        &self,
-        options: lash_kernel_dialect::PrintOptions,
-    ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
-        lash_dialect_typescript::print(&self.document, options)
-    }
-
-    /// Print exact Python, preserving the document's original helper identities.
-    /// Maps default off; enabling them does not change the source bytes.
-    ///
-    /// # Errors
-    ///
-    /// The printer's typed resource or encoding refusal.
-    #[cfg(feature = "python")]
-    pub fn python(
-        &self,
-        options: lash_kernel_dialect::PrintOptions,
-    ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
-        lash_dialect_python::print(&self.document, options)
-    }
-
-    /// What the execution overlay's reducer reads of this document: its
-    /// reference and every execution site. An entry may call and spawn any
-    /// declared function, so the sites of every unit are the document's.
-    pub fn overlay_document(&self) -> WorkflowOverlayDocument {
-        WorkflowOverlayDocument::new(
-            self.reference.clone(),
-            self.graph
-                .execution_sites()
-                .iter()
-                .map(|site| site.site.clone()),
-        )
-    }
-}
-
-/// Why a stored document has no view.
-#[derive(Debug, thiserror::Error)]
-pub enum WorkflowDocumentError {
-    #[error("the document has no canonical encoding: {0}")]
-    Encode(#[from] lash_kernel_doc::EncodeError),
-    #[error("the document does not link: {0}")]
-    Refused(#[from] Refusal),
-    #[error("document `{document}` has no entry `{entry}`")]
-    NoSuchEntry { document: DocumentId, entry: Name },
-}
 
 /// What a document is edited and admitted against: the effects the
 /// processes of its definitions would be offered, and the library
@@ -259,49 +97,6 @@ pub struct AdmittedWorkflow {
     /// the definition starts by function reference.
     pub siblings: Vec<lash_core::ProcessDefinitionDraft>,
     pub document: WorkflowDocument,
-}
-
-/// Why a document was not admitted. Nothing was stored.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum WorkflowAdmissionRefusal {
-    /// The checker refused the document, naming every fault at its site:
-    /// a missing effect, an effect whose signature does not serve, a
-    /// function identity the environment does not hold, an unbound
-    /// variable, a statement the statement rule refuses.
-    Document(Refusal),
-    /// The selected entry's called/spawned effect closure cannot be certified.
-    EntryEffects(lash_kernel_check::EntryEffectsRefusal),
-    /// The document does not list the entry.
-    NoSuchEntry { entry: Name },
-    /// The catalog cannot be stated as effects.
-    Boundary { message: String },
-}
-
-impl WorkflowAdmissionRefusal {
-    /// A stable local snake_case name for this top-level alternative.
-    /// Existing names keep their meaning; new alternatives add names. These
-    /// are not HTTP statuses, and old clients may not recognize future names.
-    /// For `Document`, inspect each nested `RefusalReason::code()`; multiple errors retain their detail.
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::Document(_) => "document",
-            Self::EntryEffects(_) => "entry_effects",
-            Self::NoSuchEntry { .. } => "no_such_entry",
-            Self::Boundary { .. } => "boundary",
-        }
-    }
-}
-
-impl std::fmt::Display for WorkflowAdmissionRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Document(refusal) => write!(f, "{refusal}"),
-            Self::EntryEffects(refusal) => write!(f, "{refusal}"),
-            Self::NoSuchEntry { entry } => write!(f, "the document lists no entry `{entry}`"),
-            Self::Boundary { message } => f.write_str(message),
-        }
-    }
 }
 
 /// The answer to admitting a document.
@@ -479,37 +274,42 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         let admission = {
             let mut environment = Environment::new(self.engine.functions.as_ref());
             environment.effects = boundary.signatures();
-            admit_entry(&request.document, &request.entry, &environment)
+            WorkflowDocument::admit(
+                request.document,
+                WorkflowDocumentEntry::Entry {
+                    function: request.entry.clone(),
+                },
+                &environment,
+            )
         };
-        let admitted = match admission {
-            Ok(admitted) => admitted,
+        let document = match admission {
+            Ok(document) => document,
             Err(refusal) => return refused(refusal),
         };
-        let Some(signature) = request.document.entries.get(&request.entry) else {
+        let Some(signature) = document.entry_signature().map(entry_signature) else {
             return refused(WorkflowAdmissionRefusal::NoSuchEntry {
                 entry: request.entry,
             });
         };
         let draft_of = |entry: &Name| {
             definition_draft(&KernelProcessDefinition {
-                document: admitted.identity,
+                document: document.identity(),
                 entry: entry.clone(),
             })
             .map_err(|error| unresolvable(error.to_string()))
         };
         let draft = draft_of(&request.entry)?;
-        let siblings = request
-            .document
+        let siblings = document
+            .document()
             .entries
             .keys()
             .filter(|entry| **entry != request.entry)
             .map(draft_of)
             .collect::<Result<Vec<_>, _>>()?;
-        let signature = entry_signature(signature);
         // Only an admitted document is held.
         self.engine
             .documents
-            .publish(claim, &request.document)
+            .publish(claim, document.document())
             .await
             .map_err(|error| match error {
                 super::DocumentStoreError::Store(error) => lash_core::PluginError::from(error),
@@ -520,70 +320,8 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
                 draft,
                 signature,
                 siblings,
-                document: WorkflowDocument {
-                    reference: WorkflowDocumentRef {
-                        document: admitted.identity,
-                        entry: WorkflowDocumentEntry::Entry {
-                            function: request.entry,
-                        },
-                    },
-                    document: Arc::new(request.document),
-                    graph: Arc::new(admitted.graph),
-                },
+                document,
             })),
         ))
     }
-}
-
-/// A definition is an entry template: other entries and main need no tool
-/// offering here. They are structurally checked, and linked at their own start.
-fn admit_entry(
-    document: &Document,
-    entry: &Name,
-    environment: &Environment<'_>,
-) -> Result<lash_kernel_check::Admitted, WorkflowAdmissionRefusal> {
-    if !document.entries.contains_key(entry) {
-        return Err(WorkflowAdmissionRefusal::NoSuchEntry {
-            entry: entry.clone(),
-        });
-    }
-    let graph = lash_kernel_check::derive_entry(document, environment.functions, entry)
-        .map_err(WorkflowAdmissionRefusal::Document)?;
-    let effects = lash_kernel_check::entry_effects(document, &graph, environment.functions, entry)
-        .map_err(WorkflowAdmissionRefusal::EntryEffects)?;
-    let mut errors = Vec::new();
-    for (effect, expected) in effects {
-        let reason = match environment.effects.get(&effect) {
-            None => Some(lash_kernel_check::RefusalReason::MissingEffect { effect }),
-            Some(provided) => {
-                lash_kernel_check::signature_mismatch(provided, &expected).map(|mismatch| {
-                    lash_kernel_check::RefusalReason::EffectSignature {
-                        effect,
-                        expected,
-                        provided: provided.clone(),
-                        mismatch: Box::new(mismatch),
-                    }
-                })
-            }
-        };
-        if let Some(reason) = reason {
-            errors.push(lash_kernel_check::Refused { site: None, reason });
-        }
-    }
-    if !errors.is_empty() {
-        return Err(WorkflowAdmissionRefusal::Document(Refusal { errors }));
-    }
-    let identity = document.identity().map_err(|error| {
-        WorkflowAdmissionRefusal::Document(Refusal {
-            errors: vec![lash_kernel_check::Refused {
-                site: None,
-                reason: lash_kernel_check::RefusalReason::Invalid(
-                    lash_kernel_doc::InvalidReason::Identity {
-                        message: error.message,
-                    },
-                ),
-            }],
-        })
-    })?;
-    Ok(lash_kernel_check::Admitted { identity, graph })
 }

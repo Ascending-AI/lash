@@ -28,6 +28,7 @@ lash-dialect-python = { workspace = true, optional = true }
 lash-kernel-doc = { workspace = true, optional = true }
 lash-kernel-check = { workspace = true, optional = true }
 lash-kernel-edit = { workspace = true, optional = true }
+lash-kernel-view = { workspace = true, optional = true }
 lash-kernel-dialect = { workspace = true, optional = true }
 lash-vm-client = { workspace = true, optional = true }
 lash-vm-worker = { workspace = true, optional = true }
@@ -69,13 +70,14 @@ tracing = { workspace = true }
 
 [features]
 default = []
-# Workflow editing, publication and kernel process execution, without a REPL.
+# Kernel process execution, workflow publication and reads, without a REPL.
+# It links no editor, no view and no in-process parser: a host that only
+# runs and publishes documents needs none of them (FIG-6378).
 codemode = [
     "dep:lash-vm-client",
     "dep:lash-vm-runtime",
     "dep:lash-kernel-doc",
     "dep:lash-kernel-check",
-    "dep:lash-kernel-edit",
     "dep:lash-kernel-dialect",
     "dep:lash-llm-tools",
     "lash-plugin-mcp?/lash-vm",
@@ -84,27 +86,35 @@ codemode = [
 # LLM tools are usable by workflow processes as well as REPL cells.
 rlm = ["codemode", "dep:lash-protocol-rlm", "dep:lash-rlm-types", "dep:lash-render"]
 
+# The canvas read of a checked document (`lash::workflow::view`), drawn with
+# the helper labels `lash::helper_labels` always ships, joined by name. It
+# links the kernel's document, checker and view and no dialect, editor or
+# runtime: a viewer draws TypeScript and Python workflows alike without
+# either parser.
+workflow-view = [
+    "dep:lash-kernel-doc",
+    "dep:lash-kernel-check",
+    "dep:lash-kernel-view",
+]
+# Editing a document (`lash::workflow::edit`, `lash::workflow::authoring`):
+# drafts, edits, transactions and authoring operations, over the view.
+workflow-authoring = ["workflow-view", "dep:lash-kernel-edit"]
+
 # The dialects a host's sessions and processes are written in, each off by
 # default: a host names the ones it runs, and there is no dialect it gets
 # without choosing (FIG-5990). A dialect's feature builds its helper
 # releases, which the parent links, admits and resumes documents against,
 # and, in a host that is its own worker (`worker`), links its parser into
-# the worker embedding. A host that enables one compiles none of the
-# other's parser or helpers.
-#
-# `dialect-typescript` also gives the host the TypeScript front end and
-# printer in its own process (`typescript`: the `lash::typescript` module and
-# `WorkflowDocument::typescript`), which a host uses to lower workflow source
-# to a kernel document and print one back without a worker.
+# the worker embedding. It never links a parser into the host's own
+# process: that is `typescript` or `python`, chosen separately. A host that
+# enables one compiles none of the other's parser or helpers.
 dialect-typescript = [
     "codemode",
-    "typescript",
     "lash-vm-runtime/dialect-typescript",
     "lash-vm-worker?/dialect-typescript",
 ]
 dialect-python = [
     "codemode",
-    "python",
     "lash-vm-runtime/dialect-python",
     "lash-vm-worker?/dialect-python",
 ]
@@ -127,11 +137,12 @@ anthropic = ["dep:lash-provider-anthropic", "dep:lash-llm-transport", "http-tran
 google = ["dep:lash-provider-google", "dep:lash-llm-transport", "http-transport"]
 mcp = ["dep:lash-plugin-mcp"]
 # The TypeScript front end and printer in the host's own process
-# (`lash::typescript`, `WorkflowDocument::typescript`), with no helper
-# release: `dialect-typescript` includes it.
-typescript = ["codemode", "dep:lash-dialect-typescript", "lash-vm-runtime/typescript"]
-# The Python exact codec in the host, without selecting a helper release.
-python = ["codemode", "dep:lash-dialect-python", "lash-vm-runtime/python"]
+# (`lash::typescript`), with no helper release. A host that lowers or prints
+# TypeScript itself names it; `dialect-typescript` does not imply it.
+typescript = ["codemode", "dep:lash-dialect-typescript"]
+# The Python front end and exact codec in the host's own process
+# (`lash::python`), without selecting a helper release.
+python = ["codemode", "dep:lash-dialect-python"]
 http-transport = ["dep:lash-http-transport"]
 # Exposes `lash::testing` (e.g. `TestProvider`) for embedder integration tests.
 # The durable-backend certification laws are not part of the facade: a host

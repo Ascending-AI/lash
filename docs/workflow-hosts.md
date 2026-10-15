@@ -69,8 +69,11 @@ one document to another without a correspondence.
 
 ### What is derived
 
-`lash::workflow::WorkflowDocument` pairs a document with the entry a
-definition starts and with what lash derives from the two:
+`lash::workflow::WorkflowDocument` is the checked holder: a document with
+the entry a definition starts, what lash derives from the two, and the
+declarations of the library functions it was linked against. It lives in
+`lash-kernel-check` and needs no runtime, so a viewer holds the same value
+a running host reads:
 
 | Read | Answers |
 | --- | --- |
@@ -78,13 +81,22 @@ definition starts and with what lash derives from the two:
 | `reference()`, `identity()` | The content identity of the document, and the entry (`Main` or `Entry { function }`). |
 | `entry_unit()`, `entry_signature()` | The unit a run starts in, and its signature. |
 | `graph()` | The derived graph (`lash::workflow::graph::Graph`): a node per block, statement, action and expression, each at its site; control-flow, call, spawn and reference edges; and `execution_sites()`, the sites a run can report an occurrence at, with their kind and enclosing loops. |
-| `overlay_document()` | What an execution overlay is held to. |
+| `declarations()` | The definition of every library function the document's `use` lines name, as it was linked: the signatures a view draws. |
+
+`WorkflowOverlayDocument::of(&document)` is what an execution overlay is
+held to.
 
 Read the graph; do not write it. It is recomputed from the document, and
 there is no edit that writes an edge. `Graph` has no serialized form.
 
-A host that serves a canvas serves `lash::workflow::view::derive(&document, &functions)`:
-a `WorkflowView`, lash's wire shape (schema `schemas/host/kernel-workflow-view`).
+A host that serves a canvas enables `workflow-view` and serves
+`lash::workflow::view::derive(&document)`: a `WorkflowView`, lash's wire
+shape (schema `schemas/host/kernel-workflow-view`). The feature links the
+kernel's document, checker and view crates and the label data, and no
+dialect, editor or runtime: a viewer draws TypeScript and Python workflows
+without either parser, from a decoded document and the declarations
+`FunctionRegistry::export_declarations` ships, passed to
+`WorkflowDocument::derive`.
 It holds the entry's `statements` (each with its site, kernel statement,
 block, depth, document ordinal and action site), its `scopes` (every block with its ordinal and depth,
 typed by what opens it: `entry`, `closure`, `then`, `else`, `for`, `while`,
@@ -98,9 +110,13 @@ A host that vendors lash reads the schema's TypeScript declaration from
 `lash::workflow::view::TYPESCRIPT_DECLARATION` — the same bytes as the
 checked-in `v1.d.ts` — to check its own copy hermetically.
 
-A document carries no labels and no presentation. Lash keeps no per-node
-host data either: wording, icons, layout and step labels are the host's,
-keyed by site.
+A document carries no labels and no presentation. A library call's
+`CalleeView::Library { id, name }` names the function by identity and by the
+name its `use` line gives it. `lash::helper_labels::labels()` reads the
+shipped helper labels, keyed by name, with no dialect or helper release;
+`helper_labels::title(&labels, &name)` answers the label, or the bare name for a
+helper this build does not know. Lash keeps no per-node host data: wording,
+icons, layout, roles and step labels are the host's, keyed by site.
 
 ### Reading one
 
@@ -257,19 +273,21 @@ decides it does.
 
 ## Publishing
 
-Publishing admits the draft's document as a definition of one entry.
+Publishing admits a document as a definition of one entry. It takes the
+document, not a draft, so a host that only runs and publishes needs no
+editor; a host that edited one passes `draft.document()` and keeps its own
+`draft.correspondence_since_open()`.
 
 ```rust,ignore
 let pin = HostArtifactPin::mint();
 match core
     .host_artifacts()
-    .publish_workflow(&pin, &draft, &Name::new("order_review"), &env_spec)
+    .publish_workflow(&pin, draft.document(), &Name::new("order_review"), &env_spec)
     .await?
 {
     WorkflowPublish::Published(publication) => {
         let definition = publication.definition;   // id and signature: what a run starts
         let admitted = publication.document;       // the WorkflowDocument, with its graph
-        let moved = publication.correspondence;    // the draft's base sites to admitted sites
     }
     WorkflowPublish::Refused(refusal) => { /* why admission refused it */ }
     WorkflowPublish::Unsupported { .. } => { /* no engine admits documents */ }
@@ -385,9 +403,11 @@ edited document; if you compare revisions, use the correspondence.
 ## TypeScript is a lens
 
 None of the above prints or parses a source language. With the `typescript`
-feature, `WorkflowDocument::typescript()` (the kernel printer,
-`lash::typescript::print`) answers equivalent TypeScript for a document,
-keeping every temporary and statement boundary. It is a read-only view.
+feature, `lash::typescript::print(document.document(), options)` answers
+equivalent TypeScript for a document, keeping every temporary and statement
+boundary. It is a read-only view. `dialect-typescript` and `dialect-python`
+select helper releases and never link a parser into the host's own process:
+name `typescript` or `python` to print or lower in-process.
 
 A document can have no TypeScript spelling. The printer then answers a
 diagnostic, and the document stays readable, editable, publishable and
@@ -427,8 +447,11 @@ can change a workflow.
 | `lash::workflow` | Publication, reads, the derived `WorkflowDocument`, the environment, and the execution overlay. Ordinary host work stays here. |
 | `lash::workflow::document` | The kernel document: the AST, sites, names, identities, kernel notation. |
 | `lash::workflow::graph` | The derived graph, execution sites and manifest requirements. |
-| `lash::workflow::edit` | Drafts, edits, transactions and correspondence. |
-| `lash::typescript` | The optional TypeScript dialect: its printer. |
+| `lash::workflow::view` | The canvas read and run coverage (`workflow-view`). |
+| `lash::workflow::edit` | Drafts, edits, transactions and correspondence (`workflow-authoring`). |
+| `lash::workflow::authoring` | Authoring operations planned into transactions (`workflow-authoring`). |
+| `lash::typescript` | The optional TypeScript dialect: its front end and printer (`typescript`). |
+| `lash::python` | The optional Python dialect: its front end and exact codec (`python`). |
 
 
 ## Who supplies a process's environment

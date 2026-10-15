@@ -889,6 +889,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "chrono": "//third-party/rust:p0048",
+            "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "opentelemetry": "//third-party/rust:p0224",
@@ -1028,8 +1029,6 @@ PACKAGE_DEPS = {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
-            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
-            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
@@ -1214,6 +1213,20 @@ PACKAGE_DEPS = {
             "thiserror": "//third-party/rust:p0375"
         }
     },
+    "lash-kernel-view": {
+        "build": {},
+        "dev": {
+            "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit"
+        },
+        "normal": {
+            "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "schemars": "//third-party/rust:p0309",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322",
+            "thiserror": "//third-party/rust:p0375"
+        }
+    },
     "lash-kernel-vm": {
         "build": {},
         "dev": {
@@ -1371,6 +1384,7 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
+            "lash_kernel_view": "//crates/lash-kernel-view:lash-kernel-view",
             "lash_llm_tools": "//crates/lash-llm-tools:lash-llm-tools",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_plugin_mcp": "//crates/lash-plugin-mcp:lash-plugin-mcp",

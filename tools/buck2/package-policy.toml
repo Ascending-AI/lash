@@ -404,7 +404,7 @@ compile_data = ["//:host_schemas"]
 # The view laws check the shipped TYPESCRIPT_DECLARATION against the
 # checked-in kernel-workflow-view declaration byte for byte.
 [[rule]]
-packages = ["lash-kernel-edit"]
+packages = ["lash-kernel-view"]
 kinds = ["unit-test"]
 compile_data = ["//:host_schemas"]
 

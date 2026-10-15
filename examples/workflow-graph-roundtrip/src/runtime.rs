@@ -145,7 +145,7 @@ pub(crate) async fn publish(
         // the effects its entry calls or spawns, including called functions.
         let environment = environment.restrict(effects.keys())?;
         match artifacts
-            .publish_workflow(&pin, draft, entry, &environment)
+            .publish_workflow(&pin, draft.document(), entry, &environment)
             .await?
         {
             WorkflowPublish::Published(publication) => {
@@ -400,7 +400,7 @@ impl Overlay {
     ) -> Result<Self, RunError> {
         let definition = document.identity().to_string();
         let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
-        accumulator.set_document(document.overlay_document());
+        accumulator.set_document(lash::workflow::WorkflowOverlayDocument::of(document));
         Ok(Self {
             accumulator,
             process,

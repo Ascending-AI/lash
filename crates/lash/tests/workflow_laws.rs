@@ -347,10 +347,9 @@ main { finish null }
         .manifest
         .effects
         .insert(effect.clone(), checked.effects()[&effect].clone());
-    let draft = Draft::open(document).expect("list draft");
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &draft, &Name::new("list"), &list_env)
+            .publish_workflow(&pin, &document, &Name::new("list"), &list_env)
             .await
             .expect("publish list"),
     );
@@ -438,12 +437,7 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
     }
     let publication = published(
         artifacts
-            .publish_workflow(
-                &pin,
-                &Draft::open(document).expect("draft"),
-                &Name::new("supervisor"),
-                &candidate,
-            )
+            .publish_workflow(&pin, &document, &Name::new("supervisor"), &candidate)
             .await
             .expect("publish"),
     );
@@ -630,10 +624,9 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
 
     let document: Document =
         lash::workflow::document::parse_document(GUARDED).expect("the document parses");
-    let draft = Draft::open(document.clone()).expect("the document opens");
     let first = published(
         artifacts
-            .publish_workflow(&pin, &draft, &entry, &environment)
+            .publish_workflow(&pin, &document, &entry, &environment)
             .await
             .expect("the publication answers"),
     );
@@ -694,13 +687,13 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     assert_ne!(applied.admitted.identity, first.document.identity());
     let second = published(
         artifacts
-            .publish_workflow(&pin, &draft, &entry, &environment)
+            .publish_workflow(&pin, draft.document(), &entry, &environment)
             .await
             .expect("the publication answers"),
     );
     assert_ne!(second.definition.id, first.definition.id);
     assert_eq!(second.document.identity(), applied.admitted.identity);
-    let survivor = second
+    let survivor = applied
         .correspondence
         .survivor(&sleep.site)
         .expect("the wait survives the edit");
@@ -759,12 +752,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         .insert(echo.clone(), checked.effects()[&echo].clone());
     let publication = published(
         artifacts
-            .publish_workflow(
-                &pin,
-                &Draft::open(document).expect("draft"),
-                &Name::new("guarded"),
-                &environment,
-            )
+            .publish_workflow(&pin, &document, &Name::new("guarded"), &environment)
             .await
             .expect("publication"),
     );
@@ -931,12 +919,7 @@ main { finish null }
     .expect("pure document");
     let publication = published(
         artifacts
-            .publish_workflow(
-                &pin,
-                &Draft::open(document).expect("draft"),
-                &Name::new("computed"),
-                &environment,
-            )
+            .publish_workflow(&pin, &document, &Name::new("computed"), &environment)
             .await
             .expect("publication"),
     );
@@ -1036,12 +1019,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     let entry = Name::new("fan");
     let publication = published(
         artifacts
-            .publish_workflow(
-                &pin,
-                &Draft::open(document).expect("the document opens"),
-                &entry,
-                &environment,
-            )
+            .publish_workflow(&pin, &document, &entry, &environment)
             .await
             .expect("the publication answers"),
     );
@@ -1074,7 +1052,9 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     );
 
     let mut overlay = WorkflowExecutionOverlayAccumulator::default();
-    overlay.set_document(publication.document.overlay_document());
+    overlay.set_document(lash::workflow::WorkflowOverlayDocument::of(
+        &publication.document,
+    ));
     loop {
         let item = tokio::time::timeout(std::time::Duration::from_secs(60), feed.next())
             .await
@@ -1170,12 +1150,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
     }
     let publication = published(
         artifacts
-            .publish_workflow(
-                &pin,
-                &Draft::open(document).expect("the document opens"),
-                &Name::new("supervisor"),
-                &environment,
-            )
+            .publish_workflow(&pin, &document, &Name::new("supervisor"), &environment)
             .await
             .expect("the publication answers"),
     );
@@ -1276,12 +1251,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     let document = lash::workflow::document::parse_document(GUARDED).expect("the document parses");
     let publication = published(
         artifacts
-            .publish_workflow(
-                &pin,
-                &Draft::open(document).expect("the document opens"),
-                &Name::new("guarded"),
-                &environment,
-            )
+            .publish_workflow(&pin, &document, &Name::new("guarded"), &environment)
             .await
             .expect("the publication answers"),
     );
@@ -1371,12 +1341,7 @@ async fn a_sealed_env_naming_a_retired_component_builds_without_it_and_resumes()
     let document = lash::workflow::document::parse_document(GUARDED).expect("the document parses");
     let publication = published(
         artifacts
-            .publish_workflow(
-                &pin,
-                &Draft::open(document).expect("the document opens"),
-                &Name::new("guarded"),
-                &environment,
-            )
+            .publish_workflow(&pin, &document, &Name::new("guarded"), &environment)
             .await
             .expect("the publication answers"),
     );
@@ -1472,12 +1437,7 @@ async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_r
     let document = lash::workflow::document::parse_document(ECHOED).expect("the document parses");
     let publication = published(
         artifacts
-            .publish_workflow(
-                &pin,
-                &Draft::open(document).expect("the document opens"),
-                &Name::new("echoed"),
-                &environment,
-            )
+            .publish_workflow(&pin, &document, &Name::new("echoed"), &environment)
             .await
             .expect("the publication answers"),
     );

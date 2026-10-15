@@ -134,20 +134,9 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     else {
         panic!("lash holds the published definition");
     };
-    let environment = core
-        .host_artifacts()
-        .workflow_environment(
-            &lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
-                .build()
-                .expect("empty environment"),
-        )
-        .await
-        .expect("environment reads")
-        .expect("workflow engine");
     assert_eq!(
         served,
-        lash::workflow::view::derive(&published.document, environment.functions())
-            .expect("the view"),
+        lash::workflow::view::derive(&published.document).expect("the view"),
         "the view is lash's read of the published document"
     );
 

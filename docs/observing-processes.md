@@ -343,7 +343,7 @@ reducer:
 
 ```rust,ignore
 let mut overlay = WorkflowExecutionOverlayAccumulator::default();
-overlay.set_document(document.overlay_document()); // the document the execution names
+overlay.set_document(WorkflowOverlayDocument::of(&document)); // the document the execution names
 overlay.observe(&observation)?;          // a LanguageExecution event
 overlay.step_body_started(&started)?;    // a StepBodyStarted event
 overlay.settle(settlement);              // a committed Terminal, or a terminal read view

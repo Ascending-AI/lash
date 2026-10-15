@@ -109,7 +109,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
         .host_artifacts()
         .publish_workflow(
             &pin,
-            &crate::workflow::edit::Draft::open(document).unwrap(),
+            &document,
             &crate::workflow::document::Name::new("handler"),
             &environment,
         )
@@ -274,7 +274,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
         .host_artifacts()
         .publish_workflow(
             &pin,
-            &crate::workflow::edit::Draft::open(document).unwrap(),
+            &document,
             &crate::workflow::document::Name::new("handler"),
             &environment,
         )

@@ -1,19 +1,25 @@
 //! The canvas read of one entry of a document: what a host draws and edits
 //! against, with no presentation.
 //!
-//! [`derive`] projects a document and the [`Graph`] the checker derived from
-//! it into a [`WorkflowView`]: the entry's statements with their exact sites
-//! and payloads, the blocks a host can select with what opens each, the
-//! dataflow a host draws ports and wires from, and every execution site a
-//! run reports at. The projection is one walk of the entry's graph nodes
-//! beside their document nodes, each in [`Node::children`] order, and it
-//! matches every statement and expression kind: a new kernel form fails to
-//! compile here, not in a host.
+//! [`derive`] projects a checked [`WorkflowDocument`] (its document, the
+//! [`Graph`] the checker derived from it and the library declarations it
+//! linked against) into a [`WorkflowView`]: the entry's statements with
+//! their exact sites and payloads, the blocks a host can select with what
+//! opens each, the dataflow a host draws ports and wires from, and every
+//! execution site a run reports at. The projection is one walk of the
+//! entry's graph nodes beside their document nodes, each in
+//! [`Node::children`] order, and it matches every statement and expression
+//! kind: a new kernel form fails to compile here, not in a host.
 //!
 //! The view is data. It serialises, and its schema is the
 //! `kernel-workflow-view` host schema. Ids name bindings within one
-//! derivation; edits address sites, never these ids. Labels, layout,
-//! styling and templates are the host's.
+//! derivation; edits address sites, never these ids. A library callee
+//! carries its identity and the name its `use` line gives it; display
+//! labels join by that name outside this crate. Layout, styling and
+//! templates are the host's.
+//!
+//! The crate depends on `lash-kernel-doc` and `lash-kernel-check` and on no
+//! other lash crate. It links no dialect, editor or runtime.
 
 use std::collections::BTreeMap;
 
@@ -25,11 +31,11 @@ pub use lash_kernel_doc::{RanCounts, ReplayPath, RunObservation, TaskPath};
 
 use lash_kernel_check::{
     ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, GraphNode, NodeId, NodeKind,
-    Reference, StmtNode,
+    Reference, StmtNode, WorkflowDocument,
 };
 use lash_kernel_doc::{
-    Action, Atom, Callee, Document, EffectName, Expr, FunctionCatalog, FunctionId, FunctionName,
-    Name, Node, Param, Place, Site, Stmt, Type, Unit,
+    Action, Atom, Callee, Document, EffectName, Expr, FunctionDeclarations, FunctionId,
+    FunctionName, Name, Node, Param, Place, Site, Stmt, Type, Unit,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -335,28 +341,26 @@ impl std::fmt::Display for SiteKind {
 pub enum ViewError {
     #[error("the graph has no unit {unit:?}")]
     NoSuchUnit { unit: Unit },
-    #[error("the view's catalog has no library function {function}")]
+    #[error("the document holds no declaration of library function {function}")]
     MissingFunction { function: FunctionId },
     /// The graph was derived from another document.
     #[error("the graph does not describe the document at {site:?}")]
     Mismatch { site: Site },
 }
 
-/// The view of `entry` in `document`, read from the `graph` the checker
-/// derived from it. `functions` must be the catalog used to derive the graph:
-/// document `use` lines name library identities but carry no signatures.
-/// A decoded [`lash_kernel_doc::FunctionDeclarations`] is sufficient.
+/// The view of `document` at the entry it is entered at, read from the
+/// graph the checker derived from it and the library declarations it linked
+/// against. No engine, registry or native code is needed: a holder decoded
+/// from a document and its declarations is enough.
 ///
 /// # Errors
 ///
-/// The graph has no such unit or was not derived from `document`, or the
-/// catalog lacks a called library function.
-pub fn derive(
-    document: &Document,
-    graph: &Graph,
-    entry: &Unit,
-    functions: &dyn FunctionCatalog,
-) -> Result<WorkflowView, ViewError> {
+/// The holder's graph or declarations do not describe its document.
+pub fn derive(document: &WorkflowDocument) -> Result<WorkflowView, ViewError> {
+    let entry = &document.entry_unit();
+    let graph = document.graph();
+    let functions = document.declarations();
+    let document = document.document();
     let unit = graph.unit(entry).ok_or_else(|| ViewError::NoSuchUnit {
         unit: entry.clone(),
     })?;
@@ -486,7 +490,7 @@ struct Walk<'a> {
     ordinals: BTreeMap<Site, u32>,
     document: &'a Document,
     graph: &'a Graph,
-    functions: &'a dyn FunctionCatalog,
+    functions: &'a FunctionDeclarations,
     entry: Callable,
     view: WorkflowView,
     uses: BTreeMap<BindingId, Vec<Use>>,
@@ -689,7 +693,7 @@ impl<'a> Walk<'a> {
                 Callee::Library(function) => {
                     let definition =
                         self.functions
-                            .definition(function)
+                            .get(function)
                             .ok_or(ViewError::MissingFunction {
                                 function: *function,
                             })?;
@@ -928,3 +932,6 @@ fn available(graph: &Graph, node: &GraphNode) -> Vec<usize> {
     }
     names.into_values().collect()
 }
+
+#[cfg(test)]
+mod tests;

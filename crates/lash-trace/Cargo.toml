@@ -26,6 +26,7 @@ testing = []
 workspace = true
 
 [dependencies]
+lash-kernel-check = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-sansio = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }

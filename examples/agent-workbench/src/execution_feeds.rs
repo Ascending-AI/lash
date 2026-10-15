@@ -229,7 +229,9 @@ impl Cache {
             };
             match self.documents.get(wants) {
                 Some(document) => {
-                    graph.accumulator.set_document(document.overlay_document());
+                    graph
+                        .accumulator
+                        .set_document(lash::workflow::WorkflowOverlayDocument::of(document));
                     graph.document = Some(Arc::clone(document));
                 }
                 None => missing = Some(wants.clone()),

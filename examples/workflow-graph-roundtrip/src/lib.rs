@@ -95,19 +95,19 @@ impl SavedWorkflow {
         );
         let (view, view_unavailable, printed, source_unavailable) = match &derived {
             Ok(derived) => {
-                let (view, view_unavailable) =
-                    match lash::workflow::view::derive(derived, functions) {
-                        Ok(view) => (Some(view), None),
-                        Err(error) => (None, Some(error.to_string())),
-                    };
+                let (view, view_unavailable) = match lash::workflow::view::derive(derived) {
+                    Ok(view) => (Some(view), None),
+                    Err(error) => (None, Some(error.to_string())),
+                };
                 let options = lash::dialect::PrintOptions {
                     source_map: true,
                     ..Default::default()
                 };
-                let (printed, source_unavailable) = match derived.typescript(options) {
-                    Ok(printed) => (Some(printed), None),
-                    Err(error) => (None, Some(error.to_string())),
-                };
+                let (printed, source_unavailable) =
+                    match lash::typescript::print(derived.document(), options) {
+                        Ok(printed) => (Some(printed), None),
+                        Err(error) => (None, Some(error.to_string())),
+                    };
                 (view, view_unavailable, printed, source_unavailable)
             }
             Err(refusal) => (

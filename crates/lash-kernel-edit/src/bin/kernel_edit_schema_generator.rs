@@ -1,6 +1,5 @@
 //! Emits the checked-in JSON Schema documents for the kernel's edit data:
-//! an authoring [`Operation`], an edit [`Transaction`] and the [`WorkflowView`]
-//! a host edits against.
+//! an authoring [`Operation`] and an edit [`Transaction`].
 //!
 //! These are owned by [`KERNEL_VERSION`]: their payloads are the forms and
 //! sites of that version. Every object is closed and no position admits
@@ -9,7 +8,6 @@
 use lash_kernel_doc::KERNEL_VERSION;
 use lash_kernel_edit::Transaction;
 use lash_kernel_edit::authoring::Operation;
-use lash_kernel_edit::view::{WorkflowCoverage, WorkflowView};
 use schemars::JsonSchema;
 use serde_json::{Value, json};
 
@@ -17,26 +15,15 @@ const VERSION_CONSTANT: &str = "KERNEL_VERSION";
 
 fn main() -> Result<(), String> {
     let documents = vec![
-        document::<Operation>("kernel-authoring-operation", |_| {})?,
-        document::<Transaction>("kernel-edit-transaction", |_| {})?,
-        // The view document also ships the run coverage a host reads
-        // through `view::coverage`, so its declaration names every type a
-        // run's JSON answers with.
-        document::<WorkflowView>("kernel-workflow-view", |generator| {
-            generator.subschema_for::<WorkflowCoverage>();
-        })?,
+        document::<Operation>("kernel-authoring-operation")?,
+        document::<Transaction>("kernel-edit-transaction")?,
     ];
     println!("{}", Value::Array(documents));
     Ok(())
 }
 
-fn document<T: JsonSchema>(
-    shape: &'static str,
-    extra: impl FnOnce(&mut schemars::SchemaGenerator),
-) -> Result<Value, String> {
-    let mut generator = schemars::SchemaGenerator::default();
-    extra(&mut generator);
-    let mut schema = serde_json::to_value(generator.into_root_schema_for::<T>())
+fn document<T: JsonSchema>(shape: &'static str) -> Result<Value, String> {
+    let mut schema = serde_json::to_value(schemars::schema_for!(T))
         .map_err(|error| format!("cannot serialize {shape} schema: {error}"))?;
     let root = schema
         .as_object_mut()

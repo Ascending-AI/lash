@@ -272,6 +272,10 @@ features = [
   "lash-runtime/dialect-typescript:off",
   "lash-runtime/dialect-python:on",
   "lash-runtime/dialect-python:off",
+  "lash-runtime/workflow-view:on",
+  "lash-runtime/workflow-view:off",
+  "lash-runtime/workflow-authoring:on",
+  "lash-runtime/workflow-authoring:off",
 ]
 commands = [
   # Production host witnesses (FIG-5097): --lib excludes dev-dependencies,
@@ -322,6 +326,10 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm,worker,dialect-typescript", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm,worker,dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm,worker,dialect-typescript,dialect-python", "--locked"],
+  # FIG-6378: a viewer links no dialect, editor or runtime; authoring adds
+  # the editor over the view. Neither needs code mode.
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "workflow-view", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "workflow-authoring", "--locked"],
   # The figments facade request (FIG-4423): `rlm,testing` in one resolution,
   # which compiles the `lash-seam-proof-worker` bin too. It links no worker;
   # a host that adds `worker` gets the `lash-vm-worker?/testing` forward
@@ -437,8 +445,6 @@ features = [
   "lash-internal-vm-runtime/dialect-typescript:off",
   "lash-internal-vm-runtime/dialect-python:on",
   "lash-internal-vm-runtime/dialect-python:off",
-  "lash-internal-vm-runtime/python:on",
-  "lash-internal-vm-runtime/python:off",
   "lash-internal-vm-worker/dialect-typescript:on",
   "lash-internal-vm-worker/dialect-typescript:off",
   "lash-internal-vm-worker/dialect-python:on",
@@ -455,7 +461,6 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-vm-library", "--lib", "--no-default-features", "--features", "dialect-typescript,dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-typescript", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "dialect-typescript,dialect-python", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--bins", "--no-default-features", "--locked"],

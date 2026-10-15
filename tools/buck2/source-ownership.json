@@ -127,7 +127,7 @@
       ]
     }
   },
-  "crates/lash-kernel-edit": {
+  "crates/lash-kernel-view": {
     "compile_data": [
       "kernel-workflow-view-v1.d.ts",
       "kernel-workflow-view-v1.schema.json"

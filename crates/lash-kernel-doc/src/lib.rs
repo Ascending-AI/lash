@@ -47,6 +47,7 @@ mod types;
 mod validate;
 mod value;
 mod version;
+mod workflow;
 
 #[cfg(test)]
 mod tests;
@@ -93,6 +94,7 @@ pub use validate::{
 pub use value::{Bytes, Datum, ErrorDatum, Handle, InvalidBytes, TaskId, Timestamp, ValueKind};
 
 pub use version::KernelVersion;
+pub use workflow::{WorkflowDocumentEntry, WorkflowDocumentRef};
 
 /// Internal registration facts shared by the checker and library assembly.
 #[doc(hidden)]

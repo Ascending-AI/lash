@@ -240,7 +240,7 @@ await control.finish(fetched.url);
         panic!("one cell started");
     };
     let emitted = emitted_sites(&events, &started.identity);
-    let index = document.overlay_document();
+    let index = lash::workflow::WorkflowOverlayDocument::of(document);
     assert_eq!(
         emitted.len(),
         2,
@@ -333,7 +333,7 @@ await control.finish(await processes.await({ handle }));
     let document = document
         .as_ref()
         .expect("a running process's document is readable");
-    let index = document.overlay_document();
+    let index = lash::workflow::WorkflowOverlayDocument::of(document);
     let emitted = emitted_sites(&events, &process.identity);
     assert!(!emitted.is_empty(), "the process reported its fetch");
     assert!(emitted.iter().all(|site| index.contains(site)));

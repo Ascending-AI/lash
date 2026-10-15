@@ -2778,6 +2778,7 @@ dependencies = [
  "chrono",
  "jsonschema",
  "lash-internal-sansio",
+ "lash-kernel-check",
  "lash-kernel-doc",
  "opentelemetry",
  "opentelemetry_sdk",
@@ -2891,8 +2892,6 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
- "lash-dialect-python",
- "lash-dialect-typescript",
  "lash-internal-core",
  "lash-internal-core-execution",
  "lash-internal-core-ids",
@@ -3074,6 +3073,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-kernel-view"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-check",
+ "lash-kernel-doc",
+ "lash-kernel-edit",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "lash-kernel-vm"
 version = "0.0.0-dev"
 dependencies = [
@@ -3234,6 +3246,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-edit",
+ "lash-kernel-view",
  "opentelemetry_sdk",
  "rusqlite",
  "serde",

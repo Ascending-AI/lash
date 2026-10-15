@@ -30,7 +30,10 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 base64 = { workspace = true }
 flate2 = "1"
 delegation = { workspace = true }
-lash = { workspace = true, features = ["rlm", "testing", "dialect-typescript", "dialect-python", "mcp", "worker"] }
+# The certification selection includes both in-process codecs: a dialect
+# feature selects helper releases only, and the workspace build's exact-source
+# laws print and read both languages in the host (FIG-6378).
+lash = { workspace = true, features = ["rlm", "testing", "dialect-typescript", "dialect-python", "typescript", "python", "workflow-view", "mcp", "worker"] }
 lash-core = { workspace = true }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }

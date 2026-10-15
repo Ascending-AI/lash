@@ -29,45 +29,7 @@ impl LanguageExecutionObservation {
     }
 }
 
-/// Which workflow document an execution runs, and where it enters it. It
-/// names the document; it is never the document. A host reads the document
-/// the reference names through the facade's workflow inspection and may
-/// cache it under this value, which is immutable for a process: a running
-/// instance keeps the document it was admitted under.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowDocumentRef {
-    /// The identity of the admitted kernel document: the hash of its
-    /// content, kernel version and manifest included.
-    pub document: lash_kernel_doc::DocumentId,
-    /// Where the execution enters the document.
-    pub entry: WorkflowDocumentEntry,
-}
-
-/// The entry of a [`WorkflowDocumentRef`].
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum WorkflowDocumentEntry {
-    /// The document's `main`: a session cell.
-    Main,
-    /// One entry of the document: a declared function a host may start,
-    /// which is what a process runs.
-    Entry { function: lash_kernel_doc::Name },
-}
-
-impl WorkflowDocumentEntry {
-    /// The unit of the document this entry runs.
-    pub fn unit(&self) -> lash_kernel_doc::Unit {
-        match self {
-            Self::Main => lash_kernel_doc::Unit::Main,
-            Self::Entry { function } => lash_kernel_doc::Unit::Function(function.clone()),
-        }
-    }
-}
+pub use lash_kernel_doc::{WorkflowDocumentEntry, WorkflowDocumentRef};
 
 /// The admitted body of a process step started: the step's actor committed
 /// its admission, bound it to a call, and is about to run it. A step that is

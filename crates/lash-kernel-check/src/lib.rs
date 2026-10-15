@@ -15,6 +15,10 @@
 //!   provides, and refuses it with a typed [`Refusal`] that names everything
 //!   missing or mismatched (`K-ADM`).
 //!
+//! - **Holding.** [`WorkflowDocument`] keeps a document, the graph derived
+//!   from it, where it is entered and the library declarations it linked
+//!   against together: the checked value a host reads, draws and admits.
+//!
 //! Nothing here is stored: document facts are derived afresh, and immutable
 //! registered library facts are shared across admissions. The
 //! crate depends on `lash-kernel-doc` and on no other lash crate.
@@ -29,6 +33,7 @@ mod refusal;
 mod schema;
 mod types;
 mod typing;
+mod workflow;
 
 #[cfg(test)]
 mod closure_tests;
@@ -50,3 +55,4 @@ pub use refusal::{Refusal, RefusalReason, Refused, SignatureMismatch, SignatureS
 pub use schema::{
     result_type_of_schema, signature_mismatch, signature_serves, tool_signature, type_of_schema,
 };
+pub use workflow::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError};

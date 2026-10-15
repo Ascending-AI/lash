@@ -29,8 +29,9 @@
 /// selects [`WorkerEntry::reexec`]. An embedding with no dialect is refused.
 /// A host that runs the shipped worker executable links no worker
 /// embedding; that executable installs the dialects it was built with.
-/// `dialect-typescript` also gives the host `lash::typescript`, the front
-/// end and printer in its own process.
+/// A dialect feature never links a parser into the host's own process:
+/// `typescript` gives the host `lash::typescript`, the front end and
+/// printer, and `python` gives it `lash::python`.
 /// A session or process records its dialect at creation, and a worker whose
 /// embedding lacks it refuses the run
 /// ([`RunRefusal::DialectNotInstalled`]).

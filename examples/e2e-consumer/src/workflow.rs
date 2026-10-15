@@ -478,7 +478,7 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
         .host_artifacts()
         .publish_workflow(
             &host.pin,
-            &draft,
+            draft.document(),
             &request.entry,
             &environment().map_err(api_error)?,
         )
@@ -489,8 +489,11 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
             "published": true,
             "definition": definition_json(&publication.definition).map_err(api_error)?,
             "workflow": document_json(&publication.document).map_err(api_error)?,
+            // Lash publishes documents, not drafts: where each node of the
+            // document the draft was opened on sits now is this host's own
+            // read of its draft.
             "correspondence":
-                serde_json::to_value(&publication.correspondence).map_err(api_error)?,
+                serde_json::to_value(draft.correspondence_since_open()).map_err(api_error)?,
         }),
         WorkflowPublish::Refused(refusal) => json!({
             "published": false,
@@ -687,7 +690,7 @@ async fn attach_observer(State(host): State<Host>, Path(process): Path<String>) 
         other => return Err(api_error(format!("the document does not read: {other:?}"))),
     };
     let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
-    accumulator.set_document(document.overlay_document());
+    accumulator.set_document(lash::workflow::WorkflowOverlayDocument::of(&document));
     let mut state = Observed {
         document: document_json(&document).map_err(api_error)?,
         ..Observed::default()

@@ -49,7 +49,7 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-lash = { workspace = true, features = ["worker", "testing", "typescript"] }
+lash = { workspace = true, features = ["worker", "testing", "typescript", "workflow-view"] }
 # `testing` is a facade dev feature on purpose: it arms the loud assertions that
 # turn an accidentally-exhausted Lash VM execution bound into a test failure.
 # The judged host must not carry them — see `[profile.judged]` in the workspace

@@ -211,6 +211,22 @@ mod codemode_inventory {
     use lash::workflow::WorkflowEnvironment as _;
 }
 
+// --- `workflow-view`: the canvas read and its labels, with no dialect ---
+
+#[cfg(feature = "workflow-view")]
+mod workflow_view_inventory {
+    use lash::workflow::WorkflowDocument as _;
+    use lash::workflow::view::{WorkflowView as _, derive as _};
+}
+
+// --- `workflow-authoring`: drafts, edits and authoring operations ---
+
+#[cfg(feature = "workflow-authoring")]
+mod workflow_authoring_inventory {
+    use lash::workflow::authoring::Operation as _;
+    use lash::workflow::edit::{Draft as _, Transaction as _};
+}
+
 // --- `rlm`: the persistent REPL protocol on top of code mode ---
 
 #[cfg(feature = "rlm")]

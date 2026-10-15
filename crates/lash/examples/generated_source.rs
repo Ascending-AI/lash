@@ -64,8 +64,8 @@ fn print_local(
     options: PrintOptions,
 ) -> Result<PrintedSource> {
     Ok(match format {
-        SourceFormat::TypeScriptV1 => view.typescript(options)?,
-        SourceFormat::PythonV1 => view.python(options)?,
+        SourceFormat::TypeScriptV1 => lash::typescript::print(view.document(), options)?,
+        SourceFormat::PythonV1 => lash::python::print(view.document(), options)?,
     })
 }
 

@@ -1215,6 +1215,7 @@ schema_documents(
         "//crates/lash-core:process_workflow_schema_generator__bin",
         "//crates/lash-kernel-doc:kernel_schema_generator__bin",
         "//crates/lash-kernel-edit:kernel_edit_schema_generator__bin",
+        "//crates/lash-kernel-view:kernel_view_schema_generator__bin",
     ],
     script = "scripts/generate-workflow-schemas.py",
 )

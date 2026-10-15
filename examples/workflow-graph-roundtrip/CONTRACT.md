@@ -66,10 +66,11 @@ A site is `{ "unit": { "function": "onboarding" }, "path": [3, 0] }`.
 
 `view` is lash's wire shape, not this example's: its schema is
 `schemas/host/kernel-workflow-view`, and every host that serves
-`lash::workflow::view::derive(document, functions)` serves the same JSON.
-The library catalog supplies parameter names that document `use` lines do not
-carry; a remote reader can decode `FunctionRegistry::export_declarations()`
-as `FunctionDeclarations` and use it for both document and view derivation.
+`lash::workflow::view::derive(&document)` serves the same JSON. The checked
+document holds the declarations it was linked against, which supply the
+parameter names that document `use` lines do not carry; a remote reader can
+decode `FunctionRegistry::export_declarations()` as `FunctionDeclarations`
+and pass it to `WorkflowDocument::derive`.
 
 | Property | Meaning |
 | --- | --- |

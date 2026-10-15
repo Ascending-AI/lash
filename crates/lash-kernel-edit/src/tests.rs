@@ -1588,14 +1588,10 @@ main {
     );
     let branch = main(&[1, 0, 0, 1]);
     let graph = lash_kernel_check::derive(draft.document(), &library.catalog).unwrap();
-    let view =
-        crate::view::derive(draft.document(), &graph, &Unit::Main, &library.catalog).unwrap();
-    assert!(
-        view.dataflow
-            .expressions
-            .iter()
-            .any(|expression| expression.site == branch)
-    );
+    assert!(matches!(
+        graph.node_at(&branch).map(|node| &node.kind),
+        Some(lash_kernel_check::NodeKind::Expr(_))
+    ));
     let replace = Edit::ReplaceExpression {
         expression: branch,
         with: Expr::Literal(Literal::Int(42.into())),

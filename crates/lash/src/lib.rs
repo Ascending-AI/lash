@@ -221,8 +221,9 @@ mod tool_intent_ingress;
 /// Turn builders, streams, activities, and output types.
 pub mod turn;
 pub mod usage;
-/// Edit, publish and observe kernel workflows (`codemode`).
-#[cfg(feature = "codemode")]
+/// Read, draw, edit, publish and observe kernel workflows (`codemode`,
+/// `workflow-view`, `workflow-authoring`).
+#[cfg(any(feature = "codemode", feature = "workflow-view"))]
 pub mod workflow;
 
 pub use crate::admin::host_commands::{SessionCommandAdmin, SessionCommandWithdrawal};

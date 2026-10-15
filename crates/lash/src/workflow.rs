@@ -1,6 +1,9 @@
-//! Code mode (`codemode`) edits and runs workflows without the RLM REPL protocol.
+//! Workflows as kernel documents a host reads, draws, edits and publishes.
 //!
-//! A process's code as a document a host reads, edits and publishes.
+//! Code mode (`codemode`) runs and publishes workflows without the RLM REPL
+//! protocol. Drawing is `workflow-view` and editing is `workflow-authoring`:
+//! each is a separate opt-in, and neither links a dialect parser. A host
+//! that prints or lowers source names `typescript` or `python` too.
 //!
 //! A process is an entry function of an admitted **kernel document**
 //! ([`document::Document`]): a typed tree of statements and expressions
@@ -21,17 +24,22 @@
 //! view is derived again on every read. A host draws it; it never stores
 //! or edits it.
 //!
-//! [`view::derive`] is the serialisable read a canvas draws from one
-//! [`WorkflowDocument`]: its entry's statements with their sites, the
-//! blocks a host can select with what opens each, the dataflow ports and
-//! wires are drawn from, and every execution site. It is lash's wire shape
-//! (the `kernel-workflow-view` host schema); labels, layout and styling
-//! stay the host's. The view also takes the library catalog explicitly. A
-//! document's `use` lines carry names and ids but no signatures. The runtime
-//! can ship [`document::FunctionRegistry::export_declarations`] as serde data;
-//! a separate reader decodes [`document::FunctionDeclarations`], passes it to
-//! [`WorkflowDocument::derive`], then to [`view::derive`]. This needs no engine
-//! object or native implementations.
+//! With `workflow-view`, `view::derive` is the serialisable read a canvas
+//! draws from one [`WorkflowDocument`]: its entry's statements with their
+//! sites, the blocks a host can select with what opens each, the dataflow
+//! ports and wires are drawn from, and every execution site. It is lash's
+//! wire shape (the `kernel-workflow-view` host schema); layout and styling
+//! stay the host's. A library callee names its identity and the name the
+//! document's `use` line gives it; `lash::helper_labels::labels` reads the shipped
+//! display labels and `helper_labels::title` joins one by that name, falling back to the bare
+//! name for a helper this build does not know. A [`WorkflowDocument`] holds
+//! the library declarations it was linked against, so the view needs no
+//! other catalog. A document's `use` lines carry names and ids but no
+//! signatures: the runtime can ship
+//! [`document::FunctionRegistry::export_declarations`] as serde data, and a
+//! separate reader decodes [`document::FunctionDeclarations`] and passes it
+//! to [`WorkflowDocument::derive`]. This needs no engine object, native
+//! implementation or dialect.
 //!
 //! A place in a document is a [`document::Site`]: the unit (`main`, a
 //! declared function or a library function) and the path of child indexes
@@ -45,20 +53,20 @@
 //! [`HostArtifacts::workflow_environment`](crate::process::HostArtifacts::workflow_environment)
 //! answers the [`WorkflowEnvironment`] a document is checked against: the
 //! effects its processes would be offered and the library functions the
-//! workers hold. An [`edit::Draft`] opens a document and applies
-//! [`edit::Edit`]s in atomic [`edit::Transaction`]s against a base
+//! workers hold. With `workflow-authoring`, an `edit::Draft` opens a document
+//! and applies `edit::Edit`s in atomic `edit::Transaction`s against a base
 //! identity: insert, remove, move and replace statements and expressions,
 //! set bindings, conditions, loop and `try` headers, function signatures,
 //! and insert, remove, rename and retype entries. Each transaction is
 //! admitted whole against the environment or changes nothing, and a
-//! refusal names the edit and the site ([`edit::EditRefusal`]).
+//! refusal names the edit and the site (`edit::EditRefusal`).
 //!
-//! For effect inputs written as expressions, [`authoring::plan`] lowers an
-//! ordered batch of [`authoring::Operation`]s to the same transaction. Mix
-//! [`authoring::Operation::InsertEffect`] with ordinary
-//! [`authoring::Operation::Edit`]s; computed inputs become preceding bindings
+//! For effect inputs written as expressions, `authoring::plan` lowers an
+//! ordered batch of `authoring::Operation`s to the same transaction. Mix
+//! `authoring::Operation::InsertEffect` with ordinary
+//! `authoring::Operation::Edit`s; computed inputs become preceding bindings
 //! whose names avoid the whole batch. Planning neither mutates nor admits the
-//! draft. Inspect the transaction, then use [`edit::Draft::apply`] as usual.
+//! draft. Inspect the transaction, then use `edit::Draft::apply` as usual.
 //!
 //! Sites are structural paths, so they change under edits. Continuity is
 //! the [`document::Correspondence`] each applied transaction answers: where
@@ -69,14 +77,14 @@
 //! # Publishing
 //!
 //! [`HostArtifacts::publish_workflow`](crate::process::HostArtifacts::publish_workflow)
-//! admits a draft's document as a definition of one of its entries. The
+//! admits a document as a definition of one of its entries. It takes the
+//! document, not an editor's draft: publishing needs no editor. The
 //! checker admits the document against the environment a process of it
 //! would run under; lash stores the document under its identity and
 //! publishes the descriptor of every entry under the host's pin, so a
 //! process that starts another entry by function reference finds it. A
-//! [`WorkflowPublication`] names the definition, the admitted document and
-//! the correspondence since the draft was opened. A refused document
-//! ([`WorkflowAdmissionRefusal`]) publishes nothing.
+//! [`WorkflowPublication`] names the definition and the admitted document.
+//! A refused document ([`WorkflowAdmissionRefusal`]) publishes nothing.
 //!
 //! A definition names its document by identity. A process keeps the
 //! document it was admitted under: publishing an edited document creates a
@@ -111,7 +119,7 @@
 //! execution identities. Their richer provisional history remains a
 //! [`WorkflowExecutionOverlay`], built with
 //! [`WorkflowExecutionOverlayAccumulator`] or [`fold_workflow_overlay`].
-//! Give that reducer the [`WorkflowDocument::overlay_document`] read through
+//! Give that reducer [`WorkflowOverlayDocument::of`] the document read through
 //! [`HostArtifacts::execution_document`](crate::process::HostArtifacts::execution_document).
 //!
 //! # Source
@@ -126,8 +134,9 @@
 //! const-bound async literals, including `process(async (...) => ...)`, become
 //! entries.
 //!
-//! With the matching `typescript` or `python` feature, a workflow document's
-//! `typescript(options)` or `python(options)` returns plain source, only the
+//! With the matching `typescript` or `python` feature,
+//! `lash::typescript::print(document, options)` or `lash::python::print`
+//! returns plain source, only the
 //! code an agent could have written, and an optional disposable map. The
 //! environment (effect manifest, number mode, entry signatures, private
 //! bindings, helper identities and name renames) stays in the document and
@@ -201,6 +210,7 @@ pub mod graph {
 
 /// Editing a document: drafts, edits, transactions, refusals and the
 /// correspondence an applied transaction answers.
+#[cfg(feature = "workflow-authoring")]
 pub mod edit {
     pub use lash_kernel_edit::{
         Applied, Draft, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal, Extraction,
@@ -210,6 +220,7 @@ pub mod edit {
 
 /// Compose expression-valued effect insertions and direct edits into a
 /// canonical transaction, without admission, publication or execution.
+#[cfg(feature = "workflow-authoring")]
 pub use lash_kernel_edit::authoring;
 
 /// The canvas read of a document's entry: statements, scopes, dataflow and
@@ -219,41 +230,29 @@ pub use lash_kernel_edit::authoring;
 /// generated `.d.ts` inside the crate, so a host that vendors lash can check
 /// its own TypeScript copy hermetically against the same bytes. [`JSON_SCHEMA`]
 /// ships the authoritative JSON Schema for validation and constraints.
+///
+/// [`derive`] reads a checked [`WorkflowDocument`](super::WorkflowDocument)
+/// alone: the declarations it was linked against give library signatures,
+/// so no engine, registry, native code or dialect is needed. Labels are
+/// display data keyed by a callee's name:
+/// [`helper_labels::labels`](crate::helper_labels::labels) reads them with no
+/// dialect or helper release, and
+/// [`helper_labels::title`](crate::helper_labels::title) falls back to the
+/// bare name.
+#[cfg(feature = "workflow-view")]
 pub mod view {
-    pub use lash_kernel_edit::view::{
+    pub use lash_kernel_view::{
         ActionView, ArgumentView, AssignmentView, BindingKind, BindingView, CalleeView, Dataflow,
         ExecutionSiteView, ExpressionView, JSON_SCHEMA, PathSite, PathStep, RanCounts, ReplayPath,
         ReturnView, RunObservation, ScopeCoverage, ScopeKind, ScopeView, SiteKind,
         StatementCoverage, StatementView, TYPESCRIPT_DECLARATION, TaskPath, Use, ViewError,
-        WorkflowCoverage, WorkflowView, coverage, path,
+        WorkflowCoverage, WorkflowView, coverage, derive, path,
     };
-
-    /// The view of `document` at the entry it is entered at.
-    ///
-    /// `functions` is the catalog used to derive the document. Its `use`
-    /// lines hold names and identities, not parameter signatures. A runtime
-    /// ships [`document::FunctionRegistry::export_declarations`](super::document::FunctionRegistry::export_declarations)
-    /// as serde data; a reader decodes [`document::FunctionDeclarations`](super::document::FunctionDeclarations),
-    /// passes it to [`WorkflowDocument::derive`](super::WorkflowDocument::derive),
-    /// then passes the same catalog here. No engine or native code is needed.
-    ///
-    /// # Errors
-    ///
-    /// The projection refuses a graph that does not describe the document,
-    /// or a catalog missing a library call's definition.
-    pub fn derive(
-        document: &super::WorkflowDocument,
-        functions: &dyn super::document::FunctionCatalog,
-    ) -> Result<WorkflowView, ViewError> {
-        lash_kernel_edit::view::derive(
-            document.document(),
-            document.graph(),
-            &document.entry_unit(),
-            functions,
-        )
-    }
 }
 
+/// A checked document entered at one entry, with its graph and the library
+/// declarations it linked against: what a host reads, draws and admits.
+pub use lash_kernel_check::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError};
 pub use lash_trace::{
     DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT, WorkflowExecutionOverlay,
     WorkflowExecutionOverlayAccumulator, WorkflowOverlayCall, WorkflowOverlayChildLink,
@@ -270,15 +269,19 @@ pub use lash_trace::{
 /// ([`ProcessDocumentIdentity`](crate::process::ProcessDocumentIdentity))
 /// and an execution's start name it.
 pub use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef};
+#[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
-    ReplaySegments, SegmentAnswer, SegmentReplay, Unreplayable, WorkflowAdmissionRefusal,
-    WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment,
+    ReplaySegments, SegmentAnswer, SegmentReplay, Unreplayable, WorkflowEnvironment,
 };
 
+#[cfg(feature = "codemode")]
 use crate::persistence::ArtifactName;
+#[cfg(feature = "codemode")]
 use crate::process::{ProcessDefinition, ProcessDefinitionId, ProcessEngineKind};
+#[cfg(feature = "codemode")]
 use crate::{ProcessId, Result};
 
+#[cfg(feature = "codemode")]
 /// One definition as a host inspects it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkflowInspection {
@@ -291,6 +294,7 @@ pub struct WorkflowInspection {
     pub document: WorkflowDocument,
 }
 
+#[cfg(feature = "codemode")]
 /// A workflow published as a definition.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkflowPublication {
@@ -298,11 +302,9 @@ pub struct WorkflowPublication {
     pub definition: ProcessDefinition,
     /// The admitted document, entered at the entry the definition starts.
     pub document: WorkflowDocument,
-    /// Where every surviving node of the document the draft was opened on
-    /// sits in the admitted one.
-    pub correspondence: document::Correspondence,
 }
 
+#[cfg(feature = "codemode")]
 /// The answer to publishing a workflow.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorkflowPublish {
@@ -315,6 +317,7 @@ pub enum WorkflowPublish {
     },
 }
 
+#[cfg(feature = "codemode")]
 /// A workflow inspection, or why there is none.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorkflowRead {
@@ -328,6 +331,7 @@ pub enum WorkflowRead {
     },
 }
 
+#[cfg(feature = "codemode")]
 /// The document an execution names, or why there is none.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorkflowDocumentRead {
@@ -338,6 +342,7 @@ pub enum WorkflowDocumentRead {
     Unsupported,
 }
 
+#[cfg(feature = "codemode")]
 /// What a workflow read found no longer retained.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WorkflowUnavailable {
@@ -349,6 +354,7 @@ pub enum WorkflowUnavailable {
     Artifact { artifact: ArtifactName },
 }
 
+#[cfg(feature = "codemode")]
 /// Read the definition `payload` names through the `engine_kind` engine's
 /// document provider.
 pub(crate) async fn read(

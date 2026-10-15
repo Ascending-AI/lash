@@ -36,6 +36,20 @@ impl WorkflowOverlayDocument {
         }
     }
 
+    /// What the reducer reads of a checked document: its reference and every
+    /// execution site. An entry may call and spawn any declared function, so
+    /// the sites of every unit are the document's.
+    pub fn of(document: &lash_kernel_check::WorkflowDocument) -> Self {
+        Self::new(
+            document.reference().clone(),
+            document
+                .graph()
+                .execution_sites()
+                .iter()
+                .map(|site| site.site.clone()),
+        )
+    }
+
     pub fn reference(&self) -> &WorkflowDocumentRef {
         &self.reference
     }

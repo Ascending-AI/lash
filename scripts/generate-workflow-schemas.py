@@ -21,10 +21,10 @@ OUTPUT = ROOT / "schemas" / "host"
 # The crate's drift law checks both copies against the repository schemas.
 CRATE_DECLARATIONS = {
     Path("kernel-workflow-view") / "v1.d.ts": Path("crates")
-    / "lash-kernel-edit"
+    / "lash-kernel-view"
     / "kernel-workflow-view-v1.d.ts",
     Path("kernel-workflow-view") / "v1.schema.json": Path("crates")
-    / "lash-kernel-edit"
+    / "lash-kernel-view"
     / "kernel-workflow-view-v1.schema.json",
 }
 

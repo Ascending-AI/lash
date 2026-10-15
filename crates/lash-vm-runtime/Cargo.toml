@@ -22,10 +22,6 @@ doctest = false
 # processes are written in (FIG-5990).
 dialect-typescript = ["lash-vm-library/dialect-typescript"]
 dialect-python = ["lash-vm-library/dialect-python"]
-# Prints a workflow document as TypeScript.
-typescript = ["dep:lash-dialect-typescript"]
-# Prints a workflow document as Python, without selecting helper releases.
-python = ["dep:lash-dialect-python"]
 testing = ["lash-vm-client/testing", "lash-core/testing"]
 # The client this crate drives and the library its workers hold move
 # versions together.
@@ -61,8 +57,6 @@ lash-vm-library = { workspace = true }
 lash-vm-releases = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-dialect = { workspace = true }
-lash-dialect-typescript = { workspace = true, optional = true }
-lash-dialect-python = { workspace = true, optional = true }
 lash-trace = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["sync"] }

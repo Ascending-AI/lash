@@ -25,6 +25,7 @@ SCHEMA_GENERATORS = [
     "//crates/lash-core-execution:process_event_schema_generator__bin",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin",
     "//crates/lash-kernel-edit:kernel_edit_schema_generator__bin",
+    "//crates/lash-kernel-view:kernel_view_schema_generator__bin",
 ]
 
 

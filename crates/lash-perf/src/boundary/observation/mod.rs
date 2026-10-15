@@ -354,7 +354,6 @@ pub(super) struct Published {
 pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Published> {
     use lash::workflow::WorkflowPublish;
     use lash::workflow::document::{Name, parse_document};
-    use lash::workflow::edit::Draft;
     let mut document =
         parse_document(document).map_err(|error| anyhow::anyhow!("workflow document: {error}"))?;
     let environment = environment(!document.manifest.effects.is_empty())?;
@@ -372,12 +371,10 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
             .with_context(|| format!("this host offers no effect `{effect}`"))?
             .clone();
     }
-    let draft =
-        Draft::open(document).map_err(|error| anyhow::anyhow!("workflow draft: {error:?}"))?;
     let pin = HostArtifactPin::mint();
     let publication = match within(
         "workflow publication",
-        artifacts.publish_workflow(&pin, &draft, &Name::new(ENTRY), &environment),
+        artifacts.publish_workflow(&pin, &document, &Name::new(ENTRY), &environment),
     )
     .await??
     {

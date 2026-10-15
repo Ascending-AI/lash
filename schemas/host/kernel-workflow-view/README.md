@@ -17,7 +17,7 @@ runtime validation.
 A host that vendors lash cannot see this directory; it reads the same `v1.d.ts`
 bytes from `lash::workflow::view::TYPESCRIPT_DECLARATION`, which `include_str!`s
 the generated copy committed as
-`crates/lash-kernel-edit/kernel-workflow-view-v1.d.ts`. The crate's laws check
+`crates/lash-kernel-view/kernel-workflow-view-v1.d.ts`. The crate's laws check
 both files hold the same bytes. `lash::workflow::view::JSON_SCHEMA` likewise
 ships `v1.schema.json` from the generated crate-local
 `kernel-workflow-view-v1.schema.json`; the same drift law checks its bytes.

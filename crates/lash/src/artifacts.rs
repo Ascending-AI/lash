@@ -418,17 +418,17 @@ impl HostArtifacts {
         .await
     }
 
-    /// Admit the document `draft` holds as the definition of its entry
-    /// `entry`, and hold it under `pin`: the document, and the descriptor
+    /// Admit `document` as the definition of its entry `entry`, and hold it
+    /// under `pin`: the document, and the descriptor
     /// of every entry it lists. The answer names the one `entry` selects;
     /// the others are what a process of it starts by function reference,
     /// so one publication is all a run needs.
     ///
     /// The checker admits the document against `environment`, the
     /// environment a process of the definition would run under. No source
-    /// is printed or parsed, and nothing the document states about itself
-    /// is taken as true: its view, its types and its effect sets are
-    /// derived again.
+    /// is printed or parsed, no editor is needed, and nothing the document
+    /// states about itself is taken as true: its view, its types and its
+    /// effect sets are derived again.
     ///
     /// Equal content publishes to the same id and changes nothing, so an
     /// unchanged document is the definition it was read from. A refused
@@ -438,7 +438,7 @@ impl HostArtifacts {
     pub async fn publish_workflow(
         &self,
         pin: &HostArtifactPin,
-        draft: &crate::workflow::edit::Draft,
+        document: &crate::workflow::document::Document,
         entry: &crate::workflow::document::Name,
         environment: &ProcessEnv,
     ) -> Result<crate::workflow::WorkflowPublish> {
@@ -454,7 +454,7 @@ impl HostArtifacts {
         };
         let claim = claim(pin)?;
         let request = lash_vm_runtime::WorkflowAdmissionRequest {
-            document: draft.document().clone(),
+            document: document.clone(),
             entry: entry.clone(),
             tool_catalog: self.core.process_tool_catalog(environment)?,
         };
@@ -480,7 +480,6 @@ impl HostArtifacts {
         Ok(WorkflowPublish::Published(Box::new(WorkflowPublication {
             definition,
             document: admitted.document,
-            correspondence: draft.correspondence_since_open().clone(),
         })))
     }
 
@@ -489,12 +488,12 @@ impl HostArtifacts {
     /// there is none. This acquires no lasting pin.
     ///
     /// The document is the whole cell, including `main` and other entries.
-    /// To publish only the selected function, plan
-    /// [`workflow::edit::extract_entry`](crate::workflow::edit::extract_entry)
-    /// with its entry name, then apply the returned `Extraction::transaction` through a
-    /// [`workflow::edit::Draft`](crate::workflow::edit::Draft) against the
-    /// workflow environment. This keeps that entry and every declared
-    /// function it reaches, and derives their manifest during application.
+    /// To publish only the selected function (with `workflow-authoring`),
+    /// plan `workflow::edit::extract_entry` with its entry name, then apply
+    /// the returned `Extraction::transaction` through a `workflow::edit::Draft`
+    /// against the workflow environment. This keeps that entry and every
+    /// declared function it reaches, and derives their manifest during
+    /// application.
     #[cfg(feature = "codemode")]
     pub async fn definition_graph(
         &self,

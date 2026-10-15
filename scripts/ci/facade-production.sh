@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# A host's library graph must compile without development feature unification.
+# A host's library graph must compile without development feature unification,
+# and each optional capability links only what its feature names (FIG-6378):
+# code mode and dialect helper releases link no editor, view or in-process
+# parser; a viewer links no dialect; authoring is the editor's opt-in.
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo"
@@ -24,6 +27,43 @@ print(','.join(features))
 PY
 )"
 args=(--package lash-runtime --no-default-features --locked)
+
+# Each named selection, then the packages its graph may not contain. Normal and
+# build edges count for the editor and view; parsers are refused on normal
+# edges only, because a helper release's build script compiles its dialect to
+# generate release data without linking it into the host.
+inference='codemode,rlm,worker,dialect-typescript,dialect-python,sqlite'
+parent='codemode,rlm,dialect-typescript,dialect-python,sqlite'
+viewer='workflow-view'
+authoring='workflow-authoring'
+selections=(
+  "$inference|normal,build|lash-kernel-edit lash-kernel-view"
+  "$parent|normal|lash-dialect-typescript lash-dialect-python"
+  "$viewer|normal,build|lash-kernel-edit lash-dialect-typescript lash-dialect-python lash-vm-runtime"
+  "$authoring|normal,build|lash-dialect-typescript lash-dialect-python"
+)
+
+# Every selection's graph is read before anything compiles, so one run names
+# every leaked edge.
+leaks=0
+for selection in "${selections[@]}"; do
+  IFS='|' read -r selected edges refused <<<"$selection"
+  if ! graph="$(cargo tree "${args[@]}" --features "$selected" --edges "$edges" --prefix none --format '{p}' 2>&1)"; then
+    printf 'facade selection %s does not resolve:\n%s\n' "$selected" "$graph" >&2
+    leaks=1
+    continue
+  fi
+  for package in $refused; do
+    if grep -Eq "^$package v" <<<"$graph"; then
+      printf 'facade selection %s links %s through %s edges\n' "$selected" "$package" "$edges" >&2
+      leaks=1
+    fi
+  done
+done
+if [ "$leaks" -ne 0 ]; then
+  exit 1
+fi
+
 checked=0
 while IFS= read -r extensions; do
   request=("${args[@]}")
@@ -39,5 +79,5 @@ while IFS= read -r extensions; do
   fi
   cargo check "${request[@]}" --lib --target-dir "$out/target"
   checked=$((checked + 1))
-done <<< "$feature_sets"
-printf 'facade production passed: %s feature sets, testing off\n' "$checked"
+done < <(printf '%s\n' "$feature_sets" "$inference" "$parent" "$viewer" "$authoring")
+printf 'facade production passed: %s feature sets, including the inference, parent, viewer and authoring selections, testing off\n' "$checked"

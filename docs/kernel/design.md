@@ -229,8 +229,9 @@ The kernel is a set of small crates that depend on nothing else in lash, so the 
 | Crate | Owns | Used by |
 | --- | --- | --- |
 | `lash-kernel-doc` | Values, types, forms, the document, function definitions and the native-function interface, the manifest, source maps and correspondences, serialisation, structural validation, the kernel text notation | Everything; a host that only reads documents needs nothing else |
-| `lash-kernel-check` | Linking, the statement rule, derived facts, admission against an environment's effect and function signatures | Editors, the engine |
-| `lash-kernel-edit` | Drafts, typed edit transactions, correspondence | Editors |
+| `lash-kernel-check` | Linking, the statement rule, derived facts, admission against an environment's effect and function signatures, the checked document holder (document, graph, entry and linked declarations) | Viewers, editors, the engine |
+| `lash-kernel-view` | The canvas read of a checked document's entry and its host schema; no dialect, editor or runtime | Viewers, editors |
+| `lash-kernel-edit` | Drafts, typed edit transactions, authoring operations | Editors |
 | `lash-kernel-lib` | The kernel library: bodies and native implementations | The machine, any second reader |
 | `lash-kernel-vm` | Compile to the executable, run tasks, charge, park, resume. The embedder assembles the function registry, prepares it once and hands it in | lash, other embedders |
 | `lash-kernel-state` | The persistent heap: pages, the object directory, the checkpoint and session roots and their records, the memory census and frozen families | The machine; a host that reads a run as data |

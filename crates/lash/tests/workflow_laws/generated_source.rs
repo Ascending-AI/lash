@@ -9,8 +9,8 @@ fn local(document: &WorkflowDocument, format: SourceFormat, maps: bool) -> Print
         ..Default::default()
     };
     match format {
-        SourceFormat::TypeScriptV1 => document.typescript(options),
-        SourceFormat::PythonV1 => document.python(options),
+        SourceFormat::TypeScriptV1 => lash::typescript::print(document.document(), options),
+        SourceFormat::PythonV1 => lash::python::print(document.document(), options),
     }
     .expect("local print succeeds")
 }
@@ -274,10 +274,15 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
     core.shutdown().await.expect("shutdown");
 }
 
-/// FIG-6322: the runtime's declarations and an imported document are enough
-/// for a remote reader to derive the canvas, without an engine or native code.
+/// FIG-6322, FIG-6378 (HELP-LABEL): a reader holding only a shipped document
+/// and the runtime's serialized declarations draws real TypeScript and Python
+/// library callees with their labels. It needs no engine, registry, native
+/// code or parser: the checked document carries its declarations, and labels
+/// join by the callee's use-line name, a removed helper showing its bare name.
 #[test]
-fn an_imported_typescript_view_needs_only_serialized_library_declarations() {
+fn a_reader_draws_labelled_typescript_and_python_callees_from_shipped_declarations() {
+    use lash::helper_labels::{labels, title};
+    use lash::workflow::view::{CalleeView, derive};
     let embedding = lash_vm_worker::built_dialects(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
     let environment = lash::dialect::Environment {
@@ -288,52 +293,72 @@ fn an_imported_typescript_view_needs_only_serialized_library_declarations() {
         bindings: &Default::default(),
         functions: &Default::default(),
     };
-    let imported = lash::typescript::lower_workflow(
+    let typescript = lash::typescript::lower_workflow(
         "export async function digest(items: string[], count: number) { let total = count; for (const item of items) { total = total + item.length; } return total; }",
         &environment,
     ).expect("import TypeScript workflow").document;
-    assert!(
-        imported
-            .manifest
-            .functions
-            .values()
-            .any(|name| name.as_str().starts_with("ts."))
-    );
-    assert!(
-        imported
-            .manifest
-            .functions
-            .values()
-            .any(|name| name.as_str().starts_with("num."))
-    );
-    let document_wire = serde_json::to_vec(&imported).expect("ship document");
+    let python = lash::python::lower(
+        "answer = [1, 2]\nanswer.append(3)\nshown = str(answer)\n",
+        &environment,
+    )
+    .expect("lower Python")
+    .document;
+    let shipped = [
+        (
+            serde_json::to_vec(&typescript).expect("ship TypeScript document"),
+            WorkflowDocumentEntry::Entry {
+                function: k::Name::new("digest"),
+            },
+            "TypeScript ",
+        ),
+        (
+            serde_json::to_vec(&python).expect("ship Python document"),
+            WorkflowDocumentEntry::Main,
+            "Python ",
+        ),
+    ];
     let library_wire = serde_json::to_vec(&registry.export_declarations()).expect("ship library");
     drop(embedding);
 
-    let document: Document = serde_json::from_slice(&document_wire).expect("read document");
     let functions: k::FunctionDeclarations =
         serde_json::from_slice(&library_wire).expect("read library declarations");
-    let entry = WorkflowDocumentEntry::Entry {
-        function: k::Name::new("digest"),
-    };
-    assert!(
-        WorkflowDocument::derive(
-            document.clone(),
-            entry.clone(),
-            &k::FunctionRegistry::default()
-        )
-        .is_err(),
-        "use lines alone do not link"
-    );
-    let document =
-        WorkflowDocument::derive(document, entry, &functions).expect("link without engine");
-    let view = lash::workflow::view::derive(&document, &functions).expect("canvas without engine");
-    assert!(!view.statements.is_empty());
-    assert!(!view.execution_sites.is_empty());
-    let serialized = serde_json::to_value(&view).expect("view serializes");
-    let decoded: lash::workflow::view::WorkflowView =
-        serde_json::from_value(serialized).expect("view decodes");
-    assert_eq!(view, decoded);
+    let labels = labels().expect("the shipped labels read without a dialect");
+    for (wire, entry, labelled) in shipped {
+        let document: Document = serde_json::from_slice(&wire).expect("read document");
+        assert!(
+            WorkflowDocument::derive(
+                document.clone(),
+                entry.clone(),
+                &k::FunctionRegistry::default()
+            )
+            .is_err(),
+            "use lines alone do not link"
+        );
+        let document =
+            WorkflowDocument::derive(document, entry, &functions).expect("link without engine");
+        let view = derive(&document).expect("canvas without engine");
+        assert!(!view.statements.is_empty());
+        assert!(!view.execution_sites.is_empty());
+        let titles: Vec<&str> = view
+            .dataflow
+            .actions
+            .iter()
+            .filter_map(|action| match &action.callee {
+                Some(CalleeView::Library { name, .. }) => Some(title(&labels, name)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            titles.iter().any(|title| title.starts_with(labelled)),
+            "a real {labelled}callee is drawn with its label: {titles:?}"
+        );
+        let serialized = serde_json::to_value(&view).expect("view serializes");
+        let decoded: lash::workflow::view::WorkflowView =
+            serde_json::from_value(serialized).expect("view decodes");
+        assert_eq!(view, decoded);
+    }
+    let removed = k::FunctionName::new("ts.removed_helper").expect("qualified name");
+    assert_eq!(title(&labels, &removed), "ts.removed_helper");
 }
 
 /// FIG-6340: entry publication and main admission retain the same typed
