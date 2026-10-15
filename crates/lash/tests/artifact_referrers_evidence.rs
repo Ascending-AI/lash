@@ -1123,7 +1123,7 @@ async fn a_saved_function_started_as_a_process_finishes_after_its_session_is_del
     saved_function_process(backend, lash_protocol_rlm::CellDialect::typescript(),
         "const factor = 2;\nasync function work(n: number) { await sleep(1500); return n * factor; }\nawait control.finish('bound');",
         "const run = await processes.start({ definition: work, args: { n: 21 } }); await control.finish(run);",
-        serde_json::json!(42.0)).await;
+        serde_json::json!(42)).await;
 }
 
 /// FIG-5778 / K-FN-004: a Python saved function is a self-contained process definition;

@@ -764,9 +764,8 @@ mod tests {
         let result = run_llm_query(&provider, &args, &context).await;
 
         assert!(!result.is_success());
-        assert_eq!(
-            result.value_for_projection(),
-            json!("missing required evidence")
-        );
+        let failure = result.value_for_projection();
+        assert_eq!(failure["code"], json!("tool_error"));
+        assert_eq!(failure["message"], json!("missing required evidence"));
     }
 }
