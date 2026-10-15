@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::{EffectName, Signature, Type, print_document};
 
-use super::{lower_against, lower_in_session, main_text};
+use super::{lower_against, main_text};
 
 /// The statements of `source`'s lowered `main` that compute something: a
 /// direct kernel call or a helper call, without the binding's name. A
@@ -24,54 +24,6 @@ fn operations(source: &str) -> Vec<String> {
                 && !value.starts_with("invoke ts.pad(")
         })
         .collect()
-}
-
-/// Declared operand types choose the kernel function of that type. A
-/// declared number may be an integer, so it is made a float first, as
-/// JavaScript's numbers are; a literal and an operator's result already
-/// are.
-#[test]
-fn declared_types_choose_the_kernel_function() {
-    for (body, expected) in [
-        ("a + b", "num.add(num.to_float(a), num.to_float(b))"),
-        ("a - 1", "num.sub(num.to_float(a), 1.0)"),
-        ("a * b / 2", "num.mul(num.to_float(a), num.to_float(b))"),
-        ("a % b", "num.rem_trunc(num.to_float(a), num.to_float(b))"),
-        ("a < b", "num.lt(num.to_float(a), num.to_float(b))"),
-        ("a >= b", "num.le(num.to_float(b), num.to_float(a))"),
-        ("a === b", "eq(num.to_float(a), num.to_float(b))"),
-        ("a !== b", "bool.not(eq(num.to_float(a), num.to_float(b)))"),
-        ("-a", "num.neg(num.to_float(a))"),
-        ("s + s", "text.concat(s, s)"),
-        ("!ok", "bool.not(ok)"),
-    ] {
-        let source = format!(
-            "function f(a: number, b: number, s: string, ok: boolean, xs: number[], \
-             o: {{ n: number }}) {{ return {body}; }}"
-        );
-        let operations = operations(&source);
-        assert_eq!(
-            operations.first().map(String::as_str),
-            Some(expected),
-            "{body}: {operations:?}"
-        );
-    }
-    // The second operation of a chain takes the first one's result as the
-    // float it is.
-    let chain = operations("function f(a: number, b: number) { return a * b / 2; }");
-    assert!(chain[1].starts_with("num.div("), "{chain:?}");
-    assert!(!chain[1].contains("num.to_float("), "{chain:?}");
-    // A property read keeps JavaScript's meaning, in place where the
-    // value is a plain record; what it gives is believed.
-    let property = operations("function f(o: { n: number }) { return o.n + 1; }");
-    assert_eq!(property[0], "invoke ts.read(o, \"n\")");
-    assert!(
-        property
-            .last()
-            .unwrap()
-            .starts_with("num.add(num.to_float("),
-        "{property:?}"
-    );
 }
 
 /// Where a type is not known the operation is the helper: an unannotated
@@ -110,81 +62,6 @@ fn unknown_types_keep_the_helper() {
     assert_eq!(
         operations("type T = number; function f<T>(a: T, b: T) { return a + b; }"),
         ["invoke ts.add(a, b)"]
-    );
-}
-
-/// Inference without an annotation is proof. A `const`, and a `let` whose
-/// every assignment gives one type, are that type. A `let` assigned two
-/// types, a `var` (which is `undefined` before its declaration runs), two
-/// bindings of one name that disagree and a name an earlier cell left are
-/// not known.
-#[test]
-fn an_unannotated_binding_is_typed_only_by_proof() {
-    assert_eq!(
-        operations("const n = 2; let i = 0; i = i + n; i++;"),
-        ["num.add(i, n)", "num.add(t2, 1.0)"]
-    );
-    assert_eq!(
-        operations("let i = 0; i = 'a'; const r = i + 1;"),
-        ["invoke ts.add(i, 1.0)"]
-    );
-    assert_eq!(
-        operations("var i = 0; const r = i + 1;"),
-        ["invoke ts.add(i, 1.0)"]
-    );
-    assert_eq!(
-        operations(
-            "{ const value = 1; const r = value + 1; } { const value = 'a'; const s = value + 1; }"
-        ),
-        ["invoke ts.add(value_1, 1.0)", "invoke ts.add(value_2, 1.0)"]
-    );
-    let lowered =
-        lower_in_session("{ const total = 1; } const r = total + 1;", &["total"]).unwrap();
-    let text = print_document(&lowered.document);
-    assert!(text.contains("invoke ts.add(total, 1.0)"), "{text}");
-}
-
-/// A test narrows a binding that is declared once and never assigned, for
-/// the code that runs only on that side of the test. An assigned binding
-/// is not narrowed: the test saw another value.
-#[test]
-fn a_test_narrows_a_binding_nothing_assigns() {
-    // `typeof` proves a number on one side; the other side knows nothing.
-    assert_eq!(
-        operations("function f(x) { if (typeof x === 'number') { return x + 1; } return x + 1; }")
-            [2..],
-        ["num.add(num.to_float(x), 1.0)", "invoke ts.add(x, 1.0)"]
-    );
-    // A union loses the member a test excludes, and an `if` that always
-    // leaves narrows what follows it.
-    let union = operations(
-        "function f(x: number | undefined, y?: number, z: number | null = null) { \
-             if (x === undefined) { return 0; } \
-             if (y == null || z === null) { return 1; } \
-             return x + y + z; }",
-    );
-    assert_eq!(
-        union[union.len() - 2],
-        "num.add(num.to_float(x), num.to_float(y))"
-    );
-    assert!(union.last().unwrap().starts_with("num.add("), "{union:?}");
-    assert!(
-        union.last().unwrap().ends_with(", num.to_float(z))"),
-        "{union:?}"
-    );
-    assert_eq!(
-        operations(
-            "function f(x: number | string) { return typeof x === 'string' ? x + x : x + 1; }"
-        )[2..],
-        ["text.concat(x, x)", "num.add(num.to_float(x), 1.0)"]
-    );
-    assert_eq!(
-        operations(
-            "function f(x) { if (typeof x === 'number') { x = 'a'; return x + 1; } return 0; }"
-        )
-        .last()
-        .map(String::as_str),
-        Some("invoke ts.add(x, 1.0)")
     );
 }
 
@@ -239,44 +116,6 @@ fn finished(source: &str) -> String {
         super::machine::Ended::Finished(lash_kernel_doc::Datum::Text(text)) => text,
         other => panic!("{source}: {other:?}"),
     }
-}
-
-/// An object or an array the source built is a kernel record or list, so
-/// a member the value plainly answers for is read and written in place:
-/// a plain record's own field by a spelled name, and a list's length and
-/// its element at one of its positions. Everything else keeps the helper:
-/// a missing field is `undefined`, a field a record lacks reads what a
-/// built-in gives (an own field of that name comes first), a hole and an
-/// index the list lacks read `undefined`, and a write past the end leaves
-/// holes.
-#[test]
-fn built_values_are_read_and_written_in_place_with_javascripts_answers() {
-    let text =
-        main_text("const o = { a: 1 }; const xs = [1, 2]; o.b = o.a; xs[2] = xs[0] + xs.length;");
-    for direct in [
-        "= o.a",
-        ".b = t",
-        "num.lt(0.0, list.len(xs))",
-        "[2.0] = t",
-        "num.to_float(list.len(xs))",
-    ] {
-        assert!(text.contains(direct), "missing `{direct}` in\n{text}");
-    }
-    assert_eq!(
-        finished(
-            "const o = { a: 1, toString: 5 }; const p = {}; const xs = [1, , 3]; \
-             const holes = []; for (let i = -1; i < 5; i = i + 0.5) { holes.push(xs[i] === undefined); } \
-             const ys = []; ys[0] = 'a'; ys[2] = 'c'; p.a = o.missing; \
-             const named = ['x', 'toString', 'y']; const c = {}; c[named[0]] = 1; \
-             await finish(JSON.stringify([o.a, o.b === undefined, o.toString, typeof p.toString, \
-             p.valueOf === Object.prototype.valueOf, xs[1] === undefined, xs.length, 1 in xs, \
-             holes.join(','), ys.length, 1 in ys, 'a' in p, p.a === undefined, \
-             c[named[0]], typeof c[named[1]], o[named[1]], c[named[2]] === undefined]));"
-        ),
-        "[1,true,5,\"function\",true,true,3,false,\
-         \"true,true,false,true,true,true,false,true,true,true,true,true\",3,false,true,true,\
-         1,\"function\",5,true]"
-    );
 }
 
 /// A representation is proof of the kind of value, never of what it holds:

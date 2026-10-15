@@ -133,10 +133,11 @@ impl Lowerer<'_> {
         let value = self.let_expr(Operand::undefined().expr(), Ty::Unknown);
         let step = self.block(|this| {
             let args = this.let_expr(Expr::List(Vec::new()), Ty::Unknown);
+            let args = this.atoms(&[iterator.clone(), args]);
             let step = this.emit_action(
                 lash_kernel_doc::Action::Call {
                     callee: lash_kernel_doc::Callee::Value(super::statements::variable_of(next)),
-                    args: vec![iterator.atom.clone(), args.atom],
+                    args,
                 },
                 Ty::Unknown,
             );

@@ -83,10 +83,10 @@ impl Lowerer<'_> {
             ast::MemberProperty::Field(name) => Key::Static(name.clone()),
             ast::MemberProperty::Index(index) => {
                 let index = self.lower_expr(index)?;
-                if let Atom::Literal(Literal::Text(name)) = &index.atom {
+                if let Expr::Literal(Literal::Text(name)) = &index.expr {
                     Key::Static(name.clone())
                 } else {
-                    Key::Computed(self.pin(index))
+                    Key::Computed(index)
                 }
             }
         })
@@ -105,6 +105,7 @@ impl Lowerer<'_> {
                 let key = self.invoke("ts.to_property_key", &[value], Ty::Text)?;
                 Ok(Key::Computed(key))
             }
+            Key::Computed(value) => Ok(Key::Computed(self.pin(value))),
             key => Ok(key),
         }
     }
@@ -122,6 +123,14 @@ impl Lowerer<'_> {
     /// Every other value, and a field a plain record lacks but a built-in
     /// might answer for, takes the helper (`direct_read`).
     pub(super) fn get_member(&mut self, object: &Operand, key: &Key) -> Lowering<Operand> {
+        if matches!(object.ty, Ty::List(_)) {
+            let object = self.reuse(object.clone());
+            return self.get_list_member(&object, key);
+        }
+        self.get_record_member(object, key)
+    }
+
+    fn get_list_member(&mut self, object: &Operand, key: &Key) -> Lowering<Operand> {
         if let Ty::List(element) = &object.ty {
             match key {
                 Key::Computed(index) if index.ty.is_number() => {
@@ -148,7 +157,7 @@ impl Lowerer<'_> {
                         object,
                         |this| {
                             let length = this.native("list.len", vec![object.expr()])?;
-                            Ok(this.let_expr(length, Ty::Number))
+                            Ok(this.inline(length, Ty::Number))
                         },
                         |this| this.invoke("ts.get", &[object.clone(), key.operand()], Ty::Number),
                     );
@@ -156,14 +165,26 @@ impl Lowerer<'_> {
                 _ => {}
             }
         }
+        self.get_record_member(object, key)
+    }
+
+    fn get_record_member(&mut self, object: &Operand, key: &Key) -> Lowering<Operand> {
         let ty = match key {
             Key::Static(name) => object.ty.property(name),
             Key::Computed(_) => Ty::Unknown,
         };
         if let Some(direct) = self.direct_read(object, key)? {
             if direct.tests.is_empty() && !direct.hole {
-                return Ok(self.let_expr(direct.read, direct.ty));
+                return Ok(self.inline(direct.read, direct.ty));
             }
+            let object = self.reuse(object.clone());
+            let key = match key {
+                Key::Static(name) => Key::Static(name.clone()),
+                Key::Computed(value) => Key::Computed(self.pin(value.clone())),
+            };
+            let Some(direct) = self.direct_read(&object, &key)? else {
+                unreachable!("holding a receiver preserves its representation");
+            };
             let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
             let place = Place::Variable(super::statements::variable_of(&result));
             let read = direct.read;
@@ -188,7 +209,7 @@ impl Lowerer<'_> {
                     Ok(())
                 },
                 &mut |this| {
-                    let value = this.read_member(object, key, Ty::Unknown)?;
+                    let value = this.read_member(&object, &key, Ty::Unknown)?;
                     this.store(place.clone(), value);
                     Ok(())
                 },
@@ -387,15 +408,15 @@ impl Lowerer<'_> {
             return Ok(None);
         }
         let mut tests = Vec::new();
-        match &index.atom {
-            Atom::Literal(Literal::Float(value)) => {
+        match &index.expr {
+            Expr::Literal(Literal::Float(value)) => {
                 let value = value.get();
                 if !(value >= 0.0 && value.fract() == 0.0) {
                     return Ok(None);
                 }
             }
-            Atom::Literal(_) => return Ok(None),
-            Atom::Variable(_) => {
+            Expr::Literal(_) => return Ok(None),
+            _ => {
                 // Only a whole number that is not negative is its own
                 // absolute value rounded down; NaN is not, and -0 is 0.
                 let floor = self.native("num.floor", vec![index.expr()])?;
@@ -489,6 +510,7 @@ impl Lowerer<'_> {
         key: &Key,
         value: Operand,
     ) -> Lowering<()> {
+        let value = self.pin(value);
         let direct = match key {
             Key::Static(name) => self.record_tests(object)?.map(|tests| {
                 let place = Place::Member(Member::Field {
@@ -672,7 +694,7 @@ impl Lowerer<'_> {
                 text(crate::builtins::object_tag(path)),
             ],
         };
-        Ok(self.let_expr(Expr::Tuple(items), Ty::Unknown))
+        Ok(self.inline(Expr::Tuple(items), Ty::Unknown))
     }
 
     pub(super) fn lower_member(
@@ -688,11 +710,13 @@ impl Lowerer<'_> {
             return result;
         }
         let object = self.lower_expr(object)?;
-        let object = match property {
-            ast::MemberProperty::Index(index) if !super::walk::is_inert(index) => self.pin(object),
-            _ => object,
+        let (buf, key) = self.aside(|this| this.lower_key(property))?;
+        let object = if buf.stmts.is_empty() {
+            object
+        } else {
+            self.pin(object)
         };
-        let key = self.lower_key(property)?;
+        self.append(buf);
         self.get_member(&object, &key)
     }
 
@@ -731,26 +755,23 @@ impl Lowerer<'_> {
         // A function the source made, held where nothing else is ever
         // assigned, is its token (`types::facts`).
         let declared = declared || matches!(function.ty, Ty::Function(_));
-        let function = match function.atom {
-            Atom::Variable(_) if declared => {
-                let closure = self.let_expr(Self::element(&function, 4), Ty::Unknown);
-                super::statements::variable_of(&closure)
-            }
-            Atom::Variable(_) => {
-                let callable = self.invoke("ts.callable", &[function], Ty::Unknown)?;
-                super::statements::variable_of(&callable)
-            }
-            Atom::Literal(_) => {
-                // Calling a literal raises the kernel's `type_error`, which
-                // is what the language asks for.
-                let held = self.let_expr(function.expr(), function.ty);
-                super::statements::variable_of(&held)
-            }
+        let function = self.reuse(function);
+        let args = self.atoms(&[this, args]);
+        let function = if declared {
+            let closure = self.let_expr(Self::element(&function, 4), Ty::Unknown);
+            super::statements::variable_of(&closure)
+        } else if matches!(function.expr, Expr::Literal(_)) {
+            let held = self.let_expr(function.expr, function.ty);
+            super::statements::variable_of(&held)
+        } else {
+            let callable = self.invoke("ts.callable", &[function], Ty::Unknown)?;
+            let callable = self.pin(callable);
+            super::statements::variable_of(&callable)
         };
         Ok(self.emit_action(
             Action::Call {
                 callee: Callee::Value(function),
-                args: vec![this.atom, args.atom],
+                args,
             },
             returned,
         ))
@@ -887,14 +908,15 @@ impl Lowerer<'_> {
                 .and_then(|(_, binding)| binding.positional.clone())
         {
             let returned = self.lower_expr(callee)?.ty.returned();
-            let mut passed = vec![Operand::undefined().atom];
+            let mut passed = vec![Atom::Literal(Literal::Absent)];
             for (index, arg) in args.iter().enumerate() {
                 let ast::CallArg::Value(arg) = arg else {
                     unreachable!("plain arguments were checked")
                 };
                 let value = self.lower_expr(arg)?;
                 if index < entry.arity {
-                    passed.push(self.pin(value).atom);
+                    let value = self.pin(value);
+                    passed.push(self.atom(value));
                 } else {
                     self.discard(value);
                 }
@@ -1108,7 +1130,9 @@ impl Lowerer<'_> {
         {
             // Each value is appended at the length the list has then
             // (`K-FORM-006`), after every argument has been evaluated.
-            for value in self.operands(&values)? {
+            let values = self.operands(&values)?;
+            let values: Vec<_> = values.into_iter().map(|value| self.pin(value)).collect();
+            for value in values {
                 let length = self.native("list.len", vec![object.expr()])?;
                 let place = Place::Member(Member::Index {
                     target: object.expr(),
@@ -1124,7 +1148,7 @@ impl Lowerer<'_> {
             }
             let length = self.native("list.len", vec![object.expr()])?;
             let length = self.native("num.to_float", vec![length])?;
-            return Ok(self.let_expr(length, Ty::Float));
+            return Ok(self.inline(length, Ty::Float));
         }
         let args = self.arguments(args)?;
         self.invoke(function, &[object.clone(), args], Ty::Unknown)

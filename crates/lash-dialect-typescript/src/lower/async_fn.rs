@@ -66,7 +66,8 @@ impl Lowerer<'_> {
             // spawning; values in them retain their original shared identities.
             let owned = lowerer.native("list.copy", vec![Expr::Variable(args)])?;
             let owned = lowerer.let_expr(owned, Ty::Unknown);
-            let promise = lowerer.start_promise(&body, Atom::Variable(this), owned.atom)?;
+            let owned = lowerer.atom(owned);
+            let promise = lowerer.start_promise(&body, Atom::Variable(this), owned)?;
             lowerer.emit(Stmt::Return {
                 value: promise.expr(),
             });
@@ -243,7 +244,7 @@ impl Lowerer<'_> {
             ));
         }
         let operands = self.operands(&values)?;
-        Ok(operands.into_iter().map(|operand| operand.atom).collect())
+        Ok(self.atoms(&operands))
     }
 
     /// The wait as one statement, giving its result.
@@ -265,13 +266,12 @@ impl Lowerer<'_> {
                         copied.push(atom);
                         continue;
                     }
-                    let value = Operand {
-                        plain: None,
-                        atom,
-                        ty: Ty::Unknown,
+                    let value = match atom {
+                        Atom::Variable(name) => Operand::variable(name, Ty::Unknown),
+                        Atom::Literal(_) => unreachable!("literals crossed the boundary above"),
                     };
                     let value = self.invoke("ts.boundary", &[value], Ty::Unknown)?;
-                    copied.push(value.atom);
+                    copied.push(self.atom(value));
                 }
                 Ok(self.emit_action(
                     Action::Perform {
@@ -334,6 +334,12 @@ impl Lowerer<'_> {
     fn start_promise(&mut self, body: &Operand, this: Atom, args: Atom) -> Lowering<Operand> {
         let promise = self.invoke("ts.promise.pending", &[], Ty::Unknown)?;
         let run = self.function("ts.promise.run")?;
+        let passed = vec![
+            self.atom(promise.clone()),
+            self.atom(body.clone()),
+            this,
+            args,
+        ];
         self.emit(Stmt::Assign {
             place: Place::Member(Member::Field {
                 target: promise.expr(),
@@ -341,7 +347,7 @@ impl Lowerer<'_> {
             }),
             value: Rhs::Action(Action::Spawn {
                 callee: Callee::Library(run),
-                args: vec![promise.atom.clone(), body.atom.clone(), this, args],
+                args: passed,
             }),
         });
         Ok(promise)

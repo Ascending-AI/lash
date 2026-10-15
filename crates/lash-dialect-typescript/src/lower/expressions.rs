@@ -324,7 +324,8 @@ impl Lowerer<'_> {
                 // `as any` says nothing is known of it.
                 let value = self.lower_expr(value)?;
                 Ok(Operand {
-                    atom: value.atom,
+                    expr: value.expr,
+                    stable: value.stable,
                     ty: self.facts.believed(ty),
                     plain: value.plain,
                 })
@@ -395,23 +396,21 @@ impl Lowerer<'_> {
         }
         let mut parts = Vec::new();
         for element in elements {
-            let part = match element {
+            parts.push(self.aside(|this| match element {
                 ast::ArrayElement::Hole => {
-                    self.let_expr(Expr::List(vec![Expr::Tuple(Vec::new())]), Ty::Unknown)
+                    Ok(this.inline(Expr::List(vec![Expr::Tuple(Vec::new())]), Ty::Unknown))
                 }
                 ast::ArrayElement::Value(value) => {
-                    let value = self.lower_expr(value)?;
-                    self.let_expr(Expr::List(vec![value.expr()]), Ty::Unknown)
+                    let value = this.lower_expr(value)?;
+                    Ok(this.inline(Expr::List(vec![value.expr()]), Ty::Unknown))
                 }
                 ast::ArrayElement::Spread(value) => {
-                    let value = self.lower_expr(value)?;
-                    self.invoke("ts.array.spread", &[value], Ty::Unknown)?
+                    let value = this.lower_expr(value)?;
+                    this.invoke("ts.array.spread", &[value], Ty::Unknown)
                 }
-            };
-            parts.push(part.expr());
+            })?);
         }
-        let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
-        self.invoke("ts.spread", &[parts], Ty::Array)
+        self.spread_parts(parts)
     }
 
     /// A new list of values, some of them spread.
@@ -419,22 +418,31 @@ impl Lowerer<'_> {
         if items.iter().all(|(spread, _)| !spread) {
             let exprs: Vec<_> = items.iter().map(|(_, expr)| *expr).collect();
             let operands = self.operands(&exprs)?;
-            return Ok(self.let_expr(
+            return Ok(self.inline(
                 Expr::List(operands.iter().map(Operand::expr).collect()),
                 Ty::Array,
             ));
         }
         let mut parts = Vec::new();
         for (spread, expr) in items {
-            let value = self.lower_expr(expr)?;
-            let part = if *spread {
-                self.invoke("ts.array.spread", &[value], Ty::Unknown)?
-            } else {
-                self.let_expr(Expr::List(vec![value.expr()]), Ty::Unknown)
-            };
-            parts.push(part.expr());
+            parts.push(self.aside(|this| {
+                let value = this.lower_expr(expr)?;
+                if *spread {
+                    this.invoke("ts.array.spread", &[value], Ty::Unknown)
+                } else {
+                    Ok(this.inline(Expr::List(vec![value.expr()]), Ty::Unknown))
+                }
+            })?);
         }
-        let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
+        self.spread_parts(parts)
+    }
+
+    fn spread_parts(&mut self, parts: Vec<(Buf, Operand)>) -> Lowering<Operand> {
+        let parts = self.ordered(parts);
+        let parts = self.inline(
+            Expr::List(parts.iter().map(Operand::expr).collect()),
+            Ty::Unknown,
+        );
         self.invoke("ts.spread", &[parts], Ty::Array)
     }
 
@@ -446,22 +454,26 @@ impl Lowerer<'_> {
         values: &[&ast::Expr],
         at: usize,
     ) -> Lowering<Operand> {
-        let mut entries = Vec::with_capacity(names.len());
+        let mut parts = Vec::with_capacity(names.len());
         for (index, (field, value)) in names.iter().zip(values).enumerate() {
-            let value = match (self.process_arrow(value), self.saved_process(value)) {
-                (Some(function), _) if index == at => self.lower_process(None, function)?,
-                (None, Some(saved)) if index == at => self.lower_saved_process(&saved)?,
-                _ => {
-                    let value = self.lower_expr(value)?;
-                    self.pin(value)
+            parts.push(self.aside(|this| {
+                match (this.process_arrow(value), this.saved_process(value)) {
+                    (Some(function), _) if index == at => this.lower_process(None, function),
+                    (None, Some(saved)) if index == at => this.lower_saved_process(&saved),
+                    _ => this.named_expression(value, field),
                 }
-            };
-            entries.push(RecordEntry {
-                field: (*field).to_string(),
-                value: value.expr(),
-            });
+            })?);
         }
-        Ok(self.let_expr(Expr::Record(entries), Ty::Object))
+        let values = self.ordered(parts);
+        let entries = names
+            .iter()
+            .zip(values)
+            .map(|(field, value)| RecordEntry {
+                field: (*field).to_string(),
+                value: value.expr,
+            })
+            .collect();
+        Ok(self.inline(Expr::Record(entries), Ty::Object))
     }
 
     fn lower_object(&mut self, properties: &[ast::ObjectProperty]) -> Lowering<Operand> {
@@ -494,19 +506,11 @@ impl Lowerer<'_> {
             }) {
                 return self.lower_object_with_process(&names, &values, at);
             }
-            let mut operands = Vec::with_capacity(values.len());
-            for (index, (name, value)) in names.iter().zip(&values).enumerate() {
-                let value = self.named_expression(value, name)?;
-                let value = if values[index + 1..]
-                    .iter()
-                    .any(|expression| !super::walk::is_inert(expression))
-                {
-                    self.pin(value)
-                } else {
-                    value
-                };
-                operands.push(value);
+            let mut parts = Vec::with_capacity(values.len());
+            for (name, value) in names.iter().zip(&values) {
+                parts.push(self.aside(|this| this.named_expression(value, name))?);
             }
+            let operands = self.ordered(parts);
             let entries = names
                 .into_iter()
                 .zip(operands)
@@ -515,7 +519,7 @@ impl Lowerer<'_> {
                     value: value.expr(),
                 })
                 .collect();
-            return Ok(self.let_expr(Expr::Record(entries), Ty::Object));
+            return Ok(self.inline(Expr::Record(entries), Ty::Object));
         }
         // A computed key, a repeated key or a spread: the object is built
         // one property at a time, in source order.
@@ -580,11 +584,11 @@ impl Lowerer<'_> {
                 } else {
                     number
                 };
-                Ok(self.let_expr(number, Ty::Float))
+                Ok(self.inline(number, Ty::Float))
             }
             UnaryOp::Not if value.ty == Ty::Bool => {
                 let negated = self.native("bool.not", vec![value.expr()])?;
-                Ok(self.let_expr(negated, Ty::Bool))
+                Ok(self.inline(negated, Ty::Bool))
             }
             UnaryOp::Plus => self.invoke("ts.to_number", &[value], Ty::Float),
             UnaryOp::Minus => self.invoke("ts.neg", &[value], Ty::Float),
@@ -651,14 +655,28 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         let ty = types::binary_result(op, &left.ty, &right.ty);
         if let Some(direct) = types::direct_binary(op, &left.ty, &right.ty) {
+            // Source values are evaluated before numeric checks. A trusted
+            // left annotation can fail its check, so hold a non-atomic right
+            // value first, after reading the left, to preserve raise order.
+            let (left, right) = if left.ty.is_number()
+                && left.ty != Ty::Float
+                && !matches!(right.expr, Expr::Literal(_) | Expr::Variable(_))
+            {
+                (self.pin(left), self.pin(right))
+            } else {
+                (left, right)
+            };
             let value = match direct {
                 Direct::Numeric(function) => {
                     let args = vec![self.float(&left)?, self.float(&right)?];
                     self.native(function, args)?
                 }
                 Direct::NumericSwapped(function) => {
-                    let args = vec![self.float(&right)?, self.float(&left)?];
-                    self.native(function, args)?
+                    let left = self.float(&left)?;
+                    let left = self.let_expr(left, Ty::Float);
+                    let right = self.float(&right)?;
+                    let right = self.let_expr(right, Ty::Float);
+                    self.native(function, vec![right.expr(), left.expr()])?
                 }
                 Direct::NumericEqual { negated } => {
                     let args = vec![self.float(&left)?, self.float(&right)?];
@@ -671,11 +689,13 @@ impl Lowerer<'_> {
                 }
                 Direct::Concat => self.native("text.concat", vec![left.expr(), right.expr()])?,
             };
-            return Ok(self.let_expr(value, ty));
+            return Ok(self.inline(value, ty));
         }
         let helper = binary_helper(op);
         if op == BinaryOp::In {
             // `key in object`: the helper takes the object first.
+            let left = self.pin(left);
+            let right = self.pin(right);
             return self.invoke(helper, &[right, left], ty);
         }
         self.invoke(helper, &[left, right], ty)
@@ -690,6 +710,7 @@ impl Lowerer<'_> {
         } else {
             self.invoke("ts.to_number", &[current], Ty::Float)?
         };
+        let old = self.pin(old);
         let new = self.binary(BinaryOp::Add, old.clone(), Operand::number(delta))?;
         Ok((old, new))
     }
@@ -735,29 +756,36 @@ impl Lowerer<'_> {
         let mut parts = Vec::new();
         for (index, quasi) in quasis.iter().enumerate() {
             if !quasi.is_empty() {
-                parts.push(Operand::text(quasi.clone()).expr());
+                parts.push((Buf::default(), Operand::text(quasi.clone())));
             }
             let Some(expression) = expressions.get(index) else {
                 continue;
             };
-            let value = self.lower_expr(expression)?;
-            // Each value is converted where the source evaluates it: a
-            // conversion may run the value's own `toString`. A float has
-            // no `toString` of its own to run, so it is spelled directly.
-            let spelled = match value.ty {
-                Ty::Text => self.pin(value),
-                Ty::Float => self.invoke("ts.number.to_string", &[value], Ty::Text)?,
-                _ => self.invoke("ts.to_string", &[value], Ty::Text)?,
-            };
-            parts.push(spelled.expr());
+            let part = self.aside(|this| {
+                let value = this.lower_expr(expression)?;
+                // Each value is converted where the source evaluates it: a
+                // conversion may run the value's own `toString`. A float has
+                // no `toString` of its own to run, so it is spelled directly.
+                let spelled = match value.ty {
+                    Ty::Text => value,
+                    Ty::Float => this.invoke("ts.number.to_string", &[value], Ty::Text)?,
+                    _ => this.invoke("ts.to_string", &[value], Ty::Text)?,
+                };
+                Ok(spelled)
+            })?;
+            parts.push(part);
         }
         // One native join, charged by the bytes it writes.
-        let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
+        let parts = self.ordered(parts);
+        let parts = self.inline(
+            Expr::List(parts.iter().map(Operand::expr).collect()),
+            Ty::Unknown,
+        );
         let joined = self.native(
             "text.join",
             vec![parts.expr(), Operand::text(String::new()).expr()],
         )?;
-        Ok(self.let_expr(joined, Ty::Text))
+        Ok(self.inline(joined, Ty::Text))
     }
 
     fn lower_assign(
@@ -777,7 +805,10 @@ impl Lowerer<'_> {
                 // before the right-hand side.
                 let object = self.lower_expr(object)?;
                 let object = self.pin(object);
-                let key = self.lower_key(property)?;
+                let key = match self.lower_key(property)? {
+                    Key::Computed(value) => Key::Computed(self.pin(value)),
+                    key => key,
+                };
                 match op {
                     AssignOp::Assign => {
                         let value = self.lower_expr(value)?;
@@ -788,8 +819,15 @@ impl Lowerer<'_> {
                     AssignOp::Binary(op) => {
                         let key = self.reference_key(&object, key)?;
                         let current = self.get_member(&object, &key)?;
-                        let value = self.lower_expr(value)?;
+                        let (buf, value) = self.aside(|this| this.lower_expr(value))?;
+                        let current = if buf.stmts.is_empty() {
+                            current
+                        } else {
+                            self.pin(current)
+                        };
+                        self.append(buf);
                         let result = self.binary(op, current, value)?;
+                        let result = self.pin(result);
                         self.set_member(&object, &key, result.clone())?;
                         Ok(result)
                     }
@@ -835,12 +873,13 @@ impl Lowerer<'_> {
             }
             AssignOp::Binary(op) => {
                 let current = self.read(name, None)?;
-                let current = if super::walk::is_inert(value) {
+                let (buf, value) = self.aside(|this| this.lower_expr(value))?;
+                let current = if buf.stmts.is_empty() {
                     current
                 } else {
                     self.pin(current)
                 };
-                let value = self.lower_expr(value)?;
+                self.append(buf);
                 let result = self.binary(op, current, value)?;
                 let ty = result.ty.clone();
                 let kernel = self.resolve_for_write(name, self.span)?;
@@ -895,6 +934,7 @@ impl Lowerer<'_> {
                 let key = self.reference_key(&object, key)?;
                 let current = self.get_member(&object, &key)?;
                 let (old, new) = self.stepped(current, delta)?;
+                let new = self.pin(new);
                 self.set_member(&object, &key, new.clone())?;
                 Ok(if prefix { new } else { old })
             }

@@ -8,8 +8,6 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::Datum;
 
-use super::main_text;
-
 fn table(text: &'static str) -> BTreeMap<&'static str, &'static str> {
     text.lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
@@ -50,30 +48,6 @@ fn expression_side_effects_follow_node_order() {
             "{family}: {source}"
         );
     }
-}
-
-/// A variable read before a call is copied before the call runs: the call,
-/// or another task while it waits, may assign the variable.
-#[test]
-fn a_variable_read_before_a_call_is_held_in_a_temporary() {
-    assert_eq!(
-        main_text("let x = 1; function f() { x = 5; return 1; } x = x + f();"),
-        "\
-let positional1 = absent
-let x = 1.0
-set positional1 = fn(this1) {
-  set x = 5.0
-  return 1.0
-}
-let t3 = fn(this2, args1) {
-  let t2 = apply positional1(this2)
-  return t2
-}
-let f = (\"ts.function\", \"\", \"f\", 0.0, t3, {})
-let t5 = x
-let t6 = apply positional1(absent)
-set x = invoke ts.add(t5, t6)"
-    );
 }
 
 /// FIG-5779: only names that enter the session must leave built-ins intact.

@@ -15,32 +15,6 @@ fn a_function_without_a_return_gives_undefined() {
     );
 }
 
-/// A `switch` is a loop of one pass, so a `continue` inside it first leaves
-/// that loop and then continues the loop the source means.
-#[test]
-fn continue_inside_a_switch_continues_the_enclosing_loop() {
-    let text = main_text("var x = 0; while (x < 2) { switch (x) { case 0: x++; continue; } x++; }");
-    assert!(text.contains("      set t8 = true\n      break"), "{text}");
-    assert!(text.contains("  if t8 {\n    continue\n  }"), "{text}");
-}
-
-/// A `let` a function reads from an enclosing block, when the function may
-/// run before the declaration, is checked where it is read. One the source
-/// itself reads too early is refused before anything runs.
-#[test]
-fn a_binding_read_before_its_declaration_is_caught() {
-    let text = main_text(
-        "{ const peek = () => late; let late = f(); peek(); } function f() { return 1; }",
-    );
-    assert!(text.contains("let late_1 = ()"), "{text}");
-    assert!(
-        text.contains("let t5 = invoke ts.tdz(late_1, \"late\")"),
-        "{text}"
-    );
-    let refused = lower("x = 1; let x;").unwrap_err();
-    assert_eq!(refused.code, DiagnosticCode::TemporalDeadZone);
-}
-
 /// What the dialect refuses keeps the code it was refused under.
 #[test]
 fn refusals_keep_their_codes() {

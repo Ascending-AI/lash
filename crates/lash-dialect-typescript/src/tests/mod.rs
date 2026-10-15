@@ -22,6 +22,7 @@ mod json;
 mod language;
 mod machine;
 mod numeric_helpers;
+mod operands;
 mod package;
 mod positional;
 mod printer;

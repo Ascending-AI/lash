@@ -1,17 +1,9 @@
 //! Lowers the adapter's tree to a kernel document.
 //!
-//! The output is three-address code. Every operation whose JavaScript
-//! meaning differs from the kernel's is a call to a helper with a
-//! kernel-code body, and such a call is the whole right-hand side of its
-//! own statement (`K-STMT-001`), so each intermediate value is bound to a
-//! temporary in the source's evaluation order (`K-STMT-005`). An operand
-//! that is a source variable is copied to a temporary whenever anything
-//! evaluated after it and before its use could run other code, because that
-//! code, or another task while it waits, may assign the variable.
-//!
-//! Where the type analysis (`crate::types`) knows an operand's type, the
-//! operation is instead a direct call of the kernel function for that type,
-//! inside an expression: `num.add(a, b)` for two numbers.
+//! Native calls, member reads and constructions stay in expressions. Actions
+//! remain statements with atom arguments (`K-STMT-001/002`). An earlier
+//! operand is pinned when a later operand emits statements that could change
+//! its value or run before its raise (`K-STMT-005`).
 //!
 //! A JavaScript function is a closure of two parameters, `fn(this, args)`.
 //! Source bindings keep their names; a binding that would shadow another in
@@ -131,11 +123,12 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.ushr",
 ];
 
-/// A value an expression lowered to: a variable or a literal, never a
-/// computation.
+/// A native-only expression, its representation facts, and whether later
+/// statements can change its value or run before it raises.
 #[derive(Clone, Debug)]
 pub(crate) struct Operand {
-    pub(crate) atom: Atom,
+    pub(crate) expr: Expr,
+    stable: bool,
     pub(crate) ty: Ty,
     /// Proven representation and stable nested fields, never an annotation
     /// or part of a saved value. Boundness is checked before this is attached.
@@ -145,57 +138,67 @@ pub(crate) struct Operand {
 impl Operand {
     pub(crate) fn undefined() -> Self {
         Self {
-            atom: Atom::Literal(Literal::Absent),
+            expr: Expr::Literal(Literal::Absent),
             ty: Ty::Undefined,
             plain: None,
+            stable: true,
         }
     }
 
     pub(crate) fn null() -> Self {
         Self {
-            atom: Atom::Literal(Literal::Null),
+            expr: Expr::Literal(Literal::Null),
             ty: Ty::Null,
             plain: None,
+            stable: true,
         }
     }
 
     pub(crate) fn bool(value: bool) -> Self {
         Self {
-            atom: Atom::Literal(Literal::Bool(value)),
+            expr: Expr::Literal(Literal::Bool(value)),
             ty: Ty::Bool,
             plain: None,
+            stable: true,
         }
     }
 
     pub(crate) fn number(value: f64) -> Self {
         Self {
-            atom: Atom::Literal(Literal::Float(Float::new(value))),
+            expr: Expr::Literal(Literal::Float(Float::new(value))),
             ty: Ty::Float,
             plain: None,
+            stable: true,
         }
     }
 
     pub(crate) fn text(value: impl Into<String>) -> Self {
         Self {
-            atom: Atom::Literal(Literal::Text(value.into())),
+            expr: Expr::Literal(Literal::Text(value.into())),
             ty: Ty::Text,
             plain: None,
+            stable: true,
         }
     }
 
     pub(crate) fn variable(name: Name, ty: Ty) -> Self {
         Self {
-            atom: Atom::Variable(name),
+            expr: Expr::Variable(name),
             ty,
             plain: None,
+            stable: false,
+        }
+    }
+
+    fn temp(name: Name, ty: Ty) -> Self {
+        Self {
+            stable: true,
+            ..Self::variable(name, ty)
         }
     }
 
     pub(crate) fn expr(&self) -> Expr {
-        match &self.atom {
-            Atom::Variable(name) => Expr::Variable(name.clone()),
-            Atom::Literal(literal) => Expr::Literal(literal.clone()),
-        }
+        self.expr.clone()
     }
 }
 
@@ -767,7 +770,7 @@ impl Lowerer<'_> {
             &[Operand::variable(kernel, Ty::Unknown), Operand::text(name)],
             Ty::Unknown,
         )?;
-        let Atom::Variable(checked) = checked.atom else {
+        let Expr::Variable(checked) = checked.expr else {
             unreachable!("a call is bound to a temporary");
         };
         Ok(checked)
@@ -958,7 +961,7 @@ impl Lowerer<'_> {
             vec![body.notes],
         );
         self.note_written();
-        Operand::variable(name, Ty::Unknown)
+        Operand::temp(name, Ty::Unknown)
     }
 
     /// Hands the last statement what is known of the function it binds.
@@ -974,7 +977,7 @@ impl Lowerer<'_> {
             name: name.clone(),
             value: Rhs::Expr(value),
         });
-        Operand::variable(name, ty)
+        Operand::temp(name, ty)
     }
 
     /// Runs an action and binds its result to a temporary.
@@ -984,7 +987,7 @@ impl Lowerer<'_> {
             name: name.clone(),
             value: Rhs::Action(action),
         });
-        Operand::variable(name, ty)
+        Operand::temp(name, ty)
     }
 
     /// The identity of a library function, listed in the manifest.
@@ -1002,7 +1005,7 @@ impl Lowerer<'_> {
         Ok(function)
     }
 
-    /// Calls a helper as its own statement.
+    /// Native calls nest; helpers with kernel bodies remain actions.
     pub(crate) fn invoke(&mut self, function: &str, args: &[Operand], ty: Ty) -> Lowering<Operand> {
         let function = self.function(function)?;
         // A helper's checked Text result is representation proof. Losing it
@@ -1019,10 +1022,24 @@ impl Lowerer<'_> {
         } else {
             ty
         };
+        if self
+            .library
+            .definition(&function)
+            .is_some_and(|definition| definition.has_native())
+        {
+            return Ok(self.inline(
+                Expr::Call {
+                    function,
+                    args: args.iter().map(Operand::expr).collect(),
+                },
+                ty,
+            ));
+        }
+        let args = self.atoms(args);
         Ok(self.emit_action(
             Action::Call {
                 callee: Callee::Library(function),
-                args: args.iter().map(|arg| arg.atom.clone()).collect(),
+                args,
             },
             ty,
         ))
@@ -1093,10 +1110,10 @@ impl Lowerer<'_> {
     /// The statement that just bound `operand`, when `operand` is a
     /// temporary nothing else has read yet.
     fn take_binding_of(&mut self, operand: &Operand) -> Option<(Rhs, Note)> {
-        let Atom::Variable(name) = &operand.atom else {
+        let Expr::Variable(name) = &operand.expr else {
             return None;
         };
-        if !self.temporaries.contains(name) {
+        if !operand.stable || !self.temporaries.contains(name) {
             return None;
         }
         match self.buf.stmts.last() {
@@ -1148,7 +1165,7 @@ impl Lowerer<'_> {
                 Rhs::Action(action) => self.push(Stmt::Do { action }, note.blocks),
                 Rhs::Expr(expr) => {
                     // Kept: an expression may raise, and a host may read it.
-                    let Atom::Variable(name) = value.atom else {
+                    let Expr::Variable(name) = value.expr else {
                         unreachable!("a taken binding is a variable");
                     };
                     self.push(
@@ -1160,38 +1177,109 @@ impl Lowerer<'_> {
                     );
                 }
             }
+        } else if !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)) {
+            let _ = self.let_expr(value.expr, value.ty);
         }
     }
 
-    /// Copies a source variable to a temporary, so that code that runs
-    /// before the operand is used cannot change what was read.
+    /// Holds a read (or a possible raise) before later statements run.
     fn pin(&mut self, operand: Operand) -> Operand {
-        match &operand.atom {
-            Atom::Variable(name) if !self.temporaries.contains(name) => {
-                let mut pinned = self.let_expr(operand.expr(), operand.ty.clone());
-                pinned.plain = operand.plain;
-                pinned
-            }
-            _ => operand,
+        if operand.stable {
+            return operand;
+        }
+        let mut pinned = self.let_expr(operand.expr, operand.ty);
+        pinned.plain = operand.plain;
+        pinned
+    }
+
+    /// Repeated native probes can reread an atom. A construction or nested
+    /// read must run once, before the ladder branches or reuses its result.
+    fn reuse(&mut self, operand: Operand) -> Operand {
+        if matches!(operand.expr, Expr::Variable(_) | Expr::Literal(_)) {
+            operand
+        } else {
+            self.pin(operand)
         }
     }
 
-    /// Lowers operands the source evaluates left to right, pinning each one
-    /// that a later operand's evaluation could invalidate.
-    pub(crate) fn operands(&mut self, exprs: &[&ast::Expr]) -> Lowering<Vec<Operand>> {
-        let mut operands = Vec::with_capacity(exprs.len());
-        for (index, expr) in exprs.iter().enumerate() {
-            let operand = self.lower_expr(expr)?;
-            let later_runs_code = exprs[index + 1..]
-                .iter()
-                .any(|later| !walk::is_inert(later));
-            operands.push(if later_runs_code {
-                self.pin(operand)
-            } else {
-                operand
-            });
+    /// Arguments of actions remain atoms under K-STMT-001.
+    fn atom(&mut self, operand: Operand) -> Atom {
+        match operand.expr {
+            Expr::Literal(literal) => Atom::Literal(literal),
+            Expr::Variable(name) => Atom::Variable(name),
+            expr => {
+                let bound = self.let_expr(expr, operand.ty);
+                let Expr::Variable(name) = bound.expr else {
+                    unreachable!("a bound expression is a variable");
+                };
+                Atom::Variable(name)
+            }
         }
-        Ok(operands)
+    }
+
+    fn atoms(&mut self, operands: &[Operand]) -> Vec<Atom> {
+        operands
+            .iter()
+            .map(|operand| self.atom(operand.clone()))
+            .collect()
+    }
+
+    /// Statements emitted while lowering one operand, without opening a scope.
+    fn aside<T>(&mut self, lower: impl FnOnce(&mut Self) -> Lowering<T>) -> Lowering<(Buf, T)> {
+        let outer = std::mem::take(&mut self.buf);
+        let result = lower(self);
+        let inner = std::mem::replace(&mut self.buf, outer);
+        result.map(|value| (inner, value))
+    }
+
+    fn append(&mut self, buf: Buf) {
+        self.buf.stmts.extend(buf.stmts);
+        self.buf.notes.extend(buf.notes);
+    }
+
+    /// Commit operand buffers in source order, pinning only before later statements.
+    fn ordered(&mut self, parts: Vec<(Buf, Operand)>) -> Vec<Operand> {
+        let mut pins = vec![false; parts.len()];
+        let mut later = false;
+        for (index, (buf, operand)) in parts.iter().enumerate().rev() {
+            pins[index] = later && !operand.stable;
+            later |= !buf.stmts.is_empty();
+        }
+        parts
+            .into_iter()
+            .zip(pins)
+            .map(|((buf, operand), pin)| {
+                self.append(buf);
+                if pin { self.pin(operand) } else { operand }
+            })
+            .collect()
+    }
+
+    pub(crate) fn operands(&mut self, exprs: &[&ast::Expr]) -> Lowering<Vec<Operand>> {
+        let mut parts = Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            parts.push(self.aside(|this| this.lower_expr(expr))?);
+        }
+        Ok(self.ordered(parts))
+    }
+
+    /// Leave room for the enclosing statement, blocks, and native wrappers
+    /// under K-DOC-006. Hoist a deep child before its parent adds another level.
+    fn inline(&mut self, expr: Expr, ty: Ty) -> Operand {
+        let mut pending = vec![(lash_kernel_doc::Node::Expr(&expr), 0)];
+        let limit = lash_kernel_doc::MAX_NESTING_DEPTH.saturating_sub(2 * self.kernel_depth + 8);
+        while let Some((node, depth)) = pending.pop() {
+            if depth >= limit {
+                return self.let_expr(expr, ty);
+            }
+            pending.extend(node.children().into_iter().map(|child| (child, depth + 1)));
+        }
+        Operand {
+            expr,
+            ty,
+            stable: false,
+            plain: None,
+        }
     }
 
     /// A bool the kernel's `if` and `while` accept: the operand itself when

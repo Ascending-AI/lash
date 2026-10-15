@@ -884,9 +884,9 @@ impl Lowerer<'_> {
 }
 
 pub(super) fn variable_of(operand: &Operand) -> Name {
-    match &operand.atom {
-        lash_kernel_doc::Atom::Variable(name) => name.clone(),
-        lash_kernel_doc::Atom::Literal(_) => unreachable!("the operand was bound to a temporary"),
+    match &operand.expr {
+        Expr::Variable(name) => name.clone(),
+        _ => unreachable!("the operand was bound to a temporary"),
     }
 }
 

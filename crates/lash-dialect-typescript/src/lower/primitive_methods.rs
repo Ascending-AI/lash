@@ -103,6 +103,9 @@ impl Lowerer<'_> {
         // Extra arguments still run, left to right, even when ignored. Pin all
         // values that a later argument could invalidate; no argument list exists.
         let passed = self.operands(&values)?;
+        // Arguments omitted by the native expression still evaluate (and raise)
+        // before it, in the same order as arguments retained in the expression.
+        let passed: Vec<_> = passed.into_iter().map(|value| self.pin(value)).collect();
         if trim {
             let result = self.native(
                 "text.trim_set",
@@ -113,14 +116,14 @@ impl Lowerer<'_> {
                     Operand::bool(name != "trimStart").expr(),
                 ],
             )?;
-            return Ok(Some(self.let_expr(result, Ty::Text)));
+            return Ok(Some(self.inline(result, Ty::Text)));
         }
         if split {
             let result = self.native(
                 "text.split",
                 vec![object.expr(), passed[0].expr(), int(4_294_967_295)],
             )?;
-            return Ok(Some(self.let_expr(result, Ty::Array)));
+            return Ok(Some(self.inline(result, Ty::Array)));
         }
         if search {
             let position = if name == "endsWith" && upper.is_none() {
@@ -157,7 +160,7 @@ impl Lowerer<'_> {
                 "includes" => (self.native("num.le", vec![int(0), found])?, Ty::Bool),
                 _ => (self.native("eq", vec![found, position])?, Ty::Bool),
             };
-            return Ok(Some(self.let_expr(result, ty)));
+            return Ok(Some(self.inline(result, ty)));
         }
         let start = self.primitive_position(object, lower.unwrap_or(0.0), true, text)?;
         let end = if let Some(upper) = upper {
@@ -197,7 +200,7 @@ impl Lowerer<'_> {
         })?;
         self.emit_if(too_large, refusal, Buf::default());
         let result = self.native("list.slice", vec![object.expr(), start, end])?;
-        Ok(Some(self.let_expr(result, Ty::Array)))
+        Ok(Some(self.inline(result, Ty::Array)))
     }
 
     /// ToIntegerOrInfinity, then either a relative bound or an absolute search

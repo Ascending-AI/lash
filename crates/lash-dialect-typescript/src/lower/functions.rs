@@ -76,7 +76,7 @@ impl Lowerer<'_> {
             closure.expr(),
             Expr::Record(Vec::new()),
         ]);
-        self.let_expr(token, closure.ty)
+        self.inline(token, closure.ty)
     }
 
     /// Anonymous function definitions receive a name only in named evaluation.
@@ -165,7 +165,8 @@ impl Lowerer<'_> {
         let closure = self.emit_closure(vec![this, args], body);
         Ok(Operand {
             plain: None,
-            atom: closure.atom,
+            expr: closure.expr,
+            stable: closure.stable,
             ty: self.facts.function(function.return_ty.as_ref()),
         })
     }
@@ -291,7 +292,7 @@ impl Lowerer<'_> {
             let mut passed = vec![lash_kernel_doc::Atom::Variable(this.clone())];
             for index in 0..entry.arity {
                 let value = lowerer.let_expr(Self::element(&supplied, index), Ty::Unknown);
-                passed.push(value.atom);
+                passed.push(lowerer.atom(value));
             }
             let result = lowerer.emit_action(
                 lash_kernel_doc::Action::Call {

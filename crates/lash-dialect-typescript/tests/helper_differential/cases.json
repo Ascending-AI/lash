@@ -8039,5 +8039,20 @@
     "id": "python/iteration/dict-table-compaction",
     "dialect": "python",
     "source": "d={'0':1,'1':1,'2':1}\nfor k in d:\n    del d[k]\n    d[k+'x']=1\n"
+  },
+  {
+    "id": "typescript/operand-order/compound",
+    "dialect": "typescript",
+    "source": "const o = { n: 1 }; o.n += (o.n = 2); await observe(o.n);"
+  },
+  {
+    "id": "typescript/operand-order/array",
+    "dialect": "typescript",
+    "source": "const o = { x: 1 }; const r = [o.x, (o.x = 2)]; await observe(r);"
+  },
+  {
+    "id": "typescript/operand-order/raise-before-tool",
+    "dialect": "typescript",
+    "source": "const n = null; function tool() { return observe('issued'); } try { [n.x, tool()]; } catch (e) { await observe('raised'); }"
   }
 ]

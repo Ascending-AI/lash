@@ -18246,6 +18246,49 @@
           "bits": "3ff0000000000000"
         }
       ]
+    },
+    "typescript/operand-order/compound": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "float",
+          "bits": "4008000000000000"
+        }
+      ]
+    },
+    "typescript/operand-order/array": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "float",
+              "bits": "3ff0000000000000"
+            },
+            {
+              "type": "float",
+              "bits": "4000000000000000"
+            }
+          ]
+        }
+      ]
+    },
+    "typescript/operand-order/raise-before-tool": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            114,
+            97,
+            105,
+            115,
+            101,
+            100
+          ]
+        }
+      ]
     }
   }
 }

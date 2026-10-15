@@ -207,7 +207,8 @@ impl Lowerer<'_> {
             .insert(entry.clone(), Signature { params, result });
         Ok(Operand {
             plain: None,
-            atom: Atom::Literal(Literal::Function(entry)),
+            expr: Expr::Literal(Literal::Function(entry)),
+            stable: true,
             ty: Ty::Unknown,
         })
     }
@@ -269,14 +270,15 @@ impl Lowerer<'_> {
                 passed.push(Expr::Variable(kernel));
             }
             let run = lowerer.closure(function)?;
-            let Atom::Variable(run) = run.atom else {
+            let Expr::Variable(run) = run.expr else {
                 unreachable!("a closure is bound to a temporary");
             };
             let args = lowerer.let_expr(Expr::List(passed), Ty::Unknown);
+            let args = lowerer.atom(args);
             let value = lowerer.emit_action(
                 Action::Call {
                     callee: Callee::Value(run),
-                    args: vec![Atom::Literal(Literal::Absent), args.atom],
+                    args: vec![Atom::Literal(Literal::Absent), args],
                 },
                 Ty::Unknown,
             );
@@ -317,7 +319,8 @@ impl Lowerer<'_> {
             .insert(entry.clone(), Signature { params, result });
         Ok(Operand {
             plain: None,
-            atom: Atom::Literal(Literal::Function(entry)),
+            expr: Expr::Literal(Literal::Function(entry)),
+            stable: true,
             ty: Ty::Unknown,
         })
     }
