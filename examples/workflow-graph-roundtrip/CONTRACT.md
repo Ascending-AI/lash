@@ -144,7 +144,7 @@ expanded canonical edits.
 | `callId`, `call` | Admitted call identity and retained input/output data when available. |
 | `output` | The workflow’s terminal result when available. |
 | `approvalKey` | The key to resolve when the run is parked on `host.approval`. |
-| `coverage` | Lash's `view::coverage` of the run's view from its process overlay's counts: `observation`, each statement's `runs` and each scope's `entries`. Sent in a `callOnly` event when it changes, and on the last event. |
+| `coverage` | Lash's `view::coverage` of the run's document from its process overlay's counts: `observation`, each statement's `runs` and each scope's `entries`. Sent in a `callOnly` event when it changes, and on the last event. |
 | `path` | On the last event: `{"state": "verified", "steps": [...]}`, each verified segment's `view::path` steps in segment order, or `{"state": "unavailable", "reason": ...}`. |
 
 Runs start observed at `counts`. The last event has no `site` and carries the

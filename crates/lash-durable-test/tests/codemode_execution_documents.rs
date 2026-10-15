@@ -452,12 +452,11 @@ async fn a_cells_parked_calls_sum_to_unsplit_counts_and_the_next_cell_can_be_off
             >= 2,
         "counts cross actual parks"
     );
-    let view = lash::workflow::view::derive(
-        document,
-        lash_vm_runtime::standard_functions().unwrap().as_ref(),
-    )
-    .unwrap();
-    let counted = lash::workflow::view::coverage(&view, &overlay.ran_counts());
+    let counted = lash::workflow::view::coverage(
+        document.document(),
+        &document.entry_unit(),
+        &overlay.ran_counts(),
+    );
     assert!(counted.statements.iter().any(|row| row.runs == Some(1)));
 
     let before = records.len();
@@ -473,7 +472,11 @@ async fn a_cells_parked_calls_sum_to_unsplit_counts_and_the_next_cell_can_be_off
     served::assert_answered("off cell", &off);
     let records = sink.records();
     let off = lash::workflow::fold_workflow_overlay(None, None, &records[before..], 1).unwrap();
-    let unobserved = lash::workflow::view::coverage(&view, &off.ran_counts());
+    let unobserved = lash::workflow::view::coverage(
+        document.document(),
+        &document.entry_unit(),
+        &off.ran_counts(),
+    );
     assert_eq!(unobserved.observation, Some(RunObservation::Off));
     assert!(unobserved.statements.iter().all(|row| row.runs.is_none()));
     assert!(off.ran.is_empty());

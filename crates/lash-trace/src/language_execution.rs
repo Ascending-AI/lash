@@ -59,6 +59,16 @@ pub enum WorkflowDocumentEntry {
     Entry { function: lash_kernel_doc::Name },
 }
 
+impl WorkflowDocumentEntry {
+    /// The unit of the document this entry runs.
+    pub fn unit(&self) -> lash_kernel_doc::Unit {
+        match self {
+            Self::Main => lash_kernel_doc::Unit::Main,
+            Self::Entry { function } => lash_kernel_doc::Unit::Function(function.clone()),
+        }
+    }
+}
+
 /// The admitted body of a process step started: the step's actor committed
 /// its admission, bound it to a call, and is about to run it. A step that is
 /// refused never produces one, and a retried body produces one more with the

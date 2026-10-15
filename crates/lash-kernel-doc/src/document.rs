@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{Block, Function, Site};
+use crate::ast::{Block, Function, Node, Site};
 use crate::canonical::{EncodeError, digest, json_depth};
 use crate::name::{DocumentId, EffectName, FunctionId, FunctionName, Name};
 use crate::number::NumberPolicy;
@@ -91,25 +91,26 @@ impl Document {
         }
     }
 
-    /// Dense ordinals for every statement and block in this document's own
-    /// units, in [`Site`] order. Expressions and actions have no ordinal;
-    /// closure bodies do. The rank depends only on the document, never on
-    /// an executable's layout or the library it is compiled against.
-    pub fn site_ordinals(&self) -> BTreeMap<Site, u32> {
-        let mut sites = BTreeMap::new();
+    /// Every statement and block of this document's own units with the
+    /// node itself, in [`Site`] order. A node's index in the answer is its
+    /// ordinal: [`site_ordinals`](Self::site_ordinals) ranks this walk's
+    /// sites alone. Expressions and actions are walked through but appear
+    /// nowhere in it.
+    pub fn ordinal_nodes(&self) -> Vec<(Site, Node<'_>)> {
+        let mut nodes = BTreeMap::new();
         let mut pending = vec![(
             Site::new(crate::Unit::Main, vec![]),
-            crate::Node::Block(&self.main),
+            Node::Block(&self.main),
         )];
         pending.extend(self.functions.iter().map(|(name, function)| {
             (
                 Site::new(crate::Unit::Function(name.clone()), vec![]),
-                crate::Node::Block(&function.body),
+                Node::Block(&function.body),
             )
         }));
         while let Some((site, node)) = pending.pop() {
-            if matches!(node, crate::Node::Block(_) | crate::Node::Stmt(_)) {
-                sites.insert(site.clone(), 0);
+            if matches!(node, Node::Block(_) | Node::Stmt(_)) {
+                nodes.insert(site.clone(), node);
             }
             pending.extend(
                 node.children()
@@ -118,10 +119,19 @@ impl Document {
                     .map(|(index, child)| (site.child(index as u32), child)),
             );
         }
-        for (ordinal, rank) in sites.values_mut().enumerate() {
-            *rank = ordinal as u32;
-        }
-        sites
+        nodes.into_iter().collect()
+    }
+
+    /// Dense ordinals for every statement and block in this document's own
+    /// units, in [`Site`] order. Expressions and actions have no ordinal;
+    /// closure bodies do. The rank depends only on the document, never on
+    /// an executable's layout or the library it is compiled against.
+    pub fn site_ordinals(&self) -> BTreeMap<Site, u32> {
+        self.ordinal_nodes()
+            .into_iter()
+            .enumerate()
+            .map(|(ordinal, (site, _))| (site, ordinal as u32))
+            .collect()
     }
 
     /// The document's behavioural identity (`K-ID-001`).

@@ -630,7 +630,8 @@ main { finish null }
     // empty else=11, outer else=12, set=13, if urgent=14,
     // then=15, sleep=16, empty else=17, set=18, return=19.
     let result = coverage(
-        &view,
+        &document,
+        &Unit::Function(Name::new("digest")),
         &RanCounts {
             observation: Some(RunObservation::Counts),
             ran: vec![
@@ -697,10 +698,11 @@ main { finish null }
 fn coverage_keeps_off_and_missing_observation_distinct_from_zero() {
     use crate::view::{RanCounts, RunObservation, coverage};
     let document = parse_document("kernel 1\nnumbers float\nentry demo() -> Any\nfn demo() { return null }\nmain { finish null }\n").unwrap();
-    let view = view_of(&document, "demo");
+    let unit = Unit::Function(Name::new("demo"));
     for observation in [None, Some(RunObservation::Off)] {
         let result = coverage(
-            &view,
+            &document,
+            &unit,
             &RanCounts {
                 observation,
                 ran: vec![(3, 9)],
@@ -711,7 +713,8 @@ fn coverage_keeps_off_and_missing_observation_distinct_from_zero() {
         assert_eq!(result.scopes[0].entries, None);
     }
     let result = coverage(
-        &view,
+        &document,
+        &unit,
         &RanCounts {
             observation: Some(RunObservation::Counts),
             ran: vec![],
@@ -728,14 +731,15 @@ fn a_replayed_path_maps_statement_and_scope_steps_in_task_order() {
     use crate::view::{PathSite, ReplayPath, TaskPath, path};
     use lash_kernel_doc::{SpawnIdentity, TaskIdentity};
     let document = parse_document("kernel 1\nnumbers float\nentry demo() -> Any\nfn demo() { if true {} return null }\nmain { finish null }\n").unwrap();
-    let view = view_of(&document, "demo");
+    let unit = Unit::Function(Name::new("demo"));
     let spawned = TaskIdentity::Spawned(SpawnIdentity {
         parent: std::sync::Arc::new(TaskIdentity::Main),
         site: site("demo", &[0]),
         occurrence: 0,
     });
     let steps = path(
-        &view,
+        &document,
+        &unit,
         &ReplayPath {
             tasks: vec![
                 TaskPath {

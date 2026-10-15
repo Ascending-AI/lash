@@ -121,10 +121,7 @@ impl WorkflowDocument {
 
     /// The unit an execution enters: `main`, or the entry function.
     pub fn entry_unit(&self) -> Unit {
-        match &self.reference.entry {
-            WorkflowDocumentEntry::Main => Unit::Main,
-            WorkflowDocumentEntry::Entry { function } => Unit::Function(function.clone()),
-        }
+        self.reference.entry.unit()
     }
 
     /// The entry function's signature; `None` for `main`.

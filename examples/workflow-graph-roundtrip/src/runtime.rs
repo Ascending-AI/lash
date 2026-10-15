@@ -7,7 +7,7 @@ use lash::process::*;
 use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
 use lash::workflow::document::{Document, EffectIdentity, Name, Site};
 use lash::workflow::edit::Draft;
-use lash::workflow::view::{WorkflowCoverage, WorkflowView};
+use lash::workflow::view::WorkflowCoverage;
 use lash::workflow::{
     ProcessWorkflowOverlay, ReplaySegments, SegmentAnswer, WorkflowDocument, WorkflowDocumentRead,
     WorkflowEnvironment, WorkflowExecutionOverlayAccumulator, WorkflowOverlayFact,
@@ -185,29 +185,23 @@ pub(crate) async fn observe(
     // The feed retains everything published while the document is read.
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     let document = execution_document(&core, &snapshot.read_view).await?;
-    let view =
-        lash::workflow::view::derive(&document, workflow_environment(&core).await?.functions())
-            .ok();
     let mut overlay = Overlay::new(&document, process, workflow_version, host)?;
     let mut workflow = process_overlay(&snapshot.read_view);
     let (mut events, mut terminal) = overlay.snapshot(snapshot.read_view)?;
     loop {
-        if let Some(view) = &view {
-            let coverage = overlay.coverage(view, workflow.as_ref(), terminal);
-            if terminal {
-                // The run's own end, which the overlay's exact counts and the
-                // replayed path complete.
-                let path = run_path(&core, &overlay.process, view).await?;
-                if let Some(last) = events.last_mut() {
-                    (last.coverage, last.path) = (coverage, Some(path));
-                }
-            } else if let Some(coverage) = coverage {
-                let mut event =
-                    overlay.event(None, RunStatus::Started, DisplayDelta::default(), None);
-                event.call_only = true;
-                event.coverage = Some(coverage);
-                events.push(event);
+        let coverage = overlay.coverage(&document, workflow.as_ref(), terminal);
+        if terminal {
+            // The run's own end, which the overlay's exact counts and the
+            // replayed path complete.
+            let path = run_path(&core, &overlay.process, &document).await?;
+            if let Some(last) = events.last_mut() {
+                (last.coverage, last.path) = (coverage, Some(path));
             }
+        } else if let Some(coverage) = coverage {
+            let mut event = overlay.event(None, RunStatus::Started, DisplayDelta::default(), None);
+            event.call_only = true;
+            event.coverage = Some(coverage);
+            events.push(event);
         }
         for mut event in events {
             if let Some(call_id) = &event.call_id
@@ -302,12 +296,12 @@ fn process_overlay(view: &ProcessReadView) -> Option<ProcessWorkflowOverlay> {
     }
 }
 
-/// The path a finished run took through `view`: each segment lash's replay
-/// verified, through `workflow::view::path`, in segment order.
+/// The path a finished run took through `document`'s entry: each segment
+/// lash's replay verified, through `workflow::view::path`, in segment order.
 async fn run_path(
     core: &LashCore,
     process: &lash::ProcessId,
-    view: &WorkflowView,
+    document: &WorkflowDocument,
 ) -> Result<RunPath, RunError> {
     let mut segments = core
         .processes()
@@ -318,7 +312,11 @@ async fn run_path(
     for segment in segments {
         match segment.answer {
             SegmentAnswer::Verified { path } => {
-                steps.extend(lash::workflow::view::path(view, &path));
+                steps.extend(lash::workflow::view::path(
+                    document.document(),
+                    &document.entry_unit(),
+                    &path,
+                ));
             }
             unverified => {
                 return Ok(RunPath::Unavailable {
@@ -448,15 +446,19 @@ impl Overlay {
         }
     }
 
-    /// The run's coverage of `view` from lash's process overlay
+    /// The run's coverage of `document`'s entry from lash's process overlay
     /// `workflow`, when it changed since it was last sent or `always`.
     fn coverage(
         &mut self,
-        view: &WorkflowView,
+        document: &WorkflowDocument,
         workflow: Option<&ProcessWorkflowOverlay>,
         always: bool,
     ) -> Option<WorkflowCoverage> {
-        let coverage = lash::workflow::view::coverage(view, &workflow?.ran_counts());
+        let coverage = lash::workflow::view::coverage(
+            document.document(),
+            &document.entry_unit(),
+            &workflow?.ran_counts(),
+        );
         if self.coverage.as_ref() == Some(&coverage) && !always {
             return None;
         }

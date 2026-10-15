@@ -463,6 +463,22 @@ export type Rhs = ({
 });
 
 /**
+ * Per-run observation. Off is unobserved, never a zero count.
+ */
+export type RunObservation = ("off" | "counts");
+
+/**
+ * One block of the entry and how often a run entered it.
+ */
+export type ScopeCoverage = {
+  "block": Site;
+  /**
+   * Arm selections, loop iterations, caught errors or function calls.
+   */
+  "entries"?: (number | null);
+};
+
+/**
  * What a block is the body of.
  */
 export type ScopeKind = ("entry" | "closure" | "then" | "else" | "for" | "while" | "try" | "catch" | "finally");
@@ -512,6 +528,17 @@ export type Site = {
  * What an action does.
  */
 export type SiteKind = ("call" | "perform" | "sleep" | "join" | "join_many" | "yield" | "spawn" | "cancel");
+
+/**
+ * One statement of the entry and how often it ran.
+ */
+export type StatementCoverage = {
+  /**
+   * None is unobserved; Some(0) is an observed statement that did not run.
+   */
+  "runs"?: (number | null);
+  "site": Site;
+};
 
 /**
  * One statement of the entry.
@@ -643,4 +670,22 @@ export type Unit = ("main" | {
 export type Use = {
   "site": Site;
   "statement": Site;
+};
+
+/**
+ * Statement starts and scope entries of one entry of a document.
+ */
+export type WorkflowCoverage = {
+  /**
+   * The observation the counts came under; absent is an unobserved run.
+   */
+  "observation"?: (RunObservation | null);
+  /**
+   * Each block of the entry, in document order.
+   */
+  "scopes": Array<ScopeCoverage>;
+  /**
+   * Each statement of the entry, in document order.
+   */
+  "statements": Array<StatementCoverage>;
 };

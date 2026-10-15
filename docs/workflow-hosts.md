@@ -317,11 +317,15 @@ counts, action states and current task positions. Fold its committed events
 and accepted live observations with `ProcessWorkflowOverlayAccumulator`, as
 [Observing processes](observing-processes.md) describes.
 
-Pass that overlay's `ran_counts()` to the view helper:
+Pass that overlay's `ran_counts()` to the view helper, with the document
+and the unit the run entered:
 
 ```rust,ignore
-let canvas = lash::workflow::view::derive(&document, &functions)?;
-let coverage = lash::workflow::view::coverage(&canvas, &overlay.ran_counts());
+let coverage = lash::workflow::view::coverage(
+    document.document(),
+    &document.entry_unit(),
+    &overlay.ran_counts(),
+);
 // coverage.statements: site and runs; coverage.scopes: block and entries.
 ```
 
@@ -338,9 +342,11 @@ come from `sites` and `current_sites`.
 
 For a retained process segment, request replay through
 `core.processes().replay(..)`. Only `SegmentAnswer::Verified { path }` carries
-a path; pass it to `view::path(&canvas, &path)` for ordered statement and scope
-steps per task. Diverged or unreplayable segments supply no path. Derive a view
-for each document unit you want to show: mapping a view omits other units.
+a path; pass it to
+`view::path(document.document(), &document.entry_unit(), &path)` for ordered
+statement and scope steps per task. Diverged or unreplayable segments supply
+no path. Pass each unit of the document you want to show: one unit's path
+omits other units. Neither helper needs a derived view or the engine library.
 
 Cells provide counts through `WorkflowExecutionOverlay::ran_counts()` and the
 same `view::coverage` helper. Import `RanCounts`, `RunObservation`, `ReplayPath`

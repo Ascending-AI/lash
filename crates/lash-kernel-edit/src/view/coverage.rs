@@ -1,35 +1,48 @@
 //! The host's one interpretation of run counts and verified paths.
 
-use super::WorkflowView;
-use lash_kernel_doc::{RanCounts, ReplayPath, RunObservation, Site, TaskIdentity};
+use lash_kernel_doc::{
+    Document, Node, RanCounts, ReplayPath, RunObservation, Site, TaskIdentity, Unit,
+};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Statement starts and scope entries of one entry of a document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowCoverage {
+    /// The observation the counts came under; absent is an unobserved run.
     pub observation: Option<RunObservation>,
+    /// Each statement of the entry, in document order.
     pub statements: Vec<StatementCoverage>,
+    /// Each block of the entry, in document order.
     pub scopes: Vec<ScopeCoverage>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One statement of the entry and how often it ran.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct StatementCoverage {
     pub site: Site,
     /// None is unobserved; Some(0) is an observed statement that did not run.
     pub runs: Option<u64>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One block of the entry and how often a run entered it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ScopeCoverage {
     pub block: Site,
     /// Arm selections, loop iterations, caught errors or function calls.
     pub entries: Option<u64>,
 }
 
-/// Count statement starts and scope entries for this view. The caller supplies
-/// counts from the same document; starts elsewhere in that document are ignored.
-/// Observation is authoritative: off and a missing start never manufacture zeros.
-pub fn coverage(view: &WorkflowView, counts: &RanCounts) -> WorkflowCoverage {
+/// Count statement starts and scope entries for this entry of `document`.
+/// The caller supplies counts from the same document; starts elsewhere in
+/// that document are ignored. Observation is authoritative: off and a
+/// missing start never manufacture zeros. An `entry` the document does not
+/// declare, or [`Unit::Library`], yields empty statements and scopes.
+pub fn coverage(document: &Document, entry: &Unit, counts: &RanCounts) -> WorkflowCoverage {
     let mut ran = BTreeMap::<u32, u64>::new();
     for (ordinal, count) in &counts.ran {
         let total = ran.entry(*ordinal).or_default();
@@ -39,36 +52,61 @@ pub fn coverage(view: &WorkflowView, counts: &RanCounts) -> WorkflowCoverage {
         (counts.observation == Some(RunObservation::Counts))
             .then(|| ran.get(&ordinal).copied().unwrap_or(0))
     };
-    let first = first_statements(view);
+    let entry = entry_nodes(document, entry);
     WorkflowCoverage {
         observation: counts.observation,
-        statements: view
+        statements: entry
             .statements
             .iter()
-            .map(|statement| StatementCoverage {
-                site: statement.site.clone(),
-                runs: count(statement.ordinal),
+            .map(|(site, ordinal)| StatementCoverage {
+                site: site.clone(),
+                runs: count(*ordinal),
             })
             .collect(),
-        scopes: view
+        scopes: entry
             .scopes
             .iter()
-            .map(|scope| ScopeCoverage {
-                block: scope.block.clone(),
-                entries: count(first.get(&scope.block).copied().unwrap_or(scope.ordinal)),
+            .map(|(block, entered)| ScopeCoverage {
+                block: block.clone(),
+                entries: count(*entered),
             })
             .collect(),
     }
 }
 
-fn first_statements(view: &WorkflowView) -> BTreeMap<Site, u32> {
-    let mut first = BTreeMap::new();
-    for statement in &view.statements {
-        first
-            .entry(statement.block.clone())
-            .or_insert(statement.ordinal);
+/// The statements and blocks of one unit of a document as run counts and
+/// replay paths address them: each statement's site with its ordinal, and
+/// each block's site with the ordinal a run entering it reports — its
+/// first statement's for a nonempty block, its own for an empty one.
+struct EntryNodes {
+    statements: Vec<(Site, u32)>,
+    scopes: Vec<(Site, u32)>,
+}
+
+fn entry_nodes(document: &Document, entry: &Unit) -> EntryNodes {
+    let mut nodes = EntryNodes {
+        statements: Vec::new(),
+        scopes: Vec::new(),
+    };
+    for (ordinal, (site, node)) in document.ordinal_nodes().into_iter().enumerate() {
+        if site.unit != *entry {
+            continue;
+        }
+        let ordinal = ordinal as u32;
+        match node {
+            Node::Stmt(_) => nodes.statements.push((site, ordinal)),
+            Node::Block(block) => nodes.scopes.push((
+                site,
+                if block.is_empty() {
+                    ordinal
+                } else {
+                    ordinal + 1
+                },
+            )),
+            Node::Action(_) | Node::Expr(_) => {}
+        }
     }
-    first
+    nodes
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,28 +123,24 @@ pub enum PathSite {
     Scope { block: Site },
 }
 
-/// Map a verified replay to sites in this view, retaining task order and each
-/// task's start order. A nonempty scope enters immediately before its first
-/// statement; an empty scope has its own start. Ordinals of other units are
-/// omitted; derive those units' views to read their paths.
-pub fn path(view: &WorkflowView, replay: &ReplayPath) -> Vec<PathStep> {
+/// Map a verified replay to sites in this entry of `document`, retaining
+/// task order and each task's start order. A nonempty scope enters
+/// immediately before its first statement; an empty scope has its own
+/// start. Ordinals of other units are omitted; pass that unit to read its
+/// path.
+pub fn path(document: &Document, entry: &Unit, replay: &ReplayPath) -> Vec<PathStep> {
     let mut sites = BTreeMap::<u32, Vec<PathSite>>::new();
-    let first = first_statements(view);
-    for scope in &view.scopes {
-        sites
-            .entry(first.get(&scope.block).copied().unwrap_or(scope.ordinal))
-            .or_default()
-            .push(PathSite::Scope {
-                block: scope.block.clone(),
-            });
+    let entry = entry_nodes(document, entry);
+    for (block, entered) in &entry.scopes {
+        sites.entry(*entered).or_default().push(PathSite::Scope {
+            block: block.clone(),
+        });
     }
-    for statement in &view.statements {
+    for (site, ordinal) in &entry.statements {
         sites
-            .entry(statement.ordinal)
+            .entry(*ordinal)
             .or_default()
-            .push(PathSite::Statement {
-                site: statement.site.clone(),
-            });
+            .push(PathSite::Statement { site: site.clone() });
     }
     let mut steps = Vec::new();
     for task in &replay.tasks {

@@ -178,8 +178,8 @@ pub struct RunEvent {
     pub call: Option<CallData>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<Value>,
-    /// How often each statement and scope of the run's view has run so far:
-    /// lash's process overlay read through `workflow::view::coverage`.
+    /// How often each statement and scope of the run's document has run so
+    /// far: lash's process overlay read through `workflow::view::coverage`.
     /// Sent when it changes, and on the terminal event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage: Option<WorkflowCoverage>,
@@ -189,7 +189,7 @@ pub struct RunEvent {
     pub path: Option<RunPath>,
 }
 
-/// A finished run's path through its view: each verified segment's steps
+/// A finished run's path through its document: each verified segment's steps
 /// through `workflow::view::path`, in segment order.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "camelCase")]

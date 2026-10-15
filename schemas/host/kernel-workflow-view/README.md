@@ -1,7 +1,9 @@
 # Workflow view host types
 
 `v1.schema.json` describes the JSON returned by `lash::workflow::view::derive`.
-`v1.d.ts` exports `WorkflowView` and every nested type from that schema. Hosts can
+`v1.d.ts` exports `WorkflowView` and every nested type from that schema, plus
+`WorkflowCoverage`, `StatementCoverage` and `ScopeCoverage`: the JSON
+`lash::workflow::view::coverage` returns. Hosts can
 copy the declaration into their source tree and import its types directly:
 
 ```typescript

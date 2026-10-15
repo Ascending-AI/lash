@@ -310,3 +310,201 @@ pub(crate) fn entry_view(
 
 #[cfg(test)]
 mod shape;
+
+#[cfg(test)]
+mod tests {
+    //! FIG-6414: run coverage and replayed paths are reads of the document
+    //! alone. The oracles below are the view-based folds verbatim; the law
+    //! is that the document read answers identically for every example.
+
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use lash::workflow::document::{Site, SpawnIdentity, TaskIdentity, Unit};
+    use lash::workflow::view::{
+        PathSite, PathStep, RanCounts, ReplayPath, RunObservation, ScopeCoverage,
+        StatementCoverage, TaskPath, WorkflowCoverage, WorkflowView,
+    };
+
+    use super::{Catalog, EXAMPLES, entry_view};
+
+    fn first_statements(view: &WorkflowView) -> BTreeMap<Site, u32> {
+        let mut first = BTreeMap::new();
+        for statement in &view.statements {
+            first
+                .entry(statement.block.clone())
+                .or_insert(statement.ordinal);
+        }
+        first
+    }
+
+    /// The view-based `view::coverage` this host ran before the document read.
+    fn view_coverage(view: &WorkflowView, counts: &RanCounts) -> WorkflowCoverage {
+        let mut ran = BTreeMap::<u32, u64>::new();
+        for (ordinal, count) in &counts.ran {
+            let total = ran.entry(*ordinal).or_default();
+            *total = total.saturating_add(*count);
+        }
+        let count = |ordinal| {
+            (counts.observation == Some(RunObservation::Counts))
+                .then(|| ran.get(&ordinal).copied().unwrap_or(0))
+        };
+        let first = first_statements(view);
+        WorkflowCoverage {
+            observation: counts.observation,
+            statements: view
+                .statements
+                .iter()
+                .map(|statement| StatementCoverage {
+                    site: statement.site.clone(),
+                    runs: count(statement.ordinal),
+                })
+                .collect(),
+            scopes: view
+                .scopes
+                .iter()
+                .map(|scope| ScopeCoverage {
+                    block: scope.block.clone(),
+                    entries: count(first.get(&scope.block).copied().unwrap_or(scope.ordinal)),
+                })
+                .collect(),
+        }
+    }
+
+    /// The view-based `view::path` this host ran before the document read.
+    fn view_path(view: &WorkflowView, replay: &ReplayPath) -> Vec<PathStep> {
+        let mut sites = BTreeMap::<u32, Vec<PathSite>>::new();
+        let first = first_statements(view);
+        for scope in &view.scopes {
+            sites
+                .entry(first.get(&scope.block).copied().unwrap_or(scope.ordinal))
+                .or_default()
+                .push(PathSite::Scope {
+                    block: scope.block.clone(),
+                });
+        }
+        for statement in &view.statements {
+            sites
+                .entry(statement.ordinal)
+                .or_default()
+                .push(PathSite::Statement {
+                    site: statement.site.clone(),
+                });
+        }
+        let mut steps = Vec::new();
+        for task in &replay.tasks {
+            for ordinal in &task.starts {
+                for site in sites.get(ordinal).into_iter().flatten() {
+                    steps.push(PathStep {
+                        task: task.task.clone(),
+                        site: site.clone(),
+                    });
+                }
+            }
+        }
+        steps
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn document_coverage_and_paths_equal_the_derived_views_fold_for_every_example() {
+        let stores = lash::sqlite::SqliteStoreSet::memory()
+            .await
+            .expect("SQLite memory stores");
+        let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+            .build()
+            .expect("the durable backend");
+        let host = crate::workflow_core(backend).expect("workflow core");
+        let core = host.core().clone();
+        let environment = crate::runtime::workflow_environment(&core)
+            .await
+            .expect("the workflow environment");
+        let catalog = Catalog::load(&core, &environment)
+            .await
+            .expect("the catalog loads");
+        assert_eq!(
+            catalog.workflows.len(),
+            EXAMPLES.len(),
+            "the catalog lists every example"
+        );
+
+        let mut saw_statements = false;
+        let mut saw_empty_scope = false;
+        for workflow in &catalog.workflows {
+            let id = &workflow.listing.id;
+            let unit = Unit::Function(workflow.entry.clone());
+            let view = entry_view(&workflow.document, &workflow.entry, environment.functions())
+                .expect("the example's view");
+            let n = workflow.document.site_ordinals().len() as u32;
+
+            // Every ordinal the document does not count stays ignored: n and
+            // n + 1 reach past the document's sites, and the duplicate second
+            // entry of each even ordinal exercises summing.
+            let ran: Vec<(u32, u64)> = (0..n + 2)
+                .filter(|ordinal| ordinal % 3 != 0)
+                .map(|ordinal| (ordinal, 2 * u64::from(ordinal) + 1))
+                .chain(
+                    (0..n + 2)
+                        .filter(|ordinal| ordinal % 2 == 0)
+                        .map(|ordinal| (ordinal, 1)),
+                )
+                .collect();
+            for (observation, ran) in [
+                (Some(RunObservation::Counts), ran.clone()),
+                (Some(RunObservation::Off), ran.clone()),
+                (None, ran),
+                (Some(RunObservation::Counts), Vec::new()),
+            ] {
+                let counts = RanCounts { observation, ran };
+                assert_eq!(
+                    lash::workflow::view::coverage(&workflow.document, &unit, &counts),
+                    view_coverage(&view, &counts),
+                    "{id}: coverage of the document equals the view's fold"
+                );
+            }
+
+            let replay = ReplayPath {
+                tasks: vec![
+                    TaskPath {
+                        task: TaskIdentity::Main,
+                        starts: (0..n).rev().chain(0..n).collect(),
+                    },
+                    TaskPath {
+                        task: TaskIdentity::Spawned(SpawnIdentity {
+                            parent: Arc::new(TaskIdentity::Main),
+                            site: Site::new(unit.clone(), [0]),
+                            occurrence: 0,
+                        }),
+                        starts: (0..n + 1).collect(),
+                    },
+                ],
+            };
+            assert_eq!(
+                lash::workflow::view::path(&workflow.document, &unit, &replay),
+                view_path(&view, &replay),
+                "{id}: the document's path equals the view's fold"
+            );
+
+            let coverage = lash::workflow::view::coverage(
+                &workflow.document,
+                &unit,
+                &RanCounts {
+                    observation: Some(RunObservation::Counts),
+                    ran: Vec::new(),
+                },
+            );
+            saw_statements |= !coverage.statements.is_empty() && !coverage.scopes.is_empty();
+            saw_empty_scope |= view
+                .scopes
+                .iter()
+                .any(|scope| view.statements.iter().all(|s| s.block != scope.block));
+        }
+        assert!(
+            saw_statements,
+            "some example's coverage has statements and scopes"
+        );
+        assert!(
+            saw_empty_scope,
+            "some example has an empty scope, so both entry-ordinal rules ran"
+        );
+    }
+}

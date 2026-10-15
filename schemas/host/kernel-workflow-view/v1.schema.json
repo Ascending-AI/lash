@@ -1293,6 +1293,36 @@
         }
       ]
     },
+    "RunObservation": {
+      "description": "Per-run observation. Off is unobserved, never a zero count.",
+      "enum": [
+        "off",
+        "counts"
+      ],
+      "type": "string"
+    },
+    "ScopeCoverage": {
+      "additionalProperties": false,
+      "description": "One block of the entry and how often a run entered it.",
+      "properties": {
+        "block": {
+          "$ref": "#/$defs/Site"
+        },
+        "entries": {
+          "description": "Arm selections, loop iterations, caught errors or function calls.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "block"
+      ],
+      "type": "object"
+    },
     "ScopeKind": {
       "description": "What a block is the body of.",
       "oneOf": [
@@ -1438,6 +1468,28 @@
         "cancel"
       ],
       "type": "string"
+    },
+    "StatementCoverage": {
+      "additionalProperties": false,
+      "description": "One statement of the entry and how often it ran.",
+      "properties": {
+        "runs": {
+          "description": "None is unobserved; Some(0) is an observed statement that did not run.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "site"
+      ],
+      "type": "object"
     },
     "StatementView": {
       "additionalProperties": false,
@@ -2055,6 +2107,42 @@
       "required": [
         "site",
         "statement"
+      ],
+      "type": "object"
+    },
+    "WorkflowCoverage": {
+      "additionalProperties": false,
+      "description": "Statement starts and scope entries of one entry of a document.",
+      "properties": {
+        "observation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunObservation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The observation the counts came under; absent is an unobserved run."
+        },
+        "scopes": {
+          "description": "Each block of the entry, in document order.",
+          "items": {
+            "$ref": "#/$defs/ScopeCoverage"
+          },
+          "type": "array"
+        },
+        "statements": {
+          "description": "Each statement of the entry, in document order.",
+          "items": {
+            "$ref": "#/$defs/StatementCoverage"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "statements",
+        "scopes"
       ],
       "type": "object"
     }
