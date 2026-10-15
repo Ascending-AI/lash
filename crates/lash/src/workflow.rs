@@ -82,6 +82,10 @@
 //! document it was admitted under: publishing an edited document creates a
 //! new definition and changes no running process.
 //!
+//! A definition id is a content address, not a permission: lash does not check
+//! that the caller ran or holds the definition; authorizing creation from an id
+//! is the host's decision.
+//!
 //! # Following a run
 //!
 //! A process observation snapshot includes a [`ProcessWorkflowOverlay`]:

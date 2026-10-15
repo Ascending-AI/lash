@@ -30,6 +30,31 @@ use lash_vm_client::service::DialectRefusal;
 
 use crate::dialect::DialectPrompts;
 
+/// Offer typed dialect facts to the session's pure feedback contributors.
+/// The original diagnosis remains intact; no contributor means no new text.
+pub(crate) fn contribute_repairs(
+    refusal: &mut DialectRefusal,
+    source: &str,
+    grant_calls: &BTreeMap<String, String>,
+    ctx: &lash_core::RuntimeExecutionContext<'_>,
+) {
+    let unknown_name = matches!(
+        refusal.code.as_str(),
+        "TS_UNKNOWN_BINDING" | "PY_UNKNOWN_NAME"
+    )
+    .then(|| refusal.span.and_then(|(start, end)| source.get(start..end)))
+    .flatten();
+    let diagnostic = lash_core::plugin::CellFailureDiagnostic {
+        code: &refusal.code,
+        span: refusal.span,
+        unknown_name,
+        grants: grant_calls,
+    };
+    refusal
+        .repairs
+        .extend(ctx.cell_failure_repairs(&diagnostic));
+}
+
 /// The stable code of the refusal a model reads when a cell uses a binding
 /// an earlier cell left that was not carried (`K-SES-003`).
 pub const SESSION_BINDING_NOT_CARRIED: &str = "SESSION_BINDING_NOT_CARRIED";

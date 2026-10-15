@@ -142,6 +142,11 @@ fn every_contribution(reg: &mut PluginRegistrar<Owner>) -> ToolProviderHandle {
         )
         .unwrap();
     reg.output()
+        .cell_failure_feedback(crate::hook_key!("failure"), |_, _| {
+            Ok(Arc::new(|_| Vec::new()))
+        })
+        .unwrap();
+    reg.output()
         .assistant_prose_projector(|owner, _| Ok(Arc::new(owner.clone())))
         .unwrap();
     reg.execution()

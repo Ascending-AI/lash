@@ -350,6 +350,10 @@ impl Processes {
     /// and its engine settings, which staging holds under the start's key
     /// and seals onto the row; lash fills in neither (FIG-6034).
     ///
+    /// A definition id is a content address, not a permission: lash does not check
+    /// that the caller ran or holds the definition; authorizing creation from an id
+    /// is the host's decision.
+    ///
     /// A session-turn start carries no environment: it is a root creation,
     /// and takes an explicit spec like every other (FIG-4594): build its
     /// create request with

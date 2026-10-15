@@ -171,6 +171,20 @@ impl PluginSpec {
         self
     }
 
+    /// Contribute repair text to dialect failures, without changing their cause.
+    pub fn with_cell_failure_feedback(
+        mut self,
+        key: HookKey,
+        hook: super::CellFailureFeedbackHook,
+    ) -> Self {
+        let result = self
+            .registrations
+            .output()
+            .cell_failure_feedback(key, move |_, _| Ok(Arc::clone(&hook)));
+        self.admit(result);
+        self
+    }
+
     pub fn with_before_turn(mut self, key: HookKey, hook: BeforeTurnHook) -> Self {
         let result = self
             .registrations

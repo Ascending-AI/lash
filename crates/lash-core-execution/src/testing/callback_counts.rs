@@ -60,7 +60,8 @@ impl CallbackCounts {
             assistant_response_hooks,
             assistant_stream_finished_hooks,
             runtime_event_hooks,
-            presentation_steps
+            presentation_steps,
+            cell_failure_feedback
         );
         if let Some(registered) = &mut contributions.presentation_presenter {
             let inner = Arc::clone(&registered.hook);

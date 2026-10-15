@@ -130,6 +130,7 @@ registration error. Context hooks use their trait's `id()` as the key.
 | `turn().before`, `turn().after`, `turn().checkpoint` | Ordered observers returning declared contributions (events, tool membership and graph appends; after-turn also records). No abort or veto. A callback error fails the phase. |
 | `output().stream` | Ordered chunk transforms; a stop request is sticky. |
 | `output().stream_finished` | Ordered collection of end-of-stream state; a response reads the state of the finished callback it names. |
+| `output().cell_failure_feedback` | Pure repair text collected in registration order from the typed dialect diagnosis and admitted callable names. No contribution means unchanged failure feedback; the cell records the result. Session plugins only. |
 | `output().response` | Ordered full-response transforms. `stream_state_from` names one finished callback of the same plugin, validated at registration. |
 | `tool_results().presentation_step` | Presenter first, then ordered steps, with the existing retry and fallback rule. Changes representation, never the result or Run control. |
 | `tool_results().presenter` | One exclusive renderer. |

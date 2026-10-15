@@ -1187,6 +1187,15 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.dispatch.composition.tool_call_hooks()
     }
 
+    /// Pure, plugin-authored repairs for a cell's dialect diagnosis. An empty
+    /// contribution set returns no text and preserves the original feedback.
+    pub fn cell_failure_repairs(
+        &self,
+        diagnostic: &crate::plugin::CellFailureDiagnostic<'_>,
+    ) -> Vec<String> {
+        self.dispatch.composition.cell_failure_repairs(diagnostic)
+    }
+
     /// The deferred provider of the surface this execution's calls are
     /// admitted under, with the key the surface recorded it as (S6).
     ///

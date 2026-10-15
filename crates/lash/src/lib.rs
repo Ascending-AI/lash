@@ -767,11 +767,12 @@ pub mod plugins {
         AfterTurnContributions, AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext,
         AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,
         AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform, BeforeTurnHook,
-        CheckpointHook, CheckpointHookContext, CompactionContext, ContextCompaction,
-        ContextCompactor, ContextError, ContextPressureContext, ContextPressureDecision,
-        ContextPressureHook, ControlPhaseExpired, HookKey, PluginExtensionContribution,
-        PluginRecordContribution, PluginSessionMaterialization, PluginTraceEmitter,
-        SessionContributions, StaticPluginFactory, ToolCatalogContext, ToolPresentationPresenter,
+        CellFailureDiagnostic, CellFailureFeedbackHook, CheckpointHook, CheckpointHookContext,
+        CompactionContext, ContextCompaction, ContextCompactor, ContextError,
+        ContextPressureContext, ContextPressureDecision, ContextPressureHook, ControlPhaseExpired,
+        HookKey, PluginExtensionContribution, PluginRecordContribution,
+        PluginSessionMaterialization, PluginTraceEmitter, SessionContributions,
+        StaticPluginFactory, ToolCatalogContext, ToolPresentationPresenter,
         ToolResultProjectionContext, TurnContributions, TurnHookReport,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.

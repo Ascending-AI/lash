@@ -311,6 +311,7 @@ async fn link_cell(
     // The catalog tools that declare a read, by effect: what the cell's
     // read plan is drawn from.
     let mut read_tools = BTreeMap::new();
+    let mut grant_calls = BTreeMap::new();
     for tool in &ctx.tool_catalog().tools {
         let surface = |error: String| host_failure(format!("invalid host tool surface: {error}"));
         let binding = lash_vm_runtime::required_tool_executable(&tool.manifest)
@@ -322,6 +323,7 @@ async fn link_cell(
             .prompts
             .tool_call_path(&binding)
             .map_err(|refusal| surface(refusal.to_string()))?;
+        grant_calls.insert(tool.manifest.name.clone(), path.clone());
         boundary
             .offer_tool(
                 &path,
@@ -364,6 +366,13 @@ async fn link_cell(
     };
     let grants = crate::deferred::offer_deferred_matches(&mut boundary, &outcomes, ctx)
         .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?;
+    for grant in grants.values() {
+        let binding = lash_vm_runtime::required_tool_executable(grant.manifest())
+            .map_err(|error| host_failure(error.to_string()))?;
+        if let Ok(path) = services.prompts.tool_call_path(&binding) {
+            grant_calls.insert(grant.manifest().name.clone(), path);
+        }
+    }
     let candidates = read_candidates(ctx, &boundary, &grants, read_tools);
 
     let session = state.bindings();
@@ -402,7 +411,8 @@ async fn link_cell(
             function_values,
             reads,
         }) => (document, annotations, function_values, reads),
-        Ok(Response::DialectRefused(refusal)) => {
+        Ok(Response::DialectRefused(mut refusal)) => {
+            crate::feedback::contribute_repairs(&mut refusal, code, &grant_calls, ctx);
             let observation = CellObservation::of_refusal(refusal);
             emit_step_trace(ctx, Err(&observation.code()));
             return Err(Refused::Cell(Box::new(observation.failure(

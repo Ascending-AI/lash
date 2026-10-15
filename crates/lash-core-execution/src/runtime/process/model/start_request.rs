@@ -102,6 +102,10 @@ impl ProcessStartDeclaration {
 
     /// Declare a start of the definition `launch` was held for, under that
     /// launch.
+    ///
+    /// A definition id is a content address, not a permission: lash does not check
+    /// that the caller ran or holds the definition; authorizing creation from an id
+    /// is the host's decision.
     pub fn definition(
         signature_claim: Option<super::super::ProcessSignature>,
         args: serde_json::Map<String, serde_json::Value>,
@@ -263,6 +267,10 @@ impl ProcessStartRequest {
 
     /// A host's start of the definition `definition_id` names, under
     /// `launch`.
+    ///
+    /// A definition id is a content address, not a permission: lash does not check
+    /// that the caller ran or holds the definition; authorizing creation from an id
+    /// is the host's decision.
     pub fn definition(
         definition_id: super::super::ProcessDefinitionId,
         signature_claim: Option<super::super::ProcessSignature>,

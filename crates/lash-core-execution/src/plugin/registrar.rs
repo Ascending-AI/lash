@@ -142,6 +142,7 @@ pub(crate) struct PluginContributions {
     pub(crate) protocol_session: Option<RegisteredExclusiveHook<Arc<dyn ProtocolSessionPlugin>>>,
     pub(crate) protocol_driver: Option<RegisteredExclusiveHook<Arc<dyn ProtocolDriverPlugin>>>,
     pub(crate) code_executor: Option<RegisteredExclusiveHook<Arc<dyn CodeExecutorPlugin>>>,
+    pub(crate) cell_failure_feedback: Vec<RegisteredHook<CellFailureFeedbackHook>>,
     pub(crate) assistant_prose_projector:
         Option<RegisteredExclusiveHook<Arc<dyn AssistantProseProjectorPlugin>>>,
     /// Prompt sections and wrappers, in registration order (ADR 0133).
@@ -184,6 +185,7 @@ impl PluginContributions {
             protocol_session,
             protocol_driver,
             code_executor,
+            cell_failure_feedback,
             assistant_prose_projector,
             prompt: _,
         } = self;
@@ -250,6 +252,10 @@ impl PluginContributions {
             (protocol_session.is_some(), CallbackSlot::ProtocolSession),
             (protocol_driver.is_some(), CallbackSlot::ProtocolDriver),
             (code_executor.is_some(), CallbackSlot::CodeExecutor),
+            (
+                !cell_failure_feedback.is_empty(),
+                CallbackSlot::CellFailureFeedback,
+            ),
             (
                 assistant_prose_projector.is_some(),
                 CallbackSlot::AssistantProseProjector,
@@ -472,6 +478,20 @@ pub(crate) struct OutputRegistrations<'a> {
 }
 
 impl OutputRegistrations<'_> {
+    pub fn cell_failure_feedback(
+        self,
+        key: HookKey,
+        hook: CellFailureFeedbackHook,
+    ) -> Result<(), PluginError> {
+        push_keyed_hook(
+            &mut self.reg.contributions.cell_failure_feedback,
+            &self.reg.owner,
+            CallbackSlot::CellFailureFeedback,
+            key,
+            hook,
+        )
+    }
+
     /// Chunk transforms chain in recorded registration order; any hook that
     /// asks to stop the stream stops it.
     pub fn stream(self, key: HookKey, hook: AssistantStreamHook) -> Result<(), PluginError> {

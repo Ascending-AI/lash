@@ -35,6 +35,26 @@ fn core(
     responses: &Responses,
     requests: &Requests,
 ) -> Result<LashCore> {
+    core_with_feedback(
+        backend,
+        dialect,
+        channel,
+        presentation,
+        responses,
+        requests,
+        None,
+    )
+}
+
+fn core_with_feedback(
+    backend: lash_core::Backend,
+    dialect: crate::rlm::CellDialect,
+    channel: crate::rlm::RlmChannel,
+    presentation: crate::rlm::RlmPresentationConfig,
+    responses: &Responses,
+    requests: &Requests,
+    feedback: Option<crate::plugins::CellFailureFeedbackHook>,
+) -> Result<LashCore> {
     let (responses, requests) = (Arc::clone(responses), Arc::clone(requests));
     let provider = crate::testing::TestProvider::builder()
         .kind("cell-call-feedback")
@@ -61,10 +81,19 @@ fn core(
     config.presentation = presentation;
     let factory = crate::rlm::RlmProtocolPluginFactory::new(config, dialect)
         .with_worker_service(untimed_fixture_workers());
-    explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
+    let builder = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
-        .build(crate::testing::runtime_lease_owner())
+        .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools));
+    let builder = if let Some(feedback) = feedback {
+        builder.plugin(Arc::new(crate::plugins::StaticPluginFactory::new(
+            crate::plugins::PluginDeclaration::initial("cell-repairs"),
+            crate::plugins::PluginSpec::new()
+                .with_cell_failure_feedback(crate::hook_key!("callable"), feedback),
+        )))
+    } else {
+        builder
+    };
+    builder.build(crate::testing::runtime_lease_owner())
 }
 
 /// The text in `messages` that carries a calls block, wherever the channel
@@ -289,6 +318,110 @@ async fn failed_cell_feedback_preserves_completed_call_evidence() -> Result<()> 
                 "{case}: the reopened session renders the recorded observation"
             );
             reopened.shutdown().await?;
+        }
+    }
+    Ok(())
+}
+
+/// FIG-6342 / host-owned repair policy: only an installed plugin adds hints,
+/// and its typed diagnosis reaches the model's very next input in both dialects.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn plugins_own_cell_failure_repairs_in_the_next_model_input() -> Result<()> {
+    for (dialect, code, diagnostic_code, callable) in [
+        (
+            crate::rlm::CellDialect::typescript(),
+            "await app_lookup({});",
+            "TS_UNKNOWN_BINDING",
+            "tools.app_lookup",
+        ),
+        (
+            crate::rlm::CellDialect::python(),
+            "await app_lookup({})",
+            "PY_UNKNOWN_NAME",
+            "tools_app_lookup",
+        ),
+    ] {
+        let mut baseline = None;
+        for installed in [false, true] {
+            let hook: crate::plugins::CellFailureFeedbackHook = Arc::new(move |diagnostic| {
+                assert_eq!(diagnostic.code, diagnostic_code);
+                assert_eq!(diagnostic.unknown_name, Some("app_lookup"));
+                let (start, end) = diagnostic.span.expect("unknown name has a span");
+                assert_eq!(&code[start..end], "app_lookup");
+                assert_eq!(
+                    diagnostic.grants.get("app_lookup").map(String::as_str),
+                    Some(callable)
+                );
+                vec![format!("did you mean `{callable}`?")]
+            });
+            let responses: Responses = Arc::new(tokio::sync::Mutex::new(
+                [
+                    control_cell_response(
+                        &dialect,
+                        crate::rlm::RlmChannel::Cell,
+                        0,
+                        code.to_owned(),
+                    ),
+                    text_response("done"),
+                ]
+                .into(),
+            ));
+            let requests: Requests = Arc::new(StdMutex::new(Vec::new()));
+            let running = core_with_feedback(
+                sqlite_memory_store_backend().await,
+                dialect.clone(),
+                crate::rlm::RlmChannel::Cell,
+                crate::rlm::RlmPresentationConfig::standard(),
+                &responses,
+                &requests,
+                installed.then_some(hook),
+            )?;
+            let session = running
+                .session(SessionId::fixture("plugin-cell-repairs"))
+                .created()
+                .await
+                .open()
+                .await?;
+            session
+                .send(TurnInput::text("call the lookup"))
+                .output()
+                .await?;
+            let feedback = {
+                let requests = requests.lock_recover();
+                assert_eq!(requests.len(), 2);
+                let mut texts = Vec::new();
+                message_strings(&requests[1], &mut texts);
+                texts
+                    .into_iter()
+                    .find(|text| text.contains(diagnostic_code))
+                    .expect("the next model request carries the diagnosis")
+                    .to_owned()
+            };
+            let repair = format!("\nInstead: did you mean `{callable}`?");
+            if installed {
+                assert!(feedback.contains(&repair), "{feedback}");
+                assert_eq!(
+                    feedback.replace(&repair, ""),
+                    baseline.as_deref().expect("unextended feedback"),
+                    "the plugin adds only its repair"
+                );
+            } else {
+                let message = if dialect.name() == "python" {
+                    "name `app_lookup` is not defined"
+                } else {
+                    "`app_lookup` is not defined"
+                };
+                assert_eq!(
+                    feedback,
+                    format!(
+                        "{diagnostic_code}: {message} (line 1, column 7)\n  {code}\n\nA standalone `</{}>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line.\n\nNext: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell.",
+                        dialect.name(),
+                    ),
+                    "no plugin preserves the original feedback bytes"
+                );
+                baseline = Some(feedback);
+            }
+            running.shutdown().await?;
         }
     }
     Ok(())

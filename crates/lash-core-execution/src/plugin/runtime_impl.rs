@@ -601,10 +601,10 @@ impl PluginHost {
                 !contributions.state_retaining_plugins.is_empty(),
                 std::sync::atomic::Ordering::SeqCst,
             );
-            let composition = Arc::new(super::ExecutionComposition::new(
-                &mut contributions,
-                Arc::clone(&registry),
-            ));
+            let composition = Arc::new(
+                super::ExecutionComposition::new(&mut contributions, Arc::clone(&registry))
+                    .with_cell_failure_feedback(&mut contributions),
+            );
             let _ = session
                 .capabilities
                 .set(super::session_obj::PluginSessionCapabilities {

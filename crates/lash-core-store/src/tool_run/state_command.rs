@@ -106,6 +106,7 @@ callback_slots! {
     ProtocolDriver => "protocol_driver", DecisionOnly;
     CodeExecutor => "code_executor", DecisionOnly;
     AssistantProseProjector => "assistant_prose_projector", DecisionOnly;
+    CellFailureFeedback => "cell_failure_feedback", DecisionOnly;
 }
 
 impl CallbackSlot {

@@ -148,6 +148,11 @@ impl JsonSchema {
     /// Whether the empty object is an instance of this schema: a tool whose
     /// input schema accepts it may be called with its input omitted, and the
     /// omitted input is exactly `{}`.
+    ///
+    /// Composition keywords do not by themselves refuse `{}`. In particular,
+    /// `oneOf` accepts it when exactly one branch accepts it; `allOf` accepts
+    /// it when every branch does. References and negation likewise follow
+    /// their validation semantics, rather than a keyword-based arity rule.
     pub fn accepts_empty_object(&self) -> bool {
         self.validator
             .is_valid(&Value::Object(serde_json::Map::new()))

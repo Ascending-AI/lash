@@ -13,6 +13,26 @@ pub type PluginSessionTask = PluginFuture<()>;
 /// A before-turn observer: what it contributes to the turn being prepared.
 pub type BeforeTurnHook =
     Arc<dyn Fn(TurnHookContext) -> PluginFuture<TurnContributions> + Send + Sync>;
+/// Facts a plugin may use to contribute repair text to a dialect failure.
+/// Registry names and callable spellings come from this cell's admitted tools.
+#[derive(Clone, Debug)]
+pub struct CellFailureDiagnostic<'a> {
+    pub code: &'a str,
+    /// Byte offsets in the authored cell source.
+    pub span: Option<(usize, usize)>,
+    /// The name at the span for an unknown-name diagnostic, otherwise absent.
+    pub unknown_name: Option<&'a str>,
+    /// Grant registry name to the callable spelling in this cell's dialect.
+    pub grants: &'a std::collections::BTreeMap<String, String>,
+}
+
+/// Pure repair contributions, appended in registration order to the cell's
+/// failure feedback. Implementations must be deterministic and perform no I/O
+/// or state changes. The cell records the resulting feedback with its failure;
+/// replay reads that result. No installed hooks means no added repair text.
+pub type CellFailureFeedbackHook =
+    Arc<dyn Fn(&CellFailureDiagnostic<'_>) -> Vec<String> + Send + Sync>;
+
 /// Realized declarations available to presentation callbacks.
 #[derive(Clone, Debug, Default)]
 pub struct ToolPresentationFacts {

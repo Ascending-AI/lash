@@ -109,11 +109,12 @@ pub use hooks::{
     AfterTurnHook, AssistantResponseHook, AssistantResponseHookContext, AssistantResponseTransform,
     AssistantStreamFinishReason, AssistantStreamFinishedContext, AssistantStreamFinishedHook,
     AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform, BeforeTurnHook,
-    CheckpointHook, CheckpointHookContext, NoPresentationArtifacts, PluginFuture,
-    PluginLifecycleEvent, PluginLifecycleEventHook, PluginLifecycleFuture, PluginSessionTask,
-    SessionConfigChangedContext, ToolCatalogContributor, ToolPresentationArtifacts,
-    ToolPresentationFacts, ToolPresentationInput, ToolPresentationPresenter, ToolPresentationStep,
-    ToolResultProjectionContext, TurnHookContext, TurnHookReport, TurnResultHookContext,
+    CellFailureDiagnostic, CellFailureFeedbackHook, CheckpointHook, CheckpointHookContext,
+    NoPresentationArtifacts, PluginFuture, PluginLifecycleEvent, PluginLifecycleEventHook,
+    PluginLifecycleFuture, PluginSessionTask, SessionConfigChangedContext, ToolCatalogContributor,
+    ToolPresentationArtifacts, ToolPresentationFacts, ToolPresentationInput,
+    ToolPresentationPresenter, ToolPresentationStep, ToolResultProjectionContext, TurnHookContext,
+    TurnHookReport, TurnResultHookContext,
 };
 pub use protocol::{
     AssistantProseProjectorPlugin, CarriedCell, CellCallReferences, CheckpointComponentKey,

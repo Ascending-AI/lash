@@ -165,6 +165,7 @@ contribution_table! {
         ProtocolSession => [Session];
         ProtocolDriver => [Session];
         CodeExecutor => [Session];
+        CellFailureFeedback => [Session];
         AssistantProseProjector => [Session];
     }
     others {

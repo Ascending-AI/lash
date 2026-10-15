@@ -438,7 +438,7 @@ keyed_facet!(TurnRegistrations, turn, before: BeforeTurn => BeforeTurnHook, afte
 keyed_facet!(ToolCallRegistrations, tool_calls, transform_args: ToolArgsTransform => ToolArgsTransformHook, check_args: ToolArgsCheck => ToolArgsCheckHook, transform_result: ToolResultTransform => ToolResultTransformHook, check_result: ToolResultCheck => ToolResultCheckHook);
 keyed_facet!(ToolCatalogRegistrations, tool_catalog, contribute: ToolCatalog => ToolCatalogContributor);
 keyed_facet!(SessionRegistrations, lifecycle => session, on_event: RuntimeEvent => PluginLifecycleEventHook);
-keyed_facet!(OutputRegistrations, output, stream: AssistantStream => AssistantStreamHook, stream_finished: AssistantStreamFinished => AssistantStreamFinishedHook);
+keyed_facet!(OutputRegistrations, output, stream: AssistantStream => AssistantStreamHook, stream_finished: AssistantStreamFinished => AssistantStreamFinishedHook, cell_failure_feedback: CellFailureFeedback => CellFailureFeedbackHook);
 keyed_facet!(ToolResultRegistrations, tool_results, presentation_step: PresentationStep => ToolPresentationStep);
 macro_rules! singleton {
     ($facet:ident, $method:ident, $( $name:ident : $slot:ident => $ty:ty ),+ $(,)?) => {

@@ -530,6 +530,17 @@ impl From<&ProcessId> for TurnId {
 pub struct RunId(TurnId);
 
 impl RunId {
+    /// An identity for a test fixture. A send's input id is not necessarily
+    /// its run id: composed and checkpoint inputs can join an existing run.
+    ///
+    /// # Panics
+    ///
+    /// When `label` is blank.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fixture(label: impl Into<String>) -> Self {
+        Self(TurnId::fixture(label))
+    }
+
     /// Parse a retained Run identity using Lash's validated identity vocabulary.
     pub fn parse(value: impl Into<String>) -> Result<Self, BlankIdentity> {
         TurnId::parse(value).map(Self)

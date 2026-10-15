@@ -18,6 +18,7 @@ pub struct ExecutionComposition {
     presenter: Option<RegisteredHook<ToolPresentationPresenter>>,
     presentation_steps: Vec<RegisteredHook<ToolPresentationStep>>,
     prompt: PromptRegistry,
+    cell_failure_feedback: Vec<RegisteredHook<CellFailureFeedbackHook>>,
     tool_registry: Arc<crate::ToolRegistry>,
 }
 
@@ -43,7 +44,27 @@ impl ExecutionComposition {
             presentation_steps: std::mem::take(&mut contributions.presentation_steps),
             prompt: std::mem::take(&mut contributions.prompt),
             tool_registry,
+            cell_failure_feedback: Vec::new(),
         }
+    }
+
+    /// Session-only contributions: process assembly leaves this slot unconsumed.
+    pub(super) fn with_cell_failure_feedback(
+        mut self,
+        contributions: &mut PluginContributions,
+    ) -> Self {
+        self.cell_failure_feedback = std::mem::take(&mut contributions.cell_failure_feedback);
+        self
+    }
+
+    pub(crate) fn cell_failure_repairs(
+        &self,
+        diagnostic: &CellFailureDiagnostic<'_>,
+    ) -> Vec<String> {
+        self.cell_failure_feedback
+            .iter()
+            .flat_map(|entry| (entry.hook)(diagnostic))
+            .collect()
     }
 
     pub fn prompt_catalog(&self) -> PromptCatalog {
