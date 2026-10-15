@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fixture tests for check-kernel-boundary.py."""
 
+import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
@@ -65,6 +66,22 @@ CLEAN = {
 
 
 class KernelBoundary(unittest.TestCase):
+    def test_migration_has_no_editor_dependency(self) -> None:
+        """FIG-6373: the migrate edge cannot make a reader compile the editor."""
+        spec = importlib.util.spec_from_file_location("kernel_boundary", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        workspace = module.Workspace(ROOT)
+        pending = [ROOT / "crates/lash-kernel-migrate"]
+        reached = set()
+        while pending:
+            directory = pending.pop()
+            if directory in reached:
+                continue
+            reached.add(directory)
+            pending.extend(target for _, _, target in workspace.edges(directory, module.LINKED_TABLES))
+        self.assertNotIn(ROOT / "crates/lash-kernel-edit", reached)
+
     def run_check(self, overrides: dict[str, str]) -> subprocess.CompletedProcess:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

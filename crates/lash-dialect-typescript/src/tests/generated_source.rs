@@ -271,7 +271,8 @@ fn maps_cover_real_sites_in_final_utf8_and_never_change_text() {
     assert!(off.source_map.is_none());
     let map = on.source_map.unwrap();
     assert_eq!(map.document, document.identity().unwrap());
-    assert_eq!(map.format, on.format);
+    assert_eq!(map.language, on.format.language());
+    map.validate(&document, &on.source).unwrap();
     use sha2::Digest;
     assert_eq!(
         map.source,

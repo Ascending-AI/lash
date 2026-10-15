@@ -2,13 +2,13 @@
 //! document lists, replacing their identities, and the correspondence of a
 //! rewrite that moves no node.
 
+use lash_kernel_doc::{Correspondence, Survivor};
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{
     Action, Block, Callee, Document, Expr, FunctionCatalog, FunctionDefinition, FunctionId,
     Implementation, Member, Node, Place, Rhs, Site, Stmt, Unit,
 };
-use lash_kernel_edit::{Correspondence, Survivor};
 
 use crate::migration::DocumentRefusal;
 

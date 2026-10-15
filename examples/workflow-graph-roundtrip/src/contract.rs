@@ -3,11 +3,12 @@
 //! a workflow view are lash's own serialized shapes, passed through
 //! unchanged.
 
+use lash::workflow::document::Correspondence;
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
 use lash::workflow::document::{Document, Name, Site};
-use lash::workflow::edit::{Correspondence, Edit};
+use lash::workflow::edit::Edit;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

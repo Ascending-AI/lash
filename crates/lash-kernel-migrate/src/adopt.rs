@@ -13,10 +13,10 @@
 //! nodes went; a run that stands inside any other replaced body is refused
 //! at the site it stands on.
 
+use lash_kernel_doc::{Correspondence, Survivor};
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{Document, FunctionBody, FunctionCatalog, FunctionId, Unit};
-use lash_kernel_edit::{Correspondence, Survivor};
 
 use crate::migration::{DocumentRefusal, Rewritten};
 use crate::rewrite::{document_identity, replace_functions, replace_in_block, same_sites, unmoved};

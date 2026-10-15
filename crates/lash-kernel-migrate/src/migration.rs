@@ -2,11 +2,11 @@
 
 use std::collections::BTreeMap;
 
+use lash_kernel_doc::Correspondence;
 use lash_kernel_doc::{
     Document, DocumentId, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName,
     FunctionRegistry, KernelVersion, RegistryError, Site,
 };
-use lash_kernel_edit::Correspondence;
 use lash_kernel_state::ParkedRun;
 use serde::Serialize;
 

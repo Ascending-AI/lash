@@ -1,6 +1,7 @@
 //! Laws of the edits. Each pins a named rule of
 //! `docs/kernel/semantics.md`.
 
+use lash_kernel_doc::Correspondence;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -19,8 +20,8 @@ use lash_kernel_vm::{
 use crate::apply::Working;
 use crate::tree::NodeMut;
 use crate::{
-    Correspondence, Draft, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal, Location,
-    NodeClass, Position, Transaction,
+    Draft, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal, Location, NodeClass, Position,
+    Transaction,
 };
 
 /// The library the laws run against: a native function, the corrected

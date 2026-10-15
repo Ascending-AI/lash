@@ -64,7 +64,7 @@ impl Lowerer<'_> {
     fn statement_inner(
         &mut self,
         statement: &PyStmt,
-        span: Option<lash_kernel_dialect::Span>,
+        span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         match statement {
             PyStmt::Expr(expression) => {
@@ -312,7 +312,7 @@ impl Lowerer<'_> {
     fn while_loop(
         &mut self,
         while_loop: &ast::StmtWhile,
-        span: Option<lash_kernel_dialect::Span>,
+        span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         let flag = (!while_loop.orelse.is_empty() && scope::breaks(&while_loop.body))
             .then(|| self.break_flag());
@@ -347,7 +347,7 @@ impl Lowerer<'_> {
         flag: Option<Name>,
         guard: Option<&(Operand, Operand)>,
         orelse: &[PyStmt],
-        span: Option<lash_kernel_dialect::Span>,
+        span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         let tail = |this: &mut Self| -> Lowering<()> {
             if let Some((walked, size)) = guard {
@@ -413,7 +413,7 @@ impl Lowerer<'_> {
     fn for_loop(
         &mut self,
         for_loop: &ast::StmtFor,
-        span: Option<lash_kernel_dialect::Span>,
+        span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         if for_loop.is_async {
             return Err(diagnostics::with_repair(
@@ -576,7 +576,7 @@ impl Lowerer<'_> {
     fn attempt(
         &mut self,
         attempt: &ast::StmtTry,
-        span: Option<lash_kernel_dialect::Span>,
+        span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         if attempt.is_star {
             return Err(diagnostics::with_repair(
@@ -621,7 +621,7 @@ impl Lowerer<'_> {
     fn finally_reraising(
         &mut self,
         attempt: &ast::StmtTry,
-        span: Option<lash_kernel_dialect::Span>,
+        span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         let pending = self.fresh("pending");
         self.emit(Stmt::Let {
@@ -684,7 +684,7 @@ impl Lowerer<'_> {
         attempt: &ast::StmtTry,
         caught: &Name,
         finally: Option<Buf>,
-        span: Option<lash_kernel_dialect::Span>,
+        span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         let has_else = !attempt.orelse.is_empty();
         let passed = has_else.then(|| {

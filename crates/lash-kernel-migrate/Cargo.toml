@@ -30,7 +30,6 @@ workspace = true
 [dependencies]
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
-lash-kernel-edit = { workspace = true }
 lash-kernel-state = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }

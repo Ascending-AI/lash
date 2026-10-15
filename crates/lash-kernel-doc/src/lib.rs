@@ -13,6 +13,13 @@
 
 mod ast;
 mod canonical;
+mod correspondence;
+mod source_map;
+mod source_map_codec;
+#[cfg(test)]
+mod source_map_tests;
+pub use correspondence::{Correspondence, Survivor};
+pub use source_map::{SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span};
 mod codec_variants;
 mod data_limits;
 mod decode;

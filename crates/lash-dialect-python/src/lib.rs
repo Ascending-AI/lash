@@ -26,13 +26,13 @@ mod tests;
 pub use diagnostics::{Code, GeneratedSourceCode};
 pub use generated::read;
 pub use lash_kernel_dialect::{
-    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceMap,
-    SourceSite,
+    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
 pub use package::define_helpers;
 pub use printer::print;
 
-use lash_kernel_dialect::{Diagnostic, Environment, FrontEnd, Lowered, Package, Span};
+use lash_kernel_dialect::{Diagnostic, Environment, FrontEnd, Lowered, Package};
+use lash_kernel_doc::Span;
 
 /// The name annotations record a document's dialect under.
 pub const DIALECT: &str = "python";

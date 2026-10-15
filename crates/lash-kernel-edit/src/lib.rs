@@ -5,7 +5,7 @@
 //! forms and whose targets are [`lash_kernel_doc::Site`]s of the document it
 //! read. The draft applies the transaction to a copy, has
 //! `lash-kernel-check` admit the result, and either publishes it with a
-//! [`Correspondence`] (which node of the old document is which node of the
+//! [`lash_kernel_doc::Correspondence`] (which node of the old document is which node of the
 //! new one) or refuses it with typed [`EditDiagnostic`]s and changes
 //! nothing. Annotations move with the node they are attached to.
 //!
@@ -23,7 +23,6 @@
 
 mod apply;
 pub mod authoring;
-mod correspondence;
 mod draft;
 mod edit;
 mod extract;
@@ -36,7 +35,6 @@ mod tests;
 #[cfg(test)]
 mod view_tests;
 
-pub use correspondence::{Correspondence, Survivor};
 pub use draft::{Applied, Draft};
 pub use edit::{Edit, Position, Transaction};
 pub use extract::{Extraction, extract_entry};

@@ -102,6 +102,9 @@ pub enum EditDiagnosticKind {
     NoSuchEntry { name: Name },
     #[error("the document calls no library function {function}")]
     FunctionNotCalled { function: FunctionId },
+    /// Surviving nodes do not define a one-to-one relation.
+    #[error("surviving nodes do not form an injective correspondence")]
+    InvalidCorrespondence,
     /// The document or its annotations cannot be read at all.
     #[error("{0}")]
     Invalid(InvalidReason),
@@ -132,6 +135,7 @@ impl EditDiagnosticKind {
             Self::EntryExists { .. } => "entry_exists",
             Self::NoSuchEntry { .. } => "no_such_entry",
             Self::FunctionNotCalled { .. } => "function_not_called",
+            Self::InvalidCorrespondence => "invalid_correspondence",
             Self::Invalid(_) => "invalid",
             Self::Refused(_) => "refused",
         }
@@ -163,5 +167,16 @@ pub(crate) fn refused(edit: Option<u32>, refusal: Refusal) -> EditRefusal {
                 kind: EditDiagnosticKind::Refused(error.reason),
             })
             .collect(),
+    }
+}
+
+/// Refuse an internally inconsistent survival relation without publishing it.
+pub(crate) fn invalid_correspondence() -> EditRefusal {
+    EditRefusal {
+        diagnostics: vec![EditDiagnostic {
+            edit: None,
+            location: None,
+            kind: EditDiagnosticKind::InvalidCorrespondence,
+        }],
     }
 }

@@ -1,7 +1,7 @@
 //! Which node of a document became which node of the document edited from
 //! it.
 
-use lash_kernel_doc::{DocumentId, Site};
+use crate::{DocumentId, Site};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// A node of `base` that is not listed did not survive. A node of `result`
 /// that no entry leads to is new.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Correspondence {
     pub base: DocumentId,
@@ -35,8 +35,19 @@ pub struct Survivor {
     pub edited: bool,
 }
 
+impl Survivor {
+    pub fn new(from: Site, to: Site, edited: bool) -> Self {
+        Self { from, to, edited }
+    }
+}
+
 impl Correspondence {
-    pub(crate) fn new(base: DocumentId, result: DocumentId, mut entries: Vec<Survivor>) -> Self {
+    /// Canonical JSON in the same encoding as documents.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, crate::EncodeError> {
+        crate::canonical::canonical_bytes(self)
+    }
+
+    fn new(base: DocumentId, result: DocumentId, mut entries: Vec<Survivor>) -> Self {
         entries.sort_by(|a, b| a.from.cmp(&b.from));
         Self {
             base,
@@ -60,7 +71,7 @@ impl Correspondence {
     }
 
     /// Every node of `document` to itself.
-    pub(crate) fn identity(document: DocumentId, sites: impl IntoIterator<Item = Site>) -> Self {
+    pub fn identity(document: DocumentId, sites: impl IntoIterator<Item = Site>) -> Option<Self> {
         let entries = sites
             .into_iter()
             .map(|site| Survivor {
@@ -69,7 +80,7 @@ impl Correspondence {
                 edited: false,
             })
             .collect();
-        Self::new(document, document, entries)
+        Self::of(document, document, entries)
     }
 
     /// The surviving nodes, ordered by their site in the base.
@@ -117,5 +128,29 @@ impl Correspondence {
             })
             .collect();
         Some(Self::new(self.base, next.result, entries))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CorrespondenceWire {
+    base: DocumentId,
+    result: DocumentId,
+    #[serde(default)]
+    entries: Vec<Survivor>,
+}
+impl TryFrom<CorrespondenceWire> for Correspondence {
+    type Error = &'static str;
+    fn try_from(value: CorrespondenceWire) -> Result<Self, Self::Error> {
+        Self::of(value.base, value.result, value.entries)
+            .ok_or("correspondence repeats a source or destination site")
+    }
+}
+
+impl<'de> Deserialize<'de> for Correspondence {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        CorrespondenceWire::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
     }
 }

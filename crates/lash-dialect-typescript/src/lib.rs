@@ -24,11 +24,10 @@ mod tests;
 
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack, SourceLimits};
 pub use builtins::{Receiver, Row};
-pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
+pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind};
 pub use intrinsics::read;
 pub use lash_kernel_dialect::{
-    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceMap,
-    SourceSite,
+    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
 pub use package::define_helpers;
 pub use printer::print;
@@ -41,6 +40,7 @@ pub const BUILD_IDENTITY: (&str, &str) = (
 );
 
 use lash_kernel_dialect::{Environment, FrontEnd, FunctionValues, Lowered};
+use lash_kernel_doc::Span as SourceSpan;
 
 /// The tag of the token a TypeScript function value is: a tuple of the tag,
 /// the built-in's path, its name and length, the closure that calls it and,

@@ -11,13 +11,14 @@
 //! start of the execution, and what it folds is checked against a count of
 //! the loops made from the order the runs were given.
 
+use lash::workflow::document::Correspondence;
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context as _, Result, bail, ensure};
 use lash::workflow::document::{
     Action, Document, Expr, Literal, Name, Node, Rhs, Site, Stmt, Unit, parse_document,
 };
-use lash::workflow::edit::{Correspondence, Edit, Position};
+use lash::workflow::edit::{Edit, Position};
 use lash_e2e::{Case, Host, NodeOptions};
 use serde_json::{Value, json};
 

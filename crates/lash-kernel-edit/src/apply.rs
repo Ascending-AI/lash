@@ -5,6 +5,7 @@
 //! the document and changes the shadows the same way. Nothing here admits:
 //! [`Working::publish`] hands the result to the checker.
 
+use lash_kernel_doc::{Correspondence, Survivor};
 use std::collections::BTreeMap;
 
 use lash_kernel_check::{
@@ -16,9 +17,8 @@ use lash_kernel_doc::{
     FunctionId, Literal, Name, Node, NodeAnnotation, Place, Site, Stmt, Unit,
 };
 
-use crate::correspondence::{Correspondence, Survivor};
 use crate::edit::{Edit, Position};
-use crate::refusal::{EditDiagnosticKind, EditRefusal, Location, refused};
+use crate::refusal::{EditDiagnosticKind, EditRefusal, Location, invalid_correspondence, refused};
 use crate::tree::{NodeClass, NodeMut, Shadow};
 
 /// Why one edit cannot be applied.
@@ -803,7 +803,7 @@ impl Working {
 
         let admitted =
             admit(&self.document, environment).map_err(|refusal| refused(None, refusal))?;
-        let (annotations, correspondence) = self.records(base, admitted.identity);
+        let (annotations, correspondence) = self.records(base, admitted.identity)?;
         Ok(Published {
             document: self.document,
             annotations,
@@ -814,7 +814,11 @@ impl Working {
 
     /// The annotation layer and the correspondence the shadows hold, for a
     /// document of identity `result` edited from the one `base` annotates.
-    fn records(&self, base: &Annotations, result: DocumentId) -> (Annotations, Correspondence) {
+    fn records(
+        &self,
+        base: &Annotations,
+        result: DocumentId,
+    ) -> Result<(Annotations, Correspondence), EditRefusal> {
         let mut nodes = Vec::new();
         let mut survivors = Vec::new();
         for (unit, root) in &self.shadows {
@@ -845,7 +849,8 @@ impl Working {
             source: base.source.clone().filter(|_| base.document == result),
             nodes,
         };
-        let correspondence = Correspondence::new(base.document, result, survivors);
-        (annotations, correspondence)
+        let correspondence = Correspondence::of(base.document, result, survivors)
+            .ok_or_else(invalid_correspondence)?;
+        Ok((annotations, correspondence))
     }
 }

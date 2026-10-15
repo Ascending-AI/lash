@@ -1,6 +1,6 @@
 //! Bounded final-text writing and optional Site collection for generated codecs.
-use lash_kernel_doc::{Document, DocumentId, Node, Site, Unit};
-use sha2::{Digest, Sha256};
+use lash_kernel_doc::{Document, Node, Site, Unit};
+use lash_kernel_doc::{SourceLanguage, SourceMap, SourceSite, Span};
 
 /// Generated source is a separate, disposable format from stored documents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -11,6 +11,13 @@ pub enum SourceFormat {
 }
 
 impl SourceFormat {
+    pub fn language(self) -> SourceLanguage {
+        match self {
+            Self::TypeScriptV1 => SourceLanguage::TypeScript,
+            Self::PythonV1 => SourceLanguage::Python,
+        }
+    }
+
     /// The installed dialect that owns this generated format.
     pub fn dialect(self) -> &'static str {
         match self {
@@ -46,21 +53,6 @@ pub struct PrintedSource {
     pub format: SourceFormat,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_map: Option<SourceMap>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SourceMap {
-    /// SHA-256 of the final UTF-8 source bytes (without a domain prefix).
-    pub source: [u8; 32],
-    pub document: DocumentId,
-    pub format: SourceFormat,
-    pub sites: Vec<SourceSite>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SourceSite {
-    pub site: Site,
-    pub ranges: Vec<crate::Span>,
-    /// Reserved for genuinely unspelled blocks. Generic forms spell all blocks.
-    pub implicit: Option<usize>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PrintError {
@@ -381,7 +373,7 @@ impl SourceWriter {
                 (vec![], Some(end))
             } else {
                 (
-                    vec![crate::Span {
+                    vec![Span {
                         start: frame.start,
                         end,
                     }],
@@ -410,12 +402,8 @@ impl SourceWriter {
         let source_map = self
             .sites
             .map(|sites| -> Result<_, PrintError> {
-                Ok(SourceMap {
-                    source: Sha256::digest(self.source.as_bytes()).into(),
-                    document: document.identity()?,
-                    format,
-                    sites,
-                })
+                SourceMap::new(document, &self.source, format.language(), sites)
+                    .map_err(|error| PrintError::Invalid(error.to_string()))
             })
             .transpose()?;
         Ok(PrintedSource {
@@ -441,6 +429,31 @@ impl std::io::Write for SourceWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// FIG-6373: printed maps are sorted even when child spans close first.
+    #[test]
+    fn printed_maps_are_canonical() {
+        let document =
+            lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return null }\n")
+                .unwrap();
+        let mut writer = SourceWriter::new(PrintOptions {
+            source_map: true,
+            ..Default::default()
+        });
+        writer.begin_node(Some(&Unit::Main));
+        writer.write("{");
+        writer.begin_node(None);
+        writer.write("yield");
+        writer.end_node();
+        writer.write("}");
+        writer.end_node();
+        let printed = writer
+            .finish(&document, SourceFormat::TypeScriptV1)
+            .unwrap();
+        let map = printed.source_map.unwrap();
+        map.validate(&document, &printed.source).unwrap();
+        assert!(map.sites.windows(2).all(|pair| pair[0].site < pair[1].site));
+    }
+
     /// G-SOURCE-MAP-OFF: even root Site allocation is optional.
     #[test]
     fn disabled_collector_does_zero_map_work() {

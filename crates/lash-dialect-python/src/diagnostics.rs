@@ -5,7 +5,8 @@
 //! construct however it is written; a program defect says this use of a
 //! supported construct is wrong.
 
-use lash_kernel_dialect::{Diagnostic, DiagnosticKind, Span};
+use lash_kernel_dialect::{Diagnostic, DiagnosticKind};
+use lash_kernel_doc::Span;
 use ruff_text_size::TextRange;
 
 macro_rules! codes {

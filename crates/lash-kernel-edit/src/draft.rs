@@ -4,9 +4,11 @@ use lash_kernel_check::{Admitted, Environment};
 use lash_kernel_doc::{Annotations, Document, DocumentId, InvalidReason, validate_annotations};
 
 use crate::apply::{FaultKind, Working};
-use crate::correspondence::Correspondence;
 use crate::edit::Transaction;
-use crate::refusal::{EditDiagnostic, EditDiagnosticKind, EditRefusal, Location, refused};
+use crate::refusal::{
+    EditDiagnostic, EditDiagnosticKind, EditRefusal, Location, invalid_correspondence, refused,
+};
+use lash_kernel_doc::Correspondence;
 
 /// A document, its annotations, and the correspondence from the document
 /// the draft was opened on to the one it holds now.
@@ -45,7 +47,8 @@ impl Draft {
             None => Annotations::new(identity(&document)?),
         };
         let sites = Working::open(&document, &annotations).sites();
-        let since_open = Correspondence::identity(annotations.document, sites);
+        let since_open = Correspondence::identity(annotations.document, sites)
+            .ok_or_else(invalid_correspondence)?;
         Ok(Self {
             document,
             annotations,

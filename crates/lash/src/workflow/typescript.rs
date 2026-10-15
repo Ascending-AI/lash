@@ -6,7 +6,6 @@ use super::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentEntry};
 
 pub use lash_kernel_dialect::{
     Diagnostic as WorkflowSourceDiagnostic, DiagnosticKind as WorkflowSourceDiagnosticKind,
-    Span as WorkflowSourceSpan,
 };
 
 /// The outcome of importing host-authored TypeScript against a workflow environment.
@@ -66,7 +65,7 @@ pub(crate) fn source_refusal(
                 message: refusal.message,
                 span: refusal
                     .span
-                    .map(|(start, end)| WorkflowSourceSpan { start, end }),
+                    .map(|(start, end)| lash_kernel_doc::Span { start, end }),
                 kind: if refusal.unsupported {
                     WorkflowSourceDiagnosticKind::Refusal
                 } else {

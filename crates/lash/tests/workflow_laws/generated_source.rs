@@ -123,7 +123,8 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                 if let Some(map) = &printed.source_map {
                     assert!(maps);
                     assert_eq!(map.document, document.identity().expect("identity"));
-                    assert_eq!(map.format, format);
+                    assert_eq!(map.language, format.language());
+                    map.validate(&document, &printed.source).unwrap();
                     let mut mapped: Vec<_> =
                         map.sites.iter().map(|entry| entry.site.clone()).collect();
                     mapped.sort();

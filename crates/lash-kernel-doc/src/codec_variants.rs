@@ -337,3 +337,13 @@ impl CodecVariant for NumberPolicy {
         }
     }
 }
+
+#[doc(hidden)]
+impl CodecVariant for crate::SourceLanguage {
+    fn codec_variant(&self) -> u32 {
+        match self {
+            Self::TypeScript => 0,
+            Self::Python => 1,
+        }
+    }
+}

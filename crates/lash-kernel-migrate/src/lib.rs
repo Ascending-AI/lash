@@ -4,7 +4,7 @@
 //! [`Migration`] from the version before it: total functions with typed
 //! refusals that redeclare a library function, rewrite a document, answering
 //! which node of the old document is which node of the new one
-//! (`lash-kernel-edit`'s [`Correspondence`]), and carry a parked run onto
+//! ([`lash_kernel_doc::Correspondence`]), and carry a parked run onto
 //! the rewritten document over that correspondence.
 //!
 //! [`carry`] is the part every migration shares: it moves each coordinate a
@@ -27,7 +27,7 @@
 //! correspondence [`carry`] moves a run parked under it over.
 //!
 //! The crate depends on `lash-kernel-doc`, `lash-kernel-dialect`,
-//! `lash-kernel-edit` and `lash-kernel-state`, and on no other lash crate.
+//! and `lash-kernel-state`, and on no other lash crate.
 
 mod adopt;
 mod carry;
@@ -39,7 +39,6 @@ mod synthetic;
 
 pub use adopt::adopt;
 pub use carry::carry;
-pub use lash_kernel_edit::{Correspondence, Survivor};
 pub use migration::{
     DocumentRefusal, MigrateRegistryError, Migration, ParkedRefusal, Rewritten, migrate_registry,
     migration_from,

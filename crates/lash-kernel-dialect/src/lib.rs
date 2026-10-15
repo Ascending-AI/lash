@@ -25,7 +25,7 @@ mod source;
 #[cfg(test)]
 mod tests;
 
-pub use diagnostic::{Diagnostic, DiagnosticKind, Span};
+pub use diagnostic::{Diagnostic, DiagnosticKind};
 pub use dialect::{
     EffectControl, Environment, FrontEnd, FunctionValues, Lowered, Package, Printer,
 };
@@ -40,8 +40,8 @@ pub use saved::{
 pub use source::{SourceError, define_functions};
 
 pub use imperative::{
-    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceMap,
-    SourceSite, SourceWriter, check_document_depth,
+    GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
+    check_document_depth,
 };
 
 /// Operand facts used only by exact generated-source codecs.

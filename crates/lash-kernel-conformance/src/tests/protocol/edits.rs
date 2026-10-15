@@ -1,5 +1,6 @@
 //! K-EDIT: transactions checked against small kernel documents.
 
+use lash_kernel_doc::Correspondence;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -9,8 +10,7 @@ use lash_kernel_doc::{
     parse_document,
 };
 use lash_kernel_edit::{
-    Applied, Correspondence, Draft, Edit, EditDiagnostic, EditDiagnosticKind, Location, Position,
-    Transaction,
+    Applied, Draft, Edit, EditDiagnostic, EditDiagnosticKind, Location, Position, Transaction,
 };
 
 use super::{Case, main, registry};

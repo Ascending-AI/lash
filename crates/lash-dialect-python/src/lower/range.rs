@@ -11,7 +11,7 @@ impl Lowerer<'_> {
         &mut self,
         for_loop: &ast::StmtFor,
         call: &ast::ExprCall,
-        span: Option<lash_kernel_dialect::Span>,
+        span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
         let args = self.positional("range", call, 1, 3)?;
         // Pin even the last argument: the body may rebind any source name.

@@ -1,6 +1,7 @@
+use lash_kernel_doc::Span as SourceSpan;
 use std::fmt;
 
-pub use lash_kernel_dialect::{DiagnosticKind, Span as SourceSpan};
+pub use lash_kernel_dialect::DiagnosticKind;
 
 /// Stable names for every TypeScript dialect rejection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -6,7 +6,8 @@
 //! closed: an unknown member is refused, as the decoders refuse it.
 
 use lash_kernel_doc::{
-    Annotations, Document, FunctionDeclarations, FunctionDefinition, KERNEL_VERSION,
+    Annotations, Correspondence, Document, FunctionDeclarations, FunctionDefinition,
+    KERNEL_VERSION, SourceMap,
 };
 use schemars::JsonSchema;
 use serde_json::{Value, json};
@@ -16,6 +17,8 @@ const VERSION_CONSTANT: &str = "KERNEL_VERSION";
 fn main() -> Result<(), String> {
     let documents = vec![
         document::<Document>("kernel-document")?,
+        document::<SourceMap>("kernel-source-map")?,
+        document::<Correspondence>("kernel-correspondence")?,
         document::<Annotations>("kernel-annotations")?,
         document::<FunctionDefinition>("kernel-function")?,
         document::<FunctionDeclarations>("kernel-function-declarations")?,

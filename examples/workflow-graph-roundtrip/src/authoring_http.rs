@@ -6,8 +6,9 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use lash::workflow::WorkflowImport;
 use lash::workflow::authoring::{Operation, plan};
+use lash::workflow::document::Correspondence;
 use lash::workflow::document::Name;
-use lash::workflow::edit::{Correspondence, Draft, Transaction};
+use lash::workflow::edit::{Draft, Transaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{AppState, ErrorResponse, WorkflowView, runtime};

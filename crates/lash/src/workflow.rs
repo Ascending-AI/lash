@@ -61,7 +61,7 @@
 //! draft. Inspect the transaction, then use [`edit::Draft::apply`] as usual.
 //!
 //! Sites are structural paths, so they change under edits. Continuity is
-//! the [`edit::Correspondence`] each applied transaction answers: where
+//! the [`document::Correspondence`] each applied transaction answers: where
 //! every surviving node of the base sits in the result, and whether an
 //! edit touched it. A host keys its layout by site and carries it across
 //! with the correspondence.
@@ -145,7 +145,7 @@ pub(crate) mod typescript;
 #[cfg(feature = "typescript")]
 pub use typescript::{
     WorkflowImport, WorkflowImportUnsupported, WorkflowSourceDiagnostic,
-    WorkflowSourceDiagnosticKind, WorkflowSourceSpan,
+    WorkflowSourceDiagnosticKind,
 };
 
 /// The kernel document: its statements, expressions, types, data, sites
@@ -181,8 +181,8 @@ pub mod graph {
 /// correspondence an applied transaction answers.
 pub mod edit {
     pub use lash_kernel_edit::{
-        Applied, Correspondence, Draft, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal,
-        Extraction, Location, NodeClass, Position, Survivor, Transaction, extract_entry,
+        Applied, Draft, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal, Extraction,
+        Location, NodeClass, Position, Transaction, extract_entry,
     };
 }
 
@@ -274,7 +274,7 @@ pub struct WorkflowPublication {
     pub document: WorkflowDocument,
     /// Where every surviving node of the document the draft was opened on
     /// sits in the admitted one.
-    pub correspondence: edit::Correspondence,
+    pub correspondence: document::Correspondence,
 }
 
 /// The answer to publishing a workflow.

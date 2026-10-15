@@ -21,9 +21,10 @@ mod repairs;
 mod saved;
 mod statements;
 
+use lash_kernel_doc::Span;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use lash_kernel_dialect::{Diagnostic, Environment, Library, Lowered, Span};
+use lash_kernel_dialect::{Diagnostic, Environment, Library, Lowered};
 use lash_kernel_doc::{
     Action, Atom, Callee, Catch, Closure, Document, EffectName, Expr, FunctionCatalog, FunctionId,
     FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Signature, Stmt, TryStmt,
