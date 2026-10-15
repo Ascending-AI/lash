@@ -10,8 +10,8 @@ use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use serde_json::json;
 
 use super::{
-    ToolListing, discovered_tool_doc, discovery_text, rlm_prompt_tool_docs,
-    tool_catalogue_disclosure,
+    ToolListing, discovered_tool_doc, discovered_tool_signature, discovery_text,
+    rlm_prompt_tool_docs, tool_catalogue_disclosure,
 };
 use crate::dialect::typescript_test_dialect;
 use crate::plugin::RlmDiscovery;
@@ -264,4 +264,71 @@ fn a_discovered_tool_carries_its_field_notes() {
         )
         .is_err()
     );
+}
+
+/// FIG-6312: discovery, documentation and the loaded tool's prompt expose
+/// the same dialect signature, including nested input and output fields.
+#[test]
+fn a_discovered_tool_signature_matches_its_doc_and_prompt_in_each_dialect() {
+    let tool = lash_core::ToolDefinition::raw(
+        "tool:tracker/search",
+        "tracker_search",
+        "Search issues.",
+        json!({
+            "type": "object",
+            "properties": {
+                "filter": {
+                    "type": "object",
+                    "properties": { "query": { "type": "string" } },
+                    "required": ["query"],
+                    "additionalProperties": false
+                }
+            },
+            "required": ["filter"],
+            "additionalProperties": false
+        }),
+        json!({
+            "type": "object",
+            "properties": {
+                "issue": {
+                    "type": "object",
+                    "properties": { "title": { "type": "string" } },
+                    "required": ["title"],
+                    "additionalProperties": false
+                }
+            },
+            "required": ["issue"],
+            "additionalProperties": false
+        }),
+    )
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    .with_tool_binding(ToolBinding::new(["tracker"], "search"));
+    let presentation = crate::RlmPresentationConfig::standard();
+    for dialect in [
+        crate::dialect::CellDialect::typescript(),
+        crate::dialect::CellDialect::python(),
+    ] {
+        let signature =
+            discovered_tool_signature(&dialect, presentation, &tool).expect("an addressable tool");
+        if dialect.name() == "typescript" {
+            insta::assert_snapshot!(signature, @r"tracker.search({ filter: { query: string } }): Promise<{ issue: { title: string } }>");
+        }
+        let doc = discovered_tool_doc(&dialect, presentation, &tool).expect("an addressable tool");
+        let signature_line = format!("`{signature}`");
+        assert_eq!(doc.lines().next(), Some(signature_line.as_str()));
+        let prompt = crate::dialect::SessionDialect::prompt_only(dialect)
+            .with_presentation(presentation)
+            .render_execution_section(
+                Default::default(),
+                &catalog(vec![tool.clone()]),
+                crate::plugin::RlmChannel::Cell,
+                None,
+            )
+            .expect("the tool can be listed");
+        assert!(
+            prompt.lines().any(|line| line == signature_line),
+            "{prompt}"
+        );
+    }
 }

@@ -60,16 +60,13 @@ impl ToolDoc<'_> {
 /// its examples. A tool a host's discovery finds is shown the same doc.
 fn tool_doc_text(
     dialect: &crate::dialect::SessionDialect,
-    call_path: &str,
+    signature: &str,
     manifest: &lash_core::ToolManifest,
     contract: &lash_core::ToolContract,
 ) -> String {
     let presentation = dialect.presentation().tools;
     let input = contract.input_shape_with(&presentation);
     let output = contract.output_shape_with(&presentation);
-    let signature = dialect
-        .language()
-        .tool_signature(call_path, &input, &output);
     // The signature carries every field's name and type. The rows under
     // it add what a type cannot say, for the fields that say it.
     let mut sections = vec![format!("`{signature}`")];
@@ -133,7 +130,13 @@ impl ToolListing {
                 let call_path = dialect.tool_call_path(&tool.manifest).expect(
                     "RLM tool catalog registration validates the session dialect's binding",
                 );
-                let text = tool_doc_text(dialect, &call_path, &tool.manifest, &tool.contract);
+                let signature = tool_signature_text(
+                    dialect.language(),
+                    dialect.presentation(),
+                    &call_path,
+                    &tool.contract,
+                );
+                let text = tool_doc_text(dialect, &signature, &tool.manifest, &tool.contract);
                 ToolDoc {
                     manifest: &tool.manifest,
                     call_path,
@@ -299,6 +302,47 @@ pub fn tool_catalogue_disclosure(
         })
 }
 
+fn tool_signature_text(
+    dialect: &dyn crate::dialect::DialectPrompts,
+    presentation: crate::plugin::RlmPresentationConfig,
+    call_path: &str,
+    contract: &lash_core::ToolContract,
+) -> String {
+    dialect.tool_signature(
+        call_path,
+        &contract.input_shape_with(&presentation.tools),
+        &contract.output_shape_with(&presentation.tools),
+    )
+}
+
+/// A discovered tool's signature in the session's `dialect` and
+/// `presentation`, without Markdown backticks or documentation. This is the
+/// signature line shown when the tool is loaded into the session's prompt.
+///
+/// # Errors
+///
+/// The tool has no binding, or one `dialect` cannot call.
+pub fn discovered_tool_signature(
+    dialect: &crate::dialect::CellDialect,
+    presentation: crate::plugin::RlmPresentationConfig,
+    tool: &lash_core::ToolDefinition,
+) -> Result<String, crate::dialect::DialectRefusal> {
+    let binding = required_tool_executable(&tool.manifest).map_err(|error| {
+        crate::dialect::DialectRefusal {
+            kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
+            message: error.to_string(),
+        }
+    })?;
+    let prompts = dialect.prompts();
+    let call_path = prompts.tool_call_path(&binding)?;
+    Ok(tool_signature_text(
+        prompts.as_ref(),
+        presentation,
+        &call_path,
+        &tool.contract,
+    ))
+}
+
 /// A tool a host's discovery operation found, as a session in `dialect`
 /// under `presentation` shows it: the doc a listed tool has, its field notes
 /// included, so a discovered signature that collapses a field to an open
@@ -312,17 +356,11 @@ pub fn discovered_tool_doc(
     presentation: crate::plugin::RlmPresentationConfig,
     tool: &lash_core::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
-    let binding = required_tool_executable(&tool.manifest).map_err(|error| {
-        crate::dialect::DialectRefusal {
-            kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
-            message: error.to_string(),
-        }
-    })?;
-    let call_path = dialect.prompts().tool_call_path(&binding)?;
+    let signature = discovered_tool_signature(dialect, presentation, tool)?;
     let dialect = SessionDialect::prompt_only(dialect.clone()).with_presentation(presentation);
     Ok(tool_doc_text(
         &dialect,
-        &call_path,
+        &signature,
         &tool.manifest,
         &tool.contract,
     ))
