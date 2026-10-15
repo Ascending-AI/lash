@@ -60,10 +60,14 @@ impl ExecutionComposition {
     pub(crate) fn cell_failure_repairs(
         &self,
         diagnostic: &CellFailureDiagnostic<'_>,
-    ) -> Vec<String> {
+    ) -> Vec<crate::CellFailureRepair> {
         self.cell_failure_feedback
             .iter()
-            .flat_map(|entry| (entry.hook)(diagnostic))
+            .map(|entry| crate::CellFailureRepair {
+                plugin_id: entry.identity.owner.clone(),
+                callback: entry.identity.key.clone(),
+                repairs: (entry.hook)(diagnostic),
+            })
             .collect()
     }
 

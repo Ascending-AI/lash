@@ -217,6 +217,9 @@ impl TraceEvent {
                 output.clear();
                 if let Some(failure) = error {
                     failure.message.clear();
+                    for feedback in &mut failure.feedback {
+                        feedback.repairs.clear();
+                    }
                     if let Some(admission) = failure.schema_admission.as_deref_mut() {
                         match admission {
                             lash_sansio::SchemaAdmissionError::Compilation { message, .. } => {

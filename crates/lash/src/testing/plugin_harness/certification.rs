@@ -400,6 +400,7 @@ fn recorded_at_cut(slot: CallbackSlot) -> bool {
     matches!(
         slot,
         CallbackSlot::BeforeTurn
+            | CallbackSlot::CellFailureFeedback
             | CallbackSlot::ToolProvider
             | CallbackSlot::ToolArgsCheck
             | CallbackSlot::ToolResultCheck
@@ -537,6 +538,23 @@ async fn recorded_decisions(
             }
         }
     }
+    if CallbackSlot::of(callback) == Some(CallbackSlot::CellFailureFeedback) {
+        let record = RecordLocator::TurnPhase {
+            session: harness.session.clone(),
+            run: run.clone(),
+        };
+        for attribution in harness
+            .core()?
+            .plugin_diagnostics()
+            .cell_failure_attributions(&record)
+            .await?
+        {
+            if matches!(&attribution.evidence, Evidence::Recorded { value: RecordedAttribution::CellFailureFeedback { selected, .. }, .. } if selected == callback)
+            {
+                decisions.push(RecordedDecision::Direct(attribution.decision));
+            }
+        }
+    }
     let owner = OwnerKey::Turn(harness.session.clone(), run.clone());
     let facts = store
         .run_facts_within(
@@ -619,7 +637,9 @@ async fn attribution_law(
             let decision = &result.decision;
             let matches = match result.evidence {
                 Evidence::Recorded {
-                    value: RecordedAttribution::Binding { selected, .. },
+                    value:
+                        RecordedAttribution::Binding { selected, .. }
+                        | RecordedAttribution::CellFailureFeedback { selected, .. },
                     ..
                 } => selected == *callback,
                 Evidence::Recorded {
@@ -686,6 +706,7 @@ mod tests {
         empty: bool,
         resolutions: Arc<AtomicUsize>,
         definition: ToolDefinition,
+        workflow: ToolDefinition,
     }
     #[lash::async_trait]
     impl ToolProvider for Resolver {
@@ -716,6 +737,9 @@ mod tests {
     }
     #[lash::async_trait]
     impl DeferredToolProvider for Resolver {
+        fn searchable_names(&self, _: &DeferredResolveContext<'_>) -> BTreeMap<String, String> {
+            BTreeMap::from([("workflows_create".into(), "workflows.create".into())])
+        }
         async fn resolve(
             &self,
             _: &DeferredResolveContext<'_>,
@@ -724,7 +748,9 @@ mod tests {
             self.resolutions.fetch_add(1, Ordering::SeqCst);
             paths
                 .iter()
-                .filter(|path| !self.empty && **path == "tools.send_email")
+                .filter(|path| {
+                    !self.empty && matches!(**path, "tools.send_email" | "workflows.create")
+                })
                 .map(|path| {
                     (
                         (*path).into(),
@@ -734,7 +760,11 @@ mod tests {
                                 "host",
                                 lash::tool_provider_key!("tools"),
                             ),
-                            definition: self.definition.clone(),
+                            definition: if *path == "workflows.create" {
+                                self.workflow.clone()
+                            } else {
+                                self.definition.clone()
+                            },
                             binding: None,
                         },
                     )
@@ -760,11 +790,13 @@ mod tests {
     }
     struct Scenario {
         code: &'static str,
+        callback: PluginCallbackIdentity,
+        deferred: Option<Arc<AtomicUsize>>,
     }
     #[lash::async_trait]
     impl PluginScenario for Scenario {
         fn callback(&self) -> PluginCallbackIdentity {
-            PluginCallbackIdentity::tool_provider("resolver", "deferred")
+            self.callback.clone()
         }
         async fn prepare(&self, harness: &mut PluginHarness) -> Result<(), PluginHarnessError> {
             let protocol: Arc<dyn PluginFactory> = Arc::new(
@@ -786,6 +818,11 @@ mod tests {
                         .with_tool_provider(lash::tool_provider_key!("tools"), Arc::new(Host)),
                 )))
                 .await?;
+            if let Some(resolutions) = &self.deferred {
+                harness
+                    .install(factory(false, Arc::clone(resolutions))?)
+                    .await?;
+            }
             harness.create(PluginOptions::default()).await
         }
         fn input(&self) -> lash::TurnInput {
@@ -821,6 +858,8 @@ mod tests {
                     empty,
                     resolutions,
                     definition: definition("remote:send_email", "send_email")?,
+                    workflow: definition("remote:workflows_create", "workflows_create")?
+                        .with_tool_binding(ToolBinding::new(["workflows"], "create")),
                 }),
             ),
         )))
@@ -833,6 +872,8 @@ mod tests {
         let decoded = Arc::new(AtomicUsize::new(0));
         let scenario: Arc<dyn PluginScenario> = Arc::new(Scenario {
             code: "await tools.lookup({}); await tools.send_email({}); await tools.send_email({}); await tools.send_email({});",
+            callback: PluginCallbackIdentity::tool_provider("resolver", "deferred"),
+            deferred: None,
         });
         let report = crate::plugin_diagnostics::CELL_REPORT_DECODES
             .scope(
@@ -856,5 +897,95 @@ mod tests {
             1,
             "one immutable report must be decoded once after removal"
         );
+    }
+
+    fn repair_factory(hook: CellFailureFeedbackHook) -> Arc<dyn PluginFactory> {
+        Arc::new(StaticPluginFactory::new(
+            PluginDeclaration::initial("repair"),
+            PluginSpec::new().with_cell_failure_feedback(lash::hook_key!("names"), hook),
+        ))
+    }
+    fn repair_scenario(deferred: Option<Arc<AtomicUsize>>) -> Arc<dyn PluginScenario> {
+        Arc::new(Scenario {
+            code: "await workflows_create({});",
+            callback: PluginCallbackIdentity {
+                owner: "repair".into(),
+                key: "cell_failure_feedback:names".into(),
+            },
+            deferred,
+        })
+    }
+
+    /// FIG-6362: an unknown bare name sees the unloaded searchable tool,
+    /// without admitting it to the cell or invoking its resolver.
+    #[tokio::test]
+    async fn cell_failure_diagnostic_names_unloaded_deferred_tools() {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let hook: CellFailureFeedbackHook = {
+            let seen = Arc::clone(&seen);
+            Arc::new(move |diagnostic| {
+                assert_eq!(diagnostic.unknown_name, Some("workflows_create"));
+                assert!(!diagnostic.grants.contains_key("workflows_create"));
+                if diagnostic
+                    .deferred
+                    .get("workflows_create")
+                    .map(String::as_str)
+                    == Some("workflows.create")
+                {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                }
+                vec!["Use workflows.create".into()]
+            })
+        };
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let report = certify_plugin_with(
+            repair_factory(hook),
+            HostPolicy::standard(),
+            &[repair_scenario(Some(Arc::clone(&resolutions)))],
+        )
+        .await
+        .unwrap();
+        assert!(!report.reports.is_empty());
+        assert_eq!(
+            resolutions.load(Ordering::SeqCst),
+            0,
+            "names must not resolve or authorize tools"
+        );
+        assert_eq!(
+            seen.load(Ordering::SeqCst),
+            1,
+            "the hook must see the deferred call path"
+        );
+    }
+
+    /// FIG-6362: the recorded repair certifies replay and exact callback
+    /// attribution after its factory has been removed.
+    #[tokio::test]
+    async fn cell_failure_feedback_alone_certifies_fully() {
+        let report = certify_plugin_with(
+            repair_factory(Arc::new(|_| vec!["Use the dotted callable".into()])),
+            HostPolicy::standard(),
+            &[repair_scenario(None)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.reports.len(), 4);
+        assert_eq!(
+            report.verdict(),
+            PluginCertificationVerdict::Full,
+            "{:#?}",
+            report.reports
+        );
+        for law in [
+            PluginLaw::ReplayInvokesNoRecordedCallback,
+            PluginLaw::RecordedDecisionsStayAttributable,
+        ] {
+            assert!(
+                report
+                    .reports
+                    .iter()
+                    .any(|report| report.law == law && report.result == PluginLawResult::Passed)
+            );
+        }
     }
 }

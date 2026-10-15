@@ -155,6 +155,22 @@ pub struct CellFailure {
     /// the cell failed, kept typed through the plugin and host result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defect: Option<CellDefect>,
+    /// Each pure repair callback's identity and answer, in registration order,
+    /// including empty answers. Retained with the failure for replay and attribution.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub feedback: Vec<CellFailureRepair>,
+}
+
+/// One plugin callback's recorded repair decision for a failed cell.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct CellFailureRepair {
+    pub plugin_id: String,
+    /// The complete callback key, including its slot prefix.
+    pub callback: String,
+    pub repairs: Vec<String>,
 }
 
 /// A rule of a session's cells that a cell's program broke.
@@ -186,6 +202,7 @@ impl CellFailure {
             exec_failure: None,
             schema_admission: None,
             defect: None,
+            feedback: Vec::new(),
         }
     }
 

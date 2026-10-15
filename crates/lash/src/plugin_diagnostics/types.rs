@@ -115,6 +115,12 @@ pub enum ToolDecisionSelection {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecisionRef {
+    /// A repair callback's answer retained with a failed cell in a turn phase.
+    CellFailureFeedback {
+        record: RecordLocator,
+        cell: String,
+        reply: u32,
+    },
     /// A call outside the retained surface's catalogue, selected by its resolver.
     DeferredTool {
         record: RecordLocator,
@@ -170,6 +176,10 @@ pub enum Evidence<T> {
 }
 #[derive(Clone, Debug)]
 pub enum RecordedAttribution {
+    CellFailureFeedback {
+        selected: crate::plugins::PluginCallbackIdentity,
+        repairs: Vec<String>,
+    },
     DeferredTool {
         resolver: crate::plugins::PluginCallbackIdentity,
         call: crate::ToolCallId,

@@ -185,6 +185,19 @@ impl TranscriptDecoders {
         self.decoders.push(decoder);
         self
     }
+    /// Decode one retained protocol event without materializing its runtime.
+    pub fn decode_event(
+        &self,
+        event: &ProtocolEvent,
+    ) -> Result<Option<TranscriptItem>, crate::runtime_error::StoredDataCorruption> {
+        for decoder in &self.decoders {
+            if let Some(item) = decoder.decode_event(event)? {
+                return Ok(Some(item));
+            }
+        }
+        Ok(None)
+    }
+
     /// Resolve a cell's call through its protocol's registered offline decoder.
     pub fn decode_cell_call(
         &self,
@@ -264,16 +277,11 @@ impl SessionTranscript {
                     } => {
                         provenance.turn_id = current_turn.clone();
                         provenance.plugin_id = Some(event.plugin_id.clone());
-                        let mut decoded = None;
-                        for decoder in &decoders.decoders {
-                            if let Some(item) = decoder.decode_event(event)? {
-                                decoded = Some(item);
-                                break;
-                            }
-                        }
-                        decoded.unwrap_or(TranscriptItem::Suppressed(
-                            SuppressionReason::UnrecognizedProtocolEvent,
-                        ))
+                        decoders
+                            .decode_event(event)?
+                            .unwrap_or(TranscriptItem::Suppressed(
+                                SuppressionReason::UnrecognizedProtocolEvent,
+                            ))
                     }
                     SessionNodePayload::Event {
                         event: SessionHistoryRecord::Conversation(record),

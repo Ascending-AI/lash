@@ -434,6 +434,18 @@ pub struct SavedTurn<M: TurnProtocol = UnitTurnProtocol> {
     pub content: TurnCheckpointContent,
 }
 
+impl<M: TurnProtocol> SavedTurn<M> {
+    /// Read this turn's retained history without restoring or executing its machine.
+    /// The committed window's earlier history is not part of this sequence.
+    pub fn recorded_events(
+        &self,
+    ) -> Result<Vec<crate::SessionHistoryRecord<M::Event>>, TurnCheckpointRestoreError> {
+        self.content
+            .sequence(&self.checkpoint.events)
+            .map(|(events, _)| events)
+    }
+}
+
 /// Failure to decode or restore an incompatible turn checkpoint.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TurnCheckpointRestoreError {

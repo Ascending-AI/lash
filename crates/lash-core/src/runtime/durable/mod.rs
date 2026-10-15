@@ -23,7 +23,7 @@ pub(crate) mod head_commit;
 mod model_call;
 pub mod node;
 mod phase_root;
-pub use phase_root::{RecordedPluginPhase, read_plugin_phase};
+pub use phase_root::{RecordedPluginPhase, read_plugin_phase, read_protocol_events};
 pub mod phases;
 mod publication_window;
 pub mod run_config;

@@ -318,6 +318,13 @@
           ],
           "description": "Why the `exec_code` effect failed before the executor produced a\nresponse, when that is the failure: the closed reason, kept typed\nthrough the protocol driver and the trajectory it records."
         },
+        "feedback": {
+          "description": "Each pure repair callback's identity and answer, in registration order,\nincluding empty answers. Retained with the failure for replay and attribution.",
+          "items": {
+            "$ref": "#/$defs/CellFailureRepair"
+          },
+          "type": "array"
+        },
         "kind": {
           "$ref": "#/$defs/CellFailureKind"
         },
@@ -405,6 +412,31 @@
           "type": "object"
         }
       ]
+    },
+    "CellFailureRepair": {
+      "additionalProperties": false,
+      "description": "One plugin callback's recorded repair decision for a failed cell.",
+      "properties": {
+        "callback": {
+          "description": "The complete callback key, including its slot prefix.",
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "repairs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "callback",
+        "repairs"
+      ],
+      "type": "object"
     },
     "ChargeSafetyDenialReason": {
       "description": "Why host charge-safety policy denied an otherwise transport-retryable\ngeneration.\n\n# Integrator class\n\nRuntime and reporting implementors exhaustively render these host-policy\noutcomes; provider adapters never construct them.",

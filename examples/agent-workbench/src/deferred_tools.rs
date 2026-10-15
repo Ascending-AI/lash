@@ -215,6 +215,13 @@ impl WorkbenchDeferredProvider {
 
 #[async_trait]
 impl DeferredToolProvider for WorkbenchDeferredProvider {
+    fn searchable_names(&self, _: &DeferredResolveContext<'_>) -> BTreeMap<String, String> {
+        self.catalogue
+            .definitions
+            .iter()
+            .map(|(path, definition)| (definition.name().to_owned(), path.clone()))
+            .collect()
+    }
     async fn resolve(
         &self,
         _cx: &DeferredResolveContext<'_>,

@@ -14,7 +14,8 @@ pub type PluginSessionTask = PluginFuture<()>;
 pub type BeforeTurnHook =
     Arc<dyn Fn(TurnHookContext) -> PluginFuture<TurnContributions> + Send + Sync>;
 /// Facts a plugin may use to contribute repair text to a dialect failure.
-/// Registry names and callable spellings come from this cell's admitted tools.
+/// Admitted grants and searchable deferred names are separate: discovery
+/// names carry no authority to call a tool.
 #[derive(Clone, Debug)]
 pub struct CellFailureDiagnostic<'a> {
     pub code: &'a str,
@@ -24,6 +25,10 @@ pub struct CellFailureDiagnostic<'a> {
     pub unknown_name: Option<&'a str>,
     /// Grant registry name to the callable spelling in this cell's dialect.
     pub grants: &'a std::collections::BTreeMap<String, String>,
+    /// The run's available deferred provider's searchable names to its resolver
+    /// call paths, under the run's configuration and capabilities. Names only:
+    /// this contains no definitions, resolved matches or authority to call them.
+    pub deferred: &'a std::collections::BTreeMap<String, String>,
 }
 
 /// Pure repair contributions, appended in registration order to the cell's

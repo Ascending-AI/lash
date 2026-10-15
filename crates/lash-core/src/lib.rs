@@ -471,8 +471,8 @@ pub use lash_sansio::llm::types::{
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
     BindingChanges, BoundedRetry, CallResultSummary, CancelOrigin, CancelRequest, CellControl,
-    CellDefect, CellFailure, CellFailureKind, CellOutcome, CellPrint, CellRecord,
-    CheckpointDelivery, CheckpointKind, CompactToolContract, CompletionCandidate,
+    CellDefect, CellFailure, CellFailureKind, CellFailureRepair, CellOutcome, CellPrint,
+    CellRecord, CheckpointDelivery, CheckpointKind, CompactToolContract, CompletionCandidate,
     CompletionDisposition, DecidedCompletion, DeclarationRefusal, DegradedBinding, ExecCodeFailure,
     ExecCodeFailureReason, ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutionBudgets,
     ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy,

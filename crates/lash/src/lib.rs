@@ -923,7 +923,7 @@ pub mod plugins {
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{
-        CellDefect, CellFailure, CellFailureKind, ExecRequest, ExecResponse,
+        CellDefect, CellFailure, CellFailureKind, CellFailureRepair, ExecRequest, ExecResponse,
         RuntimeExecutionContext,
     };
     pub use lash_core::{CompletedToolCall, PluginOptions};

@@ -412,15 +412,14 @@ async fn link_cell(
             reads,
         }) => (document, annotations, function_values, reads),
         Ok(Response::DialectRefused(mut refusal)) => {
-            crate::feedback::contribute_repairs(&mut refusal, code, &grant_calls, ctx);
+            let feedback =
+                crate::feedback::contribute_repairs(&mut refusal, code, &grant_calls, ctx);
             let observation = CellObservation::of_refusal(refusal);
             emit_step_trace(ctx, Err(&observation.code()));
-            return Err(Refused::Cell(Box::new(observation.failure(
-                code,
-                None,
-                services.channel,
-                services.prompts.as_ref(),
-            ))));
+            let mut failure =
+                observation.failure(code, None, services.channel, services.prompts.as_ref());
+            failure.feedback = feedback;
+            return Err(Refused::Cell(Box::new(failure)));
         }
         Ok(Response::UnknownDialect { dialect }) => {
             return Err(host_failure(format!(

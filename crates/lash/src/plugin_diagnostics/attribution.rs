@@ -19,6 +19,21 @@ impl PluginDiagnostics {
         decision: &DecisionRef,
     ) -> Result<DecisionAttribution, DiagnosticError> {
         let (evidence, kind) = match decision {
+            DecisionRef::CellFailureFeedback { record, .. } => {
+                let evidence = if matches!(record, RecordLocator::TurnPhase { .. }) {
+                    self.cell_failure_attributions(record)
+                        .await?
+                        .into_iter()
+                        .find(|attribution| attribution.decision == *decision)
+                        .map_or_else(
+                            || unavailable(EvidenceAbsence::NotRetainedOrNeverRecorded),
+                            |attribution| attribution.evidence,
+                        )
+                } else {
+                    unavailable(EvidenceAbsence::UnsupportedRecordKind)
+                };
+                (evidence, crate::plugins::RegistryKind::Session)
+            }
             DecisionRef::DeferredTool { record, call } => {
                 let evidence = self
                     .deferred_selections(record)
@@ -276,7 +291,8 @@ fn matches_recorded(key: &ContributionKey, record: &RecordedAttribution) -> bool
         RecordedAttribution::DeferredTool { resolver, .. } => {
             matches!(key, ContributionKey::Callback(key) if key == resolver)
         }
-        RecordedAttribution::Binding { selected, .. } => {
+        RecordedAttribution::Binding { selected, .. }
+        | RecordedAttribution::CellFailureFeedback { selected, .. } => {
             matches!(key, ContributionKey::Callback(key) if key == selected)
         }
         RecordedAttribution::Presentation(binding) => {
@@ -550,5 +566,68 @@ impl PluginDiagnostics {
             .filter(|call| !catalogue.contains(&RecordedToolName::call(call)))
             .map(|call| (resolver.callback_identity(), call.call_id))
             .collect())
+    }
+}
+
+impl PluginDiagnostics {
+    /// Read repair decisions from the saved cell failures, including empty
+    /// answers. Callback identities never come from today's installed roster.
+    pub(crate) async fn cell_failure_attributions(
+        &self,
+        record: &RecordLocator,
+    ) -> Result<Vec<DecisionAttribution>, DiagnosticError> {
+        let RecordLocator::TurnPhase { session, run } = record else {
+            return Ok(Vec::new());
+        };
+        let events = lash_core::runtime::durable::read_protocol_events(
+            self.core.backend.durable().as_ref(),
+            session,
+            run,
+        )
+        .await?;
+        let decoders = self.core.transcript_decoders();
+        let mut attributions = Vec::new();
+        for event in &events {
+            let decoded = decoders.decode_event(event).map_err(|error| {
+                lash_core::StoreError::StoredDataCorrupt {
+                    record_kind: "cell failure feedback",
+                    message: error.to_string(),
+                }
+            })?;
+            let Some(crate::transcript::TranscriptItem::Cell(cell)) = decoded else {
+                continue;
+            };
+            let Some(failure) = cell.result.failure() else {
+                continue;
+            };
+            for (reply, feedback) in failure.feedback.iter().enumerate() {
+                let reply = u32::try_from(reply).map_err(|error| {
+                    lash_core::StoreError::StoredDataCorrupt {
+                        record_kind: "cell failure feedback",
+                        message: error.to_string(),
+                    }
+                })?;
+                let decision = DecisionRef::CellFailureFeedback {
+                    record: record.clone(),
+                    cell: cell.id.clone(),
+                    reply,
+                };
+                attributions.push(self.observe_attribution(
+                    &decision,
+                    Evidence::Recorded {
+                        source: record.clone(),
+                        value: RecordedAttribution::CellFailureFeedback {
+                            selected: crate::plugins::PluginCallbackIdentity {
+                                owner: feedback.plugin_id.clone(),
+                                key: feedback.callback.clone(),
+                            },
+                            repairs: feedback.repairs.clone(),
+                        },
+                    },
+                    crate::plugins::RegistryKind::Session,
+                ));
+            }
+        }
+        Ok(attributions)
     }
 }

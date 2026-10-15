@@ -302,6 +302,46 @@ pub async fn read_plugin_phase(
     session: &crate::SessionId,
     run: &crate::TurnId,
 ) -> Result<Option<RecordedPluginPhase>, lash_durable::DurableError> {
+    Ok(read_phase(reads, session, run)
+        .await?
+        .map(|phase| RecordedPluginPhase {
+            before_turn: phase.before_turn,
+            surface: phase
+                .config
+                .and_then(|config| config.surface().map(|surface| (**surface).clone())),
+        }))
+}
+
+/// Protocol events retained by a turn's phase, decoded without restoring a runtime.
+/// A retired phase has no retained events.
+pub async fn read_protocol_events(
+    reads: &dyn lash_durable::DurableReads,
+    session: &crate::SessionId,
+    run: &crate::TurnId,
+) -> Result<Vec<crate::ProtocolEvent>, lash_durable::DurableError> {
+    let Some(phase) = read_phase(reads, session, run).await? else {
+        return Ok(Vec::new());
+    };
+    let events = phase.saved.recorded_events().map_err(|error| {
+        lash_durable::DurableError::Graph(GraphRefusal::InvalidBody {
+            kind: NodeKind::PHASE_ROOT.0,
+            reason: error.to_string(),
+        })
+    })?;
+    Ok(events
+        .into_iter()
+        .filter_map(|event| match event {
+            crate::SessionHistoryRecord::Protocol(event) => Some(event),
+            crate::SessionHistoryRecord::Conversation(_) => None,
+        })
+        .collect())
+}
+
+async fn read_phase(
+    reads: &dyn lash_durable::DurableReads,
+    session: &crate::SessionId,
+    run: &crate::TurnId,
+) -> Result<Option<PhaseCheckpoint>, lash_durable::DurableError> {
     let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(16 * 1024 * 1024);
     let graph = match reads
         .hydrate(
@@ -324,10 +364,5 @@ pub async fn read_plugin_phase(
             reason,
         })
     })?;
-    Ok(Some(RecordedPluginPhase {
-        before_turn: phase.before_turn,
-        surface: phase
-            .config
-            .and_then(|config| config.surface().map(|surface| (**surface).clone())),
-    }))
+    Ok(Some(phase))
 }

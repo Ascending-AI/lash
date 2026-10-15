@@ -1187,12 +1187,12 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.dispatch.composition.tool_call_hooks()
     }
 
-    /// Pure, plugin-authored repairs for a cell's dialect diagnosis. An empty
-    /// contribution set returns no text and preserves the original feedback.
+    /// Pure repair decisions with their registered callback identities. The
+    /// cell retains these with its failure; no contributors adds no feedback.
     pub fn cell_failure_repairs(
         &self,
         diagnostic: &crate::plugin::CellFailureDiagnostic<'_>,
-    ) -> Vec<String> {
+    ) -> Vec<crate::CellFailureRepair> {
         self.dispatch.composition.cell_failure_repairs(diagnostic)
     }
 

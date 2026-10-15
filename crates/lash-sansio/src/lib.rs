@@ -107,8 +107,8 @@ pub use schema_contract::{
 };
 pub use session::{
     BindingChanges, CallResultSummary, CellControl, CellDefect, CellFailure, CellFailureKind,
-    CellOutcome, CellPrint, CellRecord, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason,
-    ExecResponse, ExecutedCall, ExecutedCallOutcome, TextProjectionMetadata,
+    CellFailureRepair, CellOutcome, CellPrint, CellRecord, DegradedBinding, ExecCodeFailure,
+    ExecCodeFailureReason, ExecResponse, ExecutedCall, ExecutedCallOutcome, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{

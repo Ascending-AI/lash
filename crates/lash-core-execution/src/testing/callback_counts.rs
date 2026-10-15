@@ -169,6 +169,9 @@ impl<T: ToolProvider + ?Sized> ToolProvider for CountedProvider<T> {
 }
 #[async_trait::async_trait]
 impl crate::DeferredToolProvider for CountedProvider<dyn crate::DeferredToolProvider> {
+    fn searchable_names(&self, cx: &crate::DeferredResolveContext<'_>) -> BTreeMap<String, String> {
+        self.inner.searchable_names(cx)
+    }
     async fn resolve(
         &self,
         cx: &crate::DeferredResolveContext<'_>,

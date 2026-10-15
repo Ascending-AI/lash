@@ -1008,10 +1008,16 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             output_chars: 14,
             observation_count: 1,
             observation_projections: Vec::new(),
-            error: Some(lash_trace::CellFailure::new(
-                lash_trace::CellFailureKind::Program,
-                CONTENT,
-            )),
+            error: Some({
+                let mut failure =
+                    lash_trace::CellFailure::new(lash_trace::CellFailureKind::Program, CONTENT);
+                failure.feedback.push(lash_sansio::CellFailureRepair {
+                    plugin_id: "repair".into(),
+                    callback: "cell_failure_feedback:names".into(),
+                    repairs: vec![CONTENT.into()],
+                });
+                failure
+            }),
             terminal_finish: Some(json!(CONTENT)),
             tool_calls: vec![TraceExecToolCall {
                 call_id: lash_sansio::ToolCallId::fixture("call-1"),

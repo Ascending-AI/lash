@@ -55,6 +55,15 @@ impl<'a> DeferredResolveContext<'a> {
 /// it, which may be this one.
 #[async_trait]
 pub trait DeferredToolProvider: ToolProvider {
+    /// Searchable tool names and their resolver call paths under this run's
+    /// configuration and capabilities. Names only: this neither resolves a
+    /// definition nor grants authority to call it. Providers without a
+    /// searchable catalogue return an empty map. This is a pure, deterministic
+    /// projection: implementations perform no I/O or authorization.
+    fn searchable_names(&self, _cx: &DeferredResolveContext<'_>) -> BTreeMap<String, String> {
+        BTreeMap::new()
+    }
+
     /// Resolve a deterministic batch of call paths. A path omitted from the
     /// returned map is recorded as [`DeferredOutcome::Unavailable`], and
     /// entries for paths outside the batch are ignored.
