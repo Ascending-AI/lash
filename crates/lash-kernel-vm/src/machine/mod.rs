@@ -336,6 +336,8 @@ pub struct KernelMachine {
     ended: bool,
     /// What observes the run, when anything does: never part of its state.
     observer: Option<Box<Observer>>,
+    /// Statement starts in this run segment, never captured in parked state.
+    ran: Vec<u64>,
 }
 
 impl std::fmt::Debug for KernelMachine {

@@ -248,6 +248,14 @@ pub trait Host {
     /// Passive entry into a document action. Library implementation sites
     /// are private; the document's call remains visible while they compute.
     fn enter_site(&mut self, _at: &EffectIdentity) {}
+    /// Whether the host accepts exact live deltas through [`Host::ran`].
+    /// Position hints alone never consume the machine's counts.
+    fn observes_ran(&self) -> bool {
+        false
+    }
+    /// A provisional delta before a synchronous host read, when
+    /// [`Host::observes_ran`] is true. The next frame carries it.
+    fn ran(&mut self, _delta: &crate::RanDelta) {}
     /// Takes the output of one `print`.
     fn print(&mut self, value: &Datum);
     /// Whether the embedder wants the run cancelled. The machine asks at

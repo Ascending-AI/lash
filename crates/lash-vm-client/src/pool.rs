@@ -390,8 +390,7 @@ pub struct Checkout {
     /// The document the run executes, as the parent named it at `start`.
     document: Option<String>,
     printed: Vec<EncodedPayload>,
-    /// The document sites the run entered, as its run frames carried them,
-    /// when its start asked to observe them.
+    /// Position hints and exact count deltas, as the run frames carried them.
     sites: Vec<EncodedPayload>,
     /// The run's heap bound, which also bounds what one exchange prints
     /// (FIG-4458).
@@ -430,8 +429,8 @@ impl Checkout {
     pub fn take_printed(&mut self) -> Vec<EncodedPayload> {
         std::mem::take(&mut self.printed)
     }
-    /// The document sites the run entered since this was last called, as
-    /// the run frames carried them, in order.
+    /// Position hints and count deltas since this was last called, as the
+    /// run frames carried them, in order ([`crate::wire::Sites`]).
     pub fn take_sites(&mut self) -> Vec<EncodedPayload> {
         std::mem::take(&mut self.sites)
     }

@@ -91,6 +91,39 @@ impl Document {
         }
     }
 
+    /// Dense ordinals for every statement and block in this document's own
+    /// units, in [`Site`] order. Expressions and actions have no ordinal;
+    /// closure bodies do. The rank depends only on the document, never on
+    /// an executable's layout or the library it is compiled against.
+    pub fn site_ordinals(&self) -> BTreeMap<Site, u32> {
+        let mut sites = BTreeMap::new();
+        let mut pending = vec![(
+            Site::new(crate::Unit::Main, vec![]),
+            crate::Node::Block(&self.main),
+        )];
+        pending.extend(self.functions.iter().map(|(name, function)| {
+            (
+                Site::new(crate::Unit::Function(name.clone()), vec![]),
+                crate::Node::Block(&function.body),
+            )
+        }));
+        while let Some((site, node)) = pending.pop() {
+            if matches!(node, crate::Node::Block(_) | crate::Node::Stmt(_)) {
+                sites.insert(site.clone(), 0);
+            }
+            pending.extend(
+                node.children()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, child)| (site.child(index as u32), child)),
+            );
+        }
+        for (ordinal, rank) in sites.values_mut().enumerate() {
+            *rank = ordinal as u32;
+        }
+        sites
+    }
+
     /// The document's behavioural identity (`K-ID-001`).
     pub fn identity(&self) -> Result<DocumentId, EncodeError> {
         digest("lash-kernel-document", self).map(DocumentId::from_bytes)

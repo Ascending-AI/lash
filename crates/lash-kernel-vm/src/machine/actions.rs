@@ -326,6 +326,7 @@ impl KernelMachine {
         site: &Site,
         result: &Type,
     ) -> Eval<Value> {
+        self.report_ran(host);
         match host.perform(effect, args, site) {
             Ok(Ok(answer)) => self.decode_result(exe, &answer, result, effect),
             Ok(Err(error)) => {

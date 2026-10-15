@@ -2,6 +2,16 @@
 //! Install on the thread that calls export/import (including a worker thread).
 //! This unsupported diagnostic retains one raw sample per actual phase call;
 //! its owner controls lifetime and retention. Phase durations do not overlap.
+/// Enables a test/performance-only trace. This is no run observation level.
+pub fn trace_statements(machine: &mut crate::KernelMachine) {
+    machine.trace_statements();
+}
+
+/// Takes the diagnostic statement starts and empty-block entries.
+pub fn take_statement_trace(machine: &mut crate::KernelMachine) -> Vec<lash_kernel_doc::Site> {
+    machine.take_statement_trace()
+}
+
 use std::cell::RefCell;
 use std::time::Instant;
 

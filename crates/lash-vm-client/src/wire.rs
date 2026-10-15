@@ -83,6 +83,15 @@ pub fn from_json<T: DeserializeOwned>(kind: PayloadKind, json: &[u8]) -> Result<
     Ok(value)
 }
 
+/// The observations since the previous worker frame. `entered` remains
+/// a current-position hint; `ran` is an exact additive delta.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sites {
+    pub entered: Vec<EffectIdentity>,
+    pub ran: lash_kernel_vm::RanDelta,
+}
+
 /// How a new run starts ([`Start`]), and the effects it performs as reads
 /// ([`EffectModes`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

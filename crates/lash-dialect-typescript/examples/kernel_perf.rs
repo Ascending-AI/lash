@@ -278,6 +278,7 @@ enum Mode {
 #[serde(rename_all = "snake_case")]
 enum Observe {
     Nothing,
+    Counts,
     Work,
     Context,
 }
@@ -291,6 +292,7 @@ fn start_observed(
     let mut machine = start(program);
     match observe {
         Observe::Nothing => {}
+        Observe::Counts => machine.set_observe(lash_kernel_vm::Observe::Counts),
         Observe::Work => machine.count_work(),
         Observe::Context => machine.publish_context(Arc::clone(context)),
     }
@@ -340,12 +342,13 @@ fn main() -> Result<(), String> {
         return Err("iteration count must be positive".to_string());
     }
     let observe = match std::env::var("KERNEL_PERF_OBSERVE").as_deref() {
+        Ok("counts") => Observe::Counts,
         Ok("work") => Observe::Work,
         Ok("context") => Observe::Context,
         Ok("") | Err(_) => Observe::Nothing,
         Ok(other) => {
             return Err(format!(
-                "KERNEL_PERF_OBSERVE is work or context, not {other}"
+                "KERNEL_PERF_OBSERVE is counts, work or context, not {other}"
             ));
         }
     };

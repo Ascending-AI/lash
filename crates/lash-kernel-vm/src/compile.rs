@@ -23,6 +23,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use lash_kernel_doc as doc;
@@ -378,6 +379,8 @@ pub(crate) struct Executable {
 /// Immutable document tables, independent of any run or owning document.
 pub(crate) struct DocumentCode {
     tables: Tables,
+    pub(crate) block_ordinals: Vec<u32>,
+    pub(crate) site_count: usize,
     pub(crate) main: CodeId,
     pub(crate) declared: BTreeMap<Name, CodeId>,
 }
@@ -400,6 +403,11 @@ fn entry<'t, T>(library: &'t [T], own: &'t [T], index: u32) -> Option<&'t T> {
 }
 
 impl Executable {
+    pub(crate) fn block_ordinal(&self, id: BlockId) -> Option<u32> {
+        let at = (id.0 as usize).checked_sub(self.library.0.tables.blocks.len())?;
+        self.own.block_ordinals.get(at).copied()
+    }
+
     pub(crate) fn get_code(&self, id: CodeId) -> Option<&Code> {
         entry(&self.library.0.tables.codes, &self.own.tables.codes, id.0)
     }
@@ -623,6 +631,11 @@ pub(crate) struct Stream {
 /// One statement: its ops in its stream, how many registers they use, and
 /// what the machine's control needs of its shape.
 pub(crate) struct Stmt {
+    /// Its document ordinal, or None for a library statement. The main body
+    /// owns ordinal zero, so a statement's rank is always nonzero. Keeping
+    /// this in the metadata already read at dispatch avoids another table
+    /// load and fits the statement's existing alignment padding.
+    pub(crate) ordinal: Option<NonZeroU32>,
     /// The range a step runs from the statement's start: its expressions,
     /// then the op that completes it or ends its step. An action
     /// statement's action is its first op, and the statement resumes at the
@@ -891,10 +904,25 @@ fn compile_document(
         }
     }
     let declared = std::mem::take(&mut compiler.declared);
+    let mut tables = compiler.finish();
+    let ordinals = document.site_ordinals();
+    let block_ordinals = tables
+        .blocks
+        .iter()
+        .map(|block| {
+            for (index, stmt) in block.stmts.iter().enumerate() {
+                tables.stmts[(stmt.0 as usize) - prepared.tables.stmts.len()].ordinal =
+                    NonZeroU32::new(ordinals[&block.site.child(index as u32)]);
+            }
+            ordinals[&block.site]
+        })
+        .collect();
     Ok(DocumentCode {
-        tables: compiler.finish(),
+        tables,
         main,
         declared,
+        block_ordinals,
+        site_count: ordinals.len(),
     })
 }
 

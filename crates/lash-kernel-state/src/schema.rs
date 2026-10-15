@@ -119,8 +119,9 @@ pub struct Task {
     /// The task ended in an error. It outlives the error itself, which is
     /// dropped once no handle reaches the task.
     pub failed: bool,
-    /// How many times the task has run each `spawn`, `perform` and
-    /// `sleep`, by the action's site, in site order (`K-SITE-002`).
+    /// How many times the task has run each Call, Join, JoinMany, Yield,
+    /// Cancel, Spawn, recorded Perform and Sleep, by the action's site, in
+    /// site order (`K-SITE-002`). Read-bound performs have no occurrence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub occurrences: Vec<Occurrence>,
 }

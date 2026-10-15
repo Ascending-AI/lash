@@ -176,6 +176,7 @@ pub(crate) struct WireHost {
     /// The sites entered since the run's previous frame, when the parent
     /// observes them.
     pub sites: Option<EnteredSites>,
+    pub ran: lash_kernel_vm::RanDelta,
 }
 
 /// Each task's last entered document site since the run's previous frame.
@@ -199,20 +200,28 @@ impl EnteredSites {
         }
     }
 
-    /// The entries the next frame carries, in the order they were entered,
-    /// or none when no site was entered since the previous frame.
-    pub(crate) fn take(&mut self) -> Result<Option<EncodedPayload>, PoolError> {
-        if self.last.is_empty() {
-            return Ok(None);
-        }
+    /// The entries the next frame carries, in the order they were entered.
+    fn take(&mut self) -> Vec<EffectIdentity> {
         let mut entered: Vec<_> = std::mem::take(&mut self.last).into_values().collect();
         entered.sort_unstable_by_key(|(order, _)| *order);
-        let entered: Vec<EffectIdentity> = entered.into_iter().map(|(_, at)| at).collect();
-        wire::encode(PayloadKind::Sites, &entered).map(Some)
+        entered.into_iter().map(|(_, at)| at).collect()
     }
 }
 
 impl WireHost {
+    pub(crate) fn take_sites(&mut self) -> Result<Option<EncodedPayload>, PoolError> {
+        let entered = self
+            .sites
+            .as_mut()
+            .map(EnteredSites::take)
+            .unwrap_or_default();
+        let ran = std::mem::take(&mut self.ran);
+        if entered.is_empty() && ran.is_empty() {
+            return Ok(None);
+        }
+        wire::encode(PayloadKind::Sites, &wire::Sites { entered, ran }).map(Some)
+    }
+
     #[expect(
         clippy::disallowed_methods,
         reason = "broken worker IPC terminates the worker and cannot become a catchable guest error"
@@ -222,10 +231,7 @@ impl WireHost {
         kind: HostReadKind,
         request: &impl serde::Serialize,
     ) -> T {
-        let sites = match self.sites.as_mut() {
-            Some(sites) => sites.take(),
-            None => Ok(None),
-        };
+        let sites = self.take_sites();
         wire::encode(PayloadKind::HostRead, request)
             .and_then(|request| self.wire.read(kind, request, sites?))
             .and_then(|answer| wire::decode(PayloadKind::HostAnswer, &answer))
@@ -245,6 +251,14 @@ impl lash_kernel_vm::Host for WireHost {
         if let Some(sites) = self.sites.as_mut() {
             sites.enter(at);
         }
+    }
+
+    fn observes_ran(&self) -> bool {
+        self.sites.is_some()
+    }
+
+    fn ran(&mut self, delta: &lash_kernel_vm::RanDelta) {
+        self.ran.extend_from_slice(delta);
     }
 
     fn clock(&mut self) -> Timestamp {

@@ -27,6 +27,19 @@ use lash_kernel_doc::TaskId;
 
 use crate::compile::{CodeId, LibId, StmtId};
 
+/// Per-run observation. Counts are derived and never enter checkpoint state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Observe {
+    #[default]
+    Off,
+    Counts,
+}
+
+/// Nonzero statement starts and empty-block entries, keyed by
+/// [`lash_kernel_doc::Document::site_ordinals`]. Deltas add across frames
+/// and committed run segments. Counts use u64 throughout.
+pub type RanDelta = Vec<(u32, u64)>;
+
 /// Something a run did that an observer sees.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Event {
@@ -69,6 +82,8 @@ pub(crate) enum Event {
 
 /// What one machine observes.
 pub(crate) struct Observer {
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub(crate) trace: Option<Vec<lash_kernel_doc::Site>>,
     pub(crate) work: Option<Counting>,
     pub(crate) context: Option<Publisher>,
 }
@@ -76,6 +91,8 @@ pub(crate) struct Observer {
 impl Observer {
     pub(crate) fn new() -> Self {
         Self {
+            #[cfg(any(test, feature = "perf-witness"))]
+            trace: None,
             work: None,
             context: None,
         }

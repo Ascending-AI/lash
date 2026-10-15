@@ -161,6 +161,7 @@ impl KernelMachine {
                     };
                     // An empty block would end as soon as it began.
                     if running.exe.block(block).stmts.is_empty() {
+                        self.observe_empty_block(block, running.exe);
                         return Ok(Ran::Done);
                     }
                     self.push_block(task, block)?;
@@ -248,11 +249,13 @@ impl KernelMachine {
                 return Ok(None);
             }
             Op::Clock { dst } => {
+                self.report_ran(host);
                 self.put(at(base, dst), Value::Timestamp(host.clock()));
                 return Ok(None);
             }
             Op::Random { dst } => {
                 // The top 53 of the 64 bits, times 2^-53 (`K-HOST-003`).
+                self.report_ran(host);
                 let bits = host.random() >> 11;
                 let value = Value::Float(Float::new(bits as f64 / (1u64 << 53) as f64));
                 self.put(at(base, dst), value);
@@ -471,6 +474,7 @@ impl KernelMachine {
         };
         let request = self.take(request);
         let request = self.copy_out(&request)?;
+        self.report_ran(host);
         let value = match host.read(&handle, &request) {
             Ok(answer) => self.decode(exe, &answer, &lash_kernel_doc::Type::Any)?,
             Err(error) => {

@@ -7,13 +7,78 @@ use std::sync::Arc;
 use lash_kernel_doc::TaskId;
 
 use super::{Control, Frame, KernelMachine};
-use crate::compile::{Executable, LibId};
+use crate::compile::{BlockId, Executable, LibId};
 use crate::observe::{
     Counting, Event, GuestContext, GuestFrame, GuestPhase, GuestSymbols, NO_STATEMENT, Observer,
     WorkReport,
 };
+use crate::{Observe, RanDelta};
 
 impl KernelMachine {
+    /// Selects observation for this machine. A resumed machine starts Off
+    /// with zero counts; the caller chooses the new run segment's option.
+    pub fn set_observe(&mut self, observe: Observe) {
+        match observe {
+            Observe::Counts => self.ran.resize(self.exe.site_count, 0),
+            Observe::Off => self.ran.clear(),
+        }
+    }
+
+    /// Takes and resets starts since the previous take. Completed pure
+    /// code and a waiting action's start are never counted again on resume.
+    pub fn take_ran(&mut self) -> RanDelta {
+        self.ran
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(ordinal, count)| {
+                let count = std::mem::take(count);
+                (count != 0).then_some((ordinal as u32, count))
+            })
+            .collect()
+    }
+
+    /// Flushes before a synchronous host read only when the host wants live
+    /// frames. Otherwise the counts remain for the park or end frame.
+    pub(super) fn report_ran(&mut self, host: &mut dyn crate::Host) {
+        if !self.ran.is_empty() && host.observes_ran() {
+            host.ran(&self.take_ran());
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn observe_empty_block(&mut self, block: BlockId, exe: &Executable) {
+        if !self.ran.is_empty()
+            && let Some(ordinal) = exe.block_ordinal(block)
+        {
+            self.ran[ordinal as usize] += 1;
+        }
+        #[cfg(any(test, feature = "perf-witness"))]
+        if let Some(observer) = self.observer.as_deref_mut()
+            && let Some(trace) = &mut observer.trace
+            && !matches!(
+                exe.block(block).site.unit,
+                lash_kernel_doc::Unit::Library(_)
+            )
+        {
+            trace.push(exe.block(block).site.clone());
+        }
+    }
+
+    /// Diagnostic statement/empty-block trace for the count differential.
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub(crate) fn trace_statements(&mut self) {
+        self.observer_mut().trace = Some(Vec::new());
+    }
+
+    #[cfg(any(test, feature = "perf-witness"))]
+    pub(crate) fn take_statement_trace(&mut self) -> Vec<lash_kernel_doc::Site> {
+        self.observer
+            .as_mut()
+            .and_then(|o| o.trace.as_mut())
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
     /// Counts the run's work by the function that does it, from here on:
     /// calls, statements and expressions, self and inclusive charge,
     /// native calls and heap insertions. [`Self::work`] reads the counts.
@@ -70,6 +135,22 @@ impl KernelMachine {
     #[inline(never)]
     fn observe_unlikely(&mut self, event: Event) {
         if let Some(observer) = self.observer.as_deref_mut() {
+            #[cfg(any(test, feature = "perf-witness"))]
+            if let Event::Statement { task, .. } = event
+                && let Some(trace) = &mut observer.trace
+                && let Some(Control::Block { block, next }) = self.tasks[task.0 as usize]
+                    .frames
+                    .last()
+                    .and_then(|frame| frame.control.last())
+                && !matches!(
+                    self.exe.block(*block).site.unit,
+                    lash_kernel_doc::Unit::Library(_)
+                )
+            {
+                // The trace uses the live coordinate, independently of the
+                // compiled ordinal lookup used by the accumulator.
+                trace.push(self.exe.block(*block).site.child((*next - 1) as u32));
+            }
             observer.on(event, self.charged, self.heap.allocated());
         }
     }

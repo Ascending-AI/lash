@@ -494,7 +494,7 @@ impl<'embedding> Server<'embedding> {
             requests_per_park: start.bounds.requests_per_park,
             join_members: start.bounds.join_members,
         };
-        let (machine, release) = match start.from {
+        let (mut machine, release) = match start.from {
             StartFrom::Fresh(payload) => {
                 self.codec.check_payload(&payload.0)?;
                 let from: StartWire = wire::decode(PayloadKind::Start, &payload)
@@ -563,6 +563,11 @@ impl<'embedding> Server<'embedding> {
                 (machine, pinned)
             }
         };
+        machine.set_observe(if start.observe_counts {
+            lash_kernel_vm::Observe::Counts
+        } else {
+            lash_kernel_vm::Observe::Off
+        });
         Ok(Hosted {
             machine,
             document: identity,
@@ -648,6 +653,7 @@ impl<'embedding> Server<'embedding> {
             wire,
             cancel,
             printed: Vec::new(),
+            ran: Vec::new(),
             sites: hosted
                 .observe_sites
                 .then(crate::host::EnteredSites::default),
@@ -657,6 +663,9 @@ impl<'embedding> Server<'embedding> {
             .machine
             .run(&mut host, slice)
             .map_err(machine_breach)?;
+        if hosted.observe_sites || !matches!(step, Step::Slice) {
+            host.ran.extend(hosted.machine.take_ran());
+        }
         let meters = hosted.machine.meters();
         let memory = hosted.memory;
         if matches!(step, Step::Ended(_)) {
@@ -690,10 +699,7 @@ impl<'embedding> Server<'embedding> {
         for payload in chunks {
             self.send(WorkerMessage::Printed { payload })?;
         }
-        let sites = match host.sites.as_mut() {
-            Some(sites) => sites.take()?,
-            None => None,
-        };
+        let sites = host.take_sites()?;
         let message = match step {
             Step::Parked(park) => WorkerMessage::Parked {
                 park: self.encode(PayloadKind::Park, &ParkWire::from(park))?,
@@ -1033,6 +1039,7 @@ mod tests {
             bounds: config.run_bounds,
             export: None,
             observe_sites: false,
+            observe_counts: false,
         };
         struct Quiet;
         impl lash_kernel_vm::Host for Quiet {

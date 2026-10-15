@@ -354,3 +354,304 @@ main {
     let main = times.iter().find(|time| time.frame == "main").unwrap();
     assert_eq!((main.self_samples, main.inclusive_samples), (1, 3));
 }
+
+/// FIG-6369: starts include an empty selected arm, and taking a delta resets it.
+#[test]
+fn statement_starts_and_empty_arms_are_exact_deltas() {
+    let mut embedder = Embedder::new("main { let x = 1 if true {} else {} return x }");
+    embedder.machine.set_observe(crate::Observe::Counts);
+    assert!(matches!(embedder.run(), Step::Ended(End::Finished(_))));
+    assert_eq!(
+        embedder.machine.take_ran(),
+        vec![(1, 1), (2, 1), (3, 1), (5, 1)]
+    );
+    assert!(embedder.machine.take_ran().is_empty());
+}
+
+fn ran_map(delta: crate::RanDelta) -> std::collections::BTreeMap<u32, u64> {
+    let mut out = std::collections::BTreeMap::new();
+    for (ordinal, count) in delta {
+        *out.entry(ordinal).or_default() += count;
+    }
+    out
+}
+
+/// FIG-6369: a trace derives sites from the live block/statement position,
+/// independently of the compiled ordinal lookup used by the counters.
+fn counted_run(
+    text: &str,
+    layout: Layout,
+    slice: u64,
+    rebuild: bool,
+) -> (End, std::collections::BTreeMap<u32, u64>) {
+    let mut embedder = Embedder::with(
+        text,
+        Setup {
+            layout,
+            slice,
+            ..Setup::default()
+        },
+    );
+    let (program, _) = embedder.program(true);
+    let ordinals = program.document.site_ordinals();
+    let mut total = std::collections::BTreeMap::<u32, u64>::new();
+    let enable = |machine: &mut crate::KernelMachine| {
+        machine.set_observe(crate::Observe::Counts);
+        machine.trace_statements();
+    };
+    enable(&mut embedder.machine);
+    let mut hops = 0_u64;
+    loop {
+        let step = embedder.run();
+        let delta = ran_map(embedder.machine.take_ran());
+        let mut histogram = std::collections::BTreeMap::new();
+        for site in embedder.machine.take_statement_trace() {
+            *histogram.entry(ordinals[&site]).or_default() += 1;
+        }
+        assert_eq!(
+            delta, histogram,
+            "slice {slice}, layout {layout:?}, hop {hops}"
+        );
+        assert!(embedder.machine.take_ran().is_empty());
+        for (ordinal, count) in delta {
+            *total.entry(ordinal).or_default() += count;
+        }
+        if let Step::Ended(end) = step {
+            return (end, total);
+        }
+        if rebuild {
+            hops += 1;
+            embedder.relay(
+                Layout(hops.wrapping_mul(0x9e37_79b9) | 1),
+                hops.is_multiple_of(2),
+            );
+            assert!(
+                embedder.machine.take_ran().is_empty(),
+                "a resumed segment starts at zero"
+            );
+            enable(&mut embedder.machine);
+        }
+        if matches!(step, Step::Parked(_)) {
+            super::parked::deliver_next(&mut embedder);
+        }
+    }
+}
+
+/// FIG-6369 (a,b,e): the rebuild corpus has identical totals across layouts,
+/// slices and fresh run segments; each individual delta equals its trace.
+#[test]
+fn counts_are_layout_independent_and_add_exactly_across_rebuilds() {
+    use super::parked::*;
+    for text in [
+        EXPRESSIONS,
+        HELPER_FROM_TWO_PLACES,
+        CALLBACK_IN_MAP,
+        CLEANUP_WITH_A_WAIT,
+        FAN_OUT_WITH_ONE_ENDED,
+        CANCELLED_MID_CLEANUP,
+        TABLE_CHURN,
+        REQUESTS_OUT_OF_TASK_ORDER,
+    ] {
+        let straight = counted_run(text, Layout::default(), u64::MAX, false);
+        assert!(!straight.1.is_empty());
+        for slice in [u64::MAX, 1, 0] {
+            assert_eq!(counted_run(text, Layout(0x5eed), slice, true), straight);
+        }
+        for seed in [1, 2, 3, u64::MAX] {
+            assert_eq!(counted_run(text, Layout(seed), u64::MAX, false), straight);
+        }
+    }
+}
+
+/// FIG-6369 (c): an abrupt departure never starts its following statements.
+#[test]
+fn statements_after_return_break_throw_and_finish_count_zero() {
+    let source = r#"
+fn early() { return 7 print "unreachable" }
+main {
+  do call early()
+  for i in [1, 2] { break print "unreachable" }
+  try { throw "caught" print "unreachable" } catch e {}
+  finish "done"
+  print "unreachable"
+}
+"#;
+    let (_, counts) = counted_run(source, Layout::default(), 0, true);
+    let embedder = Embedder::new(source);
+    let (program, _) = embedder.program(true);
+    let ordinals = program.document.site_ordinals();
+    for site in [
+        lash_kernel_doc::Site::new(
+            lash_kernel_doc::Unit::Function(lash_kernel_doc::Name::new("early")),
+            vec![1],
+        ),
+        lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![1, 1, 1]),
+        lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![2, 0, 1]),
+        lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![4]),
+    ] {
+        assert_eq!(counts.get(&ordinals[&site]), None, "{site}");
+    }
+}
+
+/// FIG-6369: empty blocks have entries even though they start no statements.
+#[test]
+fn empty_function_loop_try_catch_and_finally_blocks_count_entries() {
+    let source = r#"
+fn empty() {}
+main {
+  do call empty()
+  let f = fn() {}
+  do apply f()
+  for i in [1, 2] {}
+  while false {}
+  try {} finally {}
+  try { throw 1 } catch e {}
+  return 0
+}
+"#;
+    let (_, counts) = counted_run(source, Layout::default(), 0, true);
+    let embedder = Embedder::new(source);
+    let (program, _) = embedder.program(true);
+    let ordinals = program.document.site_ordinals();
+    use lash_kernel_doc::{Name, Site, Unit};
+    for (site, expected) in [
+        (Site::new(Unit::Function(Name::new("empty")), vec![]), 1),
+        (Site::new(Unit::Main, vec![1, 0, 0]), 1),
+        (Site::new(Unit::Main, vec![3, 1]), 2),
+        (Site::new(Unit::Main, vec![4, 1]), 0),
+        (Site::new(Unit::Main, vec![5, 0]), 1),
+        (Site::new(Unit::Main, vec![5, 1]), 1),
+        (Site::new(Unit::Main, vec![6, 1]), 1),
+    ] {
+        assert_eq!(
+            counts.get(&ordinals[&site]).copied().unwrap_or(0),
+            expected,
+            "{site}"
+        );
+    }
+}
+
+/// FIG-6369 (d): on raise-free paths each of the eight identity-bearing
+/// action kinds advances its task's occurrence counter exactly once. The saved
+/// count is last occurrence + 1. Read-bound Perform has no identity (K-EFF-012)
+/// and is excluded; its statement start is still counted.
+#[test]
+fn action_starts_equal_the_sum_of_task_occurrences() {
+    let source = r#"
+fn same() { return 0 }
+fn worker() { for i in [1, 2] { do yield } do sleep 1 return 0 }
+main {
+  let called = call same()
+  let quick = spawn call same()
+  do yield
+  do cancel quick
+  let joined = join quick
+  let a = spawn call worker()
+  let b = spawn call worker()
+  do yield
+  let hs = [a, b]
+  let got = join all hs
+  do perform echo(got) as Any
+  return got
+}
+"#;
+    let mut embedder = Embedder::new(source);
+    let (program, _) = embedder.program(true);
+    let ordinals = program.document.site_ordinals();
+    embedder.machine.set_observe(crate::Observe::Counts);
+    let mut total = std::collections::BTreeMap::<u32, u64>::new();
+    loop {
+        let step = embedder.run();
+        for (ordinal, count) in embedder.machine.take_ran() {
+            *total.entry(ordinal).or_default() += count;
+        }
+        if let Step::Ended(end) = step {
+            assert!(
+                matches!(end, End::Finished(_)),
+                "the run is raise-free: {end:?}"
+            );
+            break;
+        }
+        if matches!(step, Step::Parked(_)) {
+            let parked = embedder.machine.export().unwrap();
+            let mut occurrences = std::collections::BTreeMap::<u32, u64>::new();
+            for task in parked.tasks {
+                for occurrence in task.handle.occurrences {
+                    let mut site = occurrence.site;
+                    site.path.pop(); // action -> its statement
+                    *occurrences.entry(ordinals[&site]).or_default() += occurrence.count;
+                }
+            }
+            assert!(!occurrences.is_empty());
+            for (ordinal, count) in occurrences {
+                assert_eq!(total[&ordinal], count);
+            }
+            super::parked::deliver_next(&mut embedder);
+        }
+    }
+}
+
+/// FIG-6369: counters are per-run instrumentation, never checkpoint state.
+#[test]
+fn a_checkpoint_omits_counts_and_off_starts_no_observer() {
+    let text = "main { let x = 1 do yield return x }";
+    let mut plain = Embedder::with(
+        text,
+        Setup {
+            slice: 0,
+            ..Setup::default()
+        },
+    );
+    let mut counted = Embedder::with(
+        text,
+        Setup {
+            slice: 0,
+            ..Setup::default()
+        },
+    );
+    counted.machine.set_observe(crate::Observe::Counts);
+    assert_eq!(plain.run(), counted.run());
+    assert_eq!(
+        plain.machine.export().unwrap(),
+        counted.machine.export().unwrap()
+    );
+    assert!(plain.machine.take_ran().is_empty());
+    counted.relay(Layout(123), false);
+    counted.machine.set_observe(crate::Observe::Counts);
+    assert!(counted.machine.take_ran().is_empty());
+}
+
+/// FIG-6369: observing position hints alone never consumes the counters;
+/// only take_ran or an explicitly enabled live-delta sink resets them.
+#[test]
+fn position_observation_does_not_discard_counts_at_host_reads() {
+    struct PositionHost(super::embedder::World);
+    impl Host for PositionHost {
+        fn observes_sites(&self) -> bool {
+            true
+        }
+        fn clock(&mut self) -> Timestamp {
+            self.0.clock()
+        }
+        fn random(&mut self) -> u64 {
+            self.0.random()
+        }
+        fn read(&mut self, h: &Handle, r: &Datum) -> Result<Datum, ErrorDatum> {
+            self.0.read(h, r)
+        }
+        fn print(&mut self, value: &Datum) {
+            self.0.print(value);
+        }
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+    let mut embedder = Embedder::new("main { let x = clock return x }");
+    embedder.machine.set_observe(crate::Observe::Counts);
+    let mut host = PositionHost(super::embedder::World::default());
+    assert!(matches!(
+        embedder.machine.run(&mut host, u64::MAX).unwrap(),
+        Step::Ended(_)
+    ));
+    assert_eq!(embedder.machine.take_ran(), vec![(1, 1), (2, 1)]);
+}

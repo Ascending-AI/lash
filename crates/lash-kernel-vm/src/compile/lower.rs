@@ -259,6 +259,7 @@ impl Compiler<'_> {
             range.len = 1;
         }
         Stmt {
+            ordinal: None,
             ops: range,
             regs: ops.regs,
             form,

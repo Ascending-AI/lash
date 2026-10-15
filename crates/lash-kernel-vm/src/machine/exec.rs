@@ -92,13 +92,20 @@ impl KernelMachine {
                         *next += 1;
                         let last = self.steps.verify && *next == stmts.len();
                         self.charge(1)?;
+                        let running = Running::new(task, exe, id);
+                        // Counting stays inline and does not enable the work/context
+                        // observer. Off pays only this predictable branch.
+                        if !self.ran.is_empty()
+                            && let Some(ordinal) = running.stmt.ordinal
+                        {
+                            self.ran[ordinal.get() as usize] += 1;
+                        }
                         self.observe(Event::Statement {
                             task,
                             code,
                             stmt: id,
                             charging: self.charging,
                         });
-                        let running = Running::new(task, exe, id);
                         let edge = running.edge;
                         let start = running.stmt.ops.start as usize;
                         match self.run(host, &running, start, self.top)? {
@@ -119,6 +126,10 @@ impl KernelMachine {
                         }
                     }
                     None => {
+                        if *next == 0 {
+                            let block = *block;
+                            self.observe_empty_block(block, exe);
+                        }
                         self.pop_control(task, exe)?;
                         self.block_ended(task, host, exe)
                     }

@@ -209,8 +209,8 @@ pub enum PayloadKind {
     HostRead,
     HostAnswer,
     Printed,
-    /// The document sites a run entered since its previous run frame, each
-    /// task's last, in the order they were entered.
+    /// Document position hints (`entered`, each task's last) alongside
+    /// exact statement-start count deltas (`ran`) since the previous frame.
     Sites,
     ParkedRun,
     ServiceRequest,

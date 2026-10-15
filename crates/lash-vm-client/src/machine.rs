@@ -43,6 +43,14 @@ pub fn kernel_reads() -> VersionRange {
 /// What a run reads from its host, answered in the parent.
 #[async_trait::async_trait]
 pub trait RunHost: Send + Sync {
+    /// The run segment's observation option, independent of live delivery.
+    fn observe(&self) -> lash_kernel_vm::Observe {
+        lash_kernel_vm::Observe::Off
+    }
+
+    /// Exact provisional counts since the worker's previous frame.
+    fn ran(&self, _delta: &lash_kernel_vm::RanDelta) {}
+
     /// Whether the run reports the document sites it enters. The worker
     /// carries them on the run frames it already sends, so observing them
     /// adds no exchange.
@@ -225,6 +233,7 @@ impl RemoteMachines {
                 binding,
             ))),
             observe_sites: self.host.observes_sites(),
+            observe_counts: self.host.observe() == lash_kernel_vm::Observe::Counts,
         };
         let reservation = start_reservation(
             &start,
@@ -277,6 +286,7 @@ impl RemoteMachines {
             host: Arc::clone(&self.host),
             owner: self.owner.clone(),
             document: self.document.to_string(),
+            ran: Default::default(),
         })
     }
 }
@@ -353,9 +363,15 @@ pub struct RemoteMachine {
     host: Arc<dyn RunHost>,
     owner: VmOwner,
     document: String,
+    ran: std::collections::BTreeMap<u32, u64>,
 }
 
 impl RemoteMachine {
+    /// Takes and resets the total received in this run segment's frames.
+    pub fn take_ran(&mut self) -> lash_kernel_vm::RanDelta {
+        std::mem::take(&mut self.ran).into_iter().collect()
+    }
+
     /// The run's end, as the worker sealed it: refused unless it is this
     /// owner's TerminalWhole under the run's document.
     fn end(&self, end: EndWire) -> Result<End, KernelFailure> {
@@ -430,10 +446,15 @@ impl RemoteMachine {
             return Ok(());
         };
         for payload in checkout.take_sites() {
-            let sites: Vec<lash_kernel_doc::EffectIdentity> =
-                wire::decode(PayloadKind::Sites, &payload).map_err(worker)?;
-            for at in &sites {
+            let sites: wire::Sites = wire::decode(PayloadKind::Sites, &payload).map_err(worker)?;
+            for at in &sites.entered {
                 self.host.enter_site(at);
+            }
+            for &(ordinal, count) in &sites.ran {
+                *self.ran.entry(ordinal).or_default() += count;
+            }
+            if !sites.ran.is_empty() {
+                self.host.ran(&sites.ran);
             }
         }
         Ok(())
@@ -600,6 +621,7 @@ mod reservation_tests {
             },
             export: Some(EncodedPayload(vec![0; 16 * 1024])),
             observe_sites: true,
+            observe_counts: false,
         };
         let actual = codec
             .encode_parent(&ParentFrame {

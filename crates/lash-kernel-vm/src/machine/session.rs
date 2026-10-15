@@ -73,6 +73,7 @@ pub(super) fn start(
         end: None,
         ended: false,
         observer: None,
+        ran: Vec::new(),
         program,
     };
     let arguments = |problem: String| StartError::Arguments { problem };

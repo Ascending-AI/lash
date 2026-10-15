@@ -150,6 +150,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         bounds: bounds(),
         export: Some(binding()),
         observe_sites: false,
+        observe_counts: false,
     }
 }
 
@@ -265,6 +266,7 @@ fn killed_at_a_park_and_resumed(
                 bounds: bounds(),
                 export: Some(binding()),
                 observe_sites: false,
+                observe_counts: false,
             },
             identity,
             ExecutionClass::Cell,
@@ -349,6 +351,7 @@ main {{
                 bounds: bounds(),
                 export: Some(binding()),
                 observe_sites: false,
+                observe_counts: false,
             },
             &identity,
             ExecutionClass::Cell,
@@ -426,6 +429,7 @@ fn a_run_exported_as_graph_state_resumes_in_another_worker_from_its_admission() 
         bounds: bounds(),
         export: Some(binding()),
         observe_sites: false,
+        observe_counts: false,
     };
     let mut refused = checkout(&pool);
     refused
@@ -539,6 +543,7 @@ fn a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name() {
         bounds: bounds(),
         export: Some(binding()),
         observe_sites: false,
+        observe_counts: false,
     };
     let new_run = || python(fresh(&document, Target::Main, Vec::new()).from);
 
@@ -660,6 +665,7 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
                 bounds: bounds(),
                 export: Some(binding()),
                 observe_sites: false,
+                observe_counts: false,
             },
             &identity,
             ExecutionClass::Cell,
@@ -723,6 +729,7 @@ fn a_parked_run_is_refused_under_another_document() {
                 bounds: bounds(),
                 export: Some(binding()),
                 observe_sites: false,
+                observe_counts: false,
             },
             &other,
             ExecutionClass::Cell,
@@ -768,7 +775,11 @@ main { }"#,
     let entered: Vec<Vec<EffectIdentity>> = worker
         .take_sites()
         .iter()
-        .map(|payload| wire::decode(PayloadKind::Sites, payload).expect("sites"))
+        .map(|payload| {
+            wire::decode::<wire::Sites>(PayloadKind::Sites, payload)
+                .expect("sites")
+                .entered
+        })
         .collect();
     let [entered] = &entered[..] else {
         panic!("the park alone carries the sites: {entered:?}")
@@ -1242,4 +1253,217 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
         |receipt| receipt.path == service::WorkerPath::ImportWorkflow
             && receipt.pid != std::process::id()
     ));
+}
+
+/// FIG-6369 (f): all frame deltas add to the direct machine's total, whether
+/// live observation is requested or counts wait for the parks and end.
+#[tokio::test]
+async fn frame_counts_and_client_totals_equal_direct_machine_counts() {
+    use lash_kernel_vm::{Host, KernelMachine, Machine, Observe, PreparedLibrary, Program, Step};
+    use lash_vm_broker::ParentFault;
+    use lash_vm_broker::kernel::{DrivenMachine as _, Machines as _};
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+    struct CountingHost {
+        live: bool,
+        deltas: Mutex<Vec<lash_kernel_vm::RanDelta>>,
+    }
+    #[async_trait::async_trait]
+    impl RunHost for CountingHost {
+        fn observe(&self) -> Observe {
+            Observe::Counts
+        }
+        fn observes_sites(&self) -> bool {
+            self.live
+        }
+        fn ran(&self, delta: &lash_kernel_vm::RanDelta) {
+            self.deltas.lock().unwrap().push(delta.clone());
+        }
+        async fn clock(&self) -> Result<Timestamp, ParentFault> {
+            Ok(Timestamp {
+                nanoseconds: Integer::from(0),
+            })
+        }
+        async fn random(&self) -> Result<u64, ParentFault> {
+            Ok(0)
+        }
+        async fn read(
+            &self,
+            _: &Handle,
+            _: &Datum,
+        ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, ParentFault> {
+            Ok(Ok(Datum::Null))
+        }
+        async fn perform(
+            &self,
+            _: &lash_kernel_doc::EffectName,
+            _: &[Datum],
+            _: &lash_kernel_doc::Site,
+        ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, ParentFault> {
+            Ok(Ok(Datum::Null))
+        }
+        fn print(&self, _: Datum) -> Result<(), ParentFault> {
+            Ok(())
+        }
+    }
+    struct Direct;
+    impl Host for Direct {
+        fn clock(&mut self) -> Timestamp {
+            Timestamp {
+                nanoseconds: Integer::from(0),
+            }
+        }
+        fn random(&mut self) -> u64 {
+            0
+        }
+        fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, lash_kernel_doc::ErrorDatum> {
+            Ok(Datum::Null)
+        }
+        fn perform(
+            &mut self,
+            _: &lash_kernel_doc::EffectName,
+            _: &[Datum],
+            _: &lash_kernel_doc::Site,
+        ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
+            Ok(Ok(Datum::Null))
+        }
+        fn print(&mut self, _: &Datum) {}
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+    let (_, encoded) = document(
+        r#"
+effect live() -> Any
+entry go(h: Handle("table")) -> Any
+fn go(h) {
+  let stamp = clock
+  let bits = random
+  let row = read(h, "row")
+  do perform live() as Any
+  for i in [1, 2] { if true {} do perform echo(i) as Any }
+  return (stamp, bits, row)
+}
+main {}"#,
+    );
+    let document = Arc::new(
+        lash_kernel_doc::Document::from_json(
+            &String::from_utf8(wire::unwrap(PayloadKind::Document, &encoded).unwrap()).unwrap(),
+        )
+        .unwrap(),
+    );
+    let embedding = lash_vm_worker::built_dialects(&WorkerTuning::standard()).unwrap();
+    let start = || RunStart {
+        target: Target::Entry(Name::new("go")),
+        args: vec![Datum::Handle(Handle {
+            kind: "table".into(),
+            id: "row".into(),
+        })],
+        bindings: Bindings::default(),
+    };
+    let modes =
+        lash_kernel_vm::EffectModes::reading([lash_kernel_doc::EffectName::new("live").unwrap()]);
+    let roomy = lash_kernel_vm::Bounds {
+        charge: 1_000_000,
+        memory: 64 << 20,
+        call_depth: 100,
+        live_tasks: 10,
+        requests_per_park: 10,
+        join_members: 10,
+    };
+    let mut direct = KernelMachine::start_reading(
+        Program {
+            document: Arc::clone(&document),
+            library: PreparedLibrary::new(Arc::clone(embedding.registry().unwrap())),
+        },
+        roomy,
+        start(),
+        modes.clone(),
+    )
+    .unwrap();
+    direct.set_observe(Observe::Counts);
+    loop {
+        match direct.run(&mut Direct, u64::MAX).unwrap() {
+            Step::Ended(End::Finished(_)) => break,
+            Step::Parked(park) => {
+                for request in park.requests {
+                    let Request::Effect(request) = request else {
+                        panic!("an effect")
+                    };
+                    direct
+                        .deliver(request.wait, Outcome::Completed(Datum::Null))
+                        .unwrap();
+                }
+            }
+            other => panic!("direct run: {other:?}"),
+        }
+    }
+    let expected = direct.take_ran();
+    assert!(!expected.is_empty());
+    let binding = lash_core_store::checkpoint_graph::bodies::OwnerBinding::Cell {
+        session: "session-A".into(),
+        turn: "count-turn".into(),
+        cell: "count-cell".into(),
+    };
+    HOST_DIALECTS.set("typescript");
+    for live in [false, true] {
+        let host = Arc::new(CountingHost {
+            live,
+            deltas: Mutex::new(Vec::new()),
+        });
+        let machines = RemoteMachines::new(
+            lash_vm_client::service::Service::new(config("")),
+            owner(),
+            OwnerEpoch(1),
+            FrameEpoch(1),
+            host.clone(),
+            &document,
+            DIALECT,
+            start(),
+            modes.clone(),
+            roomy,
+        )
+        .unwrap();
+        let mut remote = machines.start(&binding).await.unwrap();
+        loop {
+            match remote.run(0, false).await.unwrap() {
+                Step::Ended(End::Finished(_)) => break,
+                Step::Parked(park) => {
+                    for request in park.requests {
+                        let Request::Effect(request) = request else {
+                            panic!("an effect")
+                        };
+                        remote
+                            .deliver(request.wait, Outcome::Completed(Datum::Null))
+                            .await
+                            .unwrap();
+                    }
+                }
+                Step::Slice => {}
+                other => panic!("remote run: {other:?}"),
+            }
+        }
+        let mut sum = BTreeMap::<u32, u64>::new();
+        {
+            let deltas = host.deltas.lock().unwrap();
+            assert!(
+                if live {
+                    deltas.len() > 3
+                } else {
+                    deltas.len() == 3
+                },
+                "live={live}: {} frames",
+                deltas.len()
+            );
+            for delta in deltas.iter() {
+                for &(ordinal, count) in delta {
+                    *sum.entry(ordinal).or_default() += count;
+                }
+            }
+        }
+        assert_eq!(sum.into_iter().collect::<Vec<_>>(), expected, "live={live}");
+        assert_eq!(remote.take_ran(), expected);
+        assert!(remote.take_ran().is_empty());
+        remote.release().await.unwrap();
+    }
 }

@@ -843,6 +843,7 @@ pub(in crate::machine) fn import(
         end: None,
         ended: false,
         observer: None,
+        ran: Vec::new(),
     };
     // Accounts the memory of what was put back, as the machine that parked
     // it did when it wrote the state.

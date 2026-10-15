@@ -1199,7 +1199,7 @@
           "type": "boolean"
         },
         "occurrences": {
-          "description": "How many times the task has run each `spawn`, `perform` and\n`sleep`, by the action's site, in site order (`K-SITE-002`).",
+          "description": "How many times the task has run each Call, Join, JoinMany, Yield,\nCancel, Spawn, recorded Perform and Sleep, by the action's site, in\nsite order (`K-SITE-002`). Read-bound performs have no occurrence.",
           "items": {
             "$ref": "#/$defs/Occurrence"
           },

@@ -288,6 +288,10 @@ pub struct Start {
     /// `Parked`, `Slice` and `Ended`) carries the sites entered since the
     /// previous one; no exchange of its own reports them.
     pub observe_sites: bool,
+    /// Enables exact document statement-start counts. Live deltas travel
+    /// with Slice and HostRead only when observe_sites is true; parks and
+    /// ends always carry the remaining counts.
+    pub observe_counts: bool,
 }
 
 /// One committed outcome, for the wait the machine named.

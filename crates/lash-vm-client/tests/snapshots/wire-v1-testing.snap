@@ -8,6 +8,8 @@ testing true
 
 # [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { Lowered { # [serde (with = "serde_bytes")] document : Vec < u8 > , # [serde (with = "serde_bytes")] annotations : Vec < u8 > , function_values : Option < lash_kernel_dialect :: FunctionValues > , # [serde (default , skip_serializing_if = "BTreeSet::is_empty")] reads : BTreeSet < EffectName > , } , Printed (lash_kernel_dialect :: PrintedSource) , Read { # [serde (with = "serde_bytes")] document : Vec < u8 > , } , DialectRefused (DialectRefusal) , UnknownDialect { dialect : String , } , HelperReleaseNotHeld { release : u32 , } }
 
+# [serde (deny_unknown_fields)] struct Sites { entered : Vec < EffectIdentity > , ran : lash_kernel_vm :: RanDelta , }
+
 # [serde (deny_unknown_fields)] struct StartWire { entry : Option < Name > , args : Vec < Datum > , variables : BTreeMap < Name , Value > , objects : Vec < (ObjectId , Object) > , # [serde (default , skip_serializing_if = "Vec::is_empty")] reads : Vec < EffectName > , }
 
 # [serde (deny_unknown_fields)] struct EffectRead { effect : EffectName , args : Vec < Datum > , site : lash_kernel_doc :: Site , }
