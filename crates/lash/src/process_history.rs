@@ -54,7 +54,7 @@ impl ProcessHistoryContinuation {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(remote = "Self")]
 pub struct ProcessEventsRead {
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    #[serde(serialize_with = "crate::persistence::serialize_durable")]
     pub outcome: lash_core::facade_support::ObservedProcessEventReadOutcome,
     /// After the last event this page returned; after the released prefix
     /// when the read started inside one; unchanged when the page returned

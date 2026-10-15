@@ -24,7 +24,7 @@ pub struct TurnToolCallRef {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CommittedTurnWithToolCalls {
     pub turn: crate::transcript::CommittedTurn,
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    #[serde(serialize_with = "crate::persistence::serialize_durable")]
     pub tool_calls: Vec<ToolCallRecord>,
 }
 
@@ -42,7 +42,7 @@ pub struct CommittedTurnsWithToolCallsPage {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolCallRead {
     Settled {
-        #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        #[serde(serialize_with = "crate::persistence::serialize_durable")]
         record: Box<ToolCallRecord>,
     },
     NotFound {
@@ -92,7 +92,7 @@ pub struct TurnReport {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<lash_core::TurnFailureEvidence>,
     /// Tool calls issued by the turn in protocol order.
-    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    #[serde(serialize_with = "crate::persistence::serialize_durable")]
     pub tool_calls: Vec<ToolCallRecord>,
     /// Execution metadata collected for the turn.
     pub execution: TurnExecutionMetrics,

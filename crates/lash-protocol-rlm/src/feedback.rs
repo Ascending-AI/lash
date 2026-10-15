@@ -379,6 +379,20 @@ fn site_span(annotations: &Annotations, site: &Site) -> Option<(usize, usize)> {
 /// error as its kind and message, anything else as its JSON reading.
 pub(crate) fn datum_text(value: &Datum) -> String {
     match value {
+        Datum::Error(error)
+            if error.kind == crate::executor::TOOL_FAILED
+                && let Datum::Record(fields) = &error.data
+                && let Some(Datum::Text(code)) = fields
+                    .iter()
+                    .find_map(|(name, value)| (name == "code").then_some(value)) =>
+        {
+            let kind = format!("{} ({code})", error.kind);
+            if error.message.is_empty() {
+                kind
+            } else {
+                format!("{kind}: {}", error.message)
+            }
+        }
         Datum::Error(error) if error.message.is_empty() => error.kind.clone(),
         Datum::Error(error) => format!("{}: {}", error.kind, error.message),
         Datum::Text(text) => text.clone(),

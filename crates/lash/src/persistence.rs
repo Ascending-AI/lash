@@ -11,11 +11,14 @@
 //! event reads. It preserves the internal trust envelope for persistence and
 //! trusted relays. Public JSON uses the value or process projection methods.
 //! [`DurableSerialize`] lets hosts opt their own containers into that format.
+//! [`serialize_durable`] is the field adapter for derived `Serialize` containers:
+//! `#[serde(serialize_with = "lash::persistence::serialize_durable")]`.
 pub use lash_core::{Durable, ProcessAuthorityReads};
 pub use lash_core_store::checkpoint_graph::{
     DecodeLimits as GraphDecodeLimits, GraphReadPolicy, KernelDataLimits,
 };
 pub use lash_sansio::DurableSerialize;
+pub use lash_sansio::durable_serde::serialize as serialize_durable;
 
 #[cfg(any(test, feature = "testing"))]
 pub use lash_core::{

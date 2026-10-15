@@ -368,7 +368,8 @@ impl lash_core::ToolProvider for CellTools {
     }
 }
 
-/// FIG-6320: a host refusal keeps its code and plain message in model feedback.
+/// FIG-6320, FIG-6387: a host refusal keeps its code and plain message in
+/// call feedback, the committed verdict and the uncaught cell error.
 #[tokio::test]
 async fn a_tool_failure_keeps_its_code_and_plain_message_in_feedback() {
     let host = open_host().await;
@@ -401,9 +402,19 @@ async fn a_tool_failure_keeps_its_code_and_plain_message_in_feedback() {
     assert_eq!(feedback["code"], "effect_unbound", "{feedback}");
     assert_eq!(feedback["message"], "Bind the effect before calling it");
     assert_eq!(feedback["raw"], serde_json::json!({ "effect": "echo.say" }));
+    assert_eq!(
+        response.calls[0].outcome,
+        lash_core::ExecutedCallOutcome::Failed {
+            code: "effect_unbound".into(),
+            message: "Bind the effect before calling it".into(),
+        },
+        "the committed call verdict carries the tool's code"
+    );
     let rendered = crate::feedback::render(response.error().expect("the tool failed"), "cell");
     assert!(
-        rendered.starts_with("uncaught tool_failed: Bind the effect before calling it\n"),
+        rendered.starts_with(
+            "uncaught tool_failed (effect_unbound): Bind the effect before calling it\n"
+        ),
         "{rendered}"
     );
 }

@@ -540,3 +540,32 @@ async fn eviction_recovers_the_facade_on_sqlite_file() {
 async fn eviction_recovers_the_facade_on_postgres() {
     eviction_recovers_the_facade_on(Tier::Postgres, "postgres").await;
 }
+
+/// FIG-6387: hosts opt a nested tool value into durable encoding through
+/// the facade, preserving the exact bytes of the durable wrapper.
+#[test]
+fn a_host_tool_value_field_uses_the_facade_durable_adapter() {
+    #[derive(serde::Serialize)]
+    struct HostResponse {
+        #[serde(serialize_with = "lash::persistence::serialize_durable")]
+        value: lash::tools::ToolValue,
+    }
+
+    #[derive(serde::Serialize)]
+    struct DurableResponse<'a> {
+        value: lash::persistence::Durable<&'a lash::tools::ToolValue>,
+    }
+
+    let response = HostResponse {
+        value: lash::tools::ToolValue::untrusted_json(serde_json::json!({
+            "$lash_tool_value": { "kind": "host_data" },
+            "answer": 42,
+        })),
+    };
+    let encoded = serde_json::to_vec(&response).expect("encode host response");
+    let expected = serde_json::to_vec(&DurableResponse {
+        value: lash::persistence::Durable(&response.value),
+    })
+    .expect("encode durable response");
+    assert_eq!(encoded, expected);
+}
