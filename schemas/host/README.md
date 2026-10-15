@@ -22,6 +22,7 @@ target runs all of them:
 | --- | --- | --- | --- |
 | `trace-record` | `TraceRecord` with its `TraceEvent` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
 | `workflow-execution-overlay` | `WorkflowExecutionOverlay` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
+| `process-workflow-overlay` | `ProcessWorkflowOverlay` | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core/src/bin/process_workflow_schema_generator.rs` |
 | `process-effect-outcome` | `process.effect_outcome` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
 | `process-effect-omissions` | `process.effect_omissions` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
 | `kernel-document` | kernel `Document` | `KERNEL_VERSION` | `crates/lash-kernel-doc/src/bin/kernel_schema_generator.rs` |

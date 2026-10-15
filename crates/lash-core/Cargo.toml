@@ -16,6 +16,11 @@ categories = ["asynchronous", "api-bindings"]
 name = "lash_core"
 doctest = false
 
+[[bin]]
+name = "process_workflow_schema_generator"
+path = "src/bin/process_workflow_schema_generator.rs"
+test = false
+
 [features]
 # Keep core portable by default.
 default = []

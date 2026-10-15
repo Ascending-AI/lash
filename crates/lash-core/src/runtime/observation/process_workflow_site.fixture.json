@@ -1,0 +1,11 @@
+{
+  "at": {
+    "task": "main",
+    "site": { "unit": { "function": "effect" } },
+    "occurrence": 1
+  },
+  "occurrences": 2,
+  "state": { "state": "running" },
+  "first_entered": 7,
+  "last_settled": 9
+}

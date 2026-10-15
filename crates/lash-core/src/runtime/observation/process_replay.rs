@@ -401,7 +401,9 @@ impl fmt::Display for ProcessObservationIdentity {
 }
 
 /// Why a process replay store cannot continue from a cursor.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessReplayGapReason {
     /// Retention dropped events after the cursor.

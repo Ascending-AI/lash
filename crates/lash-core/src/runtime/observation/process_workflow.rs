@@ -7,6 +7,7 @@ use lash_sansio::EffectIdentity;
 use lash_trace::{
     TraceLanguageExecutionPayload, TraceNodeFact, TraceRuntimeSubject, WorkflowDocumentRef,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::super::ObservedProcessEvent;
@@ -15,7 +16,7 @@ use crate::{ProcessEffectOutcomeClass, ProcessId, ProcessLifecycleFact, WaitKind
 
 /// What was observed at a site's latest occurrence. An unobserved terminal
 /// does not claim the action succeeded: the process ended without that fact.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ProcessWorkflowSiteState {
     Running,
@@ -27,7 +28,7 @@ pub enum ProcessWorkflowSiteState {
 }
 
 /// The kind of blocker at a workflow site. No bearer key is exposed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessWorkflowWaitKind {
     Sleep,
@@ -50,16 +51,27 @@ impl From<&WaitKind> for ProcessWorkflowWaitKind {
 
 /// One task's latest visit to a document site. The VM's zero-based occurrence
 /// index counts entries, including sleeps and calls, independently of effects.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessWorkflowSite {
     pub at: EffectIdentity,
     pub occurrences: u64,
     pub state: ProcessWorkflowSiteState,
+    /// Sequence of the first committed event naming an entry at this site,
+    /// across occurrences. Live-only evidence has no sequence and leaves this
+    /// `None`. Lash stores no wall time here: hosts map the sequence to the
+    /// `occurred_at_ms` of the event they already hold.
+    pub first_entered: Option<u64>,
+    /// Sequence of the latest committed sleep resumption or effect outcome
+    /// settling an occurrence at this site. Retained through later entries;
+    /// live-only completion and `TerminalUnobserved` supply no settlement.
+    /// Always `None` until `first_entered` is present. Lash stores no wall time
+    /// here: hosts map the sequence to their event's `occurred_at_ms`.
+    pub last_settled: Option<u64>,
 }
 
 /// Which provisional evidence this fold holds. RetainedWindow is bounded;
 /// it never claims to be the execution's entire history.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ProcessWorkflowLiveCoverage {
     NotObserved,
@@ -73,7 +85,7 @@ pub enum ProcessWorkflowLiveCoverage {
 /// enclosing snapshot's `effects.coverage`; live entries are provisional and
 /// can be lost at a replay gap. `current_sites` retains the last entered site
 /// of each task through pure computation and is empty once the process ends.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessWorkflowOverlay {
     pub process_id: ProcessId,
     /// Supplied by an accepted live observation, absent in a committed-only fold.
@@ -170,6 +182,7 @@ impl ProcessWorkflowOverlayAccumulator {
         timestamp: u64,
         state: ProcessWorkflowSiteState,
         durable_terminal: bool,
+        sequence: Option<u64>,
     ) {
         let key = lash_trace::WorkflowTaskSite {
             task: at.task.clone(),
@@ -180,6 +193,8 @@ impl ProcessWorkflowOverlayAccumulator {
                 at: at.clone(),
                 occurrences: at.occurrence.saturating_add(1),
                 state: state.clone(),
+                first_entered: None,
+                last_settled: None,
             },
             durable_terminal,
             timestamp,
@@ -188,13 +203,19 @@ impl ProcessWorkflowOverlayAccumulator {
             || (at.occurrence == held.value.at.occurrence
                 && (durable_terminal || (!held.durable_terminal && timestamp >= held.timestamp)))
         {
-            held.value = ProcessWorkflowSite {
-                at: at.clone(),
-                occurrences: at.occurrence.saturating_add(1),
-                state,
-            };
+            held.value.at = at.clone();
+            held.value.occurrences = at.occurrence.saturating_add(1);
+            held.value.state = state;
             held.durable_terminal = durable_terminal;
             held.timestamp = timestamp;
+        }
+        // Committed history belongs to the site across all its occurrences,
+        // even when a newer live occurrence already owns the displayed state.
+        if let Some(sequence) = sequence {
+            held.value.first_entered.get_or_insert(sequence);
+            if durable_terminal {
+                held.value.last_settled = Some(sequence);
+            }
         }
     }
 
@@ -233,6 +254,7 @@ impl ProcessWorkflowOverlayAccumulator {
                     now,
                     state,
                     !waiting && matches!(wait.kind, WaitKind::Sleep { .. }),
+                    Some(event.sequence),
                 );
             }
             ProcessLifecycleFact::EffectOutcome(outcome) => {
@@ -242,7 +264,7 @@ impl ProcessWorkflowOverlayAccumulator {
                     ProcessEffectOutcomeClass::Failure => ProcessWorkflowSiteState::Failed,
                     ProcessEffectOutcomeClass::Cancelled => ProcessWorkflowSiteState::Cancelled,
                 };
-                self.site(&outcome.at, now, state, true);
+                self.site(&outcome.at, now, state, true, Some(event.sequence));
             }
             ProcessLifecycleFact::Terminal { .. } => self.finish(),
             _ => {}
@@ -308,6 +330,7 @@ impl ProcessWorkflowOverlayAccumulator {
                     observation.observed_at_ms,
                     ProcessWorkflowSiteState::Running,
                     false,
+                    None,
                 );
             }
             ProcessObservationEventPayload::LanguageExecution(observation) => {
@@ -360,7 +383,7 @@ impl ProcessWorkflowOverlayAccumulator {
                         TraceNodeFact::Resumed { .. } => ProcessWorkflowSiteState::Running,
                         _ => return Ok(()),
                     };
-                    self.site(at, observation.observed_at_ms, state, false);
+                    self.site(at, observation.observed_at_ms, state, false, None);
                 }
             }
         }
@@ -389,6 +412,155 @@ mod tests {
         LanguageExecutionObservation, TraceLanguageExecution, TraceLanguageExecutionIdentity,
         TraceRuntimeScope, WorkflowDocumentEntry,
     };
+
+    /// FIG-6358: committed entry and settlement sequences survive re-entry,
+    /// duplicate replay and reversed wall clocks.
+    #[test]
+    fn committed_site_sequences_retain_first_entry_and_latest_settlement() {
+        let mut overlay =
+            ProcessWorkflowOverlayAccumulator::new(ProcessId::fixture("site-sequences"));
+        let mut at = lash_sansio::effect_identity_fixture("sleep", 0);
+        for (sequence, occurrence, waiting, first_entered, last_settled) in [
+            (7, 0, true, 7, None),
+            (11, 0, false, 7, Some(11)),
+            (15, 1, true, 7, Some(11)),
+            (19, 1, false, 7, Some(19)),
+            (19, 1, false, 7, Some(19)),
+        ] {
+            at.occurrence = occurrence;
+            let wait = crate::WaitState {
+                kind: WaitKind::Sleep { until_ms: 100 },
+                since_ms: 1,
+                site: Some(at.clone()),
+            };
+            overlay.committed(&ObservedProcessEvent {
+                sequence,
+                occurred_at_ms: 100 - sequence,
+                fact: if waiting {
+                    ProcessLifecycleFact::Waiting { wait }
+                } else {
+                    ProcessLifecycleFact::Resumed { wait }
+                },
+            });
+            let snapshot = serde_json::to_value(overlay.snapshot()).expect("overlay wire shape");
+            let site = &snapshot["sites"][0];
+            assert_eq!(site["first_entered"], serde_json::json!(first_entered));
+            assert_eq!(site["last_settled"], serde_json::json!(last_settled));
+        }
+    }
+
+    /// FIG-6358: provisional evidence has no committed sequence, including
+    /// a live completion; a later commit supplies both sequence coordinates.
+    #[test]
+    fn live_only_sites_have_no_committed_sequences() {
+        let process = ProcessId::fixture("live-site-sequences");
+        let document = WorkflowDocumentRef {
+            document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
+            entry: WorkflowDocumentEntry::Main,
+        };
+        let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
+        let at = lash_sansio::effect_identity_fixture("effect", 0);
+        let mut observation = LanguageExecutionObservation {
+            language: None,
+            observed_at_ms: 100,
+            execution: TraceLanguageExecution {
+                event_key: "live-site".into(),
+                identity: TraceLanguageExecutionIdentity {
+                    scope: TraceRuntimeScope::none(),
+                    subject: TraceRuntimeSubject::Process {
+                        process_id: process,
+                    },
+                    document: document.clone(),
+                    entry_name: "main".into(),
+                    engine_execution_id: None,
+                    generation: None,
+                },
+                payload: TraceLanguageExecutionPayload::Node {
+                    at: at.clone(),
+                    fact: TraceNodeFact::Started { call_id: None },
+                },
+            },
+        };
+        for fact in [
+            TraceNodeFact::Started { call_id: None },
+            TraceNodeFact::Cancelled,
+        ] {
+            observation.execution.payload = TraceLanguageExecutionPayload::Node {
+                at: at.clone(),
+                fact,
+            };
+            overlay
+                .observe(
+                    &document,
+                    &ProcessObservationEventPayload::LanguageExecution(observation.clone()),
+                )
+                .expect("live evidence");
+            let snapshot = serde_json::to_value(overlay.snapshot()).expect("overlay wire shape");
+            let site = snapshot["sites"][0].as_object().expect("site");
+            for field in ["first_entered", "last_settled"] {
+                assert_eq!(site.get(field), Some(&serde_json::Value::Null));
+            }
+        }
+        overlay.committed(&ObservedProcessEvent {
+            sequence: 7,
+            occurred_at_ms: 1,
+            fact: ProcessLifecycleFact::EffectOutcome(crate::ProcessEffectOccurrence {
+                vocabulary_version: crate::PROCESS_EVENT_VOCABULARY_VERSION,
+                at: at.clone(),
+                operation: "fixture".into(),
+                outcome_class: ProcessEffectOutcomeClass::Failure,
+                code: None,
+                call_id: None,
+                replay_key: "fixture".into(),
+            }),
+        });
+        let snapshot = overlay.snapshot();
+        assert_eq!(snapshot.sites[0].first_entered, Some(7));
+        assert_eq!(snapshot.sites[0].last_settled, Some(7));
+
+        // A later live occurrence owns the displayed state before the prior
+        // occurrence's next committed settlement reaches this consumer.
+        let mut next = at.clone();
+        next.occurrence = 1;
+        observation.execution.payload = TraceLanguageExecutionPayload::Node {
+            at: next,
+            fact: TraceNodeFact::Started { call_id: None },
+        };
+        overlay
+            .observe(
+                &document,
+                &ProcessObservationEventPayload::LanguageExecution(observation),
+            )
+            .expect("live re-entry");
+        overlay.committed(&ObservedProcessEvent {
+            sequence: 9,
+            occurred_at_ms: 2,
+            fact: ProcessLifecycleFact::EffectOutcome(crate::ProcessEffectOccurrence {
+                vocabulary_version: crate::PROCESS_EVENT_VOCABULARY_VERSION,
+                at,
+                operation: "fixture".into(),
+                outcome_class: ProcessEffectOutcomeClass::Success,
+                code: None,
+                call_id: None,
+                replay_key: "fixture".into(),
+            }),
+        });
+        let snapshot = overlay.snapshot();
+        let site = &snapshot.sites[0];
+        assert_eq!(site.at.occurrence, 1);
+        assert_eq!(site.state, ProcessWorkflowSiteState::Running);
+        assert_eq!(site.first_entered, Some(7));
+        assert_eq!(site.last_settled, Some(9));
+        let wire = serde_json::to_value(site).expect("site wire shape");
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("process_workflow_site.fixture.json"))
+                .expect("site fixture");
+        assert_eq!(wire, fixture);
+        assert_eq!(
+            serde_json::from_value::<ProcessWorkflowSite>(wire).expect("site round trip"),
+            *site
+        );
+    }
 
     /// FIG-6354: committed site evidence is independent of a release document.
     #[test]

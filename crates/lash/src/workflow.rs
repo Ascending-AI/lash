@@ -100,6 +100,13 @@
 //! payloads supply their expected document reference to `observe`. For a stored
 //! projected terminal, call `finish` instead of decoding it as a durable event.
 //!
+//! Each site's `first_entered` and `last_settled` identify committed event
+//! sequences across its occurrences. Re-entry keeps the first entry and the
+//! previous settlement until another occurrence settles. Live-only evidence
+//! leaves both `None`; a live completion or terminal-unobserved state supplies
+//! no committed settlement. Lash stores no wall time in the overlay: map these
+//! sequences to `occurred_at_ms` using the process events you already hold.
+//!
 //! Session cells and an effect's nested language execution have separate
 //! execution identities. Their richer provisional history remains a
 //! [`WorkflowExecutionOverlay`], built with

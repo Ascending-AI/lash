@@ -848,6 +848,35 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
             .find(|row| &row.at.site == site)
             .expect("site in stored fold");
         assert_eq!(row.occurrences, 2);
+        let entered = events
+            .iter()
+            .find(|event| match &event.fact {
+                lash::process::ProcessLifecycleFact::Waiting { wait }
+                | lash::process::ProcessLifecycleFact::Resumed { wait } => {
+                    wait.execution_site().is_ok_and(|at| &at.site == site)
+                }
+                lash::process::ProcessLifecycleFact::EffectOutcome(outcome) => {
+                    &outcome.at.site == site
+                }
+                _ => false,
+            })
+            .expect("committed entry");
+        let settled = events
+            .iter()
+            .rev()
+            .find(|event| match &event.fact {
+                lash::process::ProcessLifecycleFact::Resumed { wait } => {
+                    matches!(wait.kind, lash::process::WaitKind::Sleep { .. })
+                        && wait.execution_site().is_ok_and(|at| &at.site == site)
+                }
+                lash::process::ProcessLifecycleFact::EffectOutcome(outcome) => {
+                    &outcome.at.site == site
+                }
+                _ => false,
+            })
+            .expect("committed settlement");
+        assert_eq!(row.first_entered, Some(entered.sequence));
+        assert_eq!(row.last_settled, Some(settled.sequence));
         assert_eq!(
             row.state,
             lash::workflow::ProcessWorkflowSiteState::Completed

@@ -73,6 +73,35 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "process_workflow_schema_generator__bin",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "process_workflow_schema_generator",
+    crate_root = "src/bin/process_workflow_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core", "process_workflow_schema_generator"),
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":lash-core",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "integration_boundary__test",
     crate_features = [
@@ -405,6 +434,7 @@ export_file(
 # tools/buck2/feature_variants.py.
 load(
     "//tools/buck2:lash_rust.bzl",
+    "lash_rust_feature_binary",
     "lash_rust_feature_library",
     "lash_rust_feature_test",
 )
@@ -1301,6 +1331,69 @@ lash_rust_feature_test(
     manifest_dir = "crates/lash-core",
     package_name = "lash-internal-core",
     srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_cc72fb8f", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_a4950f6c", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_733b69c8", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_5372760f", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_aae724be", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_15526c99", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_0adfc96a", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_a8308eeb", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_a208a3ee", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_53409751"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "process_workflow_schema_generator__bin__fv_2cd2af85",
+    crate_features = [
+        "default",
+        "otel-trace",
+        "testing",
+    ],
+    crate_name = "process_workflow_schema_generator",
+    crate_root = "src/bin/process_workflow_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core", "process_workflow_schema_generator"),
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-core:lash-core__fv_7f07fe3e",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    rustc_env = {},
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_6f6cf024", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_3bbda8d6", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_048a7f26", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_5e9d492f", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_950dd0d8", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_37cba217", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_4b8b8a5a", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_0120a697", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_57b33de8", "//crates/lash-store-sql:lash-store-sql": "//crates/lash-store-sql:lash-store-sql__fv_0dc86928"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_binary(
+    name = "process_workflow_schema_generator__bin__fv_e3b4abdc",
+    crate_features = [
+        "default",
+        "testing",
+    ],
+    crate_name = "process_workflow_schema_generator",
+    crate_root = "src/bin/process_workflow_schema_generator.rs",
+    declared_features = [
+        "default",
+        "otel-trace",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-core", "process_workflow_schema_generator"),
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = "//crates/lash-core:lash-core__fv_27399e02",
+    library_crate_name = "lash_core",
+    manifest_dir = "crates/lash-core",
+    package_name = "lash-internal-core",
+    rustc_env = {},
     tags = [
         "feature-lane",
         "manual",
