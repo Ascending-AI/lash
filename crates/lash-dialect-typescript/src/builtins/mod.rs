@@ -8,10 +8,9 @@
 //!
 //! The lowerer resolves a global path (`Math.max`, `new Map`) to its row's
 //! function when it lowers. A member's receiver is not known then, so for
-//! each method or property name that has rows the package builder generates
-//! one dispatcher, `ts.method.<name>` or `ts.property.<name>`, which tests
-//! the receiver's kind in row order and otherwise falls back to the
-//! object's own property. Lanes that add rows for one name never edit one
+//! each property name with rows the package builder generates a reader
+//! `ts.property.<name>` that selects by receiver kind. Method calls read
+//! their function value before applying it with the receiver. Lanes that add rows for one name never edit one
 //! file.
 //!
 //! A built-in read as a value is a token, an immutable tuple the program

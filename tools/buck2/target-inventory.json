@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 74,
-  "cargo_target_count": 319,
+  "cargo_target_count": 321,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_829a56e2__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d4e0f7b6__metadata[check]",
@@ -63934,7 +63934,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 400,
+  "generated_label_count": 402,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -64679,6 +64679,7 @@
     "//crates/lash-core:turn_event_schema__test__fv_e3b4abdc",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:document_preparation__test",
+    "//crates/lash-dialect-typescript:helper_differential__test",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
@@ -65303,7 +65304,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1423,
+  "metadata_target_count": 1425,
   "packages": [
     {
       "declared_features": [
@@ -65962,6 +65963,7 @@
         "lash-ext-date-ecma",
         "lash-ext-regex-ecma",
         "lash-ext-url-whatwg",
+        "lash-internal-vm-releases",
         "lash-kernel-check",
         "lash-kernel-conformance",
         "lash-kernel-dialect",
@@ -66019,6 +66021,15 @@
           "tags": []
         },
         {
+          "build_label": "//crates/lash-dialect-typescript:helper_differential__example",
+          "cargo": "helper_differential",
+          "check_label": "//crates/lash-dialect-typescript:helper_differential__example__metadata[check]",
+          "clippy_label": "//crates/lash-dialect-typescript:helper_differential__example__clippy[clippy.txt]",
+          "kind": "example",
+          "label": "//crates/lash-dialect-typescript:helper_differential__example",
+          "tags": []
+        },
+        {
           "build_label": "//crates/lash-dialect-typescript:kernel_perf__example",
           "cargo": "kernel_perf",
           "check_label": "//crates/lash-dialect-typescript:kernel_perf__example__metadata[check]",
@@ -66037,6 +66048,15 @@
           "tags": []
         },
         {
+          "build_label": "//crates/lash-dialect-typescript:helper_differential__test",
+          "cargo": "helper_differential",
+          "check_label": "//crates/lash-dialect-typescript:helper_differential__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-dialect-typescript:helper_differential__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-dialect-typescript:helper_differential__test",
+          "tags": []
+        },
+        {
           "build_label": "//crates/lash-dialect-typescript:test262_kernel__test",
           "cargo": "test262_kernel",
           "check_label": "//crates/lash-dialect-typescript:test262_kernel__test__rust_test__metadata[check]",
@@ -66051,6 +66071,7 @@
         "label": "//crates/lash-dialect-typescript:test_batch",
         "members": [
           "//crates/lash-dialect-typescript:document_preparation__test",
+          "//crates/lash-dialect-typescript:helper_differential__test",
           "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test"
         ]
       }
@@ -71987,6 +72008,7 @@
     "//crates/lash-core:turn_event_schema__test__fv_e3b4abdc": 300,
     "//crates/lash-dialect-python:lash-dialect-python__unit_test": 300,
     "//crates/lash-dialect-typescript:document_preparation__test": 300,
+    "//crates/lash-dialect-typescript:helper_differential__test": 300,
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test": 300,
     "//crates/lash-dialect-typescript:test262_kernel__test": 300,
     "//crates/lash-dialect-typescript:test_batch": 300,
@@ -72655,6 +72677,8 @@
     "//crates/lash-dialect-typescript:build_script",
     "//crates/lash-dialect-typescript:build_script__build",
     "//crates/lash-dialect-typescript:document_preparation__test",
+    "//crates/lash-dialect-typescript:helper_differential__example",
+    "//crates/lash-dialect-typescript:helper_differential__test",
     "//crates/lash-dialect-typescript:kernel_perf__example",
     "//crates/lash-dialect-typescript:lash-dialect-typescript[static]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
@@ -73070,6 +73094,8 @@
     "//crates/lash-dialect-python:lash-dialect-python__unit_test__rust_test__metadata[check]",
     "//crates/lash-dialect-typescript:build_script__build__metadata[check]",
     "//crates/lash-dialect-typescript:document_preparation__test__rust_test__metadata[check]",
+    "//crates/lash-dialect-typescript:helper_differential__example__metadata[check]",
+    "//crates/lash-dialect-typescript:helper_differential__test__rust_test__metadata[check]",
     "//crates/lash-dialect-typescript:kernel_perf__example__metadata[check]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__metadata[check]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test__rust_test__metadata[check]",
@@ -73504,6 +73530,8 @@
     "//crates/lash-dialect-python:lash-dialect-python__unit_test__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:build_script__build__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:document_preparation__test__clippy[clippy.txt]",
+    "//crates/lash-dialect-typescript:helper_differential__example__clippy[clippy.txt]",
+    "//crates/lash-dialect-typescript:helper_differential__test__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:kernel_perf__example__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test__clippy[clippy.txt]",
@@ -73823,6 +73851,8 @@
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:build_script__build",
     "//crates/lash-dialect-typescript:document_preparation__test",
+    "//crates/lash-dialect-typescript:helper_differential__example",
+    "//crates/lash-dialect-typescript:helper_differential__test",
     "//crates/lash-dialect-typescript:kernel_perf__example",
     "//crates/lash-dialect-typescript:lash-dialect-typescript",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
@@ -74143,6 +74173,8 @@
     "//crates/lash-dialect-typescript:build_script",
     "//crates/lash-dialect-typescript:build_script__build",
     "//crates/lash-dialect-typescript:document_preparation__test",
+    "//crates/lash-dialect-typescript:helper_differential__example",
+    "//crates/lash-dialect-typescript:helper_differential__test",
     "//crates/lash-dialect-typescript:kernel_perf__example",
     "//crates/lash-dialect-typescript:lash-dialect-typescript",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
@@ -74907,6 +74939,7 @@
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:document_preparation__test",
+    "//crates/lash-dialect-typescript:helper_differential__test",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
@@ -75280,6 +75313,7 @@
     ],
     "//crates/lash-dialect-typescript:test_batch": [
       "//crates/lash-dialect-typescript:document_preparation__test",
+      "//crates/lash-dialect-typescript:helper_differential__test",
       "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test"
     ],
     "//crates/lash-kernel-doc:test_batch": [
@@ -75540,6 +75574,7 @@
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:document_preparation__test",
+    "//crates/lash-dialect-typescript:helper_differential__test",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",

@@ -1004,6 +1004,20 @@ impl Lowerer<'_> {
     /// Calls a helper as its own statement.
     pub(crate) fn invoke(&mut self, function: &str, args: &[Operand], ty: Ty) -> Lowering<Operand> {
         let function = self.function(function)?;
+        // A helper's checked Text result is representation proof. Losing it
+        // makes a later member read emit impossible record/list branches,
+        // which admission correctly rejects (FIG-6372).
+        let ty = if ty == Ty::Unknown
+            && self
+                .library
+                .definition(&function)
+                .is_some_and(|definition| {
+                    definition.signature.result == lash_kernel_doc::Type::Text
+                }) {
+            Ty::Text
+        } else {
+            ty
+        };
         Ok(self.emit_action(
             Action::Call {
                 callee: Callee::Library(function),

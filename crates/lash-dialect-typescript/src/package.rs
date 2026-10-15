@@ -11,7 +11,7 @@ use crate::builtins::{self, Receiver};
 ///
 /// The core operations come first, then each built-in object's helpers,
 /// then the functions that make built-ins values, then one generated
-/// dispatcher per method and property name the built-in rows mention.
+/// reader per member and property name the built-in rows mention.
 pub fn define_helpers(library: &mut NamedLibrary) -> Result<Vec<FunctionDefinition>, SourceError> {
     define_helpers_from(library, builtins::objects())
 }
@@ -48,20 +48,11 @@ pub(crate) fn define_helpers_from(
             library,
         )?);
     }
-    for (name, rows) in &table.methods {
-        let source = dispatcher(table, "method", name, rows);
-        definitions.extend(define_functions(&source, library)?);
-    }
     for (name, rows) in &table.properties {
-        let source = dispatcher(table, "property", name, rows);
+        let source = dispatcher(table, name, rows);
         definitions.extend(define_functions(&source, library)?);
     }
-    for call in [false, true] {
-        definitions.extend(define_functions(
-            &computed_dispatcher(table, call),
-            library,
-        )?);
-    }
+    definitions.extend(define_functions(&computed_reader(table), library)?);
     Ok(definitions)
 }
 
@@ -80,16 +71,13 @@ fn reader(table: &builtins::Table, name: &str) -> (String, String) {
     }
 }
 
-/// The kernel text of `ts.<family>.<name>`: the receiver's kind chooses the
-/// row, and a receiver no row names, or a record with a field of that name,
-/// gives its member by that name, which a method then calls.
+/// The kernel text of a property reader: the receiver kind chooses its row,
+/// falling back to an own member when no row answers.
 pub(crate) fn dispatcher(
     table: &builtins::Table,
-    family: &str,
     name: &str,
     rows: &[(Receiver, &'static str)],
 ) -> String {
-    let method = family == "method";
     let (reader, read) = reader(table, name);
     let mut source = String::from("use same\nuse kind\nuse text.concat\nuse ts.receiver\n");
     let record_rows = rows
@@ -99,31 +87,17 @@ pub(crate) fn dispatcher(
         source.push_str("use record.contains\n");
     }
     source.push_str(&format!("use {reader}\n"));
-    if method {
-        source.push_str("use ts.call_value\n");
-    }
     let mut named: Vec<&str> = rows.iter().map(|(_, function)| *function).collect();
     named.sort_unstable();
     named.dedup();
     for function in named {
         source.push_str(&format!("use {function}\n"));
     }
-    // A method's rows take the receiver and the argument list; a property's
-    // rows take the receiver alone.
-    let (params, passed) = if method {
-        ("this: Any, args: List(Any)", "this, args")
-    } else {
-        ("this: Any", "this")
-    };
-    let member = if method {
-        format!(
-            "let member = {read}\n    let outcome = invoke ts.call_value(member, this, \"{name}\", args)"
-        )
-    } else {
-        format!("let outcome = {read}")
-    };
+    let params = "this: Any";
+    let passed = "this";
+    let member = format!("let outcome = {read}");
     source.push_str(&format!(
-        "function ts.{family}.{name}({params}) -> Any\nkernel 1\n\
+        "function ts.property.{name}({params}) -> Any\nkernel 1\n\
          errors \"type_error\"\ncharge {}\nbody {{\n{RECEIVER}",
         4 + rows.len()
     ));
@@ -141,7 +115,7 @@ pub(crate) fn dispatcher(
         .iter()
         .find(|(receiver, _)| *receiver == Receiver::List)
     {
-        let passed = if method { "items, args" } else { "items" };
+        let passed = "items";
         source.push_str(&format!(
             "  if same(receiver, \"brand:regex.match\") {{\n    let items = this.items\n    let outcome = invoke {function}({passed})\n    return outcome\n  }}\n"
         ));
@@ -171,81 +145,45 @@ const RECEIVER: &str = "  let receiver = kind(this)
 /// found among the rows by halving them in name order with
 /// `text.compare`, so a read costs the logarithm of the rows, not their
 /// count.
-fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
-    let family = if call {
-        "call_computed"
-    } else {
-        "get_computed"
-    };
-    let fallback = if call { "ts.call_member" } else { "ts.read" };
+fn computed_reader(table: &builtins::Table) -> String {
+    let fallback = "ts.read";
     let mut source = format!(
         "use bool.not\nuse same\nuse kind\nuse num.lt\nuse text.compare\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
     );
-    if !call {
-        source.push_str("use num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
-    }
-    if call {
-        source.push_str("use ts.call_value\n");
-    }
-    // A name may carry a property row, a method row and a reader. A read
-    // takes the property row, as get_member does for a literal name; a
-    // call takes the method row.
-    let mut rows: Vec<(&str, String, bool)> = Vec::new();
-    if call {
-        rows.extend(
-            table
-                .methods
-                .keys()
-                .map(|name| (*name, format!("ts.method.{name}"), false)),
-        );
-    } else {
-        rows.extend(
-            table
-                .properties
-                .keys()
-                .map(|name| (*name, format!("ts.property.{name}"), false)),
-        );
-    }
+    source.push_str("use num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
+    // A property row takes precedence over the member reader, as for
+    // a literal name. Calling a member reads its value before applying it.
+    let mut rows: Vec<(&str, String)> = Vec::new();
+    rows.extend(
+        table
+            .properties
+            .keys()
+            .map(|name| (*name, format!("ts.property.{name}"))),
+    );
     rows.extend(
         table
             .member_names
             .iter()
-            .map(|name| (name.as_str(), format!("ts.member.{name}"), call)),
+            .map(|name| (name.as_str(), format!("ts.member.{name}"))),
     );
     let mut seen = std::collections::BTreeSet::new();
-    rows.retain(|(name, _, _)| seen.insert(*name));
-    for (_, function, _) in &rows {
+    rows.retain(|(name, _)| seen.insert(*name));
+    for (_, function) in &rows {
         source.push_str(&format!("use {function}\n"));
     }
     // `text.compare` orders texts by code point, as `str` orders them.
     rows.sort_by(|left, right| left.0.cmp(right.0));
     let branches: Vec<(&str, String)> = rows
         .iter()
-        .map(|(name, function, read_then_call)| {
-            let outcome = if *read_then_call {
-                format!(
-                    "let member = invoke {function}(this)\nlet outcome = invoke ts.call_value(member, this, name, args)"
-                )
-            } else if call {
-                format!("let outcome = invoke {function}(this, args)")
-            } else {
-                format!("let outcome = invoke {function}(this)")
-            };
+        .map(|(name, function)| {
+            let outcome = format!("let outcome = invoke {function}(this)");
             (*name, outcome)
         })
         .collect();
-    let params = if call {
-        "this: Any, key: Any, args: List(Any)"
-    } else {
-        "this: Any, key: Any"
-    };
-    let own = if call {
-        "let outcome = invoke ts.call_value(own, this, key, args)\n    return outcome"
-    } else {
-        "return own"
-    };
+    let params = "this: Any, key: Any";
+    let own = "return own";
     source.push_str(&format!(
-        "function ts.{family}({params}) -> Any\nkernel 1\ncharge 4\nbody {{\n"
+        "function ts.get_computed({params}) -> Any\nkernel 1\ncharge 4\nbody {{\n"
     ));
     // A plain object's own field is what every row and reader gives for
     // its name, so a text key naming one needs neither coercion nor rows.
@@ -265,20 +203,15 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
     ));
     // A number naming an element of a list or a text spells a row's name
     // only if some row's name is all digits; then every key takes the rows.
-    if !call
-        && !rows
-            .iter()
-            .any(|(name, _, _)| name.bytes().all(|byte| byte.is_ascii_digit()))
+    if !rows
+        .iter()
+        .any(|(name, _)| name.bytes().all(|byte| byte.is_ascii_digit()))
     {
         source.push_str(ELEMENT_READ);
     }
     source.push_str("  let name = invoke ts.to_property_key(key)\n");
     search(&branches, 1, &mut source);
-    let args = if call {
-        "this, name, args"
-    } else {
-        "this, name"
-    };
+    let args = "this, name";
     source.push_str(&format!(
         "  let outcome = invoke {fallback}({args})\n  return outcome\n}}\n"
     ));

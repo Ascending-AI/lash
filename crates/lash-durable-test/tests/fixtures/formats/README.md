@@ -117,6 +117,17 @@ tools as JSON integers, as confirmed by FIG-6366; the earlier images committed
 `7.0`. Every other oracle member, each set id and program, and every version
 remain unchanged. No release was sealed.
 
+FIG-6372 deletes 132 obsolete `ts.method.*` dispatchers, the unused
+`ts.call_computed` dispatcher and `ts.url.commit` from the unsealed TypeScript
+release. Under the pre-cut standing rule, the orchestrator authorized refreshing
+only the broken `lashvm` and `session` baselines and the existing corpus
+images `loop-closures-aliases`, `task-join`, `suspending-cleanup`,
+`pending-tool-typescript` and `saved-declared-read` in place, with the existing recorders on this tree rebased onto `origin/main`.
+Programs, version constants, set metadata and every expected result stay unchanged.
+The passing `pending-tool-python` image remains byte-identical.
+The helper-result Text inference fix affects newly lowered source only; it
+intends no change to an existing parked program's result.
+
 Source `env.sh`, then run the existing recorder locally on the build being
 retained, naming its full commit (use a new build, never an existing set):
 

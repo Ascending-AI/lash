@@ -138,6 +138,7 @@ PACKAGE_DEPS = {
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "serde": "//third-party/rust:p0317",
             "serde_yaml": "//third-party/rust:p0326",
             "sha2": "//third-party/rust:p0328",

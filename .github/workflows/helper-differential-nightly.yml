@@ -1,0 +1,56 @@
+name: Helper differential nightly
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: helper-differential-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  differential:
+    name: Live Node and CPython helper differential
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: build-cache
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "25.2.1"
+      # Ubuntu 24.04's system CPython is 3.12.3. The fuzzer verifies both
+      # exact interpreter versions before executing any generated case.
+      - name: Configure Buck2 shared cache
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+      - name: Compare and minimize 10000 programs per dialect
+        shell: bash
+        run: |
+          set -euo pipefail
+          ulimit -v 8388608
+          /usr/bin/time -v /usr/bin/python3 scripts/fuzz-helper-differential.py \
+            --cases 10000 --seed "${GITHUB_RUN_NUMBER}" \
+            --output .kiln/FIG-6372/fuzz \
+            --runner-command 'scripts/hermetic-build.sh run //crates/lash-dialect-typescript:helper_differential__example --'
+      - name: Retain minimized reproductions and counts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: helper-differential-reproductions
+          path: .kiln/FIG-6372/fuzz
+          if-no-files-found: error
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"

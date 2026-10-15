@@ -2104,6 +2104,7 @@ dependencies = [
  "lash-ext-date-ecma",
  "lash-ext-regex-ecma",
  "lash-ext-url-whatwg",
+ "lash-internal-vm-releases",
  "lash-kernel-check",
  "lash-kernel-conformance",
  "lash-kernel-dialect",

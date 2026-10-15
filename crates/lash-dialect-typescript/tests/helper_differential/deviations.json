@@ -1,0 +1,947 @@
+[
+  {
+    "helper": "ts.array.toLocaleString",
+    "case": "typescript/surface/Array.prototype.toLocaleString",
+    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
+    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
+    "expected": {
+      "type": "refusal",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/surface/Date.prototype.getTimezoneOffset",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/surface/Date.prototype.toDateString",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/surface/Date.prototype.toLocaleDateString",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/surface/Date.prototype.toLocaleTimeString",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/surface/Date.prototype.toTimeString",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getFullYear",
+    "case": "typescript/surface/Date.prototype.getFullYear",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getMonth",
+    "case": "typescript/surface/Date.prototype.getMonth",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getDate",
+    "case": "typescript/surface/Date.prototype.getDate",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getDay",
+    "case": "typescript/surface/Date.prototype.getDay",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getHours",
+    "case": "typescript/surface/Date.prototype.getHours",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getMinutes",
+    "case": "typescript/surface/Date.prototype.getMinutes",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getSeconds",
+    "case": "typescript/surface/Date.prototype.getSeconds",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getMilliseconds",
+    "case": "typescript/surface/Date.prototype.getMilliseconds",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setTime",
+    "case": "typescript/surface/Date.prototype.setTime",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setFullYear",
+    "case": "typescript/surface/Date.prototype.setFullYear",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setMonth",
+    "case": "typescript/surface/Date.prototype.setMonth",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setDate",
+    "case": "typescript/surface/Date.prototype.setDate",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setHours",
+    "case": "typescript/surface/Date.prototype.setHours",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setMinutes",
+    "case": "typescript/surface/Date.prototype.setMinutes",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setSeconds",
+    "case": "typescript/surface/Date.prototype.setSeconds",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setMilliseconds",
+    "case": "typescript/surface/Date.prototype.setMilliseconds",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCFullYear",
+    "case": "typescript/surface/Date.prototype.setUTCFullYear",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCMonth",
+    "case": "typescript/surface/Date.prototype.setUTCMonth",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCDate",
+    "case": "typescript/surface/Date.prototype.setUTCDate",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCHours",
+    "case": "typescript/surface/Date.prototype.setUTCHours",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCMinutes",
+    "case": "typescript/surface/Date.prototype.setUTCMinutes",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCSeconds",
+    "case": "typescript/surface/Date.prototype.setUTCSeconds",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCMilliseconds",
+    "case": "typescript/surface/Date.prototype.setUTCMilliseconds",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.function.eval",
+    "case": "typescript/surface/eval",
+    "rule": "TS_EVAL_UNSUPPORTED; K-DOC-001",
+    "reason": "Dynamic source evaluation is outside the dialect; only the admitted document runs.",
+    "expected": {
+      "type": "refusal",
+      "value": "TS_EVAL_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.function.toString",
+    "case": "typescript/surface/Function.prototype.toString",
+    "rule": "TS_FUNCTION_STRING_COERCION; K-ID-001",
+    "reason": "Function source text is unavailable for kernel closures; the helper raises its typed refusal.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_FUNCTION_STRING_COERCION"
+    }
+  },
+  {
+    "helper": "ts.object.defineProperty",
+    "case": "typescript/surface/Object.defineProperty",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Property descriptors and prototype reflection are outside the dialect; the helper refuses them.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_REFLECTION_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.defineProperties",
+    "case": "typescript/surface/Object.defineProperties",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Property descriptors and prototype reflection are outside the dialect; the helper refuses them.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_REFLECTION_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.getOwnPropertyDescriptor",
+    "case": "typescript/surface/Object.getOwnPropertyDescriptor",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Property descriptors and prototype reflection are outside the dialect; the helper refuses them.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_REFLECTION_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.getOwnPropertyDescriptors",
+    "case": "typescript/surface/Object.getOwnPropertyDescriptors",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Property descriptors and prototype reflection are outside the dialect; the helper refuses them.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_REFLECTION_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.getOwnPropertyNames",
+    "case": "typescript/surface/Object.getOwnPropertyNames",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.getOwnPropertySymbols",
+    "case": "typescript/surface/Object.getOwnPropertySymbols",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.create",
+    "case": "typescript/surface/Object.create",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Property descriptors and prototype reflection are outside the dialect; the helper refuses them.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_REFLECTION_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.getPrototypeOf",
+    "case": "typescript/surface/Object.getPrototypeOf",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Property descriptors and prototype reflection are outside the dialect; the helper refuses them.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_REFLECTION_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.setPrototypeOf",
+    "case": "typescript/surface/Object.setPrototypeOf",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Property descriptors and prototype reflection are outside the dialect; the helper refuses them.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_REFLECTION_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.freeze",
+    "case": "typescript/surface/Object.freeze",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.seal",
+    "case": "typescript/surface/Object.seal",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.preventExtensions",
+    "case": "typescript/surface/Object.preventExtensions",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.isFrozen",
+    "case": "typescript/surface/Object.isFrozen",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.isSealed",
+    "case": "typescript/surface/Object.isSealed",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.object.isExtensible",
+    "case": "typescript/surface/Object.isExtensible",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Object descriptors, symbols and extensibility state have no admitted representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.string.locale_unsupported",
+    "case": "typescript/surface/String.prototype.localeCompare",
+    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
+    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.string.locale_unsupported",
+    "case": "typescript/surface/String.prototype.toLocaleLowerCase",
+    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
+    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.string.locale_unsupported",
+    "case": "typescript/surface/String.prototype.toLocaleUpperCase",
+    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
+    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": null,
+    "case": "typescript/text/875",
+    "rule": "TS_LONE_SURROGATE; K-VAL-006",
+    "reason": "Kernel Text contains Unicode scalar values; a string result with a lone surrogate is deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_LONE_SURROGATE_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": null,
+    "case": "typescript/core/27",
+    "rule": "TS_LONE_SURROGATE; K-VAL-006",
+    "reason": "Kernel Text contains Unicode scalar values; a string result with a lone surrogate is deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_LONE_SURROGATE_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.boolean.convert",
+    "case": "typescript/instance/Boolean",
+    "rule": "TS_BOXED_PRIMITIVE_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Boxed primitive and Function instanceof reflection have no admitted representation.",
+    "expected": {
+      "type": "refusal",
+      "value": "TS_INSTANCEOF_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.number.convert",
+    "case": "typescript/instance/Number",
+    "rule": "TS_BOXED_PRIMITIVE_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Boxed primitive and Function instanceof reflection have no admitted representation.",
+    "expected": {
+      "type": "refusal",
+      "value": "TS_INSTANCEOF_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.string.create",
+    "case": "typescript/instance/String",
+    "rule": "TS_BOXED_PRIMITIVE_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Boxed primitive and Function instanceof reflection have no admitted representation.",
+    "expected": {
+      "type": "refusal",
+      "value": "TS_INSTANCEOF_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": null,
+    "case": "typescript/instance/Function",
+    "rule": "TS_BOXED_PRIMITIVE_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Boxed primitive and Function instanceof reflection have no admitted representation.",
+    "expected": {
+      "type": "refusal",
+      "value": "TS_INSTANCEOF_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": null,
+    "case": "typescript/gap/eval-value",
+    "rule": "TS_EVAL_UNSUPPORTED; K-DOC-001",
+    "reason": "Dynamic source evaluation is outside the dialect; only the admitted document runs.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_EVAL_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": null,
+    "case": "typescript/gap/function-value",
+    "rule": "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED; K-DOC-001",
+    "reason": "A dynamic Function constructor cannot admit a new document at runtime.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.array.toLocaleString",
+    "case": "typescript/dynamic/Array.prototype.toLocaleString",
+    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
+    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/dynamic/Date.prototype.getTimezoneOffset",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/dynamic/Date.prototype.toDateString",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/dynamic/Date.prototype.toLocaleDateString",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/dynamic/Date.prototype.toLocaleTimeString",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.local_unsupported",
+    "case": "typescript/dynamic/Date.prototype.toTimeString",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getFullYear",
+    "case": "typescript/dynamic/Date.prototype.getFullYear",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getMonth",
+    "case": "typescript/dynamic/Date.prototype.getMonth",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getDate",
+    "case": "typescript/dynamic/Date.prototype.getDate",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getDay",
+    "case": "typescript/dynamic/Date.prototype.getDay",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getHours",
+    "case": "typescript/dynamic/Date.prototype.getHours",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getMinutes",
+    "case": "typescript/dynamic/Date.prototype.getMinutes",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getSeconds",
+    "case": "typescript/dynamic/Date.prototype.getSeconds",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.getMilliseconds",
+    "case": "typescript/dynamic/Date.prototype.getMilliseconds",
+    "rule": "FIG-5709; K-HOST-002",
+    "reason": "The timestamp Date representation has UTC getters; local timezone fields are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_LOCAL_TIME_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setTime",
+    "case": "typescript/dynamic/Date.prototype.setTime",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setFullYear",
+    "case": "typescript/dynamic/Date.prototype.setFullYear",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setMonth",
+    "case": "typescript/dynamic/Date.prototype.setMonth",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setDate",
+    "case": "typescript/dynamic/Date.prototype.setDate",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setHours",
+    "case": "typescript/dynamic/Date.prototype.setHours",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setMinutes",
+    "case": "typescript/dynamic/Date.prototype.setMinutes",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setSeconds",
+    "case": "typescript/dynamic/Date.prototype.setSeconds",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setMilliseconds",
+    "case": "typescript/dynamic/Date.prototype.setMilliseconds",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Local time formatting and mutable Date operations are outside the immutable timestamp Date representation.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCFullYear",
+    "case": "typescript/dynamic/Date.prototype.setUTCFullYear",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCMonth",
+    "case": "typescript/dynamic/Date.prototype.setUTCMonth",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCDate",
+    "case": "typescript/dynamic/Date.prototype.setUTCDate",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCHours",
+    "case": "typescript/dynamic/Date.prototype.setUTCHours",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCMinutes",
+    "case": "typescript/dynamic/Date.prototype.setUTCMinutes",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCSeconds",
+    "case": "typescript/dynamic/Date.prototype.setUTCSeconds",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.date.setUTCMilliseconds",
+    "case": "typescript/dynamic/Date.prototype.setUTCMilliseconds",
+    "rule": "TS_DATE_VALUE_IDENTITY; FIG-5709",
+    "reason": "Valid Dates are immutable kernel timestamp values; setters are deliberately refused.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_DATE_IMMUTABLE"
+    }
+  },
+  {
+    "helper": "ts.function.toString",
+    "case": "typescript/dynamic/Function.prototype.toString",
+    "rule": "TS_FUNCTION_STRING_COERCION; K-ID-001",
+    "reason": "Function source text is unavailable for kernel closures; the helper raises its typed refusal.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_FUNCTION_STRING_COERCION"
+    }
+  },
+  {
+    "helper": "ts.string.locale_unsupported",
+    "case": "typescript/dynamic/String.prototype.localeCompare",
+    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
+    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.string.locale_unsupported",
+    "case": "typescript/dynamic/String.prototype.toLocaleLowerCase",
+    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
+    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.string.locale_unsupported",
+    "case": "typescript/dynamic/String.prototype.toLocaleUpperCase",
+    "rule": "TS_METHOD_UNSUPPORTED; K-HOST-001",
+    "reason": "Locale-dependent operations require ambient locale state that the dialect does not expose.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": null,
+    "case": "typescript/extra/lone-surrogate-literal",
+    "rule": "TS_LONE_SURROGATE; K-VAL-006",
+    "reason": "Kernel Text contains scalar values and refuses lone UTF-16 surrogate literals.",
+    "expected": {
+      "type": "refusal",
+      "value": "TS_LONE_SURROGATE_LITERAL_UNSUPPORTED"
+    }
+  },
+  {
+    "helper": "ts.member.prototype",
+    "case": "typescript/extra/prototype-generic",
+    "rule": "TS_REFLECTION_UNSUPPORTED; 2026-10-10 option B",
+    "reason": "Kernel closures carry no mutable function prototype object; their prototype read is undefined.",
+    "expected": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            117,
+            110,
+            100,
+            101,
+            102,
+            105,
+            110,
+            101,
+            100
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "helper": null,
+    "case": "typescript/read/absent-size",
+    "rule": "TS_METHOD_UNSUPPORTED; builtin value contract",
+    "reason": "Reading an unsupported member of a builtin namespace raises the dialect typed refusal.",
+    "expected": {
+      "type": "throw",
+      "value": "TS_METHOD_UNSUPPORTED"
+    }
+  }
+]
