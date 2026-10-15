@@ -65,6 +65,62 @@ fn producer(spans: &[SpanData], context: u8) -> &SpanData {
 
 const SENT_SESSION: &str = "parentage-sent";
 
+/// FIG-6339: a host can queue a serialized start request and admit it in
+/// another process without losing the caller's explicit carrier or Link mode.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_serialized_process_start_links_its_explicit_caller() -> Result<()> {
+    let builder = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(
+        mock_provider(vec![text_call("child answered")]).into_handle(),
+        mock_llm_profile_spec(),
+    );
+    let (observed, builder) = Observed::install(builder);
+    let core = builder.build(crate::testing::runtime_lease_owner())?;
+    core.session(
+        crate::SessionId::parse(session_turn_process::PARENT).expect("nonblank session id"),
+    )
+    .create(crate::SessionCreation::root(mock_session_spec()))
+    .await?;
+    let context =
+        lash_core::TraceCarrier::parse_w3c(&caller(0xe2).traceparent(), Some("queued=caller"))
+            .expect("a valid caller carrier");
+    let request = session_turn_process::request("mock-model")
+        .trace_context(context.clone())
+        .trace_link_mode(lash_trace::TraceLinkMode::Link);
+    let encoded = serde_json::to_value(request).expect("serialize the queued start");
+    let decoded = serde_json::from_value(encoded).expect("decode the queued start");
+    let started = core.processes().start(decoded, core.effect_host()).await?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        core.processes().await_output(&started.process_id),
+    )
+    .await
+    .expect("the child's turn settles")?;
+    assert!(
+        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+            if output.is_success()),
+        "the queued start ran successfully: {output:?}"
+    );
+    let starts = observed.spans("lash.process.start");
+    assert_eq!(starts.len(), 1, "one producer for the queued start");
+    let start = &starts[0];
+    assert_eq!(
+        links(start),
+        vec![SpanId::from_bytes(context.span_id().to_bytes())],
+        "the producer links the queued caller's span"
+    );
+    let linked = &start.links[0].span_context;
+    assert_eq!(linked.trace_id(), trace_of(0xe2));
+    assert!(linked.is_sampled());
+    assert_eq!(linked.trace_state().header(), "queued=caller");
+    assert_eq!(start.parent_span_id, SpanId::INVALID);
+    assert_ne!(start.span_context.trace_id(), linked.trace_id());
+    core.shutdown().await?;
+    Ok(())
+}
+
 /// L3's first edge: a send under a caller's context opens a `lash.send`
 /// producer under it, the turn's admission is that producer's child, and the
 /// turn's `invoke_agent` is on the send's trace.

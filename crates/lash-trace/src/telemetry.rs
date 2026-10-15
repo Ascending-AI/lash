@@ -642,7 +642,8 @@ impl TraceParent {
 
 /// How a producer span relates to its caller's context. One spelling on
 /// every producer entry.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TraceLinkMode {
     /// The producer is the caller's child.
     #[default]
@@ -681,7 +682,13 @@ impl ProducerKind {
 }
 
 /// Which caller context a producer span takes.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "context",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum TraceCaller {
     /// The caller's ambient context, captured once, when the host call
     /// opens its producer.
@@ -694,7 +701,8 @@ pub enum TraceCaller {
 
 /// The per-call trace choices of a producer entry: its caller context and
 /// how its producer relates to it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TraceCall {
     pub caller: TraceCaller,
     pub link_mode: TraceLinkMode,

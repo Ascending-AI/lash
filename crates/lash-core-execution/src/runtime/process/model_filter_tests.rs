@@ -5,6 +5,42 @@ use super::model::{
     ProcessRegistration,
 };
 
+/// Caller choices cross the host's queue boundary; admission authority does
+/// not. Ambient and explicitly detached calls remain distinct on that boundary.
+#[test]
+fn serialized_start_preserves_caller_choices_but_not_admission_parent() {
+    let context = lash_trace::TraceCarrier::parse_w3c(
+        "00-000000000000000000000000000000e2-00000000000000e2-01",
+        Some("queued=caller"),
+    )
+    .expect("a valid caller context");
+    let cause = lash_trace::TraceCause::Parent(context.clone());
+    let request = crate::testing::held_engine_request(
+        serde_json::Value::Null,
+        crate::ProcessOriginator::host(),
+        crate::LifetimeDecision::Detached,
+    )
+    .with_trace_parent(cause.as_parent());
+    assert_eq!(request.clone().into_registration().trace.cause(), &cause);
+    for request in [
+        request.clone(),
+        request.clone().trace_context_none(),
+        request.trace_context(context),
+    ] {
+        for mode in [
+            lash_trace::TraceLinkMode::Parent,
+            lash_trace::TraceLinkMode::Link,
+        ] {
+            let request = request.clone().trace_link_mode(mode);
+            let wire = serde_json::to_value(&request).expect("serialize the queued request");
+            let decoded: crate::ProcessStartRequest =
+                serde_json::from_value(wire).expect("decode the queued request");
+            assert_eq!(decoded.trace_call(), request.trace_call());
+            assert!(decoded.into_registration().trace.cause().is_none());
+        }
+    }
+}
+
 #[test]
 fn process_identity_keeps_typed_engine_definitions_in_durable_encodings() {
     for signature in [

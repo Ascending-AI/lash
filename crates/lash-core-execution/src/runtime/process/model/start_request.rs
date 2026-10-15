@@ -177,9 +177,10 @@ impl ProcessStartDeclaration {
             originator: self.originator,
             identity: self.identity,
             observers: self.observers,
+            trace: lash_trace::TraceCall::default(),
             // A declared start runs under the scope of the intent that
             // declared it; realization supplies that parent.
-            trace: StartTrace::default(),
+            trace_parent: None,
         }
     }
 }
@@ -206,23 +207,16 @@ pub struct ProcessStartRequest {
     pub identity: Option<super::DeclaredProcessIdentity>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observers: Vec<SessionId>,
-    /// The start's telemetry, beside the request and never part of it: the
-    /// parent the process is admitted under, and the caller context a
-    /// host start's producer span takes. The registration that inserts the
-    /// process retains the parent as its cause; a retry under the start's
-    /// key reads the retained cause back. It is no part of what the key
-    /// fences, and it is not serialized: it belongs to one call.
+    /// The caller choices the host start's producer consumes. These are
+    /// request data, so a queued start keeps its caller across serialization.
+    /// They are no part of what the start's key fences.
+    #[serde(default)]
+    trace: lash_trace::TraceCall,
+    /// The parent supplied by admission in this process: a host producer,
+    /// or the scope of the work that declared the start. A serialized request
+    /// cannot supply an admission parent; only a live scope makes one.
     #[serde(skip)]
-    trace: StartTrace,
-}
-
-/// A process start's telemetry for one call ([`ProcessStartRequest`]).
-#[derive(Clone, Debug, Default)]
-struct StartTrace {
-    /// What the process is admitted under; `None` admits it unobserved.
-    parent: Option<lash_trace::TraceParent>,
-    /// The caller choices a host start's producer span takes.
-    call: lash_trace::TraceCall,
+    trace_parent: Option<lash_trace::TraceParent>,
 }
 
 impl ProcessStartRequest {
@@ -238,7 +232,8 @@ impl ProcessStartRequest {
             originator,
             identity: None,
             observers: Vec::new(),
-            trace: StartTrace::default(),
+            trace: lash_trace::TraceCall::default(),
+            trace_parent: None,
         }
     }
 
@@ -317,34 +312,34 @@ impl ProcessStartRequest {
     /// context. An explicit context wins over the ambient one, which is
     /// then never consulted.
     pub fn trace_context(mut self, context: lash_trace::TraceCarrier) -> Self {
-        self.trace.call.caller = lash_trace::TraceCaller::Explicit(Some(context));
+        self.trace.caller = lash_trace::TraceCaller::Explicit(Some(context));
         self
     }
 
     /// Open the start's producer span with no caller: detached from the
     /// ambient context, it is a trace root.
     pub fn trace_context_none(mut self) -> Self {
-        self.trace.call.caller = lash_trace::TraceCaller::Explicit(None);
+        self.trace.caller = lash_trace::TraceCaller::Explicit(None);
         self
     }
 
     /// How the start's producer span relates to its caller: its child (the
     /// default), or a new trace root that links it.
     pub fn trace_link_mode(mut self, mode: lash_trace::TraceLinkMode) -> Self {
-        self.trace.call.link_mode = mode;
+        self.trace.link_mode = mode;
         self
     }
 
     /// The caller choices the start's producer span takes.
     pub fn trace_call(&self) -> &lash_trace::TraceCall {
-        &self.trace.call
+        &self.trace
     }
 
     /// Admit the process under `parent`: the producer of the host call that
     /// starts it, or the scope of the work that declared it. `None` admits
     /// it unobserved.
     pub fn with_trace_parent(mut self, parent: Option<lash_trace::TraceParent>) -> Self {
-        self.trace.parent = parent;
+        self.trace_parent = parent;
         self
     }
 
@@ -430,7 +425,7 @@ impl ProcessStartRequest {
             self.lifetime,
         )
         .with_start_key(self.start_key)
-        .with_trace(lash_trace::TraceScopeOffer::caused_by(self.trace.parent));
+        .with_trace(lash_trace::TraceScopeOffer::caused_by(self.trace_parent));
         if let Some(identity) = self.identity {
             registration = registration.with_declared_identity(identity);
         }
