@@ -509,7 +509,7 @@ impl HostArtifacts {
     /// The document is the whole cell, including `main` and other entries.
     /// To publish only the selected function, plan
     /// [`workflow::edit::extract_entry`](crate::workflow::edit::extract_entry)
-    /// with its entry name, then apply the transaction through a
+    /// with its entry name, then apply the returned `Extraction::transaction` through a
     /// [`workflow::edit::Draft`](crate::workflow::edit::Draft) against the
     /// workflow environment. This keeps that entry and every declared
     /// function it reaches, and derives their manifest during application.

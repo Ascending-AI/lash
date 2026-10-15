@@ -39,6 +39,6 @@ mod view_tests;
 pub use correspondence::{Correspondence, Survivor};
 pub use draft::{Applied, Draft};
 pub use edit::{Edit, Position, Transaction};
-pub use extract::extract_entry;
+pub use extract::{Extraction, extract_entry};
 pub use refusal::{EditDiagnostic, EditDiagnosticKind, EditRefusal, Location};
 pub use tree::NodeClass;

@@ -1477,7 +1477,7 @@ main {
 /// Entry extraction retains references as well as calls, and publication
 /// derives exactly the selected entry's requirements (`K-EDIT-005`, `K-FN-001`).
 #[test]
-fn extracting_an_entry_keeps_only_its_reachable_definition() {
+fn extracting_an_entry_reports_exactly_its_reachable_effect_requirements() {
     let library = library();
     let environment = environment(&library);
     let source = document(&format!(
@@ -1528,7 +1528,9 @@ main {{
         .unit(&Unit::Function(name("chosen")))
         .unwrap()
         .effects;
-    let transaction = crate::extract_entry(&source, &name("chosen")).unwrap();
+    let extraction = crate::extract_entry(&source, &name("chosen")).unwrap();
+    assert_eq!(extraction.requirements, effects.effects);
+    let transaction = extraction.transaction;
     assert_eq!(transaction.base, source.identity().unwrap());
     let mut draft = Draft::open(source.clone(), None).unwrap();
     draft.apply(&transaction, &environment).unwrap();
@@ -1540,10 +1542,6 @@ main {{
             .keys()
             .cloned()
             .collect::<BTreeSet<_>>(),
-        effects.effects,
-    );
-    assert_eq!(
-        lash_kernel_check::requirements(extracted, &library.catalog).effects,
         effects.effects,
     );
     assert_eq!(

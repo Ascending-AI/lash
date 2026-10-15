@@ -104,6 +104,15 @@ fn reference(literal: &Literal, declared: &mut BTreeSet<Name>) {
     }
 }
 
+/// A declared entry's structural reachability, derived in one reference walk.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EntryReachability {
+    /// The root and every declared function it reaches.
+    pub functions: BTreeSet<Name>,
+    /// The effects performed by those functions, including their closures.
+    pub effects: BTreeSet<EffectName>,
+}
+
 /// The declared functions `root` reaches, including itself, through calls,
 /// spawns and function-reference literals in any expression or atomic slot.
 /// Closures are traversed as part of their enclosing function. Cycles are
@@ -116,14 +125,14 @@ fn reference(literal: &Literal, declared: &mut BTreeSet<Name>) {
 /// # Errors
 ///
 /// The root or a function it references is not declared.
-pub fn reachable_functions(
+pub fn entry_reachability(
     document: &Document,
     root: &Name,
-) -> Result<BTreeSet<Name>, crate::Refusal> {
-    let mut reached = BTreeSet::new();
+) -> Result<EntryReachability, crate::Refusal> {
+    let mut reached = EntryReachability::default();
     let mut pending = vec![root.clone()];
     while let Some(name) = pending.pop() {
-        if !reached.insert(name.clone()) {
+        if !reached.functions.insert(name.clone()) {
             continue;
         }
         let function = document
@@ -138,7 +147,7 @@ pub fn reachable_functions(
         let mut references = BTreeSet::new();
         scan(
             &function.body,
-            &mut BTreeSet::new(),
+            &mut reached.effects,
             &mut BTreeSet::new(),
             &mut references,
         );

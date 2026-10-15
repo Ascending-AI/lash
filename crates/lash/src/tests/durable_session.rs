@@ -933,7 +933,7 @@ impl RuntimeBuildProbePlugin {
     fn declare(
         reg: &mut crate::plugins::PluginRegistrar<Self>,
     ) -> std::result::Result<(), crate::plugins::PluginError> {
-        reg.session().on_event(
+        reg.lifecycle().on_event(
             crate::hook_key!("session-on-event-1"),
             move |this, _state| {
                 let counters = Arc::clone(&this.counters);

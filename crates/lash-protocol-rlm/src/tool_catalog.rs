@@ -1,6 +1,7 @@
 use lash_core::plugin::{PluginError, ToolCatalogContext};
 use lash_core::{ToolCatalog, facade_support::ToolCatalogContribution};
-use lash_vm_runtime::required_tool_executable;
+use lash_sansio::SchemaShape;
+use lash_vm_runtime::{ToolBindingResolutionExt, required_tool_binding, required_tool_executable};
 
 use crate::dialect::SessionDialect;
 
@@ -134,7 +135,8 @@ impl ToolListing {
                     dialect.language(),
                     dialect.presentation(),
                     &call_path,
-                    &tool.contract,
+                    &tool.contract.input_schema.canonical,
+                    &tool.contract.output_schema.canonical,
                 );
                 let text = tool_doc_text(dialect, &signature, &tool.manifest, &tool.contract);
                 ToolDoc {
@@ -306,41 +308,57 @@ fn tool_signature_text(
     dialect: &dyn crate::dialect::DialectPrompts,
     presentation: crate::plugin::RlmPresentationConfig,
     call_path: &str,
-    contract: &lash_core::ToolContract,
+    input: &lash_core::JsonSchema,
+    output: &lash_core::JsonSchema,
 ) -> String {
     dialect.tool_signature(
         call_path,
-        &contract.input_shape_with(&presentation.tools),
-        contract.input_schema.canonical.accepts_empty_object(),
-        &contract.output_shape_with(&presentation.tools),
+        &SchemaShape::from_json_schema_with_depth(
+            input.as_value(),
+            presentation.tools.schema_depth,
+        ),
+        input.accepts_empty_object(),
+        &SchemaShape::from_json_schema_with_depth(
+            output.as_value(),
+            presentation.tools.schema_depth,
+        ),
     )
 }
 
-/// A discovered tool's signature in the session's `dialect` and
-/// `presentation`, without Markdown backticks or documentation. This is the
-/// signature line shown when the tool is loaded into the session's prompt.
+/// A discovered tool's signature from its binding and admitted schemas in the
+/// session's `dialect` and `presentation`, without Markdown or documentation.
+/// This is the signature line shown when the tool is loaded into the prompt.
 ///
 /// # Errors
 ///
-/// The tool has no binding, or one `dialect` cannot call.
+/// The binding names a path `dialect` cannot call.
 pub fn discovered_tool_signature(
     dialect: &crate::dialect::CellDialect,
     presentation: crate::plugin::RlmPresentationConfig,
-    tool: &lash_core::ToolDefinition,
+    binding: &lash_core::ToolBinding,
+    input: &lash_core::JsonSchema,
+    output: &lash_core::JsonSchema,
 ) -> Result<String, crate::dialect::DialectRefusal> {
-    let binding = required_tool_executable(&tool.manifest).map_err(|error| {
-        crate::dialect::DialectRefusal {
-            kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
-            message: error.to_string(),
-        }
-    })?;
+    let name = format!(
+        "{}.{}",
+        binding.module_path.join("."),
+        binding.operation.as_deref().unwrap_or_default(),
+    );
+    let binding =
+        binding
+            .executable_for(&name)
+            .map_err(|error| crate::dialect::DialectRefusal {
+                kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
+                message: error.to_string(),
+            })?;
     let prompts = dialect.prompts();
     let call_path = prompts.tool_call_path(&binding)?;
     Ok(tool_signature_text(
         prompts.as_ref(),
         presentation,
         &call_path,
-        &tool.contract,
+        input,
+        output,
     ))
 }
 
@@ -357,7 +375,18 @@ pub fn discovered_tool_doc(
     presentation: crate::plugin::RlmPresentationConfig,
     tool: &lash_core::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
-    let signature = discovered_tool_signature(dialect, presentation, tool)?;
+    let binding =
+        required_tool_binding(&tool.manifest).map_err(|error| crate::dialect::DialectRefusal {
+            kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
+            message: error.to_string(),
+        })?;
+    let signature = discovered_tool_signature(
+        dialect,
+        presentation,
+        &binding,
+        &tool.contract.input_schema.canonical,
+        &tool.contract.output_schema.canonical,
+    )?;
     let dialect = SessionDialect::prompt_only(dialect.clone()).with_presentation(presentation);
     Ok(tool_doc_text(
         &dialect,

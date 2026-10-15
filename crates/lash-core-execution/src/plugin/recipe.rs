@@ -166,6 +166,17 @@ impl<R: Registry> Default for PluginRegistrar<(), R> {
 }
 impl<T: Send + Sync + 'static> PluginRegistrar<T, Session> {
     /// A session plugin's registrar, owned by `owner`.
+    pub fn session(owner: &str) -> Self {
+        Self::owned(Some(owner.into()))
+    }
+
+    /// A process component's registrar, with its registry named by this
+    /// constructor rather than a type argument at the call site.
+    pub fn process(owner: &str) -> PluginRegistrar<T, Process> {
+        PluginRegistrar::owned(Some(owner.into()))
+    }
+
+    /// A session plugin's registrar, owned by `owner`.
     pub fn new(owner: &str) -> Self {
         Self::owned(Some(owner.into()))
     }
@@ -407,6 +418,9 @@ impl<T: Send + Sync + 'static, R: Registry> PluginRegistrar<T, R> {
 }
 macro_rules! keyed_facet {
     ($facet:ident, $method:ident, $( $name:ident : $slot:ident => $ty:ty ),+ $(,)?) => {
+        keyed_facet!($facet, $method => $method, $( $name : $slot => $ty ),+);
+    };
+    ($facet:ident, $method:ident => $bound_method:ident, $( $name:ident : $slot:ident => $ty:ty ),+ $(,)?) => {
         pub struct $facet<'a, T = (), R = Session> { reg: &'a mut PluginRegistrar<T, R> }
         impl<T: Send + Sync + 'static, R: Registry> PluginRegistrar<T, R> {
             pub fn $method(&mut self) -> $facet<'_, T, R> { $facet { reg: self } }
@@ -415,7 +429,7 @@ macro_rules! keyed_facet {
             $(pub fn $name(self, key: HookKey, binder: impl Fn(&T, &PluginStateView) -> Result<$ty, PluginError> + Send + Sync + 'static) -> Result<(), PluginError>
             where R: Admits<contribution::$slot> {
                 self.reg.callback::<contribution::$slot>(Some(key), None, ContributionDetails::Callback { stream_state_from: None },
-                    Arc::new(move |owner, state, reg| reg.$method().$name(key, binder(owner, state)?)))
+                    Arc::new(move |owner, state, reg| reg.$bound_method().$name(key, binder(owner, state)?)))
             })+
         }
     }
@@ -423,7 +437,7 @@ macro_rules! keyed_facet {
 keyed_facet!(TurnRegistrations, turn, before: BeforeTurn => BeforeTurnHook, after: AfterTurn => AfterTurnHook, checkpoint: Checkpoint => CheckpointHook);
 keyed_facet!(ToolCallRegistrations, tool_calls, transform_args: ToolArgsTransform => ToolArgsTransformHook, check_args: ToolArgsCheck => ToolArgsCheckHook, transform_result: ToolResultTransform => ToolResultTransformHook, check_result: ToolResultCheck => ToolResultCheckHook);
 keyed_facet!(ToolCatalogRegistrations, tool_catalog, contribute: ToolCatalog => ToolCatalogContributor);
-keyed_facet!(SessionRegistrations, session, on_event: RuntimeEvent => PluginLifecycleEventHook);
+keyed_facet!(SessionRegistrations, lifecycle => session, on_event: RuntimeEvent => PluginLifecycleEventHook);
 keyed_facet!(OutputRegistrations, output, stream: AssistantStream => AssistantStreamHook, stream_finished: AssistantStreamFinished => AssistantStreamFinishedHook);
 keyed_facet!(ToolResultRegistrations, tool_results, presentation_step: PresentationStep => ToolPresentationStep);
 macro_rules! singleton {

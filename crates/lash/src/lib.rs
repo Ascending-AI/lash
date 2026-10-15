@@ -741,6 +741,7 @@ pub mod plugins {
     /// which of its methods each registry offers and judges descriptors
     /// offered to another registry (FIG-6273).
     pub use lash_core::plugin::registries;
+    pub use lash_core::plugin::registries::{Process, Session};
     /// The tool hook phases (ADR 0128): argument transforms, before-checks
     /// over the prepared call, result transforms, and after-checks over the
     /// final result.
@@ -930,7 +931,7 @@ pub mod plugins {
         facade_support::ToolCatalogContribution, facade_support::TurnHookContext,
         facade_support::TurnResultHookContext,
     };
-    /// Lifecycle observation: what a `reg.session().on_event(..)` hook receives
+    /// Lifecycle observation: what a `reg.lifecycle().on_event(..)` hook receives
     /// when a turn is finalized, a session is restored, or its configuration
     /// changes, and the contexts each event carries.
     ///

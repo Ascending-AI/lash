@@ -266,10 +266,10 @@ fn a_discovered_tool_carries_its_field_notes() {
     );
 }
 
-/// FIG-6312: discovery, documentation and the loaded tool's prompt expose
-/// the same dialect signature, including nested input and output fields.
+/// FIG-6336: a discovered path and schemas render the loaded tool's signature
+/// without fabricating an execution definition, in each dialect.
 #[test]
-fn a_discovered_tool_signature_matches_its_doc_and_prompt_in_each_dialect() {
+fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
     let tool = lash_core::ToolDefinition::raw(
         "tool:tracker/search",
         "tracker_search",
@@ -303,16 +303,22 @@ fn a_discovered_tool_signature_matches_its_doc_and_prompt_in_each_dialect() {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(ToolBinding::new(["tracker"], "search"));
+    .with_tool_binding(ToolBinding::new(["tracker", "issues"], "search"));
     let presentation = crate::RlmPresentationConfig::standard();
     for dialect in [
         crate::dialect::CellDialect::typescript(),
         crate::dialect::CellDialect::python(),
     ] {
-        let signature =
-            discovered_tool_signature(&dialect, presentation, &tool).expect("an addressable tool");
+        let signature = discovered_tool_signature(
+            &dialect,
+            presentation,
+            &ToolBinding::from_path("tracker.issues.search"),
+            &tool.contract.input_schema.canonical,
+            &tool.contract.output_schema.canonical,
+        )
+        .expect("an addressable tool");
         if dialect.name() == "typescript" {
-            insta::assert_snapshot!(signature, @r"tracker.search({ filter: { query: string } }): Promise<{ issue: { title: string } }>");
+            insta::assert_snapshot!(signature, @r"tracker.issues.search({ filter: { query: string } }): Promise<{ issue: { title: string } }>");
         }
         let doc = discovered_tool_doc(&dialect, presentation, &tool).expect("an addressable tool");
         let signature_line = format!("`{signature}`");

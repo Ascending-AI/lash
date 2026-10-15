@@ -199,7 +199,7 @@ impl WorkbenchSessionPlugin {
                 }))
             })?;
 
-        reg.session()
+        reg.lifecycle()
             .on_event(lash::hook_key!("observe"), move |this, _state| {
                 let config_changes = this.config_changes.clone();
                 Ok(Arc::new(move |event| {

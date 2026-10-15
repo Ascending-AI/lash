@@ -162,7 +162,7 @@ fn every_contribution(reg: &mut PluginRegistrar<Owner>) -> ToolProviderHandle {
             Ok(Arc::new(owner.clone()))
         })
         .unwrap();
-    reg.session()
+    reg.lifecycle()
         .on_event(crate::hook_key!("event"), |_, _| {
             Ok(Arc::new(|_| Box::pin(async { Ok(()) })))
         })

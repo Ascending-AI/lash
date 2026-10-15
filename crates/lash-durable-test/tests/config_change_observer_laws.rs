@@ -156,7 +156,7 @@ impl Observer {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
     ) -> std::result::Result<(), lash_core::plugin::PluginError> {
-        reg.session()
+        reg.lifecycle()
             .on_event(lash::hook_key!("observe"), move |this, _state| {
                 let seen = Arc::clone(&this.seen);
                 Ok(Arc::new(move |event| {

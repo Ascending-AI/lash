@@ -478,3 +478,11 @@ fn cell_call_references_are_public() -> lash::plugins::CellCallReferences {
         entries: Vec::new(),
     }
 }
+
+// FIG-6336: constructors select the registry while the recipe infers its owner.
+fn registry_constructors_name_their_registry() {
+    let _: lash::plugins::PluginRegistrar<(), lash::plugins::Process> =
+        lash::plugins::PluginRegistrar::process("component");
+    let _: lash::plugins::PluginRegistrar<(), lash::plugins::Session> =
+        lash::plugins::PluginRegistrar::session("plugin");
+}

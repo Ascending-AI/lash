@@ -43,6 +43,6 @@ pub use graph::{
     NodeKind, PlaceNode, RecordEntryNode, Reference, Scope, ScopeId, SiteKind, StmtNode, Target,
     UnitView,
 };
-pub use manifest::{Requirements, reachable_functions, requirements};
+pub use manifest::{EntryReachability, Requirements, entry_reachability, requirements};
 pub use refusal::{Refusal, RefusalReason, Refused};
 pub use schema::{result_type_of_schema, signature_serves, tool_signature, type_of_schema};

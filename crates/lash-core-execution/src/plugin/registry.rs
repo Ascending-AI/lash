@@ -288,7 +288,7 @@ impl PluginSpec {
     pub fn with_runtime_event(mut self, key: HookKey, hook: PluginLifecycleEventHook) -> Self {
         let result = self
             .registrations
-            .session()
+            .lifecycle()
             .on_event(key, move |_, _| Ok(Arc::clone(&hook)));
         self.admit(result);
         self

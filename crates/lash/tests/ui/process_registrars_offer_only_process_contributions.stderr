@@ -1,12 +1,12 @@
-error[E0277]: the `lash::plugins::registries::Process` registry does not install `lash::plugins::registries::contribution::BeforeTurn` contributions
+error[E0277]: the `lash::plugins::Process` registry does not install `lash::plugins::registries::contribution::BeforeTurn` contributions
   --> tests/ui/process_registrars_offer_only_process_contributions.rs:11:10
    |
 11 |         .before(lash::hook_key!("before"), |_, _| unreachable!());
-   |          ^^^^^^ not offered to a `lash::plugins::registries::Process` registrar
+   |          ^^^^^^ not offered to a `lash::plugins::Process` registrar
    |
-   = help: the trait `Admits<lash::plugins::registries::contribution::BeforeTurn>` is not implemented for `lash::plugins::registries::Process`
+   = help: the trait `Admits<lash::plugins::registries::contribution::BeforeTurn>` is not implemented for `lash::plugins::Process`
    = note: the contribution table in the plugin `registries` module lists where each contribution may be installed
-   = help: `lash::plugins::registries::Process` implements trait `Admits<C>`:
+   = help: `lash::plugins::Process` implements trait `Admits<C>`:
              Admits<lash::plugins::registries::contribution::ConfigNamespace>
              Admits<lash::plugins::registries::contribution::PresentationPresenter>
              Admits<lash::plugins::registries::contribution::PresentationStep>
