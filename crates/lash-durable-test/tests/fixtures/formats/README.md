@@ -2,10 +2,10 @@
 
 `lashvm/` and `session/` are the original pre-cut 1.0 SQLite images. Their
 original recording build is `95bc17cfa86757844c2aea97bfbc8243206f39a1`, kernel semantics
-1, helper release 1.0. Shape re-recordings authorized before the cut are
+1, helper release 1.0. Re-recordings authorized before the cut are
 listed below; otherwise keep their database and WAL bytes unchanged.
 
-`corpus.json` is an append-only archive of realistic images, grouped by the
+`corpus.json` is an archive of realistic images, grouped by the
 full recording build commit. Each set names its kernel semantics version and
 its exact helper release identity catalogue (including both dialects). Each
 image names its shape, dialect, source and recorded result. Its database and
@@ -40,9 +40,14 @@ result to accept a regression.
 
 ## Recording policy
 
-A lane changing the kernel semantics version, a helper release or a native
+Before the 1.0 cut, a lane that changes the unsealed helper release re-records,
+in place, exactly the images pinned to it that the change breaks, keeping their
+programs and expected results. Witnesses become append-only once their release
+is sealed at the cut.
+
+A lane changing the kernel semantics version, a sealed helper release or a native
 version must append a new image set **beside all previous sets**. Never overwrite
-or delete an old set or original 1.0 image: they are the upgrade witnesses.
+or delete an image pinned to a sealed release: they are the upgrade witnesses.
 This extends the existing `lash.worker` header rule: describing the recording
 build in a header alone does not prove that retained parked state resumes.
 Keep the exact helper identities as well as the build name and the images.
@@ -50,8 +55,9 @@ The pre-1.0 version freeze still applies; do not bump a guarded version or seal
 a helper release to record these witnesses.
 
 Record only on a tree rebased onto current `origin/main`. Re-record a baseline
-image only when your own change intentionally alters a stored or parked shape;
-semantic/helper/native changes append witnesses instead. FIG-6183's explicit
+image when your own change intentionally alters a stored or parked shape, or
+breaks its unsealed helper release under the rule above. Other semantic/helper/native
+changes append witnesses instead. FIG-6183's explicit
 baseline repair is an exception: FIG-6153 (`4b1b3a0d68`) changed the parked
 shape and recorded these two images before FIG-6180 (`82af350c06`) repaired
 the fingerprint probe, then rebased. The orchestrator authorized re-recording
@@ -94,6 +100,22 @@ their cell (`pending-tool-typescript`, `pending-tool-python`,
 adding exactly that member to those three `expected` oracles, with the value
 computed from each image's own committed ledger record, and changing nothing
 else. A recorded cell without the member renders `result_summary: null`.
+
+FIG-6368 changed `ts.math.random` in the unsealed TypeScript helper release
+to return the kernel's unit-interval draw directly. The orchestrator
+authorized re-recording `lashvm` and `session` in place with their existing
+recorders on a build rebased onto `origin/main`: both images pinned nodes
+replaced by the changed unsealed release. The same authorization covers set
+`4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1`'s `loop-closures-aliases`, `task-join`,
+`suspending-cleanup`, `pending-tool-typescript` and `saved-declared-read` images,
+which failed for that exact missing-node reason. `pending-tool-python` passes
+and remains byte-identical. Every re-recorded image resumes to its recorded
+result, with one authorized oracle update: `calls[0].result_summary.text` in
+the two TypeScript images is derived from each fresh committed record as
+`{"ok":true,"wrote":{"x":7}}`. FIG-6290 intentionally makes whole floats reach
+tools as JSON integers, as confirmed by FIG-6366; the earlier images committed
+`7.0`. Every other oracle member, each set id and program, and every version
+remain unchanged. No release was sealed.
 
 Source `env.sh`, then run the existing recorder locally on the build being
 retained, naming its full commit (use a new build, never an existing set):

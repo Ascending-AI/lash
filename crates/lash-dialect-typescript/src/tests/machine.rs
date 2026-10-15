@@ -73,6 +73,7 @@ const BOUNDS: Bounds = Bounds {
 #[derive(Default)]
 struct Console {
     lines: Vec<String>,
+    random_bits: std::collections::VecDeque<u64>,
 }
 
 impl Host for Console {
@@ -83,7 +84,7 @@ impl Host for Console {
     }
 
     fn random(&mut self) -> u64 {
-        0
+        self.random_bits.pop_front().unwrap_or(0)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -315,6 +316,58 @@ fn start_with_bindings(source: &str, values: Bindings) -> (KernelMachine, String
     let machine =
         KernelMachine::start(program, BOUNDS, start).unwrap_or_else(|error| panic!("{error}"));
     (machine, text)
+}
+
+/// FIG-6368, K-HOST-003: direct and borrowed Math.random calls preserve
+/// the kernel's [0, 1) draws, including values in the upper half.
+#[test]
+fn math_random_preserves_the_kernel_unit_interval_for_direct_and_borrowed_calls() {
+    let (mut machine, text) = start(
+        "const draw = Math.random; const values = []; for (let i = 0; i < 4; i++) { values.push(Math.random()); values.push(draw()); } await finish(values);",
+    );
+    let mut console = Console {
+        random_bits: [0, 1 << 62, 1 << 63, u64::MAX]
+            .into_iter()
+            .flat_map(|bits| [bits, bits])
+            .collect(),
+        ..Console::default()
+    };
+    let Step::Parked(park) = machine.run(&mut console, u64::MAX).expect("random draws") else {
+        panic!("the cell must finish with its draws\n{text}");
+    };
+    let [Request::Effect(effect)] = park.requests.as_slice() else {
+        panic!("only finish is requested: {park:?}");
+    };
+    assert_eq!(effect.effect.as_str(), "finish");
+    let [Datum::List(values)] = effect.args.as_slice() else {
+        panic!("finish carries the draws: {:?}", effect.args);
+    };
+    assert_eq!(values.len(), 8);
+    assert!(console.random_bits.is_empty(), "all fixed draws were used");
+    let draws: Vec<f64> = values
+        .iter()
+        .map(|value| {
+            let Datum::Float(value) = value else {
+                panic!("Math.random must return a float: {value:?}");
+            };
+            let value = value.get();
+            assert!((0.0..1.0).contains(&value), "draw outside [0, 1): {value}");
+            value
+        })
+        .collect();
+    for (offset, form) in [(0, "direct"), (1, "borrowed")] {
+        assert!(
+            draws
+                .iter()
+                .skip(offset)
+                .step_by(2)
+                .any(|value| *value >= 0.5),
+            "{form} Math.random must reach the upper half: {draws:?}"
+        );
+    }
+    for pair in draws.as_chunks::<2>().0 {
+        assert_eq!(pair[0], pair[1], "the same host bits give the same draw");
+    }
 }
 
 /// Lowers `source` as a first cell and runs it to its end. At each park the
