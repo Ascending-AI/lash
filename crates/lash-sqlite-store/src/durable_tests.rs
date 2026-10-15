@@ -101,6 +101,10 @@ law!(
     |store, _advance| { laws::a_replaced_boot_adopts_none_of_its_successors_actors(store) }
 );
 law!(
+    a_boot_redrives_only_the_session_parks_it_names,
+    |store, _advance| { laws::a_boot_redrives_only_the_session_parks_it_names(store) }
+);
+law!(
     progress_before_an_empty_ready_release_resets_failed_activations,
     |store, _advance| {
         laws::progress_before_an_empty_ready_release_resets_failed_activations(store)

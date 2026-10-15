@@ -1,11 +1,11 @@
 //! Current park diagnostics and control redrive, committed under the actor fence.
 
-use lash_durable::domain::{RedriveAnswer, RedriveRequest};
-use lash_durable::{DurableError, DurableInstant, Woken};
+use lash_durable::domain::{RedriveAnswer, RedriveRequest, SessionParksRedrive};
+use lash_durable::{ActorKey, ActorState, DurableError, DurableInstant, Woken};
 use sqlx::PgConnection;
 
 use super::steps::{Entry, Shape, Step, Ty, Value};
-use super::{SQL, sqlx_failure, wake_within};
+use super::{SQL, actor_key, sqlx_failure, wake_within};
 
 /// The park's statement an owner commit runs as a step.
 pub(super) static SET_PARK: Entry =
@@ -57,4 +57,46 @@ pub(super) async fn redrive(
         .await
         .map_err(sqlx_failure)?;
     Ok((RedriveAnswer::Redriven, Some(woken)))
+}
+
+/// Redrive, for a boot, every session parked with a reason `redrive` names
+/// (FIG-6310), each as [`redrive`] would and only while the park read here
+/// still stands: the sessions redriven, by key, which also locks them in key
+/// order.
+pub(super) async fn redrive_session_parks(
+    tx: &mut PgConnection,
+    redrive: &SessionParksRedrive,
+    now: DurableInstant,
+) -> Result<(Vec<ActorKey>, Vec<Woken>), DurableError> {
+    let parked: Vec<(String, Option<String>)> =
+        crate::observed_sql::query_as(SQL.park.parked_sessions.sql())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    let mut redriven = Vec::new();
+    let mut woken = Vec::new();
+    for (key, park) in parked {
+        let Some(park) = park.filter(|park| redrive.redrives(park)) else {
+            continue;
+        };
+        let readied: Option<(String,)> =
+            crate::observed_sql::query_as(SQL.park.redrive_parked.sql())
+                .bind(&key)
+                .bind(now.0)
+                .bind(&park)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
+        if readied.is_none() {
+            continue;
+        }
+        let actor = actor_key(&key)?;
+        woken.push(Woken {
+            actor: actor.clone(),
+            state: ActorState::Ready,
+            owner: None,
+        });
+        redriven.push(actor);
+    }
+    Ok((redriven, woken))
 }

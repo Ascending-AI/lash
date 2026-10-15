@@ -533,8 +533,10 @@ impl DurableSession {
 
     /// Why the session is parked, if it is: the typed reason its actor
     /// parked with, as it recorded it. A parked session runs nothing until
-    /// an operator redrives it ([`redrive`](Self::redrive)) or a turn cancel
-    /// readies it, and its unfinished turn stays open
+    /// an operator redrives it ([`redrive`](Self::redrive)), a turn cancel
+    /// readies it, or, for a park another build may clear
+    /// ([`SessionParkReason::REDRIVEN_AT_BOOT`](crate::SessionParkReason::REDRIVEN_AT_BOOT)),
+    /// a node boots, and its unfinished turn stays open
     /// ([`current_turn`](Self::current_turn)); its run's follower is answered
     /// [`TurnStatus::Parked`](crate::TurnStatus::Parked). `None` while it is
     /// not parked, and for a session no node ever ran.

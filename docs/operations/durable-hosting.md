@@ -982,6 +982,21 @@ says.
 
 A parked process holds what it holds and runs no engine code until an operator
 acts. `LashCore::parked_work()` lists parked turns.
+
+A parked session waits for an operator too, except when another build may
+clear what parked it (FIG-6310). Every node's boot redrives, before its first
+claim, each session parked `PassLoop` or `UndecodableState`
+(`SessionParkReason::REDRIVEN_AT_BOOT`). Every failure of such a park ended
+inside a live claim, so the node that met it survived it. The next claim runs
+the unfinished turn again from its committed state. A deploy that fixes the
+failure therefore resumes the turn without an operator, and a session that
+still fails parks again at its budget, at most once per boot. Sessions parked
+`ActivationLoop` or `CancelLoop` are not redriven at boot. Their claims
+committed nothing, which is also what a node's death leaves, so redriving them
+at every boot could crash each new node in turn. For those, and for any
+session a boot's redrive did not clear, the fallback is the operator path:
+`DurableSession::park_reason()` names the park, and `DurableSession::redrive(requester)`
+clears it on a build that carries the fix.
 `LashCore::processes().redrive(process_id, requester)` (`lash::process::Processes`)
 clears a process's park and activation count so its engine runs again from
 committed state; it answers whether the process was parked. Cancelling a

@@ -52,7 +52,7 @@ pub use keys::{CellId, ExecKey, Ordinal, OwnerKey, RunSeq, ScopeKey, StoredKeyEr
 pub use lash_core_store::checkpoint_graph;
 pub use processes::{
     CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite, RedriveAnswer,
-    RedriveRequest,
+    RedriveRequest, SessionParksRedrive,
 };
 pub use prompts::{
     ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite, request_roots,
@@ -151,6 +151,9 @@ pub enum MailDomainWrite {
     /// activations and control-wake
     /// it.
     Redrive(RedriveRequest),
+    /// L6: a boot's redrive of every session parked with a reason it names
+    /// (FIG-6310).
+    RedriveSessionParks(SessionParksRedrive),
 }
 
 /// The answer to one [`MailDomainWrite`], in the order they were recorded.
@@ -166,6 +169,9 @@ pub enum MailAnswer {
     RequestOperationCancel(OperationCancelAnswer),
     /// The answer to [`MailDomainWrite::Redrive`].
     Redrive(RedriveAnswer),
+    /// The answer to [`MailDomainWrite::RedriveSessionParks`]: the sessions
+    /// it redrove, by key.
+    RedriveSessionParks(Vec<crate::ids::ActorKey>),
 }
 
 /// A conditional domain write that found the rows otherwise than it

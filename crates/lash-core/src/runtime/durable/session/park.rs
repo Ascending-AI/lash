@@ -19,8 +19,9 @@ use super::{TurnError, TurnRestoreError};
 use crate::{ActorContext, SessionId};
 
 /// Why a session actor parked: the actor row's typed reason. A parked
-/// session runs nothing until an operator redrives it or a control wake (a
-/// turn cancel) readies it.
+/// session runs nothing until an operator redrives it, a control wake (a
+/// turn cancel) readies it, or, for a park a change of build may clear
+/// ([`Self::REDRIVEN_AT_BOOT`]), a node boots (FIG-6310).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionParkReason {
@@ -177,6 +178,19 @@ pub(in crate::runtime::durable) fn undecodable_state(
 }
 
 impl SessionParkReason {
+    /// The parks every node's boot redrives, by [`kind`](Self::kind)
+    /// (FIG-6310): those another build may clear and whose every failure
+    /// ended inside a live claim, so the node that met it outlived it. A
+    /// [`PassLoop`](Self::PassLoop)'s passes each failed with a typed error,
+    /// and an [`UndecodableState`](Self::UndecodableState)'s restore refused
+    /// before any of the turn's work was delivered again. An
+    /// [`ActivationLoop`](Self::ActivationLoop) or
+    /// [`CancelLoop`](Self::CancelLoop) park counts claims that committed
+    /// nothing, which a node's death also leaves: redriven at every boot, one
+    /// such session could take down every node that boots, so it waits for
+    /// an operator's redrive.
+    pub const REDRIVEN_AT_BOOT: [&'static str; 2] = ["pass_loop", "undecodable_state"];
+
     /// The reason's kind: the serde `reason` tag's spelling, which a host
     /// reads without a serde round trip (FIG-6044). The park reports it as
     /// its `lash.parked_work.reason`.

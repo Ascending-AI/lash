@@ -822,6 +822,10 @@ async fn apply_mail_domain(
             let (answer, woken) = park::redrive(tx, request, now).await?;
             (MailAnswer::Redrive(answer), woken.into_iter().collect())
         }
+        MailDomainWrite::RedriveSessionParks(redrive) => {
+            let (redriven, woken) = park::redrive_session_parks(tx, redrive, now).await?;
+            (MailAnswer::RedriveSessionParks(redriven), woken)
+        }
     })
 }
 

@@ -40,6 +40,7 @@ pub mod graph;
 mod hand_back;
 mod model_calls;
 pub mod node_wakes;
+mod parks;
 mod prompts;
 mod session_close;
 mod turn_namespaces;
@@ -60,6 +61,7 @@ pub use model_calls::{
     a_receipt_stands_beside_its_model_phase_until_the_next_phase,
     a_turn_counts_the_model_calls_it_admitted,
 };
+pub use parks::a_boot_redrives_only_the_session_parks_it_names;
 pub use prompts::{
     deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text,
     prompt_snapshot_roots_survive_phase_pruning_until_released,

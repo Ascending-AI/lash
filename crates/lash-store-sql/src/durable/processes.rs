@@ -134,5 +134,21 @@ crate::statements! {
 
         /// Actor `?1`'s park and failed activations.
         park_of = "SELECT park_json, failed_activations FROM actors WHERE actor_key = ?1";
+
+        /// Every parked session actor's key and park, by key: the candidates
+        /// of a boot's redrive (FIG-6310).
+        parked_sessions = "SELECT actor_key, park_json FROM actors
+             WHERE state = 'parked' AND kind = 'session'
+             ORDER BY actor_key";
+
+        /// Redrive actor `?1` at `?2` while it is still parked with park
+        /// `?3`, as a control wake and a redrive together do: take the next
+        /// mailbox position, make it ready, and clear its park and failed
+        /// activations. No row when that park no longer stands.
+        redrive_parked = "UPDATE actors
+             SET mail_seq = mail_seq + 1, state = 'ready', ready_at_ms = ?2,
+                 park_json = NULL, failed_activations = 0
+             WHERE actor_key = ?1 AND state = 'parked' AND park_json = ?3
+             RETURNING actor_key";
     }
 }

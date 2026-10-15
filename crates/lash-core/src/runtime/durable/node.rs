@@ -35,14 +35,25 @@
 //!   nothing more, each activation releases its actor `ready` at its next
 //!   committed phase, and `serve` returns [`Stopped::Drained`] when none is
 //!   left.
+//! - **Liveness** (FIG-6310): a session whose turn has not ended is owned
+//!   by a live boot, claimable (ready, or waiting on mail or a due time a
+//!   reap, a wake or a timer readies), or parked. A park another build may
+//!   clear ([`SessionParkReason::REDRIVEN_AT_BOOT`]) holds only until the
+//!   next boot of any node, which redrives it before its first claim, so a
+//!   turn wedged by a deterministic failure a deploy fixes resumes on its
+//!   own. A park that may have taken nodes down with it
+//!   (`ActivationLoop`, `CancelLoop`) waits for an operator's redrive.
 
 use std::future::Future;
 use std::sync::Arc;
 
+use lash_durable::domain::SessionParksRedrive;
 use lash_durable::runner::{Activation, Drain, Runner, RunnerConfig, Stopped};
-use lash_durable::{ActorDispatch, DurableError, NodeId, Notifier};
+use lash_durable::{
+    ActorDispatch, CommitLabel, DurableError, MailAnswer, MailDomainWrite, MailTx, NodeId, Notifier,
+};
 
-use super::session::SessionActivation;
+use super::session::{SessionActivation, SessionParkReason};
 use crate::Backend;
 
 /// What one node serves.
@@ -103,6 +114,7 @@ pub async fn serve(
             });
         }
     }
+    redrive_session_parks(backend).await;
     let mut decodes = formats.session_decodes();
     let activation: Arc<dyn Activation> = match serve.processes {
         Some(process) => {
@@ -139,6 +151,40 @@ pub async fn serve(
     // its actors through its hints.
     let _wakes = backend.stores().wake_sink().attach(backend.hints());
     runner.run(stop).await
+}
+
+/// Redrive every session parked for a reason another build may clear
+/// ([`SessionParkReason::REDRIVEN_AT_BOOT`]), as an operator's redrive
+/// would, before this boot claims anything (FIG-6310): its next claim runs
+/// the unfinished turn again from its committed state, and a session that
+/// still fails parks again at its budget. A refused redrive leaves the parks
+/// to the next boot or an operator; the node serves regardless.
+async fn redrive_session_parks(backend: &Backend) {
+    let mut tx = MailTx::new();
+    tx.write(MailDomainWrite::RedriveSessionParks(SessionParksRedrive {
+        reasons: SessionParkReason::REDRIVEN_AT_BOOT
+            .map(str::to_owned)
+            .to_vec(),
+    }));
+    match backend
+        .durable()
+        .commit_mail(tx, CommitLabel::MAIL_SESSION)
+        .await
+    {
+        Ok(commit) => {
+            for answer in commit.answers {
+                if let MailAnswer::RedriveSessionParks(redriven) = answer {
+                    for actor in redriven {
+                        tracing::info!(%actor, "the boot redrove a parked session");
+                    }
+                }
+            }
+        }
+        Err(error) => tracing::warn!(
+            %error,
+            "the boot's redrive of parked sessions failed; they stay parked"
+        ),
+    }
 }
 
 /// How many actors are still in a format set `backend`'s build retires

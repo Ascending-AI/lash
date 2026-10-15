@@ -993,6 +993,10 @@ fn apply_mail_domain(
         }
         MailDomainWrite::Redrive(request) => park::redrive(tx, request, now)?
             .map(|(answer, woken)| (MailAnswer::Redrive(answer), woken.into_iter().collect())),
+        MailDomainWrite::RedriveSessionParks(redrive) => {
+            park::redrive_session_parks(tx, redrive, now)?
+                .map(|(redriven, woken)| (MailAnswer::RedriveSessionParks(redriven), woken))
+        }
     })
 }
 

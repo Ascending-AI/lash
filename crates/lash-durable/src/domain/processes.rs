@@ -181,6 +181,32 @@ pub struct RedriveRequest {
     pub requester: String,
 }
 
+/// A node's boot redriving the session parks a change of build may clear
+/// (FIG-6310): every session actor parked with one of [`Self::reasons`] is
+/// redriven as an operator's [`RedriveRequest`] would redrive it, its park
+/// and failed activations cleared and the actor control-woken, each only
+/// while the park its candidate read found still stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionParksRedrive {
+    /// The park reasons it redrives: the `reason` tag of the park its owner
+    /// encoded.
+    pub reasons: Vec<String>,
+}
+
+impl SessionParksRedrive {
+    /// Whether it redrives a session parked with `park`, as its owner
+    /// encoded it: a JSON object whose `reason` is one of
+    /// [`Self::reasons`]. A park that does not decode stays parked.
+    #[must_use]
+    pub fn redrives(&self, park: &str) -> bool {
+        serde_json::from_str::<serde_json::Value>(park).is_ok_and(|park| {
+            park.get("reason")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|reason| self.reasons.iter().any(|listed| listed == reason))
+        })
+    }
+}
+
 /// The answer to a [`RedriveRequest`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RedriveAnswer {

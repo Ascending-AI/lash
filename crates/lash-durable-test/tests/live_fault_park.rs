@@ -20,16 +20,27 @@
 //! while either park is on its way, after the park's read and before its
 //! commit, is not stranded by it: the session stays claimable, and the
 //! cancel ends the turn.
+//!
+//! A-PARKED-TURN-RESUMES-AT-THE-NEXT-BOOT (FIG-6310): a session parked
+//! `PassLoop` with its turn open in its tools phase, no turn deadline, no
+//! end and no claim (the state FIG-6289's ordinal miss left on a live
+//! deployment through three restarts) is redriven by the next node's boot,
+//! which finishes the turn; a session parked `ActivationLoop` stays parked
+//! for an operator's redrive.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash_core::durable_port::{ActorKey, Release};
+use lash_core::ToolDefinitionBindingExt as _;
+use lash_core::durable_port::domain::UnfinishedPhase;
+use lash_core::durable_port::{ActorKey, ActorState, CommitLabel, Release};
 use lash_core::llm::types::LlmRequest;
 use lash_core::testing::DurableCommitHook;
 use lash_sansio::sync::MutexExt as _;
@@ -425,8 +436,407 @@ async fn a_cancel_committed_while_a_session_parks_still_ends_its_turn(tier: Tier
     world.shutdown().await;
 }
 
+/// The park FIG-6289's ordinal miss left on a live session (feedback-15),
+/// byte for byte as its actor row recorded it.
+const ORDINAL_MISS_PARK: &str = r#"{"reason":"pass_loop","failed_passes":8,"error":{"code":"runtime_effect_assistant_response_hook","message":"the save was not committed: durable store Corrupt: the operation can never be answered: none of its members is open"}}"#;
+
+/// The native tool whose first run holds until its node goes.
+const HOLD: &str = "hold_probe";
+
+/// The cell's `Repeatable` tool, as FIG-6289's ordinal miss met it.
+const FLAKY: &str = "flaky";
+
+/// A tool definition bound as `tools.<name>`.
+fn probe_definition(
+    name: &str,
+    policy: lash_core::ExecutionPolicy,
+    output: serde_json::Value,
+) -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        format!("tool:{name}"),
+        name,
+        "A park law's probe.",
+        lash_core::ToolDefinition::default_input_schema(),
+        output,
+    )
+    .expect("the probe's schemas")
+    .with_execution(std::time::Duration::from_secs(600))
+    .with_execution_policy(policy)
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
+}
+
+/// [`HOLD`]: its first run says it started and never answers; every later
+/// run answers at once.
+#[derive(Default)]
+struct Holding {
+    runs: AtomicUsize,
+    entered: tokio::sync::Notify,
+}
+
+fn hold_definition() -> lash_core::ToolDefinition {
+    probe_definition(
+        HOLD,
+        lash_core::ExecutionPolicy::default(),
+        serde_json::json!({ "type": "string" }),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Holding {
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![hold_definition().manifest()])
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        (name == HOLD).then(|| Arc::new(hold_definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if self.runs.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.entered.notify_one();
+            std::future::pending::<()>().await;
+        }
+        lash_core::ToolOutcome::ok(serde_json::json!("released")).into()
+    }
+}
+
+/// [`FLAKY`]: `Repeatable` with two attempts and no backoff; its first
+/// attempt fails, its second answers its number and marks itself answered.
+#[derive(Default)]
+struct Flaky {
+    attempts: AtomicU32,
+    answered: AtomicBool,
+}
+
+fn flaky_definition() -> lash_core::ToolDefinition {
+    probe_definition(
+        FLAKY,
+        lash_core::ExecutionPolicy::repeatable(
+            std::num::NonZeroU32::new(2).expect("a nonzero attempt bound"),
+            0,
+            0,
+        ),
+        serde_json::json!({ "type": "string" }),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Flaky {
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+        Ok(vec![flaky_definition().manifest()])
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        (name == FLAKY).then(|| Arc::new(flaky_definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        if attempt == 1 {
+            return lash_core::ToolOutcome::failure(lash_core::ToolFailure::with_suggested_delay(
+                lash_core::ToolFailureClass::Io,
+                "flaky_failed",
+                "attempt 1 failed",
+                Some(0),
+            ))
+            .into();
+        }
+        self.answered.store(true, Ordering::SeqCst);
+        lash_core::ToolOutcome::ok(serde_json::json!(format!("attempt {attempt}"))).into()
+    }
+}
+
+fn session_id(name: &str) -> lash::SessionId {
+    lash::SessionId::try_from(name.to_owned()).expect("a session id")
+}
+
+/// The node that served `name`'s open turn is gone: the turn is open in its
+/// tools phase with no turn deadline and no end, and no boot owns the
+/// session. Park it as FIG-6289's ordinal miss did, and answer its run.
+async fn wedge(world: &World, name: &str) -> lash::TurnId {
+    let durable = Arc::clone(world.backend.durable());
+    let session = session_id(name);
+    lash::testing::park_session(
+        &world.backend,
+        &session,
+        serde_json::from_str(ORDINAL_MISS_PARK).expect("the live park decodes"),
+    )
+    .await
+    .expect("the session parks");
+    let actor = ActorKey::session(name).expect("a session actor key");
+    let snapshot = durable
+        .actor(&actor)
+        .await
+        .expect("the actor reads")
+        .expect("the actor");
+    assert_eq!(
+        snapshot.state,
+        ActorState::Parked,
+        "{name}: no claim holds it"
+    );
+    let row = durable
+        .turn(&session)
+        .await
+        .expect("the turn reads")
+        .unwrap_or_else(|| panic!("{name}: the wedged turn is open"));
+    assert!(
+        matches!(row.phase, UnfinishedPhase::Tools { .. }) && row.turn_deadline.is_none(),
+        "{name}: the turn is wedged in its tools phase with no deadline: {:?}, {:?}",
+        row.phase,
+        row.turn_deadline
+    );
+    assert_eq!(
+        durable
+            .turn_end(&session, &row.run)
+            .await
+            .expect("the end reads"),
+        None,
+        "{name}: the wedged run has no end"
+    );
+    row.run
+}
+
+/// The output of `name`'s run `run` once it settles on the serving node, or
+/// a panic if it stays parked.
+async fn settled(world: &World, name: &str, run: &lash::TurnId) -> lash::TurnOutput {
+    let session = world
+        .core
+        .session(session_id(name))
+        .durable()
+        .await
+        .expect("the session opens on the booted node");
+    tokio::time::timeout(served::WATCHDOG, async {
+        loop {
+            let outcome = session
+                .run(run.clone().into())
+                .outcome()
+                .await
+                .unwrap_or_else(|error| panic!("{name}: the run answers: {error:?}"));
+            if let Some(output) = outcome.output() {
+                return output.clone();
+            }
+            assert!(
+                matches!(outcome.status(), lash::TurnStatus::Parked(_)),
+                "{name}: the run neither settled nor stayed parked: {:?}",
+                outcome.status()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{name}: the parked turn never resumed after the boot"))
+}
+
+fn holding_core(holding: Arc<Holding>) -> impl Fn(&lash::Backend) -> lash::LashCoreBuilder {
+    move |backend| {
+        lash::LashCore::standard_builder(backend.clone()).tools(
+            lash::tool_provider_key!("tools"),
+            Arc::clone(&holding) as Arc<dyn lash_core::ToolProvider>,
+        )
+    }
+}
+
+/// A-PARKED-TURN-RESUMES-AT-THE-NEXT-BOOT (FIG-6310): a session parked
+/// `PassLoop` with its turn wedged in its tools phase is redriven by the next
+/// boot of a node, which finishes the turn without an operator. A session
+/// parked `ActivationLoop`, whose claims may have taken nodes down, stays
+/// parked through that boot until an operator redrives it.
+async fn a_turn_wedged_in_its_tools_phase_by_a_pass_loop_park_finishes_at_the_next_boot(
+    tier: Tier,
+) {
+    const WEDGED: &str = "wedged-in-tools";
+    const OPERATOR: &str = "parked-for-the-operator";
+    let holding = Arc::new(Holding::default());
+    let Some(mut world) = World::new(tier, holding_core(Arc::clone(&holding))).await else {
+        return;
+    };
+    world.script(
+        WEDGED,
+        vec![served::response(vec![served::call(
+            "call_0",
+            HOLD,
+            serde_json::json!({}),
+        )])],
+    );
+    let wedged = world.session(WEDGED, served::spec(16)).await;
+    let operator = world.session(OPERATOR, served::spec(16)).await;
+    served::assert_answered(OPERATOR, &world.send(&operator, OPERATOR).await);
+    let accepted = wedged
+        .send(lash::TurnInput::text(WEDGED))
+        .await
+        .expect("the turn's input is accepted");
+    tokio::time::timeout(served::WATCHDOG, holding.entered.notified())
+        .await
+        .expect("the tool's first run started");
+    world.core.shutdown().await.expect("the node goes");
+    drop(accepted);
+    let run = wedge(&world, WEDGED).await;
+    let budget = world.backend.config().settings().activation_loop_budget;
+    let activation_loop = lash::SessionParkReason::ActivationLoop {
+        failed_activations: budget,
+    };
+    lash::testing::park_session(
+        &world.backend,
+        &session_id(OPERATOR),
+        activation_loop.clone(),
+    )
+    .await
+    .expect("the operator's session parks");
+
+    world
+        .restart("next-boot", holding_core(Arc::clone(&holding)))
+        .await;
+    let output = settled(&world, WEDGED, &run).await;
+    served::assert_answered(WEDGED, &output);
+    assert_eq!(output.assistant_message(), Some("done"));
+
+    assert_eq!(
+        operator.park_reason().await.expect("the park reads"),
+        Some(activation_loop),
+        "an activation-loop park waits for the operator through a boot"
+    );
+    assert!(
+        operator
+            .redrive("operator")
+            .await
+            .expect("the redrive commits"),
+        "the operator redrove the parked session"
+    );
+    assert_eq!(operator.park_reason().await.expect("the park reads"), None);
+    world.shutdown().await;
+}
+
+/// The commits of a cell's call that file its attempts and outcome.
+const CALL_COMMITS: [CommitLabel; 5] = [
+    CommitLabel::ROUND_START,
+    CommitLabel::ROUND_RETRY,
+    CommitLabel::ROUND_OUTCOME,
+    CommitLabel::ROUND_TRACED,
+    CommitLabel::TOOL_EFFECT,
+];
+
+fn flaky_core(flaky: Arc<Flaky>) -> impl Fn(&lash::Backend) -> lash::LashCoreBuilder {
+    move |backend| {
+        lash::LashCore::rlm_builder(
+            backend.clone(),
+            served::rlm(backend, sim::untimed_workers()),
+        )
+        .tools(
+            lash::tool_provider_key!("tools"),
+            Arc::clone(&flaky) as Arc<dyn lash_core::ToolProvider>,
+        )
+    }
+}
+
+/// A-PARKED-TURN-RESUMES-AT-THE-NEXT-BOOT (FIG-6310) for FIG-6289's ordinal
+/// miss: a cell's `Repeatable` call failed its first attempt and its retry
+/// answered, its rows filed (admit, start, retry, start, outcome), and the
+/// cell's wait was never answered, its session parked `PassLoop` with the
+/// live park. The next boot redrives it: the cell's wait is answered from
+/// the call's admitted identity with the retry's value, the call is not run
+/// a third time, and the turn finishes.
+async fn a_session_parked_by_the_ordinal_miss_finishes_its_cell_at_the_next_boot(tier: Tier) {
+    const NAME: &str = "parked-by-the-ordinal-miss";
+    let flaky = Arc::new(Flaky::default());
+    let hook = Arc::new(std::sync::OnceLock::<Arc<DurableCommitHook>>::new());
+    let scripts = Arc::new(served::Scripts::default());
+    let cell = served::cell("await control.finish(await tools.flaky({}));");
+    scripts.register(NAME, vec![cell.clone()]);
+    let Some(mut world) = World::layered_with_model(
+        tier,
+        {
+            let hook = Arc::clone(&hook);
+            move |stores| {
+                lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                    .map_durable_store(move |inner| {
+                        let hooked = Arc::new(DurableCommitHook::over(inner));
+                        let _ = hook.set(Arc::clone(&hooked));
+                        hooked
+                    })
+                    .into_store_set()
+            }
+        },
+        served::model(Arc::clone(&scripts)),
+        flaky_core(Arc::clone(&flaky)),
+    )
+    .await
+    else {
+        return;
+    };
+    world.script(NAME, vec![cell]);
+    let hook = Arc::clone(hook.get().expect("the durable store is hooked"));
+    // Once the retry answered and its call's commits are filed, the cell's
+    // next save is held, as the ordinal miss refused it, and the node goes.
+    let actor = ActorKey::session(NAME).expect("a session actor key");
+    let (reached, at_save) = tokio::sync::oneshot::channel::<CommitLabel>();
+    let (keep, held) = tokio::sync::oneshot::channel::<()>();
+    let hold = Arc::new(Mutex::new(Some((reached, held))));
+    let answered = Arc::clone(&flaky);
+    hook.arm(move |tx, label| {
+        let held = (tx.actor() == &actor
+            && answered.answered.load(Ordering::SeqCst)
+            && !CALL_COMMITS.contains(&label))
+        .then(|| hold.lock_recover().take())
+        .flatten();
+        async move {
+            if let Some((reached, held)) = held {
+                let _ = reached.send(label);
+                let _ = held.await;
+            }
+            Ok(())
+        }
+    });
+    let session = world.session(NAME, served::spec(16)).await;
+    let accepted = session
+        .send(lash::TurnInput::text(NAME))
+        .await
+        .expect("the turn's input is accepted");
+    tokio::time::timeout(served::WATCHDOG, at_save)
+        .await
+        .expect("the cell's save after the retry was reached")
+        .expect("the held save reached the hook");
+    world.core.shutdown().await.expect("the node goes");
+    drop((accepted, keep));
+    hook.disarm();
+    assert_eq!(flaky.attempts.load(Ordering::SeqCst), 2);
+    let run = wedge(&world, NAME).await;
+
+    world
+        .restart("next-boot", flaky_core(Arc::clone(&flaky)))
+        .await;
+    let output = settled(&world, NAME, &run).await;
+    served::assert_answered(NAME, &output);
+    assert_eq!(
+        output.finished().map(|(_, value)| value),
+        Some(&serde_json::json!("attempt 2")),
+        "the cell's wait is answered with the retry's value"
+    );
+    assert_eq!(
+        flaky.attempts.load(Ordering::SeqCst),
+        2,
+        "the answered call is not run a third time"
+    );
+    world.shutdown().await;
+}
+
 tiered_laws!(
     a_live_surface_install_fault_parks_typed_at_the_budget_and_one_that_clears_completes_once,
     a_session_whose_activation_panics_parks_at_its_budget_and_a_cancel_still_ends_its_turn,
-    a_cancel_committed_while_a_session_parks_still_ends_its_turn
+    a_cancel_committed_while_a_session_parks_still_ends_its_turn,
+    a_turn_wedged_in_its_tools_phase_by_a_pass_loop_park_finishes_at_the_next_boot,
+    a_session_parked_by_the_ordinal_miss_finishes_its_cell_at_the_next_boot
 );
