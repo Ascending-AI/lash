@@ -267,7 +267,14 @@ impl super::ProcessComponentRegistry {
     ) -> Result<(crate::ProcessEnv, PluginState), PluginError> {
         let mut decoded = state.clone();
         let mut entries = Vec::with_capacity(env.components().len());
+        let retired = self.retired_in(env);
         for entry in env.components() {
+            // A retired component converts nothing: its entry and state stay
+            // as recorded, and the build judges what the run left on it.
+            if retired.contains(entry.id()) {
+                entries.push(entry.clone());
+                continue;
+            }
             let registered = self.components.get(entry.id().as_str()).ok_or_else(|| {
                 PluginError::ProcessEnvRefused {
                     refusal: crate::ProcessEnvRefusal::ComponentNotInstalled {

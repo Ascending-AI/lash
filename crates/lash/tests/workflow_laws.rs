@@ -69,6 +69,25 @@ main {
 }
 "#;
 
+/// `echoed(name)`: performs `tools.echo` once, sleeps, and returns what
+/// the echo answered.
+const ECHOED: &str = r#"kernel 1
+numbers float
+effect tools.echo(input: Any) -> Any
+entry echoed(name: Text) -> Any
+
+fn echoed(name) {
+  let input = {value: name}
+  let got = perform tools.echo(input) as Any
+  do sleep 5
+  return got
+}
+
+main {
+  finish null
+}
+"#;
+
 /// `supervisor(value)` starts the entry `worker` of its own document by
 /// function reference, awaits it and returns what it ended with.
 const SUPERVISOR: &str = r#"kernel 1
@@ -153,13 +172,23 @@ async fn core() -> lash::LashCore {
 
 /// A node over `stores`, as the incarnation `boot` of the one deployment.
 async fn core_over(stores: Arc<lash_sqlite_store::SqliteStoreSet>, boot: &str) -> lash::LashCore {
-    core_with_process_tools(stores, boot, true).await
+    core_with_process_tools(stores, boot, true, EchoComponent::Installed).await
+}
+
+/// What a node does with the echo component.
+#[derive(Clone, Copy)]
+enum EchoComponent {
+    Installed,
+    /// The deployment no longer installs it and declares it retired
+    /// (FIG-6296).
+    Retired,
 }
 
 async fn core_with_process_tools(
     stores: Arc<lash_sqlite_store::SqliteStoreSet>,
     boot: &str,
     process_tools: bool,
+    echo: EchoComponent,
 ) -> lash::LashCore {
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let backend = lash_conformance::backend_over(stores);
@@ -175,8 +204,19 @@ async fn core_with_process_tools(
             lash::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
-        .tools(lash::tool_provider_key!("tools"), echo_tool())
-        .process_component(Arc::new(echo_component()), ECHO_TOOLS);
+        .tools(lash::tool_provider_key!("tools"), echo_tool());
+    let builder = match echo {
+        EchoComponent::Installed => {
+            builder.process_component(Arc::new(echo_component()), ECHO_TOOLS)
+        }
+        EchoComponent::Retired => builder.retire_process_component(
+            lash::process::ProcessComponentDeclaration::initial(
+                ECHO_TOOLS.component(),
+                ECHO_TOOLS.format(),
+            )
+            .expect("the echo component's id"),
+        ),
+    };
     // A process a workflow starts runs under its starter's environment.
     let builder = if process_tools {
         builder
@@ -1009,6 +1049,208 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     assert_eq!(read.document.identity(), publication.document.identity());
 }
 
+/// SQLite file stores under a test clock, opened anew by each node of a
+/// law.
+struct Files {
+    dir: tempfile::TempDir,
+    clock: Arc<lash_core::testing::TestClock>,
+}
+
+impl Files {
+    fn new() -> Self {
+        Self {
+            dir: tempfile::tempdir().expect("a SQLite store directory"),
+            clock: Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000)),
+        }
+    }
+
+    async fn open(&self) -> Arc<lash_sqlite_store::SqliteStoreSet> {
+        Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open_with_clock(
+                self.dir.path().join("lash.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+                self.clock.clone(),
+            )
+            .await
+            .expect("open the SQLite file stores"),
+        )
+    }
+}
+
+/// The echo component's id, as a refusal names it.
+fn echo_id() -> String {
+    ECHO_TOOLS.component().to_owned()
+}
+
+/// RETIRED-SEALED (FIG-6296): a process sealed under an env that names
+/// the echo component, which contributed none of its effects, parks on a
+/// node that installs it. A node that declares the component retired
+/// claims the parked process, builds its env without the component, says
+/// so on the env view, and resumes the run to its answer.
+#[tokio::test]
+async fn a_sealed_env_naming_a_retired_component_builds_without_it_and_resumes() {
+    let files = Files::new();
+    let first = core_over(files.open().await, "first").await;
+    let artifacts = first.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let environment = environment(true);
+    let document = lash::workflow::document::parse_document(GUARDED).expect("the document parses");
+    let publication = published(
+        artifacts
+            .publish_workflow(
+                &pin,
+                &Draft::open(document, None).expect("the document opens"),
+                &Name::new("guarded"),
+                &environment,
+            )
+            .await
+            .expect("the publication answers"),
+    );
+    let sealed = linking(&environment, &[]);
+    assert!(
+        sealed
+            .components()
+            .iter()
+            .any(|entry| entry.id().as_str() == ECHO_TOOLS.component()),
+        "the sealed env names the echo component"
+    );
+    let env_ref = artifacts
+        .publish_process_env(&pin, &sealed)
+        .await
+        .expect("publish the process environment");
+    let process = start(
+        &first,
+        &env_ref,
+        &publication.definition,
+        "retired",
+        "operator",
+    )
+    .await;
+    let first_due = timer_park_after(&first, &process, 0).await;
+    first.shutdown().await.expect("the first node stops");
+    drop(first);
+
+    files.clock.set(first_due);
+    let second =
+        core_with_process_tools(files.open().await, "second", true, EchoComponent::Retired).await;
+    let second_due = timer_park_after(&second, &process, first_due).await;
+    files.clock.set(second_due);
+    assert_eq!(
+        finished(&second, &process).await,
+        serde_json::json!("operator")
+    );
+    let view = second
+        .processes()
+        .environment(&process)
+        .await
+        .expect("the env view reads")
+        .expect("the process is retained");
+    let lash::process::ProcessAuthority::Engine { retired, .. } = view.authority else {
+        panic!("a kernel process has an env");
+    };
+    assert_eq!(
+        retired
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect::<Vec<_>>(),
+        [echo_id()],
+        "the env view names the component the process built without"
+    );
+    second.shutdown().await.expect("the second node stops");
+}
+
+/// RETIRED-NEW (FIG-6296): a new env may not name a retired component.
+#[tokio::test]
+async fn a_new_env_naming_a_retired_component_is_refused_typed() {
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open a SQLite memory store set"),
+    );
+    let core = core_with_process_tools(stores, "retired", true, EchoComponent::Retired).await;
+    let refused = core
+        .host_artifacts()
+        .publish_process_env(
+            &lash::process::HostArtifactPin::mint(),
+            &linking(&environment(true), &[]),
+        )
+        .await
+        .expect_err("the retired component refuses the new env");
+    assert_eq!(
+        refused.process_env_refusal(),
+        Some(&lash::process::ProcessEnvRefusal::ComponentRetired { id: echo_id() })
+    );
+    core.shutdown().await.expect("shutdown");
+}
+
+/// RETIRED-USED (FIG-6296): a process whose sealed env links `tools.echo`
+/// to the echo component performs it and parks. On a node that declares
+/// the component retired, the effect would have no body, so the process
+/// parks with the typed refusal before any step resumes, and nothing
+/// settles.
+#[tokio::test]
+async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_refusal() {
+    let files = Files::new();
+    let first = core_over(files.open().await, "first").await;
+    let artifacts = first.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let environment = environment(true);
+    let document = lash::workflow::document::parse_document(ECHOED).expect("the document parses");
+    let publication = published(
+        artifacts
+            .publish_workflow(
+                &pin,
+                &Draft::open(document, None).expect("the document opens"),
+                &Name::new("echoed"),
+                &environment,
+            )
+            .await
+            .expect("the publication answers"),
+    );
+    let env_ref = artifacts
+        .publish_process_env(&pin, &linking(&environment, &["tools.echo"]))
+        .await
+        .expect("publish the process environment");
+    let process = start(&first, &env_ref, &publication.definition, "used", "echoed").await;
+    let due = timer_park_after(&first, &process, 0).await;
+    first.shutdown().await.expect("the first node stops");
+    drop(first);
+
+    files.clock.set(due);
+    let second =
+        core_with_process_tools(files.open().await, "second", true, EchoComponent::Retired).await;
+    let observed = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        loop {
+            let observed = second
+                .processes()
+                .get(&process)
+                .await
+                .expect("the process reads")
+                .expect("the process is retained");
+            if matches!(observed.park, lash_core::ProcessParkState::Parked(_)) {
+                break observed;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the process parks within two minutes");
+    assert_eq!(
+        observed.park,
+        lash_core::ProcessParkState::Parked(lash_core::ProcessParkReason::EnvRefused {
+            refusal: lash::process::ProcessEnvRefusal::RetiredComponentServes {
+                id: echo_id(),
+                effect: "tools.echo".to_owned(),
+            },
+        })
+    );
+    assert!(
+        observed.lifecycle.terminal().is_none(),
+        "nothing settled: {observed:?}"
+    );
+    second.shutdown().await.expect("the second node stops");
+}
+
 /// FIG-6215: a multithreaded host can await workflow import in a Send future.
 #[cfg(feature = "typescript")]
 #[test]
@@ -1036,7 +1278,7 @@ async fn typescript_import_reports_front_end_errors_with_source_spans() {
             .await
             .expect("SQLite stores"),
     );
-    let core = core_with_process_tools(stores, "import", false).await;
+    let core = core_with_process_tools(stores, "import", false, EchoComponent::Installed).await;
     let artifacts = core.host_artifacts();
     let environment = environment(false);
     let checked = artifacts

@@ -209,7 +209,7 @@ enum LocalTarget {
         clock: Arc<dyn crate::Clock>,
     },
     Process(Box<ProcessLocalExecution>),
-    Definition(ProcessDefinitionLocalExecution),
+    Definition(Box<ProcessDefinitionLocalExecution>),
     TurnAcceptance(Arc<dyn crate::TurnInputStore>),
     /// The recorded presentation boundary's local work (ADR 0099 §6,
     /// FIG-3420): run the session's ordered presentation steps once over the
@@ -584,9 +584,9 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         claim: crate::ReferrerClaim,
     ) -> Self {
         Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(
+            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(Box::new(
                 ProcessDefinitionLocalExecution { engines, claim },
-            )),
+            ))),
             replay_trace: None,
             served_only: None,
             issued: crate::trace::StepIssue::default(),

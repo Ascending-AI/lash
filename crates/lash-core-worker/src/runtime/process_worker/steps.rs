@@ -299,10 +299,7 @@ impl ProcessSteps for WorkerSteps {
         match self.0.built_step_tools(runtime, process).await {
             Ok(_) => Ok(()),
             Err(StepToolsError::Build(crate::PluginError::ProcessEnvRefused { refusal })) => {
-                Err(StepRefusal::CompositionUnavailable {
-                    component: refused_component(&refusal),
-                    reason: refusal.to_string(),
-                })
+                Err(StepRefusal::EnvRefused { refusal })
             }
             Err(StepToolsError::Build(error))
                 if error.class() != crate::PluginErrorClass::Terminal =>
@@ -316,7 +313,6 @@ impl ProcessSteps for WorkerSteps {
             // namespaces refuse a committed resolution: the same refusal on
             // every rebuild here.
             Err(error) => Err(StepRefusal::CompositionUnavailable {
-                component: None,
                 reason: error.to_string(),
             }),
         }
@@ -482,10 +478,7 @@ impl ProcessSteps for WorkerSteps {
                         let (link, binding) =
                             tools.context.matched_link(matched).map_err(unavailable)?;
                         if let Err(reason) = binding {
-                            return Err(StepRefusal::CompositionUnavailable {
-                                component: None,
-                                reason,
-                            });
+                            return Err(StepRefusal::CompositionUnavailable { reason });
                         }
                         link
                     }
@@ -718,21 +711,6 @@ impl DurableProcessWorker {
             input,
         };
         steps.run(run, token).await.into()
-    }
-}
-
-/// The component a composition refusal names, when it names one.
-fn refused_component(refusal: &crate::ProcessEnvRefusal) -> Option<String> {
-    use crate::ProcessEnvRefusal as Refusal;
-    match refusal {
-        Refusal::DuplicateComponent { id }
-        | Refusal::ComponentNotInstalled { id }
-        | Refusal::ConfigFormatUnreadable { id, .. }
-        | Refusal::ConfigRefused { id, .. }
-        | Refusal::ComponentBuildFailed { id, .. }
-        | Refusal::ConfigWriterOutsideFleetRange { id, .. } => Some(id.clone()),
-        Refusal::DuplicatePresenter { second, .. } => Some(second.clone()),
-        _ => None,
     }
 }
 

@@ -175,3 +175,36 @@ state before `release_model` and reattach the original accepted input. Keep
 old live-session handles out of the reopen: they retain the old runtime's
 capabilities. The timeout is a scenario liveness aid, not isolation of fully
 trusted plugin code.
+
+## Retiring a process component
+
+A process component can stop being installed while sealed process envs still
+name it. Declare it retired on the core builder with the declaration it was
+installed under:
+
+```rust
+let builder = builder.retire_process_component(
+    lash::process::ProcessComponentDeclaration::initial("my-component", FormatVersion::ONE)?,
+);
+```
+
+The node then serves the component's claim token at each format the
+declaration reads, so it still claims the processes of a sealed env that names
+the component. Such an env builds without the component, and
+`core.processes().environment(id)` lists it under
+`ProcessAuthority::Engine::retired`. A new env that names it is refused with
+`ProcessEnvRefusal::ComponentRetired`, and a child process restricted from a
+sealed env leaves it out. The build refuses a component that is both installed
+and retired.
+
+On replay, what the component decided before it was retired is already
+recorded with each call's outcome: its hooks' and presenters' part in a call is
+read from the record, not run again. A run that still depends on the component
+does not resume without it. If the env links an effect to one of its providers,
+every later call of that effect would have no body. If the component published
+step state in the process, its later steps would find nothing to read. Either
+way the process parks before any step resumes, with
+`ProcessParkReason::EnvRefused` carrying
+`ProcessEnvRefusal::RetiredComponentServes` or
+`ProcessEnvRefusal::RetiredComponentHasState`. Retire only a component whose
+sealed envs link none of its tools.

@@ -286,9 +286,22 @@ pub(super) struct RegisteredComponent {
 
 /// The components a deployment installs, by id, and the host services they
 /// build against. Separate from the session plugin registry.
+///
+/// It also holds the components the deployment declares retired
+/// (FIG-6296): installed nowhere any more, and named only by sealed envs.
+/// A new env that names one is refused
+/// ([`ProcessEnvRefusal::ComponentRetired`]). A sealed env that names one
+/// builds without it, unless its run still depends on it: an effect the
+/// env links to one of its providers would have no body
+/// ([`ProcessEnvRefusal::RetiredComponentServes`]), and state it published
+/// would be read by nothing
+/// ([`ProcessEnvRefusal::RetiredComponentHasState`]). What it decided before
+/// it was retired, its hooks' and presenters' part in a call, is recorded
+/// with the call's outcome, and a resumed run reads the record.
 #[derive(Clone)]
 pub struct ProcessComponentRegistry {
     pub(super) components: Arc<BTreeMap<String, Arc<RegisteredComponent>>>,
+    retired: Arc<BTreeMap<String, ProcessComponentDeclaration>>,
     host: ProcessComponentHost,
     materialized_inventories: super::MaterializedInventoryReader,
 }
@@ -297,6 +310,7 @@ impl Default for ProcessComponentRegistry {
     fn default() -> Self {
         Self {
             components: Arc::default(),
+            retired: Arc::default(),
             materialized_inventories: Default::default(),
             host: ProcessComponentHost::new(crate::trace::TraceRuntime::default()),
         }
@@ -413,6 +427,12 @@ impl ProcessComponentRegistry {
                 declaration.id
             )));
         }
+        if self.retired.contains_key(declaration.id.as_str()) {
+            return Err(PluginError::Registration(format!(
+                "process component `{}` is installed and retired",
+                declaration.id
+            )));
+        }
         let mut recipe = Arc::clone(&factory).recipe()?;
         validate_process_entries(&recipe.entries)?;
         if recipe
@@ -450,6 +470,94 @@ impl ProcessComponentRegistry {
         Ok(())
     }
 
+    /// Declare the component `declaration` names retired (FIG-6296): this
+    /// deployment installs it nowhere any more. `declaration` is the one it
+    /// was installed under: a sealed env may name it at any format it reads,
+    /// and this node serves the claim token of each, so such an env's
+    /// processes are still claimed here and build without it.
+    ///
+    /// # Errors
+    ///
+    /// The component is installed, or already retired.
+    pub fn retire(&mut self, declaration: ProcessComponentDeclaration) -> Result<(), PluginError> {
+        let id = declaration.id.as_str();
+        if self.components.contains_key(id) {
+            return Err(PluginError::Registration(format!(
+                "process component `{id}` is installed and retired"
+            )));
+        }
+        if self.retired.contains_key(id) {
+            return Err(PluginError::Registration(format!(
+                "process component `{id}` is retired twice"
+            )));
+        }
+        let mut retired = (*self.retired).clone();
+        retired.insert(id.to_owned(), declaration);
+        self.retired = Arc::new(retired);
+        Ok(())
+    }
+
+    /// The components `env` names that this registry declares retired, in
+    /// env order: what a process under `env` builds without.
+    pub fn retired_in(&self, env: &ProcessEnv) -> Vec<ProcessComponentId> {
+        env.components()
+            .iter()
+            .filter(|entry| self.retired.contains_key(entry.id().as_str()))
+            .map(|entry| entry.id().clone())
+            .collect()
+    }
+
+    /// `env` without the components this registry declares retired: what a
+    /// child restricted from a sealed env names, since a new env may not
+    /// name a retired component.
+    pub fn without_retired(&self, env: ProcessEnv) -> ProcessEnv {
+        if self.retired_in(&env).is_empty() {
+            return env;
+        }
+        let entries = env
+            .components()
+            .iter()
+            .filter(|entry| !self.retired.contains_key(entry.id().as_str()))
+            .cloned()
+            .collect();
+        env.with_component_entries(entries)
+    }
+
+    /// `env` as this registry builds it, from the recorded `state` of its
+    /// process: without its retired components, each checked to leave
+    /// nothing the run depends on.
+    ///
+    /// # Errors
+    ///
+    /// The env links an effect to a retired component's provider, or a
+    /// retired component holds recorded state.
+    fn sealed(
+        &self,
+        env: &ProcessEnv,
+        state: &PluginState,
+    ) -> Result<ProcessEnv, ProcessEnvRefusal> {
+        for id in self.retired_in(env) {
+            if let Some(effect) = env.effects().iter().find_map(|(effect, link)| {
+                (link.provider.registry() == crate::RegistryKind::Process
+                    && link.provider.owner() == id.as_str())
+                .then_some(effect)
+            }) {
+                return Err(ProcessEnvRefusal::RetiredComponentServes {
+                    id: id.to_string(),
+                    effect: effect.to_string(),
+                });
+            }
+            if state
+                .plugins
+                .get(id.as_str())
+                .is_some_and(|namespace| !namespace.values.is_empty())
+            {
+                return Err(ProcessEnvRefusal::RetiredComponentHasState { id: id.to_string() });
+            }
+        }
+        Ok(self.without_retired(env.clone()))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.components.is_empty()
     }
@@ -478,6 +586,14 @@ impl ProcessComponentRegistry {
             .filter(|registered| self.preflight_component(registered).is_ok())
         {
             let declaration = &registered.declaration;
+            for format in &declaration.readable_formats {
+                served.insert(crate::ObligationToken::for_component(
+                    &declaration.id,
+                    *format,
+                ));
+            }
+        }
+        for declaration in self.retired.values() {
             for format in &declaration.readable_formats {
                 served.insert(crate::ObligationToken::for_component(
                     &declaration.id,
@@ -555,8 +671,8 @@ impl ProcessComponentRegistry {
     }
 
     /// Admission steps 2–7 of a new environment (§3.3): unique ids,
-    /// installed components, readable formats, each `validate`, each
-    /// `build(process: None)`, and a composable set. Ambient tools are
+    /// installed components that are not retired, readable formats, each
+    /// `validate`, each `build(process: None)`, and a composable set. Ambient tools are
     /// refused first (D7). The fleet writer range (step 8) is the store's,
     /// checked at publication.
     ///
@@ -566,6 +682,11 @@ impl ProcessComponentRegistry {
     pub fn admit(&self, env: &ProcessEnv) -> Result<(), ProcessEnvRefusal> {
         env.check_shape()?;
         for entry in env.components() {
+            if self.retired.contains_key(entry.id().as_str()) {
+                return Err(ProcessEnvRefusal::ComponentRetired {
+                    id: entry.id().to_string(),
+                });
+            }
             let registered = self.components.get(entry.id().as_str()).ok_or_else(|| {
                 ProcessEnvRefusal::ComponentNotInstalled {
                     id: entry.id().to_string(),
@@ -714,11 +835,13 @@ impl ProcessComponentRegistry {
     }
 
     /// The execution composition `env`'s components make for `process`
-    /// (§5.1): only the components the env names, in env order.
+    /// (§5.1): only the components the env names, in env order, without
+    /// the ones this registry declares retired.
     ///
     /// # Errors
     ///
-    /// A component is not installed here, or it did not build.
+    /// A component is not installed here, or it did not build, or the run
+    /// depends on a retired one.
     pub fn compose(
         &self,
         env: &ProcessEnv,
@@ -745,6 +868,7 @@ impl ProcessComponentRegistry {
         process: Option<&ProcessId>,
         snapshot: &PluginState,
     ) -> Result<ProcessComposition, ProcessEnvRefusal> {
+        let env = &self.sealed(env, snapshot)?;
         let state = Arc::new(std::sync::Mutex::new(
             state::PluginStateRegistry::from_snapshot(Some(snapshot)),
         ));

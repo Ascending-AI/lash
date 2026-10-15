@@ -1358,6 +1358,7 @@ mod named_component_laws {
             env_ref,
             env,
             engine_settings,
+            ..
         } = &view.authority
         else {
             panic!("engine authority")

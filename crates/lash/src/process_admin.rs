@@ -50,6 +50,9 @@ pub enum ProcessAuthority {
         env_ref: lash_core::ProcessEnvRef,
         env: Box<lash_core::ProcessEnv>,
         engine_settings: Option<lash_core::EngineSettings>,
+        /// The components `env` names that this core declares retired, in
+        /// env order: the process builds without them (FIG-6296).
+        retired: Vec<lash_core::ProcessComponentId>,
     },
     SessionTurn {
         session: SessionId,
@@ -610,9 +613,11 @@ impl Processes {
                 let bytes = bytes.ok_or_else(|| {
                     crate::plugins::ProcessEnvLoadError::Missing(launch.env.clone())
                 })?;
+                let env = decode_environment(&launch.env, &bytes)?;
                 ProcessAuthority::Engine {
                     env_ref: launch.env.clone(),
-                    env: Box::new(decode_environment(&launch.env, &bytes)?),
+                    retired: self.core.host_process_engines.components().retired_in(&env),
+                    env: Box::new(env),
                     engine_settings: launch.settings.clone(),
                 }
             }

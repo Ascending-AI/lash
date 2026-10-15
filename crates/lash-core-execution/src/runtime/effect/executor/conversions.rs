@@ -38,7 +38,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self.issued.unrecorded();
         match self.state {
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Definition(execution)) => {
-                Ok(execution)
+                Ok(*execution)
             }
             _ => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,

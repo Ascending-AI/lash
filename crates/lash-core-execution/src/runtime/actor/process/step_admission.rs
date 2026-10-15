@@ -148,12 +148,14 @@ impl ProcessActivation {
             .await?
         {
             Admission::Admitted => {}
-            Admission::Refused(StepRefusal::CompositionUnavailable { component, reason }) => {
-                let reason = ProcessParkReason::CompositionUnavailable {
-                    component,
-                    message: reason,
-                };
+            Admission::Refused(StepRefusal::CompositionUnavailable { reason }) => {
+                let reason = ProcessParkReason::CompositionUnavailable { message: reason };
                 return self.park(owned, tx, &reason).await;
+            }
+            Admission::Refused(StepRefusal::EnvRefused { refusal }) => {
+                return self
+                    .park(owned, tx, &ProcessParkReason::EnvRefused { refusal })
+                    .await;
             }
             Admission::Refused(refusal) => {
                 return self

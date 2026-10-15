@@ -210,11 +210,15 @@ pub(crate) async fn hold_launch(
             if performed.keys().eq(enclosing.env.effects().keys()) {
                 ProcessEnvSelection::Published(enclosing.env_ref.clone())
             } else {
+                // A new env names no retired component: the child leaves
+                // out what its sealed parent still names (FIG-6296).
                 ProcessEnvSelection::New(
-                    enclosing
-                        .env
-                        .restrict(performed.keys())
-                        .map_err(HoldEnvError::Refused)?,
+                    engines.components().without_retired(
+                        enclosing
+                            .env
+                            .restrict(performed.keys())
+                            .map_err(HoldEnvError::Refused)?,
+                    ),
                 )
             }
         }

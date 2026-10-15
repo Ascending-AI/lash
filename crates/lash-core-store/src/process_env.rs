@@ -365,6 +365,19 @@ pub enum ProcessEnvRefusal {
     DuplicateComponent { id: String },
     #[error("process component `{id}` is not installed")]
     ComponentNotInstalled { id: String },
+    /// A new env names a component the deployment declares retired
+    /// (FIG-6296): only a sealed env may still name it.
+    #[error("process component `{id}` is retired")]
+    ComponentRetired { id: String },
+    /// A sealed env links an effect to a provider of a component the
+    /// deployment declares retired: every later call of it would have no
+    /// body.
+    #[error("process component `{id}` is retired, but the env links effect `{effect}` to it")]
+    RetiredComponentServes { id: String, effect: String },
+    /// A retired component published step state in the process: what its
+    /// later steps would read is gone.
+    #[error("process component `{id}` is retired, but the process holds its recorded state")]
+    RetiredComponentHasState { id: String },
     #[error("process component `{id}` cannot read config format {format}; it reads {readable:?}")]
     ConfigFormatUnreadable {
         id: String,

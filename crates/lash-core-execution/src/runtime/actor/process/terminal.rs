@@ -69,14 +69,20 @@ pub enum ProcessParkReason {
     /// no session turns.
     UnservedSessionTurn,
     /// The composition its environment names does not build on the node
-    /// that claimed it (FIG-6034): a component is missing, its config does
-    /// not decode, or it refused to build. Nothing of the process ran or
-    /// settled for it.
+    /// that claimed it (FIG-6034) for a reason no env refusal types: a
+    /// component's contribution refused, or its committed state did not
+    /// replay. Nothing of the process ran or settled for it.
     CompositionUnavailable {
-        /// The component that did not build, when one is named.
-        component: Option<String>,
         /// Why, in words.
         message: String,
+    },
+    /// The node that claimed it refuses its sealed env, typed (FIG-6296): a
+    /// component the env names is missing, its config is unreadable or
+    /// refused, or the run depends on a component the node declares
+    /// retired. Nothing of the process ran or settled for it.
+    EnvRefused {
+        /// The refusal.
+        refusal: crate::ProcessEnvRefusal,
     },
     /// A component refused conversion of its recorded state/config format.
     ComponentFormatRefused { refusal: crate::FormatRefusal },
@@ -188,6 +194,7 @@ impl ProcessParkReason {
             Self::UnservedSessionTurn => "unserved_session_turn",
             Self::CommitRefused { .. } => "commit_refused",
             Self::CompositionUnavailable { .. } => "composition_unavailable",
+            Self::EnvRefused { .. } => "env_refused",
             Self::ComponentFormatRefused { .. } => "component_format_refused",
         }
     }

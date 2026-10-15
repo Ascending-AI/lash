@@ -424,7 +424,7 @@ the separate component registry. It fills no session or deployment defaults.
 | Trigger delivery | The host publishes the trigger's stated environment under its pin and starts the definition with its explicit launch. |
 | Host or tool session-turn start | No process environment. The create request supplies the child session's configuration; its stated session id or the process-derived child id names it. |
 | Restart, crash resume, redrive or takeover | The recorded environment ref and engine settings are loaded. No policy or default runs again. |
-| Claim by another build | The build must serve the recorded components, config formats and each linked tool's retained surface. It builds only the named components; nothing is re-selected. A kernel process stays pinned to the helper functions it was written against. |
+| Claim by another build | The build must serve the recorded components, config formats and each linked tool's retained surface. It builds only the named components; nothing is re-selected. A component the build declares retired is left out, unless the env links an effect to it or it holds recorded state; then the process parks with the typed refusal (see [Retiring a process component](plugins.md#retiring-a-process-component)). A kernel process stays pinned to the helper functions it was written against. |
 
 A committed model-start decision never re-runs its policy. An attempt abandoned
 before commit may choose again. A policy refusal becomes a tool error; a policy
@@ -440,6 +440,8 @@ statement, without building components or loading a session. A session-turn
 answer instead names the child session, because it has no process environment.
 Unknown process ids answer `None`; pruned processes refuse with
 `ProcessNoLongerRetained`. Missing or corrupt environment bytes are typed errors.
+An engine answer's `retired` lists the components the environment names that
+this core declares retired: the process builds without them.
 
 Narrowing a session does not change processes it already started. Lash enforces
 no process authority policy. A host that wants revocation gates

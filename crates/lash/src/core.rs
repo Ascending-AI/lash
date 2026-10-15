@@ -1003,6 +1003,29 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Retire the process component `declaration` names, which this
+    /// deployment no longer installs (FIG-6296); `declaration` is the one
+    /// it was installed under. A sealed env that names it still builds,
+    /// without it, and its processes resume here; the env view lists it
+    /// under [`ProcessAuthority::Engine`](crate::process::ProcessAuthority::Engine)'s
+    /// `retired`. A new env that names it is refused with
+    /// [`ProcessEnvRefusal::ComponentRetired`](lash_core::ProcessEnvRefusal::ComponentRetired).
+    /// A process whose env links an effect to one of its providers, or
+    /// that holds state it published, parks with the typed refusal instead
+    /// of resuming without it. The build refuses a component that is also
+    /// installed, or retired twice.
+    pub fn retire_process_component(
+        mut self,
+        declaration: lash_core::plugin::ProcessComponentDeclaration,
+    ) -> Self {
+        if let Err(error) = self.process_components.retire(declaration)
+            && self.process_component_refusal.is_none()
+        {
+            self.process_component_refusal = Some(error);
+        }
+        self
+    }
+
     pub fn plugins(mut self, stack: PluginStack) -> Self {
         self.plugin_stack = stack;
         self

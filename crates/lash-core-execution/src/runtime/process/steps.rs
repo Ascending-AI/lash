@@ -132,10 +132,17 @@ pub enum StepRefusal {
     /// the activation parks it before any step is admitted or resumed.
     #[error("the process's composition does not build here: {reason}")]
     CompositionUnavailable {
-        /// The component that did not build, when one is named.
-        component: Option<String>,
         /// Why.
         reason: String,
+    },
+    /// This node refuses the process's sealed env, typed: a component it
+    /// names is missing, unreadable or refused to build, or the run depends
+    /// on one this node declares retired. The activation parks it before
+    /// any step is admitted or resumed.
+    #[error("the process's env is refused here: {refusal}")]
+    EnvRefused {
+        /// The refusal.
+        refusal: crate::ProcessEnvRefusal,
     },
 }
 
@@ -324,8 +331,9 @@ pub trait ProcessSteps: Send + Sync {
     /// Build `process`'s composition and the activation's step tools into
     /// `runtime`, before the activation admits or resumes any step of it
     /// (§5.1), so no step body builds them.
-    /// [`StepRefusal::CompositionUnavailable`] parks the process and settles
-    /// nothing; any other refusal is a fault the next pass meets again.
+    /// [`StepRefusal::CompositionUnavailable`] and [`StepRefusal::EnvRefused`]
+    /// park the process and settle nothing; any other refusal is a fault the
+    /// next pass meets again.
     ///
     /// # Errors
     ///

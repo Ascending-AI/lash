@@ -573,12 +573,14 @@ impl ProcessActivation {
         // an admitted step is never answered `Interrupted` for it (D3).
         match self.steps.prepare(&live.bodies.runtime, &record).await {
             Ok(()) => {}
-            Err(StepRefusal::CompositionUnavailable { component, reason }) => {
-                let reason = ProcessParkReason::CompositionUnavailable {
-                    component,
-                    message: reason,
-                };
+            Err(StepRefusal::CompositionUnavailable { reason }) => {
+                let reason = ProcessParkReason::CompositionUnavailable { message: reason };
                 return self.park(owned, tx, &reason).await;
+            }
+            Err(StepRefusal::EnvRefused { refusal }) => {
+                return self
+                    .park(owned, tx, &ProcessParkReason::EnvRefused { refusal })
+                    .await;
             }
             Err(refusal) => {
                 return Err(DurableError::Store(StoreFailure {

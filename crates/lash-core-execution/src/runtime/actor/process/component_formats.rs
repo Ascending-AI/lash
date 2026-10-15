@@ -112,13 +112,18 @@ impl ProcessActivation {
                     .await
                     .map(Err);
             }
+            Err(crate::PluginError::ProcessEnvRefused { refusal }) => {
+                return self
+                    .park(owned, tx, &super::ProcessParkReason::EnvRefused { refusal })
+                    .await
+                    .map(Err);
+            }
             Err(error) if error.class() == crate::PluginErrorClass::Terminal => {
                 return self
                     .park(
                         owned,
                         tx,
                         &super::ProcessParkReason::CompositionUnavailable {
-                            component: None,
                             message: error.to_string(),
                         },
                     )
