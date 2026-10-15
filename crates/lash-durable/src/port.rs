@@ -418,6 +418,13 @@ pub trait DurableStore: DurableReads {
     /// Read `actor`'s row, unfenced.
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError>;
 
+    /// Wait out the owner commit of `actor` in flight, if any: a read
+    /// begun after this returns sees every owner commit of `actor` that
+    /// had begun before it was called. A reader whose own commit another
+    /// actor's commit cannot see reads that actor's facts after it
+    /// (FIG-6329). Nothing is written or locked past the return.
+    async fn await_owner_commit(&self, actor: &ActorKey) -> Result<(), DurableError>;
+
     /// Up to `limit` actors whose state is written in `formats` and that
     /// have not ended, by key, after `after`, read unfenced: what an
     /// operator lists of the actors a build carries forward or retires

@@ -1342,6 +1342,24 @@ impl DurableStore for PostgresDurableStore {
         .await
     }
 
+    /// Every owner commit's fence updates its actor's row first and holds
+    /// it to the commit's end, so a share lock on the row waits for the
+    /// commit in flight. Under READ COMMITTED a commit sees only rows
+    /// committed when its statement ran: the terminal transaction of a
+    /// process misses a wait pinned on it meanwhile, and the awaiter's
+    /// read after its pin misses the terminal until it commits (FIG-6329).
+    async fn await_owner_commit(&self, actor: &ActorKey) -> Result<(), DurableError> {
+        self.within(CommitCapacity::Work, async {
+            crate::observed_sql::query(SQL.postgres.await_owner_commit.sql())
+                .bind(actor.as_str())
+                .fetch_optional(crate::observed_sql::executor(&self.pools.work))
+                .await
+                .map(drop)
+                .map_err(sqlx_failure)
+        })
+        .await
+    }
+
     async fn actors_in(
         &self,
         formats: &FormatSet,
@@ -1400,6 +1418,9 @@ mod tests;
 #[cfg(test)]
 #[path = "../wait_law_tests.rs"]
 mod wait_law_tests;
+
+#[cfg(test)]
+mod terminal_wait_tests;
 
 #[cfg(test)]
 #[path = "../process_law_tests.rs"]

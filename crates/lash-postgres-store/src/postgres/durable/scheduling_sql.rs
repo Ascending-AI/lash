@@ -6,6 +6,11 @@ lash_store_sql::statements! {
         /// for the rest of the transaction: its draining flag, or no row.
         node_live = "SELECT draining FROM nodes WHERE node_id = ?1 AND boot_id = ?2 FOR SHARE";
 
+        /// Actor `?1`'s row, share-locked: it waits for the owner commit
+        /// in flight, whose fence holds the row, to end. Autocommit, so the
+        /// lock ends with the statement.
+        await_owner_commit = "SELECT 1 FROM actors WHERE actor_key = ?1 FOR SHARE";
+
         /// Give up to `?5` actors claimable at `?1` in a format set of `?4`
         /// whose claim requirements are all in `?7`; process actors in
         /// another set or with another requirement with mail of kind `?6`

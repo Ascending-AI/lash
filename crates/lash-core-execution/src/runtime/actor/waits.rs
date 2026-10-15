@@ -605,6 +605,9 @@ pub async fn pin_process_terminal(
 /// Resolve `wait`, a pending process-terminal wait, from its process's
 /// recorded outcome when the process had already ended: a process that ended
 /// before the wait was pinned resolved no wait in its terminal transaction.
+/// Called after the wait's pin committed, it reads the outcome after the
+/// process's owner commit in flight, so a terminal transaction that ran its
+/// resolution before the pin committed is read here.
 /// First winner beside that transaction, and the resolution wakes the wait's
 /// owner; a wait already settled, one on a process still running, and one on
 /// a process pruned since it ended (its outcome went with it; the wait's
@@ -624,6 +627,12 @@ pub async fn resolve_ended_terminal(backend: &Backend, wait: &WaitRef) -> Result
     else {
         return Ok(());
     };
+    // A terminal transaction in flight resolves only the waits committed
+    // when its resolution runs, which may miss this one: the end is read
+    // once that transaction ended (FIG-6329).
+    let target = lash_durable::ActorKey::process(process.as_str())
+        .map_err(|error| corrupt(&error.to_string()))?;
+    backend.durable().await_owner_commit(&target).await?;
     let record = match backend.process_registry().get_process(process).await {
         Ok(record) => record,
         Err(crate::PluginError::ProcessNoLongerRetained { .. }) => return Ok(()),

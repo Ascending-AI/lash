@@ -1427,6 +1427,12 @@ impl DurableStore for SqliteDurableStore {
         self.read_claim_facts(node, actor).await
     }
 
+    /// No commit is in flight to a reader: each holds the database's one
+    /// write lock from its first write to its end.
+    async fn await_owner_commit(&self, _actor: &ActorKey) -> Result<(), DurableError> {
+        Ok(())
+    }
+
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
         let actor = actor.clone();
         self.read(move |tx| {

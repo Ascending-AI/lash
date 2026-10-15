@@ -260,6 +260,10 @@ impl DurableStore for RecordedStore {
         self.inner.actor(actor).await
     }
 
+    async fn await_owner_commit(&self, actor: &ActorKey) -> Result<(), DurableError> {
+        self.inner.await_owner_commit(actor).await
+    }
+
     async fn actors_in(
         &self,
         formats: &lash::durable::FormatSet,
