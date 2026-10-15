@@ -14,6 +14,7 @@ use crate::{Diagnostic, DiagnosticCode};
 pub(super) fn annotations(
     document: &Document,
     notes: &[Note],
+    declared_notes: &BTreeMap<lash_kernel_doc::Name, Vec<Note>>,
     source: &str,
 ) -> Lowering<(Annotations, BTreeMap<Site, Written>)> {
     let identity = document
@@ -30,6 +31,17 @@ pub(super) fn annotations(
         &mut annotations.nodes,
         &mut written,
     );
+    for (name, notes) in declared_notes {
+        if let Some(function) = document.functions.get(name) {
+            block(
+                &function.body,
+                notes,
+                &Site::new(Unit::Function(name.clone()), Vec::new()),
+                &mut annotations.nodes,
+                &mut written,
+            );
+        }
+    }
     Ok((annotations, written))
 }
 

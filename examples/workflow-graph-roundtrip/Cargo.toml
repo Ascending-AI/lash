@@ -26,3 +26,14 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 reqwest = { workspace = true, features = ["json", "rustls"] }
 lash = { workspace = true, features = ["testing"] }
+lash-kernel-dialect = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-dialect-typescript = { workspace = true }
+lash-dialect-python = { workspace = true }
+lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+swc_common = { workspace = true }
+swc_ecma_ast = { workspace = true, features = ["serde-impl"] }
+swc_ecma_parser = { workspace = true }
+ruff_python_ast = { workspace = true }
+ruff_python_parser = { workspace = true }
+ruff_text_size = { workspace = true }

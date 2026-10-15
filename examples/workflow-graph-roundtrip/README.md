@@ -351,3 +351,35 @@ Events identify the execution owner, call and attempt, and support resumption
 within their own retention window with explicit gaps. This example does not
 yet subscribe to that feed or publish mock tool-live facts. Display progress
 here remains the mock host's display state, separate from tool progress.
+
+## Lowering shape ratchet (SHAPE)
+
+Print the current table and check its ratchet with one command, from a sourced
+Kiln fork:
+
+```sh
+kiln test //examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test --test_arg=catalog::shape::every_catalog_and_probe_workflow_stays_within_its_shape_ratchet --test_arg=--exact --test_arg=--nocapture --test_output=all
+```
+
+The instrument discovers every `.ts` and `.py` under `catalog/`, including the
+original four probes in `catalog/probes/`. It uses the real workflow lowerer
+(TypeScript) or cell importer (Python), with the catalog's host effects and the
+worker's helper library. It counts all document-owned statements, scopes
+(including empty blocks) and actions: module roots, entry adapters, closures and
+cloned bodies count; library helper bodies do not. This includes one module
+statement and scope beyond the entry-view counts quoted in FIG-6411.
+
+Author statements come from SWC and Ruff ASTs, including nested function bodies;
+function/type declarations and braces are containers. Loop-header declarations
+belong to their loop. Each kernel statement with a source note belongs to the
+smallest author statement containing that note's span. Ownership is exclusive:
+a loop's maximum measures its own expansion, without counting its child author
+statements again. Unowned statements remain explicit `overhead`. The table gives
+the statements/author ratio and the worst author's line, byte range and source.
+
+`catalog/shape.ratchet` is sorted by relative path, one workflow per row, with
+columns `statements scopes actions author max overhead`. A count increase fails;
+a decrease also fails until the improving change lowers the corresponding
+ratchet. The command prints replacement rows. Investigate increases rather than
+raising a baseline to accept a regression. Corpus additions and removals must
+update the ratchet in the same change. Source formatting changes need no update.

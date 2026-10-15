@@ -303,6 +303,8 @@ impl Lowerer<'_> {
         self.functions = frames;
         self.scopes = scopes;
         let body = body?;
+        // Lifting changes the unit, not the source ownership of its body.
+        self.declared_notes.insert(entry.clone(), body.notes);
 
         self.declared.insert(
             entry.clone(),

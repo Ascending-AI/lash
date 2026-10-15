@@ -1,0 +1,26 @@
+# SHAPE: workflow statements scopes actions author max overhead
+# Full document, including module root, adapters, closures and empty blocks.
+blank.ts 8 5 1 1 1 7
+branch.ts 22 11 7 5 6 7
+branching_approval.ts 85 33 39 14 8 7
+countdown.ts 35 14 11 9 7 7
+counter_loop.ts 122 51 47 17 35 11
+deep_research.ts 50 25 17 4 19 11
+digest.ts 97 48 37 8 35 14
+flat.ts 28 11 10 5 7 7
+helper.ts 101 42 29 8 35 21
+inbox.ts 97 48 31 6 36 14
+nested.ts 296 153 81 8 117 19
+onboarding.ts 87 30 39 16 8 9
+probes/digest.ts 97 48 37 8 35 14
+probes/flat.ts 28 11 10 5 7 7
+probes/inbox.ts 97 48 31 6 36 14
+probes/typed.ts 88 44 34 8 29 14
+research_nvidia_stock.ts 41 19 14 4 14 7
+retry.ts 172 94 54 9 78 10
+summarize_top_emails.ts 152 76 45 8 78 10
+team_standup_digest.ts 48 21 17 5 12 7
+traffic_lights.ts 238 86 114 16 35 10
+typed.ts 88 44 34 8 29 14
+unread.ts 126 64 38 6 35 10
+weekly_kpis.ts 57 27 20 5 13 11

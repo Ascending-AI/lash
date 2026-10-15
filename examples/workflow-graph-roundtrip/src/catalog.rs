@@ -307,3 +307,6 @@ pub(crate) fn entry_view(
     .map_err(|refusal| refusal.to_string())?;
     lash::workflow::view::derive(&derived, functions).map_err(|error| error.to_string())
 }
+
+#[cfg(test)]
+mod shape;

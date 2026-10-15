@@ -316,6 +316,7 @@ pub(crate) struct Lowerer<'a> {
     paths: Vec<expressions::LoopPaths>,
     /// The functions the document declares: its processes.
     declared: BTreeMap<Name, lash_kernel_doc::Function>,
+    declared_notes: BTreeMap<Name, Vec<Note>>,
     /// The declared functions a host may start, with their signatures.
     entries: BTreeMap<Name, Signature>,
     /// While a process body is lowered: the cell's names, none of which the
@@ -442,6 +443,7 @@ fn lower_program(
         narrowed: Vec::new(),
         paths: Vec::new(),
         declared: BTreeMap::new(),
+        declared_notes: BTreeMap::new(),
         entries: BTreeMap::new(),
         lifting: None,
         saved: environment.functions,
@@ -518,7 +520,8 @@ fn lower_program(
             environment.library,
         );
     }
-    let (annotations, written) = annotate::annotations(&document, &main.notes, source)?;
+    let (annotations, written) =
+        annotate::annotations(&document, &main.notes, &lowerer.declared_notes, source)?;
     Ok(Lowered {
         document,
         annotations,
