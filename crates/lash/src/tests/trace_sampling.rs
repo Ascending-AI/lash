@@ -40,6 +40,22 @@ fn trace_of(caller: u8) -> TraceId {
     TraceId::from_bytes(self::caller(caller).trace_id().to_bytes())
 }
 
+/// Whether `event` is a model call's closing record whose attempt ledger
+/// names span `id`. A `lash.model.attempt` span is ledger-only (FIG-6301):
+/// the closer publishes it.
+fn ledger_names(event: &crate::tracing::TraceEvent, id: SpanId) -> bool {
+    let attempts = match event {
+        crate::tracing::TraceEvent::LlmCallCompleted { attempts, .. }
+        | crate::tracing::TraceEvent::LlmCallFailed { attempts, .. } => attempts,
+        _ => return false,
+    };
+    attempts
+        .iter()
+        .flatten()
+        .filter_map(|attempt| attempt.span.as_ref())
+        .any(|span| SpanId::from_bytes(span.span_id.to_bytes()) == id)
+}
+
 /// The first owner's sampler: by the producer's trace, drop, record only,
 /// or sample under the tracestate `vendor=x`.
 #[derive(Clone, Debug)]
@@ -160,14 +176,18 @@ async fn every_owner_exports_the_producers_decision_and_the_sink_sees_it() -> Re
             .filter(move |span| span.span_context.trace_id() == trace_of(caller))
     };
     for span in &exported {
+        let id = span.span_context.span_id();
+        // A `lash.model.attempt` span has no record of its own (FIG-6301): its
+        // call's closing record publishes it from the attempt ledger.
         let record = records
             .iter()
-            .filter_map(|record| record.position.as_ref())
-            .find(|position| {
+            .filter_map(|record| Some((&record.event, record.position.as_ref()?)))
+            .find(|(event, position)| {
                 position.publishes()
-                    && SpanId::from_bytes(position.span.span_id().to_bytes())
-                        == span.span_context.span_id()
+                    && (SpanId::from_bytes(position.span.span_id().to_bytes()) == id
+                        || ledger_names(event, id))
             })
+            .map(|(_, position)| position)
             .unwrap_or_else(|| panic!("{} has a sink record", span.name));
         assert_eq!(
             span.span_context.is_sampled(),
@@ -198,6 +218,10 @@ async fn every_owner_exports_the_producers_decision_and_the_sink_sees_it() -> Re
             "the sampled trace exports its {name} span on the owner that ran it: {kept:?}"
         );
     }
+    assert!(
+        kept.iter().any(|kept| kept == "lash.model.attempt"),
+        "the sampled trace exports its model attempt from the call's ledger: {kept:?}"
+    );
     assert!(
         second_spans
             .get_finished_spans()

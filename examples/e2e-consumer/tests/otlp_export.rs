@@ -179,8 +179,8 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
             attempts.len() == 1,
             "actual provider execution missing or repeated in the trace for {session}"
         );
-        // The attempt is an event of its call's `chat` span: the call's
-        // closing record is what the exporter delivers.
+        // The call's closing record is what the exporter delivers: its `chat` span
+        // and, from its attempt ledger, one `lash.model.attempt` child sharing its record id.
         let closed: Vec<_> = records
             .iter()
             .filter(|record| {
@@ -192,16 +192,17 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
             })
             .collect();
         ensure!(closed.len() == 1, "the call closed once for {session}");
-        let exported: Vec<_> = collector
+        let (attempt_spans, chat_spans): (Vec<_>, Vec<_>) = collector
             .spans
             .iter()
             .filter(|span| span.attribute("lash.record.id") == Some(closed[0].id.as_str()))
-            .collect();
+            .partition(|span| span.integer("lash.model.attempt.ordinal").is_some());
+        let delivered = usize::from(session != "otlp-disconnected");
         ensure!(
-            exported.len() == usize::from(session != "otlp-disconnected"),
+            chat_spans.len() == delivered && attempt_spans.len() == delivered,
             "socket records disagree with outage evidence for {session}"
         );
-        if let Some(span) = exported.first() {
+        if let (Some(span), Some(attempt)) = (chat_spans.first(), attempt_spans.first()) {
             ensure!(
                 span.integer("lash.model.attempts") == Some(1),
                 "the call's one attempt missing"
@@ -210,6 +211,11 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
                 span.integer("gen_ai.usage.input_tokens") == Some(7)
                     && span.integer("gen_ai.usage.output_tokens") == Some(3),
                 "recorded provider usage changed during export"
+            );
+            ensure!(
+                attempt.integer("lash.model.attempt.ordinal") == Some(1)
+                    && attempt.parent_span_id == span.span_id,
+                "the call's attempt is not exported as its chat span's child"
             );
         }
     }
