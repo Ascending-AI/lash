@@ -50,7 +50,7 @@ impl ToolProvider for RlmControlToolsProvider {
             "read_output" => read_output(call).await,
             "continue_as" => match continue_as_switch_frame(call.args, call.context) {
                 Ok(control) => ToolOutcome::turn_control(control).into(),
-                Err(err) => ToolOutcome::err(json!(err)).into(),
+                Err(err) => ToolOutcome::err(err).into(),
             },
             _ => ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into(),
         }

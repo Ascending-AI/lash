@@ -168,7 +168,7 @@ pub(crate) struct SpawnAgent {
 }
 
 fn invalid(message: impl Into<String>) -> ToolOutcome {
-    ToolOutcome::err(json!(message.into()))
+    ToolOutcome::err(message)
 }
 
 fn refusal(code: &str, message: String) -> ToolOutcome {

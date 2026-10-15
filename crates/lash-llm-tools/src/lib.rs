@@ -312,7 +312,7 @@ impl StaticToolExecute for LlmToolsProvider {
         };
         match result {
             Ok(value) => ToolOutcome::ok(value).into(),
-            Err(LlmQueryError::Message(message)) => ToolOutcome::err(json!(message)).into(),
+            Err(LlmQueryError::Message(message)) => ToolOutcome::err(message).into(),
             Err(LlmQueryError::Failure(failure)) => ToolOutcome::failure(*failure).into(),
         }
     }

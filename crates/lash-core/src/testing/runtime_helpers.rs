@@ -616,7 +616,7 @@ impl crate::ToolProvider for EmptyTools {
     }
 
     async fn execute(&self, _call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        crate::ToolOutcome::err(serde_json::json!("Unknown tool")).into()
+        crate::ToolOutcome::err("Unknown tool").into()
     }
 }
 

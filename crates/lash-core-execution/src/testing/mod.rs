@@ -1115,11 +1115,7 @@ impl crate::ToolProvider for EmptyToolProvider {
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        crate::ToolOutcome::err(serde_json::json!(format!(
-            "test tool provider has no tool `{}`",
-            call.name()
-        )))
-        .into()
+        crate::ToolOutcome::err(format!("test tool provider has no tool `{}`", call.name())).into()
     }
 }
 

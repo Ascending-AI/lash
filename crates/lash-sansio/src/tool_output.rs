@@ -737,7 +737,19 @@ impl ToolFailure {
         self.cause = Some(Box::new(cause));
         self
     }
-    pub(crate) fn new(
+    /// A tool's execution failure with an explicit code and plain message.
+    /// Attach provider evidence with [`Self::with_raw`].
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::tool(ToolFailureClass::Execution, code, message)
+    }
+
+    /// Retains structured provider evidence without changing the code or message.
+    pub fn with_raw(mut self, raw: impl Into<ToolValue>) -> Self {
+        self.raw = Some(raw.into());
+        self
+    }
+
+    pub fn runtime(
         class: ToolFailureClass,
         code: impl Into<String>,
         message: impl Into<String>,
@@ -753,14 +765,6 @@ impl ToolFailure {
         }
     }
 
-    pub fn runtime(
-        class: ToolFailureClass,
-        code: impl Into<String>,
-        message: impl Into<String>,
-    ) -> Self {
-        Self::new(class, code, message)
-    }
-
     pub fn tool(
         class: ToolFailureClass,
         code: impl Into<String>,
@@ -768,7 +772,7 @@ impl ToolFailure {
     ) -> Self {
         Self {
             source: ToolFailureSource::Tool,
-            ..Self::new(class, code, message)
+            ..Self::runtime(class, code, message)
         }
     }
 

@@ -128,7 +128,7 @@ impl StaticToolExecute for Evidence {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         match self.run(call) {
             Ok(outcome) => outcome,
-            Err(error) => ToolOutcome::err(json!({"message": error.to_string()})),
+            Err(error) => ToolOutcome::err(error.to_string()),
         }
         .into()
     }

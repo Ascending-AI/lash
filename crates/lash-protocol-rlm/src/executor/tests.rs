@@ -278,6 +278,7 @@ fn definition(id: &str, name: &str, module: &str, operation: &str) -> lash_core:
 /// running.
 #[derive(Default)]
 struct CellTools {
+    refusal: Option<lash_core::ToolOutcome>,
     /// How many calls ran to their answer, by text.
     answered: std::sync::Mutex<Vec<String>>,
     hold: AtomicBool,
@@ -343,6 +344,9 @@ impl lash_core::ToolProvider for CellTools {
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if let Some(refusal) = &self.refusal {
+            return refusal.clone().into();
+        }
         let text = call
             .args
             .get("text")
@@ -361,6 +365,46 @@ impl lash_core::ToolProvider for CellTools {
             serde_json::Value::String(text),
         ))
     }
+}
+
+/// FIG-6320: a host refusal keeps its code and plain message in model feedback.
+#[tokio::test]
+async fn a_tool_failure_keeps_its_code_and_plain_message_in_feedback() {
+    let host = open_host().await;
+    let tools = CellTools {
+        refusal: Some(lash_core::ToolOutcome::failure(
+            lash_core::ToolFailure::new("effect_unbound", "Bind the effect before calling it")
+                .with_raw(serde_json::json!({ "effect": "echo.say" })),
+        )),
+        ..CellTools::default()
+    };
+    let response = run_cell(
+        &mut typescript_state(),
+        cell_context(&host, SESSION, TURN, "exec-code:0", Arc::new(tools)),
+        &typescript_services(),
+        "await echo.say({});",
+    )
+    .await;
+    let calls = crate::call_feedback::with_result_summaries(
+        response.calls.clone(),
+        &response.tool_calls,
+        crate::call_feedback::CallFeedbackPolicy::standard().max_result_bytes(),
+    );
+    let summary = calls[0]
+        .result_summary
+        .as_ref()
+        .expect("the call has model feedback");
+    assert!(!summary.truncated);
+    let feedback: serde_json::Value =
+        serde_json::from_str(&summary.text).expect("the model receives the structured failure");
+    assert_eq!(feedback["code"], "effect_unbound", "{feedback}");
+    assert_eq!(feedback["message"], "Bind the effect before calling it");
+    assert_eq!(feedback["raw"], serde_json::json!({ "effect": "echo.say" }));
+    let rendered = crate::feedback::render(response.error().expect("the tool failed"), "cell");
+    assert!(
+        rendered.starts_with("uncaught tool_failed: Bind the effect before calling it\n"),
+        "{rendered}"
+    );
 }
 
 /// Grants `web.fetch` and counts how often it was asked.

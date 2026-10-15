@@ -306,28 +306,18 @@ impl ToolOutcome {
         Self::from_output(crate::ToolCallOutput::success(result))
     }
 
-    /// Constructs an error-as-result JSON outcome for protocol and process-engine implementors
-    /// returning from an authorized tool call.
-    pub fn err(result: serde_json::Value) -> Self {
-        let message = result
-            .as_str()
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| result.to_string());
-        Self::from_output(crate::ToolCallOutput::failure(crate::ToolFailure {
-            cause: None,
-            class: crate::ToolFailureClass::Execution,
-            code: "tool_error".to_string(),
-            message,
-            source: crate::ToolFailureSource::Tool,
-            suggested_delay_ms: None,
-            raw: Some(crate::ToolValue::untrusted_json(result)),
-        }))
+    /// Constructs a tool execution failure with code `tool_error` and a plain message.
+    ///
+    /// For a structured refusal, use
+    /// `ToolOutcome::failure(ToolFailure::new(code, message).with_raw(data))`.
+    pub fn err(message: impl Into<String>) -> Self {
+        Self::failure(crate::ToolFailure::new("tool_error", message))
     }
 
     /// Formats an error-as-result outcome for protocol and process-engine implementors returning
     /// from an authorized tool call.
     pub fn err_fmt(msg: impl std::fmt::Display) -> Self {
-        Self::err(serde_json::json!(msg.to_string()))
+        Self::err(msg.to_string())
     }
 
     /// Constructs a structured failure for protocol and process-engine implementors returning from

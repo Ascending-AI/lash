@@ -18,7 +18,7 @@ use lash::tools::{
     CataloguePreviewOptions, DeferredOutcome, DeferredResolveContext, DeferredToolProvider,
     ExecutionBinding, StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding,
     ToolBindingResolutionExt, ToolCall, ToolContract, ToolDefinition, ToolDefinitionBindingExt,
-    ToolId, ToolManifest, ToolManifestBindingExt, ToolOutcome, ToolProvider,
+    ToolFailure, ToolId, ToolManifest, ToolManifestBindingExt, ToolOutcome, ToolProvider,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -281,10 +281,10 @@ impl ToolProvider for WorkbenchDeferredProvider {
             .tool_execution_binding()
             .map(|binding| &binding.payload["call_path"]);
         if bound != Some(&json!(call_path)) {
-            return ToolOutcome::err(json!({
-                "kind": "invalid_deferred_grant",
-                "message": "execution binding does not match the deferred tool"
-            }))
+            return ToolOutcome::failure(ToolFailure::new(
+                "invalid_deferred_grant",
+                "execution binding does not match the deferred tool",
+            ))
             .into();
         }
         execute_workbench_utility(&call_path, call.args).into()
@@ -410,10 +410,10 @@ impl StaticToolExecute for SearchDeferredTools {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             if query.trim().is_empty() {
-                return ToolOutcome::err(json!({
-                    "kind": "invalid_query",
-                    "message": "tools.search requires a non-empty query"
-                }));
+                return ToolOutcome::failure(ToolFailure::new(
+                    "invalid_query",
+                    "tools.search requires a non-empty query",
+                ));
             }
             let limit = call
                 .args
@@ -425,10 +425,10 @@ impl StaticToolExecute for SearchDeferredTools {
             let results = self.catalogue.search(query, limit);
             for result in &results {
                 if let Err(error) = self.store.grant(&result.call_path) {
-                    return ToolOutcome::err(json!({
-                        "kind": "grant_persistence_failed",
-                        "message": error.to_string()
-                    }));
+                    return ToolOutcome::failure(ToolFailure::new(
+                        "grant_persistence_failed",
+                        error.to_string(),
+                    ));
                 }
             }
             ToolOutcome::ok(json!({ "results": results }))
@@ -690,10 +690,10 @@ fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolOutcome {
                 .collect::<Vec<_>>();
             ToolOutcome::ok(json!({ "values": values }))
         }
-        _ => ToolOutcome::err(json!({
-            "kind": "unknown_deferred_tool",
-            "message": format!("unknown deferred call path `{call_path}`")
-        })),
+        _ => ToolOutcome::failure(ToolFailure::new(
+            "unknown_deferred_tool",
+            format!("unknown deferred call path `{call_path}`"),
+        )),
     }
 }
 
@@ -706,7 +706,7 @@ fn string_values(args: &Value) -> Option<Vec<String>> {
 }
 
 fn invalid_arguments(message: &str) -> ToolOutcome {
-    ToolOutcome::err(json!({ "kind": "invalid_arguments", "message": message }))
+    ToolOutcome::failure(ToolFailure::new("invalid_arguments", message))
 }
 
 #[cfg(test)]

@@ -49,9 +49,7 @@ impl ToolProvider for NoTools {
     }
 
     async fn execute(&self, _call: ToolCall<'_>) -> ToolAttemptOutcome {
-        (async { ToolOutcome::err(json!("unknown tool")) })
-            .await
-            .into()
+        (async { ToolOutcome::err("unknown tool") }).await.into()
     }
 }
 

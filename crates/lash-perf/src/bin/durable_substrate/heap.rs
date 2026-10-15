@@ -154,14 +154,11 @@ impl StaticToolExecute for Gate {
         let Some(phase) = call.args["phase"].as_f64().filter(|phase| {
             phase.is_finite() && phase.fract() == 0.0 && (0.0..=3.0).contains(phase)
         }) else {
-            return lash::tools::ToolOutcome::err(serde_json::json!("invalid phase")).into();
+            return lash::tools::ToolOutcome::err("invalid phase").into();
         };
         let phase = phase as usize;
         if self.0.send(phase).await.is_err() {
-            return lash::tools::ToolOutcome::err(serde_json::json!(
-                "measurement receiver dropped"
-            ))
-            .into();
+            return lash::tools::ToolOutcome::err("measurement receiver dropped").into();
         }
         lash::tools::ToolOutcome::pending(lash::tools::PendingCompletion::new()).into()
     }

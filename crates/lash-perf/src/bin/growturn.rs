@@ -150,8 +150,7 @@ impl StaticToolExecute for Tools {
         let Some(round) = call.args["round"].as_f64().filter(|n| {
             n.is_finite() && n.fract() == 0.0 && *n >= 1.0 && *n <= self.meter.rounds as f64
         }) else {
-            return lash::tools::ToolOutcome::err(serde_json::json!("invalid round ordinal"))
-                .into();
+            return lash::tools::ToolOutcome::err("invalid round ordinal").into();
         };
         let round = round as usize;
         // Observe the worker while it is awaiting host projection, as well as
@@ -159,7 +158,7 @@ impl StaticToolExecute for Tools {
         if round.is_multiple_of(self.meter.every)
             && let Err(error) = self.meter.sample("worker-await", round - 1)
         {
-            return lash::tools::ToolOutcome::err(serde_json::json!(error.to_string())).into();
+            return lash::tools::ToolOutcome::err(error.to_string()).into();
         }
         let prefix = format!("grow-payload:{round:08}:");
         let payload = prefix.clone() + &"x".repeat(self.bytes.saturating_sub(prefix.len()));
