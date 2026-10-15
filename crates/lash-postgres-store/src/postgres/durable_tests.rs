@@ -85,9 +85,30 @@ claim_law!(
     }
 );
 
-law!(one_writer_under_a_claim_race, |store, _advance| {
-    laws::one_writer_under_a_claim_race(store)
-});
+/// The law's four claimers must race in PostgreSQL even when each statement
+/// takes time: queueing them behind one connection can exhaust the 500 ms
+/// acquire budget before a later claimer reaches the database (FIG-6314).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_writer_under_a_claim_race() {
+    let database_url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&database_url).await;
+    let mut config = crate::testing::fixture_config();
+    // This law races four nodes, matching the fixture's served-node count.
+    // Each needs a scheduler connection without waiting behind its peers.
+    config.roles.scheduler.max_connections = config.roles.served_nodes;
+    let storage = crate::testing::connect_with(database.url(), &config)
+        .await
+        .expect("open the isolated store");
+    crate::testing::delay_node_statements(storage.pool(), Duration::from_millis(300))
+        .await
+        .expect("model host load during the claim race");
+    let store = storage
+        .durable_store()
+        .with_clock_for_testing(Arc::new(TestClock::new(1_000_000)));
+    laws::one_writer_under_a_claim_race(&store)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}
 law!(a_zombie_owner_past_reap_cannot_commit, |store, advance| {
     laws::a_zombie_owner_past_reap_cannot_commit(store, advance)
 });
