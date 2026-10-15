@@ -227,9 +227,30 @@
       "check": "per_turn_median",
       "max": 262144,
       "why": "a parked cell's 1 MB global is not resent per turn"
+    },
+    {
+      "workload": "py-codemode",
+      "metric": "ipc_bytes",
+      "check": "per_turn_median",
+      "max": 262144,
+      "why": "a parked cell's 1 MB global is not resent per turn"
     }
   ],
   "known_breaches": [
+    {
+      "workload": "ts-codemode",
+      "metric": "ipc_bytes",
+      "check": "per_turn_median",
+      "owner": "FIG-6327",
+      "why": "each cell starts with every session global by value (StartFrom::Fresh), each park that requests something exports the whole graph state, and the end carries the bindings back: the 1 MB global crosses the worker IPC about seven times per turn (about 7.7 MB); keeping it out needs the worker to hold a session's graph nodes across runs (FIG-6327)"
+    },
+    {
+      "workload": "py-codemode",
+      "metric": "ipc_bytes",
+      "check": "per_turn_median",
+      "owner": "FIG-6327",
+      "why": "each cell starts with every session global by value (StartFrom::Fresh), each park that requests something exports the whole graph state, and the end carries the bindings back: the 1 MB global crosses the worker IPC about seven times per turn (about 7.7 MB); keeping it out needs the worker to hold a session's graph nodes across runs (FIG-6327)"
+    },
     {
       "workload": "ts-codemode",
       "metric": "sql_bytes_written",
