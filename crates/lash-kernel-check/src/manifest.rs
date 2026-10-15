@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    Action, Block, Callee, Document, EffectName, Expr, FunctionCatalog, FunctionId, FunctionName,
-    Node,
+    Action, Atom, Block, Callee, Document, EffectName, Expr, FunctionCatalog, FunctionId,
+    FunctionName, InvalidReason, Literal, Name, Node,
 };
 
 use crate::refusal::{RefusalReason, Refused, refused};
@@ -23,33 +23,128 @@ pub struct Requirements {
     pub functions: BTreeMap<FunctionId, FunctionName>,
 }
 
-/// The library functions a block calls, and the effects it performs.
-fn scan(block: &Block, effects: &mut BTreeSet<EffectName>, functions: &mut BTreeSet<FunctionId>) {
+/// The references in a block, shared by manifest and entry-slice derivation.
+/// Children come from the kernel's exhaustive structural walk; actions have
+/// atomic arguments rather than children, so every action and literal kind
+/// is accounted for here as well.
+fn scan(
+    block: &Block,
+    effects: &mut BTreeSet<EffectName>,
+    functions: &mut BTreeSet<FunctionId>,
+    declared: &mut BTreeSet<Name>,
+) {
     let mut pending = vec![Node::Block(block)];
     while let Some(node) = pending.pop() {
         match node {
-            Node::Expr(Expr::Call { function, .. }) => {
-                functions.insert(*function);
-            }
-            Node::Action(Action::Perform { effect, .. }) => {
-                effects.insert(effect.clone());
-            }
-            Node::Action(
-                Action::Call {
-                    callee: Callee::Library(function),
-                    ..
+            Node::Block(_) | Node::Stmt(_) => {}
+            Node::Expr(expr) => match expr {
+                Expr::Call { function, .. } => {
+                    functions.insert(*function);
                 }
-                | Action::Spawn {
-                    callee: Callee::Library(function),
-                    ..
-                },
-            ) => {
-                functions.insert(*function);
+                Expr::Literal(literal) => reference(literal, declared),
+                Expr::Variable(_)
+                | Expr::Tuple(_)
+                | Expr::List(_)
+                | Expr::Map(_)
+                | Expr::Set(_)
+                | Expr::Record(_)
+                | Expr::Member(_)
+                | Expr::Closure(_)
+                | Expr::Clock
+                | Expr::Random
+                | Expr::Read(_) => {}
+            },
+            Node::Action(action) => {
+                let args: &[Atom] = match action {
+                    Action::Call { callee, args } | Action::Spawn { callee, args } => {
+                        match callee {
+                            Callee::Declared(name) => {
+                                declared.insert(name.clone());
+                            }
+                            Callee::Library(function) => {
+                                functions.insert(*function);
+                            }
+                            Callee::Value(_) => {}
+                        }
+                        args
+                    }
+                    Action::Perform { effect, args, .. } => {
+                        effects.insert(effect.clone());
+                        args
+                    }
+                    Action::Sleep { duration } => std::slice::from_ref(duration),
+                    Action::Join { task } | Action::Cancel { task } => std::slice::from_ref(task),
+                    Action::JoinMany { tasks, .. } => std::slice::from_ref(tasks),
+                    Action::Yield => &[],
+                };
+                for atom in args {
+                    match atom {
+                        Atom::Literal(literal) => reference(literal, declared),
+                        Atom::Variable(_) => {}
+                    }
+                }
             }
-            _ => {}
         }
         pending.extend(node.children());
     }
+}
+
+fn reference(literal: &Literal, declared: &mut BTreeSet<Name>) {
+    match literal {
+        Literal::Function(name) => {
+            declared.insert(name.clone());
+        }
+        Literal::Null
+        | Literal::Absent
+        | Literal::Bool(_)
+        | Literal::Int(_)
+        | Literal::Float(_)
+        | Literal::Text(_)
+        | Literal::Bytes(_) => {}
+    }
+}
+
+/// The declared functions `root` reaches, including itself, through calls,
+/// spawns and function-reference literals in any expression or atomic slot.
+/// Closures are traversed as part of their enclosing function. Cycles are
+/// followed once. This uses the same reference walk as manifest derivation.
+///
+/// No library catalog is needed: library code cannot name the document's
+/// declared functions. This is structural reachability, not admission;
+/// scope, type and environment rules remain on [`crate::admit`].
+///
+/// # Errors
+///
+/// The root or a function it references is not declared.
+pub fn reachable_functions(
+    document: &Document,
+    root: &Name,
+) -> Result<BTreeSet<Name>, crate::Refusal> {
+    let mut reached = BTreeSet::new();
+    let mut pending = vec![root.clone()];
+    while let Some(name) = pending.pop() {
+        if !reached.insert(name.clone()) {
+            continue;
+        }
+        let function = document
+            .functions
+            .get(&name)
+            .ok_or_else(|| crate::Refusal {
+                errors: vec![refused(
+                    None,
+                    RefusalReason::Invalid(InvalidReason::FunctionNotDeclared { name }),
+                )],
+            })?;
+        let mut references = BTreeSet::new();
+        scan(
+            &function.body,
+            &mut BTreeSet::new(),
+            &mut BTreeSet::new(),
+            &mut references,
+        );
+        pending.extend(references);
+    }
+    Ok(reached)
 }
 
 /// A function reached, and the function whose body reached it; `None` when
@@ -62,9 +157,19 @@ pub(crate) fn reach(
 ) -> (BTreeSet<EffectName>, Reached) {
     let mut effects = BTreeSet::new();
     let mut direct = BTreeSet::new();
-    scan(&document.main, &mut effects, &mut direct);
+    scan(
+        &document.main,
+        &mut effects,
+        &mut direct,
+        &mut BTreeSet::new(),
+    );
     for function in document.functions.values() {
-        scan(&function.body, &mut effects, &mut direct);
+        scan(
+            &function.body,
+            &mut effects,
+            &mut direct,
+            &mut BTreeSet::new(),
+        );
     }
     let mut reached: Reached = direct.iter().map(|function| (*function, None)).collect();
     let mut pending: Vec<FunctionId> = direct.into_iter().collect();
@@ -85,7 +190,12 @@ pub(crate) fn reach(
             continue;
         };
         let mut called = BTreeSet::new();
-        scan(&body.block, &mut BTreeSet::new(), &mut called);
+        scan(
+            &body.block,
+            &mut BTreeSet::new(),
+            &mut called,
+            &mut BTreeSet::new(),
+        );
         for callee in called {
             if let std::collections::btree_map::Entry::Vacant(entry) = reached.entry(callee) {
                 entry.insert(Some(function));

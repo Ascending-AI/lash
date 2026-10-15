@@ -1473,3 +1473,138 @@ main {
         );
     }
 }
+
+/// Entry extraction retains references as well as calls, and publication
+/// derives exactly the selected entry's requirements (`K-EDIT-005`, `K-FN-001`).
+#[test]
+fn extracting_an_entry_keeps_only_its_reachable_definition() {
+    let library = library();
+    let environment = environment(&library);
+    let source = document(&format!(
+        r#"kernel 1
+numbers float
+effect fetch(url: Text) -> Any
+effect notify(text: Text) -> Any
+use num.neg = @{neg}
+entry chosen() -> Any
+entry other() -> Any
+private secret
+
+fn chosen() {{
+  let callback = fn() {{
+    return &indirect
+  }}
+  do call direct(&indirect)
+  let task = spawn call direct(&indirect)
+  do cancel task
+  return callback
+}}
+
+fn direct(callback) {{
+  let n = num.neg(1)
+  return n
+}}
+
+fn indirect() {{
+  let got = perform fetch("u") as Any
+  return got
+}}
+
+fn other() {{
+  let got = perform notify("unused") as Any
+  return got
+}}
+
+main {{
+  let secret = 1
+  print secret
+  finish "cell"
+}}
+"#,
+        neg = library.neg,
+    ));
+    let original = lash_kernel_check::derive(&source, &library.catalog).unwrap();
+    let effects = &original
+        .unit(&Unit::Function(name("chosen")))
+        .unwrap()
+        .effects;
+    let transaction = crate::extract_entry(&source, &name("chosen")).unwrap();
+    assert_eq!(transaction.base, source.identity().unwrap());
+    let mut draft = Draft::open(source.clone(), None).unwrap();
+    draft.apply(&transaction, &environment).unwrap();
+    let extracted = draft.document();
+    assert_eq!(
+        extracted
+            .manifest
+            .effects
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        effects.effects,
+    );
+    assert_eq!(
+        lash_kernel_check::requirements(extracted, &library.catalog).effects,
+        effects.effects,
+    );
+    assert_eq!(
+        lash_kernel_doc::print_document(extracted),
+        format!(
+            r#"kernel 1
+numbers float
+effect fetch(url: Text) -> Any
+use num.neg = @{neg}
+entry chosen() -> Any
+
+fn chosen() {{
+  let callback = fn() {{
+    return &indirect
+  }}
+  do call direct(&indirect)
+  let task = spawn call direct(&indirect)
+  do cancel task
+  return callback
+}}
+
+fn direct(callback) {{
+  let n = num.neg(1)
+  return n
+}}
+
+fn indirect() {{
+  let got = perform fetch("u") as Any
+  return got
+}}
+
+main {{}}
+"#,
+            neg = library.neg,
+        ),
+    );
+}
+
+/// Extraction reports typed unknown entries and dangling declared references.
+#[test]
+fn extracting_an_entry_refuses_unknown_entries_and_broken_references() {
+    let mut source = document(
+        "kernel 1\nnumbers float\nentry start() -> Any\nfn start() {\n  return null\n}\nmain {}\n",
+    );
+    let refusal = crate::extract_entry(&source, &name("missing")).unwrap_err();
+    assert_eq!(
+        refusal.diagnostics[0].kind,
+        EditDiagnosticKind::NoSuchEntry {
+            name: name("missing")
+        }
+    );
+    source.functions.get_mut(&name("start")).unwrap().body = vec![Stmt::Return {
+        value: Expr::Literal(Literal::Function(name("missing"))),
+    }];
+    let refusal = crate::extract_entry(&source, &name("start")).unwrap_err();
+    assert_eq!(
+        refusal.diagnostics[0].kind,
+        EditDiagnosticKind::Refused(RefusalReason::Invalid(
+            lash_kernel_doc::InvalidReason::FunctionNotDeclared {
+                name: name("missing")
+            },
+        ))
+    );
+}

@@ -120,7 +120,7 @@ impl Draft {
     }
 }
 
-fn identity(document: &Document) -> Result<DocumentId, EditRefusal> {
+pub(crate) fn identity(document: &Document) -> Result<DocumentId, EditRefusal> {
     document.identity().map_err(|error| EditRefusal {
         diagnostics: vec![EditDiagnostic {
             edit: None,

@@ -157,7 +157,7 @@ pub mod graph {
 pub mod edit {
     pub use lash_kernel_edit::{
         Applied, Correspondence, Draft, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal,
-        Location, NodeClass, Position, Survivor, Transaction,
+        Location, NodeClass, Position, Survivor, Transaction, extract_entry,
     };
 }
 
