@@ -259,6 +259,90 @@ fn a_manifest_is_the_reachable_staged_dag_in_digest_order() {
     assert_eq!(spool.usage().pages, 1);
 }
 
+/// The most digest-record bytes a spool holds in memory at once while it
+/// builds, streams and settles a candidate, whatever the candidate's size.
+const METADATA_BOUND: u64 = 1 << 20;
+/// How many times a candidate's metadata may touch each page's record,
+/// from the walk through two manifest passes to settlement.
+const TOUCHES_PER_PAGE: u64 = 12;
+
+/// A 200,000-page candidate is created, streamed twice in the store's
+/// 64-entry batches (nodes, then edges) and settled while the spool
+/// holds at most [`METADATA_BOUND`] bytes of digest records at once. Each
+/// page's record is touched a fixed number of times, so the total work is
+/// linear in the candidate (FIG-6421). Both are counted, not timed.
+#[test]
+fn a_large_candidate_builds_streams_and_settles_in_bounded_memory_and_linear_work() {
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 64 << 20).expect("root");
+    let mut spool = root.spool(StageLeaseId(1)).expect("spool");
+    let committed = page("committed", &[]);
+    let protected = |id: &NodeId| *id == committed.id;
+    let mut level: Vec<NodeId> = (0..193_750)
+        .map(|leaf| {
+            let node = page(&format!("leaf {leaf}"), &[]);
+            spool.seal(node.clone(), &protected).expect("staged");
+            node.id
+        })
+        .collect();
+    let mut staged = level.len() as u64;
+    let mut depth = 0;
+    while level.len() > 1 {
+        depth += 1;
+        level = level
+            .chunks(32)
+            .enumerate()
+            .map(|(at, children)| {
+                let node = page(&format!("index {depth}/{at}"), children);
+                spool.seal(node.clone(), &protected).expect("staged");
+                node.id
+            })
+            .collect();
+        staged += level.len() as u64;
+    }
+    let top = page("top", &[level[0], committed.id]);
+    spool.seal(top.clone(), &protected).expect("staged");
+    staged += 1;
+    assert!(staged >= 200_000);
+    let meter = spool.meter();
+    let commit = CommitId([4; 32]);
+    let mut manifest = spool.candidate(top.id, None, commit).expect("candidate");
+    assert_eq!(
+        (manifest.summary().fresh_nodes, manifest.summary().external),
+        (staged, 1)
+    );
+    for pass in ["nodes", "edges"] {
+        let (mut after, mut fresh, mut external) = (None, 0_u64, 0_u64);
+        loop {
+            let batch = manifest.entries(after, 64).expect("entries");
+            if batch.is_empty() {
+                break;
+            }
+            for entry in &batch {
+                assert!(after < Some(id_of(entry)), "{pass}: one ascending stream");
+                after = Some(id_of(entry));
+                match entry {
+                    ManifestEntry::Fresh(_) => fresh += 1,
+                    ManifestEntry::External(_) => external += 1,
+                }
+            }
+        }
+        assert_eq!((fresh, external), (staged, 1), "{pass}");
+    }
+    spool.settle(commit).expect("settled");
+    assert_eq!(spool.usage().pages, 0);
+    let (touched, peak) = (meter.touched(), meter.peak());
+    eprintln!("candidate of {staged} pages: records touched {touched}, peak held {peak} bytes");
+    assert!(
+        peak <= METADATA_BOUND,
+        "the spool held {peak} record bytes against a bound of {METADATA_BOUND}"
+    );
+    assert!(
+        touched <= TOUCHES_PER_PAGE * staged,
+        "the spool touched {touched} records for {staged} pages"
+    );
+}
+
 /// A staged page may name only committed pages a capability protects or
 /// pages staged before it: anything else is refused, so the staged graph
 /// is a DAG by construction. A forged capability protects nothing, and

@@ -31,7 +31,7 @@ use lash_vm_protocol::page::{
 };
 use lash_vm_protocol::*;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::os::unix::net::UnixStream;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -533,6 +533,9 @@ const SEAL_BATCH_BYTES: u64 = PAGE_BATCH_BYTES / 2;
 /// The most child capabilities one seal batch carries, well within one
 /// standard frame's node bound.
 const SEAL_BATCH_CHILDREN: usize = 512;
+/// The fewest grants a port keeps before it drops those no checkpoint
+/// reaches.
+pub(crate) const GRANT_FLOOR: usize = 1024;
 
 /// The heap's page port on a worker (S3): reads and seals cross to the
 /// parent's page service, over the run's host wire or in process, and every
@@ -563,8 +566,12 @@ struct Port {
     /// The batch that crossed with the last frame that handed the run to
     /// the parent, until its grants come back.
     carried: Pending,
-    /// The grant the parent issued for each page this port sealed.
+    /// The grant the parent issued for each page this port sealed that the
+    /// machine may still name under none.
     granted: HashMap<PageId, PageGrant>,
+    /// How many grants `granted` may hold before a checkpoint drops those
+    /// its root no longer reaches.
+    prune_at: usize,
 }
 
 /// Sealed pages that have not been granted yet, in seal order.
@@ -602,6 +609,7 @@ impl WirePageSource {
                 batch: Pending::default(),
                 carried: Pending::default(),
                 granted: HashMap::new(),
+                prune_at: GRANT_FLOOR,
             })),
         }
     }
@@ -614,6 +622,12 @@ impl WirePageSource {
     #[cfg(test)]
     pub(crate) fn traffic(&self) -> PageTraffic {
         self.port.borrow().traffic
+    }
+
+    /// How many grants the port keeps for pages it sealed.
+    #[cfg(test)]
+    pub(crate) fn grants(&self) -> usize {
+        self.port.borrow().granted.len()
     }
 }
 
@@ -673,6 +687,17 @@ impl PagePort {
         Ok(())
     }
 
+    /// The machine sealed a checkpoint rooted at `root` (FIG-6421): the
+    /// port keeps the grants of the pages it sealed that the root, or a
+    /// batch still to cross, reaches, and drops the rest.
+    ///
+    /// # Errors
+    ///
+    /// The parent's refusal of a read the walk needed, as the heap's fault.
+    pub(crate) fn checkpointed(&self, root: PageRef) -> Result<(), HeapFault> {
+        self.0.borrow_mut().checkpointed(root)
+    }
+
     /// How a carried session names `page`: under the grant the parent
     /// issued, or as a page of the batch that crosses with it.
     pub(crate) fn link(&self, page: PageRef) -> lash_vm_client::wire::PageLink {
@@ -718,6 +743,97 @@ impl Port {
         self.resident
             .insert(answer.clone(), got.page.envelope.len() as u64);
         Ok(answer)
+    }
+
+    /// Reads `missing` from the parent in as many exchanges as its replies
+    /// take, each answer checked and held resident.
+    fn fetch(&mut self, mut missing: Vec<PageRef>) -> Result<Vec<PageAnswer>, HeapFault> {
+        let mut fetched = Vec::with_capacity(missing.len());
+        // The parent may answer a prefix that fits one frame; ask again for
+        // the rest.
+        while !missing.is_empty() {
+            self.traffic.pages_requested += missing.len() as u64;
+            crate::perf_witness::pages_loaded(missing.len() as u64);
+            let reply = self.exchange(PageRequest::Read {
+                pages: missing.iter().map(capability_of).collect(),
+            })?;
+            let read = match reply {
+                PageReply::Read { pages } => pages,
+                PageReply::Refused(refusal) => return Err(refused(refusal, missing[0].id)),
+                PageReply::Sealed { .. } => return Err(breach("a read was answered as a seal")),
+            };
+            if read.is_empty() || read.len() > missing.len() {
+                return Err(breach("a read reply answers no prefix of its request"));
+            }
+            for (wanted, got) in missing.iter().zip(&read) {
+                if got.page.id != wanted.id.0 {
+                    return Err(HeapFault::Corrupt {
+                        page: wanted.id,
+                        reason: "the parent answered another page".to_owned(),
+                    });
+                }
+                fetched.push(self.accept(*wanted, got)?);
+            }
+            missing.drain(..read.len());
+        }
+        Ok(fetched)
+    }
+
+    /// Drops the grants no live link can need (FIG-6421). A checkpoint root
+    /// holds the whole resumable machine, so every page the machine can
+    /// still name under no grant is one the root reaches, one a batch still
+    /// to cross reaches, or one it seals later. The walk from those goes
+    /// through the pages this port sealed and stops at any other page: a
+    /// committed page names no staged one. It runs once the map has doubled
+    /// since the walk before, so the map stays within twice the live pages
+    /// (or [`GRANT_FLOOR`]) and each grant is walked a bounded number of
+    /// times.
+    fn checkpointed(&mut self, root: PageRef) -> Result<(), HeapFault> {
+        if self.granted.len() <= self.prune_at {
+            return Ok(());
+        }
+        let mut kept = HashMap::new();
+        let mut seen = HashSet::new();
+        let mut level: Vec<PageId> = std::iter::once(root.id)
+            .chain(
+                [&self.batch, &self.carried]
+                    .into_iter()
+                    .flat_map(|pending| pending.pages.iter().map(|(_, own)| own.page.id)),
+            )
+            .filter(|id| seen.insert(*id))
+            .collect();
+        while !level.is_empty() {
+            let mut children = Vec::new();
+            let mut unread = Vec::new();
+            for id in level {
+                let page = PageRef {
+                    id,
+                    grant: PageGrant::NONE,
+                };
+                if let Some(own) = self.unsent(&page) {
+                    children.extend(own.children);
+                } else if let Some(&grant) = self.granted.get(&id) {
+                    kept.insert(id, grant);
+                    match self.resident.pages.get(&id) {
+                        Some((answer, _, _)) => children.extend_from_slice(&answer.children),
+                        None => unread.push(PageRef { id, grant }),
+                    }
+                }
+            }
+            for batch in unread.chunks(READ_BATCH_PAGES) {
+                for answer in self.fetch(batch.to_vec())? {
+                    children.extend(answer.children);
+                }
+            }
+            level = children
+                .into_iter()
+                .map(|child| child.id)
+                .filter(|id| seen.insert(*id))
+                .collect();
+        }
+        self.granted = kept;
+        self.prune_at = GRANT_FLOOR.max(2 * self.granted.len());
+        Ok(())
     }
 
     /// `page` under the grant the parent issued for it, when this port
@@ -873,7 +989,6 @@ impl PageSource for WirePageSource {
             });
         }
         let port = &mut *self.port.borrow_mut();
-        let mut fresh: HashMap<PageId, PageAnswer> = HashMap::new();
         let mut missing: Vec<PageRef> = Vec::new();
         for page in pages {
             if !missing.iter().any(|wanted| wanted.id == page.id)
@@ -883,33 +998,11 @@ impl PageSource for WirePageSource {
                 missing.push(port.resolved(*page));
             }
         }
-        // The parent may answer a prefix that fits one frame; ask again for
-        // the rest.
-        while !missing.is_empty() {
-            port.traffic.pages_requested += missing.len() as u64;
-            crate::perf_witness::pages_loaded(missing.len() as u64);
-            let reply = port.exchange(PageRequest::Read {
-                pages: missing.iter().map(capability_of).collect(),
-            })?;
-            let read = match reply {
-                PageReply::Read { pages } => pages,
-                PageReply::Refused(refusal) => return Err(refused(refusal, missing[0].id)),
-                PageReply::Sealed { .. } => return Err(breach("a read was answered as a seal")),
-            };
-            if read.is_empty() || read.len() > missing.len() {
-                return Err(breach("a read reply answers no prefix of its request"));
-            }
-            for (wanted, got) in missing.iter().zip(&read) {
-                if got.page.id != wanted.id.0 {
-                    return Err(HeapFault::Corrupt {
-                        page: wanted.id,
-                        reason: "the parent answered another page".to_owned(),
-                    });
-                }
-                fresh.insert(wanted.id, port.accept(*wanted, got)?);
-            }
-            missing.drain(..read.len());
-        }
+        let fresh: HashMap<PageId, PageAnswer> = port
+            .fetch(missing)?
+            .into_iter()
+            .map(|answer| (answer.page.id, answer))
+            .collect();
         pages
             .iter()
             .map(|page| {

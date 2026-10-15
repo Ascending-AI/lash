@@ -9,12 +9,15 @@
 //!
 //! A candidate is built at a park: a walk of the candidate root's staged
 //! DAG that stops at committed references, marking each page it reaches in
-//! a marker directory bucketed by the digest's first byte. The manifest
-//! then streams the markers in ascending digest order one bucket at a time,
-//! which is the store's blob lock order, and can be read again from any
-//! cursor. Staged pages no candidate reaches stay until the spool's owner
-//! names the roots it still needs ([`StageSpool::retain`]), so the cells of
-//! one session can share a spool.
+//! a marker directory bucketed by the digest's first byte and appending its
+//! record to a file that is also the walk's queue. An external sort with
+//! bounded runs orders the records into the manifest file, ascending by
+//! digest, which is the store's blob lock order; the manifest streams from
+//! any cursor, and settlement streams it again to delete the candidate's
+//! pages. No step holds more than a fixed number of records in memory
+//! (FIG-6421). Staged pages no candidate reaches stay until the spool's
+//! owner names the roots it still needs ([`StageSpool::retain`]), so the
+//! cells of one session can share a spool.
 //!
 //! A spool lives exactly as long as its stage lease: an authoritative
 //! commit deletes the candidate's pages, an authoritative refusal discards
@@ -26,11 +29,15 @@
     reason = "the spool is the host-supplied staging directory's sole reader and writer (D-SPOOL)"
 )]
 
-use std::fs;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+use std::fs::{self, File};
 use std::hash::{BuildHasher, Hasher};
-use std::io::ErrorKind;
+use std::io::{BufReader, BufWriter, ErrorKind, Read, Write};
+use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, ManifestEntry, ManifestSummary, StageFault, StageLeaseId, StageSpool,
@@ -56,6 +63,164 @@ fn hex(bytes: &[u8]) -> String {
             let _ = write!(out, "{byte:02x}");
             out
         })
+}
+
+/// One manifest record: a page's digest, then `f` when the candidate
+/// supplies the page or `e` when it references it committed. Records sort
+/// by digest.
+const RECORD: usize = 33;
+type Record = [u8; RECORD];
+/// The records one sorted run holds in memory: the sort's one buffer that
+/// grows with its input, up to this bound.
+const RUN_RECORDS: usize = 4096;
+/// The runs one merge reads at once.
+const MERGE_FANIN: usize = 64;
+/// The buffer a streamed record file reads or writes through.
+const RECORD_BUFFER: usize = 8 << 10;
+
+fn record(id: &NodeId, fresh: bool) -> Record {
+    let mut record = [0; RECORD];
+    record[..32].copy_from_slice(&id.0);
+    record[32] = if fresh { b'f' } else { b'e' };
+    record
+}
+
+fn parse(record: &Record) -> (NodeId, bool) {
+    let mut id = [0; 32];
+    id.copy_from_slice(&record[..32]);
+    (NodeId(id), record[32] == b'f')
+}
+
+/// The next record `reader` streams, none at its end.
+fn next_record(reader: &mut impl Read) -> Result<Option<Record>, StageFault> {
+    let mut record = [0; RECORD];
+    match reader.read_exact(&mut record) {
+        Ok(()) => Ok(Some(record)),
+        Err(error) if error.kind() == ErrorKind::UnexpectedEof => Ok(None),
+        Err(error) => Err(io(&error)),
+    }
+}
+
+/// Writes `record` to `out`, a record written.
+fn append(out: &mut impl Write, record: &Record, meter: &SpoolMeter) -> Result<(), StageFault> {
+    meter.touch(1);
+    out.write_all(record).map_err(|error| io(&error))
+}
+
+fn reader(path: &Path) -> Result<BufReader<File>, StageFault> {
+    File::open(path)
+        .map(|file| BufReader::with_capacity(RECORD_BUFFER, file))
+        .map_err(|error| io(&error))
+}
+
+fn writer(path: &Path) -> Result<BufWriter<File>, StageFault> {
+    File::create(path)
+        .map(|file| BufWriter::with_capacity(RECORD_BUFFER, file))
+        .map_err(|error| io(&error))
+}
+
+/// Sorts the records of `unsorted` into `sorted` (FIG-6421): runs of at
+/// most [`RUN_RECORDS`], each sorted in memory, then merge passes of at
+/// most [`MERGE_FANIN`] runs each, every run streamed through one buffer.
+fn sort_records(
+    dir: &Path,
+    unsorted: &Path,
+    sorted: &Path,
+    meter: &SpoolMeter,
+) -> Result<(), StageFault> {
+    let run = |pass: usize, at: usize| dir.join(format!("run-{pass}-{at}"));
+    let mut input = reader(unsorted)?;
+    let mut buffer: Vec<Record> = Vec::with_capacity(RUN_RECORDS);
+    let mut runs = 0;
+    loop {
+        while buffer.len() < RUN_RECORDS
+            && let Some(record) = next_record(&mut input)?
+        {
+            buffer.push(record);
+        }
+        if buffer.is_empty() {
+            break;
+        }
+        meter.holding((buffer.capacity() * RECORD + 2 * RECORD_BUFFER) as u64);
+        meter.touch(buffer.len() as u64);
+        buffer.sort_unstable();
+        let mut output = writer(&run(0, runs))?;
+        for record in buffer.drain(..) {
+            append(&mut output, &record, meter)?;
+        }
+        output.flush().map_err(|error| io(&error))?;
+        runs += 1;
+    }
+    drop(buffer);
+    let mut pass = 0;
+    while runs > 1 {
+        let mut merged = 0;
+        for first in (0..runs).step_by(MERGE_FANIN) {
+            let inputs: Vec<PathBuf> = (first..runs.min(first + MERGE_FANIN))
+                .map(|at| run(pass, at))
+                .collect();
+            merge(&inputs, &run(pass + 1, merged), meter)?;
+            for path in inputs {
+                fs::remove_file(path).map_err(|error| io(&error))?;
+            }
+            merged += 1;
+        }
+        runs = merged;
+        pass += 1;
+    }
+    fs::rename(run(pass, 0), sorted).map_err(|error| io(&error))
+}
+
+/// Merges the sorted runs `inputs` into one sorted run at `output`.
+fn merge(inputs: &[PathBuf], output: &Path, meter: &SpoolMeter) -> Result<(), StageFault> {
+    let mut readers = inputs
+        .iter()
+        .map(|path| reader(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    meter.holding(((inputs.len() + 1) * RECORD_BUFFER + inputs.len() * (RECORD + 8)) as u64);
+    let mut heads = BinaryHeap::with_capacity(readers.len());
+    for (at, reader) in readers.iter_mut().enumerate() {
+        if let Some(record) = next_record(reader)? {
+            heads.push(Reverse((record, at)));
+        }
+    }
+    let mut out = writer(output)?;
+    while let Some(Reverse((record, at))) = heads.pop() {
+        meter.touch(1);
+        append(&mut out, &record, meter)?;
+        if let Some(next) = next_record(&mut readers[at])? {
+            heads.push(Reverse((next, at)));
+        }
+    }
+    out.flush().map_err(|error| io(&error))
+}
+
+/// What a spool's candidate metadata cost (FIG-6421): the digest records it
+/// wrote and read, and the most record bytes it held in memory at once.
+#[derive(Debug, Default)]
+pub(crate) struct SpoolMeter {
+    touched: AtomicU64,
+    peak: AtomicU64,
+}
+
+impl SpoolMeter {
+    fn touch(&self, records: u64) {
+        self.touched.fetch_add(records, Ordering::Relaxed);
+    }
+
+    fn holding(&self, bytes: u64) {
+        self.peak.fetch_max(bytes, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn touched(&self) -> u64 {
+        self.touched.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn peak(&self) -> u64 {
+        self.peak.load(Ordering::Relaxed)
+    }
 }
 
 /// One parent process's staging directory: every spool of every activation
@@ -122,6 +287,7 @@ impl SpoolRoot {
                 quota_bytes: self.quota,
             },
             candidate: None,
+            meter: Arc::default(),
         })
     }
 }
@@ -139,9 +305,15 @@ pub struct DiskSpool {
     dir: PathBuf,
     usage: StageUsage,
     candidate: Option<Candidate>,
+    meter: Arc<SpoolMeter>,
 }
 
 impl DiskSpool {
+    #[cfg(test)]
+    pub(crate) fn meter(&self) -> Arc<SpoolMeter> {
+        Arc::clone(&self.meter)
+    }
+
     fn pages(&self) -> PathBuf {
         self.dir.join("pages")
     }
@@ -154,7 +326,9 @@ impl DiskSpool {
         self.page(id).is_file()
     }
 
-    fn markers(&self, commit: CommitId) -> PathBuf {
+    /// Where the candidate committed under `commit` keeps its manifest
+    /// and, while it is built, its walk.
+    fn candidate_dir(&self, commit: CommitId) -> PathBuf {
         self.dir.join(format!("candidate-{}", hex(&commit.0)))
     }
 
@@ -165,8 +339,10 @@ impl DiskSpool {
         (candidate.summary.commit == commit).then(|| {
             Box::new(DiskManifest {
                 pages: self.pages(),
-                markers: self.markers(commit),
+                manifest: self.candidate_dir(commit).join("manifest"),
                 summary: candidate.summary,
+                meter: Arc::clone(&self.meter),
+                cursor: None,
             }) as Box<dyn CandidateManifest>
         })
     }
@@ -183,25 +359,6 @@ impl DiskSpool {
         self.usage.pages -= 1;
         self.usage.bytes -= len;
         Ok(())
-    }
-
-    /// The fresh pages a candidate's markers name.
-    fn fresh(markers: &Path) -> Result<Vec<NodeId>, StageFault> {
-        let mut fresh = Vec::new();
-        for bucket in fs::read_dir(markers).map_err(|error| io(&error))? {
-            let bucket = bucket.map_err(|error| io(&error))?.path();
-            for entry in fs::read_dir(&bucket).map_err(|error| io(&error))? {
-                let name = entry.map_err(|error| io(&error))?.file_name();
-                if let Some(id) = name
-                    .to_str()
-                    .and_then(|name| name.strip_suffix(".f"))
-                    .and_then(NodeId::from_hex)
-                {
-                    fresh.push(id);
-                }
-            }
-        }
-        Ok(fresh)
     }
 }
 
@@ -331,23 +488,24 @@ impl StageSpool for DiskSpool {
         if !self.staged(&root) {
             return Err(StageFault::Missing(root));
         }
-        let markers = self.markers(commit);
-        let marker = |id: &NodeId, fresh: bool| {
-            markers.join(hex(&id.0[..1])).join(format!(
-                "{}.{}",
-                id.to_hex(),
-                if fresh { 'f' } else { 'e' }
-            ))
-        };
+        let dir = self.candidate_dir(commit);
+        // A build that failed part way left its marks: start over.
+        match fs::remove_dir_all(&dir) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(io(&error)),
+        }
+        let marks = dir.join("marks");
+        fs::create_dir_all(&marks).map_err(|error| io(&error))?;
         let mark = |id: &NodeId, fresh: bool| -> Result<bool, StageFault> {
-            let path = marker(id, fresh);
+            let bucket = marks.join(hex(&id.0[..1]));
+            let path = bucket.join(format!("{}.{}", id.to_hex(), if fresh { 'f' } else { 'e' }));
             if path.is_file() {
                 return Ok(false);
             }
-            if let Some(bucket) = path.parent() {
-                fs::create_dir_all(bucket).map_err(|error| io(&error))?;
-            }
+            fs::create_dir_all(&bucket).map_err(|error| io(&error))?;
             fs::write(&path, []).map_err(|error| io(&error))?;
+            self.meter.touch(1);
             Ok(true)
         };
         let mut summary = ManifestSummary {
@@ -360,11 +518,32 @@ impl StageSpool for DiskSpool {
             external: 0,
         };
         // Staged pages name only committed pages or pages staged before
-        // them, so the walk is over a DAG and ends; the stack holds digests
-        // still to visit, never page bytes.
+        // them, so the walk is over a DAG and ends. Each page it reaches is
+        // marked once and its record appended to `records`, which is also
+        // the walk's queue: read back in order through one buffer, so
+        // memory holds no frontier and no page bytes but the page at hand.
+        let records = dir.join("records");
+        let mut queue = writer(&records)?;
+        let mut walk = reader(&records)?;
+        self.meter.holding(2 * RECORD_BUFFER as u64);
+        let (mut written, mut flushed, mut walked) = (0_u64, 0_u64, 0_u64);
         mark(&root, true)?;
-        let mut stack = vec![root];
-        while let Some(id) = stack.pop() {
+        append(&mut queue, &record(&root, true), &self.meter)?;
+        written += 1;
+        while walked < written {
+            if walked == flushed {
+                queue.flush().map_err(|error| io(&error))?;
+                flushed = written;
+            }
+            let Some(next) = next_record(&mut walk)? else {
+                return Err(StageFault::Io("the walk's queue ended early".to_owned()));
+            };
+            walked += 1;
+            self.meter.touch(1);
+            let (id, fresh) = parse(&next);
+            if !fresh {
+                continue;
+            }
             let bytes = self.read(&id)?;
             let envelope =
                 parse_envelope(&bytes, Some(id)).map_err(|_| StageFault::HashMismatch(id))?;
@@ -372,15 +551,19 @@ impl StageSpool for DiskSpool {
             summary.fresh_bytes += bytes.len() as u64;
             summary.fresh_edges += envelope.children.len() as u64;
             for child in envelope.children.iter() {
-                if self.staged(&child) {
-                    if mark(&child, true)? {
-                        stack.push(child);
-                    }
-                } else if mark(&child, false)? {
-                    summary.external += 1;
+                let fresh = self.staged(&child);
+                if mark(&child, fresh)? {
+                    append(&mut queue, &record(&child, fresh), &self.meter)?;
+                    written += 1;
+                    summary.external += u64::from(!fresh);
                 }
             }
         }
+        queue.flush().map_err(|error| io(&error))?;
+        drop((queue, walk));
+        sort_records(&dir, &records, &dir.join("manifest"), &self.meter)?;
+        fs::remove_file(&records).map_err(|error| io(&error))?;
+        fs::remove_dir_all(&marks).map_err(|error| io(&error))?;
         self.candidate = Some(Candidate { summary });
         self.manifest(commit)
             .ok_or_else(|| StageFault::Io("the candidate was not kept".to_owned()))
@@ -390,12 +573,18 @@ impl StageSpool for DiskSpool {
         match &self.candidate {
             Some(candidate) if candidate.summary.commit == commit => {
                 // The durable root owns the candidate's pages now; pages
-                // staged beside it stay for the spool's owner.
-                let markers = self.markers(commit);
-                for id in Self::fresh(&markers)? {
-                    self.remove(&id)?;
+                // staged beside it stay for the spool's owner. The manifest
+                // streams through one buffer as its pages are deleted.
+                let dir = self.candidate_dir(commit);
+                let mut manifest = reader(&dir.join("manifest"))?;
+                self.meter.holding(RECORD_BUFFER as u64);
+                while let Some(next) = next_record(&mut manifest)? {
+                    self.meter.touch(1);
+                    if let (id, true) = parse(&next) {
+                        self.remove(&id)?;
+                    }
                 }
-                fs::remove_dir_all(&markers).map_err(|error| io(&error))?;
+                fs::remove_dir_all(&dir).map_err(|error| io(&error))?;
                 self.candidate = None;
                 Ok(())
             }
@@ -409,7 +598,7 @@ impl StageSpool for DiskSpool {
     fn withdraw(&mut self, commit: CommitId) -> Result<(), StageFault> {
         match &self.candidate {
             Some(candidate) if candidate.summary.commit == commit => {
-                fs::remove_dir_all(self.markers(commit)).map_err(|error| io(&error))?;
+                fs::remove_dir_all(self.candidate_dir(commit)).map_err(|error| io(&error))?;
                 self.candidate = None;
                 Ok(())
             }
@@ -429,12 +618,38 @@ impl StageSpool for DiskSpool {
     }
 }
 
-/// A candidate's manifest over its marker directory.
+/// A candidate's manifest over its sorted record file.
 #[derive(Debug)]
 struct DiskManifest {
     pages: PathBuf,
-    markers: PathBuf,
+    manifest: PathBuf,
     summary: ManifestSummary,
+    meter: Arc<SpoolMeter>,
+    /// Where the last batch ended: its last digest and the index of the
+    /// record after it, so a reader that continues from there seeks
+    /// nothing.
+    cursor: Option<(NodeId, u64)>,
+}
+
+impl DiskManifest {
+    /// The index of the first record after `after`: a binary search of the
+    /// sorted records, one record read a probe.
+    fn seek(&self, file: &File, records: u64, after: &NodeId) -> Result<u64, StageFault> {
+        let (mut low, mut high) = (0, records);
+        let mut probe = [0; RECORD];
+        while low < high {
+            let middle = low + (high - low) / 2;
+            file.read_exact_at(&mut probe, middle * RECORD as u64)
+                .map_err(|error| io(&error))?;
+            self.meter.touch(1);
+            if parse(&probe).0 <= *after {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        Ok(low)
+    }
 }
 
 impl CandidateManifest for DiskManifest {
@@ -447,58 +662,47 @@ impl CandidateManifest for DiskManifest {
         after: Option<NodeId>,
         limit: usize,
     ) -> Result<Vec<ManifestEntry>, StageFault> {
-        if !self.markers.is_dir() {
+        let file = match File::open(&self.manifest) {
+            Ok(file) => file,
             // Settled or discarded under the reader.
-            return Err(StageFault::Ended);
+            Err(error) if error.kind() == ErrorKind::NotFound => return Err(StageFault::Ended),
+            Err(error) => return Err(io(&error)),
+        };
+        let records = file.metadata().map_err(|error| io(&error))?.len() / RECORD as u64;
+        let start = match (after, self.cursor) {
+            (None, _) => 0,
+            (Some(after), Some((last, next))) if after == last => next,
+            (Some(after), _) => self.seek(&file, records, &after)?,
+        };
+        let count = (records - start).min(limit as u64);
+        let mut batch = vec![0; count as usize * RECORD];
+        file.read_exact_at(&mut batch, start * RECORD as u64)
+            .map_err(|error| io(&error))?;
+        self.meter.touch(count);
+        self.meter.holding(batch.len() as u64);
+        let mut entries = Vec::with_capacity(count as usize);
+        let mut last = None;
+        for record in batch.as_chunks::<RECORD>().0 {
+            let (id, fresh) = parse(record);
+            last = Some(id);
+            entries.push(if fresh {
+                let bytes = match fs::read(self.pages.join(id.to_hex())) {
+                    Ok(bytes) => bytes,
+                    Err(error) if error.kind() == ErrorKind::NotFound => {
+                        return Err(StageFault::Missing(id));
+                    }
+                    Err(error) => return Err(io(&error)),
+                };
+                ManifestEntry::Fresh(EncodedNode {
+                    id,
+                    bytes: bytes.into(),
+                })
+            } else {
+                ManifestEntry::External(id)
+            });
         }
-        let mut entries = Vec::new();
-        let first = after.map_or(0, |after| after.0[0]);
-        for bucket in first..=u8::MAX {
-            if entries.len() >= limit {
-                break;
-            }
-            let dir = self.markers.join(hex(&[bucket]));
-            let listing = match fs::read_dir(&dir) {
-                Ok(listing) => listing,
-                Err(error) if error.kind() == ErrorKind::NotFound => continue,
-                Err(error) => return Err(io(&error)),
-            };
-            // One bucket's markers: a 256th of the candidate's digests.
-            let mut marked = Vec::new();
-            for entry in listing {
-                let name = entry.map_err(|error| io(&error))?.file_name();
-                let Some((digest, tag)) = name.to_str().and_then(|name| name.split_once('.'))
-                else {
-                    continue;
-                };
-                let Some(id) = NodeId::from_hex(digest) else {
-                    continue;
-                };
-                if after.is_none_or(|after| id > after) {
-                    marked.push((id, tag == "f"));
-                }
-            }
-            marked.sort_unstable();
-            for (id, fresh) in marked {
-                if entries.len() >= limit {
-                    break;
-                }
-                entries.push(if fresh {
-                    let bytes = match fs::read(self.pages.join(id.to_hex())) {
-                        Ok(bytes) => bytes,
-                        Err(error) if error.kind() == ErrorKind::NotFound => {
-                            return Err(StageFault::Missing(id));
-                        }
-                        Err(error) => return Err(io(&error)),
-                    };
-                    ManifestEntry::Fresh(EncodedNode {
-                        id,
-                        bytes: bytes.into(),
-                    })
-                } else {
-                    ManifestEntry::External(id)
-                });
-            }
+        if let Some(last) = last {
+            self.cursor = Some((last, start + count));
         }
         Ok(entries)
     }

@@ -276,13 +276,15 @@ impl InProcessMachine {
                                 bytes: u64::MAX,
                             }) {
                                 Ok(Some(sealed)) => {
-                                    break port.flush().map(|()| NodeId(sealed.page.id.0)).map_err(
-                                        |fault| {
+                                    break port
+                                        .flush()
+                                        .and_then(|()| port.checkpointed(sealed.page))
+                                        .map(|()| NodeId(sealed.page.id.0))
+                                        .map_err(|fault| {
                                             KernelFailure::from(lash_kernel_vm::MachineError::Heap(
                                                 fault,
                                             ))
-                                        },
-                                    );
+                                        });
                                 }
                                 Ok(None) => {}
                                 Err(error) => break Err(fault(error)),

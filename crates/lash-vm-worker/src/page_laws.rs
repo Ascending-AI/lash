@@ -709,6 +709,72 @@ fn sealed_pages_cross_in_one_batch() {
     assert_eq!(pages.usage().pages, CHAIN as u64);
 }
 
+/// 10,000 version churns of a 10-page working set keep the port's grant
+/// map at O(live pages) entries (FIG-6421). Each churn seals a new
+/// version of one page and a new top naming the set; the heap holds every
+/// one of them under no grant, and the port answers for them. At each
+/// checkpoint the port keeps only the grants its root still reaches: a
+/// page sealed first and named by every top keeps its grant throughout,
+/// and every live page still reads under the ref the heap holds.
+#[test]
+fn version_churn_keeps_grants_for_live_pages_only() {
+    const WORKING: usize = 10;
+    const CHURNS: usize = 10_000;
+    // The working set, the long-lived page and the top.
+    const LIVE: usize = WORKING + 2;
+    let store = Arc::new(Store::default());
+    let (root, _) = committed_list(&store, 10);
+    let spools = tempfile::tempdir().expect("dir");
+    let spools = SpoolRoot::open(spools.path(), 64 << 20).expect("spools");
+    let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
+    let ((peak, read), _) = served(&mut pages, 0, move |source| {
+        let seal = |source: &mut WirePageSource, label: String, children: Vec<PageRef>| {
+            let mut tokens = TokenWriter::new();
+            tokens.seq(children.len() as u64 + 1);
+            tokens.text(&label);
+            for child in &children {
+                tokens.child(lash_core_store::checkpoint_graph::ChildRef(child.id.0));
+            }
+            source
+                .seal(PageBody {
+                    kind: PageKind::SEQUENCE_LEAF,
+                    tokens: tokens.into_bytes(),
+                    children,
+                })
+                .expect("seal")
+        };
+        let keeper = seal(source, "keeper".to_owned(), Vec::new());
+        let mut set: Vec<PageRef> = (0..WORKING)
+            .map(|slot| seal(source, format!("0/{slot}"), Vec::new()))
+            .collect();
+        let mut peak = 0;
+        for churn in 1..=CHURNS {
+            let slot = churn % WORKING;
+            set[slot] = seal(source, format!("{churn}/{slot}"), Vec::new());
+            let mut children = set.clone();
+            children.push(keeper);
+            let top = seal(source, format!("top {churn}"), children);
+            let port = source.port();
+            port.flush().expect("the batch crosses");
+            port.checkpointed(top)
+                .expect("the port keeps what the top reaches");
+            peak = peak.max(source.grants());
+        }
+        assert!(
+            set.iter()
+                .chain([&keeper])
+                .all(|page| page.grant == PageGrant::NONE)
+        );
+        set.push(keeper);
+        (peak, source.read(&set).map(|answers| answers.len()))
+    });
+    assert_eq!(read, Ok(WORKING + 1), "every live page reads");
+    assert!(
+        peak <= 2 * LIVE + crate::host::GRANT_FLOOR,
+        "the port kept {peak} grants for {LIVE} live pages"
+    );
+}
+
 /// A page crosses the wire named by the store's content address of its
 /// envelope: the parent admits a carried seal batch, and the worker checks a
 /// read reply, under the id the page is committed as, so each side derives

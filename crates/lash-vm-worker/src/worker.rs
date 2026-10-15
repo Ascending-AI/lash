@@ -442,6 +442,7 @@ impl<'embedding> Server<'embedding> {
                 break sealed;
             }
         };
+        hosted.port.checkpointed(root.page).map_err(heap_fault)?;
         let candidate = root.page.id.0;
         hosted.sealed = Some(candidate);
         Ok(candidate)
