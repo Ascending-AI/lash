@@ -127,6 +127,11 @@
       ]
     }
   },
+  "crates/lash-kernel-edit": {
+    "compile_data": [
+      "kernel-workflow-view-v1.d.ts"
+    ]
+  },
   "crates/lash-postgres-store": {
     "compile_data": [
       "schema.sql",

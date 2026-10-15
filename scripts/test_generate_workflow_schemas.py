@@ -108,7 +108,10 @@ class GenerateWorkflowSchemasTests(unittest.TestCase):
                         path = generated / relative
                         path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_text(contents)
-                    self.assertEqual(MODULE.generate(False, generated=generated, output=output), 0)
+                    with unittest.mock.patch.object(MODULE, "ROOT", root):
+                        self.assertEqual(
+                            MODULE.generate(False, generated=generated, output=output), 0
+                        )
                     self.assertEqual(MODULE.generate(True, generated=generated, output=output), 0)
                     (output / declaration).write_text("export type WorkflowView = unknown;\n")
                     with unittest.mock.patch("sys.stderr", new=io.StringIO()) as errors:

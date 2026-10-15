@@ -468,6 +468,11 @@ export type ScopeKind = ("entry" | "closure" | "then" | "else" | "for" | "while"
  */
 export type ScopeView = {
   "block": Site;
+  /**
+   * How many statements enclose this block inside the entry's body:
+   * the same depth its statements carry.
+   */
+  "depth": number;
   "kind": ScopeKind;
   /**
    * The statement that opens this block; absent for the entry body.

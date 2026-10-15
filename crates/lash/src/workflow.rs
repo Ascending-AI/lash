@@ -192,11 +192,15 @@ pub use lash_kernel_edit::authoring;
 
 /// The canvas read of a document's entry: statements, scopes, dataflow and
 /// execution sites, as serialisable data with no presentation.
+///
+/// [`TYPESCRIPT_DECLARATION`] ships the `kernel-workflow-view` schema's
+/// generated `.d.ts` inside the crate, so a host that vendors lash can check
+/// its own TypeScript copy hermetically against the same bytes.
 pub mod view {
     pub use lash_kernel_edit::view::{
         ActionView, ArgumentView, AssignmentView, BindingKind, BindingView, CalleeView, Dataflow,
         ExecutionSiteView, ExpressionView, ReturnView, ScopeKind, ScopeView, SiteKind,
-        StatementView, Use, ViewError, WorkflowView,
+        StatementView, TYPESCRIPT_DECLARATION, Use, ViewError, WorkflowView,
     };
 
     /// The view of `document` at the entry it is entered at.

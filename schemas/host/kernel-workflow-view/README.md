@@ -12,6 +12,12 @@ The declaration describes JSON values. JSON Schema remains authoritative for
 constraints such as numeric bounds and name patterns; the types do not perform
 runtime validation.
 
+A host that vendors lash cannot see this directory; it reads the same `v1.d.ts`
+bytes from `lash::workflow::view::TYPESCRIPT_DECLARATION`, which `include_str!`s
+the generated copy committed as
+`crates/lash-kernel-edit/kernel-workflow-view-v1.d.ts`. The crate's laws check
+both files hold the same bytes.
+
 Both files are produced by `scripts/generate-workflow-schemas.py`, and
 `kiln build //:schema_checks` checks both against fresh generation. To refresh:
 

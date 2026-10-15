@@ -377,6 +377,13 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["schema"]
 compile_data = ["//:host_schemas"]
 
+# The view laws check the shipped TYPESCRIPT_DECLARATION against the
+# checked-in kernel-workflow-view declaration byte for byte.
+[[rule]]
+packages = ["lash-kernel-edit"]
+kinds = ["unit-test"]
+compile_data = ["//:host_schemas"]
+
 [[rule]]
 packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
 kinds = ["bin", "test", "example", "bench"]

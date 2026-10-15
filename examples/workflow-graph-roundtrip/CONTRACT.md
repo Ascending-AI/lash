@@ -66,7 +66,7 @@ as `FunctionDeclarations` and use it for both document and view derivation.
 | Property | Meaning |
 | --- | --- |
 | `statements` | The entry's statements in document order: `{ site, statement, block, depth, action? }`. `statement` is the kernel statement; `action` is the site of its action, which is where a run reports. |
-| `scopes` | Every block of the entry, including empty bodies: `{ block, kind }`, where `kind` is `entry`, `closure`, `then`, `else`, `for`, `while`, `try`, `catch` or `finally`. |
+| `scopes` | Every block of the entry, including empty bodies: `{ block, depth, kind }`, where `depth` counts the statements enclosing the block (the entry body is `0`) and `kind` is `entry`, `closure`, `then`, `else`, `for`, `while`, `try`, `catch` or `finally`. |
 | `dataflow` | Bindings, expression sites, actions with their arguments, lexical availability, the entry's parameters, returns with the callable they end, and assignments. Inferred types are the checker's conservative facets; `any` is not proof of compatibility. |
 | `execution_sites` | The sites a run can report at: `{ site, statement, kind, loops }`. |
 

@@ -114,12 +114,12 @@ execution_sites:
   {"kind":"spawn","loops":[],"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
   {"kind":"sleep","loops":[],"site":{"path":[6,0],"unit":{"function":"notify"}},"statement":{"path":[6],"unit":{"function":"notify"}}}
 scopes:
-  {"block":{"unit":{"function":"notify"}},"kind":"entry"}
-  {"block":{"path":[1,1],"unit":{"function":"notify"}},"kind":"then","statement":{"path":[1],"unit":{"function":"notify"}}}
-  {"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"kind":"for","statement":{"path":[1,1,0],"unit":{"function":"notify"}}}
-  {"block":{"path":[1,2],"unit":{"function":"notify"}},"kind":"else","statement":{"path":[1],"unit":{"function":"notify"}}}
-  {"block":{"path":[2,0],"unit":{"function":"notify"}},"kind":"try","statement":{"path":[2],"unit":{"function":"notify"}}}
-  {"block":{"path":[2,1],"unit":{"function":"notify"}},"kind":"catch","statement":{"path":[2],"unit":{"function":"notify"}}}
+  {"block":{"unit":{"function":"notify"}},"depth":0,"kind":"entry"}
+  {"block":{"path":[1,1],"unit":{"function":"notify"}},"depth":1,"kind":"then","statement":{"path":[1],"unit":{"function":"notify"}}}
+  {"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"depth":2,"kind":"for","statement":{"path":[1,1,0],"unit":{"function":"notify"}}}
+  {"block":{"path":[1,2],"unit":{"function":"notify"}},"depth":1,"kind":"else","statement":{"path":[1],"unit":{"function":"notify"}}}
+  {"block":{"path":[2,0],"unit":{"function":"notify"}},"depth":1,"kind":"try","statement":{"path":[2],"unit":{"function":"notify"}}}
+  {"block":{"path":[2,1],"unit":{"function":"notify"}},"depth":1,"kind":"catch","statement":{"path":[2],"unit":{"function":"notify"}}}
 statements:
   {"action":{"path":[0,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[0],"unit":{"function":"notify"}},"statement":{"let":{"name":"sent","value":{"action":{"perform":{"args":[{"variable":"to"}],"effect":"mail.send","result":"any"}}}}}}
   {"block":{"unit":{"function":"notify"}},"depth":0,"site":{"path":[1],"unit":{"function":"notify"}},"statement":{"if":{"condition":{"variable":"sent"},"then_block":[{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}]}}}
@@ -228,6 +228,66 @@ fn the_view_of_a_branch_a_loop_a_try_and_two_effects_is_pinned() {
     ] {
         assert_eq!(serde_json::to_value(kind).unwrap(), kind.to_string());
     }
+}
+
+/// A nested block's scope is one deeper than the scope holding the
+/// statement that opens it, at the same depth convention the block's own
+/// statements carry.
+#[test]
+fn a_nested_scopes_depth_is_its_parents_plus_one_matching_its_statements() {
+    let document = parse_document(
+        r#"kernel 1
+numbers float
+entry demo() -> Any
+fn demo() {
+  if true {
+    for item in [1] {
+      let seen = item
+    }
+  }
+  return null
+}
+main { finish null }
+"#,
+    )
+    .expect("nested workflow");
+    let view = view_of(&document, "demo");
+    let scope = |kind| {
+        view.scopes
+            .iter()
+            .find(|scope| scope.kind == kind)
+            .expect("scope")
+    };
+    let (entry, then, for_body) = (
+        scope(ScopeKind::Entry),
+        scope(ScopeKind::Then),
+        scope(ScopeKind::For),
+    );
+    assert_eq!(entry.depth, 0);
+    assert_eq!(then.depth, entry.depth + 1);
+    assert_eq!(for_body.depth, then.depth + 1);
+    let inner = view
+        .statements
+        .iter()
+        .find(|statement| statement.block == for_body.block)
+        .expect("the loop's statement");
+    assert_eq!(inner.depth, for_body.depth);
+    let opening = view
+        .statements
+        .iter()
+        .find(|statement| Some(&statement.site) == for_body.statement.as_ref())
+        .expect("the opening for statement");
+    assert_eq!((&opening.block, opening.depth), (&then.block, then.depth));
+}
+
+/// The declaration the crate ships is byte-identical to the checked-in host
+/// schema file, so a host that vendors lash checks the same contract.
+#[test]
+fn the_shipped_typescript_declaration_is_the_checked_in_schema_file() {
+    assert_eq!(
+        crate::view::TYPESCRIPT_DECLARATION,
+        include_str!("../../../schemas/host/kernel-workflow-view/v1.d.ts")
+    );
 }
 
 /// An effect inserted by an authoring operation is an execution site of

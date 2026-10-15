@@ -86,13 +86,17 @@ there is no edit that writes an edge. `Graph` has no serialized form.
 A host that serves a canvas serves `lash::workflow::view::derive(&document)`:
 a `WorkflowView`, lash's wire shape (schema `schemas/host/kernel-workflow-view`).
 It holds the entry's `statements` (each with its site, kernel statement,
-block, depth and action site), its `scopes` (every block, typed by what opens
-it: `entry`, `closure`, `then`, `else`, `for`, `while`, `try`, `catch`,
-`finally`), its `dataflow` (bindings, expressions, actions with their
-arguments, lexical availability, parameters, returns and assignments) and
-every `execution_sites` entry with its typed `kind`. The projection matches
-every kernel statement and expression kind, so a new kind reaches every host
-through this one read.
+block, depth and action site), its `scopes` (every block with its depth,
+typed by what opens it: `entry`, `closure`, `then`, `else`, `for`, `while`,
+`try`, `catch`, `finally`), its `dataflow` (bindings, expressions, actions
+with their arguments, lexical availability, parameters, returns and
+assignments) and every `execution_sites` entry with its typed `kind`. The
+projection matches every kernel statement and expression kind, so a new kind
+reaches every host through this one read.
+
+A host that vendors lash reads the schema's TypeScript declaration from
+`lash::workflow::view::TYPESCRIPT_DECLARATION` — the same bytes as the
+checked-in `v1.d.ts` — to check its own copy hermetically.
 
 A document carries no labels and no presentation. The kernel's annotation
 layer (labels and host data per node) lives beside a draft, not in the

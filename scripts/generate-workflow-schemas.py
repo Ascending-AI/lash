@@ -15,6 +15,16 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "schemas" / "host"
 
+# The workflow view declaration is also committed inside the crate that owns
+# the view, where `lash::workflow::view::TYPESCRIPT_DECLARATION` ships it via
+# include_str!, so a host that vendors lash can check its copy hermetically.
+# The crate's laws check both files hold the same bytes.
+CRATE_DECLARATIONS = {
+    Path("kernel-workflow-view") / "v1.d.ts": Path("crates")
+    / "lash-kernel-edit"
+    / "kernel-workflow-view-v1.d.ts",
+}
+
 
 def typescript_declarations(schema: dict[str, object]) -> str:
     """Render the host schema graph, with JSON constraints kept in the schema.
@@ -173,6 +183,11 @@ def generate(
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(expected, encoding="utf-8")
+            crate_relative = CRATE_DECLARATIONS.get(relative)
+            if crate_relative is not None:
+                crate_path = ROOT / crate_relative
+                crate_path.parent.mkdir(parents=True, exist_ok=True)
+                crate_path.write_text(expected, encoding="utf-8")
 
     expected_paths = {output / relative for relative in documents}
     if output.exists():

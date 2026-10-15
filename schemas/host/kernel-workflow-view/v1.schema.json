@@ -1338,6 +1338,12 @@
         "block": {
           "$ref": "#/$defs/Site"
         },
+        "depth": {
+          "description": "How many statements enclose this block inside the entry's body:\nthe same depth its statements carry.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "kind": {
           "$ref": "#/$defs/ScopeKind"
         },
@@ -1355,6 +1361,7 @@
       },
       "required": [
         "block",
+        "depth",
         "kind"
       ],
       "type": "object"

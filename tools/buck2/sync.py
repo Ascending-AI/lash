@@ -1122,7 +1122,7 @@ def root_buck(inventory: dict) -> str:
     return aggregates + guards + '''
 filegroup(
     name = "host_schemas",
-    srcs = glob(["schemas/host/*/*.schema.json"]),
+    srcs = glob(["schemas/host/*/*.schema.json", "schemas/host/*/*.d.ts"]),
     copy = False,
     visibility = ["PUBLIC"],
 )
