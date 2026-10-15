@@ -806,6 +806,7 @@ mod tests {
                 cache_write_input_tokens: 1,
                 reasoning_output_tokens: i64::MAX,
             },
+            lash::ReportSource::Live,
         );
         let facts = runtime_usage_invariant_facts(&report, &[]);
         assert!(facts.non_negative);
@@ -828,6 +829,7 @@ mod tests {
                 },
             ),
             Default::default(),
+            lash::ReportSource::Live,
         );
         let failed = runtime_final_value_invariant_facts(
             &prose_only,
@@ -851,6 +853,7 @@ mod tests {
                 },
             ),
             Default::default(),
+            lash::ReportSource::Live,
         );
         let mismatched = runtime_final_value_invariant_facts(
             &semantic,

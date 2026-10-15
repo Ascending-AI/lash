@@ -139,10 +139,11 @@ impl TurnReport {
     /// cause it carries. Every other fact starts empty: no call ledgers,
     /// failure evidence, observed errors, acceptance receipt or affected
     /// inputs, and default execution metrics. Empty evidence means none was
-    /// supplied, not that none occurred, so the report is
-    /// [`ReportSource::Durable`]. Supply the facts a test reads with the
-    /// `with_*` methods.
-    pub fn new(outcome: TurnOutcome, usage: LlmUsage) -> Self {
+    /// supplied, not that none occurred. Name the report's provenance with
+    /// `source`: [`ReportSource::Live`] for a turn's own account, or
+    /// [`ReportSource::Durable`] for a report assembled from stored state.
+    /// Supply the facts a test reads with the `with_*` methods.
+    pub fn new(outcome: TurnOutcome, usage: LlmUsage, source: ReportSource) -> Self {
         Self {
             outcome,
             usage,
@@ -153,7 +154,7 @@ impl TurnReport {
             errors: Vec::new(),
             acceptance: None,
             cancel_input_outcome: lash_core::TurnCancelInputOutcome::default(),
-            source: ReportSource::Durable,
+            source,
         }
     }
 
@@ -212,13 +213,6 @@ impl TurnReport {
         cancel_input_outcome: lash_core::TurnCancelInputOutcome,
     ) -> Self {
         self.cancel_input_outcome = cancel_input_outcome;
-        self
-    }
-
-    /// Where the report was assembled.
-    #[must_use]
-    pub fn with_source(mut self, source: ReportSource) -> Self {
-        self.source = source;
         self
     }
 
