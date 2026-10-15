@@ -212,6 +212,39 @@ sealed envs link none of its tools.
 
 ## Retiring a session plugin
 
+Rebuild checks no required installed-plugin roster. A session can name a
+plugin in these durable records:
+
+- Its config head: the protocol plugin id and config-owner namespaces, including
+  defaults. Config revisions and an undelivered config change retain those
+  configurations too. Creation's `SessionSpec::plugin_options` accepts only
+  registered config owners: an empty option for a configless plugin is refused
+  with `ConfigRefusalReason::UnknownOwner`, even while it is installed.
+- Plugin-state namespaces in session revisions and turn checkpoints, including
+  each namespace's format stamp, values and publication receipts; state-command
+  batches and their outcomes also name the addressed namespace. Plugin
+  transitions retain writer admissions, namespace postimages and config.
+- A run's recorded config and owner run options, and its linked tool surface:
+  provider identities for ordinary tools and the deferred resolver.
+- Recorded callback identities in hook, tool preparation and presentation
+  decisions, opaque stream state and owed callbacks. Actor claim requirements
+  carry the callbacks still needed by the run. Completed decisions remain
+  history and are not executed again.
+- The session prompt plan's section ids, and a model call's resolved prompt
+  sections, wrappers and recorded text. Message origins, plugin events and
+  plugin-produced turn outputs can also retain plugin provenance.
+- Config-change delivery observers and retired-delivery receipts. An outstanding
+  observer has its own `retire_config_observer` declaration; retiring its plugin
+  does not retire that delivery.
+
+A plugin that leaves none of these references needs no retirement. A session
+created while an empty, configless plugin was installed already rebuilds
+without it: rebuild uses the recorded config and state with the current
+factories. An empty state namespace or a transition's recorded writer admission
+does not require that factory to be installed. A host law that removes such a
+plugin is therefore expected to pass without a retirement.
+Fleet plugin-writer registrations are deployment records, not a session roster.
+
 Declare a plugin permanently removed from this deployment by its stable id:
 
 ```rust

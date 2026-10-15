@@ -861,3 +861,51 @@ pub(super) mod whole_module_coverage {
         );
     }
 }
+
+/// The loaded-tool API example is callable through the facade, and its bare
+/// signature is the first line the documentation renderer shows in each dialect.
+#[cfg(all(
+    feature = "rlm",
+    feature = "dialect-typescript",
+    feature = "dialect-python"
+))]
+#[test]
+fn loaded_tool_signature_example_matches_the_loaded_documentation() {
+    use lash::tools::ToolBinding;
+    use lash::tools::{ToolDefinition, ToolDefinitionBindingExt};
+    use serde_json::json;
+
+    let tool = ToolDefinition::raw(
+        "lookup",
+        "lookup",
+        "Find a record.",
+        json!({
+            "type": "object",
+            "properties": { "query": { "type": "string" } },
+            "required": ["query"],
+            "additionalProperties": false
+        }),
+        json!({ "type": "string" }),
+    )
+    .expect("valid tool schemas")
+    .with_execution(std::time::Duration::from_secs(30))
+    .with_tool_binding(ToolBinding::from_path("tools.lookup"));
+    let presentation = lash::rlm::RlmPresentationConfig::standard();
+    for dialect in [
+        lash::rlm::CellDialect::typescript(),
+        lash::rlm::CellDialect::python(),
+    ] {
+        let signature = lash::rlm::loaded_tool_signature(&dialect, presentation, &tool)
+            .expect("an addressable tool");
+        if dialect.name() == "typescript" {
+            assert_eq!(
+                signature,
+                "tools.lookup({ query: string }): Promise<string>"
+            );
+        }
+        let doc = lash::rlm::discovered_tool_doc(&dialect, presentation, &tool)
+            .expect("an addressable tool");
+        assert_eq!(doc.lines().next(), Some(format!("`{signature}`").as_str()));
+        assert!(!signature.contains('\n'));
+    }
+}

@@ -362,6 +362,57 @@ pub fn discovered_tool_signature(
     ))
 }
 
+/// A loaded tool's one-line signature, without Markdown or field notes.
+/// This is the same signature [`discovered_tool_doc`] puts in its first line.
+/// For a binding and schemas without a loaded definition, use
+/// [`discovered_tool_signature`].
+///
+/// ```rust
+/// use lash::rlm::{CellDialect, RlmPresentationConfig, loaded_tool_signature};
+/// use lash::tools::{ToolBinding, ToolDefinition, ToolDefinitionBindingExt};
+/// use serde_json::json;
+///
+/// let tool = ToolDefinition::raw(
+///     "lookup", "lookup", "Find a record.",
+///     json!({
+///         "type": "object",
+///         "properties": { "query": { "type": "string" } },
+///         "required": ["query"],
+///         "additionalProperties": false
+///     }),
+///     json!({ "type": "string" }),
+/// )?
+/// .with_execution(std::time::Duration::from_secs(30))
+/// .with_tool_binding(ToolBinding::from_path("tools.lookup"));
+/// let signature = loaded_tool_signature(
+///     &CellDialect::typescript(), RlmPresentationConfig::standard(), &tool,
+/// )?;
+/// assert_eq!(signature, "tools.lookup({ query: string }): Promise<string>");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Errors
+///
+/// The tool has no binding, or one `dialect` cannot call.
+pub fn loaded_tool_signature(
+    dialect: &crate::dialect::CellDialect,
+    presentation: crate::plugin::RlmPresentationConfig,
+    tool: &lash_core::ToolDefinition,
+) -> Result<String, crate::dialect::DialectRefusal> {
+    let binding =
+        required_tool_binding(&tool.manifest).map_err(|error| crate::dialect::DialectRefusal {
+            kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
+            message: error.to_string(),
+        })?;
+    discovered_tool_signature(
+        dialect,
+        presentation,
+        &binding,
+        &tool.contract.input_schema.canonical,
+        &tool.contract.output_schema.canonical,
+    )
+}
+
 /// A tool a host's discovery operation found, as a session in `dialect`
 /// under `presentation` shows it: the doc a listed tool has, its field notes
 /// included, so a discovered signature that collapses a field to an open
@@ -375,18 +426,7 @@ pub fn discovered_tool_doc(
     presentation: crate::plugin::RlmPresentationConfig,
     tool: &lash_core::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
-    let binding =
-        required_tool_binding(&tool.manifest).map_err(|error| crate::dialect::DialectRefusal {
-            kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
-            message: error.to_string(),
-        })?;
-    let signature = discovered_tool_signature(
-        dialect,
-        presentation,
-        &binding,
-        &tool.contract.input_schema.canonical,
-        &tool.contract.output_schema.canonical,
-    )?;
+    let signature = loaded_tool_signature(dialect, presentation, tool)?;
     let dialect = SessionDialect::prompt_only(dialect.clone()).with_presentation(presentation);
     Ok(tool_doc_text(
         &dialect,

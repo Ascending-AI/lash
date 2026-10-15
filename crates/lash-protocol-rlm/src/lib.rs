@@ -48,7 +48,7 @@ mod testing;
 mod tool_catalog;
 pub use tool_catalog::{
     ToolCatalogueDisclosure, discovered_tool_doc, discovered_tool_signature, discovery_text,
-    tool_catalogue_disclosure,
+    loaded_tool_signature, tool_catalogue_disclosure,
 };
 
 pub use catalogue_preview::{

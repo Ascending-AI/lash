@@ -7,6 +7,29 @@ impl LashCoreBuilder {
     /// typed; a recorded run still linking its tools or holding its state
     /// parks before resuming. Installing the same id or retiring it twice
     /// refuses the build. Process component ids are a separate registry.
+    ///
+    /// Rebuild checks no required installed-plugin roster. Durable references
+    /// can occur in the session's config (the protocol id and owner namespaces),
+    /// its prompt plan, plugin-state namespaces and publication batches, and a
+    /// run's recorded config, owner options and tool surface (including
+    /// deferred-provider identities). Checkpoints
+    /// and call records can also name callback owners in hook, preparation and
+    /// presentation decisions, stream state, and owed callbacks; actor claim
+    /// requirements carry those identities too. Plugin transitions retain writer
+    /// admissions and namespace postimages; prompt snapshots retain section
+    /// and wrapper owners, and messages/events retain plugin provenance.
+    /// Config-change deliveries name their observers, including completed
+    /// retirement receipts; an undelivered
+    /// observer needs its own [`Self::retire_config_observer`] declaration.
+    ///
+    /// A plugin that leaves none of these references needs no retirement: a
+    /// session created while it was installed already rebuilds without it.
+    /// In particular, an empty, configless plugin needs no retirement: empty
+    /// state namespaces and recorded transition writer admissions do not
+    /// require its factory to be installed.
+    /// `SessionSpec::plugin_options` accepts only registered config owners;
+    /// adding an empty option for a configless plugin is refused as
+    /// `ConfigRefusalReason::UnknownOwner`, even while it is installed.
     pub fn retire_session_plugin(mut self, id: lash_core::plugin::PluginId) -> Self {
         if let Err(error) = self.retired_session_plugins.retire(id.as_str(), (), false)
             && self.process_component_refusal.is_none()

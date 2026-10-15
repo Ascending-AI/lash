@@ -133,7 +133,7 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_rlm::{
     GlobalsPage, GlobalsPageView, RlmPromptFacts, SessionGlobal, SessionGlobalKind, SessionGlobals,
     StaleGlobalsPage, ToolCatalogueDisclosure, discovered_tool_doc, discovered_tool_signature,
-    discovery_text, tool_catalogue_disclosure,
+    discovery_text, loaded_tool_signature, tool_catalogue_disclosure,
 };
 /// The RLM protocol's config owner and its command (FIG-4379), and the key
 /// a send states its run options under
