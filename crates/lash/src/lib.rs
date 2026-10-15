@@ -915,8 +915,9 @@ pub mod plugins {
     pub use lash_core::{
         CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
         EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
-        EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, KeyName,
-        Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepName, StepRequest,
+        EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps,
+        EngineWake, KeyName, Material, NamesMaterial, SettledOutput, SettledOutputRefusal,
+        StepName, StepRequest,
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{
@@ -1098,7 +1099,7 @@ pub mod process {
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
         ParentEndPlan, ProcessOutcome, ProcessParkReason, ProcessParkState, ProcessTombstone,
-        ProcessWaits, WaitKind, WaitState,
+        ProcessWaits, WaitKind, WaitSiteUnavailable, WaitState,
     };
     /// The one lifecycle state a process record holds, and the outcome a
     /// terminal one ends in.
@@ -1157,7 +1158,9 @@ pub mod process {
         ProcessReplayEventDraft, ProcessReplayGapReason, ProcessReplayOutcome,
         ProcessReplayPublishLimits, ProcessReplayStore, ProcessReplayStoreError,
         ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
-        RetainedProcessView, StepBodyStartedObservation,
+        ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowOverlay,
+        ProcessWorkflowOverlayAccumulator, ProcessWorkflowSite, ProcessWorkflowSiteState,
+        ProcessWorkflowWaitKind, RetainedProcessView, StepBodyStartedObservation,
     };
     #[cfg(feature = "codemode")]
     pub use lash_vm_runtime::{KernelProcessDefinition, KernelProcessInput, LASH_VM_ENGINE_KIND};

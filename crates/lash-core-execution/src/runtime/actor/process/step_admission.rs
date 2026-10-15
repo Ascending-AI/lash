@@ -474,9 +474,9 @@ impl ProcessActivation {
                         return Ok(Some(refused(refusal.to_string())));
                     }
                 }
-                driver.blocked = wake.map(|until| Blocked::Sleep {
-                    until: until.0,
-                    site: None,
+                driver.blocked = wake.map(|wake| Blocked::Sleep {
+                    until: wake.until.0,
+                    site: wake.site,
                 });
             }
             EngineAction::PinKey { name, bound } => {

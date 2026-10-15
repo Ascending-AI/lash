@@ -134,7 +134,7 @@ fn transition(
                 .waits
                 .iter()
                 .filter(
-                    |(_, wait)| matches!(wait, Wait::Timer { until_ms, .. } if *until_ms <= due),
+                    |(_, wait)| matches!(wait, Wait::Timer { until_ms, .. } if *until_ms <= due.until.0),
                 )
                 .map(|(wait, _)| *wait)
                 .collect();
@@ -251,7 +251,7 @@ fn resume(
         } else {
             EngineAction::Steps {
                 steps,
-                wake: next_timer(state).map(lash_core::durable_port::DurableInstant),
+                wake: next_timer(state),
             }
         });
     }
@@ -387,33 +387,35 @@ fn run_settled(
             } else {
                 EngineAction::Steps {
                     steps,
-                    wake: next_timer(state).map(lash_core::durable_port::DurableInstant),
+                    wake: next_timer(state),
                 }
             })
         }
     }
 }
 
-/// The earliest instant a `sleep` of the saved run ends.
-fn next_timer(state: &KernelEngineState) -> Option<i64> {
+/// The earliest task timer, retaining the same task's execution identity.
+fn next_timer(state: &KernelEngineState) -> Option<lash_core::EngineWake> {
     state
         .waits
         .values()
         .filter_map(|wait| match wait {
-            Wait::Timer { until_ms, .. } => Some(*until_ms),
+            Wait::Timer { until_ms, identity } => Some(lash_core::EngineWake {
+                until: lash_core::durable_port::DurableInstant(*until_ms),
+                site: Some(identity.clone()),
+            }),
             Wait::Step { .. } => None,
         })
-        .min()
+        .min_by_key(|wake| wake.until)
 }
 
 /// The action that stands while the process waits on what it already
 /// asked for: an event it does not wait on changes nothing.
 fn standing(state: &KernelEngineState) -> EngineAction {
     match next_timer(state) {
-        Some(until) => EngineAction::Sleep {
-            until: lash_core::durable_port::DurableInstant(until),
-            // A run's timers are its tasks', not one node's.
-            site: None,
+        Some(wake) => EngineAction::Sleep {
+            until: wake.until,
+            site: wake.site,
         },
         None => EngineAction::Idle,
     }
@@ -441,7 +443,7 @@ fn run(
     });
     Ok(EngineAction::Steps {
         steps,
-        wake: next_timer(state).map(lash_core::durable_port::DurableInstant),
+        wake: next_timer(state),
     })
 }
 

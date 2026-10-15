@@ -3,6 +3,12 @@ use crate::SessionId;
 use crate::TurnId;
 mod process_lifecycle;
 mod process_replay;
+mod process_workflow;
+pub use process_workflow::{
+    ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowOverlay,
+    ProcessWorkflowOverlayAccumulator, ProcessWorkflowSite, ProcessWorkflowSiteState,
+    ProcessWorkflowWaitKind,
+};
 pub(crate) mod replay;
 
 use arc_swap::ArcSwap;

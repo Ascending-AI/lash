@@ -441,6 +441,14 @@ pub enum EngineStepRefusal {
     },
 }
 
+/// A timer an engine waits for while its steps run, with the workflow
+/// occurrence whose sleep owns it. Engines without a document name no site.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EngineWake {
+    pub until: DurableInstant,
+    pub site: Option<lash_sansio::EffectIdentity>,
+}
+
 /// What an engine asks lash to do next.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineAction {
@@ -453,7 +461,7 @@ pub enum EngineAction {
         /// The steps to run.
         steps: Vec<StepRequest>,
         /// When the process wakes while they run, if it sleeps at all.
-        wake: Option<DurableInstant>,
+        wake: Option<EngineWake>,
     },
     /// Pin a host-resolvable key, minted before any step submits it.
     PinKey {

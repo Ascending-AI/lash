@@ -117,6 +117,7 @@ pub(crate) async fn fold_effects(
     process_id: &ProcessId,
     through: u64,
     budget: EffectFoldBudget,
+    mut workflow: Option<&mut lash_core::ProcessWorkflowOverlayAccumulator>,
 ) -> std::result::Result<std::result::Result<ProcessEffectEvidence, Pruned>, PluginError> {
     let fleet_format = registry.fleet_format();
     let mut report = ProcessEffectReport::default();
@@ -210,6 +211,9 @@ pub(crate) async fn fold_effects(
             if event.sequence > through {
                 break 'pages;
             }
+            if let Some(workflow) = workflow.as_deref_mut() {
+                workflow.committed(&event.clone().into());
+            }
             if report.fold_event(&event.fact, fleet_format).is_err() {
                 incomplete(ProcessEffectGapReason::Undecodable);
             }
@@ -296,49 +300,75 @@ impl ProcessFeedSource {
 
     /// The durable read view: the row at one sequence and the effect
     /// evidence folded through that sequence.
-    async fn read_view(&self) -> Result<ProcessReadView> {
+    async fn read_view(
+        &self,
+    ) -> Result<(
+        ProcessReadView,
+        Option<lash_core::ProcessWorkflowOverlayAccumulator>,
+    )> {
         let process = match self.observer.process(&self.process_id).await {
             Ok(Some(process)) => process,
             Ok(None) | Err(PluginError::ProcessUnknown { .. }) => {
-                return Ok(ProcessReadView::Unknown);
+                return Ok((ProcessReadView::Unknown, None));
             }
             Err(PluginError::ProcessNoLongerRetained {
                 terminal_label,
                 pruned_at_ms,
             }) => {
-                return Ok(ProcessReadView::Retired {
-                    terminal_label,
-                    pruned_at_ms,
-                });
+                return Ok((
+                    ProcessReadView::Retired {
+                        terminal_label,
+                        pruned_at_ms,
+                    },
+                    None,
+                ));
             }
             Err(error) => return Err(error.into()),
         };
-        Ok(
-            match fold_effects(
-                self.registry.as_ref(),
-                &self.process_id,
-                process.last_event_sequence,
-                self.effect_budget,
-            )
-            .await?
-            {
-                Ok(effects) => {
-                    let document = self.document(&process).await?;
-                    ProcessReadView::Retained(Box::new(RetainedProcessView {
-                        process,
-                        effects,
-                        document,
-                    }))
+        let document = self.document(&process).await?;
+        let mut workflow = match &document {
+            lash_core::ProcessDocumentIdentity::Available(document) => {
+                Some(lash_core::ProcessWorkflowOverlayAccumulator::new(
+                    self.process_id.clone(),
+                    document.clone(),
+                ))
+            }
+            _ => None,
+        };
+        match fold_effects(
+            self.registry.as_ref(),
+            &self.process_id,
+            process.last_event_sequence,
+            self.effect_budget,
+            workflow.as_mut(),
+        )
+        .await?
+        {
+            Ok(effects) => {
+                if process.lifecycle.terminal().is_some()
+                    && let Some(workflow) = &mut workflow
+                {
+                    workflow.finish();
                 }
-                Err(Pruned {
-                    terminal_label,
-                    pruned_at_ms,
-                }) => ProcessReadView::Retired {
+                let view = RetainedProcessView {
+                    process,
+                    effects,
+                    document,
+                    workflow: None,
+                };
+                Ok((ProcessReadView::Retained(Box::new(view)), workflow))
+            }
+            Err(Pruned {
+                terminal_label,
+                pruned_at_ms,
+            }) => Ok((
+                ProcessReadView::Retired {
                     terminal_label,
                     pruned_at_ms,
                 },
-            },
-        )
+                None,
+            )),
+        }
     }
 
     /// Which document `process` runs, named by its engine's document
@@ -373,7 +403,7 @@ impl ProcessFeedSource {
     /// cursor names no store's continuity, so no id costs a replay window
     /// by being read.
     pub(crate) async fn snapshot(&self) -> Result<ProcessObservation> {
-        let read_view = self.read_view().await?;
+        let (mut read_view, mut workflow) = self.read_view().await?;
         let cursor = match read_view.sequence() {
             Some(sequence) => self
                 .replay
@@ -387,6 +417,29 @@ impl ProcessFeedSource {
                 0,
             ),
         };
+        if let (Some(workflow), ProcessReadView::Retained(view)) = (&mut workflow, &mut read_view) {
+            match self
+                .replay
+                .replay_after_cursor(&cursor)
+                .await
+                .map_err(process_replay_error)?
+            {
+                lash_core::ProcessReplayOutcome::Replayed(events) => {
+                    for event in events {
+                        // A commit after the row revision belongs to the feed,
+                        // never to this snapshot's durable projection.
+                        if matches!(&event.payload, ProcessObservationEventPayload::Committed { event }
+                            if event.sequence > view.process.last_event_sequence)
+                        {
+                            continue;
+                        }
+                        workflow.observe(&event.payload)?;
+                    }
+                }
+                lash_core::ProcessReplayOutcome::Gap(reason) => workflow.live_gap(reason),
+            }
+            view.workflow = Some(workflow.snapshot());
+        }
         Ok(ProcessObservation { read_view, cursor })
     }
 

@@ -15,7 +15,9 @@ pub use change_feed::{ProcessChange, ProcessChangeCursor, ProcessChangeKind, Pro
 
 mod lifecycle;
 use lifecycle::recorded_lineage;
-pub use lifecycle::{ProcessLifecycleState, ProcessRecord, ProcessWaits, WaitKind, WaitState};
+pub use lifecycle::{
+    ProcessLifecycleState, ProcessRecord, ProcessWaits, WaitKind, WaitSiteUnavailable, WaitState,
+};
 
 mod execution;
 pub use execution::*;

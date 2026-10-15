@@ -240,6 +240,9 @@ pub trait Host {
             "this host performs no read, and the run binds `{effect}` as one"
         )))
     }
+    /// Passive entry into a document action. Library implementation sites
+    /// are private; the document's call remains visible while they compute.
+    fn enter_site(&mut self, _at: &EffectIdentity) {}
     /// Takes the output of one `print`.
     fn print(&mut self, value: &Datum);
     /// Whether the embedder wants the run cancelled. The machine asks at

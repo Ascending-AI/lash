@@ -43,6 +43,13 @@ pub fn kernel_reads() -> VersionRange {
 /// What a run reads from its host, answered in the parent.
 #[async_trait::async_trait]
 pub trait RunHost: Send + Sync {
+    /// A provisional site entry. It neither yields a task nor admits work.
+    /// Return true to continue receiving entries for this run, or false to
+    /// disable further site observations.
+    fn enter_site(&self, _at: &lash_kernel_doc::EffectIdentity) -> bool {
+        false
+    }
+
     /// The time, read once for each `clock` call the run makes.
     async fn clock(&self) -> Result<Timestamp, ParentFault>;
 
@@ -419,6 +426,10 @@ async fn answer(
     request: &EncodedPayload,
 ) -> Result<EncodedPayload, KernelFailure> {
     match kind {
+        HostReadKind::EnterSite => {
+            let at = wire::decode(PayloadKind::HostRead, request).map_err(worker)?;
+            wire::encode(PayloadKind::HostAnswer, &host.enter_site(&at))
+        }
         HostReadKind::Clock => wire::encode(PayloadKind::HostAnswer, &host.clock().await?),
         HostReadKind::Random => wire::encode(PayloadKind::HostAnswer, &host.random().await?),
         HostReadKind::Projection => {

@@ -729,6 +729,252 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     assert_eq!(kept_read.definition, first.definition);
 }
 
+/// FIG-6323: every sleep in a loop names its own execution occurrence in
+/// the committed process log, so a host can highlight it without tracing.
+#[tokio::test]
+async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
+    let core = core().await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let environment = environment(true);
+    let source = GUARDED
+        .replace(
+            "entry guarded",
+            "effect tools.echo(input: Any) -> Any\nentry guarded",
+        )
+        .replace(
+            "do sleep 5",
+            "do sleep 6000\n      let input = {value: name}\n      do perform tools.echo(input) as Any",
+        );
+    let mut document = lash::workflow::document::parse_document(&source).expect("document");
+    let checked = artifacts
+        .workflow_environment(&environment)
+        .await
+        .expect("environment")
+        .expect("kernel");
+    let echo = lash::workflow::document::EffectName::new("tools.echo").expect("effect");
+    document
+        .manifest
+        .effects
+        .insert(echo.clone(), checked.effects()[&echo].clone());
+    let publication = published(
+        artifacts
+            .publish_workflow(
+                &pin,
+                &Draft::open(document, None).expect("draft"),
+                &Name::new("guarded"),
+                &environment,
+            )
+            .await
+            .expect("publication"),
+    );
+    let sites = publication.document.graph().execution_sites();
+    let sleep = sites
+        .iter()
+        .find(|site| site.kind == lash::workflow::graph::SiteKind::Sleep)
+        .expect("sleep");
+    let tool = sites
+        .iter()
+        .find(|site| site.kind == lash::workflow::graph::SiteKind::Perform)
+        .expect("tool");
+    let env_ref = artifacts
+        .publish_process_env(&pin, &linking(&environment, &["tools.echo"]))
+        .await
+        .expect("environment");
+    let process = start(
+        &core,
+        &env_ref,
+        &publication.definition,
+        "sleep-sites",
+        "done",
+    )
+    .await;
+    assert_eq!(finished(&core, &process).await, serde_json::json!("done"));
+    let page = core
+        .processes()
+        .events(
+            lash::process::ProcessHistoryContinuation::start(process.clone()),
+            std::num::NonZeroUsize::new(100).expect("limit"),
+            lash::process::ProcessEventQueryMode::Full,
+        )
+        .await
+        .expect("stored events");
+    let lash::process::ProcessEventReadOutcome::Retained(page) = page.outcome else {
+        panic!("retained events");
+    };
+    let lash::process::ProcessEventPageEvents::Full(events) = page.events else {
+        panic!("full events");
+    };
+    let waits: Vec<lash::process::WaitState> = events
+        .iter()
+        .filter(|event| event.fact.event_type() == "process.waiting")
+        .map(|event| serde_json::from_value(event.fact.payload()["wait"].clone()).expect("wait"))
+        .collect();
+    assert_eq!(waits.len(), 2, "both loop sleeps enter a wait");
+    for (occurrence, wait) in waits.iter().enumerate() {
+        let at = wait
+            .site
+            .as_ref()
+            .expect("a sleeping workflow names its site");
+        assert_eq!(at.site, sleep.site);
+        assert_eq!(at.occurrence, occurrence as u64);
+    }
+    let mut overlay = lash::workflow::ProcessWorkflowOverlayAccumulator::new(
+        process.clone(),
+        publication.document.reference().clone(),
+    );
+    for event in &events {
+        overlay.committed(event);
+        if let lash::process::ProcessLifecycleFact::Waiting { wait } = &event.fact {
+            let at = wait.execution_site().expect("workflow coordinate");
+            let state = overlay.snapshot();
+            let row = state
+                .sites
+                .iter()
+                .find(|row| row.at == *at)
+                .expect("waiting row");
+            assert_eq!(row.occurrences, at.occurrence + 1);
+            assert_eq!(
+                row.state,
+                lash::workflow::ProcessWorkflowSiteState::Waiting {
+                    kind: lash::workflow::ProcessWorkflowWaitKind::Sleep,
+                }
+            );
+            assert!(state.current_sites.contains(at));
+        }
+    }
+    let overlay = overlay.snapshot();
+    for site in [&sleep.site, &tool.site] {
+        let row = overlay
+            .sites
+            .iter()
+            .find(|row| &row.at.site == site)
+            .expect("site in stored fold");
+        assert_eq!(row.occurrences, 2);
+        assert_eq!(
+            row.state,
+            lash::workflow::ProcessWorkflowSiteState::Completed
+        );
+    }
+    let snapshot = core
+        .processes()
+        .observe(&process)
+        .snapshot()
+        .await
+        .expect("snapshot");
+    let lash::process::ProcessReadView::Retained(view) = snapshot.read_view else {
+        panic!("retained");
+    };
+    let snapshot_overlay = view.workflow.expect("workflow snapshot");
+    assert!(
+        snapshot_overlay.current_sites.is_empty(),
+        "terminal clears current sites"
+    );
+    for row in overlay.sites {
+        assert!(
+            snapshot_overlay.sites.contains(&row),
+            "snapshot uses the stored-event fold"
+        );
+    }
+}
+
+/// FIG-6323: entry into a document call is observable before its pure body
+/// runs. The process reducer keeps that last entry and counts repeated calls.
+#[tokio::test]
+async fn a_process_feed_names_pure_compute_calls_and_counts_their_entries() {
+    use lash::process::{ProcessObservationEventPayload, ProcessObservationStreamItem};
+    use lash::workflow::{ProcessWorkflowOverlayAccumulator, ProcessWorkflowSiteState};
+
+    let core = core().await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let environment = environment(true);
+    let document = lash::workflow::document::parse_document(
+        r#"kernel 1
+numbers float
+entry computed(name: Text) -> Any
+fn identity(value) { return value }
+fn computed(name) {
+  for n in [1, 2] { let value = call identity(name) }
+  return name
+}
+main { finish null }
+"#,
+    )
+    .expect("pure document");
+    let publication = published(
+        artifacts
+            .publish_workflow(
+                &pin,
+                &Draft::open(document, None).expect("draft"),
+                &Name::new("computed"),
+                &environment,
+            )
+            .await
+            .expect("publication"),
+    );
+    let [call] = publication.document.graph().execution_sites() else {
+        panic!("one call site");
+    };
+    let env_ref = artifacts
+        .publish_process_env(&pin, &linking(&environment, &[]))
+        .await
+        .expect("environment");
+    let process = start(
+        &core,
+        &env_ref,
+        &publication.definition,
+        "compute-sites",
+        "done",
+    )
+    .await;
+    let observed = core.processes().observe(&process);
+    let snapshot = observed.snapshot().await.expect("snapshot");
+    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    assert_eq!(finished(&core, &process).await, serde_json::json!("done"));
+    let mut overlay =
+        ProcessWorkflowOverlayAccumulator::new(process, publication.document.reference().clone());
+    let mut entries = std::collections::BTreeSet::new();
+    loop {
+        let item = tokio::time::timeout(std::time::Duration::from_secs(60), feed.next())
+            .await
+            .expect("feed wakes")
+            .expect("feed continues")
+            .expect("feed reads");
+        let ProcessObservationStreamItem::Event(event) = item else {
+            panic!("no gap in the fixture");
+        };
+        // Reconstruct each running stretch from the provisional process
+        // observations, before the later committed terminal settles them.
+        if let ProcessObservationEventPayload::LanguageExecution(observation) = &event.payload {
+            overlay.observe(&event.payload).expect("same execution");
+            if let lash_trace::TraceLanguageExecutionPayload::Node {
+                at,
+                fact: lash_trace::TraceNodeFact::Started { .. },
+            } = &observation.execution.payload
+                && at.site == call.site
+            {
+                entries.insert(at.occurrence);
+                let state = overlay.snapshot();
+                assert!(
+                    state.current_sites.contains(at),
+                    "the pure call stays current"
+                );
+                let [row] = state.sites.as_slice() else {
+                    panic!("one site");
+                };
+                assert_eq!(row.occurrences, at.occurrence + 1);
+                assert_eq!(row.state, ProcessWorkflowSiteState::Running);
+            }
+            if entries.len() == 2 {
+                break;
+            }
+        }
+    }
+    assert_eq!(entries, [0, 1].into_iter().collect());
+    core.shutdown().await.expect("shutdown");
+}
+
 /// A fan-out's overlay tells its elements apart (`K-EFF-008`). Three tasks
 /// perform the one `tools.echo` of a shared closure, so each has occurrence
 /// 0 of that site. The process's feed reports each at the machine's own

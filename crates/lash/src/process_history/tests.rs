@@ -399,6 +399,7 @@ async fn effect_omissions_survive_zero_and_tiny_acquisition_budgets() {
             process_effect_fold_pages: 0,
             ..Default::default()
         }),
+        None,
     )
     .await
     .unwrap()

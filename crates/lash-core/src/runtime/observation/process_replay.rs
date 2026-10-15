@@ -222,6 +222,8 @@ impl ProcessReadView {
 /// Appends after it belong to a later view.
 #[derive(Clone, Debug)]
 pub struct RetainedProcessView {
+    /// Workflow sites from the same stored events and retained live feed.
+    pub workflow: Option<super::ProcessWorkflowOverlay>,
     pub process: ObservedProcess,
     pub effects: ProcessEffectEvidence,
     pub document: ProcessDocumentIdentity,

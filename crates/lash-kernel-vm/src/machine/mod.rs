@@ -262,7 +262,7 @@ struct Task {
     passed: bool,
     /// The task ended in an error.
     failed: bool,
-    /// How many times the task has run each `spawn`, `perform` and `sleep`.
+    /// How many times the task has entered each observed action.
     occurrences: BTreeMap<StmtId, u64>,
 }
 

@@ -626,8 +626,8 @@ pub use runtime::{
     EnclosingProcess, EngineAction, EngineEvent, EngineLaunch, EngineSettings, EngineState,
     EngineStateFormat, EngineStateMigration, EngineStateRefusal, EngineStatus,
     EngineStatusProjection, EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun,
-    EngineSteps, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope, FitPolicy,
-    ForkSessionReceipt, ForkSessionRequest, HandleId, HoldEnvError, InputItem,
+    EngineSteps, EngineWake, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
+    FitPolicy, ForkSessionReceipt, ForkSessionRequest, HandleId, HoldEnvError, InputItem,
     InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay,
     KeyName, Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason,
     LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
@@ -696,8 +696,8 @@ pub use runtime::{
     TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
     TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
     TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef,
-    TurnPreludeStore, WaitKind, WaitState, WatchedRegistry, WeakProcessEngineRegistry,
-    WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
+    TurnPreludeStore, WaitKind, WaitSiteUnavailable, WaitState, WatchedRegistry,
+    WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy, admit_session_state_generation,
     artifact_store_plugin_error, check_links, hold_process_env, lifetime, mint_process_id,
     tool_failure_code,
 };
@@ -720,7 +720,9 @@ pub use runtime::{
     ProcessObservationReplacement, ProcessReadView, ProcessReplayEventDraft,
     ProcessReplayGapReason, ProcessReplayOutcome, ProcessReplayPublishLimits, ProcessReplayStore,
     ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessReplaySubscription,
-    ProcessSequence, RetainedProcessView, StepBodyStartedObservation, commits_bridge,
+    ProcessSequence, ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowOverlay,
+    ProcessWorkflowOverlayAccumulator, ProcessWorkflowSite, ProcessWorkflowSiteState,
+    ProcessWorkflowWaitKind, RetainedProcessView, StepBodyStartedObservation, commits_bridge,
 };
 pub use runtime::{
     ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal, ProjectedObservedProcess,

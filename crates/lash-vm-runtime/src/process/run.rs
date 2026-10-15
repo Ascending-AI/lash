@@ -106,6 +106,7 @@ fn failed(process: &ProcessId, fault: &RunFault) -> SettledOutput {
 /// source and the backend's projection providers. What the body prints is
 /// not kept.
 struct StepHost {
+    trace: Option<super::trace::ProcessTrace>,
     now_ms: i64,
     random: Arc<dyn Fn() -> u64 + Send + Sync>,
     providers: ProjectionCatalog,
@@ -113,6 +114,15 @@ struct StepHost {
 
 #[async_trait::async_trait]
 impl RunHost for StepHost {
+    fn enter_site(&self, at: &lash_kernel_doc::EffectIdentity) -> bool {
+        if let Some(trace) = &self.trace {
+            trace.node(at, lash_trace::TraceNodeFact::Started { call_id: None });
+            true
+        } else {
+            false
+        }
+    }
+
     async fn clock(&self) -> Result<Timestamp, ParentFault> {
         Ok(Timestamp {
             nanoseconds: Integer::from(self.now_ms.saturating_mul(1_000_000)),
@@ -242,6 +252,7 @@ async fn kernel_run(
         OwnerEpoch(0),
         FrameEpoch(0),
         Arc::new(StepHost {
+            trace: trace.clone(),
             now_ms: run.now.0,
             random: Arc::clone(&engine.random),
             providers: ProjectionCatalog::of_backend(run.projection_providers.as_deref()),

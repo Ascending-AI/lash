@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub(crate) struct Wire {
+    observe_sites: std::sync::atomic::AtomicBool,
     pipe: Mutex<UnixStream>,
     /// The worker's one inbound source: this wire and its server read the
     /// same socket.
@@ -40,6 +41,7 @@ impl Wire {
         value_bound: u64,
     ) -> Self {
         Self {
+            observe_sites: std::sync::atomic::AtomicBool::new(true),
             pipe: Mutex::new(pipe),
             inbound,
             codec,
@@ -183,6 +185,14 @@ impl WireHost {
 }
 
 impl lash_kernel_vm::Host for WireHost {
+    fn enter_site(&mut self, at: &lash_kernel_doc::EffectIdentity) {
+        use std::sync::atomic::Ordering;
+        if self.wire.observe_sites.load(Ordering::Relaxed) {
+            let observing = self.exchange::<bool>(HostReadKind::EnterSite, at);
+            self.wire.observe_sites.store(observing, Ordering::Relaxed);
+        }
+    }
+
     fn clock(&mut self) -> Timestamp {
         self.exchange(HostReadKind::Clock, &())
     }

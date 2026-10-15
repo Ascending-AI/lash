@@ -84,15 +84,20 @@
 //!
 //! # Following a run
 //!
-//! A [`WorkflowExecutionOverlay`] is what one execution was observed to
-//! do, keyed by [`WorkflowTaskSite`]: an execution site in the task that
-//! ran it. A host folds it from a session or process feed with
-//! [`WorkflowExecutionOverlayAccumulator`] (or the pure
-//! [`fold_workflow_overlay`]), reads the document the execution names with
-//! [`HostArtifacts::execution_document`](crate::process::HostArtifacts::execution_document),
-//! gives the reducer its [`WorkflowDocument::overlay_document`], and
-//! settles the overlay with the process's committed end. Labels, kinds
-//! and edges are read from the document, never from the overlay.
+//! A process observation snapshot includes a [`ProcessWorkflowOverlay`]:
+//! site states, occurrence counts and each task's last entered site. It uses
+//! [`ProcessWorkflowOverlayAccumulator`], which also folds the typed process
+//! events a host stores and the payloads on its process feed. Site entries
+//! remain visible through pure computation; committed outcomes and the
+//! process's terminal govern completion. Read labels and edges from the
+//! process's document, never from the overlay.
+//!
+//! Session cells and an effect's nested language execution have separate
+//! execution identities. Their richer provisional history remains a
+//! [`WorkflowExecutionOverlay`], built with
+//! [`WorkflowExecutionOverlayAccumulator`] or [`fold_workflow_overlay`].
+//! Give that reducer the [`WorkflowDocument::overlay_document`] read through
+//! [`HostArtifacts::execution_document`](crate::process::HostArtifacts::execution_document).
 //!
 //! # Source
 //!
@@ -329,3 +334,12 @@ pub(crate) async fn read(
         document,
     })))
 }
+
+/// Process overlays consume the lifecycle events hosts store and the same
+/// process feed's live entries. The trace overlay above serves session cells,
+/// which have no process log. Process observation snapshots include this fold.
+pub use lash_core::{
+    ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowOverlay,
+    ProcessWorkflowOverlayAccumulator, ProcessWorkflowSite, ProcessWorkflowSiteState,
+    ProcessWorkflowWaitKind,
+};

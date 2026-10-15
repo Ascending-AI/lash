@@ -19,6 +19,7 @@ use lash_vm_client::wire::OutcomeWire;
 
 use super::state::{Delivery, Issued, KernelProcessInput};
 
+#[derive(Clone)]
 pub(super) struct ProcessTrace {
     tracing: PluginExecutionTrace,
     identity: TraceLanguageExecutionIdentity,
@@ -78,7 +79,7 @@ impl ProcessTrace {
         });
     }
 
-    fn node(&self, at: &EffectIdentity, fact: TraceNodeFact) {
+    pub(super) fn node(&self, at: &EffectIdentity, fact: TraceNodeFact) {
         self.emit(TraceLanguageExecutionPayload::Node {
             at: at.clone(),
             fact,

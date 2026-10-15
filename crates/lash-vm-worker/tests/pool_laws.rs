@@ -773,6 +773,7 @@ main { }"#,
             RunStep::HostRead { id, kind, request } => {
                 kinds.push(kind);
                 let answer = match kind {
+                    HostReadKind::EnterSite => wire::encode(PayloadKind::HostAnswer, &false),
                     HostReadKind::Projection => {
                         let read: ProjectionRead =
                             wire::decode(PayloadKind::HostRead, &request).expect("read");

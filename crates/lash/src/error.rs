@@ -15,6 +15,11 @@ pub enum EmbedError {
     #[error(transparent)]
     ProcessEnvLoad(#[from] crate::plugins::ProcessEnvLoadError),
 
+    /// A process observation carried evidence of another execution. The
+    /// structured refusal stays available to hosts instead of becoming text.
+    #[error(transparent)]
+    WorkflowObservation(#[from] lash_core::ProcessWorkflowFoldError),
+
     /// A model call's admission record (its prompt snapshot, texts or exact body) could not be read.
     #[error(transparent)]
     PromptSnapshotLoad(#[from] lash_core::plugin::prompt::AdmittedCallLoadError),
@@ -508,6 +513,7 @@ impl EmbedError {
             Self::MissingProtocolPlugin
             | Self::RetiredConfigObserver { .. }
             | Self::ConfigSubmit(_)
+            | Self::WorkflowObservation(_)
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
             | Self::UnknownSession { .. }
@@ -578,6 +584,7 @@ impl EmbedError {
             Self::ProcessRender(_) => true,
             Self::MissingProtocolPlugin
             | Self::RetiredConfigObserver { .. }
+            | Self::WorkflowObservation(_)
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)
             | Self::MissingLlmProfile
@@ -894,6 +901,7 @@ mod tests {
     #[test]
     fn wiring_errors_are_terminal_and_not_retryable() {
         for err in [
+            EmbedError::from(lash_core::ProcessWorkflowFoldError::DifferentExecution),
             EmbedError::MissingProtocolPlugin,
             EmbedError::PluginBackendMismatch {
                 plugin_id: "plugin".to_string(),

@@ -448,7 +448,13 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
     let EngineAction::Steps { wake, .. } = &action else {
         unreachable!()
     };
-    assert_eq!(*wake, Some(lash_core::durable_port::DurableInstant(5_000)));
+    assert_eq!(
+        *wake,
+        Some(lash_core::EngineWake {
+            until: lash_core::durable_port::DurableInstant(5_000),
+            site: Some(element(2))
+        })
+    );
 
     // The machine caught the refusal and withdrew its wait on the effect.
     let (state, action) = settle(state, &run1, parked(vec![], vec![1]));
@@ -456,7 +462,7 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
         action,
         EngineAction::Sleep {
             until: lash_core::durable_port::DurableInstant(5_000),
-            site: None,
+            site: Some(element(2)),
         }
     );
     let (state, action) = settle(state, &withdrawn_step, completed("null".to_owned()));

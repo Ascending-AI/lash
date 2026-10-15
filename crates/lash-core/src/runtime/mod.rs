@@ -271,7 +271,9 @@ pub use observation::{
     ProcessObservationReplacement, ProcessReadView, ProcessReplayEventDraft,
     ProcessReplayGapReason, ProcessReplayOutcome, ProcessReplayPublishLimits, ProcessReplayStore,
     ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessReplaySubscription,
-    ProcessSequence, RetainedProcessView, StepBodyStartedObservation, commits_bridge,
+    ProcessSequence, ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowOverlay,
+    ProcessWorkflowOverlayAccumulator, ProcessWorkflowSite, ProcessWorkflowSiteState,
+    ProcessWorkflowWaitKind, RetainedProcessView, StepBodyStartedObservation, commits_bridge,
 };
 pub use observation_publisher::{ObservationSource, work_with_observations};
 pub use process::ProcessChangeSubscription;
@@ -282,8 +284,8 @@ pub use process::{
     DeclaredLaunch, DeclaredProcessIdentity, DefinitionAcquisition, EnclosingProcess, EngineAction,
     EngineEvent, EngineLaunch, EngineSettings, EngineState, EngineStateFormat,
     EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
-    EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, FitPolicy,
-    HandleId, HoldEnvError, InspectedProcessDefinition, InvalidProcessDefinitionId,
+    EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, EngineWake,
+    FitPolicy, HandleId, HoldEnvError, InspectedProcessDefinition, InvalidProcessDefinitionId,
     InvalidStartKey, KeyName, Lifetime, LifetimeDecision, LifetimePolicy,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, MAX_PROCESS_EFFECT_OCCURRENCES,
     MAX_PROCESS_ROSTER_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess, ObservedProcessChange,
@@ -330,7 +332,7 @@ pub use process::{
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, StagedProcessStart, StartCx,
     StartCxError, StartKey, StepName, StepRequest, StoreRealization, TerminalProcessStatus,
-    WaitKind, WaitState, WatchedRegistry, WeakProcessEngineRegistry,
+    WaitKind, WaitSiteUnavailable, WaitState, WatchedRegistry, WeakProcessEngineRegistry,
     allocate_process_event_sequence, apply_process_event_projection, artifact_store_plugin_error,
     check_links, check_retained_start, current_epoch_ms, fold_process_record, hold_process_env,
     lifetime, load_process_env, mint_process_id, prepare_process_event_append,

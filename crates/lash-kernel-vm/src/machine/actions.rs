@@ -44,6 +44,20 @@ impl KernelMachine {
         action: &Action,
         out: Reg,
     ) -> Status {
+        if !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_))
+            && matches!(
+                action.kind,
+                ActionKind::Call { .. }
+                    | ActionKind::Join(_)
+                    | ActionKind::JoinMany(..)
+                    | ActionKind::Yield
+                    | ActionKind::Cancel(_)
+            )
+        {
+            let occurrence = self.occurrence(task, stmt)?;
+            let identity = self.action_identity(task, exe, &action.site, occurrence)?;
+            host.enter_site(&identity);
+        }
         match &action.kind {
             ActionKind::Call { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
@@ -53,7 +67,7 @@ impl KernelMachine {
             ActionKind::Spawn { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
                 self.put_atoms(task, exe, args, out)?;
-                self.spawn(task, exe, stmt, &action.site, target, out, args.len())
+                self.spawn(task, host, exe, stmt, &action.site, target, out, args.len())
             }
             ActionKind::Perform {
                 effect,
@@ -349,6 +363,20 @@ impl KernelMachine {
             return Err(bound(Bound::RequestsPerPark, limit));
         }
         let occurrence = self.occurrence(task, stmt)?;
+        let identity = self.action_identity(task, exe, site, occurrence)?;
+        let wait = WaitId(self.next_wait);
+        self.next_wait += 1;
+        self.suspend(task, stmt, Wait::Request(wait))?;
+        Ok((wait, identity))
+    }
+
+    fn action_identity(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        site: &Site,
+        occurrence: u64,
+    ) -> Result<EffectIdentity, Halt> {
         let running = self.task(task)?;
         let mut loops = Vec::new();
         for frame in &running.frames {
@@ -367,16 +395,12 @@ impl KernelMachine {
                 }
             }
         }
-        let identity = EffectIdentity {
+        Ok(EffectIdentity {
             task: running.identity.clone(),
             site: site.clone(),
             occurrence,
             loops,
-        };
-        let wait = WaitId(self.next_wait);
-        self.next_wait += 1;
-        self.suspend(task, stmt, Wait::Request(wait))?;
-        Ok((wait, identity))
+        })
     }
 
     /// Records what a wait asks for, for the next park to hand out.
@@ -404,6 +428,7 @@ impl KernelMachine {
     fn spawn(
         &mut self,
         task: TaskId,
+        host: &mut dyn Host,
         exe: &Executable,
         stmt: StmtId,
         site: &Site,
@@ -424,6 +449,11 @@ impl KernelMachine {
             return Err(bound(Bound::LiveTasks, limit).into());
         }
         let occurrence = self.occurrence(task, stmt)?;
+        if !matches!(site.unit, lash_kernel_doc::Unit::Library(_)) {
+            let at = self.action_identity(task, exe, site, occurrence)?;
+            host.enter_site(&at);
+        }
+
         let parent = self.task(task)?.identity.clone();
         let child = TaskId(self.tasks.len() as u64);
         self.tasks.push(Task {

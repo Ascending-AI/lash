@@ -677,8 +677,8 @@ pub use runtime::{
     EnclosingProcess, EngineAction, EngineEvent, EngineLaunch, EngineSettings, EngineState,
     EngineStateFormat, EngineStateMigration, EngineStateRefusal, EngineStatus,
     EngineStatusProjection, EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun,
-    EngineSteps, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope, FitPolicy,
-    ForkSessionReceipt, ForkSessionRequest, HandleId, HoldEnvError, InputItem,
+    EngineSteps, EngineWake, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
+    FitPolicy, ForkSessionReceipt, ForkSessionRequest, HandleId, HoldEnvError, InputItem,
     InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey, JournalReplay,
     KeyName, Lifetime, LifetimeDecision, LifetimePolicy, LlmRequestSpec, LlmStreamRecord,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, MAX_PROCESS_ROSTER_PAGE_SIZE, Material, NamesMaterial,
@@ -739,9 +739,10 @@ pub use runtime::{
     TurnFailureSettlement, TurnInput, TurnInputAdmissionMode, TurnInputApplication,
     TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
     TurnInputState, TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore,
-    WaitKind, WaitState, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError,
-    WorkCadencePolicy, admit_session_state_generation, admit_session_view, artifact_referrer_ended,
-    check_links, hold_process_env, lifetime, live_session_view, mint_process_id, session_is_live,
+    WaitKind, WaitSiteUnavailable, WaitState, WatchedRegistry, WeakProcessEngineRegistry,
+    WorkCadenceError, WorkCadencePolicy, admit_session_state_generation, admit_session_view,
+    artifact_referrer_ended, check_links, hold_process_env, lifetime, live_session_view,
+    mint_process_id, session_is_live,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

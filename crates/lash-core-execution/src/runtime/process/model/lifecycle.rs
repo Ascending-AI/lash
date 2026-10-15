@@ -23,6 +23,23 @@ pub struct WaitState {
     pub site: Option<lash_sansio::EffectIdentity>,
 }
 
+/// Why a process wait has no workflow coordinate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum WaitSiteUnavailable {
+    #[error("the process engine did not name a workflow execution site")]
+    EngineDidNotNameSite,
+}
+
+impl WaitState {
+    /// Workflow waits name their task's occurrence. A document-free engine
+    /// may wait without one; callers receive a typed explanation for that case.
+    pub fn execution_site(&self) -> Result<&lash_sansio::EffectIdentity, WaitSiteUnavailable> {
+        self.site
+            .as_ref()
+            .ok_or(WaitSiteUnavailable::EngineDidNotNameSite)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WaitKind {

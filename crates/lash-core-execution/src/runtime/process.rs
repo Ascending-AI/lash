@@ -81,8 +81,8 @@ pub use engine::{
 pub use engine_state::{
     CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
     EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
-    EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, KeyName,
-    StepName, StepRequest,
+    EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, EngineWake,
+    KeyName, StepName, StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent,
@@ -109,7 +109,7 @@ pub use model::{
     ProcessStartRequest, ProcessStartTarget, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
     ProcessWaits, RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId,
     ScopeRef, ScopeStorageError, SessionId, SessionScope, SessionScopeId, StartCx, StartCxError,
-    StartKey, StoreRealization, TerminalProcessStatus, WaitKind, WaitState,
+    StartKey, StoreRealization, TerminalProcessStatus, WaitKind, WaitSiteUnavailable, WaitState,
     artifact_referrer_ended, artifact_store_plugin_error, lifetime, load_process_env,
     mint_process_id, process_child_session_id, process_session_id, process_session_turn_id,
 };
