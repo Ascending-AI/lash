@@ -181,7 +181,7 @@ unsafe extern "C" fn trace(
                     window.payload(&sql, 0, 0, bytes);
                 }
                 #[cfg(feature = "perf-witness")]
-                lash_core_execution::perf_witness::record_sql_row_read();
+                lash_core_execution::perf_witness::record_sql_row_read(&sql);
             }
             ffi::SQLITE_TRACE_PROFILE => {
                 if let Some((before, changes)) =
@@ -352,9 +352,117 @@ fn placeholders(sql: &str) -> impl Iterator<Item = std::ops::Range<usize>> + '_ 
     })
 }
 
+/// Origin tags exist only in performance-witness builds; ordinary store calls
+/// inline directly to their body with no observer state.
+#[inline]
+pub(crate) fn with_origin<T>(origin: &'static str, work: impl FnOnce() -> T) -> T {
+    #[cfg(feature = "perf-witness")]
+    {
+        lash_core_execution::perf_witness::sql_shapes::with_origin(origin, work)
+    }
+    #[cfg(not(feature = "perf-witness"))]
+    {
+        let _ = origin;
+        work()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REPLAY-SQL-SHAPES: an extra physical SELECT is conserved in the
+    /// turn counters and exactly one named store-origin row, on either executor.
+    #[cfg(feature = "perf-witness")]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test-only process isolation keeps a global witness independent of parallel store laws"
+    )]
+    #[tokio::test]
+    async fn turn_sql_shapes_conserve_an_injected_select_on_connection_workers() {
+        const CHILD: &str = "LASH_FIG6400_SQL_SHAPES_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "observed_sql::tests::turn_sql_shapes_conserve_an_injected_select_on_connection_workers",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.status.success(), "isolated SQL law failed: {stdout}");
+            assert!(
+                stdout.contains("test result: ok. 1 passed; 0 failed;"),
+                "isolated law did not execute: {stdout}"
+            );
+            return;
+        }
+        use lash_core_execution::perf_witness::Collector;
+        async fn injected_store_method(store: &crate::SqliteStore, extra: bool) {
+            store
+                .conn
+                .call(move |conn| {
+                    conn.query_row("SELECT 41 AS baseline", [], |_| Ok(()))?;
+                    if extra {
+                        conn.query_row("SELECT 42 AS injected", [], |_| Ok(()))?;
+                    }
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        for inline in [true, false] {
+            let mut options = crate::SqliteStoreSetOptions::memory();
+            options.inline_calls = inline;
+            let stores = crate::SqliteStoreSet::memory_with_options_and_clock(
+                options,
+                std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
+            )
+            .await
+            .unwrap();
+            let collector = Collector::install_with_sql_shapes().unwrap();
+            let store = stores.session_store_factory();
+            injected_store_method(&store, false).await;
+            let before = collector.snapshot();
+            injected_store_method(&store, true).await;
+            let after = collector.snapshot();
+            assert_eq!(after.sql_statements - before.sql_statements, 2);
+            assert_eq!(
+                after.sql_statements_by_verb["select"] - before.sql_statements_by_verb["select"],
+                2
+            );
+            assert_eq!(after.sql_rows_read - before.sql_rows_read, 2);
+            let shapes = after.sql_shapes.unwrap();
+            assert_eq!(
+                shapes.rows.iter().map(|r| r.counts.selects).sum::<u64>(),
+                after.sql_statements_by_verb["select"]
+            );
+            assert_eq!(
+                shapes
+                    .rows
+                    .iter()
+                    .map(|r| r.counts.rows_returned)
+                    .sum::<u64>(),
+                after.sql_rows_read
+            );
+            let injected: Vec<_> = shapes
+                .rows
+                .iter()
+                .filter(|r| r.shape == "select ? as injected")
+                .collect();
+            assert_eq!(injected.len(), 1);
+            assert!(injected[0].store_origin.contains("injected_store_method"));
+            assert_eq!(injected[0].counts.selects, 1);
+            assert_eq!(injected[0].counts.rows_returned, 1);
+            eprintln!(
+                "REPLAY_SQL_SHAPES inline={inline} {}",
+                serde_json::to_string(&shapes).unwrap()
+            );
+        }
+    }
 
     /// SQL-PAYLOAD: counts writes separately from returned rows, keeps result
     /// payload distinct from SQLite's expanded bind spelling, and cached

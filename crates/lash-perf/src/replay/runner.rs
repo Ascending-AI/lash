@@ -32,6 +32,8 @@ pub struct RunOptions {
     pub turns: Option<usize>,
     /// Separate Python-worker heap profiles beside the replay receipt.
     pub worker_profile_dir: std::path::PathBuf,
+    pub sql_shapes: Option<std::path::PathBuf>,
+    pub heap: super::ReplayHeapArgs,
 }
 
 /// What a store set must outlive.
@@ -226,18 +228,36 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         });
     }
     let turns = lanes.first().map_or(0, |lane| lane.inputs.len());
-    let meter = Meter::install(probe, pool)?;
+    let meter = Meter::install(probe, pool, options.sql_shapes.is_some())?;
     let backend_name = meter.backend().to_owned();
     let mut rounds = Vec::with_capacity(turns);
     let mut compactions = Vec::new();
     let mut frame_depth = 0;
     let mut model_calls = 0_u64;
+    let mut shape_rounds = Vec::new();
+    let mut heap_window = None;
+    let profile_end = options
+        .heap
+        .profile_through_turn
+        .or(options.heap.profile_turn);
+    let mut profiled = false;
     for turn in 0..turns {
         cleanup
             .settle()
             .await
             .context("settle between-round artifact cleanup")?;
-        let before = meter.read(model_calls).await;
+        if options.heap.dhat_out.is_some() && options.heap.profile_turn == Some(turn + 1) {
+            heap_window = Some(crate::perf_support::dhat::ProfileWindow::start(
+                "replay-host",
+                "selected replay turns: before meter read through outcome and after meter read; excludes compaction",
+                &crate::perf_support::dhat::ProfileArgs {
+                    dhat_out: options.heap.dhat_out.clone(),
+                    dhat_frames: options.heap.dhat_frames,
+                    ..Default::default()
+                },
+            )?);
+        }
+        let (before, shapes_before) = meter.read_with_shapes(model_calls).await;
         let started = Instant::now();
         let outcomes = tokio::time::timeout(
             ROUND_WATCHDOG,
@@ -267,7 +287,30 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             );
             model_calls += calls.scripted as u64;
         }
-        let mut metrics = difference(&before, &meter.read(model_calls).await);
+        let (after, shapes_after) = meter.read_with_shapes(model_calls).await;
+        if profile_end == Some(turn + 1)
+            && let Some(window) = heap_window.take()
+        {
+            window.finish(true)?;
+            let path = options
+                .heap
+                .dhat_out
+                .as_ref()
+                .context("active heap window has no output path")?
+                .with_extension("receipt.json");
+            let mut receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+            receipt["workload"] = serde_json::json!(workload.name);
+            receipt["script_digest"] = serde_json::json!(workload.digest());
+            receipt["first_turn"] = serde_json::json!(options.heap.profile_turn);
+            receipt["last_turn"] = serde_json::json!(turn + 1);
+            receipt["identity"] = serde_json::to_value(super::receipt::Identity::current())?;
+            std::fs::write(path, serde_json::to_vec_pretty(&receipt)?)?;
+            profiled = true;
+        }
+        let mut metrics = difference(&before, &after);
+        if let (Some(before), Some(after)) = (shapes_before, shapes_after) {
+            shape_rounds.push(sql_shape_round(turn + 1, before, after, &metrics)?);
+        }
         metrics.insert("wall_ms".to_owned(), wall_ms);
         rounds.push(RoundRecord {
             turn: turn + 1,
@@ -302,6 +345,25 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             });
             frame_depth = 0;
         }
+    }
+    if options.heap.dhat_out.is_some() {
+        ensure!(
+            profiled,
+            "heap profile did not reach its selected final turn"
+        );
+    }
+    if let Some(path) = &options.sql_shapes {
+        crate::perf_support::report::ensure_parent_dir(path, "SQL shapes")?;
+        std::fs::write(
+            path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "kind": "lash.replay-sql-shapes", "identity": super::receipt::Identity::current(),
+                "workload": workload.name, "script_digest": workload.digest(),
+                "backend": backend_name, "scope": "all observed SQLite connections in this host process; same counter cuts as replay rounds",
+                "row_limit": lash_core::perf_witness::sql_shapes::ROW_LIMIT,
+                "conserved": true, "rounds": shape_rounds,
+            }))?,
+        )?;
     }
     drop(meter);
     for lane in lanes {
@@ -369,4 +431,51 @@ async fn compact(lane: &Lane, after: usize) -> Result<()> {
         .map_err(|error| anyhow::anyhow!("settle the compaction after turn {after}: {error}"))?;
     ensure!(opened, "the compaction after turn {after} opened no frame");
     Ok(())
+}
+
+/// Subtract cumulative shape counters, then verify against the existing turn
+/// metrics. ROW and PROFILE events may straddle a cut; each keeps its own unit.
+fn sql_shape_round(
+    turn: usize,
+    before: lash_core::perf_witness::sql_shapes::Receipt,
+    after: lash_core::perf_witness::sql_shapes::Receipt,
+    metrics: &std::collections::BTreeMap<String, f64>,
+) -> Result<serde_json::Value> {
+    use lash_core::perf_witness::sql_shapes::{Counts, Row};
+    ensure!(
+        after.overflow == Counts::default(),
+        "SQL shape attribution exceeded its row limit; refusing incomplete export"
+    );
+    let old: std::collections::BTreeMap<_, _> = before
+        .rows
+        .into_iter()
+        .map(|row| ((row.shape, row.store_origin), row.counts))
+        .collect();
+    let rows: Vec<_> = after
+        .rows
+        .into_iter()
+        .filter_map(|row| {
+            let zero = Counts::default();
+            let previous = old
+                .get(&(row.shape.clone(), row.store_origin.clone()))
+                .unwrap_or(&zero);
+            let counts = Counts {
+                statements: row.counts.statements - previous.statements,
+                selects: row.counts.selects - previous.selects,
+                rows_returned: row.counts.rows_returned - previous.rows_returned,
+            };
+            (counts != zero).then_some(Row { counts, ..row })
+        })
+        .collect();
+    let statements: u64 = rows.iter().map(|r| r.counts.statements).sum();
+    let selects: u64 = rows.iter().map(|r| r.counts.selects).sum();
+    let returned: u64 = rows.iter().map(|r| r.counts.rows_returned).sum();
+    ensure!(
+        statements as f64 == metrics["sql_statements"]
+            && selects as f64 == metrics["sql_selects"]
+            && returned as f64 == metrics["sql_rows_read"],
+        "turn {turn}: SQL shape sums differ from replay totals"
+    );
+    Ok(serde_json::json!({"turn": turn, "conserved": true,
+        "totals": {"statements": statements, "selects": selects, "rows_returned": returned}, "rows": rows}))
 }

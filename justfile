@@ -130,14 +130,15 @@ perf-replay *args:
   set -euo pipefail
   artifacts="${LASH_REPLAY_ARTIFACT_DIR:-{{repo}}/target/perf-replay}"
   mkdir -p "$artifacts"
-  kiln build //crates/lash-perf:lash-perf__bin //crates/lash-vm-worker:lash-vm-worker__bin \
+  kiln build --config=optimized //crates/lash-perf:lash-perf__bin //crates/lash-vm-worker:lash-vm-worker__bin \
     --materializations final --build-report "$artifacts/build-report.json"
   binary="$(python3 "{{repo}}/tools/buck2/outputs.py" \
     --report "$artifacts/build-report.json" --label //crates/lash-perf:lash-perf__bin --single)"
   LASH_VM_WORKER="$(python3 "{{repo}}/tools/buck2/outputs.py" \
     --report "$artifacts/build-report.json" --label //crates/lash-vm-worker:lash-vm-worker__bin --single)"
   export LASH_VM_WORKER
-  "$binary" replay --store-dir "$artifacts/stores" --out "$artifacts/replay-receipt.json" {{args}}
+  (ulimit -v 8388608; /usr/bin/time -v -o "$artifacts/peak-rss.txt" \
+    "$binary" replay --store-dir "$artifacts/stores" --out "$artifacts/replay-receipt.json" {{args}})
 
 # Optional identical-work control; never part of the replay merge budgets.
 # Produces an optimized FULL-mode table, JSON receipt and peak RSS evidence.

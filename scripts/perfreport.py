@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -387,31 +388,56 @@ def summarize_dhat(payload: dict[str, Any], top: int) -> str:
     total_max_bytes = sum(p["mb"] for p in pps)
 
     def frame_label(idx: int) -> str:
-        s = ftbl[idx]
-        # Strip leading hex address and any " (path:line:col)" tail.
-        if s.startswith("0x"):
-            sp = s.find(": ")
-            if sp != -1:
-                s = s[sp + 2 :]
-        if " (" in s:
-            s = s.split(" (")[0]
-        return s
+        # DHAT lists allocation-first frames, including inlined source frames.
+        # Keep file:line:col: optimized symbols often have names like `alloc`.
+        return re.sub(r"^0x[0-9a-fA-F]+: ", "", ftbl[idx])
 
-    def pretty_stack(fs: list[int], depth: int = 6) -> list[str]:
-        # dhat stacks are root-first; reverse to user-first then keep top.
+    def source_path(label: str) -> str:
+        match = re.search(r" \(([^()]*?):[0-9]+(?::[0-9]+)?\)$", label)
+        return match[1].replace("\\", "/") if match else ""
+
+    def allocator_source(path: str) -> bool:
+        return bool(re.search(
+            r"(?:^|/)(?:library/)?(?:alloc|core|std)/", path
+        ) or re.search(
+            r"(?:^|/)(?:dhat|stats_alloc)-[^/]+/src/", path
+        ) or re.match(
+            r"src/(?:raw_vec|vec|alloc|boxed|slice|borrow|string|sync)/", path
+        ) or re.search(r"(?:^|/)lash-perf/src/lib\.rs$", path))
+
+    # Kiln's line tables can shorten paths to `src/llm/provider_body.rs` or
+    # `plugin/prompt/composer.rs`. Resolve unique source suffixes, without
+    # guessing from a function's namespace (optimized names can be just alloc).
+    sources: dict[str, list[str]] = {}
+    root = Path(__file__).resolve().parents[1]
+    for base in (root / "crates", root / "examples"):
+        for path in base.rglob("*.rs"):
+            relative = path.relative_to(root)
+            for offset in range(len(relative.parts) - 1):
+                suffix = Path(*relative.parts[offset:]).as_posix()
+                sources.setdefault(suffix, []).append(relative.as_posix())
+
+    def application_source(path: str) -> str | None:
+        if not path or allocator_source(path):
+            return None
+        direct = re.search(r"(?:^|/)((?:crates|examples)/.*)", path)
+        candidates = sources.get(direct[1] if direct else path, [])
+        if len(candidates) != 1 or allocator_source(candidates[0]):
+            return None
+        return candidates[0]
+
+    def pretty_stack(fs: list[int], depth: int = 8) -> list[str]:
         labels = [frame_label(i) for i in fs]
-        # Skip the dhat allocator hook frames at the top.
-        skip = 0
-        while skip < len(labels) and (
-            "dhat::Alloc" in labels[skip]
-            or "__rust_alloc" in labels[skip]
-            or "RawVecInner" in labels[skip]
-            or "raw_vec" in labels[skip]
-            or "alloc::alloc" in labels[skip]
-        ):
-            skip += 1
-        labels = labels[skip:]
-        return labels[:depth]
+        # Prefer the first workspace frame, beyond dependency containers and
+        # allocator adapters; fall back to other symbolized application code.
+        application = [(label, source_path(label), application_source(source_path(label)))
+                       for label in labels]
+        resolved = [label.replace(f"({path}:", f"({source}:")
+                    for label, path, source in application if source]
+        if resolved:
+            return resolved[:depth]
+        return [label for label in labels if source_path(label)
+                and not allocator_source(source_path(label))][:depth] or labels[:depth]
 
     def fmt_block(p: dict[str, Any]) -> list[str]:
         blocks = pretty_stack(p["fs"], depth=8)

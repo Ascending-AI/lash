@@ -8,9 +8,11 @@ kiln test //crates/lash-perf:replay__test         # the per-merge counted gate
 just perf-replay-bless                            # re-bless the gate's baseline
 ```
 
-`just perf-replay` writes `target/perf-replay/replay-receipt.json`
+`just perf-replay` builds with `--config=optimized` and writes `target/perf-replay/replay-receipt.json`
 (`LASH_REPLAY_ARTIFACT_DIR` moves it) and prints one table per workload. On a
-shared host, wrap the binary in `(ulimit -v 8388608; /usr/bin/time -v ...)`.
+shared host, the recipe caps the replay at 8 GiB of virtual memory and records
+`peak-rss.txt` with `/usr/bin/time -v`. The counted baseline blessing recipe
+continues to use the gate’s debug build.
 
 ## What runs
 
@@ -35,7 +37,118 @@ A turn must make exactly its scripted model calls. A cell that fails, a tool
 that is refused or a turn that ends early stops the run and quotes the
 request that left the script, so a broken script never measures silently.
 
+### SQL shape attribution (SQLite)
+
+```sh
+. ./env.sh
+just perf-replay crates/lash-perf/workloads/replay/scenarios/coding-typical.json \
+  --sql-shapes .kiln/FIG-6400/coding-sql-shapes.json
+```
+
+The underlying command is `lash-perf replay <scenario> --store-dir <stores>
+--out <replay.json> --sql-shapes <shapes.json>`. Select exactly one workload.
+The sidecar contains one `rounds` entry per turn, with normalized SQL
+`shape` × `store_origin` rows, `statements`, `selects` and `rows_returned`.
+Each turn’s sums are checked against the existing replay metrics using the
+same locked SQL snapshot; export refuses a mismatch. The receipt records
+`conserved: true`, exact totals, script digest and build identity. Values and
+comments are redacted using the existing SQL shape normalizer. `selects` uses
+the meter’s SELECT/WITH bucket; returned rows include PRAGMA and RETURNING
+results, and count neither scanned rows nor network trips.
+
+Store origins are the types of the closures actually executing on SQLite’s
+connection worker. Tags survive delegated reads, batched writes and nested
+durable adapters. `connection/batch envelope` explicitly names work outside
+a member body, such as fences. This is process-wide store attribution,
+including overlapping engine/background tasks; it does not partition higher
+async callers of the same method. Statements count at PROFILE and rows at ROW,
+so an execution spanning a snapshot cut can contribute rows and completion to
+different turns, exactly as the existing totals do.
+
+The observer retains at most 4096 shape/origin pairs per workload and refuses
+an incomplete export on overflow. Aggregation happens in memory; there is no
+per-statement logging. Without `--sql-shapes`, there is no histogram, origin
+TLS access, normalization or attribution lock on store calls; ordinary production builds
+compile the witness out. Enabled allocation/timing numbers include the
+observer and must not replace unobserved baselines. A matched on/off
+observation is recorded below.
+
+A 2026-10-15 observation on `7a5ccc1d7897` plus this instrumentation used
+fresh coding-typical stores, five turns and 22 model calls per mode, one
+symbolized opt-level-3 `stats_alloc` executable, SQLite NORMAL. Existing replay
+counters remain active in both modes; this pair measures extra attribution.
+
+| SQL attribution | SELECT median | Returned-row median | Turn wall median | Host allocated-byte median | Peak RSS |
+|---|---:|---:|---:|---:|---:|
+| off | 512 | 705 | 75.484 ms | 15,049,805 B | 101,300 KiB |
+| on | 512 | 705 | 72.448 ms | 15,187,099 B | 101,800 KiB |
+
+All five enabled turns conserved statements, SELECTs and returned rows
+exactly; the largest turn retained 155 shape/origin pairs. Observed on/off
+ratios were 0.960× for median turn wall and 0.899× for invocation wall
+(0.683→0.614 s); allocation increased by 137,294 B/turn at the median.
+This is one ordered pair on a shared host: timing variation prevents a
+calibrated overhead estimate. The 512-SELECT median reproduces the earlier
+515-SELECT observation within the cohort's normal scheduling variation.
+
 ### Heap profiling
+
+```sh
+. ./env.sh
+python3 scripts/profile_heap.py --population replay \
+  --workload crates/lash-perf/workloads/replay/scenarios/coding-typical.json \
+  --turns 5 --profile-turn 4 --out-dir .kiln/FIG-6400/coding-heap
+python3 scripts/perfreport.py .kiln/FIG-6400/coding-heap/dhat/parent.dhat.json --top 10
+```
+
+This builds the opt-level-3, symbolized profiling platform through Kiln and
+runs one ordered pair with the **same DHAT executable**, profiler inactive
+then active. Both replays use fresh SQLite stores and validate all scripted
+model calls. `receipt.json` records the build report, executable hashes,
+allocator, identities, actual selected turns, per-turn wall observations,
+profile/window receipt and per-process `/usr/bin/time -v` resource files.
+Each replay is capped at 8 GiB virtual memory. Runtime stores live under
+`target/heap-replay/` and are removed after success. Reuse a build with
+`--no-build --build-report <previous-build.json>`.
+
+`--profile-turn K` is one-based. Optionally add `--profile-through-turn L`
+for a contiguous inclusive range; ranges crossing compaction are refused.
+The window begins before the first selected turn’s meter read and ends after
+the last selected outcome and meter read. Session creation, earlier turns,
+compaction, report writing and shutdown are excluded. A range includes inter-turn cleanup and record assembly between its endpoints.
+Already-live history
+is excluded unless reallocated in the window. Direct replay accepts the same
+turn flags with `--dhat-out <path>` and optional `--dhat-frames N` on a
+`dhat-heap` build. The launcher uses 64 frames to reach application callers.
+`perfreport.py` resolves the first application source frame, including unique
+shortened workspace paths, and retains file:line; allocator filtering uses
+source paths, never optimized function-name substrings.
+
+Compare turn 1 and turn 4 with separate fresh output directories to attribute
+history growth at equal tool count. DHAT traffic (`tb`), simultaneous-peak
+live bytes (`gb`), site maximum (`mb`) and window-end live bytes (`eb`) are
+different quantities. Site maxima cannot be summed as a simultaneous peak.
+These are host Rust allocations, excluding workers and SQLite’s native
+allocator. DHAT bookkeeping changes allocation counts, time and RSS; the
+ordered off/on pair is a shared-host diagnostic, not a calibrated overhead
+estimate or a timing gate.
+
+On the same source, coding-typical turn 1 and turn 4 captures each completed
+five turns/22 model calls per mode, with one selected turn profiled. DHAT
+send→outcome wall ratios were 10.34× and 11.94×, and peak RSS was
+949,884/948,492 KiB versus 102,140/102,908 KiB with the host profiler inactive.
+All runs used the 8 GiB cap. Prompt-admission stacks through
+`prompt_sections.rs:621`/`:546` and `composer.rs:231`/`:245` grew from
+542,315 to 1,155,928 requested bytes, or 204,538 B/prior turn over this short
+span. The scripted provider grew separately by 391,862 B/prior turn.
+First-use work in the remaining stacks makes the all-stack secant smaller;
+these typical-size, first/fourth-turn samples do not reproduce the historical
+heavy-size 4→24-turn allocation secant. The source attribution matches that
+report's prompt construction/decoding finding. The captured turn-4 prompt
+family had zero window-end live bytes. Grouping each stack by its first
+application source file ranks `prompt_sections.rs` first for growth:
+361,253→997,953 B, or 212,233 B/prior turn. These quantities describe traffic
+and the selected window, not total retained session memory.
 
 The opt-in `dhat-heap` build profiles each re-executed Python worker from
 bootstrap through its first clean reset. For a receipt at `replay-receipt.json`,

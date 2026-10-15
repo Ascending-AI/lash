@@ -48,6 +48,7 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::conn::{FencedTx, SqliteConnection, TxOutcome, cached_execute};
 use crate::liveness_locks::{LivenessLocks, Probed};
 
+mod access;
 mod claim_facts;
 mod graph;
 mod park;
@@ -455,40 +456,6 @@ impl SqliteDurableStore {
             observer,
             graph_reads,
         }
-    }
-
-    fn instant(&self) -> Result<DurableInstant, DurableError> {
-        integer(self.clock.timestamp_ms())
-            .map(DurableInstant)
-            .map_err(store_failure)
-    }
-
-    async fn write<T, F>(&self, label: CommitLabel, body: F) -> Result<T, DurableError>
-    where
-        T: Send + 'static,
-        F: FnOnce(&FencedTx<'_>, DurableInstant) -> Flow<T> + Send + 'static,
-    {
-        let now = self.instant()?;
-        tracing::trace!(label = label.as_str(), "durable sqlite commit");
-        self.observer
-            .observe_sql(label.as_str(), "sqlite", async {
-                self.conn
-                    .write_flow(move |tx| body(tx, now))
-                    .await
-                    .map_err(store_failure)?
-            })
-            .await
-    }
-
-    async fn read<T, F>(&self, body: F) -> Result<T, DurableError>
-    where
-        T: Send + 'static,
-        F: FnOnce(&Connection) -> rusqlite::Result<Result<T, DurableError>> + Send + 'static,
-    {
-        self.conn
-            .read(move |tx| body(tx))
-            .await
-            .map_err(store_failure)?
     }
 
     /// Every registered boot, and whether some listener holds its liveness

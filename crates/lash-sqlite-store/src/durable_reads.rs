@@ -1,21 +1,6 @@
 //! Read-only durable ports and their configured graph hydration.
 use super::*;
 
-impl SqliteDurableStore {
-    /// A single statement owns its SQLite snapshot. Compound reads keep
-    /// using `read` so their rows and graph bodies share one transaction.
-    async fn query<T, F>(&self, body: F) -> Result<T, DurableError>
-    where
-        T: Send + 'static,
-        F: FnOnce(&Connection) -> rusqlite::Result<Result<T, DurableError>> + Send + 'static,
-    {
-        self.conn
-            .call(move |conn| body(conn))
-            .await
-            .map_err(store_failure)?
-    }
-}
-
 #[async_trait::async_trait]
 impl DurableReads for SqliteDurableStore {
     async fn turn(

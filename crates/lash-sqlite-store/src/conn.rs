@@ -943,7 +943,10 @@ impl SqliteConnection {
                     timing.start_service();
                     timing.complete();
                 }
-                Ok(f(c))
+                Ok(crate::observed_sql::with_origin(
+                    std::any::type_name::<F>(),
+                    || f(c),
+                ))
             })
             .await,
         )
@@ -981,7 +984,8 @@ impl SqliteConnection {
                     timing.complete();
                 }
                 let tx = c.transaction_with_behavior(TransactionBehavior::Deferred)?;
-                let value = f(&tx)?;
+                let value =
+                    crate::observed_sql::with_origin(std::any::type_name::<F>(), || f(&tx))?;
                 tx.rollback()?;
                 Ok(Ok(value))
             })
@@ -1082,8 +1086,11 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&FencedTx<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
-        self.write_flow(move |tx| f(tx).map(TxOutcome::Commit))
-            .await
+        self.write_flow(move |tx| {
+            crate::observed_sql::with_origin(std::any::type_name::<F>(), || f(tx))
+                .map(TxOutcome::Commit)
+        })
+        .await
     }
 
     /// Like [`write`](Self::write) but the closure decides commit vs rollback

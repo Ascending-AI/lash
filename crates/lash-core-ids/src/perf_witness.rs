@@ -3,6 +3,8 @@
 //! This is unsupported instrumentation surface. Production builds compile the
 //! module and every call site out unless `perf-witness` is explicitly enabled.
 
+pub mod sql_shapes;
+
 pub mod latency;
 pub mod startup;
 
@@ -163,6 +165,7 @@ pub struct Snapshot {
     /// `sql_statements`.
     pub sql_statements_by_verb: BTreeMap<&'static str, u64>,
     pub sql_receipts: Vec<SqlStatementReceipt>,
+    pub sql_shapes: Option<sql_shapes::Receipt>,
     /// Result rows SQL statements returned to the store.
     pub sql_rows_read: u64,
     /// Rows SQL statements inserted, updated or deleted (SQLite's
@@ -195,14 +198,18 @@ impl std::error::Error for AlreadyInstalled {}
 
 impl Collector {
     pub fn install() -> Result<Self, AlreadyInstalled> {
-        Self::install_configured(false)
+        Self::install_configured(false, false)
     }
 
     pub fn install_with_sql_receipts() -> Result<Self, AlreadyInstalled> {
-        Self::install_configured(true)
+        Self::install_configured(true, false)
     }
 
-    fn install_configured(sql_receipts: bool) -> Result<Self, AlreadyInstalled> {
+    pub fn install_with_sql_shapes() -> Result<Self, AlreadyInstalled> {
+        Self::install_configured(false, true)
+    }
+
+    fn install_configured(sql_receipts: bool, shapes: bool) -> Result<Self, AlreadyInstalled> {
         COLLECTOR_STATE
             .compare_exchange(INACTIVE, INSTALLING, Ordering::AcqRel, Ordering::Relaxed)
             .map_err(|_| AlreadyInstalled)?;
@@ -231,13 +238,22 @@ impl Collector {
             counter.store(0, Ordering::Relaxed);
         }
         lock_pool_checkout_waits().clear();
+        if shapes {
+            sql_shapes::enable();
+        } else {
+            sql_shapes::disable();
+        }
         COLLECTOR_STATE.store(ACTIVE, Ordering::Release);
         Ok(Self { _private: () })
     }
 
     /// Snapshot all work observed since this collector was installed.
     pub fn snapshot(&self) -> Snapshot {
+        let shapes = sql_shapes::enabled().then(sql_shapes::lock);
         Snapshot {
+            sql_shapes: shapes
+                .as_ref()
+                .and_then(|s| s.as_ref().map(|s| s.receipt())),
             graph_adopt_attempts: GRAPH_ADOPT_ATTEMPTS.load(Ordering::Relaxed),
             graph_adopt_bytes: GRAPH_ADOPT_BYTES.load(Ordering::Relaxed),
             graph_serialized_body_bytes: GRAPH_SERIALIZED_BODY_BYTES.load(Ordering::Relaxed),
@@ -274,6 +290,9 @@ impl Collector {
 
 impl Drop for Collector {
     fn drop(&mut self) {
+        // A successor may install as soon as INACTIVE is visible. Clear the
+        // old attribution before handing it the process-global slot.
+        sql_shapes::disable();
         COLLECTOR_STATE.store(INACTIVE, Ordering::Release);
     }
 }
@@ -325,6 +344,10 @@ pub fn record_sql_statement_bytes(sql: &str, expanded_bytes: usize) {
     if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
         return;
     }
+    let mut shapes = sql_shapes::enabled().then(sql_shapes::lock);
+    if let Some(state) = &mut shapes {
+        sql_shapes::record(state, sql, true);
+    }
     SQL_BYTES.fetch_add(expanded_bytes as u64, Ordering::Relaxed);
     SQL_STATEMENTS.fetch_add(1, Ordering::Relaxed);
     SQL_STATEMENTS_BY_VERB[SqlVerb::classify(sql) as usize].fetch_add(1, Ordering::Relaxed);
@@ -342,9 +365,13 @@ pub fn record_sql_statement_bytes(sql: &str, expanded_bytes: usize) {
 
 /// Record one result row a SQL statement returned.
 #[inline]
-pub fn record_sql_row_read() {
+pub fn record_sql_row_read(sql: &str) {
     if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
         return;
+    }
+    let mut shapes = sql_shapes::enabled().then(sql_shapes::lock);
+    if let Some(state) = &mut shapes {
+        sql_shapes::record(state, sql, false);
     }
     SQL_ROWS_READ.fetch_add(1, Ordering::Relaxed);
 }

@@ -57,6 +57,26 @@ pub struct ReplayArgs {
     /// duration history (main's trend).
     #[arg(long)]
     pub history: Option<PathBuf>,
+    /// SQLite shape × store-origin sidecar (one selected workload).
+    #[arg(long)]
+    pub sql_shapes: Option<PathBuf>,
+    #[command(flatten)]
+    pub heap: ReplayHeapArgs,
+}
+
+/// One contiguous host heap window. Setup and earlier history are excluded.
+#[derive(Clone, Debug, Default, clap::Args)]
+pub struct ReplayHeapArgs {
+    #[arg(long, requires = "profile_turn")]
+    pub dhat_out: Option<PathBuf>,
+    #[arg(long, requires = "dhat_out")]
+    pub dhat_frames: Option<usize>,
+    /// One-based first turn to profile; requires a dhat-heap build.
+    #[arg(long, requires = "dhat_out")]
+    pub profile_turn: Option<usize>,
+    /// Inclusive last turn (default: profile-turn).
+    #[arg(long, requires = "profile_turn")]
+    pub profile_through_turn: Option<usize>,
 }
 
 /// `lash-perf replay-gate`: the per-merge counted gate.
@@ -80,6 +100,8 @@ async fn run_workloads(
     workloads: &[(script::Workload, Option<usize>)],
     store: &StoreChoice,
     out: &std::path::Path,
+    sql_shapes: Option<&std::path::Path>,
+    heap: &ReplayHeapArgs,
 ) -> Result<ReplayReceipt> {
     let mut receipt = ReplayReceipt {
         format: RECEIPT_FORMAT.to_owned(),
@@ -91,6 +113,8 @@ async fn run_workloads(
             store: store.clone(),
             turns: *turns,
             worker_profile_dir: out.with_extension("worker-heaps").join(&workload.name),
+            sql_shapes: sql_shapes.map(std::path::Path::to_path_buf),
+            heap: heap.clone(),
         };
         eprintln!(
             "replay: {} ({} turns x {} session(s))",
@@ -130,6 +154,37 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         .iter()
         .map(|name| Ok((script::resolve(name)?, args.turns)))
         .collect::<Result<Vec<_>>>()?;
+    if args.sql_shapes.is_some() || args.heap.dhat_out.is_some() {
+        anyhow::ensure!(
+            workloads.len() == 1,
+            "attribution selects exactly one workload"
+        );
+    }
+    anyhow::ensure!(
+        args.sql_shapes.is_none() || args.store == StoreKind::Sqlite,
+        "--sql-shapes is SQLite only"
+    );
+    if let Some(first) = args.heap.profile_turn {
+        let end = args.heap.profile_through_turn.unwrap_or(first);
+        let (workload, limit) = &workloads[0];
+        let count = limit
+            .unwrap_or(workload.turn_count())
+            .min(workload.turn_count());
+        anyhow::ensure!(
+            first > 0 && end >= first && end <= count,
+            "profile turn range must lie within the replay"
+        );
+        anyhow::ensure!(
+            !workload
+                .compact_every
+                .is_some_and(|every| (first..end).any(|t| t % every == 0)),
+            "heap range cannot include between-turn compaction; select one side"
+        );
+        anyhow::ensure!(
+            cfg!(feature = "dhat-heap"),
+            "--dhat-out requires a dhat-heap build"
+        );
+    }
     let store = match args.store {
         StoreKind::Sqlite => StoreChoice::SqliteFile(args.store_dir.clone()),
         StoreKind::Postgres => StoreChoice::Postgres(
@@ -138,7 +193,14 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
                 .context("--store postgres needs LASH_POSTGRES_DATABASE_URL or --postgres-url")?,
         ),
     };
-    let receipt = run_workloads(&workloads, &store, &args.out).await?;
+    let receipt = run_workloads(
+        &workloads,
+        &store,
+        &args.out,
+        args.sql_shapes.as_deref(),
+        &args.heap,
+    )
+    .await?;
     print!("{}", receipt::table(&receipt));
     if let Some(history) = &args.history {
         crate::runtime_perf::record_replay_receipt(&receipt, history)?;
@@ -166,6 +228,8 @@ pub async fn run_gate(args: &GateArgs) -> Result<i32> {
         &workloads,
         &StoreChoice::SqliteFile(args.store_dir.clone()),
         &args.out,
+        None,
+        &ReplayHeapArgs::default(),
     )
     .await?;
     print!("{}", receipt::table(&receipt));

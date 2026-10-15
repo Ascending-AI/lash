@@ -341,6 +341,12 @@ impl ShapeKey {
     }
 }
 
+/// Reuse the bounded, literal-redacting SQL key cache for process witnesses.
+#[cfg(feature = "perf-witness")]
+pub(crate) fn normalized_shape(sql: &str) -> Arc<str> {
+    ShapeKey::of(sql).shape
+}
+
 pub async fn collect<T>(
     operation: impl Into<String>,
     backend: &'static str,

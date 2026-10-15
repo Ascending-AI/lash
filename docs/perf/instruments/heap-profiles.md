@@ -29,6 +29,12 @@ and node setup through shutdown and runtime teardown. These remain diagnostic
 latency selections (exit 2 because `fast` did not run). The wrapper requires
 answered samples without case errors and both populated profiles.
 
+Replay host windows use `--population replay --workload <scenario> --turns N
+--profile-turn K --out-dir <fresh-directory>`. This uses the same optimized
+executable for inactive/active profiler modes and records build, selected-turn
+window and resource receipts. See [replay attribution](replay-workloads.md#heap-profiling)
+for the complete command, range semantics and quantity limits.
+
 The `lash-vm-worker` helper's opt-in `dhat-heap` feature uses DHAT 0.3.3.
 `--heap-profile-dir` travels in argv, preserving the worker's empty environment.
 It writes `vm-worker-<pid>.dhat.json`, covering bootstrap validation after the

@@ -223,10 +223,18 @@ pub struct Meter {
 
 impl Meter {
     /// Install the process-global SQL witness. One meter runs at a time.
-    pub fn install(probe: StoreProbe, workers: Option<lash::vm::WorkerPool>) -> Result<Self> {
+    pub fn install(
+        probe: StoreProbe,
+        workers: Option<lash::vm::WorkerPool>,
+        sql_shapes: bool,
+    ) -> Result<Self> {
         Ok(Self {
-            witness: lash_core::perf_witness::Collector::install()
-                .map_err(|error| anyhow::anyhow!("{error}"))?,
+            witness: (if sql_shapes {
+                lash_core::perf_witness::Collector::install_with_sql_shapes()
+            } else {
+                lash_core::perf_witness::Collector::install()
+            })
+            .map_err(|error| anyhow::anyhow!("{error}"))?,
             probe,
             workers,
         })
@@ -238,6 +246,18 @@ impl Meter {
 
     /// Read every available counter now.
     pub async fn read(&self, model_calls: u64) -> Reading {
+        self.read_with_shapes(model_calls).await.0
+    }
+
+    /// Counters and attribution use the very same locked SQL snapshot.
+    pub async fn read_with_shapes(
+        &self,
+        model_calls: u64,
+    ) -> (
+        Reading,
+        Option<lash_core::perf_witness::sql_shapes::Receipt>,
+    ) {
+        let mut shapes = None;
         let mut reading = Reading::new();
         let alloc = crate::GLOBAL_ALLOCATOR.stats();
         reading.insert(
@@ -257,6 +277,7 @@ impl Meter {
         } = &self.probe
         {
             let work = self.witness.snapshot();
+            shapes = work.sql_shapes.clone();
             let verb = |name: &str| {
                 work.sql_statements_by_verb
                     .get(name)
@@ -299,6 +320,6 @@ impl Meter {
             reading.insert("workers_killed", super::workers::killed() as f64);
             reading.insert("worker_cpu_ms", pool.measured_cpu().as_secs_f64() * 1_000.0);
         }
-        reading
+        (reading, shapes)
     }
 }

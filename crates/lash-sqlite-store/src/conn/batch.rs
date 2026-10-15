@@ -191,7 +191,9 @@ where
         };
         // A panic is this member's failure alone: unwinding further would
         // end the connection thread and drop every member's answer.
-        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(tx)));
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::observed_sql::with_origin(std::any::type_name::<F>(), || body(tx))
+        }));
         let (result, kept) = match ran {
             Ok(Ok(TxOutcome::Commit(value))) => (Ok(value), Kept::Writes),
             Ok(Ok(TxOutcome::Rollback(value))) => (Ok(value), Kept::Nothing),

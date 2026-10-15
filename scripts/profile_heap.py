@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import resource
 import shutil
 import subprocess
 import time
@@ -342,9 +343,93 @@ def profile_growturn(args: argparse.Namespace) -> None:
     print(f"Growing-turn heap receipt: {out / 'receipt.json'}")
 
 
+def profile_replay(args: argparse.Namespace) -> None:
+    """Use one optimized DHAT executable for an inactive/selected-turn pair."""
+    root = Path(__file__).resolve().parents[1]
+    out = args.out_dir.resolve()
+    out.mkdir(parents=True, exist_ok=False)
+    label = feature_binary(root, "lash-perf", "lash-perf", {"dhat-heap"})
+    worker = "//crates/lash-vm-worker:lash-vm-worker__bin"
+    build_report = args.build_report or out / "build.json"
+    paths = artifacts(root, [label, worker], build=not args.no_build,
+                      report=build_report, optimized=True, symbolized=True)
+    observations = []
+    last = args.profile_turn if args.profile_through_turn is None else args.profile_through_turn
+
+    def cap_memory() -> None:
+        limit = 8 * 1024**3
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        resource.setrlimit(resource.RLIMIT_AS, (min(soft, limit) if soft >= 0 else limit, hard))
+
+    for mode in ("off", "dhat"):
+        directory = out / mode
+        directory.mkdir()
+        store = root / "target/heap-replay" / f"{os.getpid()}-{mode}"
+        command = [str(paths[label]), "replay", args.workload, "--turns", str(args.turns),
+                   "--store-dir", str(store), "--out", str(directory / "replay.json")]
+        if mode == "dhat":
+            command += ["--dhat-out", str(directory / "parent.dhat.json"),
+                        "--dhat-frames", "64", "--profile-turn", str(args.profile_turn),
+                        "--profile-through-turn", str(last)]
+        with (directory / "run.log").open("w") as log:
+            started = time.monotonic_ns()
+            result = subprocess.run(["/usr/bin/time", "-v", "-o", str(directory / "resources.txt"),
+                                     *command], cwd=root, stdout=log, stderr=subprocess.STDOUT,
+                                    env=dict(os.environ, LASH_VM_WORKER=str(paths[worker])),
+                                    preexec_fn=cap_memory)
+            elapsed = time.monotonic_ns() - started
+        if result.returncode:
+            raise RuntimeError(f"replay failed; see {directory / 'run.log'}")
+        replay = json.loads((directory / "replay.json").read_text())
+        identity = replay["identity"]
+        flags = identity["build_profile"]
+        if (identity["allocator"] != "dhat-heap+stats_alloc" or "OPT_LEVEL=3;" not in flags
+                or "debug_assertions=false" not in flags or "debuginfo=line-tables-only" not in flags
+                or "force-frame-pointers=yes" not in flags):
+            raise RuntimeError("replay heap capture requires the symbolized optimized DHAT build")
+        workload = replay["workloads"][0]
+        if len(workload["rounds"]) < last:
+            raise RuntimeError("replay did not reach the selected turn range")
+        selected = [row for row in workload["rounds"] if args.profile_turn <= row["turn"] <= last]
+        observations.append({"mode": mode, "command": command, "exit_code": result.returncode,
+                             "elapsed_ns": elapsed, "identity": replay["identity"],
+                             "script_digest": workload["script_digest"],
+                             "completed_turns": len(workload["rounds"]),
+                             "selected_turns": [row["turn"] for row in selected],
+                             "selected_turn_wall_ms": sum(row["metrics"]["wall_ms"] for row in selected),
+                             "resources": str(directory / "resources.txt")})
+        shutil.rmtree(store)
+    profile = out / "dhat/parent.dhat.json"
+    window = json.loads(profile.with_suffix(".receipt.json").read_text())
+    if (not window["completed"] or window["first_turn"] != args.profile_turn
+            or window["last_turn"] != last
+            or not json.loads(profile.read_text()).get("pps")):
+        raise RuntimeError("selected replay window did not produce a complete populated profile")
+    if observations[0]["script_digest"] != observations[1]["script_digest"]:
+        raise RuntimeError("on/off workload identities differ")
+    receipt = {"kind": "lash.replay-heap", "certifying": False,
+               "population": "replay", "workload": args.workload, "turns": args.turns,
+               "profile_turn": args.profile_turn,
+               "profile_through_turn": last,
+               "scope": "host Rust allocations in selected replay rounds; excludes preexisting history, worker heaps and native SQLite allocations",
+               "window_receipt": window, "profile": str(profile), "build_report": str(build_report),
+               "platform": "//tools/buck2:profiling", "allocator": "dhat-heap+stats_alloc",
+               "statistic": "single ordered same-executable profiler inactive/active pair; shared-host diagnostic",
+               "executables": {key: {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                               for key, path in paths.items()},
+               "observations": observations,
+               "on_minus_off_ns": observations[1]["elapsed_ns"] - observations[0]["elapsed_ns"]}
+    (out / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    print(f"Replay heap receipt: {out / 'receipt.json'}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--population", choices=("boundary", "latency", "growturn"), default="boundary")
+    parser.add_argument("--population", choices=("boundary", "latency", "growturn", "replay"), default="boundary")
+    parser.add_argument("--workload", help="Replay workload name or script path")
+    parser.add_argument("--turns", type=int, help="Replay prefix length")
+    parser.add_argument("--profile-turn", type=int, help="Replay: one-based turn to profile")
+    parser.add_argument("--profile-through-turn", type=int, help="Replay: inclusive last turn")
     parser.add_argument("--case", default="root-redrive")
     parser.add_argument("--operations", type=int, default=1)
     parser.add_argument("--payload-bytes", type=int, default=1024)
@@ -365,7 +450,13 @@ def main() -> None:
         parser.error("latency heap pairs select one child-node case: cross-worker, poll or grace")
     if args.operations < 1 or args.callers < 1 or args.worker_threads < 1:
         parser.error("operations, callers and worker threads must be positive")
-    if args.population == "growturn":
+    if args.population == "replay":
+        if (args.heaptrack or not args.workload or not args.turns or args.turns < 1
+                or args.profile_turn is None
+                or not 1 <= args.profile_turn <= ((args.profile_turn if args.profile_through_turn is None else args.profile_through_turn)) <= args.turns):
+            parser.error("replay needs --workload, positive --turns and a profile turn range within turns")
+        profile_replay(args)
+    elif args.population == "growturn":
         if (args.heaptrack or args.operations < 4 or args.payload_bytes < 32
                 or args.checkpoint_every < 1 or not 0 <= args.profile_from_round <= args.operations):
             parser.error("growturn uses dhat, rounds >= 4, payload >= 32 and positive checkpoints")
