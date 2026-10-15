@@ -5197,6 +5197,7 @@
       "type": "object"
     },
     {
+      "description": "A code cell's span opens: once per execution of the cell, starting at\nthe cell's retained first start.",
       "properties": {
         "code": {
           "type": "string"
@@ -5206,6 +5207,9 @@
           "minimum": 0,
           "type": "integer"
         },
+        "language": {
+          "type": "string"
+        },
         "type": {
           "const": "exec_code_started",
           "type": "string"
@@ -5213,12 +5217,14 @@
       },
       "required": [
         "type",
+        "language",
         "code",
         "code_chars"
       ],
       "type": "object"
     },
     {
+      "description": "A code cell answered, and the commit that consumed its answer closes\nits span. `started_at_ms` is the cell's first start, which a\nsuspension or a re-run keeps; `duration_ms` runs from it.",
       "properties": {
         "duration_ms": {
           "format": "uint64",
@@ -5234,6 +5240,9 @@
               "type": "null"
             }
           ]
+        },
+        "language": {
+          "type": "string"
         },
         "observation_count": {
           "format": "uint",
@@ -5254,6 +5263,11 @@
           "minimum": 0,
           "type": "integer"
         },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "terminal_finish": true,
         "tool_calls": {
           "items": {
@@ -5268,6 +5282,8 @@
       },
       "required": [
         "type",
+        "language",
+        "started_at_ms",
         "duration_ms",
         "output",
         "output_chars",
@@ -5278,14 +5294,28 @@
       "type": "object"
     },
     {
+      "description": "A code cell answered with a failure, and the commit that consumed its\nanswer closes its span, from its first start.",
       "properties": {
+        "duration_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "error": {
           "description": "Human-readable detail. Not a stable classification surface.",
+          "type": "string"
+        },
+        "language": {
           "type": "string"
         },
         "reason": {
           "$ref": "#/$defs/ExecCodeFailureReason",
           "description": "Closed failure classification; offline analysis keys on this rather\nthan matching `error` prose."
+        },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         },
         "type": {
           "const": "exec_code_failed",
@@ -5294,8 +5324,40 @@
       },
       "required": [
         "type",
+        "language",
+        "started_at_ms",
+        "duration_ms",
         "reason",
         "error"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A code cell its turn's terminal stopped before it answered: that\nterminal's owner closes its span, from its first start. A discard is\nnot a failure.",
+      "properties": {
+        "duration_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "exec_code_discarded",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "language",
+        "started_at_ms",
+        "duration_ms"
       ],
       "type": "object"
     },

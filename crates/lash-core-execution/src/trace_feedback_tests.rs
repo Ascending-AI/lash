@@ -73,7 +73,7 @@ fn tool_scope_owner_stays_on_the_admitted_run_across_physical_turns() {
             span: None,
             started_at_ms: 1,
         };
-        let scope = tool_trace_scope(&opener, Some(&parent), &call_id, 2);
+        let scope = tool_trace_scope(&opener, parent.as_parent().as_ref(), &call_id, 2);
         assert_eq!(
             scope.scope.owner,
             TraceScopeOwner::Tool {
@@ -94,7 +94,7 @@ fn tool_scope_owner_stays_on_the_admitted_run_across_physical_turns() {
         started_at_ms: 1,
     };
     assert_eq!(
-        tool_trace_scope(&opener, Some(&parent), &call_id, 2).scope,
+        tool_trace_scope(&opener, parent.as_parent().as_ref(), &call_id, 2).scope,
         scopes[0]
     );
     assert_eq!(

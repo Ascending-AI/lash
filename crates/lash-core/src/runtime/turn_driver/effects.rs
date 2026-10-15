@@ -452,11 +452,20 @@ impl RuntimeTurnDriver<'_> {
     > {
         let code_executor = self.session.plugins().code_executor();
         let code_block_graph_key = foreground_exec_graph_key(&invocation);
+        // The cell's tool calls are the cell span's children (§3.3).
+        let tracing =
+            self.execution_tracing(protocol_iteration)
+                .map(|tracing| match &code_block_graph_key {
+                    Some(graph_key) => {
+                        tracing.in_container(&lash_trace::SpanKey::Cell { graph_key })
+                    }
+                    None => tracing,
+                });
         let context = self
             .execution_context(event_tx, Arc::default())
             .map_err(crate::RuntimeEffectControllerError::from)?
             .with_turn_history(active_events, messages)
-            .with_tracing(self.execution_tracing(protocol_iteration))
+            .with_tracing(tracing)
             .with_code_block_graph_key(code_block_graph_key)
             .with_cell_end(self.cell_end.clone())
             .with_held_response(self.held_response.clone());

@@ -23,8 +23,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash::tracing::{
-    FlightRecorderSettings, FlightRecorderSink, SpanRole, TraceCarrier, TraceRecord, TraceScopeId,
-    TraceScopeOwner, TraceSink, TraceSinkError, TraceSpanKind,
+    FlightRecorderSettings, FlightRecorderSink, SpanRole, TraceCarrier, TracePosition, TraceRecord,
+    TraceScopeId, TraceScopeOwner, TraceSink, TraceSinkError, TraceSpanKind,
 };
 use lash_sansio::sync::MutexExt as _;
 
@@ -256,6 +256,120 @@ impl Telemetry {
         }
         violations
     }
+
+    /// How the code cells of `session`'s first turn broke their spans
+    /// (the tracing lane T5, §3.8's cell row, §4.5): unless each cell's span
+    /// is the turn span's child and closes once (at most once when `lossy`),
+    /// from the first start its every opening record names, and unless each
+    /// tool call of the turn is a cell span's child. A turn with no cell
+    /// breaks them too.
+    pub fn first_turn_cell_violations(&self, session: &str, lossy: bool) -> Vec<String> {
+        let published = self.published.lock_recover();
+        let Some((scope, turn)) = first_turn(&published, session) else {
+            return vec![format!("no turn of session {session} was published")];
+        };
+        let TraceScopeOwner::Turn { turn_id, .. } = &scope.owner else {
+            unreachable!("found a turn scope");
+        };
+        let mut violations = Vec::new();
+        let mut cells = BTreeMap::<_, (Vec<&TracePosition>, Vec<&TracePosition>)>::new();
+        for position in published
+            .iter()
+            .filter_map(|record| record.position.as_ref())
+        {
+            if position.kind != TraceSpanKind::Cell
+                || position.scope.as_ref() != Some(&scope)
+                || !matches!(
+                    position.role,
+                    SpanRole::Opens | SpanRole::Closes | SpanRole::Whole
+                )
+            {
+                continue;
+            }
+            if position.parent.as_ref().map(TraceCarrier::span_id) != Some(turn.span_id()) {
+                violations.push(format!(
+                    "a cell span {:?} of turn {turn_id} is not its turn's child",
+                    position.span.span_id()
+                ));
+            }
+            let (opens, closes) = cells
+                .entry(format!("{:?}", position.span.span_id()))
+                .or_default();
+            if position.role == SpanRole::Opens {
+                opens.push(position);
+            } else {
+                closes.push(position);
+            }
+        }
+        if cells.is_empty() {
+            violations.push(format!("no cell of turn {turn_id} was published"));
+        }
+        for (cell, (opens, closes)) in &cells {
+            if closes.len() > 1 || (closes.is_empty() && !lossy) {
+                violations.push(format!(
+                    "cell {cell} of turn {turn_id} must close once, but closed {} times",
+                    closes.len()
+                ));
+            }
+            for position in opens.iter().chain(closes) {
+                if let Some(first) = opens.first()
+                    && position.started_at != first.started_at
+                {
+                    violations.push(format!(
+                        "cell {cell}'s {:?} record starts at {:?}, not its first start {:?}",
+                        position.role, position.started_at, first.started_at
+                    ));
+                }
+            }
+        }
+        for position in published
+            .iter()
+            .filter_map(|record| record.position.as_ref())
+        {
+            let Some(TraceScopeOwner::Tool {
+                owner: lash::tracing::TraceToolOwner::Turn { turn_id: owner, .. },
+                call_id,
+            }) = position.scope.as_ref().map(|scope| &scope.owner)
+            else {
+                continue;
+            };
+            if owner != turn_id || position.kind != TraceSpanKind::Tool {
+                continue;
+            }
+            let parent = position
+                .parent
+                .as_ref()
+                .map(|parent| format!("{:?}", parent.span_id()));
+            if !parent
+                .as_ref()
+                .is_some_and(|parent| cells.contains_key(parent))
+            {
+                violations.push(format!(
+                    "tool call {call_id}'s {:?} record names parent {parent:?}, not its cell",
+                    position.role
+                ));
+            }
+        }
+        violations
+    }
+
+    /// The closing records of the code cells of `session`'s first turn.
+    pub fn first_turn_cell_closes(&self, session: &str) -> Vec<TracePosition> {
+        let published = self.published.lock_recover();
+        let Some((scope, _)) = first_turn(&published, session) else {
+            return Vec::new();
+        };
+        published
+            .iter()
+            .filter_map(|record| record.position.as_ref())
+            .filter(|position| {
+                position.kind == TraceSpanKind::Cell
+                    && position.scope.as_ref() == Some(&scope)
+                    && position.publishes()
+            })
+            .cloned()
+            .collect()
+    }
 }
 
 /// A span some owner opened as a container, or a published record names
@@ -378,16 +492,12 @@ fn first_turn(published: &[TraceRecord], session: &str) -> Option<(TraceScopeId,
 }
 
 /// A span id named by two published closing or whole records (L1(b)).
-///
-/// A code cell is exempt until its span closes on the commit that consumes
-/// its answer (the tracing lane T5, §3.8's cell row): until then a cell
-/// that re-runs after a cut before that commit publishes its span again.
 fn unique_span_violations(published: &[TraceRecord]) -> Vec<String> {
     let mut seen = HashSet::new();
     published
         .iter()
         .filter_map(|record| record.position.as_ref())
-        .filter(|position| position.publishes() && position.kind != TraceSpanKind::Cell)
+        .filter(|position| position.publishes())
         .filter(|position| !seen.insert(position.span.span_id()))
         .map(|position| {
             format!(

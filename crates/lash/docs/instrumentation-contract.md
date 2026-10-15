@@ -14,7 +14,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `execute_tool` | Internal | Transition |
 | `lash.tool_intent` | Internal | Transition |
 | `lash.process` | Internal | Transition |
-| `lash.exec_code` | Internal | Live |
+| `execute_tool` | Internal | Transition |
 
 | Attribute | Type |
 |---|---|
@@ -39,6 +39,10 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `gen_ai.response.model` | String |
 | `gen_ai.tool.name` | String |
 | `gen_ai.tool.call.id` | String |
+| `gen_ai.tool.type` | String |
+| `lash.cell.id` | String |
+| `lash.cell.language` | String |
+| `lash.cell.tool_calls` | Integer |
 | `gen_ai.usage.input_tokens` | Integer |
 | `gen_ai.usage.output_tokens` | Integer |
 | `gen_ai.usage.cache_read.input_tokens` | Integer |

@@ -44,8 +44,10 @@ impl RuntimeExecutionContext<'_> {
     }
 
     /// The trace scope of `call_id`, requested at `requested_at_ms`, under
-    /// the turn's: its span derived from the turn's, so every owner that
-    /// reads the admission back names the same one. `None` without tracing.
+    /// its issuing container: the cell it was called from, else the turn's
+    /// (or process's) span. Its span is derived from that parent's, so every
+    /// owner that reads the admission back names the same one. `None`
+    /// without tracing.
     pub(crate) fn tool_trace_scope(
         &self,
         call_id: &crate::ToolCallId,
@@ -62,7 +64,7 @@ impl RuntimeExecutionContext<'_> {
         })?;
         Ok(Some(crate::trace::tool_trace_scope(
             &opener,
-            tracing.scope.as_ref(),
+            tracing.parent().as_ref(),
             call_id,
             requested_at_ms,
         )))

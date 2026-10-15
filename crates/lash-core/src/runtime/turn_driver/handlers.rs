@@ -506,20 +506,29 @@ impl RuntimeTurnDriver<'_> {
         };
         let code_correlation_id = TurnActivityId::new(format!("code:{id:?}"));
         let iteration = machine.protocol_iteration();
-        if self.trace.is_observed() {
-            let content = self.trace.content();
-            self.emit_cell_trace(held.as_ref(), iteration, None, || {
-                lash_trace::TraceEvent::ExecCodeStarted {
-                    code: content.capture(|| code.clone()),
-                    code_chars: code.chars().count(),
-                }
-            });
-        }
+        self.answered_cell_close = None;
         let invocation = match self.turn_effect_invocation(machine, id, RuntimeEffectKind::ExecCode)
         {
             Ok(invocation) => invocation,
             Err(err) => {
                 let message = err.to_string();
+                // A cell with no invocation has no identity and no span: its
+                // failure is the turn's, an event of the turn's span.
+                self.cell_start = None;
+                if self.trace.is_observed() {
+                    let started_at_ms = self.host.core.tracing.clock().timestamp_ms();
+                    let event = lash_trace::TraceEvent::ExecCodeFailed {
+                        language: language.clone(),
+                        started_at_ms,
+                        duration_ms: 0,
+                        reason: crate::ExecCodeFailureReason::Session,
+                        error: message.clone(),
+                    };
+                    let context = self.trace_context(iteration);
+                    self.emit_cell_trace(held.as_ref(), self.trace.clone(), false, move || {
+                        (context, event)
+                    });
+                }
                 self.turn_observations.observe(
                     cell_tx,
                     crate::engine::ObservedEvent::Activity {
@@ -553,8 +562,41 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(CellExit::Answered);
             }
         };
-        let graph_key = Some(foreground_effect_graph_key(&invocation));
+        let cell_graph_key = foreground_effect_graph_key(&invocation);
+        let graph_key = Some(cell_graph_key.clone());
         let cell_key = invocation.effect_replay_key().to_string();
+        // The cell's span starts at its first start, which the phase that
+        // holds the cell retains, whichever execution this is (§4.5).
+        self.begin_cell(id, &language);
+        let first_started_at_ms = self
+            .cell_start
+            .as_ref()
+            .map_or(0, |start| start.first_started_at_ms);
+        let cell_trace = CellTrace {
+            graph_key: cell_graph_key,
+            language: language.clone(),
+            first_started_at_ms,
+            context: {
+                let mut context = self.trace_context(iteration);
+                context.cell = graph_key.clone();
+                context
+            },
+        };
+        if self.trace.is_observed() {
+            let content = self.trace.content();
+            let event = lash_trace::TraceEvent::ExecCodeStarted {
+                language: language.clone(),
+                code: content.capture(|| code.clone()),
+                code_chars: code.chars().count(),
+            };
+            let context = cell_trace.context.clone();
+            self.emit_cell_trace(
+                held.as_ref(),
+                cell_trace.standing(&self.trace),
+                true,
+                move || (context, event),
+            );
+        }
         // The cell's own observation lane: every CodeBlock* event this driver
         // publishes for the cell sequences under the cell's replay key.
         let mut code_observations = crate::engine::ObservationCursor::new(
@@ -573,14 +615,8 @@ impl RuntimeTurnDriver<'_> {
         );
         // The observed duration is measured around the journaled invocation:
         // the recorded `ExecResponse` carries no wall-clock fields, so the
-        // Completed activity and its trace mirror take the live window here.
+        // Completed activity takes the live window here.
         let cell_started = self.host.core.clock.now();
-        let cell_started_at_ms = self.host.core.clock.timestamp_ms();
-        // The cell's span is whole: its closing record carries its start,
-        // and its id derives from the turn's span and the cell's graph key.
-        let cell_span = graph_key
-            .clone()
-            .map(|graph_key| (graph_key, cell_started_at_ms));
         self.answered_cell_end = None;
         drop(self.cell_end.take());
         self.held_response.clone_from(&held);
@@ -713,63 +749,76 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
         }
-        if let Ok(output) = &result {
-            if self.trace.is_observed() {
-                let observations_text = join_prints(&output.prints);
-                let observation_projections = output
-                    .prints
-                    .iter()
-                    .map(|observation| observation.projection.clone())
-                    .collect::<Vec<_>>();
-                let tool_calls = output
-                    .tool_calls
-                    .iter()
-                    .map(|record| lash_trace::TraceExecToolCall {
-                        call_id: record.call_id.clone(),
-                        name: record.tool.clone(),
-                        status: match record.output.status() {
-                            lash_sansio::ToolCallStatus::Success => {
-                                lash_trace::TraceToolCallStatus::Success
-                            }
-                            lash_sansio::ToolCallStatus::Failure => {
-                                lash_trace::TraceToolCallStatus::Failure
-                            }
-                            lash_sansio::ToolCallStatus::Cancelled => {
-                                lash_trace::TraceToolCallStatus::Cancelled
-                            }
-                        },
-                    })
-                    .collect::<Vec<_>>();
-                let content = self.trace.content();
-                self.emit_cell_trace(held.as_ref(), iteration, cell_span.clone(), || {
+        // The cell answered: its span closes once the commit that consumes
+        // the answer is acknowledged, from its first start to this end (P1).
+        self.cell_start = None;
+        if self.trace.is_observed() {
+            let ended_at_ms = self.host.core.tracing.clock().timestamp_ms();
+            let duration_ms = ended_at_ms.saturating_sub(first_started_at_ms);
+            let event = match &result {
+                Ok(output) => {
+                    let observations_text = join_prints(&output.prints);
+                    let observation_projections = output
+                        .prints
+                        .iter()
+                        .map(|observation| observation.projection.clone())
+                        .collect::<Vec<_>>();
+                    if !observation_projections.is_empty() {
+                        let projections = observation_projections.clone();
+                        let context = cell_trace.context.clone();
+                        self.emit_cell_trace(
+                            held.as_ref(),
+                            cell_trace.standing(&self.trace),
+                            false,
+                            move || {
+                                (
+                                    context,
+                                    lash_trace::TraceEvent::ObservationProjection { projections },
+                                )
+                            },
+                        );
+                    }
+                    let content = self.trace.content();
                     lash_trace::TraceEvent::ExecCodeCompleted {
-                        duration_ms: cell_duration_ms,
+                        language: language.clone(),
+                        started_at_ms: first_started_at_ms,
+                        duration_ms,
                         output: content.capture(|| observations_text.clone()),
                         output_chars: observations_text.chars().count(),
                         observation_count: output.prints.len(),
-                        observation_projections: observation_projections.clone(),
+                        observation_projections,
                         error: output.error().cloned(),
                         terminal_finish: content.capture(|| output.finish_value().cloned()),
-                        tool_calls,
+                        tool_calls: output
+                            .tool_calls
+                            .iter()
+                            .map(|record| lash_trace::TraceExecToolCall {
+                                call_id: record.call_id.clone(),
+                                name: record.tool.clone(),
+                                status: match record.output.status() {
+                                    lash_sansio::ToolCallStatus::Success => {
+                                        lash_trace::TraceToolCallStatus::Success
+                                    }
+                                    lash_sansio::ToolCallStatus::Failure => {
+                                        lash_trace::TraceToolCallStatus::Failure
+                                    }
+                                    lash_sansio::ToolCallStatus::Cancelled => {
+                                        lash_trace::TraceToolCallStatus::Cancelled
+                                    }
+                                },
+                            })
+                            .collect(),
                     }
-                });
-                if !observation_projections.is_empty() {
-                    self.emit_cell_trace(held.as_ref(), iteration, None, || {
-                        lash_trace::TraceEvent::ObservationProjection {
-                            projections: observation_projections,
-                        }
-                    });
                 }
-            }
-        } else if let Err(error) = &result
-            && self.trace.is_observed()
-        {
-            self.emit_cell_trace(held.as_ref(), iteration, cell_span, || {
-                lash_trace::TraceEvent::ExecCodeFailed {
+                Err(error) => lash_trace::TraceEvent::ExecCodeFailed {
+                    language: language.clone(),
+                    started_at_ms: first_started_at_ms,
+                    duration_ms,
                     reason: error.reason,
                     error: error.message.clone(),
-                }
-            });
+                },
+            };
+            self.answered_cell_close = Some((id, cell_trace.close(self, ended_at_ms, event)));
         }
         // A cancelled tool call ended the cell as an uncatchable host terminal,
         // so the execution settles as cancelled even without a host cancel
@@ -821,45 +870,150 @@ impl crate::engine::ObservationSink for HeldObservations<'_> {
     }
 }
 
+/// What a cell's trace records name: its span's key, language and first
+/// start, and the context of its records.
+struct CellTrace {
+    graph_key: String,
+    language: String,
+    first_started_at_ms: u64,
+    context: lash_trace::TraceContext,
+}
+
+impl CellTrace {
+    /// Where code standing at `trace` observes the cell: its span, under the
+    /// turn's, or the turn's own standing when the turn has no observed span.
+    fn standing(&self, trace: &crate::trace::TraceStanding) -> crate::trace::TraceStanding {
+        trace
+            .derived(
+                lash_trace::TraceSpanKind::Cell,
+                &lash_trace::SpanKey::Cell {
+                    graph_key: &self.graph_key,
+                },
+                self.first_started_at_ms,
+            )
+            .unwrap_or_else(|| trace.clone())
+    }
+
+    /// The close of the cell's span with `event` at `ended_at_ms`, for the
+    /// commit that consumes the cell's answer, or the terminal that discards
+    /// it, to publish once it is acknowledged. The commit, not this
+    /// execution, gives the right to publish it (P1).
+    fn close(
+        &self,
+        driver: &RuntimeTurnDriver<'_>,
+        ended_at_ms: u64,
+        event: lash_trace::TraceEvent,
+    ) -> crate::runtime::durable::session::CellClose {
+        let committed = driver
+            .host
+            .core
+            .tracing
+            .unreplayed(driver.trace.scope().cloned());
+        let standing = self.standing(&committed);
+        let context = self.context.clone();
+        crate::runtime::durable::session::CellClose::new(move || {
+            standing.close_scope(ended_at_ms, || (context, event));
+        })
+    }
+}
+
 impl RuntimeTurnDriver<'_> {
-    /// [`emit_trace`](Self::emit_trace) for a cell: once a commit holds the
-    /// model response that asked for it, now unless `held` still holds it
-    /// (FIG-6000). With `span`, the cell's graph key and start, the record
-    /// is the cell span's whole record; without, an event of the turn.
+    /// Emits `record` at `standing` (a cell's span, or its turn's), as the
+    /// span's opening record when `opens`, else as its event: once a commit
+    /// holds the model response that asked for the cell, now unless `held`
+    /// still holds it (FIG-6000).
     fn emit_cell_trace(
         &self,
         held: Option<&crate::HeldResponse>,
-        protocol_iteration: usize,
-        span: Option<(String, u64)>,
-        event: impl FnOnce() -> lash_trace::TraceEvent,
+        standing: crate::trace::TraceStanding,
+        opens: bool,
+        record: impl FnOnce() -> (lash_trace::TraceContext, lash_trace::TraceEvent) + Send + 'static,
     ) {
         if !self.trace.is_observed() {
             return;
         }
-        let trace = self.trace.clone();
-        let context = self.trace_context(protocol_iteration);
-        let emit = move |event: lash_trace::TraceEvent| match span {
-            Some((graph_key, started_at_ms)) => trace.whole(
-                lash_trace::TraceSpanKind::Cell,
-                &lash_trace::SpanKey::Cell {
-                    graph_key: &graph_key,
-                },
-                started_at_ms,
-                || {
-                    let mut context = context;
-                    context.cell = Some(graph_key.clone());
-                    (context, event)
-                },
-            ),
-            None => trace.observe(|| (context, event)),
+        let emit = move || {
+            if opens {
+                standing.open_scope(record);
+            } else {
+                standing.observe(record);
+            }
         };
         match held {
-            Some(held) => {
-                let event = event();
-                held.after_commit(Box::new(move || emit(event)));
-            }
-            None => emit(event()),
+            Some(held) => held.after_commit(Box::new(emit)),
+            None => emit(),
         }
+    }
+
+    /// Retain the first start of the cell of effect `id` in `language`, now,
+    /// unless the turn retains one for it already.
+    pub(super) fn begin_cell(&mut self, id: crate::EffectId, language: &str) {
+        if self
+            .cell_start
+            .as_ref()
+            .is_some_and(|start| start.effect == id)
+        {
+            return;
+        }
+        self.cell_start = Some(crate::runtime::durable::session::CellStart {
+            effect: id,
+            language: language.to_owned(),
+            first_started_at_ms: self.host.core.tracing.clock().timestamp_ms(),
+        });
+    }
+
+    /// The effect and close of the cell the turn's phase holds, which never
+    /// answered, for the terminal that discards it: published at the clock
+    /// of the owner whose commit wrote that terminal. `None` when no
+    /// anchored cell is open, or nothing observes it.
+    pub(super) fn discarded_cell(
+        &mut self,
+        machine: &TurnMachine,
+    ) -> Option<(crate::EffectId, crate::runtime::durable::session::CellClose)> {
+        let start = self.cell_start.take()?;
+        let effect = start.effect;
+        if !self.trace.is_observed() {
+            return None;
+        }
+        let invocation = self
+            .turn_effect_invocation(machine, start.effect, RuntimeEffectKind::ExecCode)
+            .ok()?;
+        let graph_key = foreground_effect_graph_key(&invocation);
+        let mut context = self.trace_context(machine.protocol_iteration());
+        context.cell = Some(graph_key.clone());
+        let cell = CellTrace {
+            graph_key,
+            language: start.language,
+            first_started_at_ms: start.first_started_at_ms,
+            context,
+        };
+        let committed = self
+            .host
+            .core
+            .tracing
+            .unreplayed(self.trace.scope().cloned());
+        let standing = cell.standing(&committed);
+        let clock = Arc::clone(self.host.core.tracing.clock());
+        let CellTrace {
+            language,
+            first_started_at_ms,
+            context,
+            ..
+        } = cell;
+        let close = crate::runtime::durable::session::CellClose::new(move || {
+            let ended_at_ms = clock.timestamp_ms();
+            standing.close_scope(ended_at_ms, || {
+                (
+                    context,
+                    lash_trace::TraceEvent::ExecCodeDiscarded {
+                        language,
+                        started_at_ms: first_started_at_ms,
+                        duration_ms: ended_at_ms.saturating_sub(first_started_at_ms),
+                    },
+                )
+            });
+        });
+        Some((effect, close))
     }
 }
 

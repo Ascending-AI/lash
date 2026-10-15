@@ -65,6 +65,10 @@ attributes! {
     ResponseModel => ("gen_ai.response.model", String),
     ToolName => ("gen_ai.tool.name", String),
     ToolCallId => ("gen_ai.tool.call.id", String),
+    ToolType => ("gen_ai.tool.type", String),
+    CellId => ("lash.cell.id", String),
+    CellLanguage => ("lash.cell.language", String),
+    CellToolCalls => ("lash.cell.tool_calls", Integer),
     InputTokens => ("gen_ai.usage.input_tokens", Integer),
     OutputTokens => ("gen_ai.usage.output_tokens", Integer),
     CacheReadTokens => ("gen_ai.usage.cache_read.input_tokens", Integer),
@@ -125,7 +129,7 @@ spans! {
     Tool => ("execute_tool", Internal, Transition),
     Intent => ("lash.tool_intent", Internal, Transition),
     Process => ("lash.process", Internal, Transition),
-    ExecCode => ("lash.exec_code", Internal, Live),
+    ExecCode => ("execute_tool", Internal, Transition),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -276,6 +276,7 @@ impl TraceEvent {
             | Self::StepBodyStarted { .. }
             | Self::ToolCheckConflict { .. }
             | Self::ObservationProjection { .. }
+            | Self::ExecCodeDiscarded { .. }
             | Self::TurnCompleted { .. }
             | Self::ProducerSettled { .. }
             // The producer's own structured evidence (`TelemetryContent`).

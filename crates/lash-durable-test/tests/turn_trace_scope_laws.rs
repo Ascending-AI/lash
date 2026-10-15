@@ -247,6 +247,108 @@ async fn a_turn_resumed_on_a_takeover_node_keeps_its_trace_scope(tier: Tier) {
     resumed_turn_keeps_its_trace_scope(tier, Resume::Takeover).await;
 }
 
+/// The builder of an RLM core whose cells call the law's deferred tool,
+/// serving `telemetry`.
+fn cell_builder(
+    telemetry: &Telemetry,
+    keys: &tokio::sync::mpsc::UnboundedSender<String>,
+) -> impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder {
+    let telemetry = telemetry.clone();
+    let keys = keys.clone();
+    move |backend| {
+        lash::LashCore::rlm_builder(
+            backend.clone(),
+            served::rlm(backend, sim::untimed_workers()),
+        )
+        .tools(
+            lash::tool_provider_key!("tools"),
+            Arc::new(DeferredTool { keys }),
+        )
+        .trace_runtime(telemetry.runtime())
+    }
+}
+
+/// A code cell that suspends on its parked call and is answered on a node
+/// that took the session over is one span (the tracing lane T5, §4.5): the
+/// taking-over owner, whose commit consumes the cell's answer, closes it
+/// once, from the first start the suspended owner's phase retained, and the
+/// cell's call is the cell span's child.
+async fn a_suspended_cell_answered_on_a_takeover_node_is_one_span(tier: Tier) {
+    let telemetry = Telemetry::default();
+    let (keys, mut parked) = tokio::sync::mpsc::unbounded_channel();
+    let settings = lash_core_execution::DurableSettings {
+        idle_evict: Duration::from_millis(50),
+        ..lash_core_execution::DurableSettings::default()
+    };
+    let Some(mut world) = World::configured(tier, settings, cell_builder(&telemetry, &keys)).await
+    else {
+        return;
+    };
+    let name = "trace-suspended-cell";
+    world.script(
+        name,
+        vec![served::cell(&format!("await tools.{DEFERRED}({{}});"))],
+    );
+    let session = world.session(name, served::spec(8)).await;
+    let sent = session
+        .send(lash::TurnInput::text(name))
+        .await
+        .expect("the input is accepted");
+    let key = tokio::time::timeout(WATCHDOG, parked.recv())
+        .await
+        .expect("deadlock watchdog: the cell's deferred call never ran")
+        .expect("the tool hands over its key");
+    released_waiting(&world.backend, name).await;
+    let suspended = telemetry.first_turn_cell_closes(name);
+    // The taking-over node is another process, publishing to the same
+    // collector; everything it starts starts after this instant.
+    let taken_over = lash::tracing::TraceTimestamp::from_system_time(std::time::SystemTime::now())
+        .expect("a time after the epoch");
+    world
+        .restart(
+            "trace-suspended-cell-boot",
+            cell_builder(&telemetry.restarted(), &keys),
+        )
+        .await;
+    lash_core::waits::resolve_host(
+        &world.backend,
+        &key,
+        lash_core::Resolution::Ok(serde_json::json!({ "answered": true })),
+    )
+    .await
+    .expect("the deferred call's wait resolves");
+    drop(sent);
+    let session = world
+        .core
+        .session(lash::SessionId::try_from(name.to_owned()).expect("a session id"))
+        .durable()
+        .await
+        .expect("the session is open on the taking-over node");
+    let output = world.send(&session, "after the takeover").await;
+    served::assert_answered("the follow-up turn", &output);
+    let mut violations = telemetry.first_turn_violations(name, false);
+    violations.extend(telemetry.publication_violations(&[]));
+    violations.extend(telemetry.first_turn_cell_violations(name, false));
+    let closes = telemetry.first_turn_cell_closes(name);
+    world.shutdown().await;
+    if !suspended.is_empty() {
+        violations.push(format!(
+            "the suspended cell closed before it answered: {suspended:?}"
+        ));
+    }
+    if closes.iter().any(|close| close.started_at >= taken_over) {
+        violations.push(format!(
+            "the answered cell's span starts on the taking-over node, not at its first start \
+             before {taken_over:?}: {closes:?}"
+        ));
+    }
+    assert!(
+        violations.is_empty(),
+        "the suspended cell broke its one span:\n  {}",
+        violations.join("\n  ")
+    );
+}
+
 /// The tool a code cell's call runs, which holds on the node the law
 /// loses.
 const HELD: &str = "trace_held";
@@ -448,6 +550,7 @@ async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
     violations.extend(telemetry.publication_violations(&[]));
     if let Lost::InCellCall = lost {
         violations.extend(telemetry.first_turn_tool_violations(&name, false));
+        violations.extend(telemetry.first_turn_cell_violations(&name, false));
     }
     world.shutdown().await;
     assert!(
@@ -470,4 +573,5 @@ tiered_laws!(
     a_turn_resumed_on_a_takeover_node_keeps_its_trace_scope,
     a_turn_whose_node_is_lost_before_its_model_starts_is_admitted_once,
     a_cells_call_whose_node_is_lost_while_it_runs_is_admitted_once,
+    a_suspended_cell_answered_on_a_takeover_node_is_one_span,
 );

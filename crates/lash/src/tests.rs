@@ -444,6 +444,8 @@ mod recorded_carriers;
 mod telemetry_content;
 #[cfg(feature = "otel-trace")]
 mod trace_call_ids;
+#[cfg(all(feature = "otel-trace", feature = "rlm"))]
+mod trace_cells;
 #[cfg(feature = "otel-trace")]
 mod trace_emission;
 #[cfg(feature = "otel-trace")]

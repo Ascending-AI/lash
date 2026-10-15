@@ -65,14 +65,20 @@ impl LashRuntime {
             .and_then(|input| input.run_spec.clone());
         let attachments = self.bind_turn_attachments(controller)?;
         self.transition_turn_plugins(controller).await?;
-        let (recorded_before_turn, retained_trace, run_config) = match recorded {
-            Some(recorded) => (Some(recorded.before_turn), recorded.trace, recorded.config),
+        let (recorded_before_turn, retained_trace, run_config, cell_start) = match recorded {
+            Some(recorded) => (
+                Some(recorded.before_turn),
+                recorded.trace,
+                recorded.config,
+                recorded.cell,
+            ),
             None => (
                 None,
                 admitted_trace,
                 crate::runtime::durable::run_config::RecordedRunConfig::resolved(
                     self.resolve_run(admitted_run_spec.as_ref()).await?,
                 ),
+                None,
             ),
         };
         self.activate_turn_session().await?;
@@ -372,6 +378,8 @@ impl LashRuntime {
             cell_end: Default::default(),
             answered_cell_end: None,
             held_response: None,
+            cell_start,
+            answered_cell_close: None,
             host: self.host.clone(),
             turn_id: run.clone(),
             scoped_effect_controller: controller.clone(),

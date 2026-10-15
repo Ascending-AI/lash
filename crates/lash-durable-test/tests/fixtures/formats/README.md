@@ -128,6 +128,15 @@ The passing `pending-tool-python` image remains byte-identical.
 The helper-result Text inference fix affects newly lowered source only; it
 intends no change to an existing parked program's result.
 
+FIG-6303 added `cell`, the held cell's effect, language and first start, to
+the turn's phase checkpoint, so the cell's one span starts there whichever
+owner answers it. The `session` image's turn stands in its cell's `Tools`
+phase, so it was re-recorded in place with its existing recorder on a build
+rebased onto `origin/main`, under the standing rule above; it resumes to the
+result it recorded before. `lashvm` holds no turn checkpoint and the
+retained set's images keep their bytes: a checkpoint without `cell` still
+decodes, and its cell's span then starts when the resuming owner runs it.
+
 Source `env.sh`, then run the existing recorder locally on the build being
 retained, naming its full commit (use a new build, never an existing set):
 

@@ -638,6 +638,15 @@ impl TraceParent {
     pub fn carrier(&self) -> &TraceCarrier {
         &self.0
     }
+
+    /// The container `key` under this parent, as the parent of the work it
+    /// issues: a code cell's span under its turn's, which parents the tool
+    /// calls the cell makes. Its span is derived, so every owner names the
+    /// same one.
+    #[must_use]
+    pub fn container(&self, key: &SpanKey<'_>) -> Self {
+        Self(derive_span(&self.0, key))
+    }
 }
 
 /// How a producer span relates to its caller's context. One spelling on

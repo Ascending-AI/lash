@@ -798,6 +798,8 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
         (
             TraceSpanKind::Cell,
             TraceEvent::ExecCodeCompleted {
+                language: "python".to_string(),
+                started_at_ms: 0,
                 duration_ms: 300,
                 output: "secret".into(),
                 output_chars: 6,
@@ -807,7 +809,7 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
                 terminal_finish: None,
                 tool_calls: Vec::new(),
             },
-            "lash.exec_code",
+            "execute_tool python",
             8700,
         ),
     ];
@@ -887,6 +889,8 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
     let events = [
         (
             TraceEvent::ExecCodeCompleted {
+                language: "python".to_string(),
+                started_at_ms: 0,
                 duration_ms: 10,
                 output: String::new(),
                 output_chars: 0,
@@ -903,6 +907,9 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeFailed {
+                language: "python".to_string(),
+                started_at_ms: 0,
+                duration_ms: 0,
                 reason: crate::ExecCodeFailureReason::RuntimeStopped,
                 error: "private runtime detail".into(),
             },
@@ -910,6 +917,8 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeCompleted {
+                language: "python".to_string(),
+                started_at_ms: 0,
                 duration_ms: 10,
                 output: "private output".into(),
                 output_chars: 14,
@@ -926,6 +935,8 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeCompleted {
+                language: "python".to_string(),
+                started_at_ms: 0,
                 duration_ms: 10,
                 output: String::new(),
                 output_chars: 0,
@@ -951,7 +962,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         let spans = exporter.get_finished_spans().unwrap();
         let cell = &spans[spans.len() - 2];
         let turn = spans.last().unwrap();
-        assert_eq!(cell.name, "lash.exec_code");
+        assert_eq!(cell.name, "execute_tool python");
         assert!(
             matches!(cell.status, Status::Error { .. }),
             "cell must fail: {reason}"
@@ -973,6 +984,55 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
                 .any(|a| a.key.as_str() == "error.type")
         );
     }
+}
+
+/// §4.5: a cell is an `execute_tool {language}` function tool, and one its
+/// turn's terminal discards is not a failure: its status stays unset, with
+/// `lash.outcome = discarded`.
+#[test]
+fn a_discarded_cell_is_a_tool_span_that_did_not_fail() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let cell = derive_span(
+        &derived(&producer(), &scope_id()),
+        &SpanKey::Cell { graph_key: "cell" },
+    );
+    let mut event = closing(
+        TraceSpanKind::Cell,
+        cell,
+        8000,
+        TraceEvent::ExecCodeDiscarded {
+            language: "typescript".into(),
+            started_at_ms: 1000,
+            duration_ms: 7000,
+        },
+    );
+    event.context.cell = Some("cell".into());
+    adapter.append(&event).unwrap();
+    let spans = exporter.get_finished_spans().unwrap();
+    let span = spans.last().unwrap();
+    assert_eq!(span.name, "execute_tool typescript");
+    assert!(!event.event.is_failed());
+    assert!(!matches!(span.status, Status::Error { .. }));
+    for expected in [
+        KeyValue::new("gen_ai.operation.name", "execute_tool"),
+        KeyValue::new("gen_ai.tool.name", "typescript"),
+        KeyValue::new("gen_ai.tool.type", "function"),
+        KeyValue::new("lash.cell.id", "cell"),
+        KeyValue::new("lash.cell.language", "typescript"),
+        KeyValue::new("lash.outcome", "discarded"),
+    ] {
+        assert!(
+            span.attributes.contains(&expected),
+            "{expected:?}: {span:#?}"
+        );
+    }
+    assert!(
+        !span
+            .attributes
+            .iter()
+            .any(|a| a.key.as_str() == "error.type")
+    );
 }
 
 /// Known business identities remain joinable when payload export is off.

@@ -92,6 +92,9 @@ fn tool(outcome: TraceToolCallOutcome, duration_ms: u64) -> TraceEvent {
 
 fn failure() -> TraceEvent {
     TraceEvent::ExecCodeFailed {
+        language: "python".to_string(),
+        started_at_ms: 0,
+        duration_ms: 0,
         reason: crate::ExecCodeFailureReason::Session,
         error: "PAYLOAD_SECRET".into(),
     }

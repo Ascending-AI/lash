@@ -399,13 +399,22 @@ fn event_samples() -> Vec<TraceEvent> {
             attempts: None,
         },
         TraceEvent::ExecCodeStarted {
+            language: "python".to_string(),
             code: "print(1)".to_string(),
             code_chars: 8,
         },
         exec_code_completed_event(),
         TraceEvent::ExecCodeFailed {
+            language: "python".to_string(),
+            started_at_ms: 0,
+            duration_ms: 0,
             reason: lash_trace::ExecCodeFailureReason::RuntimeStopped,
             error: "boom".to_string(),
+        },
+        TraceEvent::ExecCodeDiscarded {
+            language: "python".to_string(),
+            started_at_ms: 0,
+            duration_ms: 9,
         },
         TraceEvent::ObservationProjection {
             projections: Vec::new(),
@@ -482,6 +491,9 @@ fn trace_event_vocabulary_names_no_seam_implementation() {
 #[test]
 fn exec_code_failed_carries_a_closed_reason_code() {
     let event = TraceEvent::ExecCodeFailed {
+        language: "python".to_string(),
+        started_at_ms: 0,
+        duration_ms: 0,
         reason: lash_trace::ExecCodeFailureReason::ExecutorUnavailable,
         error: "code execution is not available in this session".to_string(),
     };
@@ -499,6 +511,9 @@ fn exec_code_failed_carries_a_closed_reason_code() {
 
     let reasonless = serde_json::json!({
         "type": "exec_code_failed",
+        "language": "python",
+        "started_at_ms": 0,
+        "duration_ms": 0,
         "error": "boom",
     });
     serde_json::from_value::<TraceEvent>(reasonless)
@@ -506,6 +521,9 @@ fn exec_code_failed_carries_a_closed_reason_code() {
 
     let unknown_reason = serde_json::json!({
         "type": "exec_code_failed",
+        "language": "python",
+        "started_at_ms": 0,
+        "duration_ms": 0,
         "reason": "executor_went_to_lunch",
         "error": "boom",
     });
@@ -515,6 +533,8 @@ fn exec_code_failed_carries_a_closed_reason_code() {
 
 fn exec_code_completed_event() -> TraceEvent {
     TraceEvent::ExecCodeCompleted {
+        language: "python".to_string(),
+        started_at_ms: 0,
         duration_ms: 12,
         output: "hello\nworld".to_string(),
         output_chars: 11,
@@ -999,10 +1019,13 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             attempts: failed_tool_attempt(),
         },
         TraceEvent::ExecCodeStarted {
+            language: "python".to_string(),
             code: CONTENT.to_string(),
             code_chars: 14,
         },
         TraceEvent::ExecCodeCompleted {
+            language: "python".to_string(),
+            started_at_ms: 0,
             duration_ms: 12,
             output: CONTENT.to_string(),
             output_chars: 14,
@@ -1026,6 +1049,9 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             }],
         },
         TraceEvent::ExecCodeFailed {
+            language: "python".to_string(),
+            started_at_ms: 0,
+            duration_ms: 0,
             reason: lash_trace::ExecCodeFailureReason::RuntimeStopped,
             error: CONTENT.to_string(),
         },

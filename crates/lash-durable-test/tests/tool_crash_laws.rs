@@ -1103,7 +1103,8 @@ impl Crash {
         }
         if self.trace_adapter {
             let tools = self.turn != Turn::Plain;
-            violations.extend(self.losses.laws(&self.telemetry, cut, tools));
+            let cells = self.turn == Turn::CellTrace;
+            violations.extend(self.losses.laws(&self.telemetry, cut, tools, cells));
         }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
@@ -2317,7 +2318,10 @@ async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash
 
 /// A code cell's call, cut anywhere, closes once, on its turn's trace: its
 /// cell's admission retains its scope, which every attempt and every later
-/// owner reads back (FIG-5395).
+/// owner reads back (FIG-5395). The cell is one span, the call's parent,
+/// closed once by the owner whose commit consumed its answer, from the
+/// first start its phase retained (T5): a cell that re-runs after a cut
+/// publishes it no second time.
 async fn a_cells_call_trace_admission_is_exported_once_across_a_crash(tier: Tier) {
     prove(Turn::CellTrace, tier).await;
 }

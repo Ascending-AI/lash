@@ -369,6 +369,42 @@ async fn restore_working(
 /// Capture references before the cell root and its run facts are retired.
 /// Outcomes since the latest snapshot are already committed round material;
 /// preserve those exact nodes rather than encoding another output.
+/// The calls the cell of effect `id` admitted that have no outcome: what
+/// the terminal that discards the cell closes `discarded`, since nothing
+/// settles them any more (§3.8).
+async fn open_cell_calls(
+    driver: &RuntimeTurnDriver<'_>,
+    machine: &TurnMachine,
+    cx: &ActorContext,
+    id: crate::EffectId,
+) -> Result<Vec<lash_core_execution::runtime::actor::round::ExecutionDraft>, TurnError> {
+    use lash_core_execution::runtime::actor::round::{self, PolicyView};
+    use lash_durable::domain::{CellId, OwnerKey};
+    let invocation = driver
+        .turn_effect_invocation(machine, id, RuntimeEffectKind::ExecCode)
+        .map_err(|error| TurnError::Exec(error.to_string()))?;
+    let cell = CellId::new(invocation.effect_replay_key());
+    let reads = cx.durable_reads()?;
+    let facts = reads
+        .run_facts(&OwnerKey::Cell(
+            driver.session_id.clone(),
+            driver.turn_id.clone(),
+            cell,
+        ))
+        .await?;
+    let waits = round::PinnedWaits::read(reads, &facts).await?;
+    let fold = round::fold(&facts, &PolicyView::new([]), &waits)
+        .map_err(|error| TurnError::Exec(format!("the cell call ledger: {error}")))?;
+    Ok(fold
+        .rounds()
+        .flat_map(|round| round.members().iter())
+        .filter(|member| {
+            member.outcome().is_none() && !member.draft().tool().as_str().starts_with("cell-host:")
+        })
+        .map(|member| member.draft().clone())
+        .collect())
+}
+
 async fn cell_calls(
     driver: &RuntimeTurnDriver<'_>,
     machine: &TurnMachine,
@@ -998,6 +1034,42 @@ impl TurnDrive for RuntimeDrive {
 
     fn answered_cell_calls(&mut self) -> CellToolCalls {
         std::mem::take(&mut self.driver.answered_cell_calls)
+    }
+
+    fn begin_cell(&mut self, id: crate::EffectId, language: &str) {
+        self.driver.begin_cell(id, language);
+    }
+
+    fn cell_start(&self) -> Option<crate::runtime::durable::session::CellStart> {
+        self.driver.cell_start.clone()
+    }
+
+    fn answered_cell_close(
+        &mut self,
+        id: crate::EffectId,
+    ) -> Option<crate::runtime::durable::session::CellClose> {
+        match self.driver.answered_cell_close.take() {
+            Some((cell, close)) if cell == id => Some(close),
+            _ => None,
+        }
+    }
+
+    fn forget_cell(&mut self) {
+        self.driver.cell_start = None;
+    }
+
+    async fn discarded_cell(
+        &mut self,
+        cx: &ActorContext,
+    ) -> Result<Option<crate::runtime::durable::session::DiscardedCell>, TurnError> {
+        let Some((id, close)) = self.driver.discarded_cell(&self.machine) else {
+            return Ok(None);
+        };
+        let open = open_cell_calls(&self.driver, &self.machine, cx, id).await?;
+        Ok(Some(crate::runtime::durable::session::DiscardedCell {
+            close,
+            open,
+        }))
     }
 
     async fn stopped_cell_calls(

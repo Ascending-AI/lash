@@ -36,6 +36,8 @@ struct PhaseText<'a> {
     before_turn: &'a [crate::plugin::RecordedTurnContribution],
     #[serde(skip_serializing_if = "Option::is_none")]
     trace: &'a Option<lash_trace::DurableTraceScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cell: &'a Option<super::session::CellStart>,
 }
 
 /// The root's text read back.
@@ -49,6 +51,8 @@ struct PhaseRead {
     before_turn: Vec<crate::plugin::RecordedTurnContribution>,
     #[serde(default)]
     trace: Option<lash_trace::DurableTraceScope>,
+    #[serde(default)]
+    cell: Option<super::session::CellStart>,
 }
 
 /// Kind 39's body: one content blob's canonical JSON text.
@@ -127,6 +131,7 @@ impl StagedPhase {
             delivered: &checkpoint.delivered,
             before_turn: &checkpoint.before_turn,
             trace: &checkpoint.trace,
+            cell: &checkpoint.cell,
         })
         .map_err(|error| format!("the turn checkpoint does not encode: {error}"))?;
         let mut content = Vec::new();
@@ -280,6 +285,7 @@ pub(super) fn load(
             before_turn: read.before_turn,
             trace: read.trace,
             config,
+            cell: read.cell,
         },
         PhaseStored {
             content: stored,

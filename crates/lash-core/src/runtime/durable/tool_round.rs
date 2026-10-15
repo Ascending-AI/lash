@@ -55,7 +55,7 @@ use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
 use lash_durable::{CommitLabel, DurableError, DurableInstant};
 use tokio_util::sync::CancellationToken;
 
-use super::session::{CellToolCalls, TurnDrive, TurnError, TurnRow, UnfinishedPhase};
+use super::session::{CellClose, CellToolCalls, TurnDrive, TurnError, TurnRow, UnfinishedPhase};
 use super::turn_cancel;
 use crate::sansio::PendingToolCall;
 use crate::{ActorContext, Effect, EffectId, Response};
@@ -421,6 +421,11 @@ pub(super) struct AnsweredCell {
     /// commits it, and what the cell published waits for that commit. A
     /// successor that loses it sends the model call again.
     pub(super) response: Option<crate::HeldResponse>,
+    /// The close of the span of a cell that answered: published once the
+    /// commit that consumes the answer is acknowledged (P1). `None` for a
+    /// cell the turn stopped on, which the terminal discards, and for one
+    /// nothing observes.
+    pub(super) close: Option<CellClose>,
 }
 
 /// What the turn held of an answered cell's publications for the commit
@@ -430,6 +435,16 @@ pub(super) struct AnsweredCell {
 pub(super) struct CellEmissions {
     response: Option<crate::HeldResponse>,
     effects: Vec<Effect>,
+    close: Option<CellClose>,
+}
+
+impl CellEmissions {
+    /// The close of the cell's span, taken, for a commit that ends the turn:
+    /// the turn's activity is published before that commit, and the cell's
+    /// close only after its acknowledgement (P1).
+    pub(super) fn take_close(&mut self) -> Option<CellClose> {
+        self.close.take()
+    }
 }
 
 impl AnsweredCell {
@@ -438,6 +453,7 @@ impl AnsweredCell {
         CellEmissions {
             response: self.response.take(),
             effects: self.held.take().unwrap_or_default(),
+            close: self.close.take(),
         }
     }
 
@@ -458,7 +474,9 @@ impl AnsweredCell {
 /// Publish what the turn held of an answered cell's publications
 /// ([`CellEmissions`]), for the commit labelled `label` that consumes the
 /// answer: after it, or before a commit that ends the turn, whose finish
-/// drains the turn's activity first.
+/// drains the turn's activity first. The cell's span closes last; a commit
+/// that ends the turn takes its close first ([`CellEmissions::take_close`])
+/// and publishes it after its acknowledgement.
 pub(super) async fn release_cell_emissions(
     cx: &ActorContext,
     drive: &mut dyn TurnDrive,
@@ -470,6 +488,9 @@ pub(super) async fn release_cell_emissions(
     }
     for effect in held.effects {
         drive.local(cx, effect).await?;
+    }
+    if let Some(close) = held.close {
+        close.publish();
     }
     Ok(())
 }

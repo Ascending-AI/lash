@@ -249,6 +249,10 @@ pub(super) fn turn_effect_executor(
         cell_end: driver.cell_end.clone(),
         answered_cell_end: None,
         held_response: driver.held_response.clone(),
+        // A step body closes no cell span: the driver that runs the cell
+        // does, once a commit consumes its answer.
+        cell_start: None,
+        answered_cell_close: None,
         host: driver.host.clone(),
         scoped_effect_controller,
         session_id: driver.session_id.clone(),

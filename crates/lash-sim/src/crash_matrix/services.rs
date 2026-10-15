@@ -826,7 +826,9 @@ impl RoundTools for Catalog {
         }
         Some(lash_core_execution::trace::tool_trace_scope(
             &EffectOpener::turn(self.session.clone(), self.run.clone()),
-            Some(&told_turn(self.session.clone(), self.run.clone())?),
+            told_turn(self.session.clone(), self.run.clone())?
+                .as_parent()
+                .as_ref(),
             &call.call_id,
             0,
         ))

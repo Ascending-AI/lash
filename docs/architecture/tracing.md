@@ -139,8 +139,15 @@ supplies `lash.run.id` and `lash.process.id`; record context supplies
 scope. A physical turn's id does not imply its logical run's id. These
 identities do not enter default span names or metric dimensions.
 
-A failed code cell exports Error status and its closed execution reason, or
-its cell failure kind when the executor returned a cell failure. A recovered
+A code cell exports as `execute_tool {language}` (`gen_ai.tool.type =
+function`, `lash.cell.id` its graph key, `lash.cell.language`,
+`lash.cell.tool_calls` once it answered and `lash.outcome`). It is its turn's
+child and the parent of the tool calls it makes, and it spans from its first
+start, which the `Tools` phase that holds the cell retains, to the end of
+the execution that answered it, across suspensions and re-runs. A failed
+code cell exports Error status and its closed execution reason, or its cell
+failure kind when the executor returned a cell failure; a cell its turn's
+terminal discards exports `lash.outcome = discarded` with no error. A recovered
 outer turn keeps its own successful status. Tool failures export the terminal
 outcome's typed class, using the last attempt's class when the terminal payload
 has no class. Turn failures export their stop reason as `error.type`.
@@ -199,7 +206,12 @@ an owner that takes a round over closes only the members whose outcomes
 its own commits write. A member a turn's terminal settles `Cancelled` (a
 cancel or a refusal of a turn whose round no live owner settled) closes
 on that terminal's owner, `cancelled`; one a session close's cancel leaves
-with no outcome closes there, `discarded`. A process closes on the owner of
+with no outcome closes there, `discarded`. A code cell closes on the owner
+whose commit consumes its answer (the next model call's start, the next
+step's `model.done` or the turn's commit); a cell its turn's terminal stops
+before it answered closes on that terminal's owner, `discarded`, with the
+calls it admitted that have no outcome. A cell that suspends closes nothing
+until an activation answers it. A process closes on the owner of
 `process.terminal`, and a tool intent on the submission that first retains
 its settlement. A successor that folds a committed terminal, a resend, a
 redrive and a reader of a retained terminal close nothing. Tracing adds no
@@ -266,9 +278,11 @@ terminal and publishes. Measured on SQLite:
 | `round.outcome+present+model.start` (a native call) | `ack-hidden`, `commit-then-abort` | the call's `execute_tool` | none |
 | `round.outcome` (a cell's call) | `ack-hidden`, `commit-then-abort` | the call's `execute_tool` | none |
 
-A cell span still publishes from the execution that ran it, so no cut loses
-it. Once a cell closes on the commit that consumes its answer, that commit
-joins the table. `process.terminal` (a process) and a tool intent's
+A code cell closes on the commit that consumes its answer (the next
+`model.start`, `model.done` or `turn.commit`), so the matrix lets a lossy cut
+of that commit lose the cell's `execute_tool {language}` span, orphaning the
+calls the cell made, and nothing else; a cell that re-runs after any other
+cut publishes its span once. `process.terminal` (a process) and a tool intent's
 settlement follow the same rule, but this matrix does not cut them.
 
 ## Integration status

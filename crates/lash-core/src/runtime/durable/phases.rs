@@ -84,6 +84,7 @@ fn encode_phase(
         before_turn: drive.before_turn(),
         trace: drive.trace_scope(),
         config: drive.run_config(),
+        cell: drive.cell_start(),
     };
     StagedPhase::of(&checkpoint, &delta.held).map_err(TurnError::Exec)
 }
@@ -549,6 +550,9 @@ pub async fn run_phases(
                 // cell its row already names commits nothing again.
                 let cell = RunSeq(id.0);
                 let named = matches!(row.phase, UnfinishedPhase::Tools { run, .. } if run == cell);
+                // The phase that holds the cell retains its first start: a
+                // resumed cell keeps the one its phase read back.
+                drive.begin_cell(id, &language);
                 let mut held = None;
                 if !named || carry.is_some() || answered_cell.is_some() {
                     // A turn that owes nothing of an earlier step holds the
@@ -660,10 +664,17 @@ pub async fn run_phases(
                             calls,
                             held,
                             response: unconsumed,
+                            close: drive.answered_cell_close(id),
                         });
                     }
                     None => {
                         drive.stop_cell();
+                        // A response no commit held leaves the cell
+                        // unanchored: it is lost with this execution, and
+                        // nothing closes its span (P3).
+                        if unconsumed.is_some() {
+                            drive.forget_cell();
+                        }
                         // The stop records the calls the cell completed:
                         // the cell never answers.
                         let calls = drive.stopped_cell_calls(cx, id).await?;
@@ -673,6 +684,7 @@ pub async fn run_phases(
                                 calls,
                                 held: None,
                                 response: None,
+                                close: None,
                             });
                         }
                         let request = cx.begin().await?.turn_cancel().cloned();
@@ -783,9 +795,16 @@ pub async fn run_phases(
                 // reports them beside the recorded ones, and drains the
                 // turn's activity before the commit (FIG-5507): what the
                 // turn held of the cell's emissions goes first.
+                // The spans of the turn's cells its commit ends close once
+                // it is acknowledged (§3.8): the last cell's, whose answer
+                // it consumes, and one that never answered (a cell whose
+                // failure ended the turn), which it discards.
+                let discarded = drive.discarded_cell(cx).await?;
+                let mut cell_closes = Vec::new();
                 if let Some(cell) = &mut answered_cell {
                     drive.finishing_cell_calls(&cell.calls);
-                    let held = cell.take_emissions();
+                    let mut held = cell.take_emissions();
+                    cell_closes.extend(held.take_close());
                     tool_round::release_cell_emissions(
                         cx,
                         drive.as_mut(),
@@ -893,6 +912,18 @@ pub async fn run_phases(
                     };
                     refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
                 })?;
+                for close in cell_closes {
+                    close.publish();
+                }
+                if let Some(discarded) = discarded {
+                    turn_trace::members_ended(
+                        services.tracing(),
+                        &row,
+                        &discarded.open,
+                        turn_trace::MemberEnd::Discarded,
+                    );
+                    discarded.close.publish();
+                }
                 turn_trace::ended(services.tracing(), &row, traced, &drive.delivered_inputs());
                 drive.committed().await;
                 // The commit moved the head: the next turn loads it again.

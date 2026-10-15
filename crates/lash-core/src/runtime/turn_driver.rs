@@ -43,6 +43,14 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// The model response that asked for the cell the turn runs next, held
     /// for the cell's first save (FIG-6000), until that cell runs.
     pub(super) held_response: Option<crate::HeldResponse>,
+    /// The first start of the cell the turn's phase holds, until it
+    /// answers: retained by the phase's checkpoint, and read back from it by
+    /// a resume (§3.4).
+    pub(super) cell_start: Option<crate::runtime::durable::session::CellStart>,
+    /// The closing record of the cell that last answered the machine, held
+    /// for the commit that consumes its answer (P1).
+    pub(super) answered_cell_close:
+        Option<(crate::EffectId, crate::runtime::durable::session::CellClose)>,
     pub(super) host: RuntimeHost,
     pub(super) scoped_effect_controller: ActorContext,
     pub(super) session_id: SessionId,

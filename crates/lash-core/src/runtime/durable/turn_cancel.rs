@@ -429,6 +429,7 @@ async fn stopped_cell(
         calls,
         held: None,
         response: None,
+        close: None,
     }))
 }
 
@@ -514,6 +515,11 @@ async fn end(
         super::tool_round::cancel_open_round(cx, &mut tx, current.unwrap_or(row)).await?;
     let mut drive = None;
     let mut head_revision = None;
+    // The spans of the turn's cells this commit ends: an answered cell's,
+    // which it consumes, and one it stops before the cell answered, which
+    // it discards. Each closes once the commit is acknowledged (§3.8).
+    let mut cell_closes = Vec::new();
+    let mut discarded = None;
     if let Some(StoppedTurn {
         drive: mut stopped,
         present,
@@ -521,11 +527,13 @@ async fn end(
         between_steps: _,
     }) = stopped
     {
+        discarded = stopped.discarded_cell(cx).await?;
         if let Some(cell) = &mut cell {
             stopped.finishing_cell_calls(&cell.calls);
             // The stop's commit drains the turn's activity first: what the
             // turn held of the cell's emissions goes before it.
-            let held = cell.take_emissions();
+            let mut held = cell.take_emissions();
+            cell_closes.extend(held.take_close());
             super::tool_round::release_cell_emissions(
                 cx,
                 stopped.as_mut(),
@@ -597,6 +605,18 @@ async fn end(
         &cancelled,
         super::turn_trace::MemberEnd::Cancelled,
     );
+    for close in cell_closes {
+        close.publish();
+    }
+    if let Some(discarded) = discarded {
+        super::turn_trace::members_ended(
+            services.tracing(),
+            row,
+            &discarded.open,
+            super::turn_trace::MemberEnd::Discarded,
+        );
+        discarded.close.publish();
+    }
     super::turn_trace::ended(services.tracing(), row, traced, &delivered);
     if let Some(mut drive) = drive {
         drive.committed().await;

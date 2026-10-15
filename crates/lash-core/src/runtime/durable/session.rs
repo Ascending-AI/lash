@@ -469,6 +469,47 @@ pub trait TurnDrive: Send {
         CellToolCalls::default()
     }
 
+    /// The cell of effect `id`, in `language`, is the one the turn's `Tools`
+    /// phase holds: retain its first start, now, unless the drive retains
+    /// one for it already (a resume, or a phase staged again). The phase's
+    /// checkpoint carries it ([`cell_start`](Self::cell_start)), so every
+    /// owner closes the cell's one span from it (§3.4).
+    fn begin_cell(&mut self, _id: EffectId, _language: &str) {}
+
+    /// The first start of the cell the turn's phase holds and that has not
+    /// answered, which the phase's checkpoint retains. `None` for a drive
+    /// that runs no cell.
+    fn cell_start(&self) -> Option<CellStart> {
+        None
+    }
+
+    /// The closing record of the cell of effect `id`, which answered the
+    /// machine, taken once: published once the commit that consumes the
+    /// answer is acknowledged (P1).
+    fn answered_cell_close(&mut self, _id: EffectId) -> Option<CellClose> {
+        None
+    }
+
+    /// The cell the turn's phase was about to hold is lost with this
+    /// execution: no commit held it, so it has no span to close (P3).
+    fn forget_cell(&mut self) {}
+
+    /// The cell the turn's phase holds, which never answered, for the
+    /// terminal that discards it: its close, published once that terminal's
+    /// commit is acknowledged, at that owner's clock, and the calls it
+    /// admitted that have no outcome, which that owner closes `discarded`
+    /// (§3.8). `None` when no anchored cell is open, or nothing observes it.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the cell's call ledger does not read.
+    async fn discarded_cell(
+        &mut self,
+        _cx: &ActorContext,
+    ) -> Result<Option<DiscardedCell>, TurnError> {
+        Ok(None)
+    }
+
     /// The tool calls the cell of effect `id` completed before the turn
     /// stopped on it, read from the cell's latest snapshot and the outcomes
     /// it committed since: what a turn that ends without the cell's answer
@@ -1118,6 +1159,58 @@ pub struct PhaseCheckpoint {
     /// which a resume and a cancel restore serve instead of resolving again
     /// (FIG-6021). `None` for a drive that resolves no configuration.
     pub config: Option<super::run_config::RecordedRunConfig>,
+    /// The first start of the cell the phase holds, which has not answered
+    /// ([`TurnDrive::cell_start`]): what a resume closes the cell's span
+    /// from, and the terminal that discards it.
+    pub cell: Option<CellStart>,
+}
+
+/// A code cell's first start, as the `Tools` phase that holds the cell
+/// retains it (§3.4): the cell's one span starts there, whichever owner, or
+/// how many suspensions later, closes it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CellStart {
+    /// The cell's effect.
+    pub effect: EffectId,
+    /// The cell's language.
+    pub language: String,
+    /// Wall-clock epoch milliseconds of the cell's first start.
+    pub first_started_at_ms: u64,
+}
+
+/// The closing record of a code cell's span, held until the commit that
+/// consumes the cell's answer, or the terminal that discards the cell, is
+/// acknowledged, and then published once (P1). Dropped unpublished when
+/// that commit fails: the owner that commits instead closes the cell.
+#[must_use = "a cell's span closes only when its close is published"]
+pub struct CellClose(Box<dyn FnOnce() + Send + Sync>);
+
+impl CellClose {
+    pub(crate) fn new(publish: impl FnOnce() + Send + Sync + 'static) -> Self {
+        Self(Box::new(publish))
+    }
+
+    /// Publish the close: its commit was acknowledged.
+    pub fn publish(self) {
+        (self.0)();
+    }
+}
+
+/// A cell its turn's terminal stops before it answered
+/// ([`TurnDrive::discarded_cell`]).
+#[derive(Debug)]
+pub struct DiscardedCell {
+    /// The close of the cell's span, `discarded`.
+    pub close: CellClose,
+    /// The calls the cell admitted that have no outcome.
+    pub open: Vec<lash_core_execution::runtime::actor::round::ExecutionDraft>,
+}
+
+impl std::fmt::Debug for CellClose {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CellClose").finish_non_exhaustive()
+    }
 }
 
 impl PhaseCheckpoint {
@@ -1167,6 +1260,8 @@ pub struct RecordedPreparation {
     pub trace: Option<lash_trace::DurableTraceScope>,
     /// The run's resolved shape and installed tool surface.
     pub config: super::run_config::RecordedRunConfig,
+    /// The first start of the cell the phase holds, if any.
+    pub cell: Option<CellStart>,
 }
 
 /// A turn restored from its rows: the machine, the effect it re-delivers,
@@ -1485,6 +1580,7 @@ impl<'a> TurnRestore<'a> {
             before_turn: phase.before_turn.clone(),
             trace: phase.trace.clone(),
             config,
+            cell: phase.cell.clone(),
         })
     }
 

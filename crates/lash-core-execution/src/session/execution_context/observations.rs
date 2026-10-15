@@ -13,15 +13,17 @@ pub(crate) struct ToolObservationAttribution {
 /// Trace handle threaded into tool execution so per-tool trace events are
 /// emitted from the single shared seam, whichever protocol executes the turn.
 ///
-/// `scope` is the scope the execution runs under, a turn's or a process's, and
-/// `scope_context` carries the matching record identity (session / turn /
-/// iteration) so [`crate::trace::assign_span_identity`] stamps
-/// `tool:<call_id>` under the right turn. Coordination runs live from
-/// committed state, never against a replay journal (ADR 0132 §2).
+/// `scope` is the scope the execution runs under, a turn's or a process's,
+/// `container` the span inside that scope the execution's work is issued
+/// from, when it is not the scope's own (a code cell's), and `scope_context`
+/// carries the matching record identity (session / turn / iteration).
+/// Coordination runs live from committed state, never against a replay
+/// journal (ADR 0132 §2).
 #[derive(Clone)]
 pub struct RuntimeExecutionTracing {
     pub(super) runtime: crate::trace::TraceRuntime,
     pub(super) scope: Option<lash_trace::DurableTraceScope>,
+    pub(super) container: Option<lash_trace::TraceParent>,
     pub(super) scope_context: lash_trace::TraceContext,
 }
 
@@ -34,8 +36,31 @@ impl RuntimeExecutionTracing {
         Self {
             runtime,
             scope,
+            container: None,
             scope_context,
         }
+    }
+
+    /// This execution issuing its work from the container `key` inside its
+    /// scope's span: a code cell, whose tool calls are its children (§3.3).
+    #[must_use]
+    pub fn in_container(mut self, key: &lash_trace::SpanKey<'_>) -> Self {
+        self.container = self
+            .scope
+            .as_ref()
+            .and_then(lash_trace::DurableTraceScope::as_parent)
+            .map(|parent| parent.container(key));
+        self
+    }
+
+    /// The parent of the work this execution issues: its container, else
+    /// its scope's span. `None` when the scope is unobserved.
+    pub fn parent(&self) -> Option<lash_trace::TraceParent> {
+        self.container.clone().or_else(|| {
+            self.scope
+                .as_ref()
+                .and_then(lash_trace::DurableTraceScope::as_parent)
+        })
     }
 
     /// The runtime's shared trace handle.

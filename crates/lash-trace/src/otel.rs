@@ -399,8 +399,13 @@ impl<'a> Projection<'a> {
             }
             (
                 TraceSpanKind::Cell,
-                TraceEvent::ExecCodeCompleted { .. } | TraceEvent::ExecCodeFailed { .. },
-            ) => projection.span = DomainSpan::ExecCode,
+                TraceEvent::ExecCodeCompleted { language, .. }
+                | TraceEvent::ExecCodeFailed { language, .. }
+                | TraceEvent::ExecCodeDiscarded { language, .. },
+            ) => {
+                projection.span = DomainSpan::ExecCode;
+                projection.tool = Some(language);
+            }
             _ => return None,
         }
         Some(projection)
@@ -409,7 +414,7 @@ impl<'a> Projection<'a> {
         let default = self.span.definition().name;
         let suffix = match self.span {
             DomainSpan::Model => self.model,
-            DomainSpan::Tool => self.tool,
+            DomainSpan::Tool | DomainSpan::ExecCode => self.tool,
             _ => None,
         };
         match suffix {
@@ -574,17 +579,29 @@ impl<'a> Projection<'a> {
                 }
             }
             TraceEvent::ExecCodeFailed { reason, .. } => {
+                cell_attributes(record, "failed", None, out);
                 out.push(A::ErrorType.value(crate::wire_tag(reason)));
             }
             TraceEvent::ExecCodeCompleted {
-                error: Some(error), ..
+                error, tool_calls, ..
             } => {
-                let reason = error
-                    .exec_failure
-                    .as_ref()
-                    .map(crate::wire_tag)
-                    .unwrap_or_else(|| crate::wire_tag(&error.kind));
-                out.push(A::ErrorType.value(reason));
+                let outcome = if error.is_some() {
+                    "failed"
+                } else {
+                    "completed"
+                };
+                cell_attributes(record, outcome, Some(tool_calls.len()), out);
+                if let Some(error) = error {
+                    let reason = error
+                        .exec_failure
+                        .as_ref()
+                        .map(crate::wire_tag)
+                        .unwrap_or_else(|| crate::wire_tag(&error.kind));
+                    out.push(A::ErrorType.value(reason));
+                }
+            }
+            TraceEvent::ExecCodeDiscarded { .. } => {
+                cell_attributes(record, "discarded", None, out);
             }
             _ if self.failed(record) => out.push(A::ErrorType.value("domain_failure")),
             _ => {}
@@ -594,11 +611,36 @@ impl<'a> Projection<'a> {
         match self.span {
             DomainSpan::Turn => Some("invoke_agent"),
             DomainSpan::Model => Some("chat"),
-            DomainSpan::Tool => Some("execute_tool"),
+            DomainSpan::Tool | DomainSpan::ExecCode => Some("execute_tool"),
             _ => None,
         }
     }
 }
+/// A code cell's own attributes (§4.5): a cell is a function tool named by
+/// its language, keyed by its graph key, with its outcome and, once it
+/// answered, the number of tool calls it made.
+fn cell_attributes(
+    record: &TraceRecord,
+    outcome: &'static str,
+    tool_calls: Option<usize>,
+    out: &mut Vec<KeyValue>,
+) {
+    out.push(A::ToolType.value("function"));
+    if let Some(cell) = &record.context.cell {
+        out.push(A::CellId.value(cell.clone()));
+    }
+    if let TraceEvent::ExecCodeCompleted { language, .. }
+    | TraceEvent::ExecCodeFailed { language, .. }
+    | TraceEvent::ExecCodeDiscarded { language, .. } = &record.event
+    {
+        out.push(A::CellLanguage.value(language.clone()));
+    }
+    if let Some(calls) = tool_calls {
+        out.push(A::CellToolCalls.value(i64::try_from(calls).unwrap_or(i64::MAX)));
+    }
+    out.push(A::Outcome.value(outcome));
+}
+
 fn usage_attributes(usage: &LlmUsage, out: &mut Vec<KeyValue>) {
     out.extend([
         A::InputTokens.value(usage.input_tokens),

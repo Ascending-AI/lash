@@ -174,11 +174,19 @@ pub enum TraceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attempts: Option<Vec<TraceRetryAttempt>>,
     },
+    /// A code cell's span opens: once per execution of the cell, starting at
+    /// the cell's retained first start.
     ExecCodeStarted {
+        language: String,
         code: String,
         code_chars: usize,
     },
+    /// A code cell answered, and the commit that consumed its answer closes
+    /// its span. `started_at_ms` is the cell's first start, which a
+    /// suspension or a re-run keeps; `duration_ms` runs from it.
     ExecCodeCompleted {
+        language: String,
+        started_at_ms: u64,
         duration_ms: u64,
         output: String,
         output_chars: usize,
@@ -188,12 +196,25 @@ pub enum TraceEvent {
         terminal_finish: Option<Value>,
         tool_calls: Vec<TraceExecToolCall>,
     },
+    /// A code cell answered with a failure, and the commit that consumed its
+    /// answer closes its span, from its first start.
     ExecCodeFailed {
+        language: String,
+        started_at_ms: u64,
+        duration_ms: u64,
         /// Closed failure classification; offline analysis keys on this rather
         /// than matching `error` prose.
         reason: ExecCodeFailureReason,
         /// Human-readable detail. Not a stable classification surface.
         error: String,
+    },
+    /// A code cell its turn's terminal stopped before it answered: that
+    /// terminal's owner closes its span, from its first start. A discard is
+    /// not a failure.
+    ExecCodeDiscarded {
+        language: String,
+        started_at_ms: u64,
+        duration_ms: u64,
     },
     ObservationProjection {
         projections: Vec<TextProjectionMetadata>,
@@ -306,6 +327,7 @@ impl TraceEvent {
                 TraceLanguageExecutionPayload::ExecutionStarted => false,
             },
             Self::TurnStarted { .. }
+            | Self::ExecCodeDiscarded { .. }
             | Self::PromptBuilt { .. }
             | Self::AttachmentDegraded { .. }
             | Self::CompositionChanged { .. }

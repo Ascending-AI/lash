@@ -234,7 +234,9 @@ impl FlightRecorderRecord {
 fn operation_duration(record: &TraceRecord) -> Option<Duration> {
     match &record.event {
         TraceEvent::ToolCallCompleted { duration_ms, .. }
-        | TraceEvent::ExecCodeCompleted { duration_ms, .. } => {
+        | TraceEvent::ExecCodeCompleted { duration_ms, .. }
+        | TraceEvent::ExecCodeFailed { duration_ms, .. }
+        | TraceEvent::ExecCodeDiscarded { duration_ms, .. } => {
             Some(Duration::from_millis(*duration_ms))
         }
         TraceEvent::LlmCallCompleted { response, .. } => {
@@ -269,6 +271,7 @@ fn operation_outcome(event: &TraceEvent) -> Option<FlightRecorderOutcome> {
             outcome: TraceProgramStepOutcome::Ok,
             ..
         } => Some(Outcome::Completed),
+        TraceEvent::ExecCodeDiscarded { .. } => Some(Outcome::Cancelled),
         TraceEvent::ToolCallCompleted { output, .. } => Some(match output.status() {
             TraceToolCallStatus::Success => Outcome::Completed,
             TraceToolCallStatus::Failure => Outcome::Failed,

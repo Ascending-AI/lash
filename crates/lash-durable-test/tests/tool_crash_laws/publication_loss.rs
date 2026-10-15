@@ -20,15 +20,27 @@ use super::telemetry::{Lost, Telemetry};
 
 /// The commits that write a container's terminal, and the kinds of the
 /// containers each one closes, for the containers the matrix's turns
-/// publish (§3.8's closer table): a turn's commit closes the turn, and a
-/// round's outcome commit closes the tool calls whose outcomes it retains.
-const TERMINALS: [(CommitLabel, &[TraceSpanKind]); 3] = [
-    (CommitLabel::TURN_COMMIT, &[TraceSpanKind::Agent]),
+/// publish (§3.8's closer table): a turn's commit closes the turn, a
+/// round's outcome commit closes the tool calls whose outcomes it retains,
+/// and the commit that consumes a code cell's answer (the next model call's
+/// start, the next step's `model.done`, or the turn's commit) closes the
+/// cell.
+const TERMINALS: [(CommitLabel, &[TraceSpanKind]); 6] = [
+    (
+        CommitLabel::TURN_COMMIT,
+        &[TraceSpanKind::Agent, TraceSpanKind::Cell],
+    ),
     (CommitLabel::ROUND_OUTCOME, &[TraceSpanKind::Tool]),
     (
         CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
-        &[TraceSpanKind::Tool],
+        &[TraceSpanKind::Tool, TraceSpanKind::Cell],
     ),
+    (CommitLabel::MODEL_START, &[TraceSpanKind::Cell]),
+    (
+        CommitLabel::ROUND_PRESENT_MODEL_START,
+        &[TraceSpanKind::Cell],
+    ),
+    (CommitLabel::MODEL_DONE, &[TraceSpanKind::Cell]),
 ];
 
 /// The faults that land a commit and lose its owner's acknowledgement or
@@ -61,12 +73,14 @@ impl Losses {
     /// published (L1(c), (g)), except that a cut that lands a terminal
     /// commit and loses its owner's acknowledgement or life may lose the
     /// containers that commit closes, and only those (L1(f)). `tools` says
-    /// whether the turn makes a tool call.
+    /// whether the turn makes a tool call, and `cells` whether it calls it
+    /// from a code cell, which is then one span, the call's parent (T5).
     pub(super) fn laws(
         &self,
         telemetry: &Telemetry,
         cut: Option<&Cut>,
         tools: bool,
+        cells: bool,
     ) -> Vec<String> {
         let losable = losable(cut);
         if let Some(cut) = cut {
@@ -78,6 +92,10 @@ impl Losses {
         if tools {
             let tool_lost = losable.contains(&TraceSpanKind::Tool);
             violations.extend(telemetry.first_turn_tool_violations(super::SESSION, tool_lost));
+        }
+        if cells {
+            let cell_lost = losable.contains(&TraceSpanKind::Cell);
+            violations.extend(telemetry.first_turn_cell_violations(super::SESSION, cell_lost));
         }
         violations
     }

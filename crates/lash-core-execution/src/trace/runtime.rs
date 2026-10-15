@@ -830,8 +830,9 @@ pub struct TraceStanding {
     right: EmissionRight,
 }
 
-/// An execution-local span: a model call. Its id is drawn when it opens and
-/// carried, never recomputed.
+/// The span a standing's records name instead of its scope's: a model call,
+/// whose id is drawn when it opens and carried, never recomputed, or a
+/// derived container such as a code cell, whose id every owner derives.
 #[derive(Debug)]
 struct LeafSpan {
     span: TraceCarrier,
@@ -972,17 +973,17 @@ impl TraceStanding {
         self.observe_as(SpanRole::Event, None, record);
     }
 
-    /// Emits the opening record of this standing's scope span: the start
-    /// its admitting owner observes. A live hint: the span is built from
-    /// its closing record.
+    /// Emits the opening record of this standing's span (its leaf's, else
+    /// its scope's): the start its admitting owner observes. A live hint:
+    /// the span is built from its closing record.
     pub fn open_scope(&self, record: impl FnOnce() -> (TraceContext, TraceEvent)) {
         self.observe_as(SpanRole::Opens, None, record);
     }
 
-    /// Emits the closing record of this standing's scope span, which ended
-    /// at `ended_at_ms`, the end its terminal's commit retained. Only the
-    /// owner whose acknowledged commit wrote that terminal calls it (P1), so
-    /// the span is published at most once.
+    /// Emits the closing record of this standing's span (its leaf's, else
+    /// its scope's), which ended at `ended_at_ms`, the end its terminal's
+    /// commit retained. Only the owner whose acknowledged commit wrote that
+    /// terminal calls it (P1), so the span is published at most once.
     pub fn close_scope(
         &self,
         ended_at_ms: u64,
@@ -1030,21 +1031,20 @@ impl TraceStanding {
         OpenSpan { standing }
     }
 
-    /// Emits `record`, the one record of a `kind` span keyed `key` under
-    /// this code's container, which ran from `started_at_ms` to now: a
-    /// container whose id any owner derives the same way.
-    pub fn whole(
+    /// The standing of code inside the `kind` container keyed `key` under
+    /// this code's container, which started at `started_at_ms`: a container
+    /// whose id any owner derives the same way. Its records open, are events
+    /// of, and close that span. `None` when there is no observed container.
+    #[must_use]
+    pub fn derived(
         &self,
         kind: TraceSpanKind,
         key: &lash_trace::SpanKey<'_>,
         started_at_ms: u64,
-        record: impl FnOnce() -> (TraceContext, TraceEvent),
-    ) {
-        let Some(parent) = self.container().cloned() else {
-            return self.observe(record);
-        };
+    ) -> Option<Self> {
+        let parent = self.container().cloned()?;
         let span = lash_trace::derive_span(&parent, key);
-        let standing = Self {
+        Some(Self {
             runtime: self.runtime.clone(),
             scope: self.scope.clone(),
             leaf: Some(Arc::new(LeafSpan {
@@ -1054,8 +1054,7 @@ impl TraceStanding {
                 started_at_ms,
             })),
             right: self.right.clone(),
-        };
-        standing.observe_as(SpanRole::Whole, None, record);
+        })
     }
 
     fn observe_as(
@@ -1260,12 +1259,13 @@ impl OpenSpan {
     }
 }
 
-/// The scope of a call under its admitted logical owner: its span is
-/// derived from the retained parent's, even across physical turns; a call
-/// with no observed parent is unobserved.
+/// The scope of a call under its admitted logical owner, issued under
+/// `parent`, its issuing container (the cell it was called from, else its
+/// owner's span): its span is derived from that parent's, even across
+/// physical turns; a call with no observed parent is unobserved.
 pub fn tool_trace_scope(
     opener: &crate::EffectOpener,
-    parent: Option<&DurableTraceScope>,
+    parent: Option<&lash_trace::TraceParent>,
     call_id: &crate::ToolCallId,
     started_at_ms: u64,
 ) -> DurableTraceScope {
@@ -1274,7 +1274,7 @@ pub fn tool_trace_scope(
             owner: lash_trace::TraceToolOwner::from(opener),
             call_id: call_id.to_string(),
         }),
-        parent.and_then(DurableTraceScope::as_parent).as_ref(),
+        parent,
         lash_trace::TraceLinks::new(),
         started_at_ms,
     )
