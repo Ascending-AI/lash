@@ -343,9 +343,10 @@ steps per task. Diverged or unreplayable segments supply no path. Derive a view
 for each document unit you want to show: mapping a view omits other units.
 
 Cells provide counts through `WorkflowExecutionOverlay::ran_counts()` and the
-same `view::coverage` helper. Set `RunSpec::observe` to `RunObservation::Counts`
-for a run that should count its cells. Each cell's `ExecutionStarted` carries
-its actual level, so later runs in the same session can change it. A missing
+same `view::coverage` helper. Import `RanCounts`, `RunObservation`, `ReplayPath`
+and `TaskPath` from `lash::workflow::view`. Set `RunSpec::observe` to
+`RunObservation::Counts` for a run that should count its cells. Each cell's
+`ExecutionStarted` carries its actual level, so later runs in the same session can change it. A missing
 start stays unobserved. Cell reports carry cumulative totals within a stable
 activation segment; their overlay deduplicates and sums them independently of
 its occurrence-history limit. Cells offer counts only, with no replay or path

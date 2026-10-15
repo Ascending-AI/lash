@@ -675,7 +675,7 @@ mod tests {
             "started",
             1_000,
             TraceLanguageExecutionPayload::ExecutionStarted {
-                observation: lash::workflow::document::RunObservation::Off,
+                observation: lash::workflow::view::RunObservation::Off,
             },
         )
     }

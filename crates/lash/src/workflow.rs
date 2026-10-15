@@ -167,7 +167,30 @@ pub use typescript::{
 /// `the_document_module_docs_example_runs` law in `tests/workflow_laws.rs`;
 /// the workspace builds no doctests, so that test is its proof.
 pub mod document {
-    pub use lash_kernel_doc::*;
+    // Observation inputs belong to `view`; data limits belong to `persistence`.
+    // An explicit vocabulary keeps those names out of this module.
+    pub use lash_kernel_doc::{
+        Action, Annotations, Atom, Block, Bytes, Callee, Catch, Closure, ClosureObject,
+        Correspondence, Datum, DecodeError, DecodeMismatch, Decoder, Document, DocumentId,
+        EffectIdentity, EffectName, Element, EncodeError, ErrorDatum, ErrorValue, Expr,
+        FIRST_NATIVE_VERSION, FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, Float, Formula,
+        FrozenDatum, Function, FunctionBody, FunctionCatalog, FunctionDeclarations,
+        FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Guard, GuardExceeded,
+        Handle, Identity, Implementation, Integer, Invalid, InvalidBytes, InvalidFloat,
+        InvalidIdentity, InvalidInteger, InvalidNumberToken, InvalidQualifiedName, InvalidReason,
+        JoinMode, KERNEL_VERSION, KernelVersion, Label, Literal, LoopIteration, MAX_DECODE_DEPTH,
+        MAX_NESTING_DEPTH, Manifest, MapEntry, MapType, Measure, Member, Name, NativeCall,
+        NativeError, NativeFunction, NativeHeap, Node, NodeAnnotation, NumberPolicy, NumberToken,
+        Object, ObjectId, Operand, Param, ParseError, ParseErrorReason, Place, PreparedNative,
+        ProjectionRead, QualifiedName, RecordEntry, RecordType, RecordTypeField,
+        RegisteredFunction, RegistryError, Rhs, Signature, Site, SourceLanguage, SourceMap,
+        SourceMapRefusal, SourceSite, Span, SpawnIdentity, StatementForm, StatementRuleViolation,
+        Stmt, Survivor, TaskId, TaskIdentity, Timestamp, TryStmt, Type, Unit, ValidatedFunctions,
+        Value, ValueKind, WorkCounter, check_statement, core_support, graph_tokens,
+        parse_definition, parse_definition_with_limits, parse_document, parse_document_with_limits,
+        print_definition, print_document, validate_annotations, validate_definition,
+        validate_definition_with_limits, validate_document, validate_document_with_limits,
+    };
 }
 
 /// The total view of a document and its admission: nodes, edges, scopes,
@@ -248,8 +271,8 @@ pub use lash_trace::{
 /// and an execution's start name it.
 pub use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef};
 pub use lash_vm_runtime::{
-    ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay, TaskPath, Unreplayable,
-    WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment,
+    ReplaySegments, SegmentAnswer, SegmentReplay, Unreplayable, WorkflowAdmissionRefusal,
+    WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment,
 };
 
 use crate::persistence::ArtifactName;

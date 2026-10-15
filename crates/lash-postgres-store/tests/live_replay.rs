@@ -559,8 +559,8 @@ async fn invalidation_closes_subscriptions_on_every_replica() {
 }
 
 /// A takeover across replicas (FIG-5366): replica B streams a session and
-/// dies with a batch in flight; replica A, which took the turn over, reads
-/// back everything B published after the cursor B pinned with the call
+/// loses a batch acknowledgement and dies; replica A takes the turn over
+/// and reads back everything B published after the cursor B pinned with the call
 /// before streaming (FIG-5399), so a re-sent call can retract B's abandoned
 /// attempt, and its own publication continues the
 /// sequence: a subscriber on A follows B's events and A's in one order,
@@ -579,24 +579,6 @@ async fn a_takeover_replica_reads_back_a_dead_replicas_stream_and_continues_it()
     let pinned = b.current_cursor(&session, SessionRevision::new(1));
     publish(&b, &session, "attempt-1#0", "abandoned one").await;
     publish(&b, &session, "attempt-1#1", "abandoned two").await;
-    let in_flight = {
-        let b = Arc::clone(&b);
-        let session = session.clone();
-        tokio::spawn(async move {
-            b.publish(
-                &session,
-                SessionRevision::new(1),
-                vec![LiveReplayEventDraft::new(
-                    None::<lash_core::TurnId>,
-                    text("attempt-1#2", "abandoned three"),
-                )],
-            )
-            .await
-        })
-    };
-    in_flight.abort();
-    drop(b);
-
     let window = match a.replay_after_cursor(&pinned).await.expect("replay on A") {
         LiveReplayOutcome::Replayed(events) => events,
         LiveReplayOutcome::Gap(reason) => panic!("B's pinned cursor gapped on A: {reason:?}"),
@@ -607,25 +589,89 @@ async fn a_takeover_replica_reads_back_a_dead_replicas_stream_and_continues_it()
         ["abandoned one", "abandoned two"],
         "A reads back what B published"
     );
+    // Force the lost-acknowledgement batch to commit AFTER the first
+    // replay read. Cancelling publish drops its reply receiver; the
+    // background writer still owns the accepted batch.
+    {
+        let mut in_flight = Box::pin(b.publish(
+            &session,
+            SessionRevision::new(1),
+            vec![LiveReplayEventDraft::new(
+                None::<lash_core::TurnId>,
+                text("attempt-1#2", "abandoned three"),
+            )],
+        ));
+        std::future::poll_fn(|cx| {
+            use std::future::Future as _;
+            // A fast writer may already have answered. The caller discards
+            // that answer too; only the committed log proves publication.
+            let _ = in_flight.as_mut().poll(cx);
+            std::task::Poll::Ready(())
+        })
+        .await;
+    }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while live_position(&b.current_cursor(&session, SessionRevision::new(1))) < 3 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("B's accepted batch commits despite its cancelled caller");
+    drop(b);
+
     let resumed = publish(&a, &session, "attempt-2#0", "resumed").await;
+    // The first replay and A's publish are separate transactions. Judge
+    // continuity against the committed prefix through A's publication,
+    // including a B batch that committed between those two operations.
+    let continued = match a.replay_after_cursor(&pinned).await.expect("replay on A") {
+        LiveReplayOutcome::Replayed(events) => events,
+        LiveReplayOutcome::Gap(reason) => panic!("B's pinned cursor gapped on A: {reason:?}"),
+    };
     assert_eq!(
-        live_position(&resumed.cursor),
-        live_position(&window.last().expect("B published").cursor) + 1,
-        "A's publication continues B's sequence"
+        continued
+            .iter()
+            .map(|event| label(event))
+            .collect::<Vec<_>>(),
+        [
+            "abandoned one",
+            "abandoned two",
+            "abandoned three",
+            "resumed"
+        ],
+        "takeover retains the late batch and A's publication"
+    );
+    assert_eq!(
+        continued[..window.len()]
+            .iter()
+            .map(|event| &event.cursor)
+            .collect::<Vec<_>>(),
+        window.iter().map(|event| &event.cursor).collect::<Vec<_>>(),
+        "the first replay remains an unchanged prefix"
+    );
+    for (previous, event) in (live_position(&pinned)..).zip(&continued) {
+        assert_eq!(
+            live_position(&event.cursor),
+            previous + 1,
+            "every publication continues the gap-free sequence"
+        );
+    }
+    assert_eq!(
+        continued.last().expect("A published").cursor,
+        resumed.cursor,
+        "A's publication follows B's complete prefix"
     );
     let mut followed = Vec::new();
-    while followed.len() < window.len() + 1 {
+    while followed.len() < continued.len() {
         followed.push(next(&mut on_a).await);
     }
     assert_eq!(
         followed
             .iter()
-            .map(|event| event.cursor.clone())
+            .map(|event| &event.cursor)
             .collect::<Vec<_>>(),
-        window
+        continued
             .iter()
-            .chain(std::iter::once(&resumed))
-            .map(|event| event.cursor.clone())
+            .map(|event| &event.cursor)
             .collect::<Vec<_>>(),
         "A's subscriber follows B's events and A's in one order"
     );

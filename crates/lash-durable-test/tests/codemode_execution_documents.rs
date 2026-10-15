@@ -350,7 +350,8 @@ await control.finish(await processes.await({ handle }));
 /// cell of the same session can run off and stays unobserved.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_cells_parked_calls_sum_to_unsplit_counts_and_the_next_cell_can_be_off() {
-    use lash::workflow::document::{Datum, ErrorDatum, Handle, RunObservation, Site, Timestamp};
+    use lash::workflow::document::{Datum, ErrorDatum, Handle, Site, Timestamp};
+    use lash::workflow::view::RunObservation;
     use lash_kernel_vm::{
         Bounds, EffectModes, Host, KernelMachine, Machine, PreparedLibrary, Program, Start, Step,
         Target,

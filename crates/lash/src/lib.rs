@@ -212,8 +212,6 @@ pub mod sync {
 }
 mod send;
 pub use lash_core::RunId;
-/// Per-run cell observation and the common input to workflow coverage.
-pub use lash_core::{ProcessWorkflowObservation as RunObservation, RanCounts};
 mod session;
 mod session_binding;
 mod support;
