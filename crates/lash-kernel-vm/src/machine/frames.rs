@@ -1006,4 +1006,57 @@ mod laws {
             "scalar bindings must bypass payload canonicalization"
         );
     }
+
+    /// FIG-6480, K-CHG-003: measuring a call's register arguments or its
+    /// result borrows each value at its holding location, without a Value copy.
+    #[test]
+    fn charge_formulas_borrow_register_arguments_and_results() {
+        use crate::compile::Plan;
+        use crate::machine::Value;
+        use lash_kernel_doc::{Formula, Name, Operand, Param, Type};
+        let embedder = Embedder::new("main { return null }");
+        let args = [Value::text("hello")];
+        let result = Value::Null;
+        let param = Operand::Param(Name::new("a"));
+        let plan = Plan::new(
+            &Formula::Sum(vec![
+                Formula::Size(param.clone()),
+                Formula::DeepSize(param.clone()),
+                Formula::Magnitude(param),
+                Formula::DeepSize(Operand::Result),
+            ]),
+            &[Param {
+                name: Name::new("a"),
+                ty: Type::Any,
+                optional: false,
+            }],
+        );
+        embedder
+            .machine
+            .storage
+            .formula_sources
+            .borrow_mut()
+            .clear();
+        assert_eq!(
+            embedder
+                .machine
+                .formula(&plan, &args, Some(&result))
+                .unwrap(),
+            13
+        );
+        let sources = embedder.machine.storage.formula_sources.borrow();
+        assert_eq!(sources.len(), 4);
+        let copied = sources
+            .iter()
+            .filter(|&&source| {
+                source != std::ptr::from_ref(&args[0]).addr()
+                    && source != std::ptr::from_ref(&result).addr()
+            })
+            .count();
+        assert_eq!(
+            copied * std::mem::size_of::<Value>(),
+            0,
+            "formula copied {copied} values"
+        );
+    }
 }

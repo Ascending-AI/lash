@@ -254,6 +254,8 @@ struct Storage {
     frames: Vec<FrameStorage>,
     #[cfg(test)]
     binding_canonicalizations: usize,
+    #[cfg(test)]
+    formula_sources: std::cell::RefCell<Vec<usize>>,
 }
 
 struct Frame {
@@ -632,6 +634,18 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
+        self.tasks.protect(Some(task));
+        let result = self.step_protected(task, host, exe);
+        self.tasks.protect(None);
+        result
+    }
+
+    fn step_protected(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+    ) -> Result<(), Halt> {
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::step();
         // What the run holds is published only where something can read
