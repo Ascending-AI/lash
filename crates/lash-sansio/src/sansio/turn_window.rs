@@ -137,6 +137,10 @@ impl<E: Clone> TurnWindow<E> {
         self.rendered.rendered(self.messages.as_slice())
     }
 
+    pub(super) fn render_cache(&self) -> Arc<BaseRenderCache> {
+        Arc::clone(&self.rendered)
+    }
+
     /// The window's first `len` messages followed by `rest`.
     pub(super) fn messages_then(&self, len: usize, rest: Vec<Message>) -> MessageSequence {
         if len == self.messages.len() {

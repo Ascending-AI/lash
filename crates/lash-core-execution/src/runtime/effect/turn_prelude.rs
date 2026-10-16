@@ -234,7 +234,9 @@ impl TurnPrelude {
                 "the recorded prelude's history window is not stored",
             )
         })?;
-        let base = crate::MessageSequence::from_base(base.state.read_model().messages);
+        let read = base.state.read_model();
+        let base = crate::MessageSequence::from_base(read.messages)
+            .with_base_render_cache(read.prompt_render_cache);
         let history = self.history_view.restore(&base)?;
         let prompt = self.prompt_view.restore(&history)?;
         Ok((

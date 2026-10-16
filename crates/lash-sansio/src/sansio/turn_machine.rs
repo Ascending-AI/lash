@@ -27,8 +27,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
         let Some(window) = &self.window else {
             return messages;
         };
+        // A restored sequence can share the window's base without its
+        // live render cache. Reattach it even when no message rebasing is
+        // needed, so projection renders only the turn's delta (FIG-6441).
+        if messages.has_base(window.messages()) {
+            return messages.with_base_render_cache(window.render_cache());
+        }
         let shared = window.shared_messages(&messages);
-        if shared == 0 || messages.has_base(window.messages()) {
+        if shared == 0 {
             return messages;
         }
         window.messages_then(shared, messages.iter().skip(shared).cloned().collect())

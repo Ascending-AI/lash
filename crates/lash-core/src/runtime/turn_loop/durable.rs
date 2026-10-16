@@ -250,7 +250,9 @@ impl LashRuntime {
                 &request_messages,
             )
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
-        crate::plugin::apply_attachment_omissions(request_messages.make_mut(), &omissions);
+        if !omissions.is_empty() {
+            crate::plugin::apply_attachment_omissions(request_messages.make_mut(), &omissions);
+        }
         let prepared_context = crate::session_model::context::PreparedContext {
             messages: request_messages,
         };
