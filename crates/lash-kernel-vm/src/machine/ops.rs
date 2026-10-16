@@ -140,6 +140,11 @@ impl KernelMachine {
     }
 
     fn hold(&mut self, bytes: u64, persistent: bool) -> Result<(), Halt> {
+        #[cfg(test)]
+        if self.pins.force_precision {
+            self.pins.reservations.push((bytes, self.charged));
+            self.refine_for(bytes)?;
+        }
         if self.heap.hold(bytes, persistent)? {
             return Ok(());
         }
@@ -165,14 +170,14 @@ impl KernelMachine {
     /// bytes.
     #[inline(always)]
     pub(super) fn pin(&mut self, r: Reg) -> Result<(), Halt> {
-        let bytes = self.pins.pin(&self.regs[r]);
+        let bytes = self.pins.pin(&self.regs[r])?;
         self.reserve(bytes)
     }
 
     /// The pin anchor on a value the statement holds outside the
     /// registers.
     pub(super) fn pin_value(&mut self, value: &Value) -> Result<(), Halt> {
-        let bytes = self.pins.pin(value);
+        let bytes = self.pins.pin(value)?;
         self.reserve(bytes)
     }
 
@@ -552,6 +557,7 @@ impl KernelMachine {
                             joins: &self.joins,
                             registers: &self.regs,
                             pinned: &self.pins.values,
+                            pinned_bytes: self.pins.bytes,
                             fresh: &self.fresh,
                             refinements: &mut self.census_refinements,
                         },

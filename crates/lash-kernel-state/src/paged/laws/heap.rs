@@ -529,6 +529,7 @@ fn an_allocation_consumes_its_native_reservation() {
         heap.joins.clone(),
         &[Value::Null],
         &[],
+        0,
         &[],
     )
     .expect("consume value reservation");
@@ -587,26 +588,34 @@ fn replacing_a_reference_checks_the_proposed_reachable_graph() {
 
 #[test]
 fn statement_holding_cost_is_counted_before_fast_reservation() {
-    let (mut heap, _) = fresh();
-    heap.set_census(Box::new(
-        Census::restore(heap.certificate(), LogicalBytes(80)).expect("census"),
-    ))
-    .expect("install");
-    let list = heap
-        .allocate_object(ObjectInit::List(vec![Value::Null]))
-        .expect("list");
-    heap.set_execution_roots(
-        heap.tasks.clone(),
-        heap.joins.clone(),
-        &[Value::List(list)],
-        &[],
-        &[],
-    )
-    .expect("register");
-    assert_eq!(heap.certificate().upper, LogicalBytes(64));
-    assert!(matches!(heap.reserve(2, 0), Err(NativeError::Memory)));
-    heap.release_statement_roots().expect("release");
-    assert_eq!(heap.certificate().upper, LogicalBytes(48));
+    // K-BND-003 / FIG-6587: an aggregate pin has precisely the same
+    // pressure verdict and release delta as its tracing descriptor.
+    for aggregate in [false, true] {
+        let (mut heap, _) = fresh();
+        heap.set_census(Box::new(
+            Census::restore(heap.certificate(), LogicalBytes(80)).expect("census"),
+        ))
+        .expect("install");
+        let list = heap
+            .allocate_object(ObjectInit::List(vec![Value::Null]))
+            .expect("list");
+        let pinned = [Value::Bool(true)];
+        heap.set_execution_roots(
+            heap.tasks.clone(),
+            heap.joins.clone(),
+            &[Value::List(list)],
+            if aggregate { &[] } else { &pinned },
+            if aggregate { 16 } else { 0 },
+            &[],
+        )
+        .expect("register and pin");
+        assert_eq!(heap.certificate().upper, LogicalBytes(80));
+        assert!(matches!(heap.reserve(2, 0), Err(NativeError::Memory)));
+        assert_eq!(heap.certificate().upper, LogicalBytes(80));
+        assert_eq!(heap.certificate().refinements, 1);
+        heap.release_statement_roots().expect("release");
+        assert_eq!(heap.certificate().upper, LogicalBytes(48));
+    }
 }
 
 #[test]
@@ -904,7 +913,7 @@ fn an_ended_task_result_counts_toward_fast_reservation() {
             &heap.access,
         )
         .expect("ended task");
-    heap.set_execution_roots(tasks, heap.joins.clone(), &[], &[], &[])
+    heap.set_execution_roots(tasks, heap.joins.clone(), &[], &[], 0, &[])
         .expect("16-byte result holding");
     assert!(
         matches!(
@@ -926,8 +935,15 @@ fn a_fresh_mid_expression_entity_survives_the_next_allocation_pressure() {
     .unwrap();
     let garbage = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
     let fresh = heap.allocate_object(ObjectInit::List(vec![])).unwrap();
-    heap.set_execution_roots(heap.tasks.clone(), heap.joins.clone(), &[], &[], &[fresh])
-        .unwrap();
+    heap.set_execution_roots(
+        heap.tasks.clone(),
+        heap.joins.clone(),
+        &[],
+        &[],
+        0,
+        &[fresh],
+    )
+    .unwrap();
     let next = heap
         .allocate_object(ObjectInit::List(vec![Value::Null]))
         .unwrap();
@@ -1260,7 +1276,7 @@ fn unchanged_root_holdings_seal_without_writing_a_page() {
     let first = seal(&mut heap);
     let before = pages.borrow().seals;
     for _ in 0..10 {
-        heap.set_execution_roots(Tree::new(false), Tree::new(false), &[], &[], &[])
+        heap.set_execution_roots(Tree::new(false), Tree::new(false), &[], &[], 0, &[])
             .expect("roots");
         heap.release_statement_roots().expect("release");
         let next = seal(&mut heap);

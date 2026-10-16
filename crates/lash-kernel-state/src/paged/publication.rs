@@ -25,6 +25,8 @@ thread_local! {
 /// published, and whether the installed roots are its current ones.
 pub(super) struct Holdings {
     temporary: Vec<Value>,
+    /// Pinned immediate values need their local cost, but no tracing descriptor.
+    scalar_bytes: u64,
     fresh: Vec<EntityId>,
     /// What the running statement holds: credit for its writes, released
     /// at the statement's end.
@@ -48,6 +50,7 @@ impl Default for Holdings {
     fn default() -> Self {
         Self {
             temporary: Vec::new(),
+            scalar_bytes: 0,
             fresh: Vec::new(),
             reserved: 0,
             held: 0,
@@ -145,7 +148,21 @@ impl PagedHeap {
         ) {
             return Ok(false);
         }
-        self.held_now(bytes, persistent)?;
+        census
+            .changed(LogicalBytes(0), LogicalBytes(bytes))
+            .map_err(census_fault)?;
+        // changed has checked this exact delta. Only U changes for a
+        // hold; copying the census certificate repeats facts we have.
+        self.accounting.upper.0 += bytes;
+        self.header = None;
+        let counter = if persistent {
+            &mut self.holdings.held
+        } else {
+            &mut self.holdings.reserved
+        };
+        *counter = counter
+            .checked_add(bytes)
+            .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
         Ok(true)
     }
     /// Refines exactly over the roots the machine has just published, with
@@ -171,26 +188,6 @@ impl PagedHeap {
         self.header = None;
         self.census = Some(census);
         result
-    }
-    fn held_now(&mut self, bytes: u64, persistent: bool) -> Result<(), HeapFault> {
-        let census = self
-            .census
-            .as_mut()
-            .ok_or_else(|| HeapFault::Malformed("a hold has no census".into()))?;
-        census
-            .changed(LogicalBytes(0), LogicalBytes(bytes))
-            .map_err(census_fault)?;
-        self.accounting = census.certificate();
-        self.header = None;
-        let counter = if persistent {
-            &mut self.holdings.held
-        } else {
-            &mut self.holdings.reserved
-        };
-        *counter = counter
-            .checked_add(bytes)
-            .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
-        Ok(())
     }
     /// The refusal of a write that needs an exact refinement of `bytes`
     /// while the installed roots are not the machine's: `None` when the
@@ -226,13 +223,16 @@ impl PagedHeap {
         census
             .changed(LogicalBytes(self.holdings.reserved), LogicalBytes(0))
             .map_err(census_fault)?;
+        self.accounting.upper.0 -= self.holdings.reserved;
         self.holdings.reserved = 0;
-        self.accounting = census.certificate();
         self.header = None;
         Ok(())
     }
     pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
-        if self.holdings.temporary.is_empty() && self.holdings.reserved == 0 {
+        if self.holdings.temporary.is_empty()
+            && self.holdings.scalar_bytes == 0
+            && self.holdings.reserved == 0
+        {
             self.holdings.fresh.clear();
             return Ok(());
         }
@@ -240,21 +240,20 @@ impl PagedHeap {
         if let Some(census) = &mut self.census {
             #[cfg(test)]
             RELEASE_DELTA_CALLS.with(|calls| calls.set(calls.get() + 1));
+            let released = checked_sum(
+                self.holdings
+                    .temporary
+                    .iter()
+                    .map(value_cost)
+                    .chain([self.holdings.scalar_bytes, self.holdings.reserved]),
+            )?;
             census
-                .changed(
-                    LogicalBytes(checked_sum(
-                        self.holdings
-                            .temporary
-                            .iter()
-                            .map(value_cost)
-                            .chain([self.holdings.reserved]),
-                    )?),
-                    LogicalBytes(0),
-                )
+                .changed(LogicalBytes(released), LogicalBytes(0))
                 .map_err(census_fault)?;
-            self.accounting = census.certificate();
+            self.accounting.upper.0 -= released;
         }
         self.holdings.temporary.clear();
+        self.holdings.scalar_bytes = 0;
         self.holdings.fresh.clear();
         self.holdings.reserved = 0;
         if before != self.accounting {
@@ -271,15 +270,21 @@ impl PagedHeap {
     pub(super) fn outstanding_reserved(&self) -> u64 {
         self.holdings.reserved.saturating_add(self.holdings.held)
     }
+    fn transient_reserved(&self) -> Result<LogicalBytes, HeapFault> {
+        checked_sum([self.outstanding_reserved(), self.holdings.scalar_bytes].into_iter())
+            .map(LogicalBytes)
+    }
     pub(super) fn install_transient(
         &mut self,
         values: &[Value],
         pinned: &[Value],
+        pinned_bytes: u64,
         fresh: &[EntityId],
     ) {
         self.holdings.temporary.clear();
         self.holdings.temporary.extend_from_slice(values);
         self.holdings.temporary.extend_from_slice(pinned);
+        self.holdings.scalar_bytes = pinned_bytes;
         self.holdings.fresh.clear();
         self.holdings.fresh.extend_from_slice(fresh);
     }
@@ -290,7 +295,7 @@ impl PagedHeap {
         pending: u64,
     ) -> Result<(), HeapWriteError> {
         let registers = self.holdings.temporary.clone();
-        let reserved = self.outstanding_reserved();
+        let reserved = self.transient_reserved()?;
         let mut seeds = self.holdings.fresh.clone();
         seeds.extend_from_slice(fresh);
         let decision = census.refine(
@@ -300,7 +305,7 @@ impl PagedHeap {
                 pinned: &[],
                 native_args: &[],
                 fresh: &seeds,
-                reserved: LogicalBytes(reserved),
+                reserved,
             },
             PendingReservation {
                 bytes: LogicalBytes(pending),
@@ -389,7 +394,7 @@ impl PagedHeap {
                 pinned: &[],
                 native_args: &[],
                 fresh: &fresh,
-                reserved: LogicalBytes(self.outstanding_reserved()),
+                reserved: self.transient_reserved()?,
             },
         )
     }
@@ -405,12 +410,17 @@ impl PagedHeap {
             heap.session = root
         })
     }
+    /// Installs execution and statement roots together. `pinned_bytes`
+    /// prices immediate pins omitted from `pinned`: it remains a holding
+    /// location in both conservative accounting and exact refinement,
+    /// never reservation credit for a write.
     pub fn set_execution_roots(
         &mut self,
         tasks: Tree<TaskRecord>,
         joins: Tree<ListJoinRecord>,
         registers: &[Value],
         pinned: &[Value],
+        pinned_bytes: u64,
         fresh: &[EntityId],
     ) -> Result<(), HeapWriteError> {
         // The proposed roots are current: a precision check installing them
@@ -419,18 +429,20 @@ impl PagedHeap {
         let before = checked_sum(
             [self.tasks.cost(), self.joins.cost()]
                 .into_iter()
-                .chain(self.statement_roots().iter().map(value_cost)),
+                .chain(self.statement_roots().iter().map(value_cost))
+                .chain([self.holdings.scalar_bytes]),
         )?;
         let after = checked_sum(
             [tasks.cost(), joins.cost()]
                 .into_iter()
-                .chain(registers.iter().chain(pinned).map(value_cost)),
+                .chain(registers.iter().chain(pinned).map(value_cost))
+                .chain([pinned_bytes]),
         )?;
         // Republishing the installed trees changes only the statement
         // roots: their task edges are those already counted (FIG-6318).
         if tasks.same_version(&self.tasks) && joins.same_version(&self.joins) {
             self.replace_holding(before, after, 0, 0, |heap| {
-                heap.install_transient(registers, pinned, fresh);
+                heap.install_transient(registers, pinned, pinned_bytes, fresh);
             })?;
             return self.release_held();
         }
@@ -447,7 +459,7 @@ impl PagedHeap {
         self.replace_holding(before, after, old_tasks, new_tasks, |heap| {
             heap.tasks = tasks.with_task_edges(task_edges);
             heap.joins = joins.with_task_edges(join_edges);
-            heap.install_transient(registers, pinned, fresh);
+            heap.install_transient(registers, pinned, pinned_bytes, fresh);
         })?;
         self.release_held()
     }
@@ -464,8 +476,8 @@ impl PagedHeap {
         census
             .changed(LogicalBytes(self.holdings.held), LogicalBytes(0))
             .map_err(census_fault)?;
+        self.accounting.upper.0 -= self.holdings.held;
         self.holdings.held = 0;
-        self.accounting = census.certificate();
         self.header = None;
         Ok(())
     }
@@ -531,7 +543,7 @@ impl PagedHeap {
                 ReservationDecision::NeedsPrecision(_) => {
                     let registers = self.statement_roots().to_vec();
                     let fresh = self.fresh_roots().to_vec();
-                    let reserved = self.outstanding_reserved();
+                    let reserved = self.transient_reserved()?;
                     match census.refine(
                         self,
                         &TransientRoots {
@@ -539,7 +551,7 @@ impl PagedHeap {
                             pinned: &[],
                             native_args: &[],
                             fresh: &fresh,
-                            reserved: LogicalBytes(reserved),
+                            reserved,
                         },
                         PendingReservation {
                             bytes: LogicalBytes(0),

@@ -397,26 +397,80 @@ impl std::fmt::Debug for KernelMachine {
 #[derive(Default)]
 struct Pins {
     values: Vec<Value>,
+    /// Local costs of immediate pins, which have no edges to trace.
     bytes: u64,
+    #[cfg(test)]
+    scalar_root_insertions: u64,
+    #[cfg(test)]
+    descriptor_pins: bool,
+    #[cfg(test)]
+    force_precision: bool,
+    #[cfg(test)]
+    scalar_locations: Vec<Option<u64>>,
+    #[cfg(test)]
+    reservations: Vec<(u64, u64)>,
 }
 
 impl Pins {
+    #[inline(always)]
+    fn scalar(value: &Value) -> bool {
+        matches!(
+            value,
+            Value::Null
+                | Value::Absent
+                | Value::Bool(_)
+                | Value::Float(_)
+                | Value::Int(lash_kernel_doc::heap::IntRef::Inline(_))
+        )
+    }
+
     /// Holds `value` until the statement ends, and gives the bytes to
     /// reserve for it.
     #[inline(always)]
-    fn pin(&mut self, value: &Value) -> u64 {
+    fn pin(&mut self, value: &Value) -> Result<u64, Halt> {
         let bytes = value_bytes(value);
-        self.hold(value, bytes);
-        bytes
+        self.hold(value, bytes)?;
+        Ok(bytes)
     }
 
     /// Holds `value`, of `bytes` bytes.
-    fn hold(&mut self, value: &Value, bytes: u64) {
+    #[inline(always)]
+    fn hold(&mut self, value: &Value, bytes: u64) -> Result<(), Halt> {
+        #[cfg(test)]
+        {
+            if self.force_precision && Self::scalar(value) {
+                self.scalar_locations.push(Some(bytes));
+            }
+            // The precision law's oracle retains every original descriptor.
+            if self.descriptor_pins {
+                self.root(value);
+                return Ok(());
+            }
+        }
+        if Self::scalar(value) {
+            self.bytes = self.bytes.checked_add(bytes).ok_or_else(|| {
+                HeapFault::Malformed("statement scalar holding cost overflow".into())
+            })?;
+        } else {
+            self.root(value);
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn root(&mut self, value: &Value) {
+        #[cfg(test)]
+        if Self::scalar(value) {
+            self.scalar_root_insertions += 1;
+        }
         self.values.push(value.clone());
-        self.bytes = self.bytes.saturating_add(bytes);
     }
 
     fn clear(&mut self) {
+        #[cfg(test)]
+        if self.force_precision {
+            self.scalar_locations.push(None);
+        }
         self.values.clear();
         self.bytes = 0;
     }
@@ -545,6 +599,7 @@ impl KernelMachine {
             joins: &self.joins,
             registers: &self.regs,
             pinned: &self.pins.values,
+            pinned_bytes: self.pins.bytes,
             fresh: &self.fresh,
             refinements: &mut self.census_refinements,
         }

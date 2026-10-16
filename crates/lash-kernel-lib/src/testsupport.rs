@@ -79,6 +79,7 @@ pub(crate) fn hold_with_extra(heap: &mut PagedHeap, args: &[Value], extra: u64) 
         tree::Tree::new(false),
         args,
         &[],
+        0,
         &[],
     )
     .unwrap();

@@ -107,7 +107,7 @@ fn ten_thousand_spawn_ancestors_have_bounded_writes_and_exact_diagnostics() {
                 &heap.access,
             )
             .unwrap();
-        heap.set_execution_roots(tasks.clone(), Tree::new(false), &[], &[], &[])
+        heap.set_execution_roots(tasks.clone(), Tree::new(false), &[], &[], 0, &[])
             .unwrap();
         tasks.seal(&heap.access, &mut work()).unwrap();
         assert_eq!(

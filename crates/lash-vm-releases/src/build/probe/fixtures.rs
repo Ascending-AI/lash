@@ -207,7 +207,7 @@ impl Replay {
             .iter()
             .map(|v| decode(&mut heap, v, &ids))
             .collect::<Result<Vec<_>, _>>()?;
-        heap.set_execution_roots(Tree::new(false), Tree::new(false), &args, &[], &[])
+        heap.set_execution_roots(Tree::new(false), Tree::new(false), &args, &[], 0, &[])
             .map_err(error)?;
         let certificate = heap.certificate();
         let bound = LogicalBytes(
