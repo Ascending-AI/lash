@@ -866,6 +866,14 @@ async fn a_held_activation_renews_its_lease_through_a_tool_twice_its_ttl() {
     };
 }
 
+/// The parents' directories under the staging directory `dir`.
+fn parent_dirs(dir: &std::path::Path) -> usize {
+    std::fs::read_dir(dir)
+        .expect("dir")
+        .filter(|entry| entry.as_ref().expect("entry").path().is_dir())
+        .count()
+}
+
 /// The parent crash cuts: after a spill, and after a candidate is sealed.
 /// The spool dies with its parent; the next parent reaps it (and never a
 /// live parent's), and a fresh activation leases the committed root,
@@ -896,7 +904,7 @@ async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
         }
         let live = SpoolRoot::open(dir.path(), 1 << 20).expect("a live sibling");
         assert_eq!(
-            std::fs::read_dir(dir.path()).expect("dir").count(),
+            parent_dirs(dir.path()),
             2,
             "{cut}: a live parent's spool is never reaped"
         );
@@ -906,7 +914,7 @@ async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
         drop(live);
         let next = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
         assert_eq!(
-            std::fs::read_dir(dir.path()).expect("dir").count(),
+            parent_dirs(dir.path()),
             1,
             "{cut}: only the new parent's directory is left"
         );
@@ -924,4 +932,52 @@ async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
         drop(fresh);
         drop(next);
     }
+}
+
+/// Parents that open their spools under one staging directory at once
+/// never reap each other (FIG-6438): each one's directory stands, and
+/// stages, from its open on, while a sibling's open reaps the parents
+/// that died around it.
+#[test]
+fn parents_opening_at_once_never_reap_a_live_sibling() {
+    const PARENTS: usize = 8;
+    const OPENS: usize = 200;
+    let dir = tempfile::tempdir().expect("dir");
+    let start = std::sync::Barrier::new(PARENTS);
+    let failures: Vec<String> = std::thread::scope(|scope| {
+        let parents: Vec<_> = (0..PARENTS)
+            .map(|_| {
+                scope.spawn(|| {
+                    start.wait();
+                    let mut failures = Vec::new();
+                    for open in 0..OPENS {
+                        // A parent that drops its root dies: the next open
+                        // reaps its directory.
+                        let root = match SpoolRoot::open(dir.path(), 1 << 20) {
+                            Ok(root) => root,
+                            Err(error) => {
+                                failures.push(format!("open {open}: {error}"));
+                                continue;
+                            }
+                        };
+                        if let Err(error) = root.spool(StageLeaseId(open as u64)) {
+                            failures.push(format!("spool {open}: {error}"));
+                        }
+                    }
+                    failures
+                })
+            })
+            .collect();
+        parents
+            .into_iter()
+            .flat_map(|parent| parent.join().expect("a parent"))
+            .collect()
+    });
+    assert!(
+        failures.is_empty(),
+        "{} of {} opens failed: {:?}",
+        failures.len(),
+        PARENTS * OPENS,
+        &failures[..failures.len().min(5)]
+    );
 }

@@ -51,6 +51,10 @@ use lash_core_store::checkpoint_graph::{
 /// parent lives.
 const LOCK: &str = "lock";
 
+/// The name of the file in the staging directory a parent holds locked
+/// while it reaps and creates its own process directory.
+const OPENING: &str = "opening.lock";
+
 fn io(error: &std::io::Error) -> StageFault {
     StageFault::Io(error.to_string())
 }
@@ -246,6 +250,11 @@ impl SpoolRoot {
     /// [`StageFault::Io`] when the directory cannot be prepared.
     pub fn open(parent: &Path, quota: u64) -> Result<Self, StageFault> {
         fs::create_dir_all(parent).map_err(|error| io(&error))?;
+        // Parents open one at a time: a sibling's directory is reaped only
+        // after its open, which holds its lock from the moment the lock
+        // file exists, and no two parents reap one directory (FIG-6438).
+        let opening = fs::File::create(parent.join(OPENING)).map_err(|error| io(&error))?;
+        opening.lock().map_err(|error| io(&error))?;
         for entry in fs::read_dir(parent).map_err(|error| io(&error))? {
             let dir = entry.map_err(|error| io(&error))?.path();
             let Ok(lock) = fs::OpenOptions::new().write(true).open(dir.join(LOCK)) else {

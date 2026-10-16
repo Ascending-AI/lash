@@ -52,8 +52,9 @@ pub trait Scenario: Send + Sync {
 pub enum Verdict {
     Held,
     Violated(Vec<String>),
-    /// The re-run never reached the write the cell cuts.
-    Unreached,
+    /// The re-run never reached the write the cell cuts; the laws' verdict
+    /// on the run it made instead.
+    Unreached(Vec<String>),
 }
 
 /// One cut point: a node's `nth` write under a label, or, with no node, the
@@ -172,7 +173,12 @@ impl MatrixReport {
             .map(|cell| {
                 let why = match &cell.verdict {
                     Verdict::Held => String::new(),
-                    Verdict::Unreached => "cut never reached".to_string(),
+                    Verdict::Unreached(violations) if violations.is_empty() => {
+                        "cut never reached".to_string()
+                    }
+                    Verdict::Unreached(violations) => {
+                        format!("cut never reached; {}", violations.join("; "))
+                    }
                     Verdict::Violated(violations) => violations.join("; "),
                 };
                 format!("{} {}: {why}\n  {}", cell.point, cell.fault, cell.trace)
@@ -691,7 +697,7 @@ impl Matrix {
         let trace = nodes.script().rendered_trace();
         let writes = nodes.script().trace();
         let verdict = if unreached {
-            Verdict::Unreached
+            Verdict::Unreached(violations)
         } else if violations.is_empty() {
             Verdict::Held
         } else {
