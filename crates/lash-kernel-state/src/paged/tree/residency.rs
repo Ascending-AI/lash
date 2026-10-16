@@ -1,7 +1,6 @@
 //! Dirty pages share a bounded staging registry across all activation trees.
 use super::decoded::{RowSize, RowSums};
 use super::*;
-use std::collections::VecDeque;
 use std::rc::Weak;
 
 pub(super) const DIRTY_LIMIT: usize = 32 << 20;
@@ -9,7 +8,7 @@ const DIRTY_TARGET: usize = 24 << 20;
 trait Stage {
     fn spill(&self, access: &Access<'_>, sequence: bool) -> Result<(), HeapFault>;
 }
-impl<T: Cell> Stage for RefCell<Node<T>> {
+impl<T: Cell> Stage for DirtyNode<T> {
     fn spill(&self, access: &Access<'_>, sequence: bool) -> Result<(), HeapFault> {
         let node = self.borrow().clone();
         if matches!(node, Node::Staged(..)) {
@@ -53,25 +52,180 @@ struct Entry {
     /// have changed untracked.
     rows: Option<RowSums>,
 }
-impl Entry {
-    fn holds<T: Cell>(&self, page: &Rc<RefCell<Node<T>>>) -> bool {
-        self.node.strong_count() > 0 && std::ptr::addr_eq(self.node.as_ptr(), Rc::as_ptr(page))
+/// A working page carries its registry identity, so a warm update needs no
+/// address-keyed lookup. The weak registry link also pins its allocation:
+/// another Access cannot acquire the same identity by address reuse.
+pub(super) struct DirtyNode<T: Cell> {
+    node: RefCell<Node<T>>,
+    registration: RefCell<Option<Registration>>,
+}
+impl<T: Cell> DirtyNode<T> {
+    pub(super) fn new(node: Node<T>) -> Self {
+        Self {
+            node: RefCell::new(node),
+            registration: RefCell::new(None),
+        }
     }
 }
+impl<T: Cell> std::ops::Deref for DirtyNode<T> {
+    type Target = RefCell<Node<T>>;
+    fn deref(&self) -> &Self::Target {
+        &self.node
+    }
+}
+impl<T: Cell> Drop for DirtyNode<T> {
+    fn drop(&mut self) {
+        if let Some(registration) = self.registration.get_mut().take() {
+            registration.release();
+        }
+    }
+}
+#[derive(Clone, Copy)]
+struct Identity {
+    slot: usize,
+    generation: u64,
+}
+struct Registration {
+    registry: Weak<RefCell<DirtyResidency>>,
+    id: Identity,
+}
+impl Registration {
+    fn release(self) {
+        if let Some(registry) = self.registry.upgrade() {
+            let mut dirty = registry.borrow_mut();
+            if dirty.contains(self.id) {
+                dirty.take(self.id.slot);
+                dirty.recycle(self.id);
+            }
+        }
+    }
+}
+struct Slot {
+    generation: u64,
+    entry: Option<Entry>,
+    prev: Option<usize>,
+    // Also the free-list link when entry is None and the slot is recycled.
+    next: Option<usize>,
+}
+// The slot vector's full capacity is charged separately, including free
+// slots. Each live page also pays for its registration and allocator overhead.
+const ENTRY_OVERHEAD: usize = std::mem::size_of::<RefCell<Option<Registration>>>() + 64;
 #[derive(Default)]
 pub(super) struct DirtyResidency {
-    entries: BTreeMap<usize, Entry>,
-    order: VecDeque<usize>,
+    slots: Vec<Slot>,
+    free: Option<usize>,
+    head: Option<usize>,
+    tail: Option<usize>,
     bytes: usize,
     staging: bool,
+    #[cfg(test)]
+    entry_allocations: usize,
+}
+impl DirtyResidency {
+    fn contains(&self, id: Identity) -> bool {
+        self.slots
+            .get(id.slot)
+            .is_some_and(|slot| slot.generation == id.generation && slot.entry.is_some())
+    }
+    fn entry<T: Cell>(&self, page: &DirtyNode<T>, registry: &Rc<RefCell<Self>>) -> Option<&Entry> {
+        let registration = page.registration.borrow();
+        let registration = registration.as_ref()?;
+        if registration.registry.as_ptr() != Rc::as_ptr(registry) {
+            return None;
+        }
+        if self.contains(registration.id) {
+            self.slots[registration.id.slot].entry.as_ref()
+        } else {
+            None
+        }
+    }
+    fn append(&mut self, entry: Entry) -> Identity {
+        let bytes = entry.bytes;
+        let index = if let Some(index) = self.free {
+            self.free = self.slots[index].next;
+            index
+        } else {
+            #[cfg(test)]
+            {
+                self.entry_allocations += 1;
+            }
+            let capacity = self.slots.capacity();
+            self.slots.push(Slot {
+                generation: 0,
+                entry: None,
+                prev: None,
+                next: None,
+            });
+            self.bytes += (self.slots.capacity() - capacity) * std::mem::size_of::<Slot>();
+            self.slots.len() - 1
+        };
+        let slot = &mut self.slots[index];
+        slot.entry = Some(entry);
+        slot.prev = self.tail;
+        slot.next = None;
+        if let Some(tail) = self.tail {
+            self.slots[tail].next = Some(index);
+        } else {
+            self.head = Some(index);
+        }
+        self.tail = Some(index);
+        self.bytes += bytes;
+        Identity {
+            slot: index,
+            generation: self.slots[index].generation,
+        }
+    }
+    /// Detach but reserve this generation while a spill may fail. Nested
+    /// tracking cannot reuse the slot before it is restored or recycled.
+    fn take(&mut self, index: usize) -> Entry {
+        let slot = &mut self.slots[index];
+        let Some(entry) = slot.entry.take() else {
+            unreachable!("occupied residency slot")
+        };
+        let prev = slot.prev.take();
+        let next = slot.next.take();
+        if let Some(prev) = prev {
+            self.slots[prev].next = next;
+        } else {
+            self.head = next;
+        }
+        if let Some(next) = next {
+            self.slots[next].prev = prev;
+        } else {
+            self.tail = prev;
+        }
+        self.bytes -= entry.bytes;
+        entry
+    }
+    fn recycle(&mut self, id: Identity) {
+        let slot = &mut self.slots[id.slot];
+        debug_assert_eq!(slot.generation, id.generation);
+        debug_assert!(slot.entry.is_none());
+        // Exhausted generations are retired rather than aliasing an old id.
+        if let Some(generation) = slot.generation.checked_add(1) {
+            slot.generation = generation;
+            slot.next = self.free;
+            self.free = Some(id.slot);
+        }
+    }
+    fn restore_front(&mut self, id: Identity, entry: Entry) {
+        let slot = &mut self.slots[id.slot];
+        debug_assert_eq!(slot.generation, id.generation);
+        debug_assert!(slot.entry.is_none());
+        self.bytes += entry.bytes;
+        slot.entry = Some(entry);
+        slot.prev = None;
+        slot.next = self.head;
+        if let Some(head) = self.head {
+            self.slots[head].prev = Some(id.slot);
+        } else {
+            self.tail = Some(id.slot);
+        }
+        self.head = Some(id.slot);
+    }
 }
 impl Access<'_> {
-    pub(super) fn track<T: Cell>(
-        &self,
-        page: &Rc<RefCell<Node<T>>>,
-        node: &Node<T>,
-        sequence: bool,
-    ) {
+    pub(super) fn track<T: Cell>(&self, page: &Rc<DirtyNode<T>>, node: &Node<T>, sequence: bool) {
         if matches!(node, Node::Staged(..)) {
             return;
         }
@@ -86,16 +240,12 @@ impl Access<'_> {
         self.record(page, weight, sequence, rows);
     }
     /// Tracks `page` unless it is tracked already with what it holds now.
-    pub(super) fn ensure_tracked<T: Cell>(&self, page: &Rc<RefCell<Node<T>>>, sequence: bool) {
+    pub(super) fn ensure_tracked<T: Cell>(&self, page: &Rc<DirtyNode<T>>, sequence: bool) {
         let known = self
             .dirty
             .borrow()
-            .entries
-            .get(&(Rc::as_ptr(page) as usize))
-            .is_some_and(|entry| {
-                entry.holds(page)
-                    && (entry.rows.is_some() || !matches!(&*page.borrow(), Node::Leaf(_)))
-            });
+            .entry(page, &self.dirty)
+            .is_some_and(|entry| entry.rows.is_some() || !matches!(&*page.borrow(), Node::Leaf(_)));
         if !known {
             self.track(page, &page.borrow(), sequence);
         }
@@ -105,24 +255,17 @@ impl Access<'_> {
     /// a publication does not measure the leaf again (FIG-6318).
     pub(super) fn track_copy<T: Cell>(
         &self,
-        page: &Rc<RefCell<Node<T>>>,
-        copy: &Rc<RefCell<Node<T>>>,
+        page: &Rc<DirtyNode<T>>,
+        copy: &Rc<DirtyNode<T>>,
         sequence: bool,
     ) {
         let known = self
             .dirty
             .borrow()
-            .entries
-            .get(&(Rc::as_ptr(page) as usize))
-            .filter(|entry| entry.holds(page))
+            .entry(page, &self.dirty)
             .map(|entry| (entry.bytes, entry.rows));
         match known {
-            Some((bytes, rows)) => self.record(
-                copy,
-                bytes - std::mem::size_of::<Entry>() - 64,
-                sequence,
-                rows,
-            ),
+            Some((bytes, rows)) => self.record(copy, bytes - ENTRY_OVERHEAD, sequence, rows),
             None => self.track(copy, &copy.borrow(), sequence),
         }
     }
@@ -131,7 +274,7 @@ impl Access<'_> {
     /// the leaf's encoded body size. The other rows are not encoded again.
     pub(super) fn track_row<T: Cell>(
         &self,
-        page: &Rc<RefCell<Node<T>>>,
+        page: &Rc<DirtyNode<T>>,
         rows: &Vec<(Key, T)>,
         sequence: bool,
         before: Option<RowSize>,
@@ -140,9 +283,7 @@ impl Access<'_> {
         let known = self
             .dirty
             .borrow()
-            .entries
-            .get(&(Rc::as_ptr(page) as usize))
-            .filter(|entry| entry.holds(page))
+            .entry(page, &self.dirty)
             .and_then(|entry| entry.rows);
         let sums = known
             .and_then(|sums| match before {
@@ -157,27 +298,51 @@ impl Access<'_> {
     }
     /// Seal preparation may relink a leaf's cells in place: its row sums
     /// are measured again when it is next tracked.
-    pub(super) fn forget_rows<T: Cell>(&self, page: &Rc<RefCell<Node<T>>>) {
-        if let Some(entry) = self
-            .dirty
-            .borrow_mut()
-            .entries
-            .get_mut(&(Rc::as_ptr(page) as usize))
-            .filter(|entry| entry.holds(page))
+    pub(super) fn forget_rows<T: Cell>(&self, page: &Rc<DirtyNode<T>>) {
+        let registration = page.registration.borrow();
+        if let Some(registration) = registration.as_ref()
+            && registration.registry.as_ptr() == Rc::as_ptr(&self.dirty)
         {
-            entry.rows = None;
+            let mut dirty = self.dirty.borrow_mut();
+            if dirty.contains(registration.id) {
+                let Some(entry) = dirty.slots[registration.id.slot].entry.as_mut() else {
+                    unreachable!("registered residency slot")
+                };
+                entry.rows = None;
+            }
         }
     }
     fn record<T: Cell>(
         &self,
-        page: &Rc<RefCell<Node<T>>>,
+        page: &Rc<DirtyNode<T>>,
         weight: usize,
         sequence: bool,
         rows: Option<RowSums>,
     ) {
-        let bytes = weight + std::mem::size_of::<Entry>() + 64;
-        let id = Rc::as_ptr(page) as usize;
-        let mut dirty = self.dirty.borrow_mut();
+        let bytes = weight + ENTRY_OVERHEAD;
+        let mut registration = page.registration.borrow_mut();
+        {
+            let mut dirty = self.dirty.borrow_mut();
+            if let Some(registered) = registration.as_ref()
+                && registered.registry.as_ptr() == Rc::as_ptr(&self.dirty)
+                && dirty.contains(registered.id)
+            {
+                let Some(entry) = dirty.slots[registered.id.slot].entry.as_mut() else {
+                    unreachable!("registered residency slot")
+                };
+                let old_bytes = entry.bytes;
+                entry.bytes = bytes;
+                entry.sequence = sequence;
+                entry.rows = rows;
+                dirty.bytes = dirty.bytes - old_bytes + bytes;
+                return;
+            }
+        }
+        // A tree can be edited through another Access. Release the old
+        // registry before borrowing this one, including stale generations.
+        if let Some(old) = registration.take() {
+            old.release();
+        }
         // Weak references do not change copy-on-write's ownership test.
         let erased: Rc<dyn Stage> = page.clone();
         let entry = Entry {
@@ -186,13 +351,13 @@ impl Access<'_> {
             sequence,
             rows,
         };
-        if let Some(old) = dirty.entries.insert(id, entry) {
-            dirty.bytes -= old.bytes;
-        } else {
-            dirty.order.push_back(id);
-        }
-        dirty.bytes += bytes;
+        let id = self.dirty.borrow_mut().append(entry);
+        *registration = Some(Registration {
+            registry: Rc::downgrade(&self.dirty),
+            id,
+        });
     }
+
     pub(super) fn stage_pressure(&self) -> Result<(), HeapFault> {
         {
             let mut dirty = self.dirty.borrow_mut();
@@ -208,24 +373,22 @@ impl Access<'_> {
                     if dirty.bytes <= DIRTY_TARGET {
                         break;
                     }
-                    let Some(id) = dirty.order.pop_front() else {
+                    let Some(index) = dirty.head else {
                         break;
                     };
-                    let Some(entry) = dirty.entries.remove(&id) else {
-                        continue;
+                    let id = Identity {
+                        slot: index,
+                        generation: dirty.slots[index].generation,
                     };
-                    dirty.bytes -= entry.bytes;
-                    (id, entry)
+                    (id, dirty.take(index))
                 };
                 if let Some(node) = entry.1.node.upgrade()
                     && let Err(fault) = node.spill(self, entry.1.sequence)
                 {
-                    let mut dirty = self.dirty.borrow_mut();
-                    dirty.bytes += entry.1.bytes;
-                    dirty.order.push_front(entry.0);
-                    dirty.entries.insert(entry.0, entry.1);
+                    self.dirty.borrow_mut().restore_front(entry.0, entry.1);
                     return Err(fault);
                 }
+                self.dirty.borrow_mut().recycle(entry.0);
             }
             Ok(())
         })();
@@ -235,5 +398,135 @@ impl Access<'_> {
     #[cfg(test)]
     pub(crate) fn dirty_bytes(&self) -> usize {
         self.dirty.borrow().bytes
+    }
+}
+
+#[cfg(test)]
+mod laws {
+    use super::*;
+
+    struct UnusedSource;
+    impl PageSource for UnusedSource {
+        fn read(&mut self, _: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+            unreachable!("this law never reads")
+        }
+        fn seal(&mut self, _: PageBody) -> Result<PageRef, HeapFault> {
+            unreachable!("this law never stages")
+        }
+    }
+
+    /// D-CAP / FIG-6568: a bounded live set has bounded bookkeeping, even
+    /// when private working versions are discarded before staging pressure.
+    #[test]
+    fn short_lived_nodes_reuse_one_residency_slot() {
+        let mut source = UnusedSource;
+        let access = Access::borrowed(&mut source);
+        for _ in 0..128 {
+            let page = Rc::new(DirtyNode::new(Node::<lash_kernel_doc::TaskId>::Leaf(
+                Vec::new(),
+            )));
+            for _ in 0..16 {
+                access.record(&page, 1, false, None);
+            }
+            drop(page);
+        }
+        let dirty = access.dirty.borrow();
+        assert_eq!(
+            dirty.entry_allocations, 1,
+            "reuse bookkeeping storage for a bounded live set"
+        );
+        assert_eq!(
+            dirty.bytes,
+            dirty.slots.capacity() * std::mem::size_of::<Slot>(),
+            "only the reusable slot storage remains resident"
+        );
+    }
+    fn page() -> Rc<DirtyNode<lash_kernel_doc::TaskId>> {
+        Rc::new(DirtyNode::new(Node::Leaf(Vec::new())))
+    }
+
+    fn identity(page: &DirtyNode<lash_kernel_doc::TaskId>) -> Identity {
+        let registration = page.registration.borrow();
+        let Some(registration) = registration.as_ref() else {
+            panic!("page is registered")
+        };
+        registration.id
+    }
+
+    /// D-CAP / D-SEALTIME: reuse cannot alias a staged generation or
+    /// another Access, reorder surviving entries, or lose a failed spill.
+    #[test]
+    fn recycled_generations_keep_fifo_and_failed_spill_identity() {
+        let mut source = UnusedSource;
+        let access = Access::borrowed(&mut source);
+        let (first, middle, last) = (page(), page(), page());
+        for page in [&first, &middle, &last] {
+            access.record(page, 1, false, None);
+        }
+        let first_id = identity(&first);
+        let middle_id = identity(&middle);
+        let last_id = identity(&last);
+        // A warm update keeps its FIFO position and allocates no new slot.
+        access.record(&first, 7, false, None);
+        drop(middle);
+        let replacement = page();
+        access.record(&replacement, 3, false, None);
+        let replacement_id = identity(&replacement);
+        assert_eq!(replacement_id.slot, middle_id.slot);
+        assert_ne!(replacement_id.generation, middle_id.generation);
+        {
+            let dirty = access.dirty.borrow();
+            assert_eq!(dirty.head, Some(first_id.slot));
+            assert_eq!(dirty.slots[first_id.slot].next, Some(last_id.slot));
+            assert_eq!(dirty.slots[last_id.slot].next, Some(replacement_id.slot));
+            assert_eq!(dirty.entry_allocations, 3);
+        }
+        // Stage the first generation while it remains shared, then reuse
+        // its slot. Its later destructor must not unregister the new owner.
+        {
+            let mut dirty = access.dirty.borrow_mut();
+            dirty.take(first_id.slot);
+            dirty.recycle(first_id);
+        }
+        let reused = page();
+        access.record(&reused, 5, false, None);
+        drop(first);
+        assert!(
+            access
+                .dirty
+                .borrow()
+                .entry(&reused, &access.dirty)
+                .is_some()
+        );
+        // A failed spill reserves the removed slot while nested work tracks
+        // another page, and restores the original weight at the FIFO front.
+        let bytes = access.dirty.borrow().bytes;
+        let capacity = access.dirty.borrow().slots.capacity();
+        let entry = access.dirty.borrow_mut().take(last_id.slot);
+        let nested = page();
+        access.record(&nested, 11, false, None);
+        assert_ne!(identity(&nested).slot, last_id.slot);
+        drop(nested);
+        access.dirty.borrow_mut().restore_front(last_id, entry);
+        assert_eq!(access.dirty.borrow().head, Some(last_id.slot));
+        let retained_growth =
+            std::mem::size_of::<Slot>() * (access.dirty.borrow().slots.capacity() - capacity);
+        assert_eq!(access.dirty.borrow().bytes, bytes + retained_growth);
+        // A page edited through a different Access leaves the first registry
+        // without letting that registry's recycled identity affect the second.
+        let mut other_source = UnusedSource;
+        let other = Access::borrowed(&mut other_source);
+        other.record(&last, 13, true, None);
+        assert!(access.dirty.borrow().entry(&last, &access.dirty).is_none());
+        assert_eq!(
+            other
+                .dirty
+                .borrow()
+                .entry(&last, &other.dirty)
+                .map(|entry| entry.bytes),
+            Some(13 + ENTRY_OVERHEAD)
+        );
+        drop(last);
+        assert!(other.dirty.borrow().head.is_none());
     }
 }

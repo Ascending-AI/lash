@@ -197,7 +197,7 @@ enum Link<T: Cell> {
         tokens: Arc<[u8]>,
         children: Vec<PageRef>,
     },
-    Dirty(Rc<RefCell<Node<T>>>),
+    Dirty(Rc<residency::DirtyNode<T>>),
 }
 #[derive(Clone)]
 struct Branch<T: Cell> {
@@ -1005,7 +1005,7 @@ impl<T: Cell> Tree<T> {
 /// A node a read holds: a working node it borrows, or a decoded one it
 /// shares.
 enum Loaded<T: Cell> {
-    Dirty(Rc<RefCell<Node<T>>>),
+    Dirty(Rc<residency::DirtyNode<T>>),
     Shared(Rc<Node<T>>),
 }
 enum NodeGuard<'a, T: Cell> {
@@ -1033,7 +1033,7 @@ fn make_dirty<T: Cell>(
     branch: &mut Branch<T>,
     access: &Access<'_>,
     seq: bool,
-) -> Result<Rc<RefCell<Node<T>>>, HeapFault> {
+) -> Result<Rc<residency::DirtyNode<T>>, HeapFault> {
     let staged =
         matches!(&branch.link, Link::Dirty(page) if matches!(&*page.borrow(), Node::Staged(..)));
     if !matches!(branch.link, Link::Dirty(_)) || staged {
@@ -1041,13 +1041,13 @@ fn make_dirty<T: Cell>(
         branch.family = None;
         branch.encoded_bytes = None;
         branch.is_leaf = None;
-        branch.link = Link::Dirty(Rc::new(RefCell::new(node)));
+        branch.link = Link::Dirty(Rc::new(residency::DirtyNode::new(node)));
     }
     if let Link::Dirty(page) = &mut branch.link
         && Rc::strong_count(page) > 1
     {
         let private = page.borrow().clone();
-        let private = Rc::new(RefCell::new(private));
+        let private = Rc::new(residency::DirtyNode::new(private));
         access.track_copy(page, &private, seq);
         *page = private;
     }
@@ -1070,7 +1070,7 @@ fn dirty<T: Cell>(node: Node<T>, access: &Access<'_>, seq: bool) -> Result<Branc
         members_known: true,
         first: Key(Vec::new()),
         summary: Summary::default(),
-        link: Link::Dirty(Rc::new(RefCell::new(node.clone()))),
+        link: Link::Dirty(Rc::new(residency::DirtyNode::new(node.clone()))),
     };
     refresh(&mut branch, &node)?;
     if let Link::Dirty(page) = &branch.link {

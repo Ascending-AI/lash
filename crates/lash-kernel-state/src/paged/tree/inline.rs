@@ -144,7 +144,7 @@ impl<T: Cell> Tree<T> {
                             HeapFault::Malformed("nonempty inline tree lost its root".into())
                         })?;
                         let node = Node::Leaf(rows);
-                        let page = Rc::new(RefCell::new(node));
+                        let page = Rc::new(residency::DirtyNode::new(node));
                         access.track(&page, &page.borrow(), self.sequence);
                         root.link = Link::Dirty(page);
                         root.encoded_bytes = None;
