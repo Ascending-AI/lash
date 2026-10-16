@@ -1,0 +1,28 @@
+[package]
+name = "workflow-corpus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+lash-dialect-typescript.workspace = true
+lash-dialect-python.workspace = true
+lash-helper-labels.workspace = true
+lash-kernel-check.workspace = true
+lash-kernel-dialect.workspace = true
+lash-kernel-doc.workspace = true
+lash-kernel-edit.workspace = true
+lash-kernel-view.workspace = true
+lash-kernel-state.workspace = true
+lash-kernel-vm.workspace = true
+lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-python"] }

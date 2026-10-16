@@ -1,0 +1,15 @@
+unit Function(Name("demo"))
+statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("t1"), value: Expr(Closure(Closure { params: [Name("this1"), Name("args1")], body: [Do { value: Act(ActExpr { kind: Sleep { then_yield: true }, args: [Literal(Float(Float(5.0)))] }) }, Return { value: Literal(Text("awake")) }], start: Some(StartAdapter { signature: Signature { params: [], result: Any }, representation: Token { tag: "ts.function", callable: 4 }, convention: TsArgsList { await_fn: FunctionId(1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a), same_fn: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578) } }) })) }
+statement fn demo/0/0/0/0 ordinal=5 depth=1 block=fn demo/0/0/0 Do { value: Act(ActExpr { kind: Sleep { then_yield: true }, args: [Literal(Float(Float(5.0)))] }) }
+statement fn demo/0/0/0/1 ordinal=6 depth=1 block=fn demo/0/0/0 Return { value: Literal(Text("awake")) }
+statement fn demo/1 ordinal=7 depth=0 block=fn demo Let { name: Name("t2"), value: Expr(List([])) }
+statement fn demo/2 ordinal=8 depth=0 block=fn demo Let { name: Name("t3"), value: Action(Call { callee: Value(Name("t1")), args: [Literal(Absent), Variable(Name("t2"))] }) }
+statement fn demo/3 ordinal=9 depth=0 block=fn demo If { condition: Call { function: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578), args: [Variable(Name("t3")), Literal(Absent)] }, then_block: [Return { value: Literal(Null) }], else_block: [] }
+statement fn demo/3/1/0 ordinal=11 depth=1 block=fn demo/3/1 Return { value: Literal(Null) }
+statement fn demo/4 ordinal=13 depth=0 block=fn demo Return { value: Variable(Name("t3")) }
+scope fn demo ordinal=2 depth=0 Entry
+scope fn demo/0/0/0 ordinal=4 depth=1 Closure
+scope fn demo/3/1 ordinal=10 depth=1 Then
+scope fn demo/3/2 ordinal=12 depth=1 Else
+action fn demo/0/0/0/0/0 None
+action fn demo/2/0 None

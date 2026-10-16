@@ -1,0 +1,19 @@
+kernel 1
+numbers by_spelling
+entry demo() -> Any
+
+fn demo() {
+  let t1 = fn() start() -> Any bare direct {
+    do sleep(5.0)
+    return "awake"
+  }
+  let t2 = apply t1()
+  return t2
+}
+
+main {
+  let demo = absent
+  set demo = &demo
+}
+
+unit Function(Name("demo")): statements=5 scopes=2 sites=9

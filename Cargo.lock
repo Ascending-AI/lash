@@ -6722,6 +6722,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
+name = "workflow-corpus"
+version = "0.0.0-dev"
+dependencies = [
+ "anyhow",
+ "lash-dialect-python",
+ "lash-dialect-typescript",
+ "lash-helper-labels",
+ "lash-internal-vm-worker",
+ "lash-kernel-check",
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+ "lash-kernel-edit",
+ "lash-kernel-state",
+ "lash-kernel-view",
+ "lash-kernel-vm",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "workflow-graph-roundtrip"
 version = "0.0.0-dev"
 dependencies = [

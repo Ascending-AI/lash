@@ -1,0 +1,7 @@
+language: TypeScript
+exceptions: none
+main/0 [0..21] "await finish(\"done\");"
+main/0/0 [0..21] "await finish(\"done\");"
+main/1 [0..21] "await finish(\"done\");"
+main/2 [22..48] "await echo(\"unreachable\");"
+main/2/0 [22..48] "await echo(\"unreachable\");"

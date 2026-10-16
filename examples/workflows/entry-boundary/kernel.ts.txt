@@ -1,0 +1,75 @@
+kernel 1
+numbers float
+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+use list.copy = @9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a
+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
+use num.le = @d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b
+use num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
+use ts.pad = @c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd
+use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
+use ts.promise.pending = @656aeb7c2f80aaa8c1a1f930bf330144f4d2b86e156f57a111e2b66c4bd7f9be
+use ts.promise.run = @b5d7323cfb8fd85bd529192148137269284bc5ec55c5d4c5a78bb474cc6269e0
+entry arrow(value: Number) -> Any
+entry declared() -> Any
+
+fn arrow(value) {
+  let t4 = fn(this1, args1) start(value: Number) -> Any token("ts.function", 4) ts_args(ts.await, same) {
+    let t1 = args1
+    if num.lt(list.len(args1), 1.0) {
+      set t1 = invoke ts.pad(args1, 1.0)
+    }
+    let value_1 = t1[0.0]
+    return value_1
+  }
+  let t5 = [value]
+  let t6 = apply t4(absent, t5)
+  if same(t6, absent) {
+    return null
+  }
+  return t6
+}
+
+fn declared() {
+  let t7 = fn(this2, args2) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
+    return "top"
+  }
+  let t8 = []
+  let t9 = apply t7(absent, t8)
+  if same(t9, absent) {
+    return null
+  }
+  return t9
+}
+
+main {
+  let arrow = &arrow
+  let declared = &declared
+  if true {
+    let t10 = fn(this3, args3) {
+      return "block"
+    }
+    let t13 = fn(this4, args4) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
+      let t11 = list.copy(args4)
+      let t12 = invoke ts.promise.pending()
+      set t12.task = spawn invoke ts.promise.run(t12, t10, this4, t11)
+      return t12
+    }
+    let local_1 = ("ts.function", "", "local", 0.0, t13, {})
+    let t14 = fn(this5, args5) {
+      return "block"
+    }
+    let t17 = fn(this6, args6) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
+      let t15 = list.copy(args6)
+      let t16 = invoke ts.promise.pending()
+      set t16.task = spawn invoke ts.promise.run(t16, t14, this6, t15)
+      return t16
+    }
+    let alsoLocal_1 = ("ts.function", "", "alsoLocal", 0.0, t17, {})
+  }
+}
+
+unit Function(Name("arrow")): statements=11 scopes=6 sites=44
+
+unit Function(Name("declared")): statements=7 scopes=4 sites=44

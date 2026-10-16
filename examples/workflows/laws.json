@@ -1,0 +1,259 @@
+[
+  {
+    "target": "//examples/workflows:corpus__test",
+    "selector": "design_8_corpus_pins_readable_per_dialect_outputs",
+    "rules": [
+      "REPRODUCIBLE-IMPORT",
+      "EXACT-SOURCE",
+      "SM-ORDER",
+      "SM-COVER",
+      "EDIT-CLOSED",
+      "MODULE-CONTRACT",
+      "FN-CROSS",
+      "FN-FREEZE"
+    ]
+  },
+  {
+    "target": "//crates/lash-kernel-dialect:lash-kernel-dialect__unit_test",
+    "selector": "imperative::tests::printed_maps_are_canonical",
+    "rules": [
+      "SM-ORDER"
+    ]
+  },
+  {
+    "target": "//crates/lash-kernel-doc:lash-kernel-doc__unit_test",
+    "selector": "source_map_tests::rekey_retains_edited_survivors_and_refuses_another_base",
+    "rules": [
+      "SM-REKEY"
+    ]
+  },
+  {
+    "target": "//crates/lash-kernel-doc:lash-kernel-doc__unit_test",
+    "selector": "source_map_tests::canonical_encodings_preserve_checked_invariants",
+    "rules": [
+      "SM-REKEY"
+    ]
+  },
+  {
+    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+    "selector": "executor::tests::written::a_resumed_cell_saves_the_functions_an_uninterrupted_one_does",
+    "rules": [
+      "WR-PARK"
+    ]
+  },
+  {
+    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+    "selector": "executor::tests::written::a_later_cell_calls_a_resumed_cells_function_alike_with_or_without_a_map",
+    "rules": [
+      "WR-CALL"
+    ]
+  },
+  {
+    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+    "selector": "executor::tests::written::a_resumed_cells_function_keeps_its_start_signature_with_or_without_a_map",
+    "rules": [
+      "WR-START"
+    ]
+  },
+  {
+    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+    "selector": "executor::tests::source_map::a_resumed_cells_failure_is_located_by_its_stored_map",
+    "rules": [
+      "WR-REPLAY"
+    ]
+  },
+  {
+    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+    "selector": "executor::tests::crossing::a_capturing_function_in_a_tool_input_reaches_the_tool_as_a_function_value",
+    "rules": [
+      "FN-CROSS"
+    ]
+  },
+  {
+    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+    "selector": "executor::tests::crossing::a_function_that_cannot_cross_raises_before_the_call",
+    "rules": [
+      "FN-FREEZE",
+      "FN-BOUND"
+    ]
+  },
+  {
+    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+    "selector": "executor::tests::crossing::equal_code_and_captures_cross_as_one_document",
+    "rules": [
+      "FN-ID"
+    ]
+  },
+  {
+    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+    "selector": "executor::tests::crossing::a_guest_record_under_the_function_tag_reaches_a_tool_as_plain_data",
+    "rules": [
+      "FN-TAG"
+    ]
+  },
+  {
+    "target": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
+    "selector": "executor::tests::crossing::a_call_that_shipped_a_function_reads_back_identically_after_a_restart",
+    "rules": [
+      "FN-RESUME"
+    ]
+  },
+  {
+    "target": "//crates/lash-kernel-edit:lash-kernel-edit__unit_test",
+    "selector": "tests::canvas_closed",
+    "rules": [
+      "EDIT-CLOSED"
+    ]
+  },
+  {
+    "target": "//crates/lash-helper-labels:lash-helper-labels__unit_test",
+    "selector": "tests::a_reader_without_dialects_reads_labels_and_unknown_names",
+    "rules": [
+      "HELP-LABEL"
+    ]
+  },
+  {
+    "target": "//crates/lash-vm-releases:lash-vm-releases__unit_test",
+    "selector": "tests::helper_sets_and_labels_cover_every_release_write_set",
+    "rules": [
+      "HELP-SET",
+      "HELP-LABEL"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "documents::a_running_process_draws_its_view_after_its_pin_and_helper_release_are_gone",
+    "rules": [
+      "DOC-HOLD"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "documents::an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_corrupt_one",
+    "rules": [
+      "DOC-IMPORT"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "documents::a_publication_holds_its_checked_source_map_and_refuses_one_that_does_not_fit",
+    "rules": [
+      "DOC-MAP"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "a_process_starts_another_entry_of_its_document_by_function_reference_and_awaits_it",
+    "rules": [
+      "START-TEMPLATE"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "crossing::a_function_a_process_ships_runs_from_its_own_document_as_it_was",
+    "rules": [
+      "FN-CROSS",
+      "FN-FREEZE"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "inline_starts::a_host_inline_start_realizes_once_across_a_crash_at_each_realization_write",
+    "rules": [
+      "START-ONCE"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "inline_starts::a_host_inline_start_cut_after_registration_is_answered_its_row_before_and_after_the_fence",
+    "rules": [
+      "START-ONCE"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "inline_starts::an_inline_start_retry_is_exact_and_a_conflicting_or_refused_one_starts_nothing",
+    "rules": [
+      "START-ONCE"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "inline_starts::a_declared_inline_start_realizes_once_across_a_crash_at_each_realization_write",
+    "rules": [
+      "START-ONCE"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "inline_starts::an_uncommitted_declared_inline_start_leaves_no_process_and_holds_nothing",
+    "rules": [
+      "START-ONCE"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "inline_starts::an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_nothing",
+    "rules": [
+      "FN-BOUND"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "typescript_and_python_modules_share_one_entry_contract",
+    "rules": [
+      "MODULE-CONTRACT"
+    ]
+  },
+  {
+    "target": "//crates/lash:workflow_laws__test",
+    "selector": "generated_source::a_reader_draws_labelled_typescript_and_python_callees_from_shipped_declarations",
+    "rules": [
+      "HELP-LABEL",
+      "STORED-VIEW"
+    ]
+  },
+  {
+    "target": "//crates/lash-vm-runtime:lash-vm-runtime__unit_test__fv_598ff3f7",
+    "selector": "process::tests::a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refuses",
+    "rules": [
+      "FN-UPGRADE"
+    ]
+  },
+  {
+    "target": "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
+    "selector": "tests::process::a_capturing_async_cell_function_is_plain_code_with_or_without_process_tools",
+    "rules": [
+      "CELL-PLAIN"
+    ]
+  },
+  {
+    "target": "//crates/lash:artifact_referrers_evidence__test",
+    "selector": "unstarted_cell_functions_publish_no_definitions_or_extra_declarations",
+    "rules": [
+      "CELL-NO-PUBLISH",
+      "DOC-COST"
+    ]
+  },
+  {
+    "target": "//crates/lash:artifact_referrers_evidence__test",
+    "selector": "own_and_later_cell_starts_keep_the_signature_and_return_the_capture",
+    "rules": [
+      "WR-START"
+    ]
+  },
+  {
+    "target": "//crates/lash:artifact_referrers_evidence__test",
+    "selector": "a_cancelled_cell_with_unstarted_functions_adds_no_frame_definition_edge",
+    "rules": [
+      "START-ONCE"
+    ]
+  },
+  {
+    "target": "//crates/lash-durable-test:codemode_execution_documents__test",
+    "selector": "a_retained_cell_draws_its_main_view_without_the_producing_engines_registry",
+    "rules": [
+      "DOC-CELL"
+    ]
+  }
+]

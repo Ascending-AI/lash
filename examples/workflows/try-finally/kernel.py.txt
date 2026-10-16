@@ -1,0 +1,46 @@
+kernel 1
+numbers by_spelling
+effect echo(input: Any) -> Any
+use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
+use map.contains = @5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3
+use py.exc.is_exception = @ce14341b9991890a40cfa78553f20bfc311d3beb76b520102917c864680684be
+use py.exc.name = @01ffcde599e3545d525e4a0dc9e66d69153a9b24168b2cdbe9db5b201785c0d1
+use py.reply = @09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd
+use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use tuple.contains = @865719b4040dc09e2521e6be6ed41d8429fd68789553b5c55be60f766254ff11
+entry demo() -> Any
+
+fn demo() {
+  let t8 = fn() start() -> Any bare direct {
+    let `result` = absent
+    set `result` = "start"
+    try {
+      let t4 = perform echo("try") as Any
+      set `result` = invoke py.reply(t4)
+    } catch t1 {
+      let t6 = ()
+      let t7 = invoke py.exc.is_exception(t1, t6)
+      if t7 {
+        set `result` = "caught"
+      } else {
+        throw t1
+      }
+    } finally {
+      let t2 = perform echo("finally") as Any
+      do invoke py.reply(t2)
+    }
+    return `result`
+  }
+  let t9 = apply t8()
+  return t9
+}
+
+main {
+  let demo = absent
+  set demo = &demo
+}
+
+unit Function(Name("demo")): statements=16 scopes=7 sites=24

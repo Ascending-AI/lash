@@ -1,0 +1,19 @@
+language: Python
+exceptions: absent-binding initialization, task finalizer
+main/1 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+fn demo/0 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+fn demo/0/0/0/0 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+fn demo/0/0/0/1 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+fn demo/0/0/0/2 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+fn demo/0/0/0/2/1/0 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+fn demo/0/0/0/2/1/0/0 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+fn demo/0/0/0/3 [38..47] "total = 0"
+fn demo/0/0/0/4 [52..92] "for item in items:\n        total += item"
+fn demo/0/0/0/4/1/0 [52..92] "for item in items:\n        total += item"
+fn demo/0/0/0/4/1/1 [79..92] "total += item"
+fn demo/0/0/0/4/1/1/0 [79..92] "total += item"
+fn demo/0/0/0/5 [97..109] "return total"
+fn demo/1 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+fn demo/1/0 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+fn demo/2 [0..109] "async def demo(items: list[int]):\n    total = 0\n    for item in items:\n        total += item\n    return total"
+exception main/0: absent-binding initialization

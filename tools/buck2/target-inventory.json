@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
-  "cargo_package_count": 83,
-  "cargo_target_count": 339,
+  "cargo_package_count": 84,
+  "cargo_target_count": 342,
   "facade_production_check_targets": [
     "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_46e42243__metadata[check]",
@@ -71556,7 +71556,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 430,
+  "generated_label_count": 435,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -72144,6 +72144,9 @@
     "//examples/workflow-graph-roundtrip:roundtrip__test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
@@ -72811,6 +72814,9 @@
     "//examples/workflow-graph-roundtrip:roundtrip__test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
@@ -72894,7 +72900,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1401,
+  "metadata_target_count": 1406,
   "packages": [
     {
       "declared_features": [
@@ -78692,6 +78698,80 @@
     {
       "declared_features": [],
       "dependencies": [
+        "anyhow",
+        "lash-dialect-python",
+        "lash-dialect-typescript",
+        "lash-helper-labels",
+        "lash-internal-vm-worker",
+        "lash-kernel-check",
+        "lash-kernel-dialect",
+        "lash-kernel-doc",
+        "lash-kernel-edit",
+        "lash-kernel-state",
+        "lash-kernel-view",
+        "lash-kernel-vm",
+        "serde",
+        "serde_json"
+      ],
+      "doc": "//examples/workflows:workflows__doc",
+      "manifest": "examples/workflows/Cargo.toml",
+      "package": "workflow-corpus",
+      "resolved_features": [],
+      "targets": [
+        {
+          "build_label": "//examples/workflows:workflows[static]",
+          "cargo": "workflow_corpus",
+          "check_label": "//examples/workflows:workflows__metadata[check]",
+          "clippy_label": "//examples/workflows:workflows__clippy[clippy.txt]",
+          "doc_label": "//examples/workflows:workflows[doc]",
+          "kind": "lib",
+          "label": "//examples/workflows:workflows"
+        },
+        {
+          "build_label": "//examples/workflows:workflows__unit_test",
+          "cargo": "workflow_corpus",
+          "check_label": "//examples/workflows:workflows__unit_test__rust_test__metadata[check]",
+          "clippy_label": "//examples/workflows:workflows__unit_test__clippy[clippy.txt]",
+          "kind": "unit-test",
+          "label": "//examples/workflows:workflows__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//examples/workflows:workflow-corpus__bin",
+          "cargo": "workflow-corpus",
+          "check_label": "//examples/workflows:workflow-corpus__bin__metadata[check]",
+          "clippy_label": "//examples/workflows:workflow-corpus__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//examples/workflows:workflow-corpus__bin",
+          "tags": []
+        },
+        {
+          "build_label": "//examples/workflows:workflow-corpus__bin__unit_test",
+          "cargo": "workflow-corpus",
+          "check_label": "//examples/workflows:workflow-corpus__bin__unit_test__rust_test__metadata[check]",
+          "clippy_label": "//examples/workflows:workflow-corpus__bin__unit_test__clippy[clippy.txt]",
+          "kind": "bin-unit-test",
+          "label": "//examples/workflows:workflow-corpus__bin__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//examples/workflows:corpus__test",
+          "cargo": "corpus",
+          "check_label": "//examples/workflows:corpus__test__rust_test__metadata[check]",
+          "clippy_label": "//examples/workflows:corpus__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//examples/workflows:corpus__test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
         "async-trait",
         "lash-internal-core-execution",
         "lash-internal-durable",
@@ -80617,6 +80697,9 @@
     "//examples/workflow-graph-roundtrip:roundtrip__test": 300,
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test": 300,
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test": 300,
+    "//examples/workflows:corpus__test": 300,
+    "//examples/workflows:workflow-corpus__bin__unit_test": 300,
+    "//examples/workflows:workflows__unit_test": 300,
     "//runbooks/lash-facade-failover:failover__test": 300,
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test": 300,
     "//runbooks/rlm-smoke:rlm-smoke__unit_test": 300,
@@ -81046,6 +81129,11 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows[static]",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover[static]",
     "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
@@ -81528,6 +81616,11 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test__rust_test__metadata[check]",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__metadata[check]",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test__rust_test__metadata[check]",
+    "//examples/workflows:corpus__test__rust_test__metadata[check]",
+    "//examples/workflows:workflow-corpus__bin__metadata[check]",
+    "//examples/workflows:workflow-corpus__bin__unit_test__rust_test__metadata[check]",
+    "//examples/workflows:workflows__metadata[check]",
+    "//examples/workflows:workflows__unit_test__rust_test__metadata[check]",
     "//runbooks/lash-facade-failover:failover__test__rust_test__metadata[check]",
     "//runbooks/lash-facade-failover:lash-facade-failover-node__bin__metadata[check]",
     "//runbooks/lash-facade-failover:lash-facade-failover__metadata[check]",
@@ -81958,6 +82051,11 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test__clippy[clippy.txt]",
+    "//examples/workflows:corpus__test__clippy[clippy.txt]",
+    "//examples/workflows:workflow-corpus__bin__clippy[clippy.txt]",
+    "//examples/workflows:workflow-corpus__bin__unit_test__clippy[clippy.txt]",
+    "//examples/workflows:workflows__clippy[clippy.txt]",
+    "//examples/workflows:workflows__unit_test__clippy[clippy.txt]",
     "//runbooks/lash-facade-failover:failover__test__clippy[clippy.txt]",
     "//runbooks/lash-facade-failover:lash-facade-failover__clippy[clippy.txt]",
     "//runbooks/lash-facade-failover:lash-facade-failover-node__bin__clippy[clippy.txt]",
@@ -82307,6 +82405,11 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover",
     "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
@@ -82659,6 +82762,11 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover",
     "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
@@ -83148,6 +83256,9 @@
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
@@ -83377,6 +83488,9 @@
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
@@ -83457,6 +83571,7 @@
     "//examples/mcp-events:mcp-events__doc",
     "//examples/provider-signatures:provider-signatures__doc",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__doc",
+    "//examples/workflows:workflows__doc",
     "//runbooks/lash-facade-failover:lash-facade-failover__doc",
     "//third-party/vendored/lash-rmcp:lash-rmcp__doc"
   ],
@@ -83541,6 +83656,7 @@
     "//examples/provider-signatures:rust_sources",
     "//examples/toolbench:rust_sources",
     "//examples/workflow-graph-roundtrip:rust_sources",
+    "//examples/workflows:rust_sources",
     "//runbooks/lash-facade-failover:rust_sources",
     "//runbooks/rlm-smoke:rust_sources",
     "//third-party/vendored/lash-rmcp:rust_sources"
@@ -83562,6 +83678,9 @@
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test"
   ],
   "workspace_test_batches": {
@@ -83830,6 +83949,9 @@
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
@@ -84066,6 +84188,9 @@
     "//examples/workflow-graph-roundtrip:roundtrip__test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
+    "//examples/workflows:corpus__test",
+    "//examples/workflows:workflow-corpus__bin__unit_test",
+    "//examples/workflows:workflows__unit_test",
     "//runbooks/lash-facade-failover:failover__test",
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",

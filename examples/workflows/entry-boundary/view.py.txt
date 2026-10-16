@@ -1,0 +1,21 @@
+unit Function(Name("arrow"))
+statement fn arrow/0 ordinal=13 depth=0 block=fn arrow Let { name: Name("t1"), value: Expr(Closure(Closure { params: [Name("value")], body: [If { condition: Call { function: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578), args: [Variable(Name("value")), Literal(Absent)] }, then_block: [Do { value: Act(ActExpr { kind: Call(Library(FunctionId(556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a))), args: [Literal(Text("arrow"))] }) }], else_block: [] }, Return { value: Variable(Name("value")) }], start: Some(StartAdapter { signature: Signature { params: [Param { name: Name("value"), ty: Int, optional: false }], result: Any }, representation: Bare, convention: Direct }) })) }
+statement fn arrow/0/0/0/0 ordinal=15 depth=1 block=fn arrow/0/0/0 If { condition: Call { function: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578), args: [Variable(Name("value")), Literal(Absent)] }, then_block: [Do { value: Act(ActExpr { kind: Call(Library(FunctionId(556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a))), args: [Literal(Text("arrow"))] }) }], else_block: [] }
+statement fn arrow/0/0/0/0/1/0 ordinal=17 depth=2 block=fn arrow/0/0/0/0/1 Do { value: Act(ActExpr { kind: Call(Library(FunctionId(556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a))), args: [Literal(Text("arrow"))] }) }
+statement fn arrow/0/0/0/1 ordinal=19 depth=1 block=fn arrow/0/0/0 Return { value: Variable(Name("value")) }
+statement fn arrow/1 ordinal=20 depth=0 block=fn arrow Let { name: Name("t2"), value: Action(Call { callee: Value(Name("t1")), args: [Variable(Name("value"))] }) }
+statement fn arrow/2 ordinal=21 depth=0 block=fn arrow Return { value: Variable(Name("t2")) }
+scope fn arrow ordinal=12 depth=0 Entry
+scope fn arrow/0/0/0 ordinal=14 depth=1 Closure
+scope fn arrow/0/0/0/0/1 ordinal=16 depth=2 Then
+scope fn arrow/0/0/0/0/2 ordinal=18 depth=2 Else
+action fn arrow/0/0/0/0/1/0/0 library id=556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a name=py.arg_missing label="Python arg missing"
+action fn arrow/1/0 None
+unit Function(Name("declared"))
+statement fn declared/0 ordinal=23 depth=0 block=fn declared Let { name: Name("t3"), value: Expr(Closure(Closure { params: [], body: [Return { value: Literal(Text("top")) }], start: Some(StartAdapter { signature: Signature { params: [], result: Any }, representation: Bare, convention: Direct }) })) }
+statement fn declared/0/0/0/0 ordinal=25 depth=1 block=fn declared/0/0/0 Return { value: Literal(Text("top")) }
+statement fn declared/1 ordinal=26 depth=0 block=fn declared Let { name: Name("t4"), value: Action(Call { callee: Value(Name("t3")), args: [] }) }
+statement fn declared/2 ordinal=27 depth=0 block=fn declared Return { value: Variable(Name("t4")) }
+scope fn declared ordinal=22 depth=0 Entry
+scope fn declared/0/0/0 ordinal=24 depth=1 Closure
+action fn declared/1/0 None

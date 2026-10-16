@@ -875,5 +875,34 @@
       "src/tripwire.rs"
     ],
     "unit_test_includes": []
+  },
+  "examples/workflows": {
+    "test_data": {
+      "corpus": [
+        "catalog.json",
+        "*/source.*",
+        "*/cell-1.*",
+        "*/kernel.*.txt",
+        "*/source-map.*.txt",
+        "*/view.*.txt",
+        "*/printed.*",
+        "*/refusal.*.txt",
+        "*/edits/*"
+      ]
+    },
+    "derive_tests": true,
+    "tests": {
+      "corpus": [
+        "tests/corpus.rs"
+      ]
+    },
+    "test_includes": {},
+    "test_input_fallbacks": {},
+    "unit_test_sources": [
+      "src/cell.rs",
+      "src/lib.rs",
+      "src/readable.rs"
+    ],
+    "unit_test_includes": []
   }
 }

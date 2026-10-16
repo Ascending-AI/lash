@@ -1,0 +1,45 @@
+kernel 1
+numbers by_spelling
+use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
+use py.arg_missing = @556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a
+use py.fail = @3299c00d83f497f9de331da39e68fa2fb955b9641f7c3f797922ef47af84ceef
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
+entry arrow(value: Int) -> Any
+entry declared() -> Any
+
+fn arrow(value) {
+  let t1 = fn(value) start(value: Int) -> Any bare direct {
+    if same(value, absent) {
+      do invoke py.arg_missing("arrow")
+    }
+    return value
+  }
+  let t2 = apply t1(value)
+  return t2
+}
+
+fn declared() {
+  let t3 = fn() start() -> Any bare direct {
+    return "top"
+  }
+  let t4 = apply t3()
+  return t4
+}
+
+main {
+  let arrow = absent
+  let declared = absent
+  let local = absent
+  set arrow = &arrow
+  set declared = &declared
+  if true {
+    set local = fn() start() -> Any bare direct {
+      return "block"
+    }
+  }
+}
+
+unit Function(Name("arrow")): statements=6 scopes=4 sites=21
+
+unit Function(Name("declared")): statements=4 scopes=2 sites=21

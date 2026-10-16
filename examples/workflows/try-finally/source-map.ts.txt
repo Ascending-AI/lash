@@ -1,0 +1,18 @@
+language: TypeScript
+exceptions: none
+main/0 [7..187] "async function demo() {\n  let result = \"start\";\n  try { result = await echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await echo(\"finally\"); }\n  return result;\n}"
+fn demo/0 [7..187] "async function demo() {\n  let result = \"start\";\n  try { result = await echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await echo(\"finally\"); }\n  return result;\n}"
+fn demo/0/0/0/0 [33..54] "let result = \"start\";"
+fn demo/0/0/0/1 [57..168] "try { result = await echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await echo(\"finally\"); }"
+fn demo/0/0/0/1/0/0 [63..90] "result = await echo(\"try\");"
+fn demo/0/0/0/1/0/0/0 [63..90] "result = await echo(\"try\");"
+fn demo/0/0/0/1/1/0 [111..129] "result = \"caught\";"
+fn demo/0/0/0/1/2/0 [144..166] "await echo(\"finally\");"
+fn demo/0/0/0/1/2/0/0 [144..166] "await echo(\"finally\");"
+fn demo/0/0/0/2 [171..185] "return result;"
+fn demo/1 [7..187] "async function demo() {\n  let result = \"start\";\n  try { result = await echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await echo(\"finally\"); }\n  return result;\n}"
+fn demo/2 [7..187] "async function demo() {\n  let result = \"start\";\n  try { result = await echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await echo(\"finally\"); }\n  return result;\n}"
+fn demo/2/0 [7..187] "async function demo() {\n  let result = \"start\";\n  try { result = await echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await echo(\"finally\"); }\n  return result;\n}"
+fn demo/3 [7..187] "async function demo() {\n  let result = \"start\";\n  try { result = await echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await echo(\"finally\"); }\n  return result;\n}"
+fn demo/3/1/0 [7..187] "async function demo() {\n  let result = \"start\";\n  try { result = await echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await echo(\"finally\"); }\n  return result;\n}"
+fn demo/4 [7..187] "async function demo() {\n  let result = \"start\";\n  try { result = await echo(\"try\"); }\n  catch (error) { result = \"caught\"; }\n  finally { await echo(\"finally\"); }\n  return result;\n}"

@@ -1,0 +1,115 @@
+kernel 1
+numbers float
+use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
+use date.ecma.format = @aa44d3f29c320f240de9506ccc5c0fe6f822c96526b0371d505060a9206a5e86
+use date.ecma.milliseconds = @ef954e7c2b6dedbd1dafcbd7bba20ba8cc5facfaaee5cbf269c4a02b910681d4
+use deref = @12677ad7e3e9aab3865fdbd2799e5c17d9d207b757de5a56c60b6911444f3207
+use eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954
+use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
+use float.parse = @a4262f9eeb1b48f06aef5450c638868fb05b4b52b7a5df3aec00257c0ef7f9ae
+use float.to_int = @4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f
+use format.decimal_parts = @deca028ad69c6201e1bd21f8e4e8a06f04f569de81bf874d0dea167f9c6d43f0
+use int.to_text = @6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29
+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
+use num.abs = @5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a
+use num.add = @9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343
+use num.floor = @245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d
+use num.is_finite = @2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3
+use num.is_nan = @0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6
+use num.le = @d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b
+use num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e
+use num.min = @e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758
+use num.mul = @7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d
+use num.neg = @56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9
+use num.sub = @f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28
+use num.to_float = @d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df
+use num.to_int = @602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea
+use num.trunc = @f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035
+use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
+use record.get = @c8cd42a6c8b72c445a4630822f01c7f7bb67060b28aaaf1e5141f326765448b8
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use text.compare = @1ffde9482105d0066232a037f8056c41e232602059aa8e67197725d81b83062c
+use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
+use text.ends_with = @ffe8ac95125db709bb5e1963e5c401aa12fa80c3e1bd541e1544afd7e3131adf
+use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
+use text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716
+use text.repeat = @ca62f99d0b5b81be587148f931be7dcd29cae182ebc2ab6452b239cc50ead43a
+use text.slice = @649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81
+use text.trim_set = @c537e7becf15c5a8ed7eaf812dc12d1be6cbb96e70749784528179c2784724e5
+use text.utf16_find = @3b3bc1d5b628bc3fb3e0558144151d085120a0d173e1932ffa98423cbbb0db76
+use text.utf16_get = @682fa4fa6329e4f79afcd5bd4bbeb448c772ca482988723a6c48977c973e444d
+use text.utf16_len = @7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18
+use text.utf16_slice = @e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409
+use ts.array.integer = @dd84727154c380213a86c81c2e8b4abf64947c64ea28ae33cf8b90d96b814ad9
+use ts.array.is = @8f0ac10cd41f7f321f99efd18a09659b5555c40aed70767e3c1c094506efb497
+use ts.array.iterator = @8133b93c72ad985af3956ba7093b38fda5917304927262aaf29368d8478f5120
+use ts.array.length = @9dc205692e067123ab5ff7da10c8bdda80eaa60f39d4c4f3fd2fd395a2c5e523
+use ts.array.values = @2748afbada69cd91d16e88b142e674a14963d01b0d4fed01a25936b45af547f3
+use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
+use ts.callable = @2c0ae8a7768df5037a9df976731713c14477549f94ea2c0b8bfa7aebe6659b0d
+use ts.exotic.error_name = @799893f49074236205ea6b36ca9e69ced9e260b62f15900f596c47d66d5a747b
+use ts.exotic.get = @61ed18c01b2e6a6fdf2724666770667f847bb65ad8d80fc1f1f77376a8f884fa
+use ts.exotic.iterate = @2c74401017d3794e407f06ff4ad46a4107116d8035a3d4a5dd1bfbc53ffb0c87
+use ts.exotic.to_primitive = @37255f2d52deb065c526f82140fd43f3887f233445a271784d28fd50d93da987
+use ts.for_of.item = @2997cb0d92bdd3433b2d0041aef3f0a2d8e451e4e90f7a8f4790778fcc5bb23b
+use ts.for_of.next = @18f7959f398ebd494fec75f9466343be3c23894982f61c7b27ade64e814d5294
+use ts.for_of.open = @1a971a131472765e4b7b9d545191d7b436074b1c1cad135ed33bc564c2eb7b7b
+use ts.get = @3648687447214149a2e515a88903b3cbb45cb86106242fe4aac435d3bc36a320
+use ts.hole_value = @f9d20d6da4d0527fe6ae92c14c49d5a6f55c7cc9af3ae36c5ea9d3c00dfdbecb
+use ts.is_nullish = @cf60a1db735461d78476e0e746903789152c640f5a92730cde4f3b3e796297d5
+use ts.is_primitive = @1ab4b07450b50e2eb1d8d8b7f23faa96fdf308b5d2bb32beb7938ac217a8a4e4
+use ts.iterate = @86a6fe594e608e81ba08f0fbb852b39cd7c06d43f05c8237c813f51f3c913899
+use ts.list_index = @8084eaeca3022f23d6ba7912b9184b0fb7a09118a057d53c28d72ad189c2db89
+use ts.map.value = @d6ffbc7f169f797ef424f861d99ece5808550a018e109f2b2e86bd3524239af2
+use ts.number.digit = @10d461e6f9192ce8ceddbb5dc4676e3ccf9af80bbb33f962c0ce95e0c14db1dc
+use ts.number.layout = @3c6dcd59d6db9ad336bb51823de9e539b96b973f5cc2b3c11d13e01ffcff355c
+use ts.number.parse = @c6df4060c3324824c44708ce99642883280600208d5f12ee1bf7f9c0629bb7fc
+use ts.number.parse_decimal = @6d8fd79e4238f63fbe12611cb73a867b9d0815ed326bb71a7d954d132de92660
+use ts.number.parse_int = @b811c17ddecf5214a038f7ffe5ea0c72a04801ee1f9407259201a8efc4078868
+use ts.number.parts = @c06d5d6a4c1e60bcbf0e431d86c7e7a6a31d60dcd606e547c92928480a014b0f
+use ts.number.to_string = @bbb9dce7354218bdce6d02442f90974a5cff393625a4dbdf767ac05788488cda
+use ts.number_index = @2846cd4a7e382de93752da056715a5884f589f87a4e7367d01024046b8afc30a
+use ts.pad = @c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd
+use ts.primitive_to_number = @ad02d8e25efbacf5d1a409cca8fb7975aae191f7cdd31f5267eb915dc426f715
+use ts.primitive_to_string = @ce452ee11eca78020d6ebfe84d0cf308c5738b68daa8f1772b85f54ba2214aa3
+use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
+use ts.receiver = @c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6
+use ts.regexp.escaped_source = @326719b934273dad2daaaeffe5d1dc15319a85ae0f7a72b1bf62d8062524ac95
+use ts.regexp.spell = @96cffb14c2793a02e2fa2b46e50a627e8cebeb324b751ed9a5335725b3164046
+use ts.require_object_coercible = @115a04ae31620995a232e6e2f6bb17dd5a421945f58a30baee4033694c22d016
+use ts.string.trim_value = @1e2c4cd075b48eb80bd85b68d25c9996afee079c00ea334fe52549825adc623c
+use ts.to_boolean = @5edeb540d455fd9c48e93ed6a4b43826c7a066402eb401357f5e081b7d242b94
+use ts.to_number = @ce0104d5f7263439ddbd1ac638d1272d62aa8fe30598a61ff98bdbf3346f44e3
+use ts.to_primitive = @1376a5afb8cd4f716fcdf8f4c4c37660e1b33120a9bdf785d7a5ad5de7e6e933
+use ts.to_property_key = @3360fd167e2174596e5c60a00936fc593e2bbaf9de6705fde916834887fa3812
+use ts.to_string = @0d4e32ecc2847e28538f93d70487f5e7effaed80b6008a59dc46cbab07e65201
+entry demo(items: List(Number)) -> Any
+
+fn demo(items) {
+  let t5 = fn(this1, args1) start(items: List(Number)) -> Any token("ts.function", 4) ts_args(ts.await, same) {
+    let t1 = args1
+    if num.lt(list.len(args1), 1.0) {
+      set t1 = invoke ts.pad(args1, 1.0)
+    }
+    let items_1 = t1[0.0]
+    let total = 0.0
+    for t4 in items_1 via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {
+      let item = t4
+      set total = num.add(total, num.to_float(item))
+    }
+    return total
+  }
+  let t6 = [items]
+  let t7 = apply t5(absent, t6)
+  if same(t7, absent) {
+    return null
+  }
+  return t7
+}
+
+main {
+  let demo = &demo
+}
+
+unit Function(Name("demo")): statements=15 scopes=7 sites=18

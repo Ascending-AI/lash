@@ -1653,6 +1653,26 @@ PACKAGE_DEPS = {
             "serde_json": "//third-party/rust:p0322"
         }
     },
+    "workflow-corpus": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "anyhow": "//third-party/rust:p0010",
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
+            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
+            "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
+            "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
+            "lash_kernel_view": "//crates/lash-kernel-view:lash-kernel-view",
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
+            "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322"
+        }
+    },
     "workflow-graph-roundtrip": {
         "build": {},
         "dev": {

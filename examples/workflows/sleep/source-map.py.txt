@@ -1,0 +1,11 @@
+language: Python
+exceptions: absent-binding initialization, task finalizer
+main/1 [16..83] "async def demo():\n    await asyncio.sleep(0.005)\n    return \"awake\""
+fn demo/0 [16..83] "async def demo():\n    await asyncio.sleep(0.005)\n    return \"awake\""
+fn demo/0/0/0/0 [38..64] "await asyncio.sleep(0.005)"
+fn demo/0/0/0/0/0 [38..64] "await asyncio.sleep(0.005)"
+fn demo/0/0/0/1 [69..83] "return \"awake\""
+fn demo/1 [16..83] "async def demo():\n    await asyncio.sleep(0.005)\n    return \"awake\""
+fn demo/1/0 [16..83] "async def demo():\n    await asyncio.sleep(0.005)\n    return \"awake\""
+fn demo/2 [16..83] "async def demo():\n    await asyncio.sleep(0.005)\n    return \"awake\""
+exception main/0: absent-binding initialization

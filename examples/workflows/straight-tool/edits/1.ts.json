@@ -1,0 +1,54 @@
+{
+  "context": {
+    "echo": {
+      "params": [
+        {
+          "name": "input",
+          "ty": "any"
+        }
+      ],
+      "result": "any"
+    },
+    "finish": {
+      "params": [
+        {
+          "name": "input",
+          "ty": "any"
+        }
+      ],
+      "result": "any"
+    }
+  },
+  "transaction": {
+    "base": "f034fc21e2228bb08478c0480b7f4efb164659d036a9f51a528e83a57b6a441c",
+    "edits": [
+      {
+        "set_value": {
+          "base": "f034fc21e2228bb08478c0480b7f4efb164659d036a9f51a528e83a57b6a441c",
+          "target": {
+            "tool_argument": {
+              "action": {
+                "unit": {
+                  "function": "demo"
+                },
+                "path": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ]
+              },
+              "index": 0
+            }
+          },
+          "value": {
+            "literal": {
+              "text": "edited λ"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+language: TypeScript
+exceptions: none
+main/0 [7..62] "async function demo() {\n  return await echo(\"hello\");\n}"
+fn demo/0 [7..62] "async function demo() {\n  return await echo(\"hello\");\n}"
+fn demo/0/0/0/0 [33..60] "return await echo(\"hello\");"
+fn demo/0/0/0/0/0 [33..60] "return await echo(\"hello\");"
+fn demo/0/0/0/1 [33..60] "return await echo(\"hello\");"
+fn demo/1 [7..62] "async function demo() {\n  return await echo(\"hello\");\n}"
+fn demo/2 [7..62] "async function demo() {\n  return await echo(\"hello\");\n}"
+fn demo/2/0 [7..62] "async function demo() {\n  return await echo(\"hello\");\n}"
+fn demo/3 [7..62] "async function demo() {\n  return await echo(\"hello\");\n}"
+fn demo/3/1/0 [7..62] "async function demo() {\n  return await echo(\"hello\");\n}"
+fn demo/4 [7..62] "async function demo() {\n  return await echo(\"hello\");\n}"

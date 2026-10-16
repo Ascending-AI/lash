@@ -76,6 +76,7 @@ members = [
     "examples/agent-workbench",
     "examples/toolbench",
     "examples/workflow-graph-roundtrip",
+    "examples/workflows",
     "examples/integrator-contract",
     "examples/provider-signatures",
     "examples/delegation",

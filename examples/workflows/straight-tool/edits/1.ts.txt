@@ -1,0 +1,570 @@
+--- before
+-kernel 1
+-numbers float
+-effect echo(input: Any) -> Any
+-use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+-use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+-use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
+-use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
+-entry demo() -> Any
+-
+-fn demo() {
+-  let t2 = fn(this1, args1) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
+-    let t1 = perform echo("hello") as Any then yield
+-    return t1
+-  }
+-  let t3 = []
+-  let t4 = apply t2(absent, t3)
+-  if same(t4, absent) {
+-    return null
+-  }
+-  return t4
+-}
+-
+-main {
+-  let demo = &demo
+-}
++++ after
++kernel 1
++numbers float
++effect echo(input: Any) -> Any
++use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
++use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
++use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
++use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
++entry demo() -> Any
++
++fn demo() {
++  let t2 = fn(this1, args1) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
++    let t1 = perform echo("edited λ") as Any then yield
++    return t1
++  }
++  let t3 = []
++  let t4 = apply t2(absent, t3)
++  if same(t4, absent) {
++    return null
++  }
++  return t4
++}
++
++main {
++  let demo = &demo
++}
+
+Correspondence:
+{
+  "base": "f034fc21e2228bb08478c0480b7f4efb164659d036a9f51a528e83a57b6a441c",
+  "result": "8bc22d969a43f030f273c3f6baae890374498df4f25439368b51554739838abd",
+  "entries": [
+    {
+      "from": {
+        "unit": "main"
+      },
+      "to": {
+        "unit": "main"
+      }
+    },
+    {
+      "from": {
+        "unit": "main",
+        "path": [
+          0
+        ]
+      },
+      "to": {
+        "unit": "main",
+        "path": [
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": "main",
+        "path": [
+          0,
+          0
+        ]
+      },
+      "to": {
+        "unit": "main",
+        "path": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        }
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        }
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "edited": true
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          1
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          1
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          1,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          2
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          2
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          2,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          2,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          0,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          0,
+          1
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          1
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          1
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          1,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          1,
+          0,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          2
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          4
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          4
+        ]
+      }
+    },
+    {
+      "from": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          4,
+          0
+        ]
+      },
+      "to": {
+        "unit": {
+          "function": "demo"
+        },
+        "path": [
+          4,
+          0
+        ]
+      }
+    }
+  ]
+}
+
+Reprinted source:
+export async function demo() {
+  let t2 = async function(this1, args1) {
+    let t1 = await await tools.echo("edited λ");
+    return t1;
+  };
+  let t3 = [];
+  let t4 = await (t2)(undefined, t3);
+  if (helper_same(t4, undefined)) {
+    return null;
+  }
+  return t4;
+}
+async function main() {
+  let demo = declared.demo;
+}

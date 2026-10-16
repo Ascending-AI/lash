@@ -1,0 +1,76 @@
+kernel 1
+numbers by_spelling
+effect echo(input: Any) -> Any
+use abs = @627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9
+use add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537
+use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
+use div_floor = @e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb
+use eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954
+use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
+use format.decimal_parts = @deca028ad69c6201e1bd21f8e4e8a06f04f569de81bf874d0dea167f9c6d43f0
+use int.to_text = @6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29
+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+use le = @7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169
+use list.concat = @3da975dd77f0c49e6cc2b4066a44091d1807247dfe97e1f524a79709ad92f9f5
+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
+use lt = @a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0
+use map.contains = @5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3
+use num.neg = @56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9
+use num.to_text = @8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7
+use py.add = @b560e89d5062ca16a6939b8a6a9aedb7f9ea67ff1f3a9d0f54d4eaf3a543e64b
+use py.arg_missing = @556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a
+use py.exc.args = @0c324b55f60d7ca736dd443b52948cedeedf99941596e480fdb6628b6b027cf8
+use py.exc.name = @01ffcde599e3545d525e4a0dc9e66d69153a9b24168b2cdbe9db5b201785c0d1
+use py.fail = @3299c00d83f497f9de331da39e68fa2fb955b9641f7c3f797922ef47af84ceef
+use py.float_text = @6969aff90755003d65ee43d90645aa4fba5ed3c364c1e52555d4ed9641185229
+use py.getitem = @81bbe1cbf45f89eed18711f1d5f4bb9f8bd9401d15620a6e056c595fa58a4f1f
+use py.index = @9685d56e4df2598398b295708f932de975b666fad5382eb6e29ac2c7ed5464c2
+use py.operand_error = @345683ebd3c4ad42f77224d7f22299131f9d33e9fe6b95072fbfd3cf1fb5fa44
+use py.reply = @09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd
+use py.repr = @a1a409e84b7f0864b10b89c6e82824e28bbec30eef8eb173c7bcfa5e13e89caf
+use py.setitem = @edba14b7556da4f04334afd9562b8aff746ca76196458bc9963eee614fbd866f
+use py.text.printable = @711d1aec4057e194c48310299a9b34a8d5dc8f8bb5e6452d437cc69196e6c6de
+use py.text_repr = @1475159c83989aa624b02296b831c8181413d61443fcb85183d6fffd53d9be82
+use py.type = @a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b
+use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
+use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use set.len = @3b70dd4bec191dc3c00a32a3aee61fa82e4e4b7256aac2668f25739b0b7a4d38
+use sub = @59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a
+use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
+use text.find = @d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451
+use text.from_code_points = @15ee852f242cc41febea71421a0af456926ad0f91429c4c96f1217c5b8732e43
+use text.get = @04442e8b0037608a734e4e93b04c62f6c031cc039f13ae147827ba9d32f22db3
+use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
+use text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716
+use text.repeat = @ca62f99d0b5b81be587148f931be7dcd29cae182ebc2ab6452b239cc50ead43a
+use text.slice = @649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81
+use text.to_code_points = @f8e1c771241bcf79d4e804e35177d17075d8bafa331fd4d14446f4aa4538c2dc
+use tuple.concat = @cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c6947953be9
+use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
+private t5, t6, t7, t8
+
+main {
+  let add = absent
+  let limit = absent
+  let shared = absent
+  set limit = 3
+  set shared = [1]
+  set add = fn(x) start(x: Int) -> Any bare direct {
+    if same(x, absent) {
+      do invoke py.arg_missing("add")
+    }
+    let t2 = invoke py.add(x, limit)
+    let t3 = invoke py.getitem(shared, 0)
+    let t4 = invoke py.add(t2, t3)
+    return t4
+  }
+  let t5 = [1, add]
+  let t6 = map{"list": t5}
+  let t7 = map{"nested": t6}
+  let t8 = perform echo(t7) as Any
+  do invoke py.reply(t8)
+  do invoke py.setitem(shared, 0, 9)
+}
+
+unit Main: statements=18 scopes=4 sites=25

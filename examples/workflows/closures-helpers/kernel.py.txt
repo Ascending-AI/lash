@@ -1,0 +1,58 @@
+kernel 1
+numbers by_spelling
+use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
+use eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954
+use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
+use map.contains = @5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3
+use map.len = @eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d
+use py.arg_missing = @556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a
+use py.exc.name = @01ffcde599e3545d525e4a0dc9e66d69153a9b24168b2cdbe9db5b201785c0d1
+use py.fail = @3299c00d83f497f9de331da39e68fa2fb955b9641f7c3f797922ef47af84ceef
+use py.for_in.check = @c85c33d14ac1847f1c08b7354b0227e0fcdceb1b53426309b174b0251c05a7c3
+use py.for_in.open = @1632d55bad34977c6fc220e9c70e6551d7d48fa4106ae7b54db830aa831c3c4c
+use py.length = @402a4e443f68fc863d4a6beafb716554a05a97e3b16a8a93a346a569b664bbf9
+use py.type = @a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b
+use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
+use record.len = @5866a6b77ba3e738a556e617baf8cc6570e9417d9df1f641ad49b4b0a77cd7ba
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use set.len = @3b70dd4bec191dc3c00a32a3aee61fa82e4e4b7256aac2668f25739b0b7a4d38
+use sub = @59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a
+use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
+use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
+use text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716
+use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
+entry demo(items: List(Text)) -> Any
+
+fn demo(items) {
+  let t5 = fn(items) start(items: Any) -> Any bare direct {
+    let size = absent
+    if same(items, absent) {
+      do invoke py.arg_missing("demo")
+    }
+    set size = fn(item) start(item: Any) -> Any bare direct {
+      if same(item, absent) {
+        do invoke py.arg_missing("size")
+      }
+      let t1 = invoke py.length(item)
+      return t1
+    }
+    let t2 = []
+    let item_1 = absent
+    for t3 in items via (open py.for_in.open, check py.for_in.check) {
+      set item_1 = t3
+      set t2[list.len(t2)] = apply size(item_1)
+    }
+    return t2
+  }
+  let t6 = apply t5(items)
+  return t6
+}
+
+main {
+  let demo = absent
+  set demo = &demo
+}
+
+unit Function(Name("demo")): statements=17 scopes=8 sites=24

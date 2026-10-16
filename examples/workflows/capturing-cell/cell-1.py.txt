@@ -1,0 +1,79 @@
+cell entries: []
+crossing echo
+Map {
+key Text("nested")
+Map {
+key Text("list")
+List [
+Int(Integer(1))
+FunctionValue entry=run signature=Some(Signature { params: [Param { name: Name("x"), ty: Int, optional: false }], result: Any })
+kernel 1
+numbers by_spelling
+use abs = @abs
+use add = @add
+use bool.not = @bool.not
+use div_floor = @div_floor
+use eq = @eq
+use error.new = @error.new
+use format.decimal_parts = @format.decimal_parts
+use int.to_text = @int.to_text
+use kind = @kind
+use le = @le
+use list.concat = @list.concat
+use list.len = @list.len
+use lt = @lt
+use map.contains = @map.contains
+use num.neg = @num.neg
+use num.to_text = @num.to_text
+use py.add = @py.add
+use py.arg_missing = @py.arg_missing
+use py.exc.args = @py.exc.args
+use py.exc.name = @py.exc.name
+use py.fail = @py.fail
+use py.float_text = @py.float_text
+use py.getitem = @py.getitem
+use py.index = @py.index
+use py.operand_error = @py.operand_error
+use py.repr = @py.repr
+use py.text.printable = @py.text.printable
+use py.text_repr = @py.text_repr
+use py.type = @py.type
+use record.contains = @record.contains
+use same = @same
+use set.len = @set.len
+use sub = @sub
+use text.concat = @text.concat
+use text.find = @text.find
+use text.from_code_points = @text.from_code_points
+use text.get = @text.get
+use text.join = @text.join
+use text.len = @text.len
+use text.repeat = @text.repeat
+use text.slice = @text.slice
+use text.to_code_points = @text.to_code_points
+use tuple.concat = @tuple.concat
+use tuple.len = @tuple.len
+entry run(x: Int) -> Any
+
+fn f0(v0) start(x: Int) -> Any bare direct {
+  let v1 = 3
+  let v2 = [1]
+  if same(v0, absent) {
+    do invoke py.arg_missing("add")
+  }
+  let v3 = invoke py.add(v0, v1)
+  let v4 = invoke py.getitem(v2, 0)
+  let v5 = invoke py.add(v3, v4)
+  return v5
+}
+
+fn run(x) {
+  let v0 = call f0(x)
+  return v0
+}
+
+main {}
+started with x=2: Int(Integer(6))
+]
+}
+}

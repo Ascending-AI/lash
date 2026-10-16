@@ -1,0 +1,33 @@
+unit Function(Name("arrow"))
+statement fn arrow/0 ordinal=27 depth=0 block=fn arrow Let { name: Name("t4"), value: Expr(Closure(Closure { params: [Name("this1"), Name("args1")], body: [Let { name: Name("t1"), value: Expr(Variable(Name("args1"))) }, If { condition: Call { function: FunctionId(34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e), args: [Call { function: FunctionId(70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b), args: [Variable(Name("args1"))] }, Literal(Float(Float(1.0)))] }, then_block: [Assign { place: Variable(Name("t1")), value: Action(Call { callee: Library(FunctionId(c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd)), args: [Variable(Name("args1")), Literal(Float(Float(1.0)))] }) }], else_block: [] }, Let { name: Name("value_1"), value: Expr(Member(Index { target: Variable(Name("t1")), index: Literal(Float(Float(0.0))) })) }, Return { value: Variable(Name("value_1")) }], start: Some(StartAdapter { signature: Signature { params: [Param { name: Name("value"), ty: Number, optional: false }], result: Any }, representation: Token { tag: "ts.function", callable: 4 }, convention: TsArgsList { await_fn: FunctionId(1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a), same_fn: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578) } }) })) }
+statement fn arrow/0/0/0/0 ordinal=29 depth=1 block=fn arrow/0/0/0 Let { name: Name("t1"), value: Expr(Variable(Name("args1"))) }
+statement fn arrow/0/0/0/1 ordinal=30 depth=1 block=fn arrow/0/0/0 If { condition: Call { function: FunctionId(34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e), args: [Call { function: FunctionId(70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b), args: [Variable(Name("args1"))] }, Literal(Float(Float(1.0)))] }, then_block: [Assign { place: Variable(Name("t1")), value: Action(Call { callee: Library(FunctionId(c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd)), args: [Variable(Name("args1")), Literal(Float(Float(1.0)))] }) }], else_block: [] }
+statement fn arrow/0/0/0/1/1/0 ordinal=32 depth=2 block=fn arrow/0/0/0/1/1 Assign { place: Variable(Name("t1")), value: Action(Call { callee: Library(FunctionId(c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd)), args: [Variable(Name("args1")), Literal(Float(Float(1.0)))] }) }
+statement fn arrow/0/0/0/2 ordinal=34 depth=1 block=fn arrow/0/0/0 Let { name: Name("value_1"), value: Expr(Member(Index { target: Variable(Name("t1")), index: Literal(Float(Float(0.0))) })) }
+statement fn arrow/0/0/0/3 ordinal=35 depth=1 block=fn arrow/0/0/0 Return { value: Variable(Name("value_1")) }
+statement fn arrow/1 ordinal=36 depth=0 block=fn arrow Let { name: Name("t5"), value: Expr(List([Variable(Name("value"))])) }
+statement fn arrow/2 ordinal=37 depth=0 block=fn arrow Let { name: Name("t6"), value: Action(Call { callee: Value(Name("t4")), args: [Literal(Absent), Variable(Name("t5"))] }) }
+statement fn arrow/3 ordinal=38 depth=0 block=fn arrow If { condition: Call { function: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578), args: [Variable(Name("t6")), Literal(Absent)] }, then_block: [Return { value: Literal(Null) }], else_block: [] }
+statement fn arrow/3/1/0 ordinal=40 depth=1 block=fn arrow/3/1 Return { value: Literal(Null) }
+statement fn arrow/4 ordinal=42 depth=0 block=fn arrow Return { value: Variable(Name("t6")) }
+scope fn arrow ordinal=26 depth=0 Entry
+scope fn arrow/0/0/0 ordinal=28 depth=1 Closure
+scope fn arrow/0/0/0/1/1 ordinal=31 depth=2 Then
+scope fn arrow/0/0/0/1/2 ordinal=33 depth=2 Else
+scope fn arrow/3/1 ordinal=39 depth=1 Then
+scope fn arrow/3/2 ordinal=41 depth=1 Else
+action fn arrow/0/0/0/1/1/0/0 library id=c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd name=ts.pad label="TypeScript pad"
+action fn arrow/2/0 None
+unit Function(Name("declared"))
+statement fn declared/0 ordinal=44 depth=0 block=fn declared Let { name: Name("t7"), value: Expr(Closure(Closure { params: [Name("this2"), Name("args2")], body: [Return { value: Literal(Text("top")) }], start: Some(StartAdapter { signature: Signature { params: [], result: Any }, representation: Token { tag: "ts.function", callable: 4 }, convention: TsArgsList { await_fn: FunctionId(1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a), same_fn: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578) } }) })) }
+statement fn declared/0/0/0/0 ordinal=46 depth=1 block=fn declared/0/0/0 Return { value: Literal(Text("top")) }
+statement fn declared/1 ordinal=47 depth=0 block=fn declared Let { name: Name("t8"), value: Expr(List([])) }
+statement fn declared/2 ordinal=48 depth=0 block=fn declared Let { name: Name("t9"), value: Action(Call { callee: Value(Name("t7")), args: [Literal(Absent), Variable(Name("t8"))] }) }
+statement fn declared/3 ordinal=49 depth=0 block=fn declared If { condition: Call { function: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578), args: [Variable(Name("t9")), Literal(Absent)] }, then_block: [Return { value: Literal(Null) }], else_block: [] }
+statement fn declared/3/1/0 ordinal=51 depth=1 block=fn declared/3/1 Return { value: Literal(Null) }
+statement fn declared/4 ordinal=53 depth=0 block=fn declared Return { value: Variable(Name("t9")) }
+scope fn declared ordinal=43 depth=0 Entry
+scope fn declared/0/0/0 ordinal=45 depth=1 Closure
+scope fn declared/3/1 ordinal=50 depth=1 Then
+scope fn declared/3/2 ordinal=52 depth=1 Else
+action fn declared/2/0 None

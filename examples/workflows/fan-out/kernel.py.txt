@@ -1,0 +1,67 @@
+kernel 1
+numbers by_spelling
+effect echo(input: Any) -> Any
+use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
+use eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954
+use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
+use map.contains = @5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3
+use py.arg_missing = @556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a
+use py.exc.name = @01ffcde599e3545d525e4a0dc9e66d69153a9b24168b2cdbe9db5b201785c0d1
+use py.fail = @3299c00d83f497f9de331da39e68fa2fb955b9641f7c3f797922ef47af84ceef
+use py.gather = @1cee69c6e0e89c90833f4a7ca40d948b2aab308c62dd8d1c6602e12fbfc9f6c9
+use py.reply = @09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd
+use py.task.bridge = @1079e87b7ae219c2835c200a1d012a4a8e3344c7a7f8d96f786c4b1d5c28bf79
+use py.task.run = @f38fc4ff1301b8bba9c3622fe2e6672fad1adb700b7775a10af1d8af6bb9773f
+use py.type = @a01d1df164d3f04d978748dbb7d25f2dbfbc8dbb8ea421bd31b8ee78448f022b
+use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use tasks.cancel_all = @1bca1cb6474db8f08b6bc9ade7f293c845c33e9474b1553ca7a3cb51d46fb683
+use tasks.unfinished = @5e80cb13afcf53414557d360bb2c75280ba4316c3929d6a76150ee665a80596b
+use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
+use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
+entry demo() -> Any
+
+fn demo() {
+  let t14 = fn() start() -> Any bare direct {
+    let work = absent
+    set work = fn(value) start(value: Text) -> Any bare direct {
+      if same(value, absent) {
+        do invoke py.arg_missing("work")
+      }
+      let t1 = value
+      let t2 = perform echo(t1) as Any
+      let t3 = invoke py.reply(t2)
+      return t3
+    }
+    let t4 = work
+    let t6 = fn() {
+      let t5 = apply t4("a")
+      return t5
+    }
+    let t7 = spawn invoke py.task.run(t6)
+    let t8 = work
+    let t10 = fn() {
+      let t9 = apply t8("b")
+      return t9
+    }
+    let t11 = spawn invoke py.task.run(t10)
+    let t12 = [t7, t11]
+    let t13 = invoke py.gather(t12)
+    return t13
+  }
+  let t15 = apply t14()
+  return t15
+}
+
+main {
+  let demo = absent
+  try {
+    set demo = &demo
+  } finally {
+    do invoke tasks.cancel_all()
+  }
+}
+
+unit Function(Name("demo")): statements=24 scopes=7 sites=38

@@ -1,0 +1,319 @@
+[
+  {
+    "name": "straight-tool",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    },
+    "edit": true
+  },
+  {
+    "name": "branch",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "iteration-typed",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "iteration-untyped",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "try-finally",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "fan-out",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "sleep",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "closures-helpers",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "early-return",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "non-ascii",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "entry-boundary",
+    "mode": "module",
+    "entries": [
+      "arrow",
+      "declared"
+    ],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "early-finish",
+    "mode": "cell",
+    "entries": [],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "capturing-cell",
+    "mode": "cell",
+    "entries": [],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    }
+  },
+  {
+    "name": "refusal-duplicate",
+    "mode": "module",
+    "entries": [],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    },
+    "refusal": "WORKFLOW_DUPLICATE_ENTRY"
+  },
+  {
+    "name": "refusal-empty",
+    "mode": "module",
+    "entries": [],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    },
+    "refusal": "WORKFLOW_EMPTY_MODULE"
+  },
+  {
+    "name": "refusal-capture",
+    "mode": "module",
+    "entries": [],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    },
+    "refusal": "WORKFLOW_CAPTURED_MODULE_BINDING"
+  },
+  {
+    "name": "refusal-annotation",
+    "mode": "module",
+    "entries": [],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    },
+    "refusal": "WORKFLOW_UNMAPPABLE_ENTRY_ANNOTATION"
+  },
+  {
+    "name": "refusal-default",
+    "mode": "module",
+    "entries": [],
+    "dialects": [
+      "ts",
+      "py"
+    ],
+    "exceptions": {
+      "ts": [],
+      "py": [
+        "absent-binding initialization",
+        "task finalizer"
+      ]
+    },
+    "refusal": "WORKFLOW_ENTRY_DEFAULT"
+  }
+]
