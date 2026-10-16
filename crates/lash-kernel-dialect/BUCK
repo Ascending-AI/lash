@@ -52,17 +52,6 @@ lash_rust_unit_test(
 )
 
 filegroup(
-    name = "source_wire_declarations",
-    srcs = [
-        "src/imperative.rs",
-        "src/diagnostic.rs",
-        "src/workflow.rs",
-    ],
-    copy = False,
-    visibility = ["PUBLIC"],
-)
-
-filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
     copy = False,

@@ -10,7 +10,8 @@ import subprocess
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-SNAPSHOTS = "crates/lash-vm-client/tests/snapshots"
+SCHEMAS = "schemas/host"
+SHAPES = ("worker-start", "worker-page-request", "worker-page-reply", "worker-seal-batch")
 VERSION = "crates/lash-vm-protocol/src/version.rs"
 
 
@@ -23,9 +24,9 @@ def check(package_version: str, before_version: int, after_version: int,
         errors.append("worker wire schema changed after 1.0 without a WORKER_PROTOCOL_VERSION bump")
     if any(after.get(name) != content for name, content in before.items()):
         errors.append("released worker schema snapshots must remain unchanged; add the new protocol snapshots")
-    expected = {f"wire-v{after_version}.snap", f"wire-v{after_version}-testing.snap"}
+    expected = {f"{shape}/v{after_version}.schema.json" for shape in SHAPES}
     if not expected <= after.keys():
-        errors.append("both base and testing snapshots are required for the new worker protocol version")
+        errors.append("all page and carry schemas are required for the new worker protocol version")
     return errors
 
 
@@ -57,9 +58,11 @@ def main() -> int:
         return subprocess.check_output(["git", *args], cwd=ROOT, text=True)
 
     before_source = git("show", f"{args.base}:{VERSION}")
-    before = {Path(name).name: git("show", f"{args.base}:{name}") for name in
-              git("ls-tree", "-r", "--name-only", args.base, "--", SNAPSHOTS).splitlines()}
-    after = {path.name: path.read_text() for path in (ROOT / SNAPSHOTS).glob("*.snap")}
+    before = {str(Path(name).relative_to(SCHEMAS)): git("show", f"{args.base}:{name}") for name in
+              git("ls-tree", "-r", "--name-only", args.base, "--",
+                  *(f"{SCHEMAS}/{shape}" for shape in SHAPES)).splitlines()}
+    after = {str(path.relative_to(ROOT / SCHEMAS)): path.read_text()
+             for shape in SHAPES for path in (ROOT / SCHEMAS / shape).glob("*.schema.json")}
     errors = check(package_version, protocol(before_source), protocol((ROOT / VERSION).read_text()), before, after)
     for error in errors:
         print(error)

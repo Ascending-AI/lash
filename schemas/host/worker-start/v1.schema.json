@@ -1,0 +1,512 @@
+{
+  "$defs": {
+    "Bytes": {
+      "pattern": "^([0-9a-f]{2})*$",
+      "type": "string"
+    },
+    "CarryWire": {
+      "additionalProperties": false,
+      "description": "A carried session as it crosses (S8): its [`SessionRoot`] in the\nkernel's token encoding, and a link for each page it names, in its\norder (heap, bindings, functions). The receiver authorizes every page\nby its link; a root naming a page with none is refused.",
+      "properties": {
+        "pages": {
+          "items": {
+            "$ref": "#/$defs/PageLink"
+          },
+          "type": "array"
+        },
+        "root": {
+          "items": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array",
+          "x-lash-binary-encoding": "MessagePack bin"
+        }
+      },
+      "required": [
+        "root",
+        "pages"
+      ],
+      "type": "object"
+    },
+    "Datum": {
+      "description": "A value copied across the effect boundary: an effect argument, an effect\nresult, a host read's answer, a run's result (`K-EFF-002`).\n\nA datum is a tree. It has no identity and no cycle; an object reached\ntwice in the run is written twice.",
+      "oneOf": [
+        {
+          "enum": [
+            "null",
+            "absent"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bool": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "bool"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "int": {
+              "$ref": "#/$defs/Integer"
+            }
+          },
+          "required": [
+            "int"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "float": {
+              "$ref": "#/$defs/Float"
+            }
+          },
+          "required": [
+            "float"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A number not yet decoded: an effect result's JSON number\n(`K-EFF-005`). A run never writes one out.",
+          "properties": {
+            "number": {
+              "$ref": "#/$defs/NumberToken"
+            }
+          },
+          "required": [
+            "number"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "$ref": "#/$defs/Bytes"
+            }
+          },
+          "required": [
+            "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "timestamp": {
+              "$ref": "#/$defs/Timestamp"
+            }
+          },
+          "required": [
+            "timestamp"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "tuple": {
+              "items": {
+                "$ref": "#/$defs/Datum"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "tuple"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "list": {
+              "items": {
+                "$ref": "#/$defs/Datum"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "list"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "map": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "$ref": "#/$defs/Datum"
+                  },
+                  {
+                    "$ref": "#/$defs/Datum"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "map"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set": {
+              "items": {
+                "$ref": "#/$defs/Datum"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "record": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/Datum"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/ErrorDatum"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/Handle"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ErrorDatum": {
+      "additionalProperties": false,
+      "description": "An error value copied across the effect boundary.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/Datum"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message",
+        "data"
+      ],
+      "type": "object"
+    },
+    "Float": {
+      "pattern": "^(nan|-?inf|-?(0|[1-9][0-9]*)\\.[0-9]+|-?[1-9](\\.[0-9]+)?e-?[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "Handle": {
+      "additionalProperties": false,
+      "description": "A typed reference to a host resource or a host projection. The kernel\nreads neither field; a host gives them meaning.",
+      "properties": {
+        "id": {
+          "description": "The host's own identifier for the resource.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "The handle's type, as the type grammar's `Handle(\"\u2026\")` names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "type": "object"
+    },
+    "Integer": {
+      "pattern": "^(0|-?[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "NumberToken": {
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?$",
+      "type": "string"
+    },
+    "PageAuthority": {
+      "description": "What authorizes a capability: the activation's lease on its committed\nroot, or its private staging.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A store root lease (S6), by its id.",
+          "properties": {
+            "root": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "root"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The activation's stage lease (S5), by its id.",
+          "properties": {
+            "stage": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "stage"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PageCapability": {
+      "pattern": "^[0-9a-fA-F]{162}$",
+      "type": "string",
+      "x-lash-binary-bytes": 81,
+      "x-lash-binary-encoding": "page[32], authority-kind[1] (root=0, stage=1), authority-id[u64-le], epoch[u64-le], mac[32]",
+      "x-lash-packed-fields": {
+        "description": "A parent-issued capability to read one page: bound to its digest, its\nauthority and the activation epoch, under a MAC whose key never leaves\nthe parent. It is transport authority, never saved state: a fresh\nactivation derives new ones from its leased root. On the worker it is\nthe kernel's opaque 48-byte `PageGrant` (authority 8, epoch 8, MAC 32).\n\nIt crosses as its [`PAGE_CAPABILITY_BYTES`] fixed bytes, a page's\nworth of them per page every exchange names (FIG-6321): the digest, the\nauthority's kind and id, the epoch and the MAC; in a human-readable\npayload, as those bytes in hex.",
+        "properties": {
+          "authority": {
+            "$ref": "#/$defs/PageAuthority"
+          },
+          "epoch": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mac": {
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 32,
+            "minItems": 32,
+            "type": "array"
+          },
+          "page": {
+            "items": {
+              "format": "uint8",
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 32,
+            "minItems": 32,
+            "type": "array"
+          }
+        },
+        "required": [
+          "page",
+          "authority",
+          "epoch",
+          "mac"
+        ],
+        "type": "object"
+      }
+    },
+    "PageLink": {
+      "description": "How a carried session names one of its pages: under a capability the\nreceiver verifies, or as a page of the seal batch the same frame\ncarries, which the parent admits into this activation's staging before\nit reads the session (FIG-6288).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "granted": {
+              "$ref": "#/$defs/PageCapability"
+            }
+          },
+          "required": [
+            "granted"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "carried": {
+              "items": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 32,
+              "minItems": 32,
+              "type": "array"
+            }
+          },
+          "required": [
+            "carried"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "QualifiedName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
+    "Timestamp": {
+      "$ref": "#/$defs/Integer",
+      "description": "An instant: nanoseconds since 1970-01-01T00:00:00Z, with no zone\n(`K-VAL-009`). Stored as its decimal spelling."
+    }
+  },
+  "$id": "https://lash.dev/schemas/worker-start/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "How a new run starts ([`lash_kernel_vm::CellStart`], less its owner\nbinding, which the protocol's `Start` carries), and the effects it\nperforms as reads ([`EffectModes`]).",
+  "properties": {
+    "args": {
+      "items": {
+        "$ref": "#/$defs/Datum"
+      },
+      "type": "array"
+    },
+    "entry": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Name"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The entry to run; `None` runs the document's `main`."
+    },
+    "host": {
+      "description": "The host's read-only bindings a cell's `main` starts with.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/Name"
+          },
+          {
+            "$ref": "#/$defs/Datum"
+          }
+        ],
+        "type": "array"
+      },
+      "type": "array"
+    },
+    "reads": {
+      "description": "The effects the run performs as reads (`K-EFF-012`).",
+      "items": {
+        "$ref": "#/$defs/QualifiedName"
+      },
+      "type": "array"
+    },
+    "session": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CarryWire"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The carried session a cell opens in place."
+    }
+  },
+  "required": [
+    "args"
+  ],
+  "title": "StartWire",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "WORKER_PROTOCOL_VERSION"
+}

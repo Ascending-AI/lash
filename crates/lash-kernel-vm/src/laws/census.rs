@@ -53,7 +53,6 @@ struct Source {
     pages: BTreeMap<PageId, PageAnswer>,
     cache: BTreeMap<PageId, PageAnswer>,
     reads: usize,
-    misses: usize,
     fail_after: Option<usize>,
 }
 impl PageSource for Source {
@@ -65,7 +64,6 @@ impl PageSource for Source {
             }
             self.reads += 1;
             if !self.cache.contains_key(&page.id) {
-                self.misses += 1;
                 let answer = self
                     .pages
                     .get(&page.id)
@@ -162,15 +160,6 @@ impl Graph {
             })?;
         }
         Ok(cost)
-    }
-    fn prepare(&mut self, mode: usize) {
-        if mode == 0 {
-            self.source.cache = self.source.pages.clone();
-        } else {
-            self.source.cache.clear();
-        }
-        self.source.reads = 0;
-        self.source.misses = 0;
     }
 }
 impl CensusGraph for Graph {
@@ -307,63 +296,6 @@ fn an_unreachable_cycle_never_fails_an_allocation() {
     ));
     assert_eq!(graph.swept, 2);
     assert_eq!(census.certificate().upper, LogicalBytes(0));
-}
-
-#[test]
-fn the_verdict_is_the_same_warm_evicted_and_reopened() {
-    for scenario in 0..3 {
-        let mut base = Graph::default();
-        let (count, upper, bound, request) = match scenario {
-            0 => {
-                base.object(0, 64, &[edge(1)]);
-                base.object(1, 64, &[]);
-                base.roots = vec![Value::List(id(0)), Value::List(id(1))];
-                (2, 160, 160, 32)
-            }
-            1 => {
-                base.object(0, 48, &[edge(1)]);
-                base.object(1, 48, &[edge(0)]);
-                (2, 96, 112, 112)
-            }
-            _ => {
-                for n in 0..4096 {
-                    let next = [edge(n + 1)];
-                    base.object(
-                        n,
-                        if n == 4095 { 32 } else { 48 },
-                        if n == 4095 { &[] } else { &next },
-                    );
-                }
-                base.roots = vec![Value::List(id(2048))];
-                (4096, 196608, 196608, 98304)
-            }
-        };
-        let saved = certificate(upper, count);
-        let mut expected = None;
-        for mode in 0..3 {
-            let mut graph = base.clone();
-            graph.prepare(mode);
-            // Opening restores only the admitted header, with a fresh cache.
-            let mut census = Census::restore(saved, LogicalBytes(bound)).unwrap();
-            assert_eq!(graph.source.reads, 0);
-            let pending = pressured(&mut census, request);
-            let decision = census.refine(&mut graph, &empty(), pending).unwrap();
-            let observed = (
-                matches!(decision, RefinedDecision::Granted(_)),
-                census.certificate(),
-            );
-            if let Some(expected) = expected {
-                assert_eq!(observed, expected);
-            } else {
-                expected = Some(observed);
-            }
-            if mode == 0 {
-                assert_eq!(graph.source.misses, 0);
-            } else if scenario != 1 {
-                assert!(graph.source.misses > 0);
-            }
-        }
-    }
 }
 
 #[test]

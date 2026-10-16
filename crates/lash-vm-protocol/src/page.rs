@@ -15,6 +15,7 @@
 //! Like the rest of this crate, nothing here reaches the kernel: a page is
 //! opaque bytes.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -22,13 +23,15 @@ use crate::Detail;
 
 /// Names one page exchange within a lease, so its reply answers exactly
 /// it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(transparent)]
 pub struct PageExchangeId(pub u64);
 
 /// What authorizes a capability: the activation's lease on its committed
 /// root, or its private staging.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PageAuthority {
     /// A store root lease (S6), by its id.
@@ -47,12 +50,26 @@ pub enum PageAuthority {
 /// worth of them per page every exchange names (FIG-6321): the digest, the
 /// authority's kind and id, the epoch and the MAC; in a human-readable
 /// payload, as those bytes in hex.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, JsonSchema)]
+#[schemars(transform = capability_schema)]
 pub struct PageCapability {
     pub page: [u8; 32],
     pub authority: PageAuthority,
     pub epoch: u64,
     pub mac: [u8; 32],
+}
+
+// Keep the type-derived fields as encoding metadata: the JSON value is hex,
+// but a change inside the packed capability must change the transitive schema.
+fn capability_schema(schema: &mut schemars::Schema) {
+    let fields = schema.clone();
+    *schema = schemars::json_schema!({
+        "type": "string",
+        "pattern": format!("^[0-9a-fA-F]{{{}}}$", PAGE_CAPABILITY_BYTES * 2),
+        "x-lash-packed-fields": fields,
+        "x-lash-binary-encoding": "page[32], authority-kind[1] (root=0, stage=1), authority-id[u64-le], epoch[u64-le], mac[32]",
+        "x-lash-binary-bytes": PAGE_CAPABILITY_BYTES,
+    });
 }
 
 /// The bytes a [`PageCapability`] crosses as.
@@ -157,7 +174,8 @@ impl<'de> Deserialize<'de> for PageCapability {
 /// Only the envelope crosses (FIG-6321): a page is named by the digest of
 /// its envelope, so the receiver derives the digest as it decodes, and a
 /// decoded page's `id` is its envelope's digest by construction.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, JsonSchema)]
+#[schemars(with = "Vec<u8>")]
 pub struct PageEnvelope {
     pub id: [u8; 32],
     pub envelope: Vec<u8>,
@@ -203,7 +221,7 @@ impl<'de> Deserialize<'de> for PageEnvelope {
 }
 
 /// A worker's page request.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PageRequest {
     /// Read these pages: at most the protocol's batch page and byte bounds.
@@ -222,7 +240,7 @@ pub enum PageRequest {
 /// exchange of their own (FIG-6288). The parent admits them exactly as a
 /// [`PageRequest::Seal`] of the same pages and children, and returns their
 /// stage capabilities on the run's next `Run`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SealBatch {
     pub pages: Vec<PageEnvelope>,
@@ -242,7 +260,7 @@ impl SealBatch {
 
 /// One page read, with a capability for each child its envelope declares,
 /// ascending by digest.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadPage {
     pub page: PageEnvelope,
@@ -250,7 +268,7 @@ pub struct ReadPage {
 }
 
 /// The parent's reply.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PageReply {
     /// The pages, in request order.

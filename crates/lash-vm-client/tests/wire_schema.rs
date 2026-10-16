@@ -1,134 +1,96 @@
-#![expect(
-    clippy::expect_used,
-    reason = "wire schema laws parse declared source fixtures"
-)]
-//! Snapshot Serde declarations directly from syntax, without enumerating API names.
-//! Field order, field types, variant forms, Serde attributes and feature gates
-//! are all wire inputs. Both feature selections have committed snapshots.
-use quote::ToTokens;
-use syn::{Attribute, Fields, Item};
+//! Independent vectors for the custom capability encoding at the carry boundary.
+use lash_kernel_doc::Datum;
+use lash_vm_client::wire::{CarryWire, PageLink, StartWire};
+use lash_vm_protocol::page::{PageAuthority, PageCapability, PageRefusal, PageReply};
+use serde_json::json;
 
-fn enabled(attributes: &[Attribute], testing: bool) -> bool {
-    attributes
-        .iter()
-        .filter(|attr| attr.path().is_ident("cfg"))
-        .all(|attr| {
-            assert_eq!(
-                attr.meta.to_token_stream().to_string(),
-                "cfg (feature = \"testing\")",
-                "unhandled wire feature gate"
-            );
-            testing
-        })
-}
+// Reviewed 1.0 bytes: page 00..1f, kind, little-endian authority and epoch,
+// MAC e0..ff. Neither vector is produced by the codec under test.
+const ROOT: &str = concat!(
+    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "00",
+    "ffffffffffffffff",
+    "ffffffffffffffff",
+    "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+);
+const STAGE: &str = concat!(
+    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "01",
+    "0807060504030201",
+    "1817161514131211",
+    "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+);
 
-fn serde_attributes(attributes: &mut Vec<Attribute>) {
-    attributes.retain(|attr| attr.path().is_ident("serde"));
-}
-
-fn fields(fields: &mut Fields) {
-    match fields {
-        Fields::Named(named) => named.named.iter_mut().for_each(|field| {
-            serde_attributes(&mut field.attrs);
-            field.vis = syn::Visibility::Inherited;
-        }),
-        Fields::Unnamed(unnamed) => unnamed.unnamed.iter_mut().for_each(|field| {
-            serde_attributes(&mut field.attrs);
-            field.vis = syn::Visibility::Inherited;
-        }),
-        Fields::Unit => {}
+fn capability(authority: PageAuthority, epoch: u64) -> PageCapability {
+    PageCapability {
+        page: std::array::from_fn(|i| i as u8),
+        authority,
+        epoch,
+        mac: std::array::from_fn(|i| 224 + i as u8),
     }
 }
 
-fn serializable(attributes: &[Attribute]) -> bool {
-    attributes.iter().any(|attr| {
-        attr.path().is_ident("derive")
-            && attr
-                .meta
-                .to_token_stream()
-                .to_string()
-                .split(|ch: char| !ch.is_alphanumeric())
-                .any(|part| part == "Serialize")
-    })
-}
-
-fn declarations(source: &str, testing: bool) -> Vec<String> {
-    syn::parse_file(source)
-        .expect("wire source parses")
-        .items
-        .into_iter()
-        .filter_map(|item| match item {
-            Item::Enum(mut item) if serializable(&item.attrs) && enabled(&item.attrs, testing) => {
-                serde_attributes(&mut item.attrs);
-                item.vis = syn::Visibility::Inherited;
-                item.variants = item
-                    .variants
-                    .into_iter()
-                    .filter(|variant| enabled(&variant.attrs, testing))
-                    .map(|mut variant| {
-                        serde_attributes(&mut variant.attrs);
-                        fields(&mut variant.fields);
-                        variant
-                    })
-                    .collect();
-                Some(item.to_token_stream().to_string())
-            }
-            Item::Struct(mut item)
-                if serializable(&item.attrs) && enabled(&item.attrs, testing) =>
-            {
-                serde_attributes(&mut item.attrs);
-                item.vis = syn::Visibility::Inherited;
-                fields(&mut item.fields);
-                Some(item.to_token_stream().to_string())
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn check_snapshot(testing: bool) {
-    let mut schema = format!(
-        "worker protocol {}\nframe header {} bytes\ntesting {}\n\n",
-        lash_vm_protocol::WORKER_PROTOCOL_VERSION - u32::from(cfg!(feature = "synthetic-next")),
-        lash_vm_protocol::FRAME_HEADER_BYTES,
-        testing
+#[test]
+fn page_and_carry_wire_vectors_preserve_the_1_0_contract() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = capability(PageAuthority::Root(u64::MAX), u64::MAX);
+    let stage = capability(
+        PageAuthority::Stage(0x0102_0304_0506_0708),
+        0x1112_1314_1516_1718,
     );
-    for source in [
-        include_str!("../src/service.rs"),
-        include_str!("../src/wire.rs"),
-        include_str!("../../lash-kernel-dialect/src/imperative.rs"),
-        include_str!("../../lash-kernel-doc/src/source_map.rs"),
-        include_str!("../../lash-kernel-dialect/src/diagnostic.rs"),
-        include_str!("../../lash-kernel-dialect/src/workflow.rs"),
-    ] {
-        for declaration in declarations(source, testing) {
-            schema.push_str(&declaration);
-            schema.push_str("\n\n");
+    for (value, hex) in [(root, ROOT), (stage, STAGE)] {
+        assert_eq!(serde_json::to_value(value)?, json!(hex));
+        assert_eq!(serde_json::from_value::<PageCapability>(json!(hex))?, value);
+        // MessagePack bin8, length 81, followed by the exact same packed bytes.
+        let mut bytes = vec![0xc4, 81];
+        for i in (0..hex.len()).step_by(2) {
+            bytes.push(u8::from_str_radix(&hex[i..i + 2], 16)?);
         }
+        assert_eq!(rmp_serde::to_vec(&value)?, bytes);
+        assert_eq!(rmp_serde::from_slice::<PageCapability>(&bytes)?, value);
     }
-    schema.truncate(schema.trim_end().len());
-    schema.push('\n');
-    let expected = if testing {
-        include_str!("snapshots/wire-v1-testing.snap")
-    } else {
-        include_str!("snapshots/wire-v1.snap")
+    let start = StartWire {
+        entry: Some("next".into()),
+        args: vec![Datum::Bool(true)],
+        session: Some(CarryWire {
+            root: vec![0, 128, 255],
+            pages: vec![
+                PageLink::Granted(root),
+                PageLink::Granted(stage),
+                PageLink::Carried([7; 32]),
+            ],
+        }),
+        reads: vec![],
+        host: vec![],
     };
-    if schema != expected {
-        println!("BEGIN_WIRE_SCHEMA\n{schema}END_WIRE_SCHEMA");
+    let prior = json!({
+        "entry": "next", "args": [{"bool": true}],
+        "session": {"root": [0, 128, 255], "pages": [
+            {"granted": ROOT}, {"granted": STAGE}, {"carried": vec![7; 32]}
+        ]}
+    });
+    assert_eq!(serde_json::to_value(&start)?, prior);
+    assert_eq!(serde_json::from_value::<StartWire>(prior)?, start);
+    for (refusal, prior) in [
+        (
+            PageRefusal::Unauthorized,
+            json!({"refused": "unauthorized"}),
+        ),
+        (
+            PageRefusal::BatchTooLarge {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            },
+            json!({"refused": {"batch_too_large": {"pages": u64::MAX, "bytes": u64::MAX}}}),
+        ),
+        (
+            PageRefusal::StagingEntryLimit { entries: u64::MAX },
+            json!({"refused": {"staging_entry_limit": {"entries": u64::MAX}}}),
+        ),
+    ] {
+        let reply = PageReply::Refused(refusal);
+        assert_eq!(serde_json::to_value(&reply)?, prior);
+        assert_eq!(serde_json::from_value::<PageReply>(prior)?, reply);
     }
-    assert_eq!(
-        schema, expected,
-        "wire shape changed: review the change and refresh the snapshot in place before 1.0; after 1.0 bump WORKER_PROTOCOL_VERSION and retain the old versioned snapshot"
-    );
-}
-
-#[test]
-fn base_wire_schema_matches_committed_snapshot() {
-    check_snapshot(false);
-}
-
-#[cfg(feature = "testing")]
-#[test]
-fn testing_wire_schema_matches_committed_snapshot() {
-    check_snapshot(true);
+    Ok(())
 }

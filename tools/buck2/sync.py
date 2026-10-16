@@ -1244,6 +1244,7 @@ schema_documents(
     name = "host_schema_documents",
     generators = [
         "//crates/lash-trace:trace_schema_generator__bin",
+        "//crates/lash-vm-client:worker_wire_schema_generator__bin",
         "//crates/lash-core-execution:process_event_schema_generator__bin",
         "//crates/lash-core:process_workflow_schema_generator__bin",
         "//crates/lash-kernel-doc:kernel_schema_generator__bin",

@@ -572,6 +572,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-vm-broker:lash-vm-broker__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-vm-client:lash-vm-client__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-vm-client:wire_schema__test": {"cpu_count": 1, "memory_kb": 262144},
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-vm-library:lash-vm-library__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-vm-protocol:codec_bounds__test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test": {"cpu_count": 1, "memory_kb": 262144},

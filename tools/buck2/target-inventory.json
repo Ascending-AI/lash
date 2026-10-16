@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 77,
-  "cargo_target_count": 329,
+  "cargo_target_count": 330,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_829a56e2__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d4e0f7b6__metadata[check]",
@@ -66763,7 +66763,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 413,
+  "generated_label_count": 415,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -67078,6 +67078,7 @@
     "//crates/lash-vm-broker:lash-vm-broker__unit_test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test__fv_1c9379b8",
     "//crates/lash-vm-protocol:test_batch",
@@ -67765,6 +67766,7 @@
     "//crates/lash-vm-broker:lash-vm-broker__unit_test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:codec_bounds__test",
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test",
@@ -68143,7 +68145,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1428,
+  "metadata_target_count": 1430,
   "packages": [
     {
       "declared_features": [
@@ -72374,12 +72376,11 @@
         "lash-kernel-state",
         "lash-kernel-vm",
         "libc",
-        "quote",
         "rmp-serde",
+        "schemars",
         "serde",
         "serde_bytes",
         "serde_json",
-        "syn",
         "thiserror",
         "tokio"
       ],
@@ -72407,6 +72408,24 @@
           "clippy_label": "//crates/lash-vm-client:lash-vm-client__unit_test__clippy[clippy.txt]",
           "kind": "unit-test",
           "label": "//crates/lash-vm-client:lash-vm-client__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-vm-client:worker_wire_schema_generator__bin",
+          "cargo": "worker_wire_schema_generator",
+          "check_label": "//crates/lash-vm-client:worker_wire_schema_generator__bin__metadata[check]",
+          "clippy_label": "//crates/lash-vm-client:worker_wire_schema_generator__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//crates/lash-vm-client:worker_wire_schema_generator__bin",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
+          "cargo": "worker_wire_schema_generator",
+          "check_label": "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test__clippy[clippy.txt]",
+          "kind": "bin-unit-test",
+          "label": "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
           "tags": []
         },
         {
@@ -75296,6 +75315,7 @@
     "//crates/lash-vm-broker:lash-vm-broker__unit_test": 300,
     "//crates/lash-vm-client:lash-vm-client__unit_test": 300,
     "//crates/lash-vm-client:wire_schema__test": 300,
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test": 300,
     "//crates/lash-vm-library:lash-vm-library__unit_test": 300,
     "//crates/lash-vm-protocol:codec_bounds__test": 300,
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test": 300,
@@ -75935,6 +75955,8 @@
     "//crates/lash-vm-client:lash-vm-client[static]",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library[static]",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:codec_bounds__test",
@@ -76391,6 +76413,8 @@
     "//crates/lash-vm-client:lash-vm-client__metadata[check]",
     "//crates/lash-vm-client:lash-vm-client__unit_test__rust_test__metadata[check]",
     "//crates/lash-vm-client:wire_schema__test__rust_test__metadata[check]",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__metadata[check]",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test__rust_test__metadata[check]",
     "//crates/lash-vm-library:lash-vm-library__metadata[check]",
     "//crates/lash-vm-library:lash-vm-library__unit_test__rust_test__metadata[check]",
     "//crates/lash-vm-protocol:codec_bounds__test__rust_test__metadata[check]",
@@ -76809,6 +76833,8 @@
     "//crates/lash-vm-client:lash-vm-client__clippy[clippy.txt]",
     "//crates/lash-vm-client:lash-vm-client__unit_test__clippy[clippy.txt]",
     "//crates/lash-vm-client:wire_schema__test__clippy[clippy.txt]",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__clippy[clippy.txt]",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test__clippy[clippy.txt]",
     "//crates/lash-vm-library:lash-vm-library__clippy[clippy.txt]",
     "//crates/lash-vm-library:lash-vm-library__unit_test__clippy[clippy.txt]",
     "//crates/lash-vm-protocol:codec_bounds__test__clippy[clippy.txt]",
@@ -77141,6 +77167,8 @@
     "//crates/lash-vm-client:lash-vm-client",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:codec_bounds__test",
@@ -77475,6 +77503,8 @@
     "//crates/lash-vm-client:lash-vm-client",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:codec_bounds__test",
@@ -77788,6 +77818,7 @@
     "//crates/lash-vm-broker:lash-vm-broker__unit_test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:test_batch",
     "//crates/lash-vm-releases:lash-vm-releases__unit_test",
@@ -77976,6 +78007,7 @@
     "//crates/lash-vm-broker:lash-vm-broker__unit_test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:test_batch",
     "//crates/lash-vm-releases:lash-vm-releases__unit_test",
@@ -78195,6 +78227,7 @@
     "//crates/lash-vm-broker:lash-vm-broker__unit_test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:codec_bounds__test",
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test",
@@ -78628,6 +78661,7 @@
     "//crates/lash-vm-broker:lash-vm-broker__unit_test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:test_batch",
     "//crates/lash-vm-releases:lash-vm-releases__unit_test",
@@ -78852,6 +78886,7 @@
     "//crates/lash-vm-broker:lash-vm-broker__unit_test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
+    "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test",
     "//crates/lash-vm-library:lash-vm-library__unit_test",
     "//crates/lash-vm-protocol:codec_bounds__test",
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test",

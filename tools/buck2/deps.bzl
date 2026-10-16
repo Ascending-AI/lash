@@ -955,10 +955,7 @@ PACKAGE_DEPS = {
     },
     "lash-internal-vm-client": {
         "build": {},
-        "dev": {
-            "quote": "//third-party/rust:p0257",
-            "syn": "//third-party/rust:p0367"
-        },
+        "dev": {},
         "normal": {
             "async_trait": "//third-party/rust:p0016",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
@@ -972,6 +969,7 @@ PACKAGE_DEPS = {
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "libc": "//third-party/rust:p0188",
             "rmp_serde": "//third-party/rust:p0285",
+            "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",
             "serde_bytes": "//third-party/rust:p0318",
             "serde_json": "//third-party/rust:p0322",

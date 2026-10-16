@@ -109,7 +109,7 @@ pub type OrdinalPath = Vec<(lash_kernel_doc::TaskIdentity, Vec<u32>)>;
 /// receiver verifies, or as a page of the seal batch the same frame
 /// carries, which the parent admits into this activation's staging before
 /// it reads the session (FIG-6288).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PageLink {
     Granted(PageCapability),
@@ -131,10 +131,11 @@ impl PageLink {
 /// kernel's token encoding, and a link for each page it names, in its
 /// order (heap, bindings, functions). The receiver authorizes every page
 /// by its link; a root naming a page with none is refused.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CarryWire {
     #[serde(with = "serde_bytes")]
+    #[schemars(with = "Vec<u8>", extend("x-lash-binary-encoding" = "MessagePack bin"))]
     pub root: Vec<u8>,
     pub pages: Vec<PageLink>,
 }
@@ -200,7 +201,7 @@ fn session_pages(session: &SessionRoot) -> Vec<PageRef> {
 /// How a new run starts ([`lash_kernel_vm::CellStart`], less its owner
 /// binding, which the protocol's `Start` carries), and the effects it
 /// performs as reads ([`EffectModes`]).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StartWire {
     /// The entry to run; `None` runs the document's `main`.

@@ -445,14 +445,7 @@
   "crates/lash-vm-client": {
     "tests": {
       "wire_schema": [
-        "tests/wire_schema.rs",
-        "src/service.rs",
-        "src/wire.rs"
-      ]
-    },
-    "test_data": {
-      "wire_schema": [
-        "tests/snapshots/*.snap"
+        "tests/wire_schema.rs"
       ]
     }
   },

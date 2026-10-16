@@ -663,19 +663,6 @@ kinds = ["example"]
 targets = ["native_corpus"]
 compile_data = ["//crates/lash-vm-releases:rust_sources"]
 
-# The source service transports the shared exact-source result/options/maps.
-[[rule]]
-packages = ["lash-internal-vm-client"]
-kinds = ["test"]
-targets = ["wire_schema"]
-compile_data = ["//crates/lash-kernel-dialect:source_wire_declarations", "//crates/lash-kernel-doc:source_wire_declarations"]
-
-[filegroups.lash-kernel-dialect]
-source_wire_declarations = { srcs = ["src/imperative.rs", "src/diagnostic.rs", "src/workflow.rs"] }
-
-[filegroups.lash-kernel-doc]
-source_wire_declarations = { srcs = ["src/source_map.rs"] }
-
 # Complete upstream SDK tests are retained for upstream merge validation.
 [[rule]]
 packages = ["lash-rmcp"]

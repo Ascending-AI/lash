@@ -60,9 +60,6 @@ lash_rust_unit_test(
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-client", "lash_vm_client", "//crates/lash-vm-client:lash-vm-client__unit_test"),
-    data_exclude = [
-        "tests/snapshots/*.snap",
-    ],
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
@@ -72,6 +69,63 @@ lash_rust_unit_test(
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
+)
+
+lash_rust_binary(
+    name = "worker_wire_schema_generator__bin",
+    crate_features = [
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "worker_wire_schema_generator",
+    crate_root = "src/bin/worker_wire_schema_generator.rs",
+    declared_features = [
+        "dhat-heap",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-client", "worker_wire_schema_generator"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    include_dev_deps = False,
+    run_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-vm-client",
+    library_crate_name = "lash_vm_client",
+    manifest_dir = "crates/lash-vm-client",
+    package_name = "lash-internal-vm-client",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_unit_test(
+    name = "worker_wire_schema_generator__bin__unit_test",
+    crate_features = [
+        "perf-witness",
+        "testing",
+    ],
+    crate_name = "worker_wire_schema_generator",
+    crate_root = "src/bin/worker_wire_schema_generator.rs",
+    declared_features = [
+        "dhat-heap",
+        "perf-witness",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-client", "worker_wire_schema_generator", "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test"),
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":lash-vm-client",
+    library_crate_name = "lash_vm_client",
+    manifest_dir = "crates/lash-vm-client",
+    package_name = "lash-internal-vm-client",
+    tags = [],
+    version = "0.0.0-dev",
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
 )
 
 lash_rust_integration_test(
@@ -90,14 +144,9 @@ lash_rust_integration_test(
     ],
     srcs_patterns = [
         "tests/wire_schema.rs",
-        "src/service.rs",
-        "src/wire.rs",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-client", "wire_schema", "//crates/lash-vm-client:wire_schema__test"),
-    extra_compile_data = [
-        "//crates/lash-kernel-dialect:source_wire_declarations",
-        "//crates/lash-kernel-doc:source_wire_declarations",
-    ],
+    extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],

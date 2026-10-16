@@ -41,6 +41,7 @@ lash-kernel-dialect = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-core-store = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 rmp-serde = { workspace = true }
 serde_json = { workspace = true }
@@ -48,6 +49,6 @@ serde_bytes = { workspace = true }
 thiserror = { workspace = true }
 libc = { workspace = true }
 
-[dev-dependencies]
-syn = { version = "2", features = ["full"] }
-quote = "1"
+[[bin]]
+name = "worker_wire_schema_generator"
+path = "src/bin/worker_wire_schema_generator.rs"

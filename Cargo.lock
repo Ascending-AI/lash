@@ -2853,12 +2853,11 @@ dependencies = [
  "lash-kernel-state",
  "lash-kernel-vm",
  "libc",
- "quote",
  "rmp-serde",
+ "schemars",
  "serde",
  "serde_bytes",
  "serde_json",
- "syn 2.0.118",
  "thiserror 2.0.18",
  "tokio",
 ]
