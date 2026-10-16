@@ -15,6 +15,32 @@ import tempfile
 import time
 
 
+MANAGED_REMOTE_JOBS = 16
+CI_REMOTE_JOBS_VARIABLE = 'LASH_CI_REMOTE_JOBS'
+
+
+def remote_jobs(jobs):
+    """Keep a managed fork's remote queue independent of driver parallelism."""
+    override = os.environ.get(CI_REMOTE_JOBS_VARIABLE)
+    if override is not None:
+        if os.environ.get('CI') != 'true':
+            raise ValueError(f'{CI_REMOTE_JOBS_VARIABLE} requires CI=true')
+        if not re.fullmatch(r'[1-9][0-9]*', override):
+            raise ValueError(f'{CI_REMOTE_JOBS_VARIABLE} must be a positive integer')
+        return min(jobs, int(override))
+    return min(jobs, MANAGED_REMOTE_JOBS) if os.environ.get('KILN_REPO') == 'lash' else jobs
+
+
+@contextmanager
+def repo_build_admission(root):
+    """Seam for Kiln's forthcoming per-repo/user remote build-phase lease.
+
+    Kiln owns the two-active-phase policy. Its env/lock contract is not yet
+    published; wire it here once available, without inventing another lock.
+    """
+    yield
+
+
 def regular_file(path):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, 'r') as source:
@@ -69,7 +95,7 @@ def atomic_write(path, text):
 def configuration(root, jobs):
     local = root / '.buckconfig.local'
     previous = regular_file(local) if local.exists() or local.is_symlink() else ''
-    desired = replace_limit(previous, jobs)
+    desired = replace_limit(previous, remote_jobs(jobs))
     tracked = regular_file(root / '.buckconfig')
     identity = hashlib.sha256((tracked + '\0' + desired).encode())
     values = configparser.ConfigParser(interpolation=None, strict=False)
@@ -234,10 +260,11 @@ def admission(root, executable, isolation, jobs, exclusive=False, cancelled=lamb
                 alias.unlink(missing_ok=True)
             if status is not None:
                 subprocess.run([str(executable), '--isolation-dir', isolation, 'kill'], cwd=root, check=True)
-            atomic_write(receipt_path, json.dumps({'configuration': identity, 'jobs': jobs}) + '\n')
+            atomic_write(receipt_path, json.dumps({'configuration': identity, 'jobs': remote_jobs(jobs)}) + '\n')
         if not exclusive:
             fcntl.flock(active, fcntl.LOCK_SH)
         fcntl.flock(gate, fcntl.LOCK_UN)
+        print(f'hermetic-build: remote jobs={remote_jobs(jobs)} (driver jobs={jobs})', file=sys.stderr, flush=True)
         yield
 
 
@@ -260,7 +287,7 @@ def run_command(root, jobs, isolation, argv, planner=None, **kwargs):
             os.setsid()
             for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                 signal.signal(signum, forward)
-            with admission(root, argv[0], isolation, jobs, exclusive=argv[3] == 'clean', cancelled=lambda: interrupted):
+            with repo_build_admission(root), admission(root, argv[0], isolation, jobs, exclusive=argv[3] == 'clean', cancelled=lambda: interrupted):
                 if interrupted:
                     os._exit(128 + interrupted)
                 if planner is not None:

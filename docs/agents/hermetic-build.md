@@ -572,13 +572,31 @@ commands on the same test binary with different filters.
   and no case outside the requested filters or behind a requested `--skip`.
   Otherwise the test is an `INFRA_FAILURE` whose message starts
   `Test report does not match its selection`. It never passes.
-- **`--jobs`.** A command whose `--jobs` differs from the running daemon's
-  waits for every running command to finish before it restarts the daemon. It
-  never restarts the daemon under another command. Overlapping loops with
-  different `--jobs` restart the daemon at every handoff, so give them one
-  value.
+- **`--jobs`.** Driver parallelism defaults to 32. Managed Lash forks
+  (`KILN_REPO=lash`, supplied by `env.sh`) cap the daemon's outstanding remote
+  requests at `min(--jobs, 16)`. Lower `--jobs` values still lower the cap.
+  A changed effective remote limit waits for every running command to finish
+  before restarting the daemon. It never restarts under another command.
 - **Build and test together.** Both hold a shared lease on the daemon and run
   at once. Buck2 itself orders commands whose configuration differs.
+
+### Remote admission
+
+The driver logs effective remote and driver jobs on every invocation. CI in a
+managed fork uses the same 16-request cap unless it explicitly sets
+`CI=true LASH_CI_REMOTE_JOBS=<positive integer>`; the effective cap then becomes
+`min(--jobs, LASH_CI_REMOTE_JOBS)`. For example, `CI=true
+LASH_CI_REMOTE_JOBS=32` retains the previous 32-request envelope with the default
+driver jobs. A CI allocation above 16 needs its own recorded pool-demand
+measurement before deployment; no larger CI allocation is enabled here. The
+override is rejected outside `CI=true`.
+
+`tools/buck2/invocation.py:repo_build_admission` is the single integration seam
+for Kiln's planned two-active-remote-build-phase admission per repo and user.
+It currently yields without acquiring a lease because Kiln's env/lock contract
+has not been published. The fork's existing daemon transition locks remain in
+force; the 16-request cap controls client fan-out independently of that future
+repo-wide policy.
 
 ### Queue priority
 
