@@ -85,7 +85,7 @@ pub(super) fn verify(shard: &Shard, registry: &FunctionRegistry) {
         "K-ID-001" | "K-ID-003" => identity_document(shard),
         "K-ID-002" | "K-VER-002" => identity_definition(),
         "K-LIB-001" => definition_parts(),
-        "K-LIB-002" | "K-STMT-002" => implementations(),
+        "K-LIB-002" => implementations(),
         "K-LIB-003" => callbacks(),
         "K-LIB-004" => body_rules(),
         "K-LIB-005" => {
@@ -118,7 +118,6 @@ pub(super) fn verify(shard: &Shard, registry: &FunctionRegistry) {
         "K-ADM-008" => reached_body_rules(),
         "K-SITE-004" => enclosing_loops(shard, registry),
         "K-SITE-005" => site_order(shard, registry),
-        "K-STMT-003" => statement_locality(),
         "K-CHG-001" => charge_invariance(shard, registry),
         "K-MACH-001" => instance_isolation(shard, registry),
         "K-MACH-004" => delivery_errors(shard, registry),
@@ -477,20 +476,6 @@ fn site_order(shard: &Shard, registry: &FunctionRegistry) {
             .iter()
             .all(|node| node.site.unit == Unit::Library(id))
     );
-}
-
-fn statement_locality() {
-    let registry = same_registry(BODY, false);
-    let id = definition(BODY).identity();
-    for body in [
-        "let x = 7 let y = invoke probe.same(x) finish y",
-        "let x = 7 print 0 let y = invoke probe.same(x) print 0 finish y",
-    ] {
-        let document = doc(&format!(
-            "{HEADER}use probe.same = @{id}\nmain {{ {body} }}"
-        ));
-        admit(&document, &Environment::new(&registry)).unwrap();
-    }
 }
 
 fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {

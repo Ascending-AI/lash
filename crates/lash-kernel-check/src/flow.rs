@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_doc::{EffectName, FunctionCatalog, Literal, Name, Unit};
 
 use crate::graph::{
-    ActionNode, AtomNode, CalleeNode, Edge, EdgeKind, ExecutionSite, ExprNode, Graph, NodeId,
-    NodeKind, SiteKind, StmtNode, Target,
+    ActNode, ActionNode, AtomNode, CalleeNode, Edge, EdgeKind, ExecutionSite, ExprNode, Graph,
+    NodeId, NodeKind, SiteKind, StmtNode, Target,
 };
 
 /// Where each way of leaving a statement leads.
@@ -89,6 +89,22 @@ impl Flow<'_> {
                 }
                 NodeKind::Expr(ExprNode::Literal(Literal::Function(name))) => {
                     referenced.push(name);
+                }
+                NodeKind::Expr(ExprNode::Act { kind: act, .. }) => {
+                    let (callee, kind) = match act {
+                        ActNode::Call(callee) => (Some(callee), EdgeKind::Call),
+                        ActNode::Spawn(callee) => (Some(callee), EdgeKind::Spawn),
+                        _ => (None, EdgeKind::Call),
+                    };
+                    if let Some(CalleeNode::Declared(name)) = callee
+                        && let Some(to) = function_body(name)
+                    {
+                        self.edges.push(Edge {
+                            from: node.id,
+                            to,
+                            kind,
+                        });
+                    }
                 }
                 NodeKind::Action(action) => {
                     let (callee, kind) = match action {
@@ -298,10 +314,44 @@ pub(crate) fn atoms(action: &ActionNode) -> impl Iterator<Item = &AtomNode> {
 fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
     let mut out = Vec::new();
     for node in &graph.nodes {
-        let NodeKind::Action(action) = &node.kind else {
-            continue;
+        let kind = match &node.kind {
+            NodeKind::Action(action) => match action {
+                ActionNode::Call { .. } => SiteKind::Call,
+                ActionNode::Perform { .. } => SiteKind::Perform,
+                ActionNode::Sleep { .. } => SiteKind::Sleep,
+                ActionNode::Join { .. } => SiteKind::Join,
+                ActionNode::JoinMany { .. } => SiteKind::JoinMany,
+                ActionNode::Yield => SiteKind::Yield,
+                ActionNode::Spawn { .. } => SiteKind::Spawn,
+                ActionNode::Cancel { .. } => SiteKind::Cancel,
+            },
+            NodeKind::Expr(ExprNode::Act { kind, .. }) => match kind {
+                ActNode::Call(_) => SiteKind::Call,
+                ActNode::Perform { .. } => SiteKind::Perform,
+                ActNode::Sleep => SiteKind::Sleep,
+                ActNode::Spawn(_) => SiteKind::Spawn,
+            },
+            _ => continue,
         };
-        let Some(statement) = node.parent else {
+        // A nested action stands in its nearest statement, inside the
+        // innermost action it is an argument of, if any (`K-SITE-001`).
+        let mut within = None;
+        let mut cursor = node.parent;
+        let statement = loop {
+            let Some(id) = cursor else {
+                break None;
+            };
+            let ancestor = graph.node(id);
+            match &ancestor.kind {
+                NodeKind::Stmt(_) => break Some(id),
+                NodeKind::Expr(ExprNode::Act { .. }) if within.is_none() => {
+                    within = Some(ancestor.site.clone());
+                }
+                _ => {}
+            }
+            cursor = ancestor.parent;
+        };
+        let Some(statement) = statement else {
             continue;
         };
         // The loops between the action and its function body, which a
@@ -324,16 +374,8 @@ fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
             node: node.id,
             site: node.site.clone(),
             statement: graph.node(statement).site.clone(),
-            kind: match action {
-                ActionNode::Call { .. } => SiteKind::Call,
-                ActionNode::Perform { .. } => SiteKind::Perform,
-                ActionNode::Sleep { .. } => SiteKind::Sleep,
-                ActionNode::Join { .. } => SiteKind::Join,
-                ActionNode::JoinMany { .. } => SiteKind::JoinMany,
-                ActionNode::Yield => SiteKind::Yield,
-                ActionNode::Spawn { .. } => SiteKind::Spawn,
-                ActionNode::Cancel { .. } => SiteKind::Cancel,
-            },
+            within,
+            kind,
             loops,
         });
     }
@@ -348,6 +390,21 @@ struct Direct {
     through_values: bool,
 }
 
+/// What a call or a `spawn` of `callee` lets a unit reach.
+fn reach(unit: &mut Direct, callee: &CalleeNode, catalog: &dyn FunctionCatalog) {
+    match callee {
+        CalleeNode::Declared(name) => {
+            unit.reaches.insert(name.clone());
+        }
+        CalleeNode::Value(_) => unit.through_values = true,
+        CalleeNode::Library(function) => {
+            unit.through_values |= catalog
+                .definition(function)
+                .is_none_or(|definition| !definition.has_native());
+        }
+    }
+}
+
 /// Fills each unit's effect set: its own performs, then those of every
 /// declared function it calls, spawns or references, to a fixed point.
 fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
@@ -358,22 +415,21 @@ fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
             NodeKind::Expr(ExprNode::Literal(Literal::Function(name))) => {
                 unit.reaches.insert(name.clone());
             }
+            NodeKind::Expr(ExprNode::Act { kind, .. }) => match kind {
+                ActNode::Perform { effect, .. } => {
+                    unit.effects.insert(effect.clone());
+                }
+                ActNode::Call(callee) | ActNode::Spawn(callee) => {
+                    reach(unit, callee, catalog);
+                }
+                ActNode::Sleep => {}
+            },
             NodeKind::Action(action) => {
                 if let ActionNode::Perform { effect, .. } = action {
                     unit.effects.insert(effect.clone());
                 }
                 if let ActionNode::Call { callee, .. } | ActionNode::Spawn { callee, .. } = action {
-                    match callee {
-                        CalleeNode::Declared(name) => {
-                            unit.reaches.insert(name.clone());
-                        }
-                        CalleeNode::Value(_) => unit.through_values = true,
-                        CalleeNode::Library(function) => {
-                            unit.through_values |= catalog
-                                .definition(function)
-                                .is_none_or(|definition| !definition.has_native());
-                        }
-                    }
+                    reach(unit, callee, catalog);
                 }
                 for atom in atoms(action) {
                     if let AtomNode::Literal(Literal::Function(name)) = atom {

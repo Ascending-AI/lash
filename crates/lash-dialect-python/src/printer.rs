@@ -384,6 +384,14 @@ impl Renderer<'_> {
                 self.expr(&read.handle);
                 self.expr(&read.request);
             }
+            // The front end writes no nested action yet, so its source has
+            // no spelling for one.
+            k::Expr::Act(_) => {
+                self.out.refuse(PrintError::Invalid(
+                    "a nested action has no generated Python spelling".into(),
+                ));
+                return;
+            }
         }
         self.indent -= 1;
     }

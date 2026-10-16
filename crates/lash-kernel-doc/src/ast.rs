@@ -1,12 +1,12 @@
 //! The kernel's forms as one closed tree (`K-FORM-001`).
 //!
-//! The statement rule is carried by the types where that is cheap. A form
-//! that may pause a task, or that calls anything but a native library
-//! function, is an [`Action`]: it is the whole right-hand side of a
-//! statement and its arguments are [`Atom`]s. An [`Expr`] holds no action,
-//! so "a wait nested in an expression" has no representation. What the types
-//! cannot say, that an [`Expr::Call`] names a function with a native
-//! implementation, is checked by validation (`K-STMT-002`).
+//! A form that may pause a task, or that calls anything but a native
+//! library function, is an action. It is either a statement's whole
+//! right-hand side, an [`Action`] with [`Atom`] arguments, or an
+//! [`Expr::Act`] nested in an expression, with expression arguments. A task
+//! may pause at either (`K-EVAL-008`). What the types cannot say, that an
+//! [`Expr::Call`] names a function with a native implementation, is checked
+//! by validation.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -106,8 +106,9 @@ pub enum Rhs {
     Action(Action),
 }
 
-/// A form that is the whole right-hand side of its own statement
-/// (`K-STMT-001`).
+/// An action as the whole right-hand side of its own statement, its
+/// arguments atoms (`K-FORM-001`); [`Expr::Act`] nests one in an
+/// expression.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
@@ -148,7 +149,7 @@ pub enum JoinMode {
     Any,
 }
 
-/// What a statement-position call or a `spawn` runs.
+/// What a call or a `spawn` runs.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Callee {
@@ -182,7 +183,8 @@ pub enum Literal {
     Function(Name),
 }
 
-/// An expression: evaluated within one statement, it never pauses a task.
+/// An expression, evaluated within one statement. Only an [`Expr::Act`]
+/// in it may pause the task (`K-EVAL-008`).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Expr {
@@ -219,6 +221,71 @@ pub enum Expr {
     Random,
     /// Reads through a projection handle.
     Read(Box<ProjectionRead>),
+    /// An action nested in the expression: the statement may pause at it,
+    /// the operands it has already evaluated kept as the roles of its
+    /// continuation (`K-EVAL-008`).
+    Act(Box<ActExpr>),
+}
+
+/// An action inside an expression: the action forms that may nest, with
+/// expression arguments.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ActExpr {
+    pub kind: ActKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<Expr>,
+}
+
+/// What an [`Expr::Act`] does. `join`, `yield` and `cancel` stay statement
+/// actions.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ActKind {
+    /// Calls a function and yields what it returns.
+    Call(Callee),
+    /// Runs one effect and yields its result, decoded as `result`.
+    Perform { effect: EffectName, result: Type },
+    /// Waits for a number of milliseconds, its one argument.
+    Sleep,
+    /// Starts a task running a function and yields its handle.
+    Spawn(Callee),
+}
+
+impl ActExpr {
+    /// The statement [`Action`] this nested action spells when every
+    /// argument is a variable or a literal: kernel text writes such an
+    /// action, as a whole right-hand side, as the statement form.
+    pub fn as_action(&self) -> Option<Action> {
+        let args = self
+            .args
+            .iter()
+            .map(|expr| match expr {
+                Expr::Variable(name) => Some(Atom::Variable(name.clone())),
+                Expr::Literal(literal) => Some(Atom::Literal(literal.clone())),
+                _ => None,
+            })
+            .collect::<Option<Vec<Atom>>>()?;
+        Some(match &self.kind {
+            ActKind::Call(callee) => Action::Call {
+                callee: callee.clone(),
+                args,
+            },
+            ActKind::Spawn(callee) => Action::Spawn {
+                callee: callee.clone(),
+                args,
+            },
+            ActKind::Perform { effect, result } => Action::Perform {
+                effect: effect.clone(),
+                args,
+                result: result.clone(),
+            },
+            ActKind::Sleep => match <[Atom; 1]>::try_from(args) {
+                Ok([duration]) => Action::Sleep { duration },
+                Err(_) => return None,
+            },
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -356,8 +423,9 @@ impl<'a> Node<'a> {
     ///
     /// A block's children are its statements. A statement's are its
     /// expressions, its action and its blocks, in the order they are
-    /// written. An action has none: its arguments are atoms. A closure's one
-    /// child is its body.
+    /// written. A statement's action has none: its arguments are atoms. A
+    /// nested action's are its arguments. A closure's one child is its
+    /// body.
     pub fn children(self) -> Vec<Node<'a>> {
         let mut out = Vec::new();
         match self {
@@ -433,6 +501,7 @@ impl<'a> Node<'a> {
                     out.push(Node::Expr(&read.handle));
                     out.push(Node::Expr(&read.request));
                 }
+                Expr::Act(act) => out.extend(act.args.iter().map(Node::Expr)),
             },
         }
         out

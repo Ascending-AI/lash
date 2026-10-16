@@ -203,7 +203,7 @@ pub enum WorkflowAdmissionRefusal {
     /// The checker refused the document, naming every fault at its site:
     /// a missing effect, an effect whose signature does not serve, a
     /// function identity the environment does not hold, an unbound
-    /// variable, a statement the statement rule refuses.
+    /// variable, a node structural validation refuses.
     Document(Refusal),
     /// The selected entry's called/spawned effect closure cannot be certified.
     EntryEffects(EntryEffectsRefusal),

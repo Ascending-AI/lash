@@ -32,8 +32,8 @@ use lash_kernel_doc::{
     PreparedNative, Site, Type, Unit,
 };
 use lash_kernel_exec::{
-    BoundaryKind, KirError, LocalRef, Op, OpRange, StepEdge, StmtRanges, Tables as StreamTables,
-    verify_stream,
+    ActIx, BoundaryKind, KirError, LocalRef, Op, OpRange, Reg, StepEdge, StmtRanges,
+    Tables as StreamTables, verify_stream,
 };
 
 use crate::functions::{MachineFunction, machine_function};
@@ -140,6 +140,7 @@ impl Tables {
             codes,
             blocks,
             libs,
+            nested: stream.nested.len(),
         };
         verify_stream(&stream.ops, &stmts, &sizes)?;
         Ok(stmts.len())
@@ -243,6 +244,19 @@ impl PreparedLibrary {
             .map(|(function, registered)| (*function, registered.definition().as_ref()))
             .collect();
         shuffler.shuffle(layout, &mut units);
+        let bodies: Vec<Runs> = library
+            .iter()
+            .map(|(_, registered)| {
+                let definition = registered.definition();
+                if machine_function(definition).is_some() || definition.body().is_none() {
+                    Runs::Answers
+                } else if registered.native().is_some() {
+                    Runs::Natively
+                } else {
+                    Runs::Body
+                }
+            })
+            .collect();
 
         let no_bindings = NO_BINDINGS;
         let mut compiler = Compiler::new(
@@ -251,6 +265,7 @@ impl PreparedLibrary {
             Resolve {
                 lib_of: &lib_of,
                 listed: None,
+                bodies: &bodies,
             },
             &no_bindings,
             Base::default(),
@@ -382,6 +397,11 @@ pub(crate) struct DocumentCode {
     pub(crate) site_count: usize,
     pub(crate) main: CodeId,
     pub(crate) declared: BTreeMap<Name, CodeId>,
+    /// The functions the bodies of the library functions the document
+    /// lists reach where the machine runs them, which a frame of the run
+    /// may stand in beside those it lists. Found only when a run asks for
+    /// one the document does not list: compiling never walks the library.
+    reached: std::sync::OnceLock<BTreeSet<FunctionId>>,
 }
 
 impl std::ops::Deref for Executable {
@@ -472,24 +492,49 @@ impl Executable {
         &self.library.0.libs[id.0 as usize]
     }
 
-    /// The library function `function`, when the document lists it.
+    /// The library function `function`, when the document reaches it.
     pub(crate) fn lib_of(&self, function: &FunctionId) -> Option<LibId> {
-        if !self.document.manifest.functions.contains_key(function) {
+        if !self.reaches(function) {
             return None;
         }
         self.library.0.lib_of.get(function).copied()
     }
 
+    /// Whether a frame of the run may stand in library function
+    /// `function`: the document lists it, or the body of one it lists
+    /// reaches it where the machine runs that body.
+    fn reaches(&self, function: &FunctionId) -> bool {
+        let listed = &self.document.manifest.functions;
+        listed.contains_key(function)
+            || self
+                .own
+                .reached
+                .get_or_init(|| {
+                    let registry = &self.library.0.registry;
+                    let mut reached = BTreeSet::new();
+                    let mut pending: Vec<FunctionId> = listed.keys().copied().collect();
+                    while let Some(function) = pending.pop() {
+                        if !reached.insert(function) {
+                            continue;
+                        }
+                        if let Some(registered) = registry.get(&function)
+                            && registered.native().is_none()
+                            && let Some(body) = registered.definition().body()
+                        {
+                            pending.extend(body.functions.keys().copied());
+                        }
+                    }
+                    reached
+                })
+                .contains(function)
+    }
+
     /// The tables that hold `unit`'s code: the library's for a function
-    /// the document lists, the document's own for its main and functions.
+    /// the document reaches, the document's own for its main and
+    /// functions.
     fn tables_of(&self, unit: &Unit) -> Option<&Tables> {
         match unit {
-            Unit::Library(function) => self
-                .document
-                .manifest
-                .functions
-                .contains_key(function)
-                .then_some(&self.library.0.tables),
+            Unit::Library(function) => self.reaches(function).then_some(&self.library.0.tables),
             Unit::Main | Unit::Function(_) => Some(&self.own.tables),
         }
     }
@@ -625,6 +670,64 @@ pub(crate) struct Stream {
     pub(crate) names: Vec<Name>,
     pub(crate) fields: Vec<String>,
     pub(crate) field_lists: Vec<Box<[String]>>,
+    /// The resume entries of the stream's nested actions, by [`ActIx`].
+    pub(crate) nested: Vec<Nested>,
+    /// Each resume entry by its action's site: where a saved continuation
+    /// finds its entry under this layout.
+    pub(crate) nested_at: BTreeMap<Site, ActIx>,
+}
+
+/// An action nested in a statement's expression, or a call inside an
+/// expression of a library function that runs its body: what the machine
+/// needs to issue it and to resume its statement at the op after it
+/// (`K-EVAL-008`).
+pub(crate) struct Nested {
+    /// The action's site: what its waits, its occurrences and its saved
+    /// continuation name.
+    pub(crate) site: Site,
+    /// The length of its statement's site path: a saved continuation names
+    /// the action and its roles by their path suffix under it.
+    pub(crate) depth: u32,
+    pub(crate) kind: NestedKind,
+    /// The op its statement resumes at, as an offset from the start of the
+    /// statement's range.
+    pub(crate) resume: u32,
+    /// The register its value goes to.
+    pub(crate) dst: Reg,
+    /// The operands the statement has evaluated when the action is reached
+    /// and will still use, in evaluation order: each the site of the
+    /// expression that produced it and the register it is in under this
+    /// layout. They are the continuation's roles, `live_roles` of the
+    /// action's site.
+    pub(crate) roles: Box<[(Site, Reg)]>,
+}
+
+/// What a nested action does.
+pub(crate) enum NestedKind {
+    /// A `call`, `apply` or `invoke`: of a declared function, a closure or
+    /// function reference, or a library function, which enters a frame
+    /// when it runs its body.
+    Call(NestedCallee),
+    /// A library call inside an expression of a function that runs its
+    /// body here: it enters a frame, as a call does, but it is no action,
+    /// so no occurrence of its site is counted.
+    Body(LibId),
+    Perform {
+        effect: doc::EffectName,
+        result: Type,
+    },
+    Sleep,
+    Spawn(NestedCallee),
+}
+
+/// What a nested call or `spawn` runs.
+pub(crate) enum NestedCallee {
+    Declared(CodeId),
+    Library(LibId),
+    /// A closure or function reference held in a variable, read into the
+    /// action's first register before its arguments (`K-EVAL-004`): a role
+    /// of the actions in them, named by the action's own site.
+    Read,
 }
 
 /// One statement: its ops in its stream, how many registers they use, and
@@ -801,9 +904,31 @@ struct Resolve<'a> {
     /// The functions a document lists; a library body's calls resolve
     /// against the whole registry, which its registration checked.
     listed: Option<&'a BTreeMap<FunctionId, doc::FunctionName>>,
+    /// How each library function, by its id, runs in this preparation.
+    bodies: &'a [Runs],
+}
+
+/// How a library function runs when it is called inside an expression.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Runs {
+    /// It has no kernel body: it always answers at once.
+    Answers,
+    /// It has a body, but its native implementation answers at once here:
+    /// a run parked in its body under another registry resumes here.
+    Natively,
+    /// It runs its body in a frame of its own.
+    Body,
 }
 
 impl Resolve<'_> {
+    /// How `lib` runs when it is called.
+    fn runs(&self, lib: LibId) -> Runs {
+        self.bodies
+            .get(lib.0 as usize)
+            .copied()
+            .unwrap_or(Runs::Answers)
+    }
+
     fn lib(&self, function: &FunctionId) -> Option<LibId> {
         if self
             .listed
@@ -845,6 +970,14 @@ struct Compiler<'a> {
     scopes: Vec<Scopes>,
     unit: Unit,
     path: Vec<u32>,
+    /// The operands of the statement being compiled that are evaluated and
+    /// still to be used, each by its parent's path length, its index among
+    /// the parent's children and its register: the roles of a nested action
+    /// compiled now. Each parent is an ancestor of what is compiled while
+    /// its entries stand, so `path` still holds its prefix.
+    live: Vec<(u32, u32, Reg)>,
+    /// The site path length of the statement being compiled.
+    stmt_depth: u32,
 }
 
 enum UnitSource<'a> {
@@ -871,12 +1004,22 @@ fn compile_document(
     let mut units: Vec<UnitSource<'_>> = vec![UnitSource::Main];
     units.extend(document.functions.keys().map(UnitSource::Function));
     shuffler.shuffle(layout, &mut units);
+    let bodies: Vec<Runs> = prepared
+        .libs
+        .iter()
+        .map(|lib| match &lib.run {
+            LibRun::Body(_) => Runs::Body,
+            LibRun::Native(_) if lib.definition.body().is_some() => Runs::Natively,
+            LibRun::Native(_) | LibRun::Machine(_) => Runs::Answers,
+        })
+        .collect();
     let mut compiler = Compiler::new(
         layout,
         shuffler,
         Resolve {
             lib_of: &prepared.lib_of,
             listed: Some(&document.manifest.functions),
+            bodies: &bodies,
         },
         &document.private_bindings,
         Base {
@@ -926,6 +1069,7 @@ fn compile_document(
         declared,
         block_ordinals,
         site_count: ordinals.len(),
+        reached: std::sync::OnceLock::new(),
     })
 }
 
@@ -954,6 +1098,8 @@ impl<'a> Compiler<'a> {
             scopes: Vec::new(),
             unit: Unit::Main,
             path: Vec::new(),
+            live: Vec::new(),
+            stmt_depth: 0,
         }
     }
 
@@ -1079,6 +1225,10 @@ impl Compiler<'_> {
         free: bool,
     ) -> Code {
         let site = self.site();
+        // A body's statements have roles of their own: the operands of an
+        // enclosing expression are no role of theirs.
+        let enclosing = std::mem::take(&mut self.live);
+        let enclosing_depth = self.stmt_depth;
         self.scopes.push(Scopes {
             main,
             body: site.clone(),
@@ -1096,6 +1246,8 @@ impl Compiler<'_> {
             captures: Vec::new(),
             free: None,
         });
+        self.live = enclosing;
+        self.stmt_depth = enclosing_depth;
         let mut positions: Vec<u32> = (0..scopes.slots.len() as u32).collect();
         self.shuffler.shuffle(self.layout, &mut positions);
         let placer = Placer {

@@ -204,7 +204,7 @@ impl FunctionDefinition {
     }
 
     /// Whether the definition states a native implementation: the property
-    /// that lets a call sit inside an expression (`K-STMT-002`).
+    /// that lets an expression call it by name (`K-LIB-002`).
     pub fn has_native(&self) -> bool {
         matches!(
             self.implementation,

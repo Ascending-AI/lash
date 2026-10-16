@@ -1,7 +1,88 @@
 {
   "$defs": {
+    "ActExpr": {
+      "additionalProperties": false,
+      "description": "An action inside an expression: the action forms that may nest, with\nexpression arguments.",
+      "properties": {
+        "args": {
+          "items": {
+            "$ref": "#/$defs/Expr"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/ActKind"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ActKind": {
+      "description": "What an [`Expr::Act`] does. `join`, `yield` and `cancel` stay statement\nactions.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Calls a function and yields what it returns.",
+          "properties": {
+            "call": {
+              "$ref": "#/$defs/Callee"
+            }
+          },
+          "required": [
+            "call"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Runs one effect and yields its result, decoded as `result`.",
+          "properties": {
+            "perform": {
+              "additionalProperties": false,
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                },
+                "result": {
+                  "$ref": "#/$defs/Type"
+                }
+              },
+              "required": [
+                "effect",
+                "result"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "perform"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "sleep",
+          "description": "Waits for a number of milliseconds, its one argument.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Starts a task running a function and yields its handle.",
+          "properties": {
+            "spawn": {
+              "$ref": "#/$defs/Callee"
+            }
+          },
+          "required": [
+            "spawn"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Action": {
-      "description": "A form that is the whole right-hand side of its own statement\n(`K-STMT-001`).",
+      "description": "An action as the whole right-hand side of its own statement, its\narguments atoms (`K-FORM-001`); [`Expr::Act`] nests one in an\nexpression.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -227,7 +308,7 @@
       "type": "string"
     },
     "Callee": {
-      "description": "What a statement-position call or a `spawn` runs.",
+      "description": "What a call or a `spawn` runs.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -313,7 +394,7 @@
       "type": "object"
     },
     "Expr": {
-      "description": "An expression: evaluated within one statement, it never pauses a task.",
+      "description": "An expression, evaluated within one statement. Only an [`Expr::Act`]\nin it may pause the task (`K-EVAL-008`).",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -548,6 +629,19 @@
           },
           "required": [
             "read"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An action nested in the expression: the statement may pause at it,\nthe operands it has already evaluated kept as the roles of its\ncontinuation (`K-EVAL-008`).",
+          "properties": {
+            "act": {
+              "$ref": "#/$defs/ActExpr"
+            }
+          },
+          "required": [
+            "act"
           ],
           "type": "object"
         }

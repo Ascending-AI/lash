@@ -1,9 +1,10 @@
 //! Lowers the adapter's tree to a kernel document.
 //!
-//! Native calls, member reads and constructions stay in expressions. Actions
-//! remain statements with atom arguments (`K-STMT-001/002`). An earlier
-//! operand is pinned when a later operand emits statements that could change
-//! its value or run before its raise (`K-STMT-005`).
+//! Native calls, member reads and constructions stay in expressions
+//! (`K-LIB-002`). Actions remain statements with atom arguments: the front
+//! end nests none (`K-EVAL-008`). An earlier operand is pinned when a later
+//! operand emits statements that could change its value or run before its
+//! raise (`K-EVAL-001`).
 //!
 //! A JavaScript function is a closure of two parameters, `fn(this, args)`.
 //! Source bindings keep their names; a binding that would shadow another in
@@ -1027,7 +1028,7 @@ impl Lowerer<'_> {
     }
 
     /// A call of a kernel function with a native implementation, as an
-    /// expression (`K-STMT-002`).
+    /// expression (`K-LIB-002`).
     pub(crate) fn native(&mut self, function: &str, args: Vec<Expr>) -> Lowering<Expr> {
         Ok(Expr::Call {
             function: self.function(function)?,
@@ -1206,7 +1207,7 @@ impl Lowerer<'_> {
         }
     }
 
-    /// Arguments of actions remain atoms under K-STMT-001.
+    /// Arguments of the actions the front end emits are atoms.
     fn atom(&mut self, operand: Operand) -> Atom {
         match operand.expr {
             Expr::Literal(literal) => Atom::Literal(literal),

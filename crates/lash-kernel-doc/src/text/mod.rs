@@ -32,16 +32,16 @@ pub struct ParseError {
 pub enum ParseErrorReason {
     #[error("found {found}; expected {expected}")]
     Unexpected { found: String, expected: String },
-    /// The statement rule (`K-STMT-001`): this form is the whole right-hand
-    /// side of its own statement and cannot sit inside an expression.
+    /// `join`, `yield` and `cancel` are the whole right-hand side of their
+    /// own statement and cannot sit inside an expression (`K-EVAL-008`).
     #[error(
         "`{}` cannot sit inside an expression: make it the whole right-hand side of its own \
          statement and name its result",
         .form.keyword()
     )]
     StatementForm { form: StatementForm },
-    /// The statement rule: an argument of a statement-position form is a
-    /// variable or a literal.
+    /// An argument of a statement spelling of `join`, `cancel` or `sleep` is
+    /// a variable or a literal.
     #[error(
         "an argument here is a variable or a literal; bind the computation to a variable first"
     )]

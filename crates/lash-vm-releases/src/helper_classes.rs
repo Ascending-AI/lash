@@ -16,8 +16,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    Action, Atom, Block, Callee, Expr, FunctionDefinition, FunctionId, Implementation, Literal,
-    Member, Name, Place, Rhs, Stmt, Type,
+    ActKind, Action, Atom, Block, Callee, Expr, FunctionDefinition, FunctionId, Implementation,
+    Literal, Member, Name, Place, Rhs, Stmt, Type,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -174,7 +174,7 @@ impl Graph {
                         Some(can_hold_closure(&definition.signature.result));
                 }
             }
-            // K-LIB-010: these are native only for the statement rule. Their
+            // K-LIB-010: these are native only for `K-LIB-002`. Their
             // machine access cannot move into a dialect native fast path.
             if matches!(definition.name.as_str(), "deref" | "tasks.unfinished") {
                 graph.units[unit].class = Class::Body;
@@ -285,6 +285,28 @@ impl Graph {
                 let result = self.slot();
                 self.values[result].unknown = true;
                 result
+            }
+            Expr::Act(act) => {
+                let args = act
+                    .args
+                    .iter()
+                    .map(|arg| self.expr(arg, scope, owner))
+                    .collect();
+                match &act.kind {
+                    ActKind::Call(Callee::Library(id)) => self.library_call(*id, args, owner),
+                    ActKind::Call(Callee::Value(name)) => {
+                        self.call(Self::variable(scope, name), args, owner)
+                    }
+                    ActKind::Call(Callee::Declared(_))
+                    | ActKind::Perform { .. }
+                    | ActKind::Sleep
+                    | ActKind::Spawn(_) => {
+                        self.units[owner].class = Class::Body;
+                        let result = self.slot();
+                        self.values[result].unknown = true;
+                        result
+                    }
+                }
             }
         }
     }

@@ -5,15 +5,19 @@
 //! evaluation order with an explicit [`Op::Charge`] at each node's
 //! pre-order position, then the one op that completes the statement or
 //! leaves it where its step ends. The machine's control stack (blocks,
-//! loops, `try` statements and frames) stays the only control state, so a
-//! range starts at a step Boundary and ends at the next, and an action's
-//! continuation, the op right after its [`Op::Act`], is the Boundary a
-//! call returns or a wait resumes to.
+//! loops, `try` statements and frames) stays the only control state. A
+//! statement's action is its first op, so its continuation, the op right
+//! after its [`Op::Act`], is the Boundary a call returns or a wait resumes
+//! to. An action nested in an expression, [`Op::Nested`], is a Boundary
+//! inside its range: the op after it is where a resume entry restarts the
+//! statement.
 //!
 //! Registers hold one statement's temporaries only. Each op names its
 //! source, destination and scratch registers, relative to the register
-//! window the statement runs in; no register is live at a Boundary
-//! (`K-STMT-004`), and registers are not roots.
+//! window the statement runs in. Registers are never saved: at a nested
+//! action the operands still to be used are saved as the continuation's
+//! roles, by the sites that produced them, and a resume entry loads them
+//! back into whatever registers the layout chose (`K-EVAL-008`).
 //!
 //! Kir is a private derivative of the durable document: it is derived
 //! deterministically, never saved, and changing its shape changes no
@@ -51,6 +55,8 @@ index! {
     LibIx;
     /// A kernel block of the executable.
     BlockIx;
+    /// A resume entry of the stream's table of nested actions.
+    ActIx;
 }
 
 impl Reg {
@@ -181,9 +187,8 @@ pub enum Op {
         code: CodeIx,
     },
     /// A library call inside an expression: a native implementation's
-    /// guard, call, retry after a collection, pin and formula, or a
-    /// native-backed body run to its end inside the expression
-    /// (`K-STMT-002`).
+    /// guard, call, retry after a collection, pin and formula (`K-LIB-002`);
+    /// a body runs in a frame instead, through [`Op::Nested`].
     Call {
         lib: LibIx,
         args: RegRange,
@@ -203,12 +208,24 @@ pub enum Op {
     Pin {
         src: Reg,
     },
-    /// The statement's action (`K-STMT-001`): its atoms are read and it
-    /// starts. One that completes at once leaves its value in register 0
-    /// and goes on to the next op; one that waits or enters a frame ends the
-    /// step, and the next op is where the statement resumes, its value in
-    /// register 0.
+    /// The statement's action: its atoms are read and it starts. One that
+    /// completes at once leaves its value in register 0 and goes on to the
+    /// next op; one that waits or enters a frame ends the step, and the
+    /// next op is where the statement resumes, its value in register 0.
     Act,
+    /// An action nested in an expression (`K-EVAL-008`), or a library call
+    /// inside an expression whose function runs its body: its arguments
+    /// are the `args` registers, its resume entry the stream's `act`. One
+    /// that completes at once leaves its value in `args.start` and goes on.
+    /// One that waits or enters a frame saves the operands its statement
+    /// has evaluated as its continuation's roles and ends the step; the
+    /// statement resumes at the op after this one, the entry loading the
+    /// roles back into their registers and the action's value into
+    /// `args.start`.
+    Nested {
+        act: ActIx,
+        args: RegRange,
+    },
     /// Declares a variable with its first value (`K-FORM-004`).
     Bind {
         local: LocalRef,
@@ -343,6 +360,7 @@ pub enum OpKind {
     HostRead,
     Pin,
     Act,
+    Nested,
     Bind,
     BindShared,
     BindSession,
@@ -398,6 +416,7 @@ impl OpKind {
         Self::HostRead,
         Self::Pin,
         Self::Act,
+        Self::Nested,
         Self::Bind,
         Self::BindShared,
         Self::BindSession,
@@ -454,6 +473,7 @@ impl OpKind {
                 | Self::HostRead
                 | Self::Pin
                 | Self::Act
+                | Self::Nested
                 | Self::Jump
                 | Self::JumpIfFalse
                 | Self::LetBind
@@ -476,6 +496,7 @@ pub enum Operand {
     Code(CodeIx),
     Lib(LibIx),
     Block(BlockIx),
+    Nested(ActIx),
 }
 
 impl Op {
@@ -502,6 +523,7 @@ impl Op {
             Self::HostRead { .. } => OpKind::HostRead,
             Self::Pin { .. } => OpKind::Pin,
             Self::Act => OpKind::Act,
+            Self::Nested { .. } => OpKind::Nested,
             Self::Bind { .. } => OpKind::Bind,
             Self::BindShared { .. } => OpKind::BindShared,
             Self::BindSession { .. } => OpKind::BindSession,
@@ -543,7 +565,8 @@ impl Op {
             | Self::MakeSet { items }
             | Self::MakeMap { entries: items }
             | Self::MakeRecord { values: items, .. }
-            | Self::Call { args: items, .. } => items.regs().collect(),
+            | Self::Call { args: items, .. }
+            | Self::Nested { args: items, .. } => items.regs().collect(),
             Self::Pin { src }
             | Self::LetBind { src, .. }
             | Self::LetBindShared { src, .. }
@@ -605,7 +628,8 @@ impl Op {
             | Self::MakeSet { items }
             | Self::MakeMap { entries: items }
             | Self::MakeRecord { values: items, .. }
-            | Self::Call { args: items, .. } => Some(items.start),
+            | Self::Call { args: items, .. }
+            | Self::Nested { args: items, .. } => Some(items.start),
             Self::Act => Some(Reg(0)),
             _ => None,
         }
@@ -635,6 +659,7 @@ impl Op {
             Self::MakeRecord { fields, .. } => vec![O::FieldList(fields)],
             Self::Closure { code, .. } => vec![O::Code(code)],
             Self::Call { lib, .. } => vec![O::Lib(lib)],
+            Self::Nested { act, .. } => vec![O::Nested(act)],
             Self::Branch { then_, else_, .. } => vec![O::Block(then_), O::Block(else_)],
             Self::Try { body } => vec![O::Block(body)],
             _ => Vec::new(),
@@ -645,7 +670,8 @@ impl Op {
             | Self::MakeSet { items }
             | Self::MakeMap { entries: items }
             | Self::MakeRecord { values: items, .. }
-            | Self::Call { args: items, .. } => out.push(O::Regs(items)),
+            | Self::Call { args: items, .. }
+            | Self::Nested { args: items, .. } => out.push(O::Regs(items)),
             _ => {
                 out.extend(self.reads().into_iter().map(O::Reg));
                 out.extend(self.writes().map(O::Reg));

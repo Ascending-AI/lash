@@ -17,6 +17,8 @@ Out of scope, by standing ruling: running a stock runtime behind a sandbox; jour
 
 **Written in on the reviewers' agreement, open to Sam's objection.** Numbers compare by mathematical value; the statement rule is syntactic; no typed-binding form; a task's error is data on its handle; outcomes may be delivered in any order.
 
+**Since withdrawn.** FIG-6402 withdrew the statement rule, and with it "every wait is its own statement": an action may nest in an expression, and a task may pause there (`K-EVAL-008`).
+
 ## 2. The kernel
 
 The kernel is one small language with one meaning. It replaces the ECMAScript-shaped IR.
@@ -63,9 +65,7 @@ Closed and few. A form is added only by a new kernel version.
 
 There is no process form. Starting and awaiting a durable process are effects that lash supplies; the start effect takes a function reference to a declared function of the document. A document lists its entries (the functions a host may start, with typed signatures). The kernel does not know lash's process model.
 
-**The statement rule (syntactic).** A call may sit inside an expression only when its callee is a library function that has a native implementation, which cannot wait by construction (§2.4). Every other call (declared functions, closures, helpers and any library function with only a kernel-code body) and every `perform`, `sleep`, `join`, `yield`, `spawn` and `cancel` is the whole right-hand side of its own statement, with variables or literals as arguments. The rule is checked locally on each statement at admission, for documents, host edits and library bodies alike; nothing is derived about what may wait and no edit elsewhere can invalidate a statement. A task therefore pauses only between statements, and no unnamed intermediate value is live when it does.
-
-**Hoisting.** A front end hoists to satisfy the rule, in the source's evaluation order. Every operand the source evaluates before a statement-position call is bound to a temporary first: `f(a, g(b))` becomes `t1 = a; t2 = g(b); f(t1, t2)`, because another task may change `a` while `g` waits.
+**Nested actions.** A call (of a declared function, a closure or a library function), `perform`, `sleep` and `spawn` may sit inside an expression, with expressions as arguments; `join`, `yield` and `cancel` are statement forms only, and no action is nested in a `while` condition or an assignment's place. A library function called by name inside an expression states a native implementation; one with only a kernel-code body is called with `invoke`. A task pauses only at an action, and a frame stands either between statements or at one nested action in a phase (called, waiting or spawned). The values its statement evaluated before that action and has not consumed are the continuation's *operand roles*, a function of the document alone and named by their sites: a run resumed there loads them into whatever registers its layout chose and continues the statement, evaluating nothing of it twice (`K-EVAL-008`).
 
 **Evaluation order** is left to right, operands before operation, and is part of the kernel version.
 
@@ -100,7 +100,7 @@ A library function is a content-addressed definition with a name, a typed signat
 
 A document references functions by identity and lists them in its manifest; it does not contain their bodies. A host can resolve and read any body. Changing behaviour means a new definition with a new identity. A host adopts a corrected function with one edit that replaces identity A with B across a document.
 
-A function with a kernel-code body is ordinary kernel code: it obeys the statement rule, may call a function argument, and so may wait if its callback does. Nothing about the registry makes a call effect-free. Without a native implementation it is charged as ordinary code too, its forms as they run, so a helper's charge is its work.
+A function with a kernel-code body is ordinary kernel code: it may nest actions (`K-EVAL-008`), may call a function argument, and so may wait if its callback does. Nothing about the registry makes a call effect-free. Without a native implementation it is charged as ordinary code too, its forms as they run, so a helper's charge is its work.
 
 **Admission test for the kernel library.** A function belongs in it only if its meaning fits in a sentence that names no language, two dialects would map to it directly or expansions need it as a building block, and every edge is pinned. Coercing addition, any language's truthiness and operand-returning logical operators fail the test and are helpers.
 
@@ -164,15 +164,15 @@ A parked run is a checkpoint root over the run's persistent heap ([ADR 0145](../
 | `session`, `host` | A session cell's bindings by name, and the names its host projected into `main`, which its carry leaves out |
 | `meters` | Charge, waits issued, the next join number and live tasks, exactly |
 
-An active call (`FrameRecord`) holds semantic coordinates only: the site of its pending statement; its bindings, each by name and declaring site with its value or shared cell; its loops (site, iterations started, and a map or set position as a table cursor); its `finally` blocks under way and how each was entered; the values a loop iterates and a `finally` departs with; and a library call's arguments. Every unbounded record is itself a tree, so a resume reads only the paths it touches.
+An active call (`FrameRecord`) holds semantic coordinates only: the site of its pending statement and, when it stands at a nested action, that action's continuation (its site under the statement's, its phase, and its operand roles, each the site suffix of an operand with its value); its bindings, each by name and declaring site with its value or shared cell; its loops (site, iterations started, and a map or set position as a table cursor); its `finally` blocks under way and how each was entered; the values a loop iterates and a `finally` departs with; and a library call's arguments. Every unbounded record is itself a tree, so a resume reads only the paths it touches.
 
-Not saved: registers and inline library frames, which belong to one slice and are empty at every safe point; compiled code, statement and slot numbers, which are rebuilt caches; the handlers around a statement, derived from its site; loop activation numbers and check counts, which the kernel does not have (`K-EFF-008`); and any trace state of the memory census.
+Not saved: registers, which belong to one step and are empty at every safe point, a continuation's roles being saved by site instead; compiled code, statement and slot numbers, which are rebuilt caches; the handlers around a statement, derived from its site; loop activation numbers and check counts, which the kernel does not have (`K-EFF-008`); and any trace state of the memory census.
 
 A wait persists its identity and kind, never its admitted request's arguments: the embedder hands the admission of every wait in at open. A request issued since the last park is frozen once, so a crash before the park that reports it neither loses nor duplicates it, and an outcome delivered and not yet run with stays committed in the root until the task resumes and its wait is removed in the same edit.
 
 **Law.** Resuming from saved state continues the computation and its effect ownership exactly, without re-executing effects whose outcomes committed; unsaved computation and diagnostics may repeat. The laws are `lash-kernel-state`'s `paged::laws::root` (every record round-trips canonically, and a root fits its 4096-byte bound), `lash-kernel-vm`'s `laws::paged` (a parked frame resumes from its sealed record; an issued request is reported once; a committed outcome survives a seal before semantic resume) and `laws::layout` (every layout and every implementation of a function runs a document the same way).
 
-**Upgrades.** A parked run pins: the kernel version (forms, values, evaluation order, the statement rule, task scheduling, site derivation, the cost table and this schema), its document identity, and every function identity in its manifest, charge formulas and guards included. Most change never touches the kernel version: a library function is fixed or added as a new identity, and a host adopts it by an edit.
+**Upgrades.** A parked run pins: the kernel version (forms, values, evaluation order, where an action may be nested, task scheduling, site derivation, the cost table and this schema), its document identity, and every function identity in its manifest, charge formulas and guards included. Most change never touches the kernel version: a library function is fixed or added as a new identity, and a host adopts it by an edit.
 
 A kernel version may break when a pinned rule is wrong, unsafe or unbounded. A breaking version ships, under lash's existing upgrade policies (ADR 0106):
 1. a document migration, which rewrites a version N document into N+1;
@@ -229,7 +229,7 @@ The kernel is a set of small crates that depend on nothing else in lash, so the 
 | Crate | Owns | Used by |
 | --- | --- | --- |
 | `lash-kernel-doc` | Values, types, forms, the document, function definitions and the native-function interface, the manifest, source maps and correspondences, serialisation, structural validation, the kernel text notation | Everything; a host that only reads documents needs nothing else |
-| `lash-kernel-check` | Linking, the statement rule, derived facts, admission against an environment's effect and function signatures, the checked document holder (document, graph, entry and linked declarations) | Viewers, editors, the engine |
+| `lash-kernel-check` | Linking, typing, derived facts, admission against an environment's effect and function signatures, the checked document holder (document, graph, entry and linked declarations) | Viewers, editors, the engine |
 | `lash-kernel-view` | The canvas read of a checked document's entry and its host schema; no dialect, editor or runtime | Viewers, editors |
 | `lash-kernel-edit` | Drafts, typed edit transactions, authoring operations | Editors |
 | `lash-kernel-lib` | The kernel library: bodies and native implementations | The machine, any second reader |

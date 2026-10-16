@@ -193,13 +193,15 @@ open that two lanes would otherwise settle differently.
   use Tree<BindingRecord>; zero-forbidden classification reads no leaf. The
   100k-separate-bindings no-op law counts O(1) pages. No Vec-based API remains.
 - **D-FRAME.** Persisted frames hold semantic coordinates only: the pending
-  statement's `Site`, bindings by declaring site, loops (a map or set
-  position is a `TableCursor`), `finally` departures and held values. This
-  fits the flat-KIR machine (FIG-6161). Its `Frame { code, slots, control,
-  awaiting, library, inline }` keeps the same control shape. Its registers
-  belong to a slice and are cleared before any park. An inline frame runs to
-  its end inside its expression. So neither registers nor inline frames
-  exist at a checkpoint, and compiled `CodeId`/`StmtId`/slot indexes are
+  statement's `Site` and, for a frame standing at an action nested in it,
+  the pending continuation (the action's site suffix, its phase and its
+  operand roles by site suffix, `K-EVAL-008`), bindings by declaring site,
+  loops (a map or set position is a `TableCursor`), `finally` departures
+  and held values. This fits the flat-KIR machine (FIG-6161). Its registers
+  belong to a step and are cleared at every step's end; a resume entry
+  loads a continuation's roles into whatever registers the layout chose.
+  So no register exists at a checkpoint, a checkpoint may be sealed at any
+  slice return or park, and compiled `CodeId`/`StmtId`/slot indexes are
   rebuilt caches.
 - **D-SEALTIME.** A seal happens at a park, and dirty eviction seals the
   pages it evicts. A `Slice` step does not seal. Pressure refinement never

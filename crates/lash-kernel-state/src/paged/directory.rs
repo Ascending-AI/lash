@@ -8,6 +8,8 @@ use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWr
 use lash_kernel_doc::heap::*;
 use std::sync::Arc;
 
+mod continuation;
+
 #[derive(Clone)]
 pub enum Body {
     List {
@@ -372,6 +374,9 @@ pub fn ordinal_key(ordinal: u64) -> Vec<u8> {
 /// A task's binding/frame trees are the working representation, not an
 /// image rebuilt at park. Only changed paths become editable.
 pub mod execution {
+    pub use super::continuation::{
+        PendingRecord, PhaseRecord, ROLE_CHUNK, ROLE_FLAT, RoleChunk, RoleRecord, RolesRecord,
+    };
     use super::*;
     use lash_kernel_doc::{Name, TaskId};
 
@@ -420,6 +425,9 @@ pub mod execution {
         pub iterated: Tree<IteratedRecord>,
         pub departing: Tree<Value>,
         pub arguments: Option<Tree<Value>>,
+        /// The action nested in its statement the frame stands at, if it
+        /// stands at one (`K-EVAL-008`).
+        pub pending: Option<PendingRecord>,
     }
     #[derive(Clone)]
     pub struct TaskRecord {
@@ -443,6 +451,7 @@ pub mod execution {
                 iterated: Tree::new(true),
                 departing: Tree::new(true),
                 arguments: None,
+                pending: None,
             }
         }
     }
@@ -608,6 +617,11 @@ pub mod execution {
                     (Some(a), Some(b)) => a.same_version(b),
                     _ => false,
                 }
+                && match (&self.pending, &other.pending) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.roles.same_version(&b.roles),
+                    _ => false,
+                }
         }
     }
     impl Cell for FrameRecord {
@@ -623,18 +637,25 @@ pub mod execution {
                     (Some(a), Some(b)) => a.same_version(b),
                     _ => false,
                 }
+                && match (&self.pending, &other.pending) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.same_version(b),
+                    _ => false,
+                }
         }
         fn task_edges(&self) -> u64 {
             self.bindings.task_edges()
                 + self.iterated.task_edges()
                 + self.departing.task_edges()
                 + self.arguments.as_ref().map_or(0, Tree::task_edges)
+                + self.pending.as_ref().map_or(0, PendingRecord::task_edges)
         }
         fn cost(&self) -> u64 {
             64 + self.bindings.cost()
                 + self.iterated.cost()
                 + self.departing.cost()
                 + self.arguments.as_ref().map_or(0, Tree::cost)
+                + self.pending.as_ref().map_or(0, PendingRecord::cost)
         }
         fn prepare(&mut self, access: &Access<'_>, work: &mut SealWork) -> Result<bool, HeapFault> {
             Ok(self.bindings.seal_nested(access, work)?
@@ -644,6 +665,10 @@ pub mod execution {
                 && self.departing.seal_nested(access, work)?
                 && match &mut self.arguments {
                     Some(a) => a.seal_nested(access, work)?,
+                    None => true,
+                }
+                && match &mut self.pending {
+                    Some(p) => p.prepare(access, work)?,
                     None => true,
                 })
         }
@@ -657,6 +682,9 @@ pub mod execution {
             if let Some(a) = &self.arguments {
                 a.children(out);
             }
+            if let Some(p) = &self.pending {
+                p.children(out);
+            }
         }
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
             self.statement.grants(children)?;
@@ -667,6 +695,9 @@ pub mod execution {
             self.departing.grants(children)?;
             if let Some(a) = &mut self.arguments {
                 a.grants(children)?;
+            }
+            if let Some(p) = &mut self.pending {
+                p.grants(children)?;
             }
             Ok(())
         }
@@ -759,7 +790,7 @@ pub mod execution {
     }
     impl TokenCodec for FrameRecord {
         fn encode(&self, out: &mut TokenWriter) {
-            out.seq(7);
+            out.seq(8);
             self.statement.encode(out);
             self.bindings.encode(out);
             self.loops.encode(out);
@@ -767,9 +798,10 @@ pub mod execution {
             self.iterated.encode(out);
             self.departing.encode(out);
             self.arguments.encode(out);
+            self.pending.encode(out);
         }
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-            input.expect_struct(7)?;
+            input.expect_struct(8)?;
             Ok(Self {
                 statement: <SiteRef>::decode(input)?,
                 bindings: <Tree<BindingRecord>>::decode(input)?,
@@ -778,6 +810,7 @@ pub mod execution {
                 iterated: <Tree<IteratedRecord>>::decode(input)?,
                 departing: <Tree<Value>>::decode(input)?,
                 arguments: <Option<Tree<Value>>>::decode(input)?,
+                pending: <Option<PendingRecord>>::decode(input)?,
             })
         }
     }

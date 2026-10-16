@@ -51,7 +51,7 @@ impl Machine for KernelMachine {
         }
         self.observe_phase(GuestPhase::Interpret);
         let result = self.run_slice(host, slice);
-        self.regs.truncate(self.top);
+        self.regs.clear();
         self.observe_phase(if matches!(result, Ok(Step::Parked(_))) {
             GuestPhase::Park
         } else {
@@ -118,25 +118,15 @@ impl Machine for KernelMachine {
             }
             Outcome::Completed(datum) => {
                 let task = pending.task;
-                let (effect, ty) = self
-                    .frame(task)
-                    .map_err(|error| {
-                        DeliverError::Heap(HeapFault::Malformed(format!("{error:?}")))
-                    })?
-                    .awaiting
-                    .and_then(|stmt| match &self.exe.stmt(stmt).form {
-                        crate::compile::Form::Action(action) => match &action.kind {
-                            crate::compile::ActionKind::Perform { effect, result, .. } => {
-                                Some((effect, result))
-                            }
-                            _ => None,
-                        },
-                        _ => None,
-                    })
+                let frame = self.frame(task).map_err(|error| {
+                    DeliverError::Heap(HeapFault::Malformed(format!("{error:?}")))
+                })?;
+                let (effect, ty) = super::actions::waiting(&exe, frame)
+                    .and_then(|(_, perform)| perform)
                     .ok_or_else(|| {
                         DeliverError::Heap(HeapFault::Malformed("outcome has no perform".into()))
                     })?;
-                match decoder.decode(&datum, ty) {
+                match decoder.decode(&datum, &ty) {
                     Ok(datum) => CommittedOutcomeRecord::Completed(
                         self.heap.freeze_datum(&datum).map_err(delivery_error)?,
                     ),
@@ -160,11 +150,6 @@ impl Machine for KernelMachine {
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedRoot>, SealError> {
         if self.ended {
             return Err(SealError::Ended);
-        }
-        // No record holds a statement standing in a call made inside an
-        // expression: the run is at a safe point once none does.
-        if self.called > 0 {
-            return Err(SealError::NotSafePoint);
         }
         self.publish_roots().map_err(|error| SealError::Fault {
             problem: format!("{error:?}"),
@@ -447,9 +432,7 @@ impl KernelMachine {
             charged: root.meters.charged,
             live_tasks: root.meters.live_tasks,
             census_refinements,
-            called: 0,
             regs: Vec::new(),
-            top: 0,
             storage: Storage::default(),
             steps: Default::default(),
             end: None,

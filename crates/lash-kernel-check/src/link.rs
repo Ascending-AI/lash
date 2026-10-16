@@ -7,12 +7,13 @@
 //! structural validation has accepted, which bounds its depth.
 
 use lash_kernel_doc::{
-    Action, Atom, Block, Callee, Expr, Member, Name, Place, Rhs, Signature, Site, Stmt, Type, Unit,
+    ActKind, Action, Atom, Block, Callee, Expr, Member, Name, Place, Rhs, Signature, Site, Stmt,
+    Type, Unit,
 };
 
 use crate::graph::{
-    ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode, EffectSet,
-    ExprNode, Graph, GraphNode, MapEntryNode, MemberNode, NodeId, NodeKind, PlaceNode,
+    ActNode, ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode,
+    EffectSet, ExprNode, Graph, GraphNode, MapEntryNode, MemberNode, NodeId, NodeKind, PlaceNode,
     RecordEntryNode, Reference, Scope, ScopeId, StmtNode, UnitView,
 };
 use crate::refusal::{RefusalReason, Refused, refused};
@@ -393,12 +394,16 @@ impl Linker {
         node: NodeId,
     ) -> (CalleeNode, Vec<AtomNode>) {
         // The callee is read before the arguments (`K-EVAL-004`).
-        let callee = match callee {
+        let callee = self.callee(callee, scope, site, node);
+        (callee, self.atoms(args, scope, site, node))
+    }
+
+    fn callee(&mut self, callee: &Callee, scope: ScopeId, site: &Site, node: NodeId) -> CalleeNode {
+        match callee {
             Callee::Declared(name) => CalleeNode::Declared(name.clone()),
             Callee::Value(name) => CalleeNode::Value(self.resolve(name, scope, site, node)),
             Callee::Library(function) => CalleeNode::Library(*function),
-        };
-        (callee, self.atoms(args, scope, site, node))
+        }
     }
 
     fn exprs<'e>(
@@ -505,6 +510,22 @@ impl Linker {
                 handle: self.expr(&read.handle, slots.take(), id, scope),
                 request: self.expr(&read.request, slots.take(), id, scope),
             },
+            Expr::Act(act) => {
+                // The callee is read before the arguments (`K-EVAL-004`).
+                let kind = match &act.kind {
+                    ActKind::Call(callee) => ActNode::Call(self.callee(callee, scope, &site, id)),
+                    ActKind::Spawn(callee) => ActNode::Spawn(self.callee(callee, scope, &site, id)),
+                    ActKind::Perform { effect, result } => ActNode::Perform {
+                        effect: effect.clone(),
+                        result: result.clone(),
+                    },
+                    ActKind::Sleep => ActNode::Sleep,
+                };
+                ExprNode::Act {
+                    kind,
+                    args: self.exprs(act.args.iter(), &mut slots, id, scope),
+                }
+            }
         };
         self.set(id, NodeKind::Expr(node))
     }

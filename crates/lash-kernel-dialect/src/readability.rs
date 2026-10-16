@@ -344,6 +344,7 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
             k::Expr::Read(_) => "Read",
             k::Expr::If { .. } => "IfExpression",
             k::Expr::Let { .. } => "LetExpression",
+            k::Expr::Act(_) => "NestedAction",
         },
     }
 }

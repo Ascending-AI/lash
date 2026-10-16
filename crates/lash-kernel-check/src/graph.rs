@@ -376,6 +376,20 @@ pub enum ExprNode {
         handle: NodeId,
         request: NodeId,
     },
+    /// An action nested in the expression (`K-EVAL-008`).
+    Act {
+        kind: ActNode,
+        args: Vec<NodeId>,
+    },
+}
+
+/// What a nested action does: its statement form's kind, without atoms.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ActNode {
+    Call(CalleeNode),
+    Perform { effect: EffectName, result: Type },
+    Sleep,
+    Spawn(CalleeNode),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -459,6 +473,7 @@ impl GraphNode {
                 ExprNode::If { cond, then, r#else } => out.extend([*cond, *then, *r#else]),
                 ExprNode::Let { value, body, .. } => out.extend([*value, *body]),
                 ExprNode::Read { handle, request } => out.extend([*handle, *request]),
+                ExprNode::Act { args, .. } => out.extend(args),
             },
         }
         out
@@ -591,9 +606,12 @@ pub struct ExecutionSite {
     pub node: NodeId,
     /// The action's site: what an effect's or a spawn's identity carries.
     pub site: Site,
-    /// The site of the statement the action is the right-hand side of: where
-    /// its task stands while it waits.
+    /// The site of the statement the action is part of: where its task
+    /// stands while it waits.
     pub statement: Site,
+    /// The innermost action the action is nested in, as an argument of it,
+    /// if any: in `call f(perform g() as Any)`, the call.
+    pub within: Option<Site>,
     pub kind: SiteKind,
     /// The loops that enclose the action inside its own function body,
     /// outermost first. A closure body is a function body.

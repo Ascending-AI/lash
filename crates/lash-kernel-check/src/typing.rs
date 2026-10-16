@@ -14,8 +14,8 @@ use lash_kernel_doc::{
 };
 
 use crate::graph::{
-    ActionNode, AtomNode, CalleeNode, ExprNode, Graph, MemberNode, NodeId, NodeKind, PlaceNode,
-    Reference, StmtNode,
+    ActNode, ActionNode, AtomNode, CalleeNode, ExprNode, Graph, MemberNode, NodeId, NodeKind,
+    PlaceNode, Reference, StmtNode,
 };
 use crate::refusal::{RefusalReason, Refused, refused};
 use crate::types::{common, disjoint, function_of, stable, union};
@@ -139,7 +139,7 @@ impl Typer<'_> {
     /// Types an expression or an action, records its facet and returns it.
     fn value(&mut self, id: NodeId) -> Type {
         let facet = match self.graph.node(id).kind.clone() {
-            NodeKind::Expr(expr) => self.expr(expr),
+            NodeKind::Expr(expr) => self.expr(id, expr),
             NodeKind::Action(action) => self.action(id, &action),
             NodeKind::Block(_) | NodeKind::Stmt(_) => return Type::Any,
         };
@@ -182,7 +182,7 @@ impl Typer<'_> {
         ids.iter().map(|id| self.value(*id)).collect()
     }
 
-    fn expr(&mut self, expr: ExprNode) -> Type {
+    fn expr(&mut self, id: NodeId, expr: ExprNode) -> Type {
         match expr {
             ExprNode::Literal(literal) => self.literal(&literal),
             ExprNode::Variable(reference) => self.reference(&reference),
@@ -262,7 +262,58 @@ impl Typer<'_> {
                 self.value(request);
                 Type::Any
             }
+            ExprNode::Act { kind, args } => {
+                let found = self.values(&args);
+                match kind {
+                    ActNode::Call(callee) => self.nested_call(&callee, &args, &found),
+                    ActNode::Spawn(callee) => {
+                        Type::Task(Box::new(stable(&self.nested_call(&callee, &args, &found))))
+                    }
+                    ActNode::Perform { effect, result } => {
+                        if let Some(signature) =
+                            self.effects.and_then(|effects| effects.get(&effect))
+                        {
+                            let signature = signature.clone();
+                            for (index, found) in found.iter().enumerate() {
+                                let site = self.graph.node(args[index]).site.clone();
+                                self.argument(effect.as_str(), &signature, index, found, &site);
+                            }
+                            if disjoint(&result, &signature.result) {
+                                let site = self.graph.node(id).site.clone();
+                                self.errors.push(refused(
+                                    Some(&site),
+                                    RefusalReason::PerformResult {
+                                        effect: effect.clone(),
+                                        declared: signature.result,
+                                        stated: result.clone(),
+                                    },
+                                ));
+                            }
+                        }
+                        result
+                    }
+                    ActNode::Sleep => Type::Any,
+                }
+            }
         }
+    }
+
+    /// What a nested call of `callee` yields, after checking a library
+    /// callee's arguments, of types `found`.
+    fn nested_call(&mut self, callee: &CalleeNode, args: &[NodeId], found: &[Type]) -> Type {
+        let CalleeNode::Library(function) = callee else {
+            return Type::Any;
+        };
+        let Some(definition) = self.catalog.definition(function) else {
+            return Type::Any;
+        };
+        let signature = definition.signature.clone();
+        let name = definition.name.to_string();
+        for (index, found) in found.iter().enumerate() {
+            let site = self.graph.node(args[index]).site.clone();
+            self.argument(&name, &signature, index, found, &site);
+        }
+        signature.result
     }
 
     /// Refuses an argument that can never be of its parameter's type. An

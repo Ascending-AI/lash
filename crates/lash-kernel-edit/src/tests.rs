@@ -310,7 +310,8 @@ fn run(document: &Document, answer: &Datum) -> Ran {
 }
 
 /// A document in the shape a front end emits: every operand of a
-/// statement-position form is hoisted to a temporary first (`K-STMT-005`).
+/// statement-position form is hoisted to a temporary first, in evaluation
+/// order (`K-EVAL-001`).
 const LOWERED: &str = r#"kernel 1
 numbers float
 effect fetch(url: Text) -> Any

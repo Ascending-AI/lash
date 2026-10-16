@@ -435,13 +435,12 @@ fn counted_run(
         if let Step::Ended(end) = step {
             return (end, total);
         }
-        if rebuild
-            && embedder.reopen_if_safe(
-                Layout((hops + 1).wrapping_mul(0x9e37_79b9) | 1),
-                (hops + 1).is_multiple_of(2),
-            )
-        {
+        if rebuild {
             hops += 1;
+            embedder.reopen(
+                Layout(hops.wrapping_mul(0x9e37_79b9) | 1),
+                hops.is_multiple_of(2),
+            );
             assert!(
                 embedder.machine.take_ran().is_empty(),
                 "a resumed segment starts at zero"

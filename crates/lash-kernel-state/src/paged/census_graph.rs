@@ -76,6 +76,9 @@ impl CensusGraph for PagedHeap {
                 if let Some(args) = &frame.arguments {
                     visit_tree(args, &self.access, visit)?;
                 }
+                if let Some(pending) = &frame.pending {
+                    pending.visit_values(&self.access, visit)?;
+                }
                 Ok(())
             })
         })

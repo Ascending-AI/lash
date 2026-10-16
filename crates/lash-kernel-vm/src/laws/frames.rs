@@ -10,7 +10,7 @@ use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, parse_definition};
 
 use super::embedder::{Embedder, ROOMY, Setup, int, result, text};
 use crate::machine::Boundary;
-use crate::{Bound, BoundExceeded, Bounds, End, Layout, RunError, SealError, Step};
+use crate::{Bound, BoundExceeded, Bounds, End, Layout, RunError, Step};
 
 /// The probes: `probe.long(tag)` prints `[tag, i]` for `i` from 0 to 3 and
 /// gives `tag`; `probe.hold(n)` keeps `n` texts of 1 MiB, printing the
@@ -296,32 +296,23 @@ fn entering_and_slicing_an_expression_callee_changes_no_ready_order() {
     assert_eq!((&nested.0, &nested.1), (&hoisted.0, &hoisted.1));
 }
 
-/// `K-MACH-007`, `K-MACH-008`: a seal asked for while a task stands in a
-/// call made inside an expression is refused as no safe point, changing
-/// nothing; the run goes on to its next safe point, is sealed there and
-/// opened cold under another layout, and ends as the run never sealed.
+/// `K-MACH-007`, `K-EVAL-008`: a run is at a safe point at every slice,
+/// one inside a callee called inside an expression included: sealed there
+/// and opened cold under alternating layouts at every slice, it ends as
+/// the run never sealed.
 #[test]
-fn a_seal_inside_an_expression_callee_waits_for_the_next_safe_point() {
+fn a_seal_inside_an_expression_callee_is_exact() {
     let program = scheduled("let v = [probe.long(\"a\"), probe.long(\"b\")]");
     let (whole, _) = observe(&program, u64::MAX, |_| {});
     let mut embedder = Embedder::with(&program, setup(ROOMY, 0));
-    let (mut refused, mut sealed, mut deferred) = (0, 0, false);
+    let mut sealed = 0;
     let mut layouts = [Layout(1), Layout::default()].into_iter().cycle();
     let end = loop {
         let step = embedder.run();
         if !matches!(step, Step::Ended(_)) {
-            match embedder.try_checkpoint() {
-                Ok((root, certificate)) => {
-                    sealed += 1;
-                    deferred = false;
-                    embedder.open_at(&root, certificate, layouts.next().unwrap(), true);
-                }
-                Err(SealError::NotSafePoint) => {
-                    refused += 1;
-                    deferred = true;
-                }
-                Err(other) => panic!("the seal failed: {other}"),
-            }
+            let (root, certificate) = embedder.checkpoint();
+            sealed += 1;
+            embedder.open_at(&root, certificate, layouts.next().unwrap(), true);
         }
         match step {
             Step::Ended(end) => break end,
@@ -329,13 +320,7 @@ fn a_seal_inside_an_expression_callee_waits_for_the_next_safe_point() {
             Step::Parked(_) => embedder.deliver_next(),
         }
     };
-    // Each callee step refused; every refused seal landed at the next
-    // safe point, before the run ended.
-    assert!(
-        refused >= 6 && sealed >= 4,
-        "{refused} refused, {sealed} sealed"
-    );
-    assert!(!deferred, "a refused seal never landed");
+    assert!(sealed >= 10, "{sealed} sealed");
     let (charged, asked) = (
         crate::Machine::meters(&embedder.machine).charged,
         embedder.asked(),

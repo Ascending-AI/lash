@@ -89,7 +89,7 @@ waits withdrawn since, and, when the park requested something, the
 candidate checkpoint it sealed), `Slice` (still ready) or `Ended`. `Deliver`
 hands the machine one committed outcome for the wait it named, in any order;
 `Delivered` says it was taken or dropped. `Seal` seals the run as it stands
-at a safe point, where every task is between statements, into a candidate
+at a safe point, which every slice return and park is (`K-MACH-007`), into a candidate
 (`Sealed`). Host reads (clock, random, projection reads) cross to the parent
 in the middle of a slice as `HostRead` and are answered by `HostAnswer`;
 the heap's page reads and seals cross the same way as `Pages`

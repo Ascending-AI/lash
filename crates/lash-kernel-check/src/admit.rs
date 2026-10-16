@@ -188,8 +188,9 @@ fn check(
     catalog: &dyn FunctionCatalog,
     errors: &mut Vec<Refused>,
 ) -> Option<Graph> {
-    // The statement rule reads the definitions of the functions a statement
-    // names, so a missing definition is named before anything else is read.
+    // Validation reads the definitions of the functions a statement calls
+    // (`K-LIB-002`), so a missing definition is named before anything else
+    // is read.
     let (effects, reached) = manifest::reach(document, catalog);
     let missing = manifest::missing_functions(document, catalog, &reached);
     if !missing.is_empty() {
@@ -200,8 +201,8 @@ fn check(
         errors.push(invalid.into());
         return None;
     }
-    // The statement rule and the scope rule hold of every body the document
-    // reaches, as they do of the document (`K-STMT-003`).
+    // Structural validation and the scope rule hold of every body the
+    // document reaches, as they do of the document (`K-ADM-008`).
     for function in reached.keys() {
         if let Some(definition) = catalog.definition(function) {
             let checked = library(definition, catalog, catalog.registered(function));

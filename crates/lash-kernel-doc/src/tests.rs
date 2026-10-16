@@ -127,6 +127,9 @@ main {{
   let twice = invoke helper.twice(first)
   let again = call worker(&worker)
   let applied = apply g(null, absent, true, -1, 2.5, "t", b"")
+  let nested = [call worker([1][0]), apply g(1), invoke helper.twice(first), perform fetch("y") as Any, sleep(1), spawn call worker("z")]
+  set nested[0] = (sleep 5, spawn apply g(first))
+  let direct = call worker([1][0])
   do perform fetch("x") as Union(Null, Number, Tuple(Bool, Bytes), Map(Text, Set(Timestamp)), Enum("a", "b"), Task(Error), Handle("db"), Fn(a: Int, b?: Float) -> Absent, Record{{}}, Record{{..Text}})
   return null
 }}
@@ -202,6 +205,10 @@ fn kernel_text_round_trips_documents_that_use_every_form() {
         "callee:declared",
         "callee:library",
         "callee:value",
+        "expr:act:call",
+        "expr:act:perform",
+        "expr:act:sleep",
+        "expr:act:spawn",
         "expr:call",
         "expr:clock",
         "expr:closure",
@@ -331,6 +338,12 @@ fn collect_forms(node: Node<'_>, forms: &mut std::collections::BTreeSet<&'static
                 Expr::If { .. } => "expr:if",
                 Expr::Let { .. } => "expr:let",
                 Expr::Read(_) => "expr:read",
+                Expr::Act(act) => match &act.kind {
+                    crate::ActKind::Call(_) => "expr:act:call",
+                    crate::ActKind::Perform { .. } => "expr:act:perform",
+                    crate::ActKind::Sleep => "expr:act:sleep",
+                    crate::ActKind::Spawn(_) => "expr:act:spawn",
+                },
             });
         }
     }
@@ -392,11 +405,12 @@ fn main_of(statements: &str) -> String {
     format!("{header}fn declared(x) {{ return x }}\nmain {{\n{statements}\n}}\n")
 }
 
-/// `K-STMT-002`: a call inside an expression is admitted when its callee
-/// has a native implementation, and refused, naming the node, when it has
-/// only a kernel-code body.
+/// `K-LIB-002`: a library function called by name inside an expression
+/// states a native implementation; one with only a kernel-code body is
+/// refused there, naming the call, and is called inside an expression with
+/// `invoke`, a nested action (`K-EVAL-008`).
 #[test]
-fn statement_rule_admits_a_nested_native_call_and_refuses_a_nested_body_only_call() {
+fn a_body_only_library_function_is_invoked_inside_an_expression() {
     let (catalog, _) = catalog();
     let admitted = parse_document(&main_of("let y = num.neg(num.neg(1))")).unwrap();
     assert_eq!(validate_document(&admitted, &catalog), Ok(()));
@@ -415,51 +429,29 @@ fn statement_rule_admits_a_nested_native_call_and_refuses_a_nested_body_only_cal
         refused.node(&site),
         Some(Node::Expr(Expr::Call { .. }))
     ));
-    // The same call as its own statement is admitted.
-    let hoisted = parse_document(&main_of(
-        "let x = 1\nlet t = invoke helper.twice(x)\nlet y = num.neg(t)",
+    let invoked = parse_document(&main_of(
+        "let x = 1\nlet y = num.neg(invoke helper.twice(x))",
     ))
     .unwrap();
-    assert_eq!(validate_document(&hoisted, &catalog), Ok(()));
+    assert_eq!(validate_document(&invoked, &catalog), Ok(()));
 }
 
-/// `K-STMT-001`: `perform`, `spawn` and every other statement form have no
-/// place inside an expression. Kernel text refuses each with a typed error
-/// at the form; the tree has no node that could hold one.
+/// `K-FORM-001`: `join`, `yield` and `cancel` are statement forms only.
+/// Kernel text refuses each inside an expression with a typed error at the
+/// form; the tree has no node that could hold one.
 #[test]
-fn statement_rule_refuses_statement_forms_nested_in_an_expression() {
+fn join_yield_and_cancel_are_refused_inside_an_expression() {
     let cases = [
-        (
-            "let y = num.neg(perform fetch(\"u\") as Any)",
-            StatementForm::Perform,
-            (8, 17),
-        ),
-        (
-            "let y = [spawn call declared(1)]",
-            StatementForm::Spawn,
-            (8, 10),
-        ),
-        (
-            "let y = num.neg(call declared(1))",
-            StatementForm::Call,
-            (8, 17),
-        ),
         (
             "let h = 1\nlet y = {v: join h}",
             StatementForm::Join,
             (9, 13),
         ),
-        ("let y = (sleep 1,)", StatementForm::Sleep, (8, 10)),
         ("let y = map{1: yield}", StatementForm::Yield, (8, 16)),
         (
             "let h = 1\nlet y = set{cancel h}",
             StatementForm::Cancel,
             (9, 13),
-        ),
-        (
-            "let y = call declared(spawn call declared(1))",
-            StatementForm::Spawn,
-            (8, 23),
         ),
     ];
     for (statements, form, (line, column)) in cases {
@@ -470,12 +462,6 @@ fn statement_rule_refuses_statement_forms_nested_in_an_expression() {
             "{statements}: {error}"
         );
     }
-    // An argument of a statement form is a variable or a literal.
-    let error = parse_document(&main_of("let y = call declared(num.neg(1))")).unwrap_err();
-    assert_eq!(error.reason, ParseErrorReason::ArgumentNotAtom);
-    // The JSON encoding has no spelling for a nested wait either.
-    let nested = r#"{"manifest":{"kernel":1,"numbers":"float"},"main":[{"let":{"name":"y","value":{"expr":{"list":[{"spawn":{"callee":{"declared":"f"},"args":[]}}]}}}}]}"#;
-    assert!(Document::from_json(nested).is_err());
 }
 
 /// `K-ID-001`: the identity is over behaviour alone, and over all of it.

@@ -45,6 +45,11 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///         path = "crates/lash-kernel-state/src/paged/directory.rs",
 ///         Body, ObjectHead, Entry, Ordinal, IteratedRecord, FrameRecord, TaskRecord, encode, decode,
 ///     ),
+///     items(
+///         path = "crates/lash-kernel-state/src/paged/directory/continuation.rs",
+///         ROLE_FLAT, ROLE_CHUNK, PendingRecord, RolesRecord, PhaseRecord, RoleRecord, RoleChunk,
+///         decode_cell, encode_roles, encode, decode,
+///     ),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree.rs", Summary, Link, Branch, Node, Key, load_shared, seal, encode, decode),
 ///     items(path = "crates/lash-kernel-state/src/paged/tree/inline.rs", inline_node, seal_nested, encode, decode),
 ///     items(path = "crates/lash-kernel-state/src/paged/payload.rs", Part, build, read, encode, decode),

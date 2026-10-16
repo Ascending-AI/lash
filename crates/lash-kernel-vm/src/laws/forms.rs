@@ -419,7 +419,7 @@ fn forms_do_what_their_rules_say() {
             tuple([text("boom"), text("bang"), text("bang")]),
         ),
         (
-            "K-STMT-002, K-LIB-002: a call inside an expression runs the function to its end",
+            "K-LIB-002: a call inside an expression runs the function to its end",
             "return [pair.twice(pair.twice(1)), text.concat(\"a\", \"b\")]",
             list([int(4), text("ab")]),
         ),

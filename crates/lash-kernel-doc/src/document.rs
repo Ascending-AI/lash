@@ -13,7 +13,7 @@ use crate::number::NumberPolicy;
 use crate::types::Signature;
 
 /// The kernel version this crate's forms, values, evaluation order,
-/// statement rule, task scheduling, site derivation and canonical form are
+/// nested-action positions, task scheduling, site derivation and canonical form are
 /// written for (`K-VER-001`): the number of [`crate::KernelVersion::One`],
 /// and what a front end and a library definition state. A build may
 /// interpret a second version beside it (`K-VER-003`).

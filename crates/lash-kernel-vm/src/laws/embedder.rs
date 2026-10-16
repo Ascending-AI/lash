@@ -388,7 +388,7 @@ pub(crate) struct Embedder {
     pub(crate) source: Source,
 }
 
-fn wait_of(request: &Request) -> WaitId {
+pub(crate) fn wait_of(request: &Request) -> WaitId {
     match request {
         Request::Effect(effect) => effect.wait,
         Request::Sleep(sleep) => sleep.wait,
@@ -408,7 +408,7 @@ pub(crate) fn label(request: &Request) -> String {
 }
 
 /// The table effects are answered from.
-fn answer(request: &Request) -> Outcome {
+pub(crate) fn answer(request: &Request) -> Outcome {
     let Request::Effect(effect) = request else {
         return Outcome::Elapsed;
     };
@@ -434,6 +434,12 @@ impl Embedder {
     }
 
     pub(crate) fn with(text: &str, setup: Setup) -> Self {
+        Self::try_with(text, setup).unwrap_or_else(|error| panic!("{error}\n{text}"))
+    }
+
+    /// [`Self::with`], or why the machine refused to start: a bound it
+    /// cannot start under.
+    pub(crate) fn try_with(text: &str, setup: Setup) -> Result<Self, crate::StartError> {
         let library = library_with(setup.native_twice, setup.probes);
         let text = format!("numbers {}\n{}{text}", setup.numbers, library.header);
         let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
@@ -451,9 +457,8 @@ impl Embedder {
             setup.layout,
             Box::new(source.clone()),
             census(setup.bounds.memory),
-        )
-        .unwrap_or_else(|error| panic!("{error}\n{text}"));
-        Self {
+        )?;
+        Ok(Self {
             machine,
             world: World::default(),
             library,
@@ -465,7 +470,7 @@ impl Embedder {
             bounds: setup.bounds,
             probes: setup.probes,
             source,
-        }
+        })
     }
 
     /// The run's document with a registry built afresh, in which
@@ -519,18 +524,30 @@ impl Embedder {
         root
     }
 
-    /// [`Self::reopen`] where the run is at a safe point; `false`, with
-    /// nothing changed, where a task stands in a call made inside an
-    /// expression (`K-MACH-007`).
-    pub(crate) fn reopen_if_safe(&mut self, layout: Layout, native_twice: bool) -> bool {
-        match self.try_checkpoint() {
-            Ok((root, certificate)) => {
-                self.open_at(&root, certificate, layout, native_twice);
-                true
-            }
-            Err(crate::SealError::NotSafePoint) => false,
-            Err(other) => panic!("the seal failed: {other}"),
-        }
+    /// [`Self::reopen`], or why the seal or the open refused: a bound a
+    /// law runs under can refuse at either.
+    pub(crate) fn try_reopen(&mut self, layout: Layout, native_twice: bool) -> Result<(), String> {
+        let (root, certificate) = self
+            .try_checkpoint()
+            .map_err(|error| format!("{error:?}"))?;
+        let (program, library) = self.program(native_twice);
+        let census = lash_kernel_state::paged::census_impl::Census::restore(
+            certificate,
+            LogicalBytes(self.bounds.memory),
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        self.machine = KernelMachine::open_with_layout(
+            program,
+            self.bounds,
+            &root,
+            Vec::new(),
+            Box::new(self.source.clone()),
+            Box::new(census),
+            layout,
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        self.library = library;
+        Ok(())
     }
 
     /// Seals the run whole, as a node commits it, leaving it running: the

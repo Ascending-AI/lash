@@ -714,7 +714,7 @@ fn primitive_method_regions_match_guarded_utf16_and_bound_semantics() {
     println!("primitive method region differential pairs={pairs}");
 }
 
-/// K-STMT-005, K-DIALECT-001: replacement invalidates field proof, while
+/// K-EVAL-001, K-DIALECT-001: replacement invalidates field proof, while
 /// passing the old primitive value keeps its representation. Unknown/borrowed
 /// methods, callbacks, spreads and coercion retain their original order.
 #[test]

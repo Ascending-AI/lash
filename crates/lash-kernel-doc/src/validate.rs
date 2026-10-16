@@ -9,7 +9,8 @@
 use std::collections::BTreeSet;
 
 use crate::ast::{
-    Action, Atom, Block, Callee, Closure, Expr, Literal, Member, Node, Place, Rhs, Site, Stmt, Unit,
+    ActExpr, ActKind, Action, Atom, Block, Callee, Closure, Expr, Literal, Member, Node, Place,
+    Rhs, Site, Stmt, Unit,
 };
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
@@ -34,7 +35,9 @@ fn at(site: &Option<Site>) -> String {
         .unwrap_or_default()
 }
 
-/// A form in a place the statement rule keeps it out of (`K-STMT-001`).
+/// An action form, as a refusal names it: one with no expression spelling
+/// (`join`, `yield`, `cancel`) nested in an expression, or one the body of
+/// a function with a native implementation may not run (`K-LIB-004`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StatementForm {
     Call,
@@ -75,12 +78,10 @@ pub enum InvalidReason {
     DuplicateField { field: String },
     #[error("`{keyword}` is used outside a loop")]
     LoopControlOutsideLoop { keyword: &'static str },
-    /// The statement rule: a call inside an expression names a library
-    /// function with no native implementation, which may wait.
-    #[error(
-        "`{name}` has no native implementation, so a call to it must be the whole right-hand \
-         side of its own statement"
-    )]
+    /// A library call written as an expression's own call names a
+    /// function with no native implementation: a call of it is an
+    /// action, `invoke`.
+    #[error("`{name}` has no native implementation, so a call to it is an `invoke` action")]
     CallNotNative {
         function: FunctionId,
         name: FunctionName,
@@ -98,7 +99,7 @@ pub enum InvalidReason {
     #[error("library function {function} is called but not listed in the manifest")]
     FunctionNotListed { function: FunctionId },
     #[error(
-        "library function {function} has no definition here, so the statement rule cannot be checked"
+        "library function {function} has no definition here, so a call of it cannot be checked"
     )]
     FunctionNotResolved { function: FunctionId },
     #[error("`{name}` takes at most {accepted} argument(s) and at least {required}; {given} given")]
@@ -158,6 +159,17 @@ pub enum InvalidReason {
     /// cannot wait.
     #[error("the body stands beside a native implementation, so it cannot `{}`", .form.keyword())]
     NativeBodyMayWait { form: StatementForm },
+    /// An action nested where no frame can stand at it: a `while`
+    /// condition, or an assignment's place.
+    #[error("an action cannot be nested in {position}")]
+    NestedActionPosition { position: &'static str },
+    /// A right-hand side that is one action with variable and literal
+    /// arguments is the statement's action, not an expression: the one
+    /// spelling kernel text reads back.
+    #[error(
+        "an action that is the whole right-hand side with atom arguments is the statement's action"
+    )]
+    ActionAsExpression,
 }
 
 fn invalid(site: Option<&Site>, reason: InvalidReason) -> Invalid {
@@ -189,8 +201,8 @@ fn check_written_for(
     }
 }
 
-/// Validates a document's structure, checking the statement rule against
-/// the definitions in `catalog`.
+/// Validates a document's structure, checking its calls by name and its
+/// nested actions against the definitions in `catalog`.
 pub fn validate_document(
     document: &Document,
     catalog: &dyn FunctionCatalog,
@@ -259,7 +271,7 @@ pub fn validate_document_with_limits(
 }
 
 /// Validates a library-function definition's structure, checking its body's
-/// statement rule against the definitions in `catalog`.
+/// calls by name and nested actions against the definitions in `catalog`.
 pub fn validate_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
@@ -345,7 +357,7 @@ pub(crate) fn validate_identified_definition(
     Ok(Some(function))
 }
 
-/// A call inside an expression that the statement rule refuses.
+/// A call by name inside an expression that `K-LIB-002` refuses.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{reason} (at child path {path:?} of the statement)")]
 pub struct StatementRuleViolation {
@@ -355,9 +367,9 @@ pub struct StatementRuleViolation {
     pub reason: Box<InvalidReason>,
 }
 
-/// Checks the statement rule on one statement, and on it alone
-/// (`K-STMT-003`): every call inside one of its expressions names a library
-/// function that `catalog` defines with a native implementation.
+/// Checks one statement, and it alone, for `K-LIB-002`: every call by name
+/// inside one of its expressions names a library function that `catalog`
+/// defines with a native implementation.
 ///
 /// The check stops at a nested block. The statements of an `if` arm, a loop
 /// body or a closure body are statements of their own.
@@ -442,7 +454,22 @@ impl Scope<'_> {
             Stmt::Assign { place, value } => {
                 match place {
                     Place::Variable(name) => check_name(name, Some(site))?,
-                    Place::Member(member) => self.check_member(member, &mut child)?,
+                    Place::Member(member) => {
+                        let mut first = 0;
+                        let mut place = |expr: &Expr| {
+                            let at = site.child(first);
+                            first += 1;
+                            nested_action(expr, &at, "an assignment's place")
+                        };
+                        match member {
+                            Member::Field { target, .. } => place(target)?,
+                            Member::Index { target, index } => {
+                                place(target)?;
+                                place(index)?;
+                            }
+                        }
+                        self.check_member(member, &mut child)?
+                    }
                 }
                 self.check_rhs(value, &child())
             }
@@ -467,7 +494,9 @@ impl Scope<'_> {
                 self.check_block(body, &child(), true)
             }
             Stmt::While { condition, body } => {
-                self.check_expr(condition, &child())?;
+                let at = child();
+                nested_action(condition, &at, "a `while` condition")?;
+                self.check_expr(condition, &at)?;
                 self.check_block(body, &child(), true)
             }
             Stmt::Break => loop_control(in_loop, "break", site),
@@ -493,6 +522,9 @@ impl Scope<'_> {
 
     fn check_rhs(&self, rhs: &Rhs, site: &Site) -> Result<(), Invalid> {
         match rhs {
+            Rhs::Expr(Expr::Act(act)) if act.as_action().is_some() => {
+                Err(invalid(Some(site), InvalidReason::ActionAsExpression))
+            }
             Rhs::Expr(expr) => self.check_expr(expr, site),
             Rhs::Action(action) => self.check_action(action, site),
         }
@@ -510,6 +542,67 @@ impl Scope<'_> {
                 self.check_expr(index, &child())
             }
         }
+    }
+
+    /// An action nested in an expression, checked as its statement form
+    /// is (`K-EVAL-008`), its arguments as expressions.
+    fn check_act(&self, act: &ActExpr, site: &Site) -> Result<(), Invalid> {
+        let form = match &act.kind {
+            ActKind::Call(_) => StatementForm::Call,
+            ActKind::Perform { .. } => StatementForm::Perform,
+            ActKind::Sleep => StatementForm::Sleep,
+            ActKind::Spawn(_) => StatementForm::Spawn,
+        };
+        let native_callee = matches!(
+            &act.kind,
+            ActKind::Call(Callee::Library(function))
+                if self.catalog.definition(function).is_some_and(FunctionDefinition::has_native)
+        );
+        if self.native_body && !native_callee {
+            return Err(invalid(
+                Some(site),
+                InvalidReason::NativeBodyMayWait { form },
+            ));
+        }
+        match &act.kind {
+            ActKind::Call(callee) | ActKind::Spawn(callee) => {
+                self.check_callee(callee, act.args.len(), site)?
+            }
+            ActKind::Perform { effect, result } => {
+                let Some(document) = self.document else {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::PerformInLibrary {
+                            effect: effect.clone(),
+                        },
+                    ));
+                };
+                let Some(signature) = document.manifest.effects.get(effect) else {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::EffectNotListed {
+                            effect: effect.clone(),
+                        },
+                    ));
+                };
+                check_arity(effect.as_str(), act.args.len(), signature, site)?;
+                check_type(result).map_err(|reason| invalid(Some(site), reason))?;
+            }
+            ActKind::Sleep => {
+                if act.args.len() != 1 {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::CallArity {
+                            name: "sleep".to_owned(),
+                            given: act.args.len(),
+                            required: 1,
+                            accepted: 1,
+                        },
+                    ));
+                }
+            }
+        }
+        self.check_exprs(act.args.iter(), site)
     }
 
     fn check_action(&self, action: &Action, site: &Site) -> Result<(), Invalid> {
@@ -718,6 +811,7 @@ impl Scope<'_> {
                 self.check_expr(&read.handle, &site.child(0))?;
                 self.check_expr(&read.request, &site.child(1))
             }
+            Expr::Act(act) => self.check_act(act, site),
         }
     }
 
@@ -738,6 +832,30 @@ impl Scope<'_> {
         // reach into it.
         self.check_block(&closure.body, &site.child(0), false)
     }
+}
+
+/// Refuses an action nested in `expr`, at `site`, which stands in
+/// `position`: no frame can stand at one there. A closure's body is code of
+/// its own.
+fn nested_action(expr: &Expr, site: &Site, position: &'static str) -> Result<(), Invalid> {
+    let mut pending = vec![(Node::Expr(expr), site.clone())];
+    while let Some((node, at)) = pending.pop() {
+        match node {
+            Node::Expr(Expr::Act(_)) => {
+                return Err(invalid(
+                    Some(&at),
+                    InvalidReason::NestedActionPosition { position },
+                ));
+            }
+            Node::Expr(Expr::Closure(_)) => {}
+            node => pending.extend(
+                (0u32..)
+                    .zip(node.children())
+                    .map(|(index, child)| (child, at.child(index))),
+            ),
+        }
+    }
+    Ok(())
 }
 
 fn loop_control(in_loop: bool, keyword: &'static str, site: &Site) -> Result<(), Invalid> {

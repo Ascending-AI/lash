@@ -13,11 +13,11 @@
 //! - `Err(Interrupt::Halt(_))`: it ended the run.
 //!
 //! An operation that cannot step returns [`Eval`] instead. The registers
-//! are the machine's register stack: a statement's ops name the registers
-//! of its window, where each expression's value goes and each operation
-//! reads its operands. Past its step only a statement standing in a call
-//! made inside an expression keeps its window, below the callee's; such a
-//! task cannot wait, so a parked run holds no register (`K-STMT-004`).
+//! hold the running statement's values: each expression's value goes to
+//! one and each operation reads its operands from them. No register lives
+//! past its step: a statement that stands at an action nested in its
+//! expression keeps its operands as its continuation's roles
+//! (`K-EVAL-008`).
 //!
 //! The operations are the member reads and writes, the charge, memory
 //! reservation and pin anchors, the library call with its charge (the one
@@ -30,7 +30,7 @@ use num_traits::ToPrimitive;
 
 use super::exec::Call;
 use super::stream::{Ran, Running};
-use super::{Calling, Control, Cursor, Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
+use super::{Control, Cursor, Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
 use crate::compile::{Charge, Executable, Form, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::heap::within_depth;
@@ -54,17 +54,6 @@ pub(super) enum Flow {
 
 /// How an operation ends (see the module documentation).
 pub(super) type Status = Result<Flow, Interrupt>;
-
-/// How a library function's kernel body runs when it is called.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum Entry {
-    /// In a frame of its own, as an action's call or a task's start; the
-    /// statement of the caller's frame that waits in the call, if any.
-    Frame(Option<StmtId>),
-    /// Inside an expression (`K-STMT-002`): in a frame of its own too, the
-    /// caller's statement standing in the call where it says.
-    Expression(Calling),
-}
 
 /// Drops a register's old value, which is mostly one that owns nothing:
 /// that one needs no drop.
@@ -388,13 +377,9 @@ impl KernelMachine {
     /// Calls library function `lib` with the `count` registers from `args`
     /// as its arguments: the one entry of every library call. A native
     /// implementation or a machine function answers at once, charged by
-    /// its formula: `Done`, its value in `out`. A function that runs its
-    /// kernel body has that body's frame pushed, its arguments moved in, as
-    /// `entry` says: `Step`.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "a call is its function, its argument registers, its result register and its entry"
-    )]
+    /// its formula: `Done`, its value in `args`. A function that runs its
+    /// kernel body has that body's frame pushed, its arguments moved in,
+    /// the caller's statement `awaiting` waiting in it, if any: `Step`.
     pub(super) fn call_lib(
         &mut self,
         task: TaskId,
@@ -402,12 +387,11 @@ impl KernelMachine {
         lib: LibId,
         args: Reg,
         count: usize,
-        out: Reg,
-        entry: Entry,
+        awaiting: Option<StmtId>,
     ) -> Status {
         let function = exe.lib(lib);
         if self
-            .answer(task, exe, lib, args, count, out)
+            .answer(task, exe, lib, args, count, args)
             .map_err(|interrupt| interrupt.in_function(&function.definition.name))?
         {
             return Ok(Flow::Done);
@@ -418,22 +402,28 @@ impl KernelMachine {
         // An argument the call leaves out is absent: the body binds every
         // parameter.
         let call = Call::new(*code, args, function.arity).of_library(lib);
-        match entry {
-            Entry::Frame(awaiting) => self.push_frame(task, exe, call.awaited_by(awaiting))?,
-            Entry::Expression(calling) => {
-                // The caller stands in the call before the callee's frame
-                // is pushed, so that its derived frame stays.
-                self.frame(task)?.calling = Some(calling);
-                if let Err(interrupt) = self.push_frame(task, exe, call) {
-                    self.frame(task)?.calling = None;
-                    return Err(interrupt.in_function(&function.definition.name));
-                }
-                self.task(task)?.called += 1;
-                self.called += 1;
-                self.top = calling.dst;
-            }
-        }
+        self.push_frame(task, exe, call.awaited_by(awaiting))?;
         Ok(Flow::Step)
+    }
+
+    /// Calls `lib`, which answers without a frame, inside an expression,
+    /// with the `count` arguments from `args`, its value there.
+    pub(super) fn call_answered(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: LibId,
+        args: Reg,
+        count: usize,
+    ) -> Eval<()> {
+        let function = exe.lib(lib);
+        if self
+            .answer(task, exe, lib, args, count, args)
+            .map_err(|interrupt| interrupt.in_function(&function.definition.name))?
+        {
+            return Ok(());
+        }
+        Err(fault("a call that runs its body was lowered as one that answers").into())
     }
 
     /// Answers a call of a library function that needs no frame: a native
@@ -687,9 +677,9 @@ impl KernelMachine {
                 let Form::While { test, .. } = &running.stmt.form else {
                     return Err(fault("a `while` loop is not at a `while`").into());
                 };
-                match self.run(host, &running, test.start as usize, self.top)? {
+                match self.run(host, &running, test.start as usize)? {
                     Ran::Tested(value) => self.tested(task, value),
-                    // The condition stands in a call made inside it.
+                    // The condition stands at a call made inside it.
                     Ran::Step => Ok(Flow::Step),
                     _ => Err(fault("a `while` condition gave no value").into()),
                 }

@@ -262,7 +262,8 @@ impl Names {
                     | Expr::If { .. }
                     | Expr::Clock
                     | Expr::Random
-                    | Expr::Read(_) => {}
+                    | Expr::Read(_)
+                    | Expr::Act(_) => {}
                 },
             }
             pending.extend(node.children());

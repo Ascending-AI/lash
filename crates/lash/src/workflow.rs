@@ -189,8 +189,8 @@ pub mod document {
     // Observation inputs belong to `view`; data limits belong to `persistence`.
     // An explicit vocabulary keeps those names out of this module.
     pub use lash_kernel_doc::{
-        Action, Atom, Block, Bytes, Callee, Catch, Closure, Correspondence, Datum,
-        DeclarationRefusal, DecodeError, DecodeMismatch, Decoder, Document, DocumentId,
+        ActExpr, ActKind, Action, Atom, Block, Bytes, Callee, Catch, Closure, Correspondence,
+        Datum, DeclarationRefusal, DecodeError, DecodeMismatch, Decoder, Document, DocumentId,
         EffectIdentity, EffectName, Element, EncodeError, ErrorDatum, Expr, FIRST_NATIVE_VERSION,
         FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, Float, Formula, FrozenDatum, Function,
         FunctionBody, FunctionCatalog, FunctionDeclarations, FunctionDefinition, FunctionId,

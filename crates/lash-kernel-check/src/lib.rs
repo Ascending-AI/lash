@@ -45,10 +45,10 @@ pub use admit::{
 };
 pub use closure::{EntryEffectsRefusal, entry_effects, main_effects};
 pub use graph::{
-    ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode, Edge, EdgeKind,
-    EffectSet, ExecutionSite, ExprNode, Graph, GraphNode, MapEntryNode, MemberNode, NodeId,
-    NodeKind, PlaceNode, RecordEntryNode, Reference, Scope, ScopeId, SiteKind, StmtNode, Target,
-    UnitView,
+    ActNode, ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode, Edge,
+    EdgeKind, EffectSet, ExecutionSite, ExprNode, Graph, GraphNode, MapEntryNode, MemberNode,
+    NodeId, NodeKind, PlaceNode, RecordEntryNode, Reference, Scope, ScopeId, SiteKind, StmtNode,
+    Target, UnitView,
 };
 pub use manifest::{EntryReachability, Requirements, entry_reachability, requirements};
 pub use refusal::{Refusal, RefusalReason, Refused, SignatureMismatch, SignatureSide};

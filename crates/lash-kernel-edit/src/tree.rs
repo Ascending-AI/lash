@@ -130,6 +130,7 @@ impl<'a> NodeMut<'a> {
                     out.push(NodeMut::Expr(&mut read.handle));
                     out.push(NodeMut::Expr(&mut read.request));
                 }
+                Expr::Act(act) => out.extend(act.args.iter_mut().map(NodeMut::Expr)),
             },
         }
         out

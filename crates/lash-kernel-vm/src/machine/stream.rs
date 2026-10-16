@@ -1,24 +1,23 @@
 //! The stream: the one loop that runs a statement's ops
 //! (`lash_kernel_exec::Op`), each a decoded enum over explicit registers.
 //!
-//! A statement runs in a window of the register stack from `base`: every
-//! register an op names is relative to it. Expressions never pause a task,
-//! and every operation is strict (`K-EVAL-001`, `K-EVAL-006`). A range ends
-//! at its last op, which completes the statement, ends its step where it
-//! left the task, departs, or, for a `while` condition, gives the test's
-//! value. A call inside an expression whose function runs its body ends
-//! the step too: the statement stands in the call, its window kept, and
-//! runs on from the op after it when the callee returns.
+//! A statement runs in the registers, every operation strict
+//! (`K-EVAL-001`). A range ends at its last op, which completes the
+//! statement, ends its step where it left the task, departs, or, for a
+//! `while` condition, gives the test's value. An action nested in an
+//! expression that enters a frame, waits or spawns ends the step too: the
+//! statement stands at it, its evaluated operands saved as roles, and its
+//! resume entry runs it on from the op after the action's (`K-EVAL-008`).
 
 use std::sync::Arc;
 
 use lash_kernel_doc::{EntityId, Float, Name, TaskId, Value};
 use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, StepEdge};
 
-use super::ops::{Entry, Flow};
+use super::ops::Flow;
 use super::{
-    Calling, Completion, Control, Eval, Halt, Interrupt, KernelMachine, SlotState, TryPhase, bound,
-    fault, raise,
+    Completion, Control, Eval, Halt, Interrupt, KernelMachine, SlotState, TryPhase, bound, fault,
+    raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Stmt, StmtId, Stream};
 use crate::heap::{value_bytes, within_depth};
@@ -40,10 +39,10 @@ pub(super) enum Ran {
     Tested(bool),
 }
 
-/// The register window's place `r`.
+/// The register stack's place of `r`.
 #[inline(always)]
-fn at(base: usize, r: Reg) -> usize {
-    base + r.0 as usize
+fn at(r: Reg) -> usize {
+    r.0 as usize
 }
 
 /// The error a read of a variable no scope binds raises.
@@ -85,16 +84,15 @@ impl<'a> Running<'a> {
 }
 
 impl KernelMachine {
-    /// Runs a statement's ops from `pc` in the register window from
-    /// `base`. The common ops run here; the rest in [`Self::run_rare`].
+    /// Runs a statement's ops from `pc`. The common ops run here; the rest
+    /// in [`Self::run_rare`].
     pub(super) fn run(
         &mut self,
         host: &mut dyn Host,
         running: &Running<'_>,
         mut pc: usize,
-        base: usize,
     ) -> Eval<Ran> {
-        let window = base + running.stmt.regs as usize;
+        let window = running.stmt.regs as usize;
         if self.regs.len() < window {
             self.regs.resize(window, Value::Null);
         }
@@ -108,31 +106,24 @@ impl KernelMachine {
                 Op::ChargeLocal { units, dst, local } => {
                     self.charge_nodes(u32::from(units))?;
                     let value = self.read_local(task, running.exe, local)?;
-                    self.put(at(base, dst), value);
+                    self.put(at(dst), value);
                 }
                 Op::ChargeConst { units, dst, c } => {
                     self.charge_nodes(u32::from(units))?;
                     let value = self.literal(&running.stream.consts[c.ix()])?;
-                    self.put(at(base, dst), value);
+                    self.put(at(dst), value);
                 }
                 Op::Const { dst, c } => {
                     let value = self.literal(&running.stream.consts[c.ix()])?;
-                    self.put(at(base, dst), value);
+                    self.put(at(dst), value);
                 }
                 Op::Local { dst, local } => {
                     let value = self.read_local(task, running.exe, local)?;
-                    self.put(at(base, dst), value);
+                    self.put(at(dst), value);
                 }
                 Op::Call { lib, args } => {
-                    let calling = Calling {
-                        stmt: running.id,
-                        pc,
-                        base,
-                        dst: at(base, args.start),
-                    };
-                    if self.call_expr(running, LibId(lib.0), calling, args.len)? == Flow::Step {
-                        return Ok(Ran::Step);
-                    }
+                    let (lib, count) = (LibId(lib.0), args.len as usize);
+                    self.call_answered(task, running.exe, lib, at(args.start), count)?;
                 }
                 Op::Session { dst, name } => {
                     let name = &running.stream.names[name.ix()];
@@ -140,10 +131,10 @@ impl KernelMachine {
                         Some(value) => value.clone(),
                         None => return unbound(name),
                     };
-                    self.put(at(base, dst), value);
+                    self.put(at(dst), value);
                 }
                 Op::WriteSession { name, src } => {
-                    let value = self.take(at(base, src));
+                    let value = self.take(at(src));
                     self.reserve(value_bytes(&value))?;
                     let name = &running.stream.names[name.ix()];
                     if self.session_get(name)?.is_none() {
@@ -153,13 +144,13 @@ impl KernelMachine {
                     return Ok(Ran::Done);
                 }
                 Op::Jump { skip } => pc += skip as usize,
-                Op::JumpIfFalse { cond, skip } => match self.take(at(base, cond)) {
+                Op::JumpIfFalse { cond, skip } => match self.take(at(cond)) {
                     Value::Bool(true) => {}
                     Value::Bool(false) => pc += skip as usize,
                     _ => return raise("type_error", "an `if` condition must be a bool"),
                 },
                 Op::LetBind { local, src } | Op::LetBindShared { local, src } => {
-                    let value = self.take(at(base, src));
+                    let value = self.take(at(src));
                     self.bind(
                         task,
                         local.at,
@@ -171,17 +162,17 @@ impl KernelMachine {
                     self.frame(task)?.set_slot(local.at, SlotState::Empty);
                 }
                 Op::Bind { local, src } => {
-                    let value = self.take(at(base, src));
+                    let value = self.take(at(src));
                     self.bind(task, local.at, false, value)?;
                     return Ok(Ran::Done);
                 }
                 Op::WriteLocal { local, src } => {
-                    let value = self.take(at(base, src));
+                    let value = self.take(at(src));
                     self.write_local(task, running.exe, local, value)?;
                     return Ok(Ran::Done);
                 }
                 Op::Branch { cond, then_, else_ } => {
-                    let block = match self.take(at(base, cond)) {
+                    let block = match self.take(at(cond)) {
                         Value::Bool(true) => BlockId(then_.0),
                         Value::Bool(false) => BlockId(else_.0),
                         _ => return raise("type_error", "an `if` condition must be a bool"),
@@ -195,14 +186,14 @@ impl KernelMachine {
                     return Ok(Ran::Step);
                 }
                 Op::Test { cond } => {
-                    let Value::Bool(tested) = self.take(at(base, cond)) else {
+                    let Value::Bool(tested) = self.take(at(cond)) else {
                         return raise("type_error", "a `while` condition must be a bool");
                     };
                     return Ok(Ran::Tested(tested));
                 }
                 Op::End => return Ok(Ran::Done),
                 op => {
-                    if let Some(ran) = self.run_rare(host, running, op, base)? {
+                    if let Some(ran) = self.run_rare(host, running, op)? {
                         return Ok(ran);
                     }
                 }
@@ -217,33 +208,32 @@ impl KernelMachine {
         host: &mut dyn Host,
         running: &Running<'_>,
         op: Op,
-        base: usize,
     ) -> Eval<Option<Ran>> {
         let (task, exe, stream) = (running.task, running.exe, running.stream);
         let ran = match op {
             Op::Unbound { name, .. } => return unbound(&stream.names[name.ix()]),
             Op::Field { at: r, field } => {
-                let r = at(base, r);
+                let r = at(r);
                 self.read_field(r, &stream.fields[field.ix()], r)?;
                 return Ok(None);
             }
             Op::Index { at: r } => {
-                let r = at(base, r);
+                let r = at(r);
                 self.read_index(r, r + 1, r)?;
                 return Ok(None);
             }
             Op::MakeTuple { items } => {
-                self.make_tuple(base, items)?;
+                self.make_tuple(items)?;
                 return Ok(None);
             }
             Op::MakeList { items } => {
-                let (start, items) = self.members(base, items)?;
+                let (start, items) = self.members(items)?;
                 let list = Value::List(self.alloc(ObjectInit::List(items))?);
                 self.put(start, list);
                 return Ok(None);
             }
             Op::MakeSet { items } => {
-                let (start, items) = self.members(base, items)?;
+                let (start, items) = self.members(items)?;
                 for member in &items {
                     self.key(member)?;
                 }
@@ -252,7 +242,7 @@ impl KernelMachine {
                 return Ok(None);
             }
             Op::MakeMap { entries } => {
-                let start = at(base, entries.start);
+                let start = at(entries.start);
                 self.charge(u64::from(entries.len / 2))?;
                 let mut table = Vec::new();
                 for pair in (start..start + entries.len as usize).step_by(2) {
@@ -266,7 +256,7 @@ impl KernelMachine {
                 return Ok(None);
             }
             Op::MakeRecord { fields, values } => {
-                let (start, values) = self.members(base, values)?;
+                let (start, values) = self.members(values)?;
                 let fields = stream.field_lists[fields.ix()]
                     .iter()
                     .map(|name| {
@@ -283,12 +273,12 @@ impl KernelMachine {
             }
             Op::Closure { dst, code } => {
                 let closure = Value::Closure(self.closure(task, exe, CodeId(code.0))?);
-                self.put(at(base, dst), closure);
+                self.put(at(dst), closure);
                 return Ok(None);
             }
             Op::Clock { dst } => {
                 self.report_ran(host);
-                self.put(at(base, dst), Value::Timestamp(host.clock()));
+                self.put(at(dst), Value::Timestamp(host.clock()));
                 return Ok(None);
             }
             Op::Random { dst } => {
@@ -296,63 +286,69 @@ impl KernelMachine {
                 self.report_ran(host);
                 let bits = host.random() >> 11;
                 let value = Value::Float(Float::new(bits as f64 / (1u64 << 53) as f64));
-                self.put(at(base, dst), value);
+                self.put(at(dst), value);
                 return Ok(None);
             }
             Op::HostRead { at: r } => {
-                let r = at(base, r);
+                let r = at(r);
                 self.host_read(host, exe, r, r + 1, r)?;
                 return Ok(None);
             }
             Op::Pin { src } => {
-                self.pin(at(base, src))?;
+                self.pin(at(src))?;
                 return Ok(None);
             }
             Op::Act => {
                 let Form::Action(action) = &running.stmt.form else {
                     return Err(fault("an action op stands in no action statement").into());
                 };
-                if self.act(task, host, exe, running.id, action, base)? == Flow::Step {
+                if self.act(task, host, exe, running.id, action, 0)? == Flow::Step {
+                    return Ok(Some(Ran::Step));
+                }
+                return Ok(None);
+            }
+            Op::Nested { act, args } => {
+                if self.nested_act(host, running, act, args)? == Flow::Step {
                     return Ok(Some(Ran::Step));
                 }
                 return Ok(None);
             }
             Op::BindShared { local, src } => {
-                let value = self.take(at(base, src));
+                let value = self.take(at(src));
                 self.bind(task, local.at, true, value)?;
                 Ran::Done
             }
             Op::BindSession { name, src } => {
-                let value = self.take(at(base, src));
+                let value = self.take(at(src));
                 self.reserve(value_bytes(&value))?;
                 self.session_write(stream.names[name.ix()].clone(), value)?;
                 Ran::Done
             }
             Op::WriteUnbound { name, src } => {
-                let value = self.take(at(base, src));
+                let value = self.take(at(src));
                 self.reserve(value_bytes(&value))?;
                 return unbound(&stream.names[name.ix()]);
             }
             Op::SetField { target, field, src } => {
-                self.write_field(at(base, target), &stream.fields[field.ix()], at(base, src))?;
+                self.write_field(at(target), &stream.fields[field.ix()], at(src))?;
                 Ran::Done
             }
             Op::SetIndex { target, src } => {
-                let target = at(base, target);
-                self.write_index(target, target + 1, at(base, src))?;
+                let target = at(target);
+                self.write_index(target, target + 1, at(src))?;
                 Ran::Done
             }
             Op::RemoveField { target, field } => {
-                self.remove_field(at(base, target), &stream.fields[field.ix()])?;
+                self.remove_field(at(target), &stream.fields[field.ix()])?;
                 Ran::Done
             }
             Op::RemoveIndex { target } => {
-                let target = at(base, target);
+                let target = at(target);
                 self.remove_index(target, target + 1)?;
                 Ran::Done
             }
             Op::ForIn { iterable } => {
-                ran(self.for_start(task, host, exe, running.id, at(base, iterable))?)
+                ran(self.for_start(task, host, exe, running.id, at(iterable))?)
             }
             Op::While => {
                 self.frame(task)?.control.push(Control::While {
@@ -372,7 +368,7 @@ impl KernelMachine {
             Op::Break => Ran::Depart(Completion::Break),
             Op::Continue => Ran::Depart(Completion::Continue),
             Op::Return { src } => {
-                let value = self.take(at(base, src));
+                let value = self.take(at(src));
                 if task == TaskId::MAIN && self.task(task)?.frames.len() == 1 {
                     // The run's result leaves the run (`K-EFF-002`): a value
                     // that cannot is refused here, where a `catch` sees it.
@@ -380,19 +376,19 @@ impl KernelMachine {
                 }
                 Ran::Depart(Completion::Return(Box::new(value)))
             }
-            Op::Throw { src } => return Err(Interrupt::raised(self.take(at(base, src)))),
+            Op::Throw { src } => return Err(Interrupt::raised(self.take(at(src)))),
             Op::Print { src } => {
-                let value = self.take(at(base, src));
+                let value = self.take(at(src));
                 let datum = self.copy_out(&value)?;
                 host.print(&datum);
                 Ran::Done
             }
             Op::Finish { src } => {
-                let value = self.take(at(base, src));
+                let value = self.take(at(src));
                 return Err(Halt::Finish(Box::new(self.copy_out(&value)?)).into());
             }
             Op::Fail { src } => {
-                let value = self.take(at(base, src));
+                let value = self.take(at(src));
                 return Err(Halt::Fail(Box::new(self.copy_out(&value)?)).into());
             }
             Op::Charge { .. }
@@ -446,17 +442,17 @@ impl KernelMachine {
 
     /// Takes a construction's members out of their registers, charging
     /// them (`K-CHG-002`); gives where the construction goes.
-    fn members(&mut self, base: usize, items: RegRange) -> Eval<(usize, Vec<Value>)> {
+    fn members(&mut self, items: RegRange) -> Eval<(usize, Vec<Value>)> {
         self.charge(u64::from(items.len))?;
-        let start = at(base, items.start);
+        let start = at(items.start);
         let members = (start..start + items.len as usize)
             .map(|r| self.take(r))
             .collect();
         Ok((start, members))
     }
 
-    fn make_tuple(&mut self, base: usize, items: RegRange) -> Eval<()> {
-        let (start, items) = self.members(base, items)?;
+    fn make_tuple(&mut self, items: RegRange) -> Eval<()> {
+        let (start, items) = self.members(items)?;
         if items
             .iter()
             .any(|value| !within_depth(value, self.limits.value_depth().saturating_sub(1)))
@@ -475,22 +471,6 @@ impl KernelMachine {
         self.put(start, tuple);
         self.pin(start)?;
         Ok(())
-    }
-
-    /// Calls `lib` inside an expression with the `count` arguments from
-    /// the call's result register: `Done`, its value there, or `Step`, the
-    /// statement standing in the call as `calling` says while its body's
-    /// frame runs.
-    fn call_expr(
-        &mut self,
-        running: &Running<'_>,
-        lib: LibId,
-        calling: Calling,
-        count: u32,
-    ) -> Eval<Flow> {
-        let (task, exe, args) = (running.task, running.exe, calling.dst);
-        let entry = Entry::Expression(calling);
-        self.call_lib(task, exe, lib, args, count as usize, args, entry)
     }
 
     /// A closure of `code` over the cells of the variables it shares.

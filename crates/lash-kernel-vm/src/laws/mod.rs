@@ -4,6 +4,7 @@
 
 mod bounds;
 mod census;
+mod continuation;
 pub(crate) mod embedder;
 mod forms;
 mod frames;

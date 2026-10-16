@@ -1,10 +1,10 @@
 //! Lowers a parsed Python module to a kernel document.
 //!
-//! The lowerer emits three-address statements, so the statement rule holds
-//! by construction: every call of a function, a closure or a helper, and
-//! every wait, is its own statement with atoms for arguments, in Python's
-//! evaluation order (`K-STMT-005`). An operand read before a later
-//! operand's statements run is pinned to a temporary first.
+//! The lowerer emits three-address statements: every call of a function, a
+//! closure or a helper, and every wait, is its own statement with atoms for
+//! arguments, in Python's evaluation order (`K-EVAL-001`). It nests no
+//! action (`K-EVAL-008`). An operand read before a later operand's
+//! statements run is pinned to a temporary first.
 //!
 //! A Python function is a kernel closure over the variables of the scopes
 //! around it. Every name a body binds is declared at the top of the kernel
@@ -999,7 +999,7 @@ impl Lowerer<'_> {
     }
 
     /// Lowers operands in order. One that a later operand's statements
-    /// could change is pinned before they run (`K-STMT-005`).
+    /// could change is pinned before they run (`K-EVAL-001`).
     pub(crate) fn operands(&mut self, exprs: &[&ast::Expr]) -> Lowering<Vec<Operand>> {
         let exprs: Vec<Option<&ast::Expr>> = exprs.iter().copied().map(Some).collect();
         self.optional_operands(&exprs)

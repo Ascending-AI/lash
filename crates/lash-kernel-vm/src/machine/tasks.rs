@@ -1,5 +1,5 @@
 //! The canonical task table and its bounded execution-coordinate cache.
-use super::frames::Frames;
+use super::frames::{Frames, ParkKind};
 use super::{Task, Wait};
 use crate::compile::Executable;
 use lash_kernel_doc::TaskId;
@@ -31,7 +31,6 @@ impl Task {
                 frames: Tree::new(true),
             },
             frames: Frames::new(access, exe),
-            called: 0,
             published: None,
         }
     }
@@ -114,24 +113,16 @@ impl Tasks {
                 let Some(record) = self.rows.get(&ordinal_key(index), &self.access)? else {
                     return Ok(None);
                 };
-                let continues = matches!(
-                    record.state,
-                    TaskStateRecord::Waiting(_)
-                        | TaskStateRecord::Joining(_)
-                        | TaskStateRecord::JoiningMany(_)
-                        | TaskStateRecord::Resuming(_)
-                );
                 let frames = Frames::open(
                     record.frames.clone(),
                     self.access.clone(),
                     Arc::clone(&self.exe),
-                    continues,
+                    ParkKind::of(&record.state),
                 );
                 entry.insert(Task {
                     published: Some(record.clone()),
                     record,
                     frames,
-                    called: 0,
                 })
             }
         };
@@ -213,8 +204,8 @@ impl Tasks {
         malformed.map_or(Ok(()), Err)
     }
     /// How many frames `id` has and its resident live frames, by index.
-    /// Callers stay resident across calls; a cold stack loads its frames
-    /// as execution reaches them. `None` when the task is not cached.
+    /// A cold stack loads its frames as execution reaches them. `None` when
+    /// the task is not cached.
     pub(super) fn cached_frames(&self, id: TaskId) -> Option<(usize, Vec<(usize, &super::Frame)>)> {
         self.cache
             .get(&id.0)
@@ -224,14 +215,8 @@ impl Tasks {
         if self.cache.len() < CACHED_TASKS {
             return Ok(());
         }
-        let Some(index) = self
-            .cache
-            .iter()
-            .find_map(|(index, task)| (!task.frames.pinned()).then_some(*index))
-        else {
-            return Err(HeapFault::Malformed(
-                "all derived task frames are pinned".into(),
-            ));
+        let Some(index) = self.cache.keys().next().copied() else {
+            return Ok(());
         };
         let mut task = self
             .cache

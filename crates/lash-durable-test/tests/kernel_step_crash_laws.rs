@@ -14,6 +14,11 @@
 //!   commits exactly the uncut run's outcomes and one terminal;
 //! - nothing staged is left behind: no spool outlives its activation, and
 //!   no stored page is unreachable from a root.
+//!
+//! A second process parks inside expressions (`K-EVAL-008`): at a `sleep`
+//! nested in a list (`Waiting`), then in a callee called inside it, its
+//! caller standing at the call (`Called`). Every cut ends it with the
+//! uncut run's result.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -54,10 +59,36 @@ main {
 }
 "#;
 
+/// `worker()`: a `sleep` and a call that sleeps, both inside the list
+/// it returns. Three `kernel_run` steps, as `WORKER`'s.
+const NESTED: &str = r#"kernel 1
+numbers float
+entry worker() -> Any
+
+fn inner(x) {
+  do sleep 7
+  return x
+}
+
+fn worker() {
+  let v = [1, sleep 5, call inner("b")]
+  return v
+}
+
+main {
+  finish null
+}
+"#;
+
 /// The step outcomes the uncut run commits.
 const OUTCOMES: usize = 3;
 
+/// Each program's terminal output in its uncut run, which every cut run
+/// ends with.
+static UNCUT: Mutex<Vec<(&'static str, String)>> = Mutex::new(Vec::new());
+
 struct KernelSteps {
+    source: &'static str,
     staging: tempfile::TempDir,
     tripwire: Arc<Tripwire>,
     store: Mutex<Option<lash_sqlite_store::SqliteDurableStore>>,
@@ -68,8 +99,9 @@ struct KernelSteps {
 }
 
 impl KernelSteps {
-    fn new() -> Self {
+    fn new(source: &'static str) -> Self {
         Self {
+            source,
             staging: tempfile::tempdir().expect("a staging directory"),
             tripwire: Arc::default(),
             store: Mutex::default(),
@@ -131,7 +163,7 @@ impl KernelSteps {
 
     async fn start_process(&self) -> Result<lash_core::ProcessId, String> {
         let core = self.core();
-        let document = lash::workflow::document::parse_document(WORKER)
+        let document = lash::workflow::document::parse_document(self.source)
             .map_err(|error| format!("the document parses: {error}"))?;
         let identity = lash_vm_runtime::KernelDocuments::new(self.backend().module_artifacts())
             .publish(
@@ -311,6 +343,30 @@ impl Scenario for KernelSteps {
         if terminals != 1 {
             violations.push(format!("the process committed {terminals} terminals"));
         }
+        if let Some(process) = self.process() {
+            let terminal = self
+                .backend()
+                .process_registry()
+                .get_process(&process)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|record| record.terminal().cloned());
+            let output = terminal.map(|terminal| {
+                serde_json::to_string(&lash_core::Durable(&terminal.into_await_output())).unwrap()
+            });
+            let mut uncut = UNCUT.lock_recover();
+            let seen = uncut.iter().find(|(source, _)| *source == self.source);
+            match (cut, seen, output) {
+                (_, _, None) => violations.push("the process has no terminal".to_owned()),
+                (None, None, Some(output)) => uncut.push((self.source, output)),
+                (_, Some((_, expected)), Some(output)) if *expected != output => violations.push(
+                    format!("the process ended {output}, not as uncut: {expected}"),
+                ),
+                (Some(_), None, Some(_)) => violations.push("no uncut run ended first".to_owned()),
+                _ => {}
+            }
+        }
         let spools = self.spools();
         if !spools.is_empty() {
             violations.push(format!("spools outlived their activations: {spools:?}"));
@@ -345,12 +401,38 @@ async fn a_kernel_steps_outcome_publishes_its_pages_once_across_a_cut() {
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run_test(KernelSteps::new)
+        .run_test(|| KernelSteps::new(WORKER))
         .await;
     eprintln!("kernel steps: {} cells", report.cells.len());
     report.assert_held();
     assert!(
         report.labels().contains(&CommitLabel::STEP_OUTCOME),
         "the matrix never cut a step outcome"
+    );
+}
+
+/// `K-EVAL-008`, `K-MACH-007`: a run parked inside an expression, at
+/// `Waiting` and at `Called`, resumes from its continuation on the other
+/// node wherever its step's outcome was cut, and ends as the uncut run.
+#[tokio::test]
+async fn a_run_parked_inside_an_expression_resumes_exactly_across_a_cut() {
+    let report = Matrix::new()
+        .labels(&[CommitLabel::STEP_OUTCOME])
+        .faults(&[
+            Fault::FailBefore,
+            Fault::Abort,
+            Fault::AckHidden,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| KernelSteps::new(NESTED))
+        .await;
+    eprintln!("nested kernel steps: {} cells", report.cells.len());
+    report.assert_held();
+    let uncut = UNCUT.lock_recover();
+    let ended = uncut.iter().find(|(source, _)| *source == NESTED);
+    assert!(
+        ended.is_some_and(|(_, output)| output.contains(r#""b""#)),
+        "{ended:?}"
     );
 }

@@ -692,6 +692,11 @@ impl Renderer<'_> {
                 self.expr(&read.request);
                 self.out.write(")");
             }
+            // The front end writes no nested action yet, so its source has
+            // no spelling for one.
+            k::Expr::Act(_) => self.out.refuse(PrintError::Invalid(
+                "a nested action has no generated TypeScript spelling".into(),
+            )),
         }
     }
 }

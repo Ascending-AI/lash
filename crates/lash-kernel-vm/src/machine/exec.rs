@@ -8,8 +8,8 @@ use lash_kernel_exec::LocalRef;
 use super::ops::Reg;
 use super::stream::{Ran, Running, unbound};
 use super::{
-    Calling, Completion, Control, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt,
-    KernelMachine, LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
+    Completion, Control, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt, KernelMachine,
+    LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
 use crate::data::{copy_out, deep_size, magnitude, nested_size, size};
@@ -135,7 +135,7 @@ impl KernelMachine {
                         });
                         let edge = running.edge;
                         let start = running.stmt.ops.start as usize;
-                        match self.run(host, &running, start, self.top)? {
+                        match self.run(host, &running, start)? {
                             Ran::Done => {
                                 self.take_edge(task, exe, edge)?;
                                 Ok(Completion::Normal)
@@ -252,8 +252,11 @@ impl KernelMachine {
                 Completion::Break | Completion::Continue => {}
             }
             let frame = self.frame(task)?;
-            // The statement the call stood in is left behind.
+            // The statement the call stood in is left behind, with the
+            // continuation it saved there.
             frame.awaiting = None;
+            frame.nested = None;
+            frame.record.pending = None;
             // A return or a raise that no `try` of the frame can take leaves
             // the frame at once: ending the frame ends all its variables.
             if matches!(departure, Completion::Return(_) | Completion::Throw(_))
@@ -344,45 +347,21 @@ impl KernelMachine {
             self.charge_call(exe, call.lib, units)?;
         }
         self.observe(Event::Pop { task });
-        let lib = frame.library.as_ref().map(|call| call.lib);
         self.recycle(frame);
         if self.task(task)?.frames.is_empty() {
             self.end_task(task, result)?;
             return Ok(None);
         }
-        if let Some(calling) = self.frame(task)?.calling.take() {
-            self.task(task)?.called -= 1;
-            self.called -= 1;
-            self.top = calling.base;
-            return match result {
-                Ok(value) => {
-                    // The value is in no variable until the statement binds
-                    // it.
-                    self.put(calling.dst, value);
-                    self.pin(calling.dst).map_err(|halt| match lib {
-                        Some(lib) => halt.in_function(&exe.lib(lib).definition.name),
-                        None => halt,
-                    })?;
-                    self.continue_statement(task, host, exe, calling)
-                }
-                Err(value) => Ok(Some(Completion::Throw(Box::new(value)))),
-            };
-        }
         Ok(match result {
-            Ok(value) => {
-                // The value is in no variable until the statement binds it.
-                let base = self.top;
-                self.put(base, value);
-                self.pin(base)?;
-                match self.finish_action(task, host, exe, base) {
-                    Ok(stmt) => {
-                        self.take_edge_of(task, exe, stmt)?;
-                        None
-                    }
-                    Err(Interrupt::Raise(value)) => Some(Completion::Throw(value)),
-                    Err(Interrupt::Halt(halt)) => return Err(*halt),
-                }
-            }
+            Ok(value) => match self
+                .finish_action(task, host, exe, value)
+                .and_then(|ran| self.resumed(task, exe, ran))
+            {
+                Ok(Completion::Normal) => None,
+                Ok(completion) => Some(completion),
+                Err(Interrupt::Raise(value)) => Some(Completion::Throw(value)),
+                Err(Interrupt::Halt(halt)) => return Err(*halt),
+            },
             Err(value) => Some(Completion::Throw(Box::new(value))),
         })
     }
@@ -559,8 +538,8 @@ impl KernelMachine {
             exe: Arc::clone(&self.exe),
             control,
             awaiting: None,
+            nested: None,
             library: None,
-            calling: None,
             published: None,
         });
         if let Some(lib) = library {
@@ -804,56 +783,98 @@ impl KernelMachine {
         Ok(value)
     }
 
-    /// Runs on the statement that stood in a call made inside one of its
-    /// expressions, the call's value in its result register, from the op
-    /// after the call. Gives the departure the frame is left with.
-    fn continue_statement(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-        calling: Calling,
-    ) -> Result<Option<Completion>, Halt> {
-        let running = Running::new(task, exe, calling.stmt);
-        let ran = match self.run(host, &running, calling.pc, calling.base) {
-            Ok(ran) => ran,
-            Err(Interrupt::Raise(value)) => return Ok(Some(Completion::Throw(value))),
-            Err(Interrupt::Halt(halt)) => return Err(*halt),
-        };
-        match ran {
-            Ran::Done => {
-                self.take_edge(task, exe, running.edge)?;
-                Ok(None)
-            }
-            Ran::Step => Ok(None),
-            Ran::Depart(completion) => Ok(Some(completion)),
-            // A `while` condition: the loop goes on as its test says.
-            Ran::Tested(value) => match self.tested(task, value) {
-                Ok(_) => Ok(None),
-                Err(Interrupt::Raise(value)) => Ok(Some(Completion::Throw(value))),
-                Err(Interrupt::Halt(halt)) => Err(*halt),
-            },
-        }
-    }
-
-    /// Completes the statement the top frame waits in with the value its
-    /// action yielded, in register `base`: runs the statement on from its
-    /// action, which binds, writes or drops the value (`K-EVAL-003`). Gives
-    /// the statement.
+    /// Completes the statement the top frame waits in with `value`, what
+    /// its action yielded, and runs the statement on from the action
+    /// (`K-EVAL-003`). A statement's own action leaves the value in
+    /// register 0 and resumes after its action op, where the statement
+    /// binds, writes or drops it. A nested action's resume entry loads the
+    /// saved roles into their registers under this layout and the value
+    /// into the action's, and the statement goes on from the op after the
+    /// action's, charging nothing again (`K-EVAL-008`). Gives the statement
+    /// and how its range ended.
     pub(super) fn finish_action(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
-        base: Reg,
-    ) -> Eval<StmtId> {
-        let Some(id) = self.frame(task)?.awaiting.take() else {
+        value: Value,
+    ) -> Eval<(StmtId, Ran)> {
+        let frame = self.frame(task)?;
+        let Some(id) = frame.awaiting.take() else {
             return Err(fault("a value arrived at no statement").into());
         };
+        let nested = frame.nested.take();
+        let pending = frame.record.pending.take();
         let running = Running::new(task, exe, id);
-        match self.run(host, &running, running.stmt.resume(), base)? {
-            Ran::Done => Ok(id),
-            _ => Err(fault("an action's statement did not complete").into()),
+        let (Some(act), Some(pending)) = (nested, pending) else {
+            if nested.is_some() {
+                return Err(fault("a resuming nested action has no saved continuation").into());
+            }
+            // The value is in no variable until the statement binds it.
+            self.put(0, value);
+            self.pin(0)?;
+            return match self.run(host, &running, running.stmt.resume())? {
+                Ran::Done => Ok((id, Ran::Done)),
+                _ => Err(fault("an action's statement did not complete").into()),
+            };
+        };
+        // The roles leave the frame priced exactly before they are back in
+        // registers, as the uninterrupted run holds them: a memory decision
+        // inside the rest of the statement is the same whether the run
+        // parked here or not (ROOTS-CANON, K-BND-003).
+        self.publish_holdings()?;
+        let entry = running
+            .stream
+            .nested
+            .get(act.ix())
+            .ok_or_else(|| fault("a pending action has no resume entry"))?;
+        let depth = entry.depth as usize;
+        let mut saved: std::collections::BTreeMap<Vec<u32>, Value> = pending
+            .roles(self.heap.pages())?
+            .into_iter()
+            .map(|role| (role.site, role.value))
+            .collect();
+        for (site, reg) in &entry.roles {
+            let role = saved
+                .remove(&site.path[depth..])
+                .ok_or_else(|| fault("a saved continuation role is missing"))?;
+            // Back in the register it was evaluated to, as if the
+            // statement had never stopped.
+            self.put(reg.0 as usize, role);
+        }
+        // The value is in no variable until the statement uses it.
+        self.put(entry.dst.0 as usize, value);
+        self.pin(entry.dst.0 as usize)?;
+        let pc = running.stmt.ops.start as usize + entry.resume as usize;
+        let ran = self.run(host, &running, pc)?;
+        Ok((id, ran))
+    }
+
+    /// The statement a resume ran on has ended its range as `ran` says: in
+    /// its block, its step edge is taken; a `while` condition's value goes
+    /// to its loop; a departure is the frame's.
+    pub(super) fn resumed(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        (stmt, ran): (StmtId, Ran),
+    ) -> Eval<Completion> {
+        match ran {
+            Ran::Done => {
+                self.take_edge_of(task, exe, stmt)?;
+                Ok(Completion::Normal)
+            }
+            Ran::Step => {
+                if self.steps.verify {
+                    self.verify_no_edge(task, exe)?;
+                }
+                Ok(Completion::Normal)
+            }
+            Ran::Depart(completion) => Ok(completion),
+            Ran::Tested(value) => {
+                self.tested(task, value)?;
+                Ok(Completion::Normal)
+            }
         }
     }
 }

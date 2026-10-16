@@ -26,12 +26,16 @@ pub struct CoverageError {
     pub malformed: BTreeSet<String>,
 }
 
-/// Reads definitions, not cross-references or section headings.
+/// Reads definitions, not cross-references, section headings or withdrawn
+/// rules, which keep their ids and pin no behaviour.
 pub fn rule_ids(semantics: &str) -> BTreeSet<String> {
     semantics
         .lines()
         .filter_map(|line| {
-            let id = line.strip_prefix("- **")?.split_once(".**")?.0;
+            let (id, text) = line.strip_prefix("- **")?.split_once(".**")?;
+            if text.trim_start().starts_with("Withdrawn") {
+                return None;
+            }
             let mut parts = id.split('-');
             (parts.next() == Some("K")
                 && parts.next().is_some_and(|family| {

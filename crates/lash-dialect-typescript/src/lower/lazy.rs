@@ -18,7 +18,7 @@ impl Lowerer<'_> {
         Ok((buf, value))
     }
 
-    /// K-STMT-001/002: only native calls and pure bindings may nest.
+    /// Only native calls (`K-LIB-002`) and pure bindings nest here.
     pub(super) fn branch_expression(&self, buf: &Buf, mut body: Expr) -> Option<Expr> {
         for stmt in buf.stmts.iter().rev() {
             let Stmt::Let { name, value } = stmt else {

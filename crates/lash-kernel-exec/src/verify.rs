@@ -3,10 +3,11 @@
 //! - [`verify_semantics`]: the semantics table states every op exactly
 //!   once, and every dynamic charge event has an op that emits it.
 //! - [`verify_stream`]: every statement's ops are well formed and no op
-//!   spans a Boundary: a range ends at its one terminator, an action is the
-//!   first op of its statement so that its continuation starts right after
-//!   it, and every register a range reads was written earlier in it, so no
-//!   register is live at a Boundary (`K-STMT-004`).
+//!   spans a Boundary: a range ends at its one terminator, a statement's
+//!   action is the first op of its statement so that its continuation
+//!   starts right after it, and every register a range reads was written
+//!   earlier in it. A nested action is a Boundary inside its range; what
+//!   its continuation reads, its resume entry loads (`K-EVAL-008`).
 
 use crate::kir::{Op, OpKind, OpRange, Operand, Reg};
 use crate::sem::{ChargeEvent, OpSpec};
@@ -70,6 +71,8 @@ pub struct Tables {
     pub codes: usize,
     pub libs: usize,
     pub blocks: usize,
+    /// The table of nested actions' resume entries.
+    pub nested: usize,
 }
 
 /// Why a stream is rejected: the statement, by its position in the
@@ -222,6 +225,7 @@ fn fits(operand: Operand, regs: u32, frame: usize, tables: &Tables) -> bool {
         Operand::Code(code) => code.ix() < tables.codes,
         Operand::Lib(lib) => lib.ix() < tables.libs,
         Operand::Block(block) => block.ix() < tables.blocks,
+        Operand::Nested(act) => act.ix() < tables.nested,
     }
 }
 
@@ -238,7 +242,7 @@ mod tests {
         assert_eq!(verify_semantics(SEMANTICS), Ok(()));
     }
 
-    /// No range spans a Boundary (`K-STMT-004`): a step ends at its
+    /// No range spans a Boundary: a step ends at its
     /// statement's one terminator, an action's continuation starts right
     /// after it, and no register is read that its range did not write.
     #[test]

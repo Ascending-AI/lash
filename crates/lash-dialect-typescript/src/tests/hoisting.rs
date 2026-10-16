@@ -1,4 +1,4 @@
-//! `K-STMT-005`: the front end hoists in the source's evaluation order.
+//! `K-EVAL-001`: the front end hoists in the source's evaluation order.
 //!
 //! The Node witness records one side-effect order per expression family.
 //! The current execution law observes those effects in guest code rather
@@ -15,7 +15,7 @@ fn table(text: &'static str) -> BTreeMap<&'static str, &'static str> {
         .collect()
 }
 
-/// K-STMT-005: each expression runs its reached operands in Node's order.
+/// K-EVAL-001: each expression runs its reached operands in Node's order.
 #[test]
 fn expression_side_effects_follow_node_order() {
     use super::machine::{Ended, end};

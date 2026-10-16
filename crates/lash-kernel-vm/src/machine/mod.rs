@@ -1,11 +1,13 @@
 //! The kernel machine: one run of one document as a set of tasks.
 //!
 //! Each task is a stack of frames, and each frame a stack of the blocks,
-//! loops and `try` statements it is inside. A call inside an expression is
-//! a frame too: the caller's statement stands in it, its registers kept
-//! below the callee's, until the callee returns. A task pauses only at an
-//! action, between statements (`K-STMT-004`), so its whole state is that
-//! stack and the variables: no value lives anywhere else while it waits.
+//! loops and `try` statements it is inside. A frame stands between
+//! statements, or inside a statement at an action nested in its
+//! expression: a call whose callee's frame is above it, a wait, or a
+//! `spawn`. There it holds the operands its statement has evaluated as the
+//! roles of its continuation (`K-EVAL-008`), so a task's whole state is
+//! that stack and the variables: no value lives in a register past its
+//! step.
 
 mod actions;
 mod checkpoint;
@@ -235,17 +237,6 @@ struct LibraryCall {
     args: Tree<Value>,
 }
 
-/// A statement standing in a call made inside one of its expressions: its
-/// op after the call, its register window, and the register the call's
-/// value goes to, where the callee's windows start.
-#[derive(Clone, Copy, Debug)]
-struct Calling {
-    stmt: StmtId,
-    pc: usize,
-    base: usize,
-    dst: usize,
-}
-
 /// The vectors of a frame that has ended, kept for the next frame.
 #[derive(Debug, Default)]
 struct FrameStorage {
@@ -269,12 +260,13 @@ struct Frame {
     control: Vec<Control>,
     /// The statement whose action this frame waits on.
     awaiting: Option<StmtId>,
+    /// The action nested in the awaited statement the frame stands at, by
+    /// its resume entry in the statement's stream under this layout; the
+    /// record's `pending` saves it by site (`K-EVAL-008`). `None` waits in
+    /// the statement's own action.
+    nested: Option<lash_kernel_exec::ActIx>,
     /// The library call this frame is the body of, charged when it ends.
     library: Option<LibraryCall>,
-    /// Where this frame's statement stands while the call it made inside
-    /// an expression runs in the frame above. The record cannot hold it,
-    /// so such a frame stays derived until the callee returns.
-    calling: Option<Calling>,
     /// The record as last written to its row: what a flush compares to
     /// instead of reading the row back (FIG-6318).
     published: Option<FrameRecord>,
@@ -290,8 +282,6 @@ enum Wait {
 struct Task {
     record: lash_kernel_state::paged::TaskRecord,
     frames: frames::Frames,
-    /// How many of its frames stand in a call made inside an expression.
-    called: u32,
     /// The record as last written to its row (FIG-6318).
     published: Option<lash_kernel_state::paged::TaskRecord>,
 }
@@ -348,19 +338,10 @@ pub struct KernelMachine {
     costs: crate::costs::Costs,
     live_tasks: u32,
     census_refinements: u64,
-    /// How many frames of all tasks stand in a call made inside an
-    /// expression. The run is at a safe point only when none does
-    /// (`K-MACH-007`).
-    called: u32,
-    /// The registers: the values of the expressions being evaluated and
-    /// the arguments of the calls being made, in the windows of the
-    /// statements running, innermost last. Only a statement standing in a
-    /// call made inside an expression keeps its window past its step, and
-    /// each step's end truncates the registers to those windows.
+    /// The registers: the values of the expressions of the statement being
+    /// run and the arguments of the calls and actions it makes. No step
+    /// reads one an earlier step wrote, and each step's end clears them.
     regs: Vec<Value>,
-    /// Where the window of the next statement to run starts: 0, or the
-    /// result register of the call the innermost such statement stands in.
-    top: usize,
     storage: Storage,
     steps: steps::StepCheck,
     end: Option<End>,
@@ -657,24 +638,14 @@ impl KernelMachine {
         if self.observer.is_some() {
             self.observe_step(task, exe);
         }
-        // A statement standing in a call keeps what it holds until it ends.
-        if self.called == 0 {
-            self.pins.clear();
-            self.fresh.clear();
-        }
+        self.pins.clear();
+        self.fresh.clear();
         let outcome = match self.task(task)?.take_incoming() {
             Some(incoming) => {
                 self.refresh_charging(task, exe)?;
-                self.resume(task, exe, incoming).and_then(|value| {
-                    // The value is in no variable until the statement binds
-                    // it.
-                    let base = self.top;
-                    self.put(base, value);
-                    self.pin(base)?;
-                    let stmt = self.finish_action(task, host, exe, base)?;
-                    self.take_edge_of(task, exe, stmt)?;
-                    Ok(Completion::Normal)
-                })
+                self.resume(task, exe, incoming)
+                    .and_then(|value| self.finish_action(task, host, exe, value))
+                    .and_then(|ran| self.resumed(task, exe, ran))
             }
             None => self.advance(task, host, exe),
         };
@@ -936,16 +907,12 @@ impl KernelMachine {
                     };
                 }
             }
-            // The windows of statements standing in calls made inside
-            // expressions stay, with what those statements hold.
-            self.regs.truncate(self.top);
-            if self.called == 0 {
-                self.pins.clear();
-                self.fresh.clear();
-                self.heap
-                    .release_statement_roots()
-                    .map_err(MachineError::Heap)?;
-            }
+            self.regs.clear();
+            self.pins.clear();
+            self.fresh.clear();
+            self.heap
+                .release_statement_roots()
+                .map_err(MachineError::Heap)?;
             #[cfg(test)]
             self.at_boundary()?;
             if let Some(end) = self.end.take() {
@@ -991,6 +958,70 @@ fn machine_error(halt: Halt) -> MachineError {
         other => MachineError::Fault {
             problem: format!("{other:?}"),
         },
+    }
+}
+
+#[cfg(test)]
+impl KernelMachine {
+    /// The executable the run compiled, under its layout: what a
+    /// continuation law reads resume entries from.
+    pub(crate) fn executable(&self) -> &Executable {
+        &self.exe
+    }
+
+    /// Sets `task`'s state as its next publication writes it: what a
+    /// continuation law plants for a state the grammar refuses.
+    pub(crate) fn tamper_task_state(&mut self, task: TaskId, state: TaskState) -> Result<(), Halt> {
+        self.task(task)?.record.state = state;
+        Ok(())
+    }
+
+    /// The phase of every published frame row that stands at a nested
+    /// action, by task and frame index.
+    pub(crate) fn pending_phases(
+        &mut self,
+    ) -> Vec<(TaskId, usize, lash_kernel_state::paged::PhaseRecord)> {
+        let mut phases = Vec::new();
+        let access = self.heap.pages().clone();
+        self.publish_holdings().expect("the run publishes");
+        self.tasks
+            .visit(&mut |id, task| {
+                for index in 0..task.frames.len() {
+                    if let Ok(Some((_, frame))) = task.frames.rank_get(index, &access)
+                        && let Some(pending) = &frame.pending
+                    {
+                        phases.push((id, index as usize, pending.phase));
+                    }
+                }
+                true
+            })
+            .expect("the task rows read");
+        phases
+    }
+
+    /// Applies `edit` to the saved continuation of `task`'s frame
+    /// `index`: a continuation law's tamper with the grammar.
+    pub(crate) fn tamper_pending(
+        &mut self,
+        task: TaskId,
+        index: usize,
+        edit: impl FnOnce(&mut Option<lash_kernel_state::paged::PendingRecord>, &Access<'_>),
+    ) -> Result<(), String> {
+        let task = self.task(task).map_err(|halt| format!("{halt:?}"))?;
+        let mut edit = Some(edit);
+        let edited = task
+            .frames
+            .pending_mut(index as u64, &mut |pending, access| {
+                if let Some(edit) = edit.take() {
+                    edit(pending, access);
+                }
+            })
+            .map_err(|fault| format!("{fault:?}"))?;
+        if edited {
+            Ok(())
+        } else {
+            Err("the frame has no row".to_string())
+        }
     }
 }
 

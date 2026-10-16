@@ -7,8 +7,8 @@ use num_traits::ToPrimitive;
 use super::lexer::{Spanned, Token, lex};
 use super::{ParseError, ParseErrorReason, is_keyword};
 use crate::ast::{
-    Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode, Literal, MapEntry,
-    Member, Place, ProjectionRead, RecordEntry, Rhs, Stmt, TryStmt,
+    ActExpr, ActKind, Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode,
+    Literal, MapEntry, Member, Place, ProjectionRead, RecordEntry, Rhs, Stmt, TryStmt,
 };
 use crate::document::{Document, Manifest};
 use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Operand};
@@ -587,11 +587,89 @@ impl Parser {
         })
     }
 
+    /// A right-hand side. An action that may nest is read as an
+    /// expression; when it is the whole right-hand side and every argument
+    /// is a variable or a literal, it is the statement's action.
     fn rhs(&mut self) -> Parsed<Rhs> {
-        Ok(match self.action()? {
-            Some(action) => Rhs::Action(action),
-            None => Rhs::Expr(self.expr()?),
+        if !self.at_named_call()
+            && matches!(
+                self.statement_form(),
+                Some(StatementForm::Join | StatementForm::Yield | StatementForm::Cancel)
+            )
+            && let Some(action) = self.action()?
+        {
+            return Ok(Rhs::Action(action));
+        }
+        Ok(match self.expr()? {
+            Expr::Act(act) => match act.as_action() {
+                Some(action) => Rhs::Action(action),
+                None => Rhs::Expr(Expr::Act(act)),
+            },
+            expr => Rhs::Expr(expr),
         })
+    }
+
+    /// An action nested in an expression, when the next word begins one:
+    /// `call`, `apply` or `invoke` a function, `perform`, `sleep` or
+    /// `spawn`. The other statement forms have no expression spelling.
+    fn act(&mut self) -> Parsed<Option<ActExpr>> {
+        let kind = match self.statement_form() {
+            Some(StatementForm::Call) => ActKind::Call(self.act_callee()?),
+            Some(StatementForm::Spawn) => {
+                self.position += 1;
+                ActKind::Spawn(self.act_callee()?)
+            }
+            Some(StatementForm::Perform) => {
+                self.position += 1;
+                let effect = self.qualified_name()?;
+                self.expect(&Token::LParen)?;
+                let args = self.exprs(&Token::RParen)?;
+                self.expect_keyword("as")?;
+                let result = self.ty()?;
+                return Ok(Some(ActExpr {
+                    kind: ActKind::Perform { effect, result },
+                    args,
+                }));
+            }
+            Some(StatementForm::Sleep) => {
+                // `sleep(e)` nests any duration; `sleep x` is the
+                // statement's spelling, a variable or a literal.
+                self.position += 1;
+                let duration = if self.eat(&Token::LParen) {
+                    let duration = self.expr()?;
+                    self.expect(&Token::RParen)?;
+                    duration
+                } else {
+                    match self.atom()? {
+                        Atom::Variable(name) => Expr::Variable(name),
+                        Atom::Literal(literal) => Expr::Literal(literal),
+                    }
+                };
+                return Ok(Some(ActExpr {
+                    kind: ActKind::Sleep,
+                    args: vec![duration],
+                }));
+            }
+            _ => return Ok(None),
+        };
+        self.expect(&Token::LParen)?;
+        Ok(Some(ActExpr {
+            kind,
+            args: self.exprs(&Token::RParen)?,
+        }))
+    }
+
+    /// What a nested call or `spawn` runs: `call`, `apply` or `invoke` and
+    /// its function.
+    fn act_callee(&mut self) -> Parsed<Callee> {
+        Ok(
+            match self.keyword("`call`, `apply` or `invoke`")?.as_str() {
+                "call" => Callee::Declared(self.name()?),
+                "apply" => Callee::Value(self.name()?),
+                "invoke" => Callee::Library(self.function_reference()?),
+                _ => return Err(self.unexpected_previous("`call`, `apply` or `invoke`")),
+            },
+        )
     }
 
     /// The statement form the next word begins, if it begins one.
@@ -682,12 +760,7 @@ impl Parser {
     }
 
     fn callee(&mut self) -> Parsed<(Callee, Vec<Atom>)> {
-        let callee = match self.keyword("`call`, `apply` or `invoke`")?.as_str() {
-            "call" => Callee::Declared(self.name()?),
-            "apply" => Callee::Value(self.name()?),
-            "invoke" => Callee::Library(self.function_reference()?),
-            _ => return Err(self.unexpected_previous("`call`, `apply` or `invoke`")),
-        };
+        let callee = self.act_callee()?;
         Ok((callee, self.atoms()?))
     }
 
@@ -788,7 +861,8 @@ impl Parser {
             && (self.is_word("fn")
                 || self.is_word("read")
                 || self.is_word("if")
-                || self.is_word("let"));
+                || self.is_word("let")
+                || self.is_word("sleep"));
         self.peek_at(offset) == &Token::LParen && !reserved
     }
 
@@ -845,6 +919,9 @@ impl Parser {
                 function,
                 args: self.exprs(&Token::RParen)?,
             });
+        }
+        if let Some(act) = self.act()? {
+            return Ok(Expr::Act(Box::new(act)));
         }
         if let Some(form) = self.statement_form() {
             return Err(self.error(ParseErrorReason::StatementForm { form }));

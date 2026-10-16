@@ -22,6 +22,7 @@ pub use correspondence::{Correspondence, Survivor};
 pub use declarations::{DeclarationRefusal, check_declarations, required_declarations};
 pub use source_map::{SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span};
 mod codec_variants;
+mod continuation;
 mod data_limits;
 mod decode;
 pub use decode::{DecodeMismatch, Decoder};
@@ -54,9 +55,11 @@ mod workflow;
 mod tests;
 
 pub use ast::{
-    Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode, Literal, MapEntry,
-    Member, Node, Place, ProjectionRead, RecordEntry, Rhs, Site, Stmt, TryStmt, Unit,
+    ActExpr, ActKind, Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode,
+    Literal, MapEntry, Member, Node, Place, ProjectionRead, RecordEntry, Rhs, Site, Stmt, TryStmt,
+    Unit,
 };
+pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
     DecodeError, Document, EncodeError, KERNEL_VERSION, Label, MAX_NESTING_DEPTH, Manifest,
 };

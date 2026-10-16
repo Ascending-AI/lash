@@ -8,8 +8,9 @@
 
 use crate::graph_tokens::CodecVariant;
 use crate::{
-    Action, Atom, Callee, Datum, Expr, Formula, Identity, Implementation, JoinMode, Literal,
-    Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt, TaskIdentity, Type, Unit, Value,
+    ActKind, Action, Atom, Callee, Datum, Expr, Formula, Identity, Implementation, JoinMode,
+    Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt, TaskIdentity, Type, Unit,
+    Value,
 };
 
 #[doc(hidden)]
@@ -191,6 +192,19 @@ impl CodecVariant for Expr {
             Self::Read(..) => 12,
             Self::If { .. } => 13,
             Self::Let { .. } => 14,
+            Self::Act(..) => 15,
+        }
+    }
+}
+
+#[doc(hidden)]
+impl CodecVariant for ActKind {
+    fn codec_variant(&self) -> u32 {
+        match self {
+            Self::Call(..) => 0,
+            Self::Perform { .. } => 1,
+            Self::Sleep => 2,
+            Self::Spawn(..) => 3,
         }
     }
 }

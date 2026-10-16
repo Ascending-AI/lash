@@ -2,8 +2,8 @@
 use crate::{FunctionValues, Written};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{
-    Action, Atom, Callee, Document, EffectName, Expr, Function, FunctionId, Literal, Member, Name,
-    Node, Place, Rhs, Signature, Site, Stmt, Unit, ValueKind,
+    ActKind, Action, Atom, Callee, Document, EffectName, Expr, Function, FunctionId, Literal,
+    Member, Name, Node, Place, Rhs, Signature, Site, Stmt, Unit, ValueKind,
 };
 use lash_kernel_state::paged::{
     ClosureView, FrozenRef, HeapLifecycle, HeapWriteError, PagedHeap, SemanticHeap,
@@ -492,6 +492,24 @@ impl Reads {
             Expr::Read(read) => {
                 self.expr(&read.handle, bound);
                 self.expr(&read.request, bound);
+            }
+            Expr::Act(act) => {
+                match &act.kind {
+                    ActKind::Call(callee) | ActKind::Spawn(callee) => match callee {
+                        Callee::Declared(name) => {
+                            self.declared.insert(name.clone());
+                        }
+                        Callee::Value(name) => self.name(name, bound),
+                        Callee::Library(function) => {
+                            self.library.insert(*function);
+                        }
+                    },
+                    ActKind::Perform { effect, .. } => {
+                        self.effects.insert(effect.clone());
+                    }
+                    ActKind::Sleep => {}
+                }
+                act.args.iter().for_each(|arg| self.expr(arg, bound));
             }
         }
     }

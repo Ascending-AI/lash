@@ -2,7 +2,7 @@ use lash_kernel_dialect::Library;
 
 use crate::define_helpers;
 
-/// Every helper source is kernel text that satisfies the statement rule and
+/// Every helper source is kernel text that structural validation admits and
 /// calls only functions the library holds, and every name the lowerer
 /// emits a call to is defined.
 #[test]

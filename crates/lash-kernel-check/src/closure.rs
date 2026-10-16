@@ -20,12 +20,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    Document, EffectName, FunctionCatalog, Literal, Name, Signature, Site, Type, Unit,
+    Document, EffectName, FunctionCatalog, FunctionId, Literal, Name, Signature, Site, Type, Unit,
 };
 
 use crate::graph::{
-    ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, NodeKind, PlaceNode, Reference,
-    StmtNode,
+    ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, NodeId, NodeKind,
+    PlaceNode, Reference, StmtNode,
 };
 
 /// Why an entry's linked-effect set cannot be certified.
@@ -151,32 +151,58 @@ fn linked_units(graph: &Graph, catalog: &dyn FunctionCatalog, root: Unit) -> Lin
     let mut callback_helpers = BTreeMap::new();
     for node in &graph.nodes {
         let unit = runs.entry(node.site.unit.clone()).or_default();
+        // A library function with a kernel-code body calls the functions
+        // it is passed: what the expressions passed to it can hold.
+        let mut library_call = |unit: &mut Runs, function: &FunctionId, args: &[NodeId]| {
+            if !*callback_helpers
+                .entry(*function)
+                .or_insert_with(|| library_calls_values(catalog, function))
+            {
+                return;
+            }
+            for argument in args {
+                let argument = graph.node(*argument);
+                let known = targets_of(graph, argument.id, &targets);
+                if !known.is_empty() {
+                    unit.calls.extend(known);
+                    continue;
+                }
+                match &argument.kind {
+                    NodeKind::Expr(ExprNode::Literal(Literal::Function(name))) => {
+                        unit.calls.insert(name.clone());
+                    }
+                    NodeKind::Expr(ExprNode::Variable(Reference::Binding(binding)))
+                        if closures.contains(binding) => {}
+                    _ if argument.facet.as_ref().is_none_or(may_hold_function) => {
+                        unit.value_call.get_or_insert_with(|| node.site.clone());
+                    }
+                    _ => {}
+                }
+            }
+        };
         let action = match &node.kind {
             NodeKind::Action(action) => action,
             NodeKind::Expr(ExprNode::Call { function, args }) => {
-                if *callback_helpers
-                    .entry(*function)
-                    .or_insert_with(|| library_calls_values(catalog, function))
-                {
-                    for argument in args {
-                        let argument = graph.node(*argument);
-                        let known = targets_of(graph, argument.id, &targets);
-                        if !known.is_empty() {
-                            unit.calls.extend(known);
-                            continue;
-                        }
-                        match &argument.kind {
-                            NodeKind::Expr(ExprNode::Literal(Literal::Function(name))) => {
-                                unit.calls.insert(name.clone());
-                            }
-                            NodeKind::Expr(ExprNode::Variable(Reference::Binding(binding)))
-                                if closures.contains(binding) => {}
-                            _ if argument.facet.as_ref().is_none_or(may_hold_function) => {
-                                unit.value_call.get_or_insert_with(|| node.site.clone());
-                            }
-                            _ => {}
-                        }
+                library_call(unit, function, args);
+                continue;
+            }
+            NodeKind::Expr(ExprNode::Act { kind, args }) => {
+                match kind {
+                    ActNode::Perform { effect, .. } => {
+                        unit.effects.insert(effect.clone());
                     }
+                    ActNode::Call(callee) | ActNode::Spawn(callee) => match callee {
+                        CalleeNode::Declared(name) => {
+                            unit.calls.insert(name.clone());
+                        }
+                        CalleeNode::Value(Reference::Binding(binding))
+                            if closures.contains(binding) => {}
+                        CalleeNode::Value(_) => {
+                            unit.value_call.get_or_insert_with(|| node.site.clone());
+                        }
+                        CalleeNode::Library(function) => library_call(unit, function, args),
+                    },
+                    ActNode::Sleep => {}
                 }
                 continue;
             }
@@ -425,7 +451,13 @@ fn targets_of(
         }
         NodeKind::Expr(ExprNode::If { then, r#else, .. }) => union(&[*then, *r#else]),
         NodeKind::Expr(ExprNode::Let { body, .. }) => targets_of(graph, *body, targets),
-        NodeKind::Expr(ExprNode::Call { args, .. }) => union(args),
+        NodeKind::Expr(
+            ExprNode::Call { args, .. }
+            | ExprNode::Act {
+                kind: ActNode::Call(_) | ActNode::Spawn(_),
+                args,
+            },
+        ) => union(args),
         NodeKind::Action(ActionNode::Call { args, .. } | ActionNode::Spawn { args, .. }) => args
             .iter()
             .flat_map(|arg| targets_of_atom(arg, targets))

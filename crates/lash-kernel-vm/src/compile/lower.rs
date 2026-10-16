@@ -18,11 +18,14 @@
 use lash_kernel_doc as doc;
 use lash_kernel_doc::Name;
 use lash_kernel_exec::{
-    BlockIx, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx, Op, OpRange, Reg,
-    RegRange,
+    ActIx, BlockIx, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx, Op, OpRange,
+    Reg, RegRange,
 };
 
-use super::{Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Stmt, Var};
+use super::{
+    Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Nested, NestedCallee,
+    NestedKind, Runs, Stmt, Var,
+};
 
 /// One statement's ops as they are gathered, and how many registers they
 /// use.
@@ -78,6 +81,8 @@ enum Target {
 impl Compiler<'_> {
     pub(super) fn stmt(&mut self, stmt: &doc::Stmt) -> Stmt {
         let mut ops = self.ops();
+        let outer_depth = std::mem::replace(&mut self.stmt_depth, self.path.len() as u32);
+        let live = self.live.len();
         let mut form = match stmt {
             doc::Stmt::Let { name, value } => {
                 // The right-hand side does not see the variable it binds.
@@ -126,13 +131,27 @@ impl Compiler<'_> {
                 doc::Place::Member(member) => {
                     // The target and the index are evaluated after the
                     // right-hand side, which register 0 holds meanwhile
-                    // (`K-FORM-005`, `K-FORM-006`); they compile first, as
-                    // their children come first.
+                    // (`K-FORM-005`, `K-FORM-006`): a role of any action
+                    // nested in them. They compile first, as their
+                    // children come first.
+                    let value_index = match member {
+                        doc::Member::Field { .. } => 1,
+                        doc::Member::Index { .. } => 2,
+                    };
+                    self.live.push((self.stmt_depth, value_index, Reg(0)));
                     let mut written = self.ops();
+                    let first_nested = self.stream.nested.len();
                     let (field, next) = self.member(&mut written, member, 0, Reg(1));
+                    let place_nested = self.stream.nested.len();
+                    self.live.truncate(live);
                     let form = self.child(next, |c| c.rhs(&mut ops, value));
                     ops.push(Op::Pin { src: Reg(0) });
                     ops.regs = ops.regs.max(written.regs);
+                    // The place's actions resume in the statement's range.
+                    let offset = ops.ops.len() as u32;
+                    for nested in &mut self.stream.nested[first_nested..place_nested] {
+                        nested.resume += offset;
+                    }
                     ops.ops.append(&mut written.ops);
                     self.spare.push(written.ops);
                     let (target, src) = (Reg(1), Reg(0));
@@ -256,6 +275,8 @@ impl Compiler<'_> {
             };
             range.len = 1;
         }
+        self.live.truncate(live);
+        self.stmt_depth = outer_depth;
         Stmt {
             ordinal: None,
             ops: range,
@@ -308,12 +329,12 @@ impl Compiler<'_> {
     ) -> (Option<FieldIx>, u32) {
         match member {
             doc::Member::Field { target, field } => {
-                self.child(first, |c| c.expr(ops, target, at));
+                self.expr_at(ops, first, target, at);
                 (Some(self.field(field)), first + 1)
             }
             doc::Member::Index { target, index } => {
-                self.child(first, |c| c.expr(ops, target, at));
-                self.child(first + 1, |c| c.expr(ops, index, at.next()));
+                self.expr_at(ops, first, target, at);
+                self.expr_at(ops, first + 1, index, at.next());
                 (None, first + 2)
             }
         }
@@ -381,7 +402,7 @@ impl Compiler<'_> {
     fn exprs(&mut self, ops: &mut Ops, exprs: &[doc::Expr], at: Reg) -> RegRange {
         for (index, expr) in exprs.iter().enumerate() {
             let reg = Reg(at.0 + index as u32);
-            self.child(index as u32, |c| c.expr(ops, expr, reg));
+            self.expr_at(ops, index as u32, expr, reg);
         }
         RegRange {
             start: at,
@@ -389,11 +410,80 @@ impl Compiler<'_> {
         }
     }
 
+    /// Child `index` of the node being compiled, into `reg`: from then on a
+    /// role of any action nested after it, until its parent ends.
+    fn expr_at(&mut self, ops: &mut Ops, index: u32, expr: &doc::Expr, reg: Reg) {
+        let depth = self.path.len() as u32;
+        self.child(index, |c| c.expr(ops, expr, reg));
+        self.live.push((depth, index, reg));
+    }
+
+    /// An action nested in an expression, its arguments in the registers
+    /// from `dst` and its value to `dst`: its resume entry, with the roles
+    /// standing now, then its op. A library call whose native answers here
+    /// keeps its plain call op: its entry is for a run parked in the body
+    /// under a registry where the body runs.
+    fn nested(
+        &mut self,
+        ops: &mut Ops,
+        kind: NestedKind,
+        read: Option<Var>,
+        args: &[doc::Expr],
+        dst: Reg,
+    ) {
+        let roles = self
+            .live
+            .iter()
+            .map(|&(depth, index, reg)| {
+                let mut path = self.path[..depth as usize].to_vec();
+                path.push(index);
+                (doc::Site::new(self.unit.clone(), path), reg)
+            })
+            .collect();
+        let site = self.site();
+        let args = match read {
+            // The callee comes before the arguments (`K-EVAL-004`), a role
+            // of the actions in them under the action's own site.
+            Some(var) => {
+                self.read(ops, var, dst);
+                let live = self.live.len();
+                let depth = self.path.len() - 1;
+                self.live.push((depth as u32, self.path[depth], dst));
+                let rest = self.exprs(ops, args, Reg(dst.0 + 1));
+                self.live.truncate(live);
+                RegRange {
+                    start: dst,
+                    len: rest.len + 1,
+                }
+            }
+            None => self.exprs(ops, args, dst),
+        };
+        let act = ActIx(self.stream.nested.len() as u32);
+        let op = match kind {
+            NestedKind::Body(lib) if self.resolve.runs(lib) == Runs::Natively => Op::Call {
+                lib: LibIx(lib.0),
+                args,
+            },
+            _ => Op::Nested { act, args },
+        };
+        self.stream.nested_at.insert(site.clone(), act);
+        self.stream.nested.push(Nested {
+            site,
+            depth: self.stmt_depth,
+            kind,
+            resume: ops.ops.len() as u32 + 1,
+            dst,
+            roles,
+        });
+        ops.push(op);
+    }
+
     /// An expression's value into register `dst`, charged before its
     /// sub-expressions.
     fn expr(&mut self, ops: &mut Ops, expr: &doc::Expr, dst: Reg) {
         ops.charge();
         ops.uses(dst);
+        let live = self.live.len();
         match expr {
             doc::Expr::Literal(literal) => {
                 let c = self.constant(literal.clone());
@@ -419,8 +509,8 @@ impl Compiler<'_> {
                 for (index, entry) in entries.iter().enumerate() {
                     let index = index as u32 * 2;
                     let (key, value) = (Reg(dst.0 + index), Reg(dst.0 + index + 1));
-                    self.child(index, |c| c.expr(ops, &entry.key, key));
-                    self.child(index + 1, |c| c.expr(ops, &entry.value, value));
+                    self.expr_at(ops, index, &entry.key, key);
+                    self.expr_at(ops, index + 1, &entry.value, value);
                 }
                 ops.push(Op::MakeMap {
                     entries: RegRange {
@@ -432,7 +522,7 @@ impl Compiler<'_> {
             doc::Expr::Record(entries) => {
                 for (index, entry) in entries.iter().enumerate() {
                     let reg = Reg(dst.0 + index as u32);
-                    self.child(index as u32, |c| c.expr(ops, &entry.value, reg));
+                    self.expr_at(ops, index as u32, &entry.value, reg);
                 }
                 let fields = FieldListIx(self.stream.field_lists.len() as u32);
                 self.stream
@@ -448,13 +538,13 @@ impl Compiler<'_> {
             }
             doc::Expr::Member(member) => match member.as_ref() {
                 doc::Member::Field { target, field } => {
-                    self.child(0, |c| c.expr(ops, target, dst));
+                    self.expr_at(ops, 0, target, dst);
                     let field = self.field(field);
                     ops.push(Op::Field { at: dst, field });
                 }
                 doc::Member::Index { target, index } => {
-                    self.child(0, |c| c.expr(ops, target, dst));
-                    self.child(1, |c| c.expr(ops, index, dst.next()));
+                    self.expr_at(ops, 0, target, dst);
+                    self.expr_at(ops, 1, index, dst.next());
                     ops.push(Op::Index { at: dst });
                 }
             },
@@ -473,6 +563,11 @@ impl Compiler<'_> {
                 });
             }
             doc::Expr::Call { function, args } => match self.resolve.lib(function) {
+                // A function that runs its body enters a frame: the
+                // statement stands at the call (`K-EVAL-008`).
+                Some(lib) if self.resolve.runs(lib) != Runs::Answers => {
+                    self.nested(ops, NestedKind::Body(lib), None, args, dst);
+                }
                 Some(lib) => {
                     let args = self.exprs(ops, args, dst);
                     ops.push(Op::Call {
@@ -533,11 +628,33 @@ impl Compiler<'_> {
                 }
             }
             doc::Expr::Read(read) => {
-                self.child(0, |c| c.expr(ops, &read.handle, dst));
-                self.child(1, |c| c.expr(ops, &read.request, dst.next()));
+                self.expr_at(ops, 0, &read.handle, dst);
+                self.expr_at(ops, 1, &read.request, dst.next());
                 ops.push(Op::HostRead { at: dst });
             }
+            doc::Expr::Act(act) => {
+                let mut read = None;
+                let mut runs = |callee: &doc::Callee| match self.callee(callee) {
+                    Callee::Declared(code) => NestedCallee::Declared(code),
+                    Callee::Library(lib) => NestedCallee::Library(lib),
+                    Callee::Value(var) => {
+                        read = Some(var);
+                        NestedCallee::Read
+                    }
+                };
+                let kind = match &act.kind {
+                    doc::ActKind::Call(callee) => NestedKind::Call(runs(callee)),
+                    doc::ActKind::Perform { effect, result } => NestedKind::Perform {
+                        effect: effect.clone(),
+                        result: result.clone(),
+                    },
+                    doc::ActKind::Sleep => NestedKind::Sleep,
+                    doc::ActKind::Spawn(callee) => NestedKind::Spawn(runs(callee)),
+                };
+                self.nested(ops, kind, read, &act.args, dst);
+            }
         }
+        self.live.truncate(live);
     }
 
     /// Reads a variable into `dst`.

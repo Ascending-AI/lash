@@ -53,8 +53,8 @@ impl From<Invalid> for Refused {
 #[non_exhaustive]
 pub enum RefusalReason {
     /// The document, or the body of a library function it reaches, fails
-    /// structural validation (`K-DOC-005`); the statement rule is one such
-    /// check (`K-STMT-002`).
+    /// structural validation (`K-DOC-005`), a call by name of a function
+    /// with no native implementation among them (`K-LIB-002`).
     #[error("{0}")]
     Invalid(InvalidReason),
     /// `K-ADM-001`: the environment provides no such effect.

@@ -272,3 +272,19 @@ replaced the set's before the temporary set was dropped. Every fresh image
 recorded exactly the result the set names; the set keeps its id, programs,
 versions and every oracle member. The pre-heap refusal witnesses keep their
 bytes.
+
+FIG-6439 gave the heap's frame row (`FrameRecord`) its pending
+continuation in place: a frame standing at an action nested in its
+statement's expression keeps the action's site, its phase and the operand
+values already evaluated. Every image holding a frame row of the old seven-field
+shape is refused with `expected 8 fields, found 7`, or its process cannot
+advance; each of `lashvm`, `session` and set
+`4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1`'s six images was shown to fail on
+this build alone. They were re-recorded in place with their recorders on a
+tree rebased onto `origin/main` (`a444ae6c6a`, after FIG-6256's logical
+identities): the two baseline recorders, then
+`corpus::record_current_parked_image_set` under a temporary build id whose
+fresh image bytes replaced the set's before the temporary set was dropped.
+Each fresh image recorded exactly the result the set names. The set keeps its
+id, programs, helper catalogue, version constants and every oracle member.
+Both pre-heap refusal witnesses keep their bytes.

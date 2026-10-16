@@ -89,11 +89,12 @@ tasks, the ready order, waits, list joins, withdrawn waits and the ones the
 next park reports, read-bound effects and a session cell's bindings, plus
 its exact meters. The table is [kernel design §6](../kernel/design.md#6-parked-runs).
 
-- A frame persists semantic coordinates only: its pending statement's site,
-  bindings by name and declaring site, loops, `finally` departures, values
-  a loop iterates and a library call's arguments. Registers, inline frames
-  and compiled code, statement and slot numbers are rebuilt caches and are
-  never at a checkpoint.
+- A frame persists semantic coordinates only: its pending statement's site
+  and, at an action nested in it, that action's site, phase and operand
+  roles by site (`K-EVAL-008`), bindings by name and declaring site, loops,
+  `finally` departures, values a loop iterates and a library call's
+  arguments. Registers and compiled code, statement and slot numbers are
+  rebuilt caches and are never at a checkpoint.
 - A wait is keyed by its number and holds its task, its kind and its phase:
   `Issued` with its frozen request, `Admitted`, or `Committed` with its
   frozen outcome. Issuing freezes the request once; the park that reports

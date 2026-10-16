@@ -1,20 +1,107 @@
 //! Derived frame coordinates beside the canonical paged frame stack.
 //! Slots are mutable while a frame executes. Synchronization publishes only
 //! their pending edits to the declaring-site tree, beside its control records.
+//!
+//! A frame that stands at an action nested in its statement's expression
+//! is decoded through the grammar of saved continuations (`K-EVAL-008`):
+//! the action and its roles are found by site in the statement's resume
+//! entries under this layout, and the phase must agree with the action's
+//! kind and with how the task comes to the frame.
 use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
-use crate::compile::{Executable, Form};
+use crate::compile::{Executable, Form, NestedKind, StmtId};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{Site, Unit, Value};
+use lash_kernel_exec::ActIx;
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{
-    BindingRecord, BoundRecord, EnteredRecord, FinallyRecord, FrameRecord, IteratedRecord,
-    LoopRecord,
+    BindingRecord, BoundRecord, EnteredRecord, FinallyRecord, FrameRecord, IncomingRecord,
+    IteratedRecord, LoopRecord, PendingRecord, PhaseRecord, RoleRecord, TaskStateRecord,
 };
+use std::collections::BTreeSet;
+use std::fmt;
 use std::sync::Arc;
 
 fn malformed(problem: impl Into<String>) -> HeapFault {
     HeapFault::Malformed(problem.into())
+}
+
+/// How a task comes to the top frame being decoded: what a saved
+/// continuation there may claim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ParkKind {
+    /// The frame stands where it was last pushed or published, and nothing
+    /// resumes it: it stands between statements.
+    Fresh,
+    /// The frame above it has just returned or raised into it.
+    Returned,
+    /// The task waits on a request, or its outcome has been delivered.
+    Requested,
+    /// A raise has been delivered: a `cancel` at the task's wait or turn.
+    Raised,
+    /// A value has been delivered: a `spawn`'s handle among them.
+    Valued { handle: bool },
+    /// The task joins, or a join has decided.
+    Joined,
+}
+
+impl ParkKind {
+    /// How a task in `state` comes to its top frame.
+    pub(super) fn of(state: &TaskStateRecord) -> Self {
+        match state {
+            TaskStateRecord::Waiting(_) | TaskStateRecord::Resuming(IncomingRecord::Outcome(_)) => {
+                Self::Requested
+            }
+            TaskStateRecord::Resuming(IncomingRecord::Raise(_)) => Self::Raised,
+            TaskStateRecord::Resuming(IncomingRecord::Value(value)) => Self::Valued {
+                handle: matches!(value, Value::Task(_)),
+            },
+            TaskStateRecord::Joining(_)
+            | TaskStateRecord::JoiningMany(_)
+            | TaskStateRecord::Resuming(IncomingRecord::Joined(_)) => Self::Joined,
+            _ => Self::Fresh,
+        }
+    }
+}
+
+/// Why a saved continuation is refused where a frame is decoded
+/// (`K-EVAL-008`): each names the site it is about.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ContinuationRefusal {
+    /// The saved action site is no action nested in the frame's statement.
+    UnknownSite { site: Site },
+    /// The phase cannot stand at that action, or where the task is.
+    IllegalPhase { site: Site, phase: &'static str },
+    /// A role the action's continuation keeps is not saved.
+    MissingRole { site: Site },
+    /// A saved role is none the action's continuation keeps.
+    ExtraRole { site: Site },
+    /// The task's state does not agree with the phase.
+    TaskState { site: Site },
+}
+
+impl fmt::Display for ContinuationRefusal {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownSite { site } => write!(out, "no nested action at {site}"),
+            Self::IllegalPhase { site, phase } => {
+                write!(out, "the action at {site} cannot stand at phase {phase}")
+            }
+            Self::MissingRole { site } => write!(out, "the role {site} is not saved"),
+            Self::ExtraRole { site } => write!(out, "the saved role {site} is no role"),
+            Self::TaskState { site } => {
+                write!(out, "the task's state disagrees with the action at {site}")
+            }
+        }
+    }
+}
+
+fn phase_name(phase: PhaseRecord) -> &'static str {
+    match phase {
+        PhaseRecord::Called => "called",
+        PhaseRecord::Waiting => "waiting",
+        PhaseRecord::Spawned => "spawned",
+    }
 }
 
 fn row<T: Cell>(tree: &Tree<T>, index: u64, access: &Access<'_>) -> Result<T, HeapFault> {
@@ -188,15 +275,26 @@ impl Frame {
 
     fn sync_to(&mut self, coordinates: bool) -> Result<(), HeapFault> {
         self.sync_slots()?;
-        if coordinates && let Some(Control::Block { block, next }) = self.control.last() {
-            let index = if self.awaiting.is_some() || self.calling.is_some() {
+        // A frame stands at its block's next statement, or at the statement
+        // it waits in: a `while` waits in its condition above its loop.
+        let block = match self.control.as_slice() {
+            [.., Control::Block { block, next }] => Some((*block, *next)),
+            [.., Control::Block { block, next }, Control::While { .. }]
+                if self.awaiting.is_some() =>
+            {
+                Some((*block, *next))
+            }
+            _ => None,
+        };
+        if coordinates && let Some((block, next)) = block {
+            let index = if self.awaiting.is_some() {
                 next.checked_sub(1)
                     .ok_or_else(|| malformed("a frame awaits a statement it has not issued"))?
             } else {
-                *next
+                next
             };
             let statement =
-                self.exe.block(*block).site.child(
+                self.exe.block(block).site.child(
                     u32::try_from(index).map_err(|_| malformed("statement ordinal overflows"))?,
                 );
             if !self.record.statement.matches(&statement, &self.access)? {
@@ -365,17 +463,17 @@ pub(super) struct Frames {
     cache: Vec<(u64, Box<Frame>)>,
     access: Access<'static>,
     exe: Arc<Executable>,
-    continues: bool,
+    parked: ParkKind,
 }
 impl Frames {
     pub(super) fn new(access: Access<'static>, exe: Arc<Executable>) -> Self {
-        Self::open(Tree::new(true), access, exe, false)
+        Self::open(Tree::new(true), access, exe, ParkKind::Fresh)
     }
     pub(super) fn open(
         rows: Tree<FrameRecord>,
         access: Access<'static>,
         exe: Arc<Executable>,
-        continues: bool,
+        parked: ParkKind,
     ) -> Self {
         Self {
             len: rows.len(),
@@ -383,7 +481,7 @@ impl Frames {
             cache: Vec::new(),
             access,
             exe,
-            continues,
+            parked,
         }
     }
     pub(super) fn len(&self) -> usize {
@@ -401,7 +499,7 @@ impl Frames {
             let record = row(&self.rows, index, &self.access)?;
             let frame = restore(
                 record,
-                self.continues,
+                self.parked,
                 self.access.clone(),
                 Arc::clone(&self.exe),
             )?;
@@ -415,7 +513,7 @@ impl Frames {
         // discards the call without ever writing it.
         self.cache.push((self.len, frame));
         self.len += 1;
-        self.continues = false;
+        self.parked = ParkKind::Fresh;
     }
     pub(super) fn pop(&mut self) -> Result<Option<Box<Frame>>, HeapFault> {
         if self.is_empty() {
@@ -424,14 +522,14 @@ impl Frames {
         self.last_mut()?;
         let frame = self.cache.pop().map(|(_, frame)| frame);
         self.len -= 1;
-        self.continues = true;
+        self.parked = ParkKind::Returned;
         Ok(frame)
     }
     pub(super) fn clear(&mut self) {
         self.rows = Tree::new(true);
         self.len = 0;
         self.cache.clear();
-        self.continues = false;
+        self.parked = ParkKind::Fresh;
     }
     pub(super) fn flush(&mut self) -> Result<(), HeapFault> {
         truncate(&mut self.rows, self.len, &self.access)?;
@@ -469,9 +567,29 @@ impl Frames {
         }
         Ok(())
     }
-    pub(super) fn pinned(&self) -> bool {
-        self.cache.iter().any(|(_, frame)| frame.calling.is_some())
+    /// Applies `edit` to the saved continuation of the frame at `index`:
+    /// in its decoded frame when the cache holds it, else in its row.
+    /// `false` when no frame has that index.
+    #[cfg(test)]
+    pub(super) fn pending_mut(
+        &mut self,
+        index: u64,
+        edit: &mut dyn FnMut(&mut Option<PendingRecord>, &Access<'_>),
+    ) -> Result<bool, HeapFault> {
+        let access = self.access.clone();
+        if let Some((_, frame)) = self.cache.iter_mut().find(|(at, _)| *at == index) {
+            edit(&mut frame.record.pending, &access);
+            return Ok(true);
+        }
+        let key = ordinal_key(index);
+        let Some(mut record) = self.rows.get(&key, &access)? else {
+            return Ok(false);
+        };
+        edit(&mut record.pending, &access);
+        self.rows.write(key, record, &access)?;
+        Ok(true)
     }
+
     /// The frames the cache holds, by their index in the stack.
     pub(super) fn cached(&self) -> Vec<(usize, &Frame)> {
         self.cache
@@ -500,7 +618,7 @@ impl Frames {
 
 fn restore(
     record: FrameRecord,
-    continues: bool,
+    parked: ParkKind,
     access: Access<'static>,
     exe: Arc<Executable>,
 ) -> Result<Box<Frame>, HeapFault> {
@@ -518,12 +636,37 @@ fn restore(
     let mut iterated = 0;
     let mut departing = 0;
     let mut awaiting = None;
+    let mut nested = None;
     let nowhere = || malformed(format!("{} is no statement of the admitted document", site));
     loop {
         let index = *site.path.get(depth).ok_or_else(nowhere)? as usize;
         let stmts = &exe.block(block).stmts;
         if depth + 1 == site.path.len() {
-            let next = if continues {
+            let next = if let Some(pending) = &record.pending {
+                let stmt = *stmts.get(index).ok_or_else(nowhere)?;
+                let saved = pending.roles(&access)?;
+                let act = continuation(&exe, stmt, &site, pending, &saved, parked)
+                    .map_err(|refusal| malformed(format!("continuation refused: {refusal}")))?;
+                nested = Some(act);
+                awaiting = Some(stmt);
+                control.push(Control::Block {
+                    block,
+                    next: index + 1,
+                });
+                // A `while` waits in its condition: it stands above its loop.
+                if let Form::While { site: at, .. } = &exe.stmt(stmt).form {
+                    let saved = row(&record.loops, loops, &access)?;
+                    loops += 1;
+                    if !saved.site.matches(at, &access)? || saved.position.is_some() {
+                        return Err(malformed("a saved while has another site or a position"));
+                    }
+                    control.push(Control::While {
+                        stmt,
+                        started: saved.started,
+                    });
+                }
+                break;
+            } else if parked != ParkKind::Fresh {
                 let stmt = *stmts.get(index).ok_or_else(nowhere)?;
                 if !matches!(exe.stmt(stmt).form, Form::Action(_)) {
                     return Err(malformed("a resuming frame has no action"));
@@ -674,9 +817,98 @@ fn restore(
         exe,
         control,
         awaiting,
+        nested,
         library,
-        calling: None,
     }))
+}
+
+/// The resume entry of `pending`, the continuation a frame saved where it
+/// stands at an action nested in statement `stmt`, at `site`: when the
+/// grammar admits it beside `parked` (`K-EVAL-008`). Its action names one
+/// of the statement's nested actions, its phase is that action's and can
+/// stand where the task is, and its roles are exactly the action's, as a
+/// set. Sites in the record are path suffixes under `site`.
+fn continuation(
+    exe: &Executable,
+    stmt: StmtId,
+    site: &Site,
+    pending: &PendingRecord,
+    saved: &[RoleRecord],
+    parked: ParkKind,
+) -> Result<ActIx, ContinuationRefusal> {
+    let (stream, _, _) = exe.statement(stmt);
+    let depth = site.path.len();
+    let at = |suffix: &[u32]| {
+        Site::new(
+            site.unit.clone(),
+            site.path.iter().chain(suffix).copied().collect::<Vec<_>>(),
+        )
+    };
+    let action = at(&pending.site);
+    // The entry must be the statement's own: an action in a closure
+    // written inside it belongs to the closure's statement.
+    let Some((act, entry)) = stream
+        .nested_at
+        .get(&action)
+        .map(|act| (*act, &stream.nested[act.ix()]))
+        .filter(|(_, entry)| entry.depth as usize == depth)
+    else {
+        return Err(ContinuationRefusal::UnknownSite { site: action });
+    };
+    let kind = matches!(
+        (pending.phase, &entry.kind),
+        (
+            PhaseRecord::Called,
+            NestedKind::Call(_) | NestedKind::Body(_)
+        ) | (
+            PhaseRecord::Waiting,
+            NestedKind::Perform { .. } | NestedKind::Sleep
+        ) | (PhaseRecord::Spawned, NestedKind::Spawn(_))
+    );
+    if !kind || parked == ParkKind::Fresh {
+        return Err(ContinuationRefusal::IllegalPhase {
+            site: action,
+            phase: phase_name(pending.phase),
+        });
+    }
+    let agrees = match pending.phase {
+        PhaseRecord::Called => parked == ParkKind::Returned,
+        PhaseRecord::Waiting => matches!(parked, ParkKind::Requested | ParkKind::Raised),
+        PhaseRecord::Spawned => {
+            matches!(parked, ParkKind::Valued { handle: true } | ParkKind::Raised)
+        }
+    };
+    if !agrees {
+        return Err(ContinuationRefusal::TaskState { site: action });
+    }
+    let mut sites = BTreeSet::new();
+    if let Some(twice) = saved
+        .iter()
+        .find(|role| !sites.insert(role.site.as_slice()))
+    {
+        return Err(ContinuationRefusal::ExtraRole {
+            site: at(&twice.site),
+        });
+    }
+    let saved = sites;
+    let expected: BTreeSet<&[u32]> = entry
+        .roles
+        .iter()
+        .map(|(role, _)| &role.path[depth..])
+        .collect();
+    if let Some(extra) = saved.iter().find(|role| !expected.contains(*role)) {
+        return Err(ContinuationRefusal::ExtraRole { site: at(extra) });
+    }
+    if let Some((missing, _)) = entry
+        .roles
+        .iter()
+        .find(|(role, _)| !saved.contains(&role.path[depth..]))
+    {
+        return Err(ContinuationRefusal::MissingRole {
+            site: missing.clone(),
+        });
+    }
+    Ok(act)
 }
 
 #[cfg(test)]

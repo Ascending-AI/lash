@@ -1,4 +1,5 @@
-//! Actions: calls, waits and tasks (`K-STMT-001`, `K-TASK`).
+//! Actions: calls, waits and tasks (`K-TASK`), as a statement's own action
+//! or nested in its expression (`K-EVAL-008`).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -10,19 +11,27 @@ use lash_kernel_doc::{
 use num_traits::ToPrimitive;
 
 use super::exec::Call;
-use super::ops::{Entry, Flow, Reg, Status};
+use super::ops::{Flow, Reg, Status};
+use super::stream::Running;
 use super::{
     Eval, Halt, Incoming, Interrupt, Joiner, KernelMachine, ListJoin, Task, TaskState, Wait, bound,
     error, fault, raise,
 };
-use crate::compile::{Action, ActionKind, Atom, Callee, CodeId, Executable, Form, LibId, StmtId};
+use crate::compile::{
+    Action, ActionKind, Atom, Callee, CodeId, Executable, Form, LibId, LibRun, Nested,
+    NestedCallee, NestedKind, StmtId,
+};
+use crate::heap::value_bytes;
 use crate::interface::{Bound, EffectMode, EffectRequest, Host, Request, SleepRequest, WaitId};
 use lash_kernel_doc::NativeHeap;
 use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
 use lash_kernel_doc::heap::{ErrorRef, Payload};
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::tree::{Access, Cell, Tree};
-use lash_kernel_state::paged::{ObjectInit, SemanticHeap, WaitKindRecord, WaitPhase, WaitRecord};
+use lash_kernel_state::paged::{
+    ObjectInit, PendingRecord, PhaseRecord, RoleRecord, SemanticHeap, WaitKindRecord, WaitPhase,
+    WaitRecord,
+};
 
 /// What a call or a `spawn` runs, once its callee is read.
 enum Target {
@@ -108,33 +117,8 @@ impl KernelMachine {
                 Ok(Flow::Step)
             }
             ActionKind::Sleep(duration) => {
-                let duration = match self.atom(task, exe, duration)? {
-                    Value::Int(integer)
-                        if !match &integer {
-                            lash_kernel_doc::heap::IntRef::Inline(i) => i.is_negative(),
-                            lash_kernel_doc::heap::IntRef::Paged { summary, .. } => {
-                                summary.negative
-                            }
-                        } =>
-                    {
-                        Duration::from_millis(match integer {
-                            lash_kernel_doc::heap::IntRef::Inline(integer) => {
-                                integer.to_u64().unwrap_or(u64::MAX)
-                            }
-                            _ => u64::MAX,
-                        })
-                    }
-                    Value::Float(float) if float.get().is_finite() && float.get() >= 0.0 => {
-                        Duration::try_from_secs_f64(float.get() / 1000.0).unwrap_or(Duration::MAX)
-                    }
-                    Value::Int(_) | Value::Float(_) => {
-                        return raise(
-                            "number_range",
-                            "`sleep` takes a duration that is finite and not negative",
-                        );
-                    }
-                    _ => return raise("type_error", "`sleep` takes a number of milliseconds"),
-                };
+                let duration = self.atom(task, exe, duration)?;
+                let duration = sleep_duration(duration)?;
                 let wait = self.request(task, stmt, &action.site)?;
                 self.issue(
                     task,
@@ -232,7 +216,6 @@ impl KernelMachine {
                 }
             }
             ActionKind::Yield => {
-                self.leaves_no_call(task)?;
                 let yielding = self.task(task)?;
                 yielding.wake(Incoming::Value(Value::Null));
                 self.frame(task)?.awaiting = Some(stmt);
@@ -252,6 +235,157 @@ impl KernelMachine {
                 Ok(Flow::Done)
             }
         }
+    }
+
+    /// An action nested in statement `running`'s expression, its
+    /// arguments the registers `args` and its resume entry `act`
+    /// (`K-EVAL-008`). `Done` is one that completed at once, its value in
+    /// `args.start`. `Step` is one the task now waits in, a call whose
+    /// frame now runs or a `spawn` whose child does: the frame stands at
+    /// the action, the operands its statement evaluated saved as its
+    /// continuation's roles.
+    pub(super) fn nested_act(
+        &mut self,
+        host: &mut dyn Host,
+        running: &Running<'_>,
+        act: lash_kernel_exec::ActIx,
+        args: lash_kernel_exec::RegRange,
+    ) -> Status {
+        let (task, exe, stmt) = (running.task, running.exe, running.id);
+        let entry = running
+            .stream
+            .nested
+            .get(act.ix())
+            .ok_or_else(|| fault("a nested op names no resume entry"))?;
+        let count = args.len as usize;
+        let args = args.start.0 as usize;
+        let site = &entry.site;
+        let library = matches!(site.unit, lash_kernel_doc::Unit::Library(_));
+        match &entry.kind {
+            NestedKind::Call(callee) => {
+                if !library {
+                    let occurrence = self.occurrence(task, site)?;
+                    if host.observes_sites() {
+                        let identity = self.action_identity(task, site, occurrence)?;
+                        host.enter_site(&identity);
+                    }
+                }
+                let (target, at) = self.nested_target(exe, callee, args)?;
+                let enters = match &target {
+                    Target::Code(..) => true,
+                    Target::Library(lib) => matches!(exe.lib(*lib).run, LibRun::Body(_)),
+                };
+                if enters {
+                    self.capture(task, entry, act, PhaseRecord::Called)?;
+                }
+                let flow = self.call(task, exe, stmt, target, at, count - (at - args))?;
+                Ok(self.answered_at(flow, at, args))
+            }
+            NestedKind::Body(lib) => {
+                self.capture(task, entry, act, PhaseRecord::Called)?;
+                self.call_lib(task, exe, *lib, args, count, Some(stmt))
+            }
+            NestedKind::Spawn(callee) => {
+                let (target, at) = self.nested_target(exe, callee, args)?;
+                let flow =
+                    self.spawn(task, host, exe, stmt, site, target, at, count - (at - args))?;
+                if flow == Flow::Step {
+                    self.capture(task, entry, act, PhaseRecord::Spawned)?;
+                }
+                Ok(self.answered_at(flow, at, args))
+            }
+            NestedKind::Perform { effect, result } => {
+                let mut copied = Vec::with_capacity(count);
+                for at in args..args + count {
+                    let value = self.take(at);
+                    copied.push(self.copy_out(&value)?);
+                }
+                if self.effect_mode(effect)? == EffectMode::Read {
+                    // A read completes here, inside its statement, and the
+                    // task keeps its turn (`K-EFF-012`).
+                    let value = self.perform_read(host, exe, effect, &copied, site, result)?;
+                    self.put(args, value);
+                    self.pin(args)?;
+                    return Ok(Flow::Done);
+                }
+                self.capture(task, entry, act, PhaseRecord::Waiting)?;
+                let wait = self.request(task, stmt, site)?;
+                self.issue(
+                    task,
+                    wait,
+                    lash_kernel_state::AdmittedRequest::Effect {
+                        effect: effect.clone(),
+                        args: copied,
+                    },
+                )?;
+                Ok(Flow::Step)
+            }
+            NestedKind::Sleep => {
+                let duration = self.take(args);
+                let duration = sleep_duration(duration)?;
+                self.capture(task, entry, act, PhaseRecord::Waiting)?;
+                let wait = self.request(task, stmt, site)?;
+                self.issue(
+                    task,
+                    wait,
+                    lash_kernel_state::AdmittedRequest::Sleep {
+                        duration: duration.into(),
+                    },
+                )?;
+                Ok(Flow::Step)
+            }
+        }
+    }
+
+    /// An action that completed at once left its value in `at`, its
+    /// arguments' first register: the value is the action's, in `dst`.
+    fn answered_at(&mut self, flow: Flow, at: Reg, dst: Reg) -> Flow {
+        if flow == Flow::Done && at != dst {
+            let value = self.take(at);
+            self.put(dst, value);
+        }
+        flow
+    }
+
+    /// Saves where the top frame of `task` stands: at the nested action of
+    /// `entry`, in `phase`, keeping the operands its statement evaluated as
+    /// the continuation's roles. Registers are never saved: each role is
+    /// saved by its site, as the path suffix under its statement's, held by
+    /// the frame as a variable's value is (`K-EVAL-008`).
+    fn capture(
+        &mut self,
+        task: TaskId,
+        entry: &Nested,
+        act: lash_kernel_exec::ActIx,
+        phase: PhaseRecord,
+    ) -> Result<(), Halt> {
+        let depth = entry.depth as usize;
+        let mut roles = Vec::with_capacity(entry.roles.len());
+        // Each role moves from its register to the frame, held as a bound
+        // value is until the frames are next published: a refinement while
+        // the frame stands here counts it once, as the frame's.
+        for (site, reg) in &entry.roles {
+            let held = self.take(reg.0 as usize);
+            let value = self.heap_write(|heap| {
+                heap.canonical_value(held.clone())
+                    .map_err(super::write_halt)
+            })?;
+            self.reserve_held(value_bytes(&value))?;
+            roles.push(RoleRecord {
+                site: site.path[depth..].to_vec(),
+                value,
+            });
+        }
+        let pending = PendingRecord::new(
+            entry.site.path[depth..].to_vec(),
+            phase,
+            roles,
+            self.heap.pages(),
+        )?;
+        let frame = self.frame(task)?;
+        frame.record.pending = Some(pending);
+        frame.nested = Some(act);
+        Ok(())
     }
 
     fn atom(&mut self, task: TaskId, exe: &Executable, atom: &Atom) -> Eval<Value> {
@@ -284,9 +418,7 @@ impl KernelMachine {
                 self.push_frame(task, exe, call)?;
                 Ok(Flow::Step)
             }
-            Target::Library(lib) => {
-                self.call_lib(task, exe, lib, args, count, args, Entry::Frame(Some(stmt)))
-            }
+            Target::Library(lib) => self.call_lib(task, exe, lib, args, count, Some(stmt)),
         }
     }
 
@@ -314,54 +446,79 @@ impl KernelMachine {
         match callee {
             Callee::Declared(code) => Ok(Target::Code(*code, Vec::new())),
             Callee::Library(lib) => Ok(Target::Library(*lib)),
-            Callee::Value(var) => match self.read_var(task, exe, var)? {
-                Value::Closure(id) => {
-                    let closure = self.heap.closure(id)?;
-                    let closure_site = closure.site.resolve(self.heap.pages())?;
-                    let site = Site::new(
-                        closure_site.unit.clone(),
-                        closure_site
-                            .path
-                            .iter()
-                            .copied()
-                            .chain([0])
-                            .collect::<Vec<_>>(),
-                    );
-                    let code = exe
-                        .code_at(&site)
-                        .ok_or_else(|| fault("a closure names no admitted code"))?;
-                    let captures = exe
-                        .code(code)
-                        .captures
-                        .iter()
-                        .map(|capture| {
-                            let name = &exe.code(code).slots[capture.inner as usize].name;
-                            closure
-                                .captures
-                                .get(
-                                    &lash_kernel_state::paged::metadata::metadata_key(name),
-                                    self.heap.pages(),
-                                )?
-                                .map(|(_, id)| id)
-                                .ok_or_else(|| fault("a closure capture is missing"))
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok(Target::Code(code, captures))
-                }
-                Value::Function(name) => {
-                    let name =
-                        lash_kernel_doc::Name::new(crate::data::text_copy(&self.heap, &name)?);
-                    match exe.declared.get(&name) {
-                        Some(code) => Ok(Target::Code(*code, Vec::new())),
-                        None => raise("type_error", format!("no function `{name}` is declared")),
-                    }
-                }
-                _ => raise(
-                    "type_error",
-                    "only a closure or a function reference can be called",
-                ),
-            },
+            Callee::Value(var) => {
+                let value = self.read_var(task, exe, var)?;
+                self.target(exe, value)
+            }
         }
+    }
+
+    /// The function a closure or a function reference names (`K-FN-005`).
+    fn target(&mut self, exe: &Executable, value: Value) -> Eval<Target> {
+        match value {
+            Value::Closure(id) => {
+                let closure = self.heap.closure(id)?;
+                let closure_site = closure.site.resolve(self.heap.pages())?;
+                let site = Site::new(
+                    closure_site.unit.clone(),
+                    closure_site
+                        .path
+                        .iter()
+                        .copied()
+                        .chain([0])
+                        .collect::<Vec<_>>(),
+                );
+                let code = exe
+                    .code_at(&site)
+                    .ok_or_else(|| fault("a closure names no admitted code"))?;
+                let captures = exe
+                    .code(code)
+                    .captures
+                    .iter()
+                    .map(|capture| {
+                        let name = &exe.code(code).slots[capture.inner as usize].name;
+                        closure
+                            .captures
+                            .get(
+                                &lash_kernel_state::paged::metadata::metadata_key(name),
+                                self.heap.pages(),
+                            )?
+                            .map(|(_, id)| id)
+                            .ok_or_else(|| fault("a closure capture is missing"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Target::Code(code, captures))
+            }
+            Value::Function(name) => {
+                let name = lash_kernel_doc::Name::new(crate::data::text_copy(&self.heap, &name)?);
+                match exe.declared.get(&name) {
+                    Some(code) => Ok(Target::Code(*code, Vec::new())),
+                    None => raise("type_error", format!("no function `{name}` is declared")),
+                }
+            }
+            _ => raise(
+                "type_error",
+                "only a closure or a function reference can be called",
+            ),
+        }
+    }
+
+    /// What a nested call or `spawn` runs, and the registers its arguments
+    /// start at: after the callee's, when a variable held it.
+    fn nested_target(
+        &mut self,
+        exe: &Executable,
+        callee: &NestedCallee,
+        args: Reg,
+    ) -> Eval<(Target, Reg)> {
+        Ok(match callee {
+            NestedCallee::Declared(code) => (Target::Code(*code, Vec::new()), args),
+            NestedCallee::Library(lib) => (Target::Library(*lib), args),
+            NestedCallee::Read => {
+                let value = self.take(args);
+                (self.target(exe, value)?, args + 1)
+            }
+        })
     }
 
     /// A read-bound `perform`, answered by the host at once: its result
@@ -390,21 +547,9 @@ impl KernelMachine {
 
     /// Parks the running task in a wait.
     fn suspend(&mut self, task: TaskId, stmt: StmtId, wait: Wait) -> Result<(), Halt> {
-        self.leaves_no_call(task)?;
         self.frame(task)?.awaiting = Some(stmt);
         self.task(task)?.suspend(wait);
         self.current = None;
-        Ok(())
-    }
-
-    /// A task may give up its turn while a frame of it stands in a call
-    /// made inside an expression only by a `spawn`, which runs the child at
-    /// once and the spawner next. Every body such a call runs stands beside
-    /// a native implementation, so it cannot wait (`K-LIB-004`).
-    fn leaves_no_call(&mut self, task: TaskId) -> Result<(), Halt> {
-        if self.task(task)?.called > 0 {
-            return Err(fault("a library body waited inside an expression"));
-        }
         Ok(())
     }
 
@@ -503,22 +648,17 @@ impl KernelMachine {
             lash_kernel_doc::heap::HeapFault::Malformed("issued task is missing".into())
         })?;
         let loops = running.frames.loop_coordinates()?;
-        let stmt = running
+        let (site, result) = running
             .frames
             .last_mut()?
-            .and_then(|frame| frame.awaiting)
+            .and_then(|frame| waiting(&self.exe, frame))
             .ok_or_else(|| {
                 lash_kernel_doc::heap::HeapFault::Malformed("issued request has no action".into())
             })?;
-        let Form::Action(action) = &self.exe.stmt(stmt).form else {
-            return Err(lash_kernel_doc::heap::HeapFault::Malformed(
-                "issued request has no action".into(),
-            ));
-        };
         let occurrence = running
             .occurrences
             .get(
-                &lash_kernel_state::paged::metadata::metadata_key(&action.site),
+                &lash_kernel_state::paged::metadata::metadata_key(&site),
                 &access,
             )?
             .and_then(|next| next.checked_sub(1))
@@ -527,7 +667,7 @@ impl KernelMachine {
             })?;
         let identity = EffectIdentity {
             task: running.identity.resolve(&access)?,
-            site: action.site.clone(),
+            site: site.clone(),
             occurrence,
             loops,
         };
@@ -542,7 +682,7 @@ impl KernelMachine {
                 })
             }
             lash_kernel_state::AdmittedRequest::Effect { effect, args } => {
-                let ActionKind::Perform { result, .. } = &action.kind else {
+                let Some((_, result)) = result else {
                     return Err(lash_kernel_doc::heap::HeapFault::Malformed(
                         "issued effect is not a perform".into(),
                     ));
@@ -620,9 +760,7 @@ impl KernelMachine {
             Target::Code(code, captures) => self
                 .push_frame(child, exe, Call::new(code, args, count).sharing(&captures))
                 .map(|()| Flow::Step),
-            Target::Library(lib) => {
-                self.call_lib(child, exe, lib, args, count, args, Entry::Frame(None))
-            }
+            Target::Library(lib) => self.call_lib(child, exe, lib, args, count, None),
         };
         match started {
             Ok(Flow::Step) => {}
@@ -828,6 +966,65 @@ impl KernelMachine {
             }
         }
         self.wake(target, Incoming::Raise(cancelled()))
+    }
+}
+
+/// The site of the action the frame waits at and, for a `perform`, its
+/// effect and the type its result is decoded by: the frame's statement's
+/// own action, or the nested action it stands at.
+pub(super) fn waiting(
+    exe: &Executable,
+    frame: &super::Frame,
+) -> Option<(Site, Option<(EffectName, Type)>)> {
+    let (stream, statement, _) = exe.statement(frame.awaiting?);
+    match frame.nested {
+        Some(act) => {
+            let entry = stream.nested.get(act.ix())?;
+            let perform = match &entry.kind {
+                NestedKind::Perform { effect, result } => Some((effect.clone(), result.clone())),
+                _ => None,
+            };
+            Some((entry.site.clone(), perform))
+        }
+        None => {
+            let Form::Action(action) = &statement.form else {
+                return None;
+            };
+            let perform = match &action.kind {
+                ActionKind::Perform { effect, result, .. } => {
+                    Some((effect.clone(), result.clone()))
+                }
+                _ => None,
+            };
+            Some((action.site.clone(), perform))
+        }
+    }
+}
+
+/// A `sleep`'s duration, from its argument's value.
+fn sleep_duration(value: Value) -> Eval<Duration> {
+    match value {
+        Value::Int(integer)
+            if !match &integer {
+                lash_kernel_doc::heap::IntRef::Inline(i) => i.is_negative(),
+                lash_kernel_doc::heap::IntRef::Paged { summary, .. } => summary.negative,
+            } =>
+        {
+            Ok(Duration::from_millis(match integer {
+                lash_kernel_doc::heap::IntRef::Inline(integer) => {
+                    integer.to_u64().unwrap_or(u64::MAX)
+                }
+                _ => u64::MAX,
+            }))
+        }
+        Value::Float(float) if float.get().is_finite() && float.get() >= 0.0 => {
+            Ok(Duration::try_from_secs_f64(float.get() / 1000.0).unwrap_or(Duration::MAX))
+        }
+        Value::Int(_) | Value::Float(_) => raise(
+            "number_range",
+            "`sleep` takes a duration that is finite and not negative",
+        ),
+        _ => raise("type_error", "`sleep` takes a number of milliseconds"),
     }
 }
 

@@ -1,9 +1,9 @@
 {
-  "rule": "K-STMT-005",
+  "rule": "K-EVAL-008",
   "cases": [
     {
-      "name": "hoisted operand is bound before a waiting call",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\nlet x = 1 let saved = x let fnc = fn() { do perform echo(1) as Int set x = 2 return 3 } let h = spawn apply fnc() let answer = join h finish (saved, x, answer)\n}\n",
+      "name": "operands evaluated before a nested wait keep their values across a resume",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\nlet xs = [1] let r = (xs[0], perform echo(1) as Int, xs[0]) finish r\n}\n",
       "expected": {
         "prints": [],
         "end": {
@@ -13,10 +13,10 @@
                 "int": "1"
               },
               {
-                "int": "2"
+                "int": "10"
               },
               {
-                "int": "3"
+                "int": "1"
               }
             ]
           }
@@ -48,7 +48,7 @@
             }
           ]
         ],
-        "resume": false
+        "resume": true
       }
     }
   ]

@@ -6,8 +6,8 @@ use lash_kernel_doc::{Correspondence, Survivor};
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{
-    Action, Block, Callee, Document, Expr, FunctionCatalog, FunctionDefinition, FunctionId,
-    Implementation, Member, Node, Place, Rhs, Site, Stmt, Unit,
+    ActKind, Action, Block, Callee, Document, Expr, FunctionCatalog, FunctionDefinition,
+    FunctionId, Implementation, Member, Node, Place, Rhs, Site, Stmt, Unit,
 };
 
 use crate::migration::DocumentRefusal;
@@ -205,6 +205,17 @@ fn replace_in_expr(expr: &mut Expr, functions: &BTreeMap<FunctionId, FunctionId>
         Expr::Read(read) => {
             replace_in_expr(&mut read.handle, functions);
             replace_in_expr(&mut read.request, functions);
+        }
+        Expr::Act(act) => {
+            if let ActKind::Call(Callee::Library(function))
+            | ActKind::Spawn(Callee::Library(function)) = &mut act.kind
+                && let Some(to) = functions.get(function)
+            {
+                *function = *to;
+            }
+            for arg in &mut act.args {
+                replace_in_expr(arg, functions);
+            }
         }
     }
 }

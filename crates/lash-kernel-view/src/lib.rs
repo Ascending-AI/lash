@@ -35,8 +35,8 @@ pub use coverage::{
 pub use lash_kernel_doc::{RanCounts, ReplayPath, RunObservation, TaskPath};
 
 use lash_kernel_check::{
-    ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, GraphNode, NodeId, NodeKind,
-    Reference, StmtNode, WorkflowDocument,
+    ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, GraphNode, NodeId,
+    NodeKind, Reference, StmtNode, WorkflowDocument,
 };
 use lash_kernel_doc::{
     Action, Atom, Callee, Document, EffectName, Expr, FunctionDeclarations, FunctionId,
@@ -584,7 +584,8 @@ impl<'a> Walk<'a> {
                     | ExprNode::Let { .. }
                     | ExprNode::Clock
                     | ExprNode::Random
-                    | ExprNode::Read { .. } => {}
+                    | ExprNode::Read { .. }
+                    | ExprNode::Act { .. } => {}
                 }
             }
             (
@@ -819,6 +820,13 @@ fn direct_references(kind: &NodeKind) -> Vec<BindingId> {
         NodeKind::Expr(expression) => match expression {
             ExprNode::Variable(reference) => vec![reference],
             ExprNode::Closure { captures, .. } => captures.iter().collect(),
+            ExprNode::Act {
+                kind:
+                    ActNode::Call(CalleeNode::Value(reference))
+                    | ActNode::Spawn(CalleeNode::Value(reference)),
+                ..
+            } => vec![reference],
+            ExprNode::Act { .. } => Vec::new(),
             ExprNode::Literal(_)
             | ExprNode::Tuple(_)
             | ExprNode::List(_)

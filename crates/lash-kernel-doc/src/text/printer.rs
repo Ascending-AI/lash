@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use super::is_keyword;
 use super::lexer::write_quoted;
-use crate::ast::{Action, Atom, Block, Callee, Expr, JoinMode, Literal, Member, Place, Rhs, Stmt};
+use crate::ast::{
+    ActKind, Action, Atom, Block, Callee, Expr, JoinMode, Literal, Member, Place, Rhs, Stmt,
+};
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Operand};
 use crate::name::{FunctionId, FunctionName, Name, is_identifier};
@@ -330,6 +332,11 @@ impl<'a> Printer<'a> {
     }
 
     fn callee(&mut self, callee: &Callee, args: &[Atom]) {
+        self.callee_name(callee);
+        self.atoms(args);
+    }
+
+    fn callee_name(&mut self, callee: &Callee) {
         match callee {
             Callee::Declared(name) => {
                 self.out.push_str("call ");
@@ -344,7 +351,6 @@ impl<'a> Printer<'a> {
                 self.function(function);
             }
         }
-        self.atoms(args);
     }
 
     fn function(&mut self, function: &FunctionId) {
@@ -503,6 +509,32 @@ impl<'a> Printer<'a> {
                 self.expr(&read.request);
                 self.out.push(')');
             }
+            Expr::Act(act) => match &act.kind {
+                ActKind::Call(callee) => {
+                    self.callee_name(callee);
+                    self.out.push('(');
+                    self.exprs(act.args.iter());
+                    self.out.push(')');
+                }
+                ActKind::Spawn(callee) => {
+                    self.out.push_str("spawn ");
+                    self.callee_name(callee);
+                    self.out.push('(');
+                    self.exprs(act.args.iter());
+                    self.out.push(')');
+                }
+                ActKind::Perform { effect, result } => {
+                    self.out.push_str(&format!("perform {effect}("));
+                    self.exprs(act.args.iter());
+                    self.out.push_str(") as ");
+                    self.ty(result);
+                }
+                ActKind::Sleep => {
+                    self.out.push_str("sleep(");
+                    self.exprs(act.args.iter());
+                    self.out.push(')');
+                }
+            },
         }
     }
 

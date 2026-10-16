@@ -24,8 +24,33 @@ export type WorkflowView = {
 };
 
 /**
- * A form that is the whole right-hand side of its own statement
- * (`K-STMT-001`).
+ * An action inside an expression: the action forms that may nest, with
+ * expression arguments.
+ */
+export type ActExpr = {
+  "args"?: Array<Expr>;
+  "kind": ActKind;
+};
+
+/**
+ * What an [`Expr::Act`] does. `join`, `yield` and `cancel` stay statement
+ * actions.
+ */
+export type ActKind = ({
+  "call": Callee;
+} | {
+  "perform": {
+    "effect": QualifiedName;
+    "result": Type;
+  };
+} | "sleep" | {
+  "spawn": Callee;
+});
+
+/**
+ * An action as the whole right-hand side of its own statement, its
+ * arguments atoms (`K-FORM-001`); [`Expr::Act`] nests one in an
+ * expression.
  */
 export type Action = ({
   "call": {
@@ -173,7 +198,7 @@ export type BindingView = {
 export type Bytes = string;
 
 /**
- * What a statement-position call or a `spawn` runs.
+ * What a call or a `spawn` runs.
  */
 export type Callee = ({
   "declared": Name;
@@ -269,7 +294,8 @@ export type ExecutionSiteView = {
 };
 
 /**
- * An expression: evaluated within one statement, it never pauses a task.
+ * An expression, evaluated within one statement. Only an [`Expr::Act`]
+ * in it may pause the task (`K-EVAL-008`).
  */
 export type Expr = ({
   "literal": Literal;
@@ -308,6 +334,8 @@ export type Expr = ({
   };
 } | "clock" | "random" | {
   "read": ProjectionRead;
+} | {
+  "act": ActExpr;
 });
 
 /**

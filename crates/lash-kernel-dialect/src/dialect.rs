@@ -119,9 +119,9 @@ pub struct Lowered {
 
 /// Lowers source in one language to a kernel document.
 ///
-/// The document it returns satisfies the statement rule: the front end has
-/// hoisted, in the source's evaluation order, every operand the source
-/// evaluates before a statement-position form (`K-STMT-005`).
+/// The document it returns nests no action (`K-EVAL-008`): the front end
+/// has hoisted, in the source's evaluation order, every operand the source
+/// evaluates before a statement-position form (`K-EVAL-001`).
 pub trait FrontEnd {
     fn lower(
         &self,

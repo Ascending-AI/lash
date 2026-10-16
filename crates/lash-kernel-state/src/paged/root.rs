@@ -12,9 +12,10 @@
 //! (FIG-6161): a frame is its pending statement's [`Site`], its bindings by
 //! declaring site, its loops, its `finally` departures and its held values.
 //! Compiled code, statement and slot indexes, registers and the KIR
-//! register window are derived caches, never persisted: a slice clears its
-//! registers before any park, and an inline frame runs to its end inside
-//! its expression, so neither exists at a checkpoint.
+//! register window are derived caches, never persisted. A frame standing
+//! at an action nested in its statement's expression keeps the operand
+//! values its statement already evaluated by their sites, in its pending
+//! continuation (`K-EVAL-008`), never as registers.
 //!
 //! These records are the decoded shapes of their pages. Their canonical
 //! token encodings are layer hp-heap's (FIG-6188), in this crate; the

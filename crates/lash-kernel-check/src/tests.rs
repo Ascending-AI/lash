@@ -272,6 +272,7 @@ fn form(kind: &NodeKind) -> &'static str {
             ExprNode::If { .. } => "expr:if",
             ExprNode::Let { .. } => "expr:let",
             ExprNode::Read { .. } => "expr:read",
+            ExprNode::Act { .. } => "expr:act",
         },
     }
 }
@@ -758,8 +759,8 @@ main {
 }
 
 /// `K-DOC-005`, `K-ADM-008`: a structural fault refuses, in the document
-/// and in the body of a library function the document reaches, where the
-/// statement rule is checked as it is in a document (`K-STMT-002`).
+/// and in the body of a library function the document reaches, where a
+/// call by name is checked as it is in a document (`K-LIB-002`).
 #[test]
 fn a_structural_fault_refuses_in_the_document_and_in_a_reached_body() {
     let mut library = library();

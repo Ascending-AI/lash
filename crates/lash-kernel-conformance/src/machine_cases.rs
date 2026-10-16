@@ -271,21 +271,6 @@ fn k_site_005() {
 }
 
 #[test]
-fn k_stmt_001() {
-    super::run_rule("K-STMT-001", include_str!("../corpus/stmt/K-STMT-001.json"));
-}
-
-#[test]
-fn k_stmt_002() {
-    super::run_rule("K-STMT-002", include_str!("../corpus/stmt/K-STMT-002.json"));
-}
-
-#[test]
-fn k_stmt_003() {
-    super::run_rule("K-STMT-003", include_str!("../corpus/stmt/K-STMT-003.json"));
-}
-
-#[test]
 fn k_text_001() {
     super::run_rule("K-TEXT-001", include_str!("../corpus/text/K-TEXT-001.json"));
 }
