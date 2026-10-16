@@ -170,10 +170,10 @@ mod tests {
                          process_id, originator_id,
                          identity_kind, created_at_ms, updated_at_ms,
                          change_seq,
-                         lifetime_scope_kind, lifetime_scope_id, lifetime, record_json
+                         lifetime_scope_kind, lifetime_scope_id, lifetime, start_json, execution_json, lifecycle_json
                      )
                      SELECT printf('plan-%05d', i), 'host', 'test', 0, 0, i,
-                            NULL, NULL, 'detached',
+                            NULL, NULL, 'detached', '{}', '{}',
                             CASE WHEN i <= 100
                                 THEN '{\"last_event_sequence\":0,\"lifecycle\":{\"state\":\"running\"}}'
                                 ELSE '{\"last_event_sequence\":0,\"lifecycle\":{\"state\":\"terminal\",\"outcome\":{\"type\":\"settled\",\"output\":{\"outcome\":{\"status\":\"success\"}}}}}'

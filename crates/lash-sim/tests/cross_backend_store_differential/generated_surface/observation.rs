@@ -89,7 +89,7 @@ pub(super) fn read_sqlite_surface(process_path: &Path) -> SurfaceState {
 
     let records = sqlite_simple_json_rows(
         &process,
-        "SELECT record_json, change_seq FROM processes ORDER BY process_id",
+        "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json, change_seq FROM processes ORDER BY process_id",
         |row| {
             let record: String = row.get(0)?;
             Ok(normalized_json(serde_json::json!({
@@ -171,7 +171,7 @@ where
 )]
 pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     let record_rows: Vec<(String, i64)> =
-        sqlx::query_as("SELECT record_json, change_seq FROM lash_processes ORDER BY process_id")
+        sqlx::query_as("SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json, change_seq FROM lash_processes ORDER BY process_id")
             .fetch_all(pool)
             .await
             .unwrap();

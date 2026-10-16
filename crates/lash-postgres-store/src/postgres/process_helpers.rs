@@ -107,19 +107,28 @@ pub(crate) async fn require_process_tx(
 pub(crate) async fn save_process_tx(
     tx: &mut GuardedTx<'_>,
     record: &ProcessRecord,
+    execution_changed: bool,
 ) -> Result<(), PluginError> {
-    crate::observed_sql::query(
-        process_sql()
-            .process_postgres
-            .update_mutable_columns_staged
-            .sql(),
-    )
-    .bind(record.id.as_str())
-    .bind(record.updated_at_ms as i64)
-    .bind(serde_json::to_string(record).map_err(process_decode_error)?)
-    .execute(crate::observed_sql::executor(&mut ***tx))
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let statements = &process_sql().process_postgres;
+    let sql = if execution_changed {
+        statements.update_execution_columns_staged.sql()
+    } else {
+        statements.update_mutable_columns_staged.sql()
+    };
+    let query = crate::observed_sql::query(sql)
+        .bind(record.id.as_str())
+        .bind(record.updated_at_ms as i64)
+        .bind(serde_json::to_string(&record.lifecycle_storage()).map_err(process_decode_error)?);
+    let query = if execution_changed {
+        query
+            .bind(serde_json::to_string(&record.execution_storage()).map_err(process_decode_error)?)
+    } else {
+        query
+    };
+    query
+        .execute(crate::observed_sql::executor(&mut ***tx))
+        .await
+        .map_err(plugin_sqlx_error)?;
     Ok(())
 }
 
@@ -188,6 +197,7 @@ pub(crate) enum ProcessEventAppendArm {
 pub(crate) struct ProcessEventBatch {
     fleet_format: lash_core_execution::FleetFormat,
     record_changed: bool,
+    execution_changed: bool,
 }
 
 impl ProcessEventBatch {
@@ -196,6 +206,7 @@ impl ProcessEventBatch {
         Self {
             fleet_format,
             record_changed: false,
+            execution_changed: false,
         }
     }
 
@@ -225,6 +236,8 @@ impl ProcessEventBatch {
             stage_process_event_append_tx(tx, record, request, occurred_at_ms, self.fleet_format)
                 .await?;
         self.record_changed |= record_changed;
+        self.execution_changed |= record_changed
+            && receipt.event.fact.kind() == lash_core_execution::ProcessEventKind::Succeeded;
         Ok((receipt, arm))
     }
 
@@ -235,7 +248,7 @@ impl ProcessEventBatch {
         record: &ProcessRecord,
     ) -> Result<(), PluginError> {
         if self.record_changed {
-            save_process_tx(tx, record).await?;
+            save_process_tx(tx, record, self.execution_changed).await?;
         }
         Ok(())
     }
@@ -254,7 +267,12 @@ pub(crate) async fn apply_process_event_append_tx(
     let (receipt, arm, record_changed) =
         stage_process_event_append_tx(tx, record, request, occurred_at_ms, fleet_format).await?;
     if record_changed {
-        save_process_tx(tx, record).await?;
+        save_process_tx(
+            tx,
+            record,
+            receipt.event.fact.kind() == lash_core_execution::ProcessEventKind::Succeeded,
+        )
+        .await?;
     }
     Ok((receipt, arm))
 }

@@ -1,13 +1,15 @@
 //! `processes`: one row per registered process.
 //!
-//! The row is wide and its authoritative form is `record_json`; the other
-//! columns are the indexed projection a non-terminal scan, a retention sweep or a
-//! change feed filters on. No caller reads the whole row, so this module
-//! declares the **named** projections that exist and nothing else.
+//! `start_json` is immutable creation metadata; `execution_json` is the current
+//! input/definition pair, replaced only on succession; `lifecycle_json` is the
+//! mutable event fold. Reads concatenate their disjoint object members to
+//! assemble the existing rich `ProcessRecord`, without storing it again. All three
+//! codecs emit nonempty JSON objects. Text concatenation preserves payload
+//! strings, including escaped NULs which PostgreSQL JSONB cannot represent.
 //!
 //! `status`, `last_event_sequence` and `cancel_requested_at_ms` are generated
-//! by the database from `record_json` in both dialects: a statement reads and
-//! filters on them and none writes them, so a save is the record alone.
+//! from `lifecycle_json` in both dialects. Every changed batch saves that object
+//! once, with its indexed timestamp and change sequence, in the event transaction.
 //!
 //! `status` carries domain vocabulary (`lash_core::ProcessStatus`). A
 //! statement here names a lifecycle partition as a `{{term(column)}}` token
@@ -21,8 +23,8 @@ pub const TABLE: &str = "processes";
 pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
                 identity_kind, identity_label, created_at_ms, updated_at_ms,
                 change_seq, lifetime_scope_kind, lifetime_scope_id,
-                lifetime, record_json, consumer_hold_key,
-                consumer_hold_scope_kind, consumer_hold_scope_id, consumer_hold_cancels";
+                lifetime, lifecycle_json, consumer_hold_key,
+                consumer_hold_scope_kind, consumer_hold_scope_id, consumer_hold_cancels, start_json, execution_json";
 
 /// What the change feed reports for a live row.
 ///
@@ -30,7 +32,7 @@ pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
 /// three result columns: the sequence the caller resumes from, the kind that
 /// says which arm produced the row, and the payload. The literal `'upsert'` is
 /// the arm's name, not a lifecycle label.
-pub const CHANGE_FEED_UPSERT_COLUMNS: &str = "change_seq, 'upsert' AS kind, record_json AS payload";
+pub const CHANGE_FEED_UPSERT_COLUMNS: &str = "change_seq, 'upsert' AS kind, (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS payload";
 
 crate::statements! {
     /// `processes` statements both backends issue verbatim.
@@ -39,11 +41,11 @@ crate::statements! {
         select_max_process_id = "SELECT MAX(process_id) FROM processes";
 
         /// The stored record for `?1`.
-        select_record_json_by_id = "SELECT record_json FROM processes WHERE process_id = ?1";
+        select_record_json_by_id = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes WHERE process_id = ?1";
 
         /// The retained process registered under start key `?1`, if any: the
         /// idempotency half of a registration (ADR 0107).
-        select_record_json_by_start_key = "SELECT record_json FROM processes WHERE start_key = ?1";
+        select_record_json_by_start_key = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes WHERE start_key = ?1";
 
         exists_by_id = "SELECT EXISTS(SELECT 1 FROM processes WHERE process_id = ?1)";
 
@@ -69,13 +71,18 @@ crate::statements! {
 
         /// The identity columns are absent because none of them is mutable.
         update_mutable_columns = "UPDATE processes
-             SET updated_at_ms = ?2, change_seq = ?3, record_json = ?4
+             SET updated_at_ms = ?2, change_seq = ?3, lifecycle_json = ?4
+             WHERE process_id = ?1";
+
+        /// A successor replaces its execution pair with the same one batch save.
+        update_execution_columns = "UPDATE processes
+             SET updated_at_ms = ?2, change_seq = ?3, lifecycle_json = ?4, execution_json = ?5
              WHERE process_id = ?1";
 
         /// Every live process, whole. The unpaged read behind the in-memory
         /// registry rebuild; the paged non-terminal scans are backend-only because
         /// SQLite pins them to a partial index by name.
-        collect_non_terminal_records = "SELECT record_json FROM processes
+        collect_non_terminal_records = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
                          WHERE {{live_process_status(status)}}
                          ORDER BY process_id ASC";
     }

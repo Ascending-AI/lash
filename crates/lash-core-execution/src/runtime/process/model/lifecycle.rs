@@ -165,6 +165,103 @@ pub struct ProcessRecord {
     pub lifecycle: ProcessLifecycleState,
 }
 
+impl ProcessRecord {
+    /// Creation metadata, written once by SQL stores. Execution input and
+    /// definition live in [`Self::execution_storage`], since succession replaces
+    /// that pair; lifecycle batches never resubmit either object.
+    #[doc(hidden)]
+    pub fn start_storage(&self) -> impl Serialize + '_ {
+        #[derive(Serialize)]
+        struct Start<'a> {
+            id: &'a ProcessId,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            start_key: &'a Option<StartKey>,
+            lifetime: &'a LifetimeDecision,
+            ancestry: &'a Ancestry,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            session_capability: &'a Option<SessionId>,
+            provenance: &'a ProcessProvenance,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            trace: &'a Option<lash_trace::DurableTraceScope>,
+            #[serde(skip_serializing_if = "std::ops::Not::not")]
+            trace_nodes: bool,
+            trace_class: &'a super::super::ProcessTraceClass,
+            created_at_ms: u64,
+        }
+        // Exhaustive so every new record field must choose its storage owner.
+        let Self {
+            id,
+            start_key,
+            lifetime,
+            ancestry,
+            session_capability,
+            provenance,
+            trace,
+            trace_nodes,
+            trace_class,
+            created_at_ms,
+            input: _,
+            identity: _,
+            last_event_sequence: _,
+            updated_at_ms: _,
+            external_ref: _,
+            cancel_request: _,
+            lifecycle: _,
+        } = self;
+        Start {
+            id,
+            start_key,
+            lifetime,
+            ancestry,
+            session_capability,
+            provenance,
+            trace,
+            trace_nodes: *trace_nodes,
+            trace_class,
+            created_at_ms: *created_at_ms,
+        }
+    }
+
+    /// The current engine input and its admitted identity. Written at creation
+    /// and replaced only by a committed successor (FIG-6121), never by an
+    /// ordinary lifecycle change. No unused original input is retained.
+    #[doc(hidden)]
+    pub fn execution_storage(&self) -> impl Serialize + '_ {
+        #[derive(Serialize)]
+        struct Execution<'a> {
+            input: &'a Arc<ProcessInput>,
+            identity: &'a ProcessIdentity,
+        }
+        Execution {
+            input: &self.input,
+            identity: &self.identity,
+        }
+    }
+
+    /// Only the facts an event batch may change. SQL indexes derive their
+    /// lifecycle projections from this object alone.
+    #[doc(hidden)]
+    pub fn lifecycle_storage(&self) -> impl Serialize + '_ {
+        #[derive(Serialize)]
+        struct Lifecycle<'a> {
+            last_event_sequence: u64,
+            updated_at_ms: u64,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            external_ref: &'a Option<ProcessExternalRef>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            cancel_request: &'a Option<Box<CancelRequest>>,
+            lifecycle: super::super::Durable<&'a ProcessLifecycleState>,
+        }
+        Lifecycle {
+            last_event_sequence: self.last_event_sequence,
+            updated_at_ms: self.updated_at_ms,
+            external_ref: &self.external_ref,
+            cancel_request: &self.cancel_request,
+            lifecycle: super::super::Durable(&self.lifecycle),
+        }
+    }
+}
+
 /// The lifecycle state of a process record: each state owns the facts that
 /// exist only in it, so a record cannot hold a wait beside an outcome, or a
 /// terminal status without one. A waiting process lists everything it is

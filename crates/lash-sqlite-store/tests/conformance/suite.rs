@@ -554,10 +554,11 @@ lash_conformance::process_projection_repair_tests!({
             let conn = corruption.raw();
             let changed = conn
                 .execute(
-                    "UPDATE processes SET record_json = ?2 WHERE process_id = ?1",
+                    "UPDATE processes SET lifecycle_json = ?2 WHERE process_id = ?1",
                     rusqlite::params![
                         stale.id.as_str(),
-                        serde_json::to_string(&stale).expect("encode stale process projection")
+                        serde_json::to_string(&stale.lifecycle_storage())
+                            .expect("encode stale process projection")
                     ],
                 )
                 .expect("corrupt SQLite process projection");

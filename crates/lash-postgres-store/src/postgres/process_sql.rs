@@ -46,10 +46,10 @@ lash_store_sql::statements! {
         select_environment_bytes = "SELECT artifact_bytes FROM lash_vm_artifacts WHERE namespace = ?1 AND artifact_ref = ?2";
 
         /// A retained process and its environment bytes, or its prune tombstone, atomically.
-        select_authority = "SELECT p.record_json, a.artifact_bytes, NULL::text, NULL::bigint
+        select_authority = "SELECT (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)) AS record_json, a.artifact_bytes, NULL::text, NULL::bigint
              FROM processes p
              LEFT JOIN lash_vm_artifacts a ON a.namespace = ?2
-               AND a.artifact_ref = p.record_json::jsonb #>> '{input,launch,env}'
+               AND a.artifact_ref = p.execution_json::jsonb #>> '{input,launch,env}'
              WHERE p.process_id = ?1
              UNION ALL
              SELECT NULL, NULL, terminal_label, pruned_at_ms
@@ -60,7 +60,7 @@ lash_store_sql::statements! {
         /// `FOR UPDATE` is the fork: every decision this store makes about a
         /// process is taken from the row it locks here, where SQLite already
         /// holds the database write lock.
-        select_record_json_for_update = "SELECT record_json
+        select_record_json_for_update = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json
              FROM processes
              WHERE process_id = ?1
              FOR UPDATE";
@@ -71,7 +71,15 @@ lash_store_sql::statements! {
         /// which is assigned after it commits
         /// (`process_change_clock.sequence_committed`, FIG-5276).
         update_mutable_columns_staged = "UPDATE processes
-             SET updated_at_ms = ?2, record_json = ?3,
+             SET updated_at_ms = ?2, lifecycle_json = ?3,
+                 unsequenced_saves = CASE WHEN change_seq IS NULL
+                     THEN unsequenced_saves + 1 ELSE 1 END,
+                 change_seq = NULL, staged_seq = DEFAULT
+             WHERE process_id = ?1";
+
+        /// The successor pair and lifecycle publish as one staged save.
+        update_execution_columns_staged = "UPDATE processes
+             SET updated_at_ms = ?2, lifecycle_json = ?3, execution_json = ?4,
                  unsequenced_saves = CASE WHEN change_seq IS NULL
                      THEN unsequenced_saves + 1 ELSE 1 END,
                  change_seq = NULL, staged_seq = DEFAULT
@@ -91,10 +99,10 @@ lash_store_sql::statements! {
                 identity_kind, identity_label,
                 created_at_ms, updated_at_ms,
                 lifetime_scope_kind, lifetime_scope_id, lifetime,
-                record_json, consumer_hold_key, consumer_hold_scope_kind, consumer_hold_scope_id,
-                consumer_hold_cancels
+                lifecycle_json, consumer_hold_key, consumer_hold_scope_kind, consumer_hold_scope_id,
+                consumer_hold_cancels, start_json, execution_json
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
              ON CONFLICT (start_key) WHERE start_key IS NOT NULL DO NOTHING";
 
         /// How many processes are live.
@@ -112,12 +120,12 @@ lash_store_sql::statements! {
         ///
         /// One parameter fewer than SQLite's, which binds an unused cursor
         /// slot so that both non-terminal page queries take the same three binds.
-        list_first_non_terminal_process_page = "SELECT record_json FROM processes
+        list_first_non_terminal_process_page = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
      WHERE {{live_process_status(status)}} AND process_id <= ?1
      ORDER BY process_id ASC LIMIT ?2";
 
         /// The next `?3` live processes in `(?2, ?1]`.
-        list_next_non_terminal_process_page = "SELECT record_json FROM processes
+        list_next_non_terminal_process_page = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
      WHERE {{live_process_status(status)}}
        AND process_id <= ?1 AND process_id > ?2
      ORDER BY process_id ASC LIMIT ?3";
@@ -125,9 +133,9 @@ lash_store_sql::statements! {
         /// Prune candidates: retired rows older than `?1`, at or below change
         /// sequence `?2`, with no consumer hold. The survey half, which locks
         /// nothing.
-        list_prunable_terminal = "SELECT record_json FROM processes
+        list_prunable_terminal = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
          WHERE {{retired_process_status(status)}}
-           AND (record_json::jsonb #>> '{lifecycle,occurred_at_ms}')::NUMERIC < ?1
+           AND (lifecycle_json::jsonb #>> '{lifecycle,occurred_at_ms}')::NUMERIC < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
                AND cascade_cursor IS NULL
@@ -139,9 +147,9 @@ lash_store_sql::statements! {
         /// Two statements rather than one built with a suffix: the survey must
         /// not lock, and the prune must hold its candidates from selection
         /// through the delete.
-        list_prunable_terminal_for_update = "SELECT record_json FROM processes
+        list_prunable_terminal_for_update = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
          WHERE {{retired_process_status(status)}}
-           AND (record_json::jsonb #>> '{lifecycle,occurred_at_ms}')::NUMERIC < ?1
+           AND (lifecycle_json::jsonb #>> '{lifecycle,occurred_at_ms}')::NUMERIC < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
                AND cascade_cursor IS NULL
@@ -153,7 +161,7 @@ lash_store_sql::statements! {
         /// `json_build_object` and the `::TEXT` cast are the fork; SQLite
         /// spells the same assembly `json_object`.
         list_changes_after = "SELECT change_seq, kind, payload FROM (
-                 SELECT change_seq, 'upsert' AS kind, record_json AS payload
+                 SELECT change_seq, 'upsert' AS kind, (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS payload
                  FROM processes WHERE change_seq > ?1
                  UNION ALL
                  SELECT pruned_change_seq,
@@ -200,50 +208,50 @@ lash_store_sql::statements! {
 
         /// A bounded keyset matching the filters, including rows retired since `?8`.
 
-        list = "SELECT record_json FROM processes
+        list = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
                AND (?2::TEXT IS NULL OR originator_id = ?2)
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition_id}') = ?5)
+                    (execution_json::JSONB #> '{identity,definition_id}') = ?5)
                AND (?6::BIGINT IS NULL OR created_at_ms >= ?6)
                AND (?7::BIGINT IS NULL OR created_at_ms < ?7)
                AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
                     OR updated_at_ms >= ?8)
-           AND (?9::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,type}' = ?9)
-           AND (?10::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?10)
+           AND (?9::TEXT IS NULL OR start_json::JSONB #>> '{provenance,originator,type}' = ?9)
+           AND (?10::TEXT IS NULL OR start_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?10)
            AND (?11::TEXT IS NULL OR process_id > ?11)
            AND process_id <= ?12
              ORDER BY process_id ASC LIMIT ?13";
         /// The same, narrowed to lifetime scope `?9` / `?10`.
-        list_by_lifetime_scope = "SELECT record_json FROM processes
+        list_by_lifetime_scope = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
                AND (?2::TEXT IS NULL OR originator_id = ?2)
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition_id}') = ?5)
+                    (execution_json::JSONB #> '{identity,definition_id}') = ?5)
                AND (?6::BIGINT IS NULL OR created_at_ms >= ?6)
                AND (?7::BIGINT IS NULL OR created_at_ms < ?7)
                AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
                     OR updated_at_ms >= ?8)
                AND lifetime_scope_kind = ?9
                AND lifetime_scope_id = ?10
-           AND (?11::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,type}' = ?11)
-           AND (?12::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?12)
+           AND (?11::TEXT IS NULL OR start_json::JSONB #>> '{provenance,originator,type}' = ?11)
+           AND (?12::TEXT IS NULL OR start_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?12)
            AND (?13::TEXT IS NULL OR process_id > ?13)
            AND process_id <= ?14
              ORDER BY process_id ASC LIMIT ?15";
         /// The same, narrowed to rows whose cancel request is older than `?9`
         /// and whose outcome is still open.
-        list_pending_cancel = "SELECT record_json FROM processes
+        list_pending_cancel = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
                AND (?2::TEXT IS NULL OR originator_id = ?2)
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition_id}') = ?5)
+                    (execution_json::JSONB #> '{identity,definition_id}') = ?5)
                AND (?6::BIGINT IS NULL OR created_at_ms >= ?6)
                AND (?7::BIGINT IS NULL OR created_at_ms < ?7)
                AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
@@ -251,19 +259,19 @@ lash_store_sql::statements! {
                AND cancel_requested_at_ms IS NOT NULL
                AND cancel_requested_at_ms < ?9
                AND {{nonterminal_process_status(status)}}
-           AND (?10::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,type}' = ?10)
-           AND (?11::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?11)
+           AND (?10::TEXT IS NULL OR start_json::JSONB #>> '{provenance,originator,type}' = ?10)
+           AND (?11::TEXT IS NULL OR start_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?11)
            AND (?12::TEXT IS NULL OR process_id > ?12)
            AND process_id <= ?13
              ORDER BY process_id ASC LIMIT ?14";
         /// Both narrowings at once.
-        list_by_lifetime_scope_pending_cancel = "SELECT record_json FROM processes
+        list_by_lifetime_scope_pending_cancel = "SELECT (substr(start_json, 1, length(start_json) - 1) || ',' || substr(execution_json, 2, length(execution_json) - 2) || ',' || substr(lifecycle_json, 2)) AS record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
                AND (?2::TEXT IS NULL OR originator_id = ?2)
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
                AND (?4::TEXT IS NULL OR identity_label = ?4)
                AND (?5::JSONB IS NULL OR
-                    (record_json::JSONB #> '{identity,definition_id}') = ?5)
+                    (execution_json::JSONB #> '{identity,definition_id}') = ?5)
                AND (?6::BIGINT IS NULL OR created_at_ms >= ?6)
                AND (?7::BIGINT IS NULL OR created_at_ms < ?7)
                AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
@@ -273,8 +281,8 @@ lash_store_sql::statements! {
                AND cancel_requested_at_ms IS NOT NULL
                AND cancel_requested_at_ms < ?11
                AND {{nonterminal_process_status(status)}}
-           AND (?12::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,type}' = ?12)
-           AND (?13::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?13)
+           AND (?12::TEXT IS NULL OR start_json::JSONB #>> '{provenance,originator,type}' = ?12)
+           AND (?13::TEXT IS NULL OR start_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?13)
            AND (?14::TEXT IS NULL OR process_id > ?14)
            AND process_id <= ?15
              ORDER BY process_id ASC LIMIT ?16";
@@ -290,7 +298,7 @@ lash_store_sql::statements! {
         /// One statement where SQLite keeps two: SQLite splits the recency arm
         /// into a union so each half lands on its own partial index, and
         /// PostgreSQL's planner does not need the split.
-        list_observed = "SELECT p.record_json
+        list_observed = "SELECT (substr(p.start_json, 1, length(p.start_json) - 1) || ',' || substr(p.execution_json, 2, length(p.execution_json) - 2) || ',' || substr(p.lifecycle_json, 2)) AS record_json
              FROM process_observers o
              JOIN processes p ON p.process_id = o.process_id
              WHERE o.session_id = ?1

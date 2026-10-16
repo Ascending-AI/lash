@@ -282,7 +282,7 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
             &format!(
                 "INSERT INTO lash_processes ({process_columns}) VALUES
                  ('{process_id}', 'originator', 'standard', 0, 0, 0,
-                  {scope_kind}, {scope_id}, {lifetime}, '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
+                  {scope_kind}, {scope_id}, {lifetime}, '{{}}', '{{}}', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
             ),
             constraint,
         )
@@ -298,7 +298,7 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     sqlx::query(&format!(
         "INSERT INTO lash_processes ({process_columns}) VALUES
          ('wake-parent', 'originator', 'standard', 0, 0, 0,
-          NULL, NULL, 'detached', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
+          NULL, NULL, 'detached', '{{}}', '{{}}', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
     ))
     .execute(&mut connection)
     .await
@@ -344,11 +344,11 @@ mod obligation_constraint_cases;
 /// The columns a statement may write on a process row.
 const PROCESS_FIXTURE_COLUMNS: &str = "process_id, originator_id,
         identity_kind, created_at_ms, updated_at_ms, change_seq,
-        lifetime_scope_kind, lifetime_scope_id, lifetime, record_json";
+        lifetime_scope_kind, lifetime_scope_id, lifetime, start_json, execution_json, lifecycle_json";
 
 /// A process record's JSON, as far as its row's columns read it: the event
 /// sequence, the lifecycle and the cancel request, each in its own codec.
-fn process_record_json(
+fn process_lifecycle_json(
     status: lash_core_execution::ProcessStatus,
     last_event_sequence: u64,
     cancel_requested_at_ms: Option<u64>,
@@ -392,7 +392,7 @@ async fn refused(connection: &mut PgConnection, statement: &str, binds: &[&str])
 }
 
 /// F1 (FIG-5557): `status`, `last_event_sequence` and
-/// `cancel_requested_at_ms` are the database's projections of `record_json`.
+/// `cancel_requested_at_ms` are the database's projections of `lifecycle_json`.
 /// No statement can write one, so a row whose columns disagree with its
 /// record cannot be written; a write of the record moves all three; and a
 /// record whose lifecycle names no status, or that lacks its sequence or
@@ -431,9 +431,9 @@ async fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
 
     let insert = format!(
         "INSERT INTO lash_processes ({PROCESS_FIXTURE_COLUMNS}) VALUES
-         ($1, 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached', $2)"
+         ($1, 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached', '{{}}', '{{}}', $2)"
     );
-    let save = "UPDATE lash_processes SET record_json = $2 WHERE process_id = $1";
+    let save = "UPDATE lash_processes SET lifecycle_json = $2 WHERE process_id = $1";
     async fn columns(connection: &mut PgConnection, id: &str) -> (String, i64, Option<i64>) {
         let row = sqlx::query(
             "SELECT status, last_event_sequence, cancel_requested_at_ms
@@ -457,7 +457,7 @@ async fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
     ];
     for (sequence, status) in (0_u64..).zip(statuses) {
         let id = format!("is-{}", status.label());
-        let record = process_record_json(status, sequence, None);
+        let record = process_lifecycle_json(status, sequence, None);
         sqlx::query(&insert)
             .bind(&id)
             .bind(&record)
@@ -474,13 +474,17 @@ async fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
     // A write of the record alone moves every projection with it.
     sqlx::query(&insert)
         .bind("moves")
-        .bind(process_record_json(ProcessStatus::Running, 1, None))
+        .bind(process_lifecycle_json(ProcessStatus::Running, 1, None))
         .execute(&mut connection)
         .await
         .expect("insert a running record");
     sqlx::query(save)
         .bind("moves")
-        .bind(process_record_json(ProcessStatus::Cancelled, 7, Some(42)))
+        .bind(process_lifecycle_json(
+            ProcessStatus::Cancelled,
+            7,
+            Some(42),
+        ))
         .execute(&mut connection)
         .await
         .expect("save the cancelled record");
@@ -488,7 +492,7 @@ async fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
     assert_eq!(columns(&mut connection, "moves").await, moved);
 
     // No statement writes a projection, with the record or without it.
-    let running = process_record_json(ProcessStatus::Running, 0, None);
+    let running = process_lifecycle_json(ProcessStatus::Running, 0, None);
     for column in ["status", "last_event_sequence", "cancel_requested_at_ms"] {
         let value = if column == "status" {
             "'completed'"
@@ -498,7 +502,7 @@ async fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         for statement in [
             format!(
                 "INSERT INTO lash_processes ({PROCESS_FIXTURE_COLUMNS}, {column}) VALUES
-                 ('disagrees', 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached',
+                 ('disagrees', 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached', '{{}}', '{{}}',
                   $1, {value})"
             ),
             format!("UPDATE lash_processes SET {column} = {value} WHERE $1 <> ''"),
@@ -523,12 +527,12 @@ async fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         ),
         (
             "an unknown outcome",
-            process_record_json(ProcessStatus::Abandoned, 0, None)
+            process_lifecycle_json(ProcessStatus::Abandoned, 0, None)
                 .replace("\"abandoned\"", "\"vanished\""),
         ),
         (
             "an unknown settlement",
-            process_record_json(ProcessStatus::Completed, 0, None)
+            process_lifecycle_json(ProcessStatus::Completed, 0, None)
                 .replace("\"success\"", "\"shrugged\""),
         ),
         (
@@ -537,7 +541,7 @@ async fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         ),
         (
             "a cancel without its time",
-            process_record_json(ProcessStatus::Running, 0, Some(42))
+            process_lifecycle_json(ProcessStatus::Running, 0, Some(42))
                 .replace("\"requested_at_ms\"", "\"at\""),
         ),
         ("text that is not a record", "not json".to_owned()),
@@ -575,7 +579,7 @@ async fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         ("running".to_owned(), 0, None)
     );
     let stored: String =
-        sqlx::query_scalar("SELECT record_json FROM lash_processes WHERE process_id = $1")
+        sqlx::query_scalar("SELECT lifecycle_json FROM lash_processes WHERE process_id = $1")
             .bind("holds-a-nul")
             .fetch_one(&mut connection)
             .await

@@ -125,7 +125,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
              ('bad-lifetime', 'originator', 'standard', 0, 0, 0,
-              NULL, NULL, 'abandon', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
+              NULL, NULL, 'abandon', '{{}}', '{{}}', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
         ),
         "ck_processes_lifetime",
     );
@@ -134,7 +134,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
              ('bad-scope-kind', 'originator', 'standard', 0, 0, 0,
-              'host', 'scope', 'until', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
+              'host', 'scope', 'until', '{{}}', '{{}}', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
         ),
         "ck_processes_lifetime_scope",
     );
@@ -143,7 +143,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
              ('detached-with-scope', 'originator', 'standard', 0, 0, 0,
-              'turn', 'scope', 'detached', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
+              'turn', 'scope', 'detached', '{{}}', '{{}}', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
         ),
         "ck_processes_lifetime_scope",
     );
@@ -152,7 +152,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
              ('until-without-id', 'originator', 'standard', 0, 0, 0,
-              'session', NULL, 'until', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
+              'session', NULL, 'until', '{{}}', '{{}}', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
         ),
         "ck_processes_lifetime_scope",
     );
@@ -166,7 +166,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         .execute_batch(&format!(
             "INSERT INTO processes ({process_columns}) VALUES
              ('wake-parent', 'originator', 'standard', 0, 0, 0,
-              NULL, NULL, 'detached', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
+              NULL, NULL, 'detached', '{{}}', '{{}}', '{{\"last_event_sequence\":0,\"lifecycle\":{{\"state\":\"running\"}}}}')"
         ))
         .expect("insert valid wake parent");
     assert_check_rejects(
@@ -218,11 +218,11 @@ fn turn_cancellation_shape_is_guarded() {
 /// The columns a statement may write on a process row.
 const PROCESS_FIXTURE_COLUMNS: &str = "process_id, originator_id,
         identity_kind, created_at_ms, updated_at_ms, change_seq,
-        lifetime_scope_kind, lifetime_scope_id, lifetime, record_json";
+        lifetime_scope_kind, lifetime_scope_id, lifetime, start_json, execution_json, lifecycle_json";
 
 /// A process record's JSON, as far as its row's columns read it: the event
 /// sequence, the lifecycle and the cancel request, each in its own codec.
-fn process_record_json(
+fn process_lifecycle_json(
     status: lash_core_execution::ProcessStatus,
     last_event_sequence: u64,
     cancel_requested_at_ms: Option<u64>,
@@ -242,7 +242,7 @@ fn process_record_json(
 }
 
 /// F1 (FIG-5557): `status`, `last_event_sequence` and
-/// `cancel_requested_at_ms` are the database's projections of `record_json`.
+/// `cancel_requested_at_ms` are the database's projections of `lifecycle_json`.
 /// No statement can write one, so a row whose columns disagree with its
 /// record cannot be written; a write of the record moves all three; and a
 /// record whose lifecycle names no status, or that lacks its sequence or
@@ -260,7 +260,7 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         process.execute(
             &format!(
                 "INSERT INTO processes ({PROCESS_FIXTURE_COLUMNS}) VALUES
-                 (?1, 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached', ?2)"
+                 (?1, 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached', '{{}}', '{{}}', ?2)"
             ),
             rusqlite::params![id, record],
         )
@@ -293,7 +293,7 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
     ];
     for (sequence, status) in (0_u64..).zip(statuses) {
         let id = format!("is-{}", status.label());
-        insert(&id, &process_record_json(status, sequence, None)).expect("insert the record");
+        insert(&id, &process_lifecycle_json(status, sequence, None)).expect("insert the record");
         assert_eq!(
             columns(&id),
             (status.label().to_owned(), sequence as i64, None),
@@ -304,13 +304,17 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
     // A write of the record alone moves every projection with it.
     insert(
         "moves",
-        &process_record_json(ProcessStatus::Running, 1, None),
+        &process_lifecycle_json(ProcessStatus::Running, 1, None),
     )
     .expect("insert a running record");
     process
         .execute(
-            "UPDATE processes SET record_json = ?1 WHERE process_id = 'moves'",
-            [process_record_json(ProcessStatus::Cancelled, 7, Some(42))],
+            "UPDATE processes SET lifecycle_json = ?1 WHERE process_id = 'moves'",
+            [process_lifecycle_json(
+                ProcessStatus::Cancelled,
+                7,
+                Some(42),
+            )],
         )
         .expect("save the cancelled record");
     assert_eq!(columns("moves"), ("cancelled".to_owned(), 7, Some(42)));
@@ -325,9 +329,9 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         for statement in [
             format!(
                 "INSERT INTO processes ({PROCESS_FIXTURE_COLUMNS}, {column}) VALUES
-                 ('disagrees', 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached',
+                 ('disagrees', 'originator', 'standard', 0, 0, 0, NULL, NULL, 'detached', '{{}}', '{{}}',
                   '{}', {value})",
-                process_record_json(ProcessStatus::Running, 0, None)
+                process_lifecycle_json(ProcessStatus::Running, 0, None)
             ),
             format!("UPDATE processes SET {column} = {value} WHERE process_id = 'moves'"),
         ] {
@@ -344,7 +348,7 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
 
     // A record that names no status, or lacks what a column reads, is
     // refused whole.
-    let running = process_record_json(ProcessStatus::Running, 0, None);
+    let running = process_lifecycle_json(ProcessStatus::Running, 0, None);
     for (what, record) in [
         ("no lifecycle", "{\"last_event_sequence\":0}".to_owned()),
         (
@@ -353,12 +357,12 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         ),
         (
             "an unknown outcome",
-            process_record_json(ProcessStatus::Abandoned, 0, None)
+            process_lifecycle_json(ProcessStatus::Abandoned, 0, None)
                 .replace("\"abandoned\"", "\"vanished\""),
         ),
         (
             "an unknown settlement",
-            process_record_json(ProcessStatus::Completed, 0, None)
+            process_lifecycle_json(ProcessStatus::Completed, 0, None)
                 .replace("\"success\"", "\"shrugged\""),
         ),
         (
@@ -367,7 +371,7 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         ),
         (
             "a cancel without its time",
-            process_record_json(ProcessStatus::Running, 0, Some(42))
+            process_lifecycle_json(ProcessStatus::Running, 0, Some(42))
                 .replace("\"requested_at_ms\"", "\"at\""),
         ),
         ("text that is not a record", "not json".to_owned()),
@@ -379,7 +383,7 @@ fn a_process_row_takes_its_lifecycle_columns_from_its_record_alone() {
         assert!(
             process
                 .execute(
-                    "UPDATE processes SET record_json = ?1 WHERE process_id = 'moves'",
+                    "UPDATE processes SET lifecycle_json = ?1 WHERE process_id = 'moves'",
                     [&record],
                 )
                 .is_err(),

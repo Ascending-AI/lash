@@ -79,7 +79,7 @@ async fn a_deadlock_inside_a_process_terminal_is_retried() {
             END IF;
             RETURN NEW;
         END $$;
-        CREATE TRIGGER terminal_contention AFTER UPDATE OF record_json ON lash_processes
+        CREATE TRIGGER terminal_contention AFTER UPDATE OF lifecycle_json ON lash_processes
             FOR EACH ROW EXECUTE FUNCTION fail_first_terminal();
     "#,
     )

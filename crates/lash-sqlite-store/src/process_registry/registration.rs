@@ -190,11 +190,13 @@ impl SqliteProcessRegistry {
                 record.lifetime.scope().map(ScopeId::storage_kind),
                 record.lifetime.scope().map(ScopeId::storage_id),
                 record.lifetime.storage_label(),
-                process_encode_json(&record)?,
+                process_encode_json(&record.lifecycle_storage())?,
                 consumer_hold.as_ref().map(|hold| hold.key.as_str()),
                 consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()),
                 consumer_hold.as_ref().map(|hold| hold.owner.storage_id()),
                 consumer_hold.as_ref().map(|hold| hold.cancels),
+                process_encode_json(&record.start_storage())?,
+                process_encode_json(&record.execution_storage())?,
             ],
         )
         .map_err(process_sqlite_error)?;

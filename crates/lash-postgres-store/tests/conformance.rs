@@ -827,9 +827,12 @@ lash_conformance::process_projection_repair_tests!({
         registry,
         move |stale: lash_core_execution::ProcessRecord| async move {
             let changed =
-                sqlx::query("UPDATE lash_processes SET record_json = $2 WHERE process_id = $1")
+                sqlx::query("UPDATE lash_processes SET lifecycle_json = $2 WHERE process_id = $1")
                     .bind(stale.id.as_str())
-                    .bind(serde_json::to_string(&stale).expect("encode stale process projection"))
+                    .bind(
+                        serde_json::to_string(&stale.lifecycle_storage())
+                            .expect("encode stale process projection"),
+                    )
                     .execute(&pool)
                     .await
                     .expect("corrupt Postgres process projection")

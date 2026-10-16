@@ -176,7 +176,7 @@ async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
         let tx = conn.unchecked_transaction()?;
         tx.execute("DELETE FROM processes", [])?;
         for record in rows {
-            tx.execute("INSERT INTO processes (process_id, originator_id, identity_kind, identity_label, created_at_ms, updated_at_ms, change_seq, lifetime, record_json) VALUES (?1, 'host', ?2, ?3, ?4, ?5, 1, 'detached', ?6)", params![record.id.as_str(), record.identity.kind.as_str(), record.identity.label, record.created_at_ms as i64, record.updated_at_ms as i64, serde_json::to_string(&record).expect("encode record")])?;
+            tx.execute("INSERT INTO processes (process_id, originator_id, identity_kind, identity_label, created_at_ms, updated_at_ms, change_seq, lifetime, lifecycle_json, start_json, execution_json) VALUES (?1, 'host', ?2, ?3, ?4, ?5, 1, 'detached', ?6, ?7, ?8)", params![record.id.as_str(), record.identity.kind.as_str(), record.identity.label, record.created_at_ms as i64, record.updated_at_ms as i64, serde_json::to_string(&record.lifecycle_storage()).expect("encode lifecycle"), serde_json::to_string(&record.start_storage()).expect("encode start"), serde_json::to_string(&record.execution_storage()).expect("encode execution")])?;
         }
         tx.commit()?;
         Ok(())

@@ -61,7 +61,12 @@ implicitly cancel processes; hosts compose cancellation policy explicitly.
 
 ## Shipped storage boundary
 
-SQLite and PostgreSQL store lifecycle JSON beside indexed query fields,
+SQLite and PostgreSQL store immutable creation JSON once, the current execution
+input/definition pair separately, and mutable lifecycle JSON. The execution pair
+is written at creation and replaced only on a committed successor (FIG-6121). A changed event batch writes only the lifecycle object;
+reads assemble the same complete record and change-feed upsert. Status, event
+sequence and cancellation time are generated from the lifecycle object alone.
+The objects live beside indexed query fields,
 observer edges and payload-free process tombstones. `ProcessStatus` is a
 label-only lifecycle enum; terminal payloads live in `ProcessRecord::outcome`.
 VM continuation state is the process's snapshot under [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §8.

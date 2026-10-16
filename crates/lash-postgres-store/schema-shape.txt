@@ -299,17 +299,19 @@ table lash_processes
   column consumer_hold_scope_kind text nullable
   column created_at_ms bigint not-null
   column driver_json text nullable
+  column execution_json text not-null
   column identity_kind text not-null
   column identity_label text nullable
   column last_event_sequence bigint not-null generated
+  column lifecycle_json text not-null
   column lifetime text not-null
   column lifetime_scope_id text nullable
   column lifetime_scope_kind text nullable
   column originator_id text not-null
   column process_id text not-null
   column published_event_sequence bigint not-null default
-  column record_json text not-null
   column staged_seq bigint not-null default
+  column start_json text not-null
   column start_key text nullable
   column state_rev bigint not-null default
   column status text not-null generated

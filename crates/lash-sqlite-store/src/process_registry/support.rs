@@ -30,6 +30,7 @@ impl ProcessEventAppendArm {
 pub(crate) struct ProcessEventBatch {
     fleet_format: lash_core_execution::FleetFormat,
     record_changed: bool,
+    execution_changed: bool,
 }
 
 impl ProcessEventBatch {
@@ -38,6 +39,7 @@ impl ProcessEventBatch {
         Self {
             fleet_format,
             record_changed: false,
+            execution_changed: false,
         }
     }
 
@@ -71,6 +73,8 @@ impl ProcessEventBatch {
             self.fleet_format,
         )?;
         self.record_changed |= arm.record_changed();
+        self.execution_changed |= arm.record_changed()
+            && receipt.event.fact.kind() == lash_core_execution::ProcessEventKind::Succeeded;
         Ok((receipt, arm))
     }
 
@@ -81,7 +85,7 @@ impl ProcessEventBatch {
         record: &ProcessRecord,
     ) -> Result<(), lash_core_execution::PluginError> {
         if self.record_changed {
-            SqliteProcessRegistry::save_process_conn(conn, record)?;
+            SqliteProcessRegistry::save_process_conn(conn, record, self.execution_changed)?;
         }
         Ok(())
     }
@@ -315,18 +319,34 @@ impl SqliteProcessRegistry {
     pub(crate) fn save_process_conn(
         conn: &Connection,
         record: &ProcessRecord,
+        execution_changed: bool,
     ) -> Result<(), lash_core_execution::PluginError> {
         let change_seq = Self::next_change_seq_conn(conn)?;
-        crate::conn::cached_execute(
-            conn,
-            process_sql().process.update_mutable_columns.sql(),
-            params![
-                record.id.as_str(),
-                record.updated_at_ms as i64,
-                change_seq as i64,
-                process_encode_json(record)?,
-            ],
-        )
+        let lifecycle = process_encode_json(&record.lifecycle_storage())?;
+        if execution_changed {
+            crate::conn::cached_execute(
+                conn,
+                process_sql().process.update_execution_columns.sql(),
+                params![
+                    record.id.as_str(),
+                    record.updated_at_ms as i64,
+                    change_seq as i64,
+                    lifecycle,
+                    process_encode_json(&record.execution_storage())?
+                ],
+            )
+        } else {
+            crate::conn::cached_execute(
+                conn,
+                process_sql().process.update_mutable_columns.sql(),
+                params![
+                    record.id.as_str(),
+                    record.updated_at_ms as i64,
+                    change_seq as i64,
+                    lifecycle
+                ],
+            )
+        }
         .map_err(process_sqlite_error)?;
         Ok(())
     }
@@ -392,7 +412,11 @@ impl SqliteProcessRegistry {
             fleet_format,
         )?;
         if arm.record_changed() {
-            Self::save_process_conn(conn, record)?;
+            Self::save_process_conn(
+                conn,
+                record,
+                receipt.event.fact.kind() == lash_core_execution::ProcessEventKind::Succeeded,
+            )?;
         }
         Ok((receipt, arm))
     }

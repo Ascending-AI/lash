@@ -177,7 +177,7 @@ async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
         if matches {
             expected.push(record.id.clone());
         }
-        rows.push(record);
+        rows.push(serde_json::json!({"start": record.start_storage(), "execution": record.execution_storage(), "lifecycle": record.lifecycle_storage()}));
     }
     expected.sort();
 
@@ -185,7 +185,7 @@ async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
         .execute(backend.pool())
         .await
         .expect("remove template");
-    crate::observed_sql::query("INSERT INTO lash_processes (process_id, originator_id, identity_kind, identity_label, created_at_ms, updated_at_ms, lifetime, record_json) SELECT r->>'id', 'host', r#>>'{identity,kind}', r#>>'{identity,label}', (r->>'created_at_ms')::bigint, (r->>'updated_at_ms')::bigint, 'detached', r::text FROM jsonb_array_elements($1) r")
+    crate::observed_sql::query("INSERT INTO lash_processes (process_id, originator_id, identity_kind, identity_label, created_at_ms, updated_at_ms, lifetime, start_json, execution_json, lifecycle_json) SELECT r#>>'{start,id}', 'host', r#>>'{execution,identity,kind}', r#>>'{execution,identity,label}', (r#>>'{start,created_at_ms}')::bigint, (r#>>'{lifecycle,updated_at_ms}')::bigint, 'detached', (r->'start')::text, (r->'execution')::text, (r->'lifecycle')::text FROM jsonb_array_elements($1) r")
         .bind(serde_json::to_value(rows).expect("encode records")).execute(backend.pool()).await.expect("seed ten thousand rows");
 
     let page = registry

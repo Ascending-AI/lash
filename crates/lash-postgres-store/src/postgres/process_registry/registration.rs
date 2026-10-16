@@ -112,7 +112,8 @@ pub(crate) async fn apply_registration_tx(
     }
     let requires = registration.requires.clone();
     let mut record = ProcessRecord::from_prepared_registration(registration, process_id, now);
-    let record_json = serde_json::to_string(&record).map_err(process_decode_error)?;
+    let lifecycle_json =
+        serde_json::to_string(&record.lifecycle_storage()).map_err(process_decode_error)?;
     let result =
         crate::observed_sql::query(process_sql().process_postgres.insert_registration.sql())
             .bind(record.id.as_str())
@@ -140,11 +141,13 @@ pub(crate) async fn apply_registration_tx(
                     .map(lash_core_execution::ScopeId::storage_id),
             )
             .bind(record.lifetime.storage_label())
-            .bind(record_json)
+            .bind(lifecycle_json)
             .bind(consumer_hold.as_ref().map(|hold| hold.key.clone()))
             .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
             .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
             .bind(consumer_hold.as_ref().map(|hold| hold.cancels))
+            .bind(serde_json::to_string(&record.start_storage()).map_err(process_decode_error)?)
+            .bind(serde_json::to_string(&record.execution_storage()).map_err(process_decode_error)?)
             .execute(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(plugin_sqlx_error)?;
