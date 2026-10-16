@@ -916,11 +916,11 @@ mod tests {
                     SessionObservationEventPayload::TurnActivity(TurnActivity::independent(
                         TurnEvent::CodeBlockCompleted {
                             language: "typescript".to_owned(),
-                            prints: vec!["retained output".repeat(1024).into()],
+                            prints: Some(vec!["retained output".repeat(1024).into()]),
                             prints_retained: None,
                             result: lash_core::CellOutcome::Completed,
-                            duration_ms: 1,
-                            tool_call_ids: Vec::new(),
+                            duration_ms: Some(1),
+                            tool_call_ids: Some(Vec::new()),
                             graph_key: None,
                         },
                     )),

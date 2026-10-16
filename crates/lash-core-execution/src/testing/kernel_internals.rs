@@ -113,10 +113,12 @@ pub fn emit_tool_call_completed(
             lash_trace::TraceEvent::ToolCallCompleted {
                 call_id: record.call_id.clone(),
                 provider_call_id: record.provider_call_id.clone(),
-                name: record.tool.clone(),
-                args: content.capture(lash_trace::ContentCategory::ToolArguments, || {
-                    record.args.clone()
-                }),
+                name: record.tool.clone().into(),
+                args: content
+                    .capture(lash_trace::ContentCategory::ToolArguments, || {
+                        record.args.clone()
+                    })
+                    .into(),
                 output: crate::trace::trace_tool_call_output(&record.output, content),
                 duration_ms,
                 issuing_node_id: issuing_node_id.map(str::to_string),

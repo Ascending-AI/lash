@@ -74,7 +74,7 @@ pub use domain::{
     TraceModelAttempt, TraceModelAttemptSpan, TraceModelCall, TraceRuntimeStreamEvent,
     TraceRuntimeStreamPayload,
 };
-pub use event::{TraceEvent, TraceEventKind};
+pub use event::{TraceEvent, TraceEventKind, TraceToolArgs, TraceToolName};
 pub use extension::{
     AmbientContext, AmbientFrame, AmbientGuard, AmbientScope, ExtensionAttribute, ExtensionContent,
     ExtensionOperation, ExtensionSpanEnd, ExtensionSpanEvent, ExtensionSpanKind,

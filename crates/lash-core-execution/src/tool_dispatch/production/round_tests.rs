@@ -93,3 +93,74 @@ fn a_parked_finish_settles_under_the_declaration_its_park_recorded() {
         "{accepted:?}"
     );
 }
+
+fn observed_context() -> (
+    crate::RuntimeExecutionContext<'static>,
+    tokio::sync::mpsc::UnboundedReceiver<crate::TurnActivity>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut built = crate::testing::TestExecutionContextBuilder::over_controller(
+        crate::ActorContext::unavailable(),
+    )
+    .build();
+    Arc::get_mut(&mut built.dispatch)
+        .expect("the fixture owns its dispatch")
+        .observer = crate::testing::ChannelObservationSink::new(None, Some(tx));
+    (built.into_runtime(), rx)
+}
+
+/// S1: a tool answered without admission has no measured execution window.
+#[test]
+fn a_tool_answered_without_admission_has_no_duration() {
+    let (context, mut observed) = observed_context();
+    let call = crate::sansio::PendingToolCall {
+        call_id: crate::ToolCallId::fixture("unadmitted"),
+        provider_call_id: None,
+        tool_name: "unknown".into(),
+        args: serde_json::Value::Null,
+        replay: None,
+    };
+    ProductionToolHandlers::new(context).unavailable_call(&call);
+    assert!(matches!(
+        observed.try_recv().expect("the call starts").event,
+        crate::TurnEvent::ToolCallStarted { .. }
+    ));
+    let crate::TurnEvent::ToolCallCompleted { duration_ms, .. } =
+        observed.try_recv().expect("the call answers").event
+    else {
+        panic!("a completion follows its start")
+    };
+    assert_eq!(duration_ms, None);
+}
+
+/// T5: a refused empty batch has no declaration whose index or kind can be reported.
+#[tokio::test]
+async fn an_empty_invalid_version_batch_emits_only_a_batch_refusal() {
+    let (context, mut observed) = observed_context();
+    let call = crate::ToolCallId::fixture("batch-refused");
+    let realization = crate::tool_dispatch::execute_final_tool_intents(
+        &context.dispatch().intent_realization_context(),
+        &call,
+        &crate::ToolIntents {
+            protocol_version: 0,
+            intents: Vec::new(),
+        },
+        None,
+    )
+    .await
+    .expect("the protocol refusal is an outcome");
+    context.emit_tool_intent_outcome_activities("batch", &call, &realization.receipt.outcomes);
+    let activity = observed.try_recv().expect("the batch refusal is observed");
+    assert!(
+        matches!(&activity.event, crate::TurnEvent::ToolIntentOutcome { call_id, outcome: crate::ToolIntentActivityOutcome::BatchRefused {
+        refusal: crate::ToolIntentRefusalReason::UnsupportedProtocolVersion { recorded: 0 },
+    }} if call_id == &call)
+    );
+    let encoded = serde_json::to_value(activity.event).expect("the activity serializes");
+    assert!(encoded["outcome"].get("intent_index").is_none());
+    assert!(encoded["outcome"].get("kind").is_none());
+    assert!(
+        observed.try_recv().is_err(),
+        "no per-intent activity was invented"
+    );
+}

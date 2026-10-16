@@ -268,18 +268,24 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
-    /// A cell's execution settled. `prints`, `prints_retained` and `result`
-    /// are the executor's response values, the same ones the protocol
-    /// commits in the cell's [`crate::CellRecord`]; `duration_ms` is measured
-    /// around the invocation and is in no record.
+    /// Provisional cell activity; a later commit settles it (ADR 0122).
     CodeBlockCompleted {
+        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         language: String,
-        prints: Vec<crate::CellPrint>,
+        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122); absent when unavailable.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prints: Option<Vec<crate::CellPrint>>,
+        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prints_retained: Option<crate::RetainedValue>,
+        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         result: crate::CellOutcome,
-        duration_ms: u64,
-        tool_call_ids: Vec<crate::ToolCallId>,
+        /// The observed invocation window, absent when unmeasured.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
+        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122); absent when unavailable.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_ids: Option<Vec<crate::ToolCallId>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         graph_key: Option<String>,
     },
@@ -301,12 +307,18 @@ pub enum TurnEvent {
         call_id: crate::ToolCallId,
         /// The model provider's id for the call, when a model issued it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         provider_call_id: Option<String>,
+        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         name: String,
+        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         args: serde_json::Value,
         #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+        /// Provisional activity, not yet committed and never committed after an Immediate stop (ADR 0122).
         output: crate::ToolCallOutput,
-        duration_ms: u64,
+        /// The observed call window, absent when unmeasured.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
         /// Graph key of the enclosing code block, when this tool call ran
         /// inside one. `None` when the call did not run inside a code block.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -314,7 +326,7 @@ pub enum TurnEvent {
     },
     ToolIntentOutcome {
         call_id: crate::ToolCallId,
-        outcome: crate::ToolIntentExecutionOutcome,
+        outcome: ToolIntentActivityOutcome,
     },
     /// A declared Finish control ended the turn with `value`.
     Finished {
@@ -513,5 +525,80 @@ pub async fn admit_session_state_generation(
     match store.read_session_state_version(session_id).await {
         Ok(_) | Err(crate::StoreError::SessionDeleted { .. }) => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+/// The new fact a tool intent produced, without copying its committed process record.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ToolIntentActivityOutcome {
+    Executed {
+        intent_index: u32,
+        kind: crate::ToolIntentKind,
+        realized: ToolIntentRealizedRef,
+    },
+    Refused {
+        intent_index: u32,
+        kind: crate::ToolIntentKind,
+        refusal: crate::ToolIntentRefusalReason,
+    },
+    BatchRefused {
+        refusal: crate::ToolIntentRefusalReason,
+    },
+}
+
+/// The typed identity and admission outcome of a realized intent.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "result",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum ToolIntentRealizedRef {
+    Process(crate::ProcessId),
+    /// The signature is the definition admission's new outcome, alongside its id.
+    Definition(crate::ProcessDefinition),
+    Cancel {
+        process_id: crate::ProcessId,
+        status: crate::ProcessStatus,
+    },
+}
+
+impl From<&crate::ToolIntentExecutionOutcome> for ToolIntentActivityOutcome {
+    fn from(outcome: &crate::ToolIntentExecutionOutcome) -> Self {
+        use crate::{ToolIntentExecutionOutcome, ToolIntentRealized};
+        match outcome {
+            ToolIntentExecutionOutcome::Executed { identity, realized } => Self::Executed {
+                intent_index: identity.intent_index,
+                kind: realized.kind(),
+                realized: match realized {
+                    ToolIntentRealized::StartProcess(handle) => {
+                        ToolIntentRealizedRef::Process(handle.process_id.clone())
+                    }
+                    ToolIntentRealized::GetDefinition(definition)
+                    | ToolIntentRealized::PublishDefinition(definition) => {
+                        ToolIntentRealizedRef::Definition((**definition).clone())
+                    }
+                    ToolIntentRealized::CancelProcess(receipt) => ToolIntentRealizedRef::Cancel {
+                        process_id: receipt.process_id.clone(),
+                        status: receipt.status,
+                    },
+                },
+            },
+            ToolIntentExecutionOutcome::Refused {
+                intent_index,
+                kind,
+                refusal,
+                ..
+            } => Self::Refused {
+                intent_index: *intent_index,
+                kind: *kind,
+                refusal: refusal.clone(),
+            },
+            ToolIntentExecutionOutcome::ProtocolRefused { refusal } => Self::BatchRefused {
+                refusal: refusal.clone(),
+            },
+        }
     }
 }

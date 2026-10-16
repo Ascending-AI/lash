@@ -81,8 +81,8 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         TraceEvent::ToolCallCompleted {
             call_id: lash_sansio::ToolCallId::fixture("none"),
             provider_call_id: None,
-            name: "tool".to_string(),
-            args: Value::Null,
+            name: "tool".to_string().into(),
+            args: Value::Null.into(),
             output: TraceToolCallOutput {
                 outcome,
                 control: None,

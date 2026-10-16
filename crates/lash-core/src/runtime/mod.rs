@@ -400,8 +400,9 @@ pub use lash_core_llm::turn_vocabulary::{TurnExecutionMetrics, TurnIssue, TurnIs
 pub use lash_core_execution::runtime::{
     AgentFrameRun, AssembledTurn, CodeOutputRecord, DeploymentStore, DeploymentStoreDecorator,
     EventSink, NOOP_EVENT_SINK, NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink,
-    ProtocolSessionExtension, TurnActivity, TurnActivitySink, TurnEvent,
-    admit_session_state_generation, admit_session_view, live_session_view, session_is_live,
+    ProtocolSessionExtension, ToolIntentActivityOutcome, ToolIntentRealizedRef, TurnActivity,
+    TurnActivitySink, TurnEvent, admit_session_state_generation, admit_session_view,
+    live_session_view, session_is_live,
 };
 
 mod normalized_item {

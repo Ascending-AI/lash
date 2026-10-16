@@ -401,8 +401,8 @@ fn event_samples() -> Vec<TraceEvent> {
         TraceEvent::ToolCallCompleted {
             call_id: lash_sansio::ToolCallId::fixture("call-1"),
             provider_call_id: None,
-            name: "read_file".to_string(),
-            args: json!({ "path": "README.md" }),
+            name: "read_file".to_string().into(),
+            args: json!({ "path": "README.md" }).into(),
             output: TraceToolCallOutput {
                 outcome: TraceToolCallOutcome::Success(json!("ok")),
                 control: None,
@@ -411,6 +411,14 @@ fn event_samples() -> Vec<TraceEvent> {
             issuing_node_id: None,
             attempts: None,
             span_attributes: Default::default(),
+        },
+        TraceEvent::ToolCallCompleted {
+            call_id: lash_sansio::ToolCallId::fixture("abandoned"),
+            provider_call_id: None,
+            name: lash_trace::TraceToolName::Identity { tool_id: lash_sansio::ToolId::new("tool:read") },
+            args: lash_trace::TraceToolArgs::Unavailable,
+            output: TraceToolCallOutput { outcome: TraceToolCallOutcome::Discarded, control: None },
+            duration_ms: 3, issuing_node_id: None, attempts: None, span_attributes: Default::default(),
         },
         TraceEvent::ExecCodeStarted {
             language: "python".to_string(),
@@ -422,7 +430,7 @@ fn event_samples() -> Vec<TraceEvent> {
             code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,
-            duration_ms: 0,
+            duration_ms: None,
             reason: lash_trace::ExecCodeFailureReason::RuntimeStopped,
             error: "boom".to_string(),
         },
@@ -562,7 +570,7 @@ fn exec_code_failed_carries_a_closed_reason_code() {
         code: String::new(),
         language: "python".to_string(),
         started_at_ms: 0,
-        duration_ms: 0,
+        duration_ms: Some(0),
         reason: lash_trace::ExecCodeFailureReason::ExecutorUnavailable,
         error: "code execution is not available in this session".to_string(),
     };
@@ -1121,8 +1129,8 @@ fn content_bearing_events() -> Vec<TraceEvent> {
         TraceEvent::ToolCallCompleted {
             call_id: lash_sansio::ToolCallId::fixture("call-1"),
             provider_call_id: Some("provider-call".to_string()),
-            name: "search".to_string(),
-            args: json!({ "query": CONTENT }),
+            name: "search".to_string().into(),
+            args: json!({ "query": CONTENT }).into(),
             output: TraceToolCallOutput {
                 outcome: TraceToolCallOutcome::Failure(json!({
                     "class": "permission_denied",
@@ -1170,7 +1178,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,
-            duration_ms: 0,
+            duration_ms: Some(0),
             reason: lash_trace::ExecCodeFailureReason::RuntimeStopped,
             error: CONTENT.to_string(),
         },

@@ -339,7 +339,9 @@ impl TraceEvent {
                 issuing_node_id: _,
                 span_attributes: _,
             } => {
-                json(C::ToolArguments, "tool_arguments", args, f);
+                if let crate::TraceToolArgs::Value(args) = args {
+                    json(C::ToolArguments, "tool_arguments", args, f);
+                }
                 match &mut output.outcome {
                     TraceToolCallOutcome::Success(value) => {
                         json(C::ToolResults, "tool_results", value, f)

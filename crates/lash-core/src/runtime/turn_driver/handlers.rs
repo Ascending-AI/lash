@@ -594,7 +594,7 @@ impl RuntimeTurnDriver<'_> {
                         code: content.capture(lash_trace::ContentCategory::Code, || code.clone()),
                         language: language.clone(),
                         started_at_ms,
-                        duration_ms: 0,
+                        duration_ms: None,
                         reason: crate::ExecCodeFailureReason::Session,
                         error: content
                             .capture(lash_trace::ContentCategory::CodeOutput, || message.clone()),
@@ -618,14 +618,14 @@ impl RuntimeTurnDriver<'_> {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
                             language: language.clone(),
-                            prints: Vec::new(),
+                            prints: Some(Vec::new()),
                             prints_retained: None,
                             result: crate::CellOutcome::Failed(crate::CellFailure::new(
                                 crate::CellFailureKind::Host,
                                 message,
                             )),
-                            duration_ms: 0,
-                            tool_call_ids: Vec::new(),
+                            duration_ms: None,
+                            tool_call_ids: Some(Vec::new()),
                             graph_key: None,
                         },
                     },
@@ -707,23 +707,22 @@ impl RuntimeTurnDriver<'_> {
             Ok(result) => result,
             Err(err) => {
                 let message = err.to_string();
-                // The observation-only duration is not read from the clock:
-                // the shift decides nothing from it, so it reports 0 rather
-                // than take a live timestamp (FIG-3672 P6b).
+                // No executor response was available to observe; its timing,
+                // prints and calls are unavailable.
                 code_observations.observe(
                     cell_tx,
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
                             language: language.clone(),
-                            prints: Vec::new(),
+                            prints: None,
                             prints_retained: None,
                             result: crate::CellOutcome::Failed(crate::CellFailure::new(
                                 crate::CellFailureKind::Host,
                                 message,
                             )),
-                            duration_ms: 0,
-                            tool_call_ids: Vec::new(),
+                            duration_ms: None,
+                            tool_call_ids: None,
                             graph_key: graph_key.clone(),
                         },
                     },
@@ -790,15 +789,17 @@ impl RuntimeTurnDriver<'_> {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
                             language: language.clone(),
-                            prints: output.prints.clone(),
+                            prints: Some(output.prints.clone()),
                             prints_retained: output.prints_retained.clone(),
                             result: output.result.clone(),
-                            duration_ms: cell_duration_ms,
-                            tool_call_ids: output
-                                .tool_calls
-                                .iter()
-                                .map(|record| record.call_id.clone())
-                                .collect(),
+                            duration_ms: Some(cell_duration_ms),
+                            tool_call_ids: Some(
+                                output
+                                    .tool_calls
+                                    .iter()
+                                    .map(|record| record.call_id.clone())
+                                    .collect(),
+                            ),
                             graph_key: graph_key.clone(),
                         },
                     },
@@ -811,14 +812,14 @@ impl RuntimeTurnDriver<'_> {
                         correlation_id: Some(code_correlation_id.clone()),
                         event: TurnEvent::CodeBlockCompleted {
                             language: language.clone(),
-                            prints: Vec::new(),
+                            prints: None,
                             prints_retained: None,
                             result: crate::CellOutcome::Failed(crate::CellFailure::new(
                                 crate::CellFailureKind::Host,
                                 error.message.clone(),
                             )),
-                            duration_ms: 0,
-                            tool_call_ids: Vec::new(),
+                            duration_ms: Some(cell_duration_ms),
+                            tool_call_ids: None,
                             graph_key: graph_key.clone(),
                         },
                     },
@@ -918,7 +919,7 @@ impl RuntimeTurnDriver<'_> {
                         code: content.capture(lash_trace::ContentCategory::Code, || code.clone()),
                         language: language.clone(),
                         started_at_ms: first_started_at_ms,
-                        duration_ms,
+                        duration_ms: Some(duration_ms),
                         reason: error.reason,
                         error: content.capture(lash_trace::ContentCategory::CodeOutput, || {
                             error.message.clone()

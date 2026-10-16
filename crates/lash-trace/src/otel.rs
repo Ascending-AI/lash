@@ -708,6 +708,7 @@ struct Projection<'a> {
     span: DomainSpan,
     model: Option<&'a str>,
     tool: Option<&'a str>,
+    tool_identity: Option<&'a lash_sansio::ToolId>,
     process: Option<&'a str>,
     /// A workflow node's site, which names its span.
     site: Option<String>,
@@ -721,6 +722,7 @@ impl<'a> Projection<'a> {
             span: DomainSpan::Turn,
             model: None,
             tool: None,
+            tool_identity: None,
             process: None,
             site: None,
             attempt: None,
@@ -775,7 +777,10 @@ impl<'a> Projection<'a> {
             }
             (TraceSpanKind::Tool, TraceEvent::ToolCallCompleted { name, .. }) => {
                 projection.span = DomainSpan::Tool;
-                projection.tool = Some(name);
+                projection.tool = name.name();
+                if let crate::TraceToolName::Identity { tool_id } = name {
+                    projection.tool_identity = Some(tool_id);
+                }
             }
             (
                 TraceSpanKind::Cell,
@@ -797,7 +802,10 @@ impl<'a> Projection<'a> {
         let default = self.span.definition().name;
         let suffix = match self.span {
             DomainSpan::Model => self.model,
-            DomainSpan::Tool | DomainSpan::ExecCode => self.tool,
+            DomainSpan::Tool => self
+                .tool
+                .or_else(|| self.tool_identity.map(|id| id.as_str())),
+            DomainSpan::ExecCode => self.tool,
             DomainSpan::Process | DomainSpan::Workflow => self.process,
             DomainSpan::WorkflowNode => self.site.as_deref(),
             _ => None,
@@ -962,7 +970,7 @@ impl<'a> Projection<'a> {
                 ..
             } => {
                 out.push(A::ToolType.value("function"));
-                out.push(A::ToolId.value(name.clone()));
+                out.push(A::ToolId.value(name.label().to_owned()));
                 if let Some(id) = provider_call_id {
                     out.push(A::ProviderCallId.value(id.clone()));
                 }

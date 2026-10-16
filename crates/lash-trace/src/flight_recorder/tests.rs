@@ -80,7 +80,7 @@ fn tool(outcome: TraceToolCallOutcome, duration_ms: u64) -> TraceEvent {
         call_id: call_id(),
         provider_call_id: Some("provider-call".into()),
         name: "tool".into(),
-        args: json!({"input": "PAYLOAD_SECRET"}),
+        args: json!({"input": "PAYLOAD_SECRET"}).into(),
         output: TraceToolCallOutput {
             outcome,
             control: Some(json!("PAYLOAD_SECRET")),
@@ -98,7 +98,7 @@ fn failure() -> TraceEvent {
         code: String::new(),
         language: "python".to_string(),
         started_at_ms: 0,
-        duration_ms: 0,
+        duration_ms: Some(0),
         reason: crate::ExecCodeFailureReason::Session,
         error: "PAYLOAD_SECRET".into(),
     }

@@ -106,9 +106,9 @@ pub use lash_trace::{
     TraceLlmTerminalReason, TraceNodeAwaited, TraceNodeFact, TraceNodeWaitKind,
     TraceNodeWaitResolution, TraceNormalizedError, TraceProgramStepOutcome,
     TraceProviderFailureKind, TraceRetryAttempt, TraceRetryAttemptDetail, TraceRetryClass,
-    TraceRetryDeclineCause, TraceRetryWait, TraceStoreErrorClass, TraceToolAttemptOutcome,
-    TraceToolCallStatus, TraceTurnCancellationEvidence, TraceTurnCompletionReason,
-    TraceTurnFailureReason, TraceTurnOutcome,
+    TraceRetryDeclineCause, TraceRetryWait, TraceStoreErrorClass, TraceToolArgs,
+    TraceToolAttemptOutcome, TraceToolCallStatus, TraceToolName, TraceTurnCancellationEvidence,
+    TraceTurnCompletionReason, TraceTurnFailureReason, TraceTurnOutcome,
 };
 
 /// How a producer's host call that failed with `error` settles: refused,

@@ -314,9 +314,9 @@ pub use lash_core::{
     RegisteredLlmProfile, RegistrationError, Resolution, ResolveOutcome, RuntimeOwner,
     SessionCreateRequest, SessionEntry, SessionError, SessionId, SessionListFilter,
     SessionRelationKind, SessionStartPoint, SessionView, ToolCallLimitExceeded, ToolCallLimitScope,
-    TurnActivity, TurnActivityId, TurnBudget, TurnEvent, TurnFailureEvidence,
-    TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput, TurnInputApplication,
-    UnstatedSessionConfig, facade_support::GenerationOverlay,
+    ToolIntentActivityOutcome, ToolIntentRealizedRef, TurnActivity, TurnActivityId, TurnBudget,
+    TurnEvent, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnId,
+    TurnInput, TurnInputApplication, UnstatedSessionConfig, facade_support::GenerationOverlay,
     facade_support::OperationCancelOutcome, facade_support::PluginStack,
     facade_support::PluginStage, facade_support::QueueWithdrawalPublisher,
     facade_support::SessionCommand, facade_support::SessionCommandReceipt,
@@ -414,9 +414,10 @@ pub mod prelude {
         SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
         SessionCommandReceipt, SessionCreateRequest, SessionCreation, SessionDeletion,
         SessionEntry, SessionListFilter, SessionParkRefused, SessionRelationKind, SessionSpec,
-        SessionStartPoint, SessionView, TurnActivity, TurnActivityFanout, TurnActivityId,
-        TurnActivitySink, TurnBudget, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
-        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop,
+        SessionStartPoint, SessionView, ToolIntentActivityOutcome, ToolIntentRealizedRef,
+        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget, TurnEvent,
+        TurnExecutionMetrics, TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome,
+        TurnOutput, TurnReport, TurnStatus, TurnStop,
     };
 }
 
@@ -508,13 +509,13 @@ pub mod tools {
         ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
         ToolCatalogEntry, ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
         ToolDraft, ToolExecutionGrant, ToolFailure, ToolFailureCause, ToolFailureClass,
-        ToolFailureSource, ToolIntent, ToolIntentCommandFailure, ToolIntentExecutionOutcome,
-        ToolIntentIdentity, ToolIntentKind, ToolIntentLimits, ToolIntentRealized,
-        ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents, ToolManifest, ToolModule,
-        ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
-        ToolProvider, ToolRegistry, ToolSessionLlmProfile, ToolValue, ToolView, ToolViewBlock,
-        ToolViewMeta, derive_tool_intent_identity, facade_support::ReconfigureError,
-        turn_stop_from_tool_control,
+        ToolFailureSource, ToolIntent, ToolIntentActivityOutcome, ToolIntentCommandFailure,
+        ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentLimits,
+        ToolIntentRealized, ToolIntentRealizedRef, ToolIntentRefusalReason,
+        ToolIntentRuntimeFailure, ToolIntents, ToolManifest, ToolModule, ToolOutcome,
+        ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+        ToolRegistry, ToolSessionLlmProfile, ToolValue, ToolView, ToolViewBlock, ToolViewMeta,
+        derive_tool_intent_identity, facade_support::ReconfigureError, turn_stop_from_tool_control,
     };
     /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
     pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};

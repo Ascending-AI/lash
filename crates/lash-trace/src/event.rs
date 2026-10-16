@@ -174,14 +174,20 @@ pub enum TraceEvent {
         call_id: lash_sansio::ToolCallId,
         /// The model provider's id for the call, when a model issued it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Exporters outside lash cannot read the store, so provider correlation travels with the trace.
         provider_call_id: Option<String>,
-        name: String,
-        args: Value,
+        /// Exporters outside lash cannot read the store, so this diagnostic content travels with the trace.
+        name: TraceToolName,
+        /// Exporters outside lash cannot read the store, so this diagnostic content travels with the trace.
+        args: TraceToolArgs,
+        /// Exporters outside lash cannot read the store, so this diagnostic content travels with the trace.
         output: TraceToolCallOutput,
         duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Exporters outside lash cannot read the store, so issuer correlation travels with the trace.
         issuing_node_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        /// Exporters outside lash cannot read the journal, so the observed retry ladder travels with the trace.
         attempts: Option<Vec<TraceRetryAttempt>>,
         /// What the body of the attempt that settled the call set on its own
         /// tool span: in memory only, stamped by the span's closer.
@@ -222,7 +228,9 @@ pub enum TraceEvent {
         code: String,
         language: String,
         started_at_ms: u64,
-        duration_ms: u64,
+        /// The observed window, absent when no invocation existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u64>,
         /// Closed failure classification; offline analysis keys on this rather
         /// than matching `error` prose.
         reason: ExecCodeFailureReason,
@@ -419,4 +427,53 @@ impl TraceEventKind {
 
 fn is_zero(value: &usize) -> bool {
     *value == 0
+}
+
+/// Tool arguments observed at completion, distinct from arguments that are unavailable.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "availability", content = "value", rename_all = "snake_case")]
+pub enum TraceToolArgs {
+    Value(Value),
+    Unavailable,
+}
+
+impl From<Value> for TraceToolArgs {
+    fn from(value: Value) -> Self {
+        Self::Value(value)
+    }
+}
+
+/// A tool's recorded name, or its identity when no recorded name is available.
+/// Exporters use an identity to name the span, but omit `gen_ai.tool.name`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum TraceToolName {
+    Name(String),
+    Identity { tool_id: lash_sansio::ToolId },
+}
+
+impl TraceToolName {
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::Name(name) => Some(name),
+            Self::Identity { .. } => None,
+        }
+    }
+    /// The name or typed identity used in the span's display label.
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Name(name) => name,
+            Self::Identity { tool_id } => tool_id.as_str(),
+        }
+    }
+}
+impl From<String> for TraceToolName {
+    fn from(name: String) -> Self {
+        Self::Name(name)
+    }
+}
+impl From<&str> for TraceToolName {
+    fn from(name: &str) -> Self {
+        Self::Name(name.to_owned())
+    }
 }

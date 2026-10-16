@@ -101,7 +101,7 @@ fn a_panicking_sink_or_snapshot_callback_costs_only_its_own_delivery() {
             call_id: crate::ToolCallId::fixture("call"),
             provider_call_id: None,
             name: "slow".into(),
-            args: serde_json::Value::Null,
+            args: serde_json::Value::Null.into(),
             output: lash_trace::TraceToolCallOutput {
                 outcome: lash_trace::TraceToolCallOutcome::Success(serde_json::Value::Null),
                 control: None,

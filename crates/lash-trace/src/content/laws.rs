@@ -22,7 +22,7 @@ fn tool(value: Value) -> TraceEvent {
         call_id: lash_sansio::ToolCallId::fixture("call"),
         provider_call_id: None,
         name: "tool".into(),
-        args: json!([1, 2]),
+        args: json!([1, 2]).into(),
         output: TraceToolCallOutput {
             outcome: TraceToolCallOutcome::Success(value),
             control: None,

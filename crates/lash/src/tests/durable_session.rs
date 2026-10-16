@@ -2341,7 +2341,11 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
         );
         assert_eq!(
             (&cell.prints, &cell.prints_retained, &cell.result),
-            (&completed.0, &completed.1, &completed.2),
+            (
+                completed.0.as_ref().expect("the executor reported prints"),
+                &completed.1,
+                &completed.2
+            ),
             "{name}: the record holds what the completion activity reported"
         );
 

@@ -265,7 +265,7 @@ impl CellTools {
                 args: completed.args,
                 output: completed.output,
             },
-            0,
+            None,
         );
     }
 }

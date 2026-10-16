@@ -299,10 +299,12 @@ impl StepToolSpans {
                     TraceEvent::ToolCallCompleted {
                         call_id: call.clone(),
                         provider_call_id: None,
-                        name: record.tool.clone(),
-                        args: content.capture(lash_trace::ContentCategory::ToolArguments, || {
-                            record.args.clone()
-                        }),
+                        name: record.tool.clone().into(),
+                        args: content
+                            .capture(lash_trace::ContentCategory::ToolArguments, || {
+                                record.args.clone()
+                            })
+                            .into(),
                         output: crate::trace::trace_tool_call_output(&record.output, content),
                         duration_ms: ended_at_ms.saturating_sub(scope.started_at_ms),
                         issuing_node_id: issuing_node,

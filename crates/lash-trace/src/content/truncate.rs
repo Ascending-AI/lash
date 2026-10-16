@@ -168,9 +168,11 @@ impl TraceEvent {
                     }
                 }
                 "gen_ai.tool.call.arguments" => match self {
-                    Self::ToolCallCompleted { args, .. } | Self::ToolCallStarted { args, .. } => {
-                        *args = Value::Null
+                    Self::ToolCallCompleted {
+                        args: crate::TraceToolArgs::Value(args),
+                        ..
                     }
+                    | Self::ToolCallStarted { args, .. } => *args = Value::Null,
                     Self::ExecCodeCompleted { code, .. }
                     | Self::ExecCodeFailed { code, .. }
                     | Self::ExecCodeDiscarded { code, .. } => code.clear(),

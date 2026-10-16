@@ -375,7 +375,7 @@ function patchToolView(view, event) {
     ? "durable outcome only"
     : running
     ? "in progress"
-    : `${ok ? "ok" : "failed"} in ${event.duration_ms || 0}ms`;
+    : `${ok ? "ok" : "failed"}${event.duration_ms == null ? "" : ` in ${event.duration_ms}ms`}`;
   view.summary.textContent = durable
     ? `Tool ${ok ? "completed" : "failed"} · arguments, result, duration, and call identity are not loaded after reload`
     : running
@@ -849,7 +849,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
         }
         const toolCount = tools.length || (event.tool_call_ids || []).length;
         const toolLabel = toolCount ? ` · ${toolCount} tool${toolCount === 1 ? "" : "s"}` : "";
-        const durationLabel = event.duration_ms === undefined || event.duration_ms === null ? "" : ` in ${event.duration_ms || 0}ms`;
+        const durationLabel = event.duration_ms === undefined || event.duration_ms === null ? "" : ` in ${event.duration_ms}ms`;
         view.label.textContent = `${event.language || "code"} ${codeBlockStateLabel(event)}${durationLabel}${toolLabel}`;
         if (event.graph_key && event.graph_key !== view.graphKey) {
           view.graphKey = event.graph_key;

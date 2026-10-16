@@ -306,8 +306,8 @@ impl crate::TraceRecord {
         {
             let ids = self.context.ids();
             let tool_name = match &self.event {
-                TraceEvent::ToolCallStarted { name, .. }
-                | TraceEvent::ToolCallCompleted { name, .. } => Some(name.clone()),
+                TraceEvent::ToolCallStarted { name, .. } => Some(name.clone()),
+                TraceEvent::ToolCallCompleted { name, .. } => name.name().map(str::to_owned),
                 _ => None,
             };
             let view = ContentView {

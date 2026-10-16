@@ -16,7 +16,7 @@ type Received = Arc<StdMutex<Vec<serde_json::Value>>>;
 
 /// A protocol whose every turn starts one code cell, with no code
 /// executor.
-struct TestProtocolFactory(Received);
+struct TestProtocolFactory(Received, bool);
 
 impl lash_core::facade_support::PluginFactory for TestProtocolFactory {
     fn id(&self) -> &'static str {
@@ -29,7 +29,7 @@ impl lash_core::facade_support::PluginFactory for TestProtocolFactory {
         let mut reg = crate::plugins::PluginRegistrar::<TestProtocolPlugin>::new(
             crate::plugins::PluginFactory::id(self.as_ref()),
         );
-        TestProtocolPlugin::declare(&mut reg)?;
+        TestProtocolPlugin::declare(&mut reg, self.1)?;
         let id = self.id();
         Ok(crate::plugins::PluginRecipe::new(
             id,
@@ -60,7 +60,12 @@ impl lash_core::facade_support::SessionPlugin for TestProtocolPlugin {
 impl TestProtocolPlugin {
     fn declare(
         reg: &mut crate::plugins::PluginRegistrar<Self>,
+        fail_invocation: bool,
     ) -> std::result::Result<(), crate::plugins::PluginError> {
+        if fail_invocation {
+            reg.execution()
+                .code_executor(|_, _| Ok(Arc::new(FailedInvocation)))?;
+        }
         reg.protocol()
             .session(move |_this, _state| Ok(Arc::new(TestProtocolSession)))?;
 
@@ -173,10 +178,17 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for TestDriv
 /// The output of one turn of a session whose protocol starts code with no
 /// code executor, and the failures its driver was handed.
 async fn a_turn_without_a_code_executor() -> Result<(crate::TurnOutput, Vec<serde_json::Value>)> {
+    a_failed_cell(false).await
+}
+
+async fn a_failed_cell(
+    fail_invocation: bool,
+) -> Result<(crate::TurnOutput, Vec<serde_json::Value>)> {
     let received = Received::default();
     let core = explicit_ephemeral_facets(
-        LashCore::builder(sqlite_memory_store_backend().await)
-            .protocol_plugin(Arc::new(TestProtocolFactory(Arc::clone(&received)))),
+        LashCore::builder(sqlite_memory_store_backend().await).protocol_plugin(Arc::new(
+            TestProtocolFactory(Arc::clone(&received), fail_invocation),
+        )),
     )
     .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .build(crate::testing::runtime_lease_owner())?;
@@ -239,7 +251,7 @@ async fn the_driver_s_reported_exec_failure_is_the_turn_s_error() -> Result<()> 
 async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
     fn core(backend: lash_core::Backend) -> Result<LashCore> {
         explicit_ephemeral_facets(LashCore::builder(backend).protocol_plugin(Arc::new(
-            TestProtocolFactory(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            TestProtocolFactory(Arc::new(std::sync::Mutex::new(Vec::new())), false),
         )))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
@@ -294,5 +306,56 @@ async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
         ))
     );
     reopened.shutdown().await?;
+    Ok(())
+}
+
+/// A nested effect refusal leaves the invocation without an executor response.
+struct FailedInvocation;
+
+#[async_trait]
+impl lash_core::plugin::CodeExecutorPlugin for FailedInvocation {
+    async fn frame_switch_carries(
+        &self,
+        _: lash_core::plugin::ProtocolSessionContext<'_>,
+        _: &lash_core::FrameNodeId,
+        _: &[lash_core::SessionAppendNode],
+    ) -> std::result::Result<Vec<lash_core::ArtifactName>, lash_core::SessionError> {
+        Ok(Vec::new())
+    }
+
+    async fn execute_code(
+        &self,
+        ctx: lash_core::RuntimeExecutionContext<'_>,
+        _: lash_core::ExecRequest,
+    ) -> std::result::Result<lash_core::ExecResponse, lash_core::SessionError> {
+        ctx.record_nested_runtime_effect_error(lash_core::RuntimeEffectControllerError::new(
+            lash_core::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
+            "the nested cell invocation failed",
+        ));
+        Err(lash_core::SessionError::CodeExecutionUnavailable)
+    }
+}
+
+/// S1: an invocation failure has no observed duration; an answered failure does.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cell_failure_activity_distinguishes_unmeasured_from_measured_duration() -> Result<()> {
+    for invocation_failed in [true, false] {
+        let (output, _) = a_failed_cell(invocation_failed).await?;
+        let completion = output
+            .activities
+            .iter()
+            .find_map(|activity| {
+                matches!(&activity.event, crate::TurnEvent::CodeBlockCompleted { .. })
+                    .then(|| serde_json::to_value(&activity.event).expect("activity serializes"))
+            })
+            .expect("the failed cell publishes its completion");
+        if invocation_failed {
+            assert!(completion.get("duration_ms").is_none(), "{completion}");
+            assert!(completion.get("prints").is_none(), "{completion}");
+            assert!(completion.get("tool_call_ids").is_none(), "{completion}");
+        } else {
+            assert!(completion["duration_ms"].is_u64(), "{completion}");
+        }
+    }
     Ok(())
 }

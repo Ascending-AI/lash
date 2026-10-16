@@ -107,7 +107,9 @@ pub(crate) fn attributes(event: &TraceEvent) -> Vec<(&'static str, Value)> {
             }
         }
         TraceEvent::ToolCallCompleted { args, output, .. } => {
-            out.push(("gen_ai.tool.call.arguments", object(args)));
+            if let crate::TraceToolArgs::Value(args) = args {
+                out.push(("gen_ai.tool.call.arguments", object(args)));
+            }
             match &output.outcome {
                 TraceToolCallOutcome::Success(value) => {
                     out.push(("gen_ai.tool.call.result", object(value)))

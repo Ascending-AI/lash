@@ -118,6 +118,29 @@ function serialize(node) {
 
 export const laws = [
   {
+    name: "unmeasured tool and cell activity never renders a zero duration",
+    async run(env) {
+      for (const duration of [undefined, 0, 12]) {
+        const view = env.timeline(clock());
+        const turn = `duration-${duration}`;
+        view.timeline.applyObservation(activity(turn, { type: "code_block_started", language: "typescript", code: "await tool()" }));
+        view.timeline.applyObservation(activity(turn, {
+          type: "tool_call_completed", call_id: "duration-call", name: "tool", args: null,
+          output: { outcome: { status: "success", payload: null } },
+          ...(duration === undefined ? {} : { duration_ms: duration })
+        }));
+        view.timeline.applyObservation(activity(turn, {
+          type: "code_block_completed", language: "typescript", result: { kind: "failed", value: { kind: "host", message: "invocation failed" } },
+          ...(duration === undefined ? {} : { duration_ms: duration })
+        }));
+        const cell = view.timeline.nodeOf(`code:${turn}:0`);
+        const shown = cell.textContent;
+        if (duration === undefined) env.assert.ok(!shown.includes("0ms"), shown);
+        else env.assert.ok(shown.includes(`in ${duration}ms`), shown);
+      }
+    }
+  },
+  {
     name: "a declared finish value renders once before and after commit",
     async run(env) {
       for (const toolName of ["finish", "submit"]) {

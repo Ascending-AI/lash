@@ -203,15 +203,14 @@ async fn run_task_with_shutdown_witness(
                 result: lash::transcript::CellOutcome::Failed(error),
                 prints,
                 ..
-            } => Some(
-                if error.message.trim().is_empty() {
-                    crate::telemetry::printed_text(prints)
+            } => {
+                let message = if error.message.trim().is_empty() {
+                    prints.as_deref().map(crate::telemetry::printed_text)
                 } else {
-                    error.message.clone()
-                }
-                .trim()
-                .to_string(),
-            ),
+                    Some(error.message.clone())
+                };
+                message.map(|message| message.trim().to_string())
+            }
             _ => None,
         })
         .collect();

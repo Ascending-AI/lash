@@ -301,13 +301,17 @@ fn execution_fields(activities: &[TurnActivity], standard: bool) -> Value {
                 code.push(source.as_str())
             }
             TurnEvent::CodeBlockCompleted { prints, result, .. } if !standard => {
-                let output = printed_text(prints);
+                let output = prints.as_deref().map(printed_text);
                 // Runtime errors can be separate from the rendered stdout.
                 let error = result
                     .failure()
-                    .filter(|error| !output.contains(&error.message))
+                    .filter(|error| {
+                        output
+                            .as_ref()
+                            .is_none_or(|output| !output.contains(&error.message))
+                    })
                     .map(|error| error.message.clone());
-                observations.push(output);
+                observations.extend(output);
                 observations.extend(error);
             }
             TurnEvent::ToolCallStarted { name, args, .. } if standard => {
@@ -361,12 +365,12 @@ mod tests {
                 }),
                 activity(TurnEvent::CodeBlockCompleted {
                     language: "typescript".into(),
-                    prints: vec!["é".repeat(2_001).into()],
+                    prints: Some(vec!["é".repeat(2_001).into()]),
                     prints_retained: None,
                     result: lash::transcript::CellOutcome::Completed,
 
-                    duration_ms: 1,
-                    tool_call_ids: vec![],
+                    duration_ms: Some(1),
+                    tool_call_ids: Some(vec![]),
                     graph_key: None,
                 }),
             ],

@@ -1115,17 +1115,14 @@ async fn spawn_agent_record_carries_child_identity(tier: Tier) {
     assert_eq!(receipts.len(), 1, "one intent outcome: {receipts:#?}");
     let (call_id, receipt) = &receipts[0];
     assert_eq!(call_id, &spawned[0], "the receipt is the spawn's");
-    let lash_core::ToolIntentExecutionOutcome::Executed {
-        realized: lash_core::ToolIntentRealized::StartProcess(result),
+    let lash_core::ToolIntentActivityOutcome::Executed {
+        realized: lash_core::ToolIntentRealizedRef::Process(result),
         ..
     } = receipt
     else {
         panic!("the receipt is an executed start: {receipt:?}");
     };
-    assert_eq!(
-        &result.process_id, &child.id,
-        "the receipt names the child process"
-    );
+    assert_eq!(result, &child.id, "the receipt names the child process");
     let saw = world.script.parent_saw();
     assert!(
         !saw[0].contains(child.id.as_str()),

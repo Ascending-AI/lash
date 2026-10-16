@@ -388,6 +388,44 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
         [code.as_str()],
         "the closing owner needs no opening record to export code"
     );
+    if discard {
+        let terminals = published
+            .iter()
+            .filter_map(|record| match &record.event {
+                lash::tracing::TraceEvent::ToolCallCompleted {
+                    name,
+                    args,
+                    output,
+                    provider_call_id,
+                    issuing_node_id,
+                    attempts,
+                    ..
+                } => Some((
+                    name,
+                    args,
+                    output,
+                    provider_call_id,
+                    issuing_node_id,
+                    attempts,
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(terminals.len(), 1, "the abandoned call closes once");
+        let (name, args, output, provider, node, attempts) = terminals[0];
+        assert_eq!(
+            name.name(),
+            Some(DEFERRED),
+            "the recorded tool name differs from its ToolId"
+        );
+        assert_eq!(args, &lash::tracing::TraceToolArgs::Unavailable);
+        assert!(matches!(
+            output.outcome,
+            lash::tracing::TraceToolCallOutcome::Discarded
+                | lash::tracing::TraceToolCallOutcome::Cancelled(_)
+        ));
+        assert!(provider.is_none() && node.is_none() && attempts.is_none());
+    }
     let first_turn_input = published
         .iter()
         .find_map(|record| match &record.event {

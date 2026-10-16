@@ -314,14 +314,14 @@ pub(super) enum MemberEnd {
 pub(super) fn members_ended(
     tracing: Option<&TraceRuntime>,
     row: &TurnRow,
-    members: &[ExecutionDraft],
+    members: &[(ExecutionDraft, lash_trace::TraceToolName)],
     end: MemberEnd,
 ) {
     let Some(tracing) = tracing.filter(|tracing| tracing.is_observed()) else {
         return;
     };
     let ended_at_ms = tracing.clock().timestamp_ms();
-    for member in members {
+    for (member, name) in members {
         let Some(scope) = member.trace() else {
             continue;
         };
@@ -342,8 +342,8 @@ pub(super) fn members_ended(
                     TraceEvent::ToolCallCompleted {
                         call_id: member.call().clone(),
                         provider_call_id: None,
-                        name: member.tool().to_string(),
-                        args: serde_json::Value::Null,
+                        name: name.clone(),
+                        args: lash_trace::TraceToolArgs::Unavailable,
                         output: TraceToolCallOutput {
                             outcome,
                             control: None,
@@ -351,6 +351,7 @@ pub(super) fn members_ended(
                         duration_ms: ended_at_ms.saturating_sub(scope.started_at_ms),
                         issuing_node_id: None,
                         attempts: None,
+                        // No attempt answered this synthetic end, so none supplied annotations.
                         span_attributes: Default::default(),
                     },
                 )

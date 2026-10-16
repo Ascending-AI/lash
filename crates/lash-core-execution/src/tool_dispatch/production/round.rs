@@ -352,7 +352,7 @@ impl ProductionToolHandlers<'_> {
                 args: completed.args.clone(),
                 output: completed.output.clone(),
             },
-            0,
+            None,
         );
         completed
     }
@@ -637,7 +637,7 @@ pub(super) async fn present_resolved(
             args: completed.args.clone(),
             output: completed.output.clone(),
         },
-        0,
+        None,
     );
     member_output(owner, MemberEnd::Final(completed))
 }

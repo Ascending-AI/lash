@@ -302,10 +302,10 @@ fn operation_duration(record: &TraceRecord) -> Option<Duration> {
     match &record.event {
         TraceEvent::ToolCallCompleted { duration_ms, .. }
         | TraceEvent::ExecCodeCompleted { duration_ms, .. }
-        | TraceEvent::ExecCodeFailed { duration_ms, .. }
         | TraceEvent::ExecCodeDiscarded { duration_ms, .. } => {
             Some(Duration::from_millis(*duration_ms))
         }
+        TraceEvent::ExecCodeFailed { duration_ms, .. } => duration_ms.map(Duration::from_millis),
         TraceEvent::LlmCallCompleted { response, .. } => {
             Some(Duration::from_millis(response.duration_ms))
         }

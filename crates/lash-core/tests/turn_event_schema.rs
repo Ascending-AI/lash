@@ -12,7 +12,6 @@
 //! representative sample for the new variant is added to [`sample_events`], so
 //! the new shape actually gets pinned rather than silently skipped.
 
-use lash_core::SessionId;
 use lash_core::TurnId;
 use lash_core::llm::types::{LlmTerminalReason, ProviderFailureKind};
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
@@ -24,7 +23,7 @@ use std::collections::BTreeSet;
 use lash_core::{
     AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, LlmUsage,
     PluginRuntimeEvent, ProtocolPosition, ToolCallOutput, ToolFailure, ToolFailureClass,
-    ToolIntentExecutionOutcome, ToolIntentIdentity, TurnActivity, TurnActivityId, TurnEvent,
+    ToolIntentActivityOutcome, ToolIntentKind, TurnActivity, TurnActivityId, TurnEvent,
     TurnInputApplication,
 };
 use serde_json::json;
@@ -218,14 +217,14 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             "code_block_completed (failed + graph_key present)",
             TurnEvent::CodeBlockCompleted {
                 language: "python".to_string(),
-                prints: vec!["1".to_string().into()],
+                prints: Some(vec!["1".to_string().into()]),
                 prints_retained: None,
                 result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Program,
                     "boom",
                 )),
-                duration_ms: 5,
-                tool_call_ids: vec![lash_core::ToolCallId::fixture("call-1")],
+                duration_ms: Some(5),
+                tool_call_ids: Some(vec![lash_core::ToolCallId::fixture("call-1")]),
                 graph_key: Some("effect:s:e".to_string()),
             },
             json!({
@@ -254,15 +253,15 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             "code_block_completed (finished + graph_key absent)",
             TurnEvent::CodeBlockCompleted {
                 language: "python".to_string(),
-                prints: Vec::new(),
+                prints: Some(Vec::new()),
                 prints_retained: None,
                 result: lash_core::CellOutcome::finished_by(
                     "finish",
                     lash_core::ToolCallId::fixture("call-1"),
                     json!(null),
                 ),
-                duration_ms: 5,
-                tool_call_ids: vec![],
+                duration_ms: Some(5),
+                tool_call_ids: Some(vec![]),
                 graph_key: None,
             },
             json!({
@@ -320,7 +319,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 name: "read_file".to_string(),
                 args: json!({ "path": "x" }),
                 output: ToolCallOutput::success("ok"),
-                duration_ms: 7,
+                duration_ms: Some(7),
                 graph_key: Some("effect:s:e".to_string()),
             },
             json!({
@@ -354,7 +353,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                     "boom",
                     "kaboom",
                 )),
-                duration_ms: 7,
+                duration_ms: None,
                 graph_key: None,
             },
             json!({
@@ -373,28 +372,17 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                         },
                     },
                 },
-                "duration_ms": 7,
             }),
         ),
         (
             "tool_intent_outcome",
             TurnEvent::ToolIntentOutcome {
                 call_id: lash_core::ToolCallId::fixture("call-1"),
-                outcome: ToolIntentExecutionOutcome::Executed {
-                    identity: ToolIntentIdentity {
-                        owner: lash_core::RuntimeOwner::Session(SessionId::from("session-1")),
-                        execution_scope_id: "turn-1".to_string(),
-                        tool_call_id: lash_core::ToolCallId::fixture("call-1"),
-                        intent_index: 0,
-                        replay_key: "tool-intent:v1:blake3:literal".to_string(),
-                        minting_emission_replay_key: None,
-                    },
-                    realized: lash_core::ToolIntentRealized::StartProcess(
-                        lash_core::ProcessHandleView::new(
-                            lash_core::ProcessIdMint::sequential_id_for_testing(1),
-                            lash_core::ProcessIdentity::new("external"),
-                            lash_core::ProcessStatus::Running,
-                        ),
+                outcome: ToolIntentActivityOutcome::Executed {
+                    intent_index: 0,
+                    kind: ToolIntentKind::StartProcess,
+                    realized: lash_core::ToolIntentRealizedRef::Process(
+                        lash_core::ProcessIdMint::sequential_id_for_testing(1),
                     ),
                 },
             },
@@ -403,25 +391,56 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
                 "outcome": {
                     "status": "executed",
-                    "identity": {
-                        "owner": { "session": "session-1" },
-                        "execution_scope_id": "turn-1",
-                        "tool_call_id": lash_core::ToolCallId::fixture("call-1").as_str(),
-                        "intent_index": 0,
-                        "replay_key": "tool-intent:v1:blake3:literal",
-                    },
+                    "intent_index": 0,
+                    "kind": "start_process",
                     "realized": {
-                        "kind": "start_process",
-                        "result": {
-                            "__handle__": "lash",
-                            "id": lash_core::HandleId::process(&lash_core::ProcessIdMint::sequential_id_for_testing(1)),
-                            "process_id": lash_core::ProcessIdMint::sequential_id_for_testing(1),
-                            "kind": "external",
-                            "status": "running",
-                        },
+                        "kind": "process",
+                        "result": lash_core::ProcessIdMint::sequential_id_for_testing(1),
                     },
                 },
             }),
+        ),
+        (
+            "tool_intent_refused",
+            TurnEvent::ToolIntentOutcome {
+                call_id: lash_core::ToolCallId::fixture("call-1"),
+                outcome: ToolIntentActivityOutcome::Refused {
+                    intent_index: 2,
+                    kind: ToolIntentKind::CancelProcess,
+                    refusal: lash_core::ToolIntentRefusalReason::MintingRunCancelled,
+                },
+            },
+            json!({"type":"tool_intent_outcome", "call_id":lash_core::ToolCallId::fixture("call-1"),
+                "outcome":{"status":"refused","intent_index":2,"kind":"cancel_process","refusal":{"reason":"minting_run_cancelled"}}}),
+        ),
+        (
+            "tool_intent_batch_refused",
+            TurnEvent::ToolIntentOutcome {
+                call_id: lash_core::ToolCallId::fixture("call-1"),
+                outcome: ToolIntentActivityOutcome::BatchRefused {
+                    refusal: lash_core::ToolIntentRefusalReason::UnsupportedProtocolVersion {
+                        recorded: 0,
+                    },
+                },
+            },
+            json!({"type":"tool_intent_outcome", "call_id":lash_core::ToolCallId::fixture("call-1"),
+                "outcome":{"status":"batch_refused","refusal":{"reason":"unsupported_protocol_version","recorded":0}}}),
+        ),
+        (
+            "unavailable_cell_evidence",
+            TurnEvent::CodeBlockCompleted {
+                language: "python".into(),
+                prints: None,
+                prints_retained: None,
+                result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Host,
+                    "invocation failed",
+                )),
+                duration_ms: None,
+                tool_call_ids: None,
+                graph_key: None,
+            },
+            json!({"type":"code_block_completed","language":"python","result":{"kind":"failed","value":{"kind":"host","message":"invocation failed"}}}),
         ),
         (
             "finished",

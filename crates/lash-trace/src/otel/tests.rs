@@ -786,7 +786,7 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
                 call_id: lash_sansio::ToolCallId::fixture("call"),
                 provider_call_id: None,
                 name: "unfamiliar-tool".into(),
-                args: serde_json::json!({"secret":"hidden"}),
+                args: serde_json::json!({"secret":"hidden"}).into(),
                 output: crate::TraceToolCallOutput {
                     outcome: crate::TraceToolCallOutcome::Failure(serde_json::Value::Null),
                     control: None,
@@ -919,7 +919,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
                 code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
-                duration_ms: 0,
+                duration_ms: Some(0),
                 reason: crate::ExecCodeFailureReason::RuntimeStopped,
                 error: "private runtime detail".into(),
             },
@@ -1201,7 +1201,7 @@ fn failure_attributes_preserve_typed_classes() {
         call_id: lash_sansio::ToolCallId::fixture("call"),
         provider_call_id: None,
         name: "tool".into(),
-        args: serde_json::Value::Null,
+        args: serde_json::Value::Null.into(),
         output: crate::TraceToolCallOutput {
             outcome,
             control: None,
@@ -2221,7 +2221,7 @@ fn content_attributes_are_whole_schema_valid_json() {
         call_id: lash_sansio::ToolCallId::fixture("content-law"),
         provider_call_id: None,
         name: "read".into(),
-        args: serde_json::json!([1, 2]),
+        args: serde_json::json!([1, 2]).into(),
         output: crate::TraceToolCallOutput {
             outcome: crate::TraceToolCallOutcome::Success(serde_json::json!("é".repeat(20_000))),
             control: None,
@@ -2384,3 +2384,83 @@ fn a_turn_closer_exports_input_with_the_global_meter_provider() {
 }
 
 mod metrics;
+
+/// S1: a synthetic terminal has unavailable arguments, unlike a real JSON null.
+#[test]
+fn abandoned_tool_spans_omit_unavailable_arguments_but_keep_real_null() {
+    let (traces, meters, spans, _) = providers(Sampler::AlwaysOn);
+    let exporter = OtelTelemetry::new(&traces, &meters, OtelOptions::standard());
+    for (index, outcome) in [
+        crate::TraceToolCallOutcome::Discarded,
+        crate::TraceToolCallOutcome::Cancelled(serde_json::json!({"origin":"turn_stopped"})),
+        crate::TraceToolCallOutcome::Success(serde_json::Value::Null),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let event = TraceEvent::ToolCallCompleted {
+            call_id: lash_sansio::ToolCallId::fixture(&format!("abandoned-{index}")),
+            provider_call_id: None,
+            name: if index == 0 {
+                crate::TraceToolName::Identity {
+                    tool_id: lash_sansio::ToolId::new("tool:read"),
+                }
+            } else {
+                "read".into()
+            },
+            args: if index < 2 {
+                crate::TraceToolArgs::Unavailable
+            } else {
+                crate::TraceToolArgs::Value(serde_json::Value::Null)
+            },
+            output: crate::TraceToolCallOutput {
+                outcome,
+                control: None,
+            },
+            duration_ms: 5,
+            issuing_node_id: None,
+            attempts: None,
+            span_attributes: Default::default(),
+        };
+        let record = captured_record(
+            event,
+            position(
+                TraceSpanKind::Tool,
+                SpanRole::Closes,
+                with_span(&producer(), exporter.leaf_span_id()),
+                Some(producer()),
+                &scope_id(),
+                (1, 6),
+            ),
+        )
+        .governed(crate::ContentPolicy::captured());
+        exporter.append(&record).unwrap();
+    }
+    traces.provider().force_flush().unwrap();
+    let exported = spans.get_finished_spans().unwrap();
+    assert_eq!(exported.len(), 3);
+    for (span, expected) in exported.iter().zip(["discarded", "cancelled", "completed"]) {
+        let attribute = |key| span.attributes.iter().find(|kv| kv.key.as_str() == key);
+        assert_eq!(attribute("lash.outcome").unwrap().value.as_str(), expected);
+        if expected == "discarded" {
+            assert_eq!(span.name.as_ref(), "execute_tool tool:read");
+            assert!(attribute("gen_ai.tool.name").is_none());
+        }
+        if expected == "completed" {
+            let args: serde_json::Value = serde_json::from_str(
+                &attribute("gen_ai.tool.call.arguments")
+                    .unwrap()
+                    .value
+                    .as_str(),
+            )
+            .unwrap();
+            assert_eq!(args, serde_json::json!({"value":null}));
+        } else {
+            assert!(
+                attribute("gen_ai.tool.call.arguments").is_none(),
+                "{:?}",
+                span.attributes
+            );
+        }
+    }
+}

@@ -73,7 +73,7 @@ pub(super) fn attributes(record: &TraceRecord, out: &mut Vec<KeyValue>) {
         if out
             .iter()
             .any(|a| a.key.as_str() == "gen_ai.tool.call.arguments")
-            && !args.is_object()
+            && matches!(args, crate::TraceToolArgs::Value(value) if !value.is_object())
         {
             out.push(KeyValue::new("lash.tool.arguments.wrapped", true));
         }

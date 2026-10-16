@@ -1196,6 +1196,7 @@ await control.finish("done");"#,
     };
     assert_eq!(language, "typescript");
     assert!(!cell_outcome.is_failed());
+    let tool_call_ids = tool_call_ids.as_ref().expect("the cell reported its calls");
     assert_eq!(Some(call_id), tool_call_ids.first());
     // The lookup, then the cell's `control.finish`.
     assert_eq!(tool_call_ids.len(), 2);
@@ -1353,7 +1354,8 @@ await control.finish("done");"#,
             TurnEvent::CodeBlockCompleted { tool_call_ids, .. } => Some(tool_call_ids.clone()),
             _ => None,
         })
-        .expect("code block completed");
+        .expect("code block completed")
+        .expect("the cell reported its calls");
     assert_eq!(tool_call_ids.len(), completed_ids.len());
     for call_id in completed_ids {
         assert!(

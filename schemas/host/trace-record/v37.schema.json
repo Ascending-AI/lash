@@ -4978,6 +4978,37 @@
       "format": "date-time",
       "type": "string"
     },
+    "TraceToolArgs": {
+      "description": "Tool arguments observed at completion, distinct from arguments that are unavailable.",
+      "oneOf": [
+        {
+          "properties": {
+            "availability": {
+              "const": "value",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "availability",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "availability": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "availability"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TraceToolAttemptOutcome": {
       "oneOf": [
         {
@@ -5142,6 +5173,25 @@
         "discarded"
       ],
       "type": "string"
+    },
+    "TraceToolName": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "properties": {
+            "tool_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tool_id"
+          ],
+          "type": "object"
+        }
+      ],
+      "description": "A tool's recorded name, or its identity when no recorded name is available.\nExporters use an identity to name the span, but omit `gen_ai.tool.name`."
     },
     "TraceToolOwner": {
       "description": "The logical owner of a tool call, independent of its execution route.",
@@ -6304,8 +6354,12 @@
     },
     {
       "properties": {
-        "args": true,
+        "args": {
+          "$ref": "#/$defs/TraceToolArgs",
+          "description": "Exporters outside lash cannot read the store, so this diagnostic content travels with the trace."
+        },
         "attempts": {
+          "description": "Exporters outside lash cannot read the journal, so the observed retry ladder travels with the trace.",
           "items": {
             "$ref": "#/$defs/TraceRetryAttempt"
           },
@@ -6324,19 +6378,22 @@
           "type": "integer"
         },
         "issuing_node_id": {
+          "description": "Exporters outside lash cannot read the store, so issuer correlation travels with the trace.",
           "type": [
             "string",
             "null"
           ]
         },
         "name": {
-          "type": "string"
+          "$ref": "#/$defs/TraceToolName",
+          "description": "Exporters outside lash cannot read the store, so this diagnostic content travels with the trace."
         },
         "output": {
-          "$ref": "#/$defs/TraceToolCallOutput"
+          "$ref": "#/$defs/TraceToolCallOutput",
+          "description": "Exporters outside lash cannot read the store, so this diagnostic content travels with the trace."
         },
         "provider_call_id": {
-          "description": "The model provider's id for the call, when a model issued it.",
+          "description": "The model provider's id for the call, when a model issued it.\nExporters outside lash cannot read the store, so provider correlation travels with the trace.",
           "type": [
             "string",
             "null"
@@ -6471,9 +6528,13 @@
           "type": "string"
         },
         "duration_ms": {
+          "description": "The observed window, absent when no invocation existed.",
           "format": "uint64",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "error": {
           "description": "Human-readable detail. Not a stable classification surface.",
@@ -6507,7 +6568,6 @@
         "code",
         "language",
         "started_at_ms",
-        "duration_ms",
         "reason",
         "error"
       ],

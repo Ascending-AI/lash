@@ -419,7 +419,13 @@ async fn open_cell_calls(
     machine: &TurnMachine,
     cx: &ActorContext,
     id: crate::EffectId,
-) -> Result<Vec<lash_core_execution::runtime::actor::round::ExecutionDraft>, TurnError> {
+) -> Result<
+    Vec<(
+        lash_core_execution::runtime::actor::round::ExecutionDraft,
+        lash_trace::TraceToolName,
+    )>,
+    TurnError,
+> {
     use lash_core_execution::runtime::actor::round::{self, PolicyView};
     use lash_durable::domain::{CellId, OwnerKey};
     let invocation = driver
@@ -437,13 +443,31 @@ async fn open_cell_calls(
     let waits = round::PinnedWaits::read(reads, &facts).await?;
     let fold = round::fold(&facts, &PolicyView::new([]), &waits)
         .map_err(|error| TurnError::Exec(format!("the cell call ledger: {error}")))?;
+    // The installed catalog is the run's recorded surface, including after restore.
+    let manifests = driver
+        .session
+        .installed_tool_catalog()
+        .ok()
+        .map(|catalog| catalog.callable_tools())
+        .unwrap_or_default();
     Ok(fold
         .rounds()
         .flat_map(|round| round.members().iter())
         .filter(|member| {
             member.outcome().is_none() && !member.draft().tool().as_str().starts_with("cell-host:")
         })
-        .map(|member| member.draft().clone())
+        .filter(|member| member.draft().trace().is_some())
+        .map(|member| {
+            let draft = member.draft();
+            let name = manifests
+                .iter()
+                .find(|manifest| &manifest.id == draft.tool())
+                .map(|manifest| lash_trace::TraceToolName::Name(manifest.name.clone()))
+                .unwrap_or_else(|| lash_trace::TraceToolName::Identity {
+                    tool_id: draft.tool().clone(),
+                });
+            (draft.clone(), name)
+        })
         .collect())
 }
 

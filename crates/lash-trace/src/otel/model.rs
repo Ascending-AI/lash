@@ -242,6 +242,7 @@ impl OtelTelemetry {
                     span: DomainSpan::ModelAttempt,
                     model: None,
                     tool: None,
+                    tool_identity: None,
                     process: None,
                     site: None,
                     attempt: Some(attempt),

@@ -847,8 +847,11 @@ impl CellClose {
 pub struct DiscardedCell {
     /// The close of the cell's span, `discarded`.
     pub close: CellClose,
-    /// The calls the cell admitted that have no outcome.
-    pub open: Vec<lash_core_execution::runtime::actor::round::ExecutionDraft>,
+    /// The calls the cell admitted that have no outcome, with their recorded trace names or typed identities.
+    pub open: Vec<(
+        lash_core_execution::runtime::actor::round::ExecutionDraft,
+        lash_trace::TraceToolName,
+    )>,
 }
 
 impl std::fmt::Debug for CellClose {

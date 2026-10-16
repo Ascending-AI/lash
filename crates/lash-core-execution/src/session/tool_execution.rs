@@ -373,7 +373,7 @@ impl RuntimeExecutionContext<'_> {
                 args: outcome.record.args.clone(),
                 output: output.clone(),
             };
-            this.emit_tool_call_completed(call_key, &record, &attempts, duration_ms)
+            this.emit_tool_call_completed(call_key, &record, &attempts, Some(duration_ms))
                 .await;
             Ok(CompletedProtocolToolCall {
                 completed: crate::sansio::CompletedToolCall {
@@ -402,7 +402,7 @@ impl RuntimeExecutionContext<'_> {
         call_key: &str,
         record: &ToolCallRecord,
         attempts: &[lash_trace::TraceRetryAttempt],
-        duration_ms: u64,
+        duration_ms: Option<u64>,
     ) {
         self.trace_tool_call_completed(record, attempts, None);
         self.emit_tool_call_completed_activity(call_key, record, duration_ms);
@@ -424,7 +424,7 @@ impl RuntimeExecutionContext<'_> {
                     correlation_id: Some(tool_activity_id(call_id)),
                     event: TurnEvent::ToolIntentOutcome {
                         call_id: call_id.clone(),
-                        outcome: intent_outcome.clone(),
+                        outcome: crate::ToolIntentActivityOutcome::from(intent_outcome),
                     },
                 },
             );
@@ -435,7 +435,7 @@ impl RuntimeExecutionContext<'_> {
         &self,
         call_key: &str,
         record: &ToolCallRecord,
-        duration_ms: u64,
+        duration_ms: Option<u64>,
     ) {
         let context = self.with_call_observation_key(self.call_observation_key(call_key));
         let mut cursor = context.observation_cursor(&format!("tool:{}:complete", record.call_id));
@@ -515,10 +515,8 @@ impl RuntimeExecutionContext<'_> {
             completed.args.clone(),
             tool_activity_id(&completed.call_id),
         );
-        // The call completed host-side; no measured window exists on this
-        // path, so the observation reports 0 rather than a live clock read
-        // made long after the work ran (FIG-3696).
-        self.emit_tool_call_completed(call_key, &record, &[], 0)
+        // The protocol refused the call before dispatch; no measured window exists.
+        self.emit_tool_call_completed(call_key, &record, &[], None)
             .await;
     }
 

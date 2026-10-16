@@ -273,7 +273,7 @@ pub(super) fn emit_remaining_metrics(adapter: &OtelTelemetry) {
                 call_id: lash_sansio::ToolCallId::fixture("call"),
                 provider_call_id: None,
                 name: "search".into(),
-                args: serde_json::Value::Null,
+                args: serde_json::Value::Null.into(),
                 output: crate::TraceToolCallOutput {
                     outcome: crate::TraceToolCallOutcome::Success(serde_json::Value::Null),
                     control: None,

@@ -481,8 +481,8 @@ async fn a_durable_turn_streams_a_native_call_s_activity_to_its_sink(tier: Tier)
             event,
             TurnEvent::ToolIntentOutcome {
                 call_id,
-                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
-                    realized: lash_core::ToolIntentRealized::StartProcess(_),
+                outcome: lash_core::ToolIntentActivityOutcome::Executed {
+                    realized: lash_core::ToolIntentRealizedRef::Process(_),
                     ..
                 },
             } if call_id == call
@@ -1143,11 +1143,11 @@ async fn a_tool_s_intent_outcome_never_reaches_the_model(tier: Tier) {
                 TurnEvent::ToolIntentOutcome {
                     call_id,
                     outcome:
-                        lash_core::ToolIntentExecutionOutcome::Executed {
-                            realized: lash_core::ToolIntentRealized::StartProcess(handle),
+                        lash_core::ToolIntentActivityOutcome::Executed {
+                            realized: lash_core::ToolIntentRealizedRef::Process(handle),
                             ..
                         },
-                } if *call_id == ids[0] => Some(handle.process_id.clone()),
+                } if *call_id == ids[0] => Some(handle.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>();

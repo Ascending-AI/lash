@@ -576,14 +576,15 @@ pub(super) async fn cancel_open_round(
     cx: &ActorContext,
     tx: &mut lash_durable::ActorTx,
     row: &TurnRow,
-) -> Result<Vec<round::ExecutionDraft>, TurnError> {
+) -> Result<Vec<(round::ExecutionDraft, lash_trace::TraceToolName)>, TurnError> {
     let UnfinishedPhase::Tools { run, .. } = row.phase else {
         return Ok(Vec::new());
     };
     let owner = OwnerKey::Turn(row.session.clone(), row.run.clone());
-    round::settle_cancelled(cx, tx, &owner, run)
+    let members = round::settle_cancelled(cx, tx, &owner, run)
         .await
-        .map_err(round_error)
+        .map_err(round_error)?;
+    Ok(named_members(cx, row, members).await)
 }
 
 /// The open members of `row`'s round, when the turn is in its `Tools`
@@ -596,10 +597,54 @@ pub(super) async fn cancel_open_round(
 pub(super) async fn open_round_members(
     cx: &ActorContext,
     row: &TurnRow,
-) -> Result<Vec<round::ExecutionDraft>, TurnError> {
+) -> Result<Vec<(round::ExecutionDraft, lash_trace::TraceToolName)>, TurnError> {
     let UnfinishedPhase::Tools { run, .. } = row.phase else {
         return Ok(Vec::new());
     };
     let owner = OwnerKey::Turn(row.session.clone(), row.run.clone());
-    round::unsettled(cx, &owner, run).await.map_err(round_error)
+    let members = round::unsettled(cx, &owner, run)
+        .await
+        .map_err(round_error)?;
+    Ok(named_members(cx, row, members).await)
+}
+
+/// Trace labels come from the run's committed definitions, never from a
+/// ToolId presented as a name. An undecodable or absent phase still permits
+/// cancellation: tracing uses the typed identity when its name cannot be read.
+async fn named_members(
+    cx: &ActorContext,
+    row: &TurnRow,
+    members: Vec<round::ExecutionDraft>,
+) -> Vec<(round::ExecutionDraft, lash_trace::TraceToolName)> {
+    if !members.iter().any(|member| member.trace().is_some()) {
+        return Vec::new();
+    }
+    let surface = match cx.durable_reads() {
+        Ok(reads) => {
+            match super::phase_root::read_plugin_phase(reads, &row.session, &row.run).await {
+                Ok(phase) => phase.and_then(|phase| phase.surface),
+                Err(error) => {
+                    tracing::warn!(%error, "terminal tool trace names could not be read");
+                    None
+                }
+            }
+        }
+        Err(_) => None,
+    };
+    members
+        .into_iter()
+        .filter(|member| member.trace().is_some())
+        .map(|member| {
+            let name = surface
+                .as_ref()
+                .and_then(|surface| surface.entry_for(member.tool()))
+                .map(|entry| {
+                    lash_trace::TraceToolName::Name(entry.definition.manifest.name.clone())
+                })
+                .unwrap_or_else(|| lash_trace::TraceToolName::Identity {
+                    tool_id: member.tool().clone(),
+                });
+            (member, name)
+        })
+        .collect()
 }
