@@ -18,6 +18,12 @@
 //! contracts, internally tagged by `kind`. Their typed JSON is the readable
 //! host form; hosts may exchange it directly without a wire mirror.
 //!
+//! With `workflow-view`, `workflow::view::JSON_SCHEMA` is self-contained:
+//! every `$ref` has the form `#/$defs/<name>` and resolves within its root
+//! `$defs`, with no external or `$id`-relative references. Definition names
+//! are stable within a lash version, so hosts may splice the definitions
+//! into their own OpenAPI schemas.
+//!
 //! # Three verbs for one session
 //!
 //! A session id reaches Lash three ways, and the choice is the first thing to

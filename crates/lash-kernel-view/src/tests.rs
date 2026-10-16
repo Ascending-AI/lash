@@ -301,6 +301,49 @@ fn the_shipped_view_contracts_are_the_checked_in_schema_files() {
     );
 }
 
+/// FIG-6448: hosts may splice the view's definitions into their OpenAPI schemas
+/// because every reference resolves within the root `$defs`.
+#[test]
+fn the_view_schema_is_self_contained_with_resolving_defs_only_references() {
+    fn walk(value: &Value, schema: &Value, is_root: bool) {
+        match value {
+            Value::Object(fields) => {
+                assert!(
+                    is_root || !fields.contains_key("$id"),
+                    "a nested $id would change the root of $defs references"
+                );
+                if let Some(reference) = fields.get("$ref") {
+                    let reference = reference.as_str().expect("$ref must be a string");
+                    let name = reference.strip_prefix("#/$defs/").unwrap_or_else(|| {
+                        panic!("$ref must use #/$defs/<name>, without external or $id-relative references: {reference}")
+                    });
+                    assert!(
+                        !name.is_empty() && !name.contains('/'),
+                        "$ref must name one root definition: {reference}"
+                    );
+                    assert!(
+                        schema.pointer(&reference[1..]).is_some(),
+                        "$ref must resolve in the root $defs: {reference}"
+                    );
+                }
+                for child in fields.values() {
+                    walk(child, schema, false);
+                }
+            }
+            Value::Array(items) => {
+                for child in items {
+                    walk(child, schema, false);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let schema: Value = serde_json::from_str(crate::JSON_SCHEMA).expect("view JSON Schema");
+    schema["$defs"].as_object().expect("root $defs object");
+    walk(&schema, &schema, true);
+}
+
 /// An effect inserted by an authoring operation is an execution site of
 /// the result, at the statement just before where the correspondence moved
 /// the insertion's anchor.

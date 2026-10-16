@@ -18,6 +18,11 @@
 //! labels join by that name outside this crate. Layout, styling and
 //! templates are the host's.
 //!
+//! [`JSON_SCHEMA`] is self-contained: every `$ref` has the form
+//! `#/$defs/<name>` and resolves within its root `$defs`, with no external or
+//! `$id`-relative references. Definition names are stable within a lash
+//! version, so hosts may splice the definitions into their own OpenAPI schemas.
+//!
 //! The crate depends on `lash-kernel-doc` and `lash-kernel-check` and on no
 //! other lash crate. It links no dialect, editor or runtime.
 
@@ -59,6 +64,11 @@ pub const TYPESCRIPT_DECLARATION: &str = include_str!("../kernel-workflow-view-v
 /// Like [`TYPESCRIPT_DECLARATION`], this ships the generated contract to hosts
 /// that vendor the crate without the repository-root `schemas/` tree.
 /// Regenerate both copies with `scripts/generate-workflow-schemas.py`.
+///
+/// This schema is self-contained: every `$ref` has the form `#/$defs/<name>`
+/// and resolves within its root `$defs`; there are no external or
+/// `$id`-relative references. Definition names are stable within a lash
+/// version, so hosts may splice the definitions into their own OpenAPI schemas.
 pub const JSON_SCHEMA: &str = include_str!("../kernel-workflow-view-v1.schema.json");
 
 /// One entry of a document as a canvas reads it.
