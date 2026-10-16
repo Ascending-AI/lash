@@ -64,6 +64,44 @@ impl Draft {
         &self.since_open
     }
 
+    /// Re-links library references by their manifest names against `registry`
+    /// and derives the full manifest closure, including transitive callees.
+    /// Each directly referenced name must select exactly one registered identity.
+    /// Old transitive listings are replaced by the selected definitions' closure.
+    ///
+    /// This is an atomic linking operation, separate from canvas authoring.
+    /// It checks the resulting document's types and scope, but hosts must still
+    /// admit it against their runtime effects and bindings before execution.
+    /// A refusal leaves the document, identity and correspondence unchanged.
+    pub fn relink(
+        &mut self,
+        registry: &lash_kernel_doc::FunctionRegistry,
+    ) -> Result<Correspondence, crate::RelinkRefusal> {
+        let (document, edited) = crate::relink::relink(&self.document, registry)?;
+        let identity = document.identity();
+        let correspondence = Correspondence::of(
+            self.identity,
+            identity,
+            Working::open(&self.document)
+                .sites()
+                .into_iter()
+                .map(|site| {
+                    let changed = edited.contains(&site);
+                    lash_kernel_doc::Survivor::new(site.clone(), site, changed)
+                })
+                .collect(),
+        )
+        .ok_or_else(invalid_correspondence)?;
+        let since_open = self
+            .since_open
+            .then(&correspondence)
+            .ok_or_else(invalid_correspondence)?;
+        self.document = document;
+        self.identity = identity;
+        self.since_open = since_open;
+        Ok(correspondence)
+    }
+
     /// Applies `transaction` whole and publishes the result, or refuses it
     /// and changes nothing.
     pub fn apply(

@@ -301,6 +301,11 @@ The canvas carries no arbitrary statement, declaration, action or expression rep
 
 The executable laws live in `lash-kernel-edit::tests`. Correspondences compose across admitted batches. All wire objects are closed, with snake_case alternatives and no host layout or label data.
 
+Library re-linking is separate from canvas authoring:
+
+- **RELINK-CLOSURE.** `Draft::relink` resolves the document's library references by their manifest names against a host-selected registry. Each directly referenced name must select exactly one identity. The selected definitions determine the entire manifest closure, including functions called only transitively; obsolete transitive listings are discarded. Every node survives at its original site, with changed references marked edited. Hosts still admit the linked document against runtime effects and bindings before execution.
+- **RELINK-ATOMIC.** Missing or ambiguous names and checker refusals leave the draft's document, identity and composed correspondence unchanged.
+
 ## Kernel text (`K-TEXT`)
 
 The `lash::workflow::document` module docs and `parse_document`'s carry a

@@ -92,6 +92,116 @@ fn insert(base: DocumentId, at: Position, binding: &str) -> Operation {
     }
 }
 
+fn relink_library(value: &str) -> (FunctionRegistry, lash_kernel_doc::FunctionId) {
+    let mut registry = FunctionRegistry::new();
+    let g = registry
+        .register(
+            lash_kernel_doc::parse_definition(&format!(
+                "function helper.g() -> Any\nkernel 1\ncharge 1\nbody {{ return {value} }}"
+            ))
+            .unwrap(),
+            None,
+        )
+        .unwrap();
+    let f = registry.register(lash_kernel_doc::parse_definition(&format!(
+        "function helper.f() -> Any\nkernel 1\ncharge 1\nuse helper.g = @{g}\nbody {{ let y = invoke helper.g() return y }}"
+    )).unwrap(), None).unwrap();
+    (registry, f)
+}
+
+fn relink_document(registry: &FunctionRegistry, f: lash_kernel_doc::FunctionId) -> Document {
+    let mut document = parse_document(&format!(
+        "kernel 1\nnumbers float\nuse helper.f = @{f}\nentry run() -> Any\nfn run() {{ let y = invoke helper.f() return y }}\nmain {{}}"
+    )).unwrap();
+    document.manifest.functions = lash_kernel_check::requirements(&document, registry).functions;
+    document
+}
+
+/// RELINK-CLOSURE (FIG-6550): a stored entry -> f -> g is linked in one
+/// transaction, including g even though no document node calls it directly.
+#[test]
+fn relink_transitive_manifest_closure() {
+    let (old, old_f) = relink_library("null");
+    let original = relink_document(&old, old_f);
+    let stored = Document::from_json(&original.to_json().unwrap()).unwrap();
+    let mut draft = Draft::open(stored).unwrap();
+    let (current, current_f) = relink_library("true");
+    let expected = relink_document(&current, current_f);
+    assert_ne!(original.manifest.functions, expected.manifest.functions);
+    assert_eq!(expected.manifest.functions.len(), 2);
+
+    let correspondence = draft.relink(&current).unwrap();
+    assert_eq!(correspondence.base, original.identity());
+    assert_eq!(correspondence.result, expected.identity());
+    assert!(correspondence.entries().iter().all(|s| s.from == s.to));
+    assert!(correspondence.entries().iter().any(|s| s.edited));
+    assert_eq!(draft.correspondence_since_open(), &correspondence);
+
+    assert_eq!(draft.document(), &expected);
+    assert_eq!(draft.identity(), expected.identity());
+    assert_eq!(
+        draft.document().manifest.functions,
+        lash_kernel_check::requirements(draft.document(), &current).functions
+    );
+}
+
+/// RELINK-ATOMIC: missing names, ambiguous names and invalid replacements
+/// refuse without publishing any part of a re-link.
+#[test]
+fn relink_refusals_leave_the_draft_unchanged() {
+    let (old, old_f) = relink_library("null");
+    let original = relink_document(&old, old_f);
+    let mut draft = Draft::open(original.clone()).unwrap();
+    let correspondence = draft.correspondence_since_open().clone();
+    let missing = FunctionRegistry::new();
+    let (mut ambiguous, _) = relink_library("true");
+    for (_, registered) in old.iter().filter(|(id, _)| **id != old_f) {
+        ambiguous
+            .register(registered.definition().as_ref().clone(), None)
+            .unwrap();
+    }
+    ambiguous
+        .register(old.get(&old_f).unwrap().definition().as_ref().clone(), None)
+        .unwrap();
+    let mut invalid = FunctionRegistry::new();
+    invalid
+        .register(
+            lash_kernel_doc::parse_definition(
+                "function helper.f(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }",
+            )
+            .unwrap(),
+            None,
+        )
+        .unwrap();
+    for (registry, expected) in [
+        (&missing, "missing"),
+        (&ambiguous, "ambiguous"),
+        (&invalid, "invalid"),
+    ] {
+        let error = draft.relink(registry).unwrap_err();
+        match (expected, error) {
+            ("missing", crate::RelinkRefusal::MissingFunction { function, name }) => {
+                assert_eq!(function, old_f);
+                assert_eq!(name.as_str(), "helper.f");
+            }
+            ("ambiguous", crate::RelinkRefusal::AmbiguousFunction { name, functions }) => {
+                assert_eq!(name.as_str(), "helper.f");
+                assert_eq!(functions.len(), 2);
+            }
+            ("invalid", crate::RelinkRefusal::Refused(refusal)) => {
+                assert!(refusal.diagnostics.iter().any(|diagnostic| matches!(
+                    diagnostic.kind,
+                    Cause::Refused(RefusalReason::Invalid(InvalidReason::CallArity { .. }))
+                )));
+            }
+            (_, error) => panic!("unexpected {expected} refusal: {error}"),
+        }
+        assert_eq!(draft.document(), &original);
+        assert_eq!(draft.identity(), original.identity());
+        assert_eq!(draft.correspondence_since_open(), &correspondence);
+    }
+}
+
 /// CANVAS-CLOSED: raw syntax and the old passthrough cannot decode.
 #[test]
 fn canvas_closed() {

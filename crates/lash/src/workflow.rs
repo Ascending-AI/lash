@@ -65,6 +65,9 @@
 //! step and wrapper operations reject nonseparable actions. Other changes go
 //! through whole-source replacement. `edit::extract_entry` atomically returns
 //! an admitted entry slice and its effect requirements.
+//! `edit::Draft::relink` resolves library names against a host-selected
+//! `document::FunctionRegistry` and replaces the complete manifest closure in
+//! one transaction. Admit the result against the runtime environment before use.
 //!
 //! A workflow definition id is a content address. Holding or copying one proves
 //! content only, not possession. Lash performs no possession check; the host
@@ -235,7 +238,7 @@ pub mod graph {
 pub mod edit {
     pub use lash_kernel_edit::{
         Applied, Draft, EditDiagnostic, EditDiagnosticKind, EditRefusal, Extraction, Location,
-        NodeClass, Position, Transaction, extract_entry,
+        NodeClass, Position, RelinkRefusal, Transaction, extract_entry,
     };
 }
 
