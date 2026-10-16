@@ -73595,7 +73595,9 @@
           "clippy_label": "//crates/lash-durable-test:cell_declaration_crash_laws__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:cell_declaration_crash_laws__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:cell_dialect_releases__test",
@@ -79692,6 +79694,7 @@
     "postgres": [
       "//crates/lash-durable-test:after_turn_crash_laws__test",
       "//crates/lash-durable-test:attachment_referrer_laws__test",
+      "//crates/lash-durable-test:cell_declaration_crash_laws__test",
       "//crates/lash-durable-test:cell_process_handles__test",
       "//crates/lash-durable-test:cell_restore_laws__test",
       "//crates/lash-durable-test:codemode_execution_documents__test",

@@ -223,7 +223,9 @@ lash_rust_integration_test(
     package_name = "lash-internal-durable-test",
     rustc_env = {},
     test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    tags = [],
+    tags = [
+        "hermetic-postgres",
+    ],
     version = "0.0.0-dev",
 )
 
