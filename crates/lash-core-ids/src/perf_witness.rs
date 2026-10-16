@@ -12,8 +12,18 @@ pub mod queues;
 
 pub mod wakes;
 
+use lash_checkpoint_encoder::perf_witness::{
+    COLLECTOR_STATE, GRAPH_ADOPT_ATTEMPTS, GRAPH_ADOPT_BYTES, GRAPH_DECODED_BODY_BYTES,
+    GRAPH_DECODED_BYTES, GRAPH_DECODED_NODES, GRAPH_ENCODED_BYTES, GRAPH_ENVELOPES,
+    GRAPH_SERIALIZED_BODY_BYTES, HASH_PASSES, HASHED_BYTES,
+};
+pub use lash_checkpoint_encoder::perf_witness::{
+    graph_work, record_graph_adopt, record_graph_decode, record_graph_decoded_body,
+    record_graph_encode, record_graph_serialized_body, record_hash_pass,
+};
+
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -21,18 +31,7 @@ const INACTIVE: u8 = 0;
 const INSTALLING: u8 = 1;
 const ACTIVE: u8 = 2;
 
-static COLLECTOR_STATE: AtomicU8 = AtomicU8::new(INACTIVE);
-static GRAPH_SERIALIZED_BODY_BYTES: AtomicU64 = AtomicU64::new(0);
-static GRAPH_DECODED_BODY_BYTES: AtomicU64 = AtomicU64::new(0);
-static GRAPH_DECODED_NODES: AtomicU64 = AtomicU64::new(0);
-static GRAPH_DECODED_BYTES: AtomicU64 = AtomicU64::new(0);
 static SQL_BYTES: AtomicU64 = AtomicU64::new(0);
-static GRAPH_ENVELOPES: AtomicU64 = AtomicU64::new(0);
-static GRAPH_ENCODED_BYTES: AtomicU64 = AtomicU64::new(0);
-static GRAPH_ADOPT_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
-static GRAPH_ADOPT_BYTES: AtomicU64 = AtomicU64::new(0);
-static HASH_PASSES: AtomicU64 = AtomicU64::new(0);
-static HASHED_BYTES: AtomicU64 = AtomicU64::new(0);
 // Pool-wait sample serialization is acceptable here because this recorder is
 // compiled in only for the explicitly enabled performance-witness feature.
 static POOL_CHECKOUT_WAIT_NANOS: LazyLock<Mutex<Vec<u64>>> =
@@ -219,17 +218,8 @@ impl Collector {
         COLLECTOR_STATE
             .compare_exchange(INACTIVE, INSTALLING, Ordering::AcqRel, Ordering::Relaxed)
             .map_err(|_| AlreadyInstalled)?;
-        GRAPH_SERIALIZED_BODY_BYTES.store(0, Ordering::Relaxed);
-        GRAPH_DECODED_BODY_BYTES.store(0, Ordering::Relaxed);
-        GRAPH_DECODED_NODES.store(0, Ordering::Relaxed);
-        GRAPH_DECODED_BYTES.store(0, Ordering::Relaxed);
+        lash_checkpoint_encoder::perf_witness::reset();
         SQL_BYTES.store(0, Ordering::Relaxed);
-        GRAPH_ENVELOPES.store(0, Ordering::Relaxed);
-        GRAPH_ENCODED_BYTES.store(0, Ordering::Relaxed);
-        GRAPH_ADOPT_ATTEMPTS.store(0, Ordering::Relaxed);
-        GRAPH_ADOPT_BYTES.store(0, Ordering::Relaxed);
-        HASH_PASSES.store(0, Ordering::Relaxed);
-        HASHED_BYTES.store(0, Ordering::Relaxed);
         SQL_STATEMENTS.store(0, Ordering::Relaxed);
         SQL_ROWS_READ.store(0, Ordering::Relaxed);
         SQL_ROWS_WRITTEN.store(0, Ordering::Relaxed);
@@ -305,35 +295,6 @@ impl Drop for Collector {
         sql_shapes::disable();
         COLLECTOR_STATE.store(INACTIVE, Ordering::Release);
     }
-}
-
-/// Record one complete graph envelope produced, before staging deduplication.
-#[inline]
-pub fn record_graph_encode(bytes: usize) {
-    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
-        GRAPH_ENVELOPES.fetch_add(1, Ordering::Relaxed);
-        GRAPH_ENCODED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
-    }
-}
-
-/// Record one received envelope submitted to adoption, including refused and duplicate nodes.
-#[inline]
-pub fn record_graph_adopt(bytes: usize) {
-    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
-        GRAPH_ADOPT_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
-        GRAPH_ADOPT_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
-    }
-}
-
-/// Record one digest pass over a checkpoint body or graph envelope.
-/// Legacy bodies use SHA-256; graph envelopes use the domain-separated BLAKE3 hash.
-#[inline]
-pub fn record_hash_pass(bytes: usize) {
-    if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
-        return;
-    }
-    HASH_PASSES.fetch_add(1, Ordering::Relaxed);
-    HASHED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
 }
 
 #[inline]
@@ -437,41 +398,6 @@ fn lock_pool_checkout_waits() -> MutexGuard<'static, Vec<u64>> {
     POOL_CHECKOUT_WAIT_NANOS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Every envelope read by a graph decoder, including repeated reads.
-#[inline]
-pub fn record_graph_decode(bytes: usize) {
-    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
-        GRAPH_DECODED_NODES.fetch_add(1, Ordering::Relaxed);
-        GRAPH_DECODED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
-    }
-}
-/// Allocation-free scalar view for an isolated worker's progress receipt.
-pub fn graph_work() -> [u64; 6] {
-    [
-        GRAPH_ENVELOPES.load(Ordering::Relaxed),
-        GRAPH_ENCODED_BYTES.load(Ordering::Relaxed),
-        GRAPH_DECODED_NODES.load(Ordering::Relaxed),
-        GRAPH_DECODED_BYTES.load(Ordering::Relaxed),
-        GRAPH_SERIALIZED_BODY_BYTES.load(Ordering::Relaxed),
-        GRAPH_DECODED_BODY_BYTES.load(Ordering::Relaxed),
-    ]
-}
-
-/// Logical tokens actually serialized, including before an encoding-cache hit.
-#[inline]
-pub fn record_graph_serialized_body(bytes: usize) {
-    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
-        GRAPH_SERIALIZED_BODY_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
-    }
-}
-/// Logical tokens supplied to a typed decoder after materialization.
-#[inline]
-pub fn record_graph_decoded_body(bytes: usize) {
-    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
-        GRAPH_DECODED_BODY_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
-    }
 }
 
 #[cfg(test)]

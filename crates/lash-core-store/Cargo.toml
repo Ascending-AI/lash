@@ -21,15 +21,16 @@ default = []
 otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace"]
 # Internal performance instrumentation. Production builds leave every call
 # site compiled out unless an internal witness explicitly enables this feature.
-perf-witness = ["lash-core-ids/perf-witness", "lash-core-llm/perf-witness"]
+perf-witness = ["lash-checkpoint-encoder/perf-witness", "lash-core-ids/perf-witness", "lash-core-llm/perf-witness"]
 # Test-only observation hooks shared with lash-core's unit suites.
-testing = ["lash-core-ids/testing", "lash-core-llm/testing"]
+testing = ["lash-checkpoint-encoder/testing", "lash-core-ids/testing", "lash-core-llm/testing"]
 synthetic-next = ["lash-sansio/synthetic-next"]
 
 [lints]
 workspace = true
 
 [dependencies]
+lash-checkpoint-encoder = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }
 lash-kernel-doc = { workspace = true }

@@ -253,35 +253,44 @@ impl TryFrom<GraphReadPolicyWire> for GraphReadPolicy {
     }
 }
 
-/// What one decode may read. Every field is chosen by the caller: there is
-/// no default, and none may exceed the format's own bounds.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DecodeLimits {
-    pub kernel_data: lash_kernel_doc::KernelDataLimits,
-    /// The largest envelope read, at most [`MAX_NODE_BYTES`](super::MAX_NODE_BYTES).
-    pub node_bytes: u64,
-    /// Envelope bytes read in total.
-    pub total_bytes: u64,
-    /// Nodes read in total.
-    pub nodes: u64,
-    /// The largest logical body assembled, placed values included.
-    pub logical_bytes: u64,
-    /// The deepest index or stream tree followed.
-    pub depth: u64,
-}
+pub use lash_checkpoint_encoder::DecodeLimits;
 
-impl DecodeLimits {
-    /// Limits bounded only by the format and by `total` bytes read: for
-    /// tests, tools and readers whose caller bounds the input another way.
-    #[must_use]
-    pub const fn within_total(total: u64) -> Self {
-        Self {
-            kernel_data: lash_kernel_doc::KernelDataLimits::standard(),
-            node_bytes: super::MAX_NODE_BYTES,
-            total_bytes: total,
-            nodes: total,
-            logical_bytes: total,
-            depth: 64,
+impl From<lash_checkpoint_encoder::GraphRefusal> for GraphRefusal {
+    fn from(error: lash_checkpoint_encoder::GraphRefusal) -> Self {
+        use lash_checkpoint_encoder::GraphRefusal as Codec;
+        match error {
+            Codec::BadMagic => Self::BadMagic,
+            Codec::UnsupportedKind(value) => Self::UnsupportedKind(value),
+            Codec::RetiredFormat { node, kind, format } => {
+                Self::RetiredFormat { node, kind, format }
+            }
+            Codec::UnsupportedVariant { kind, variant } => {
+                Self::UnsupportedVariant { kind, variant }
+            }
+            Codec::NonCanonical { node, reason } => Self::NonCanonical { node, reason },
+            Codec::Truncated => Self::Truncated,
+            Codec::TrailingBytes => Self::TrailingBytes,
+            Codec::LengthOverflow => Self::LengthOverflow,
+            Codec::InvalidUtf8 => Self::InvalidUtf8,
+            Codec::HashMismatch(value) => Self::HashMismatch(value),
+            Codec::SemanticPage(value) => Self::SemanticPage(value),
+            Codec::MissingNode(value) => Self::MissingNode(value),
+            Codec::WrongChildKind { parent, child } => Self::WrongChildKind { parent, child },
+            Codec::EncodedNodeTooLarge { bytes, limit } => {
+                Self::EncodedNodeTooLarge { bytes, limit }
+            }
+            Codec::RootTooLarge { bytes, limit } => Self::RootTooLarge { bytes, limit },
+            Codec::DecodeLimit {
+                dimension,
+                actual,
+                limit,
+            } => Self::DecodeLimit {
+                dimension,
+                actual,
+                limit,
+            },
+            Codec::EncodeMemoryLimit => Self::EncodeMemoryLimit,
+            Codec::InvalidBody { kind, reason } => Self::InvalidBody { kind, reason },
         }
     }
 }

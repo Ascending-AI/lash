@@ -615,7 +615,7 @@ impl FrontierReader {
                                 }
                             }
                             Ok(envelope) => Ok(envelope.children.iter().collect()),
-                            Err(refusal) => Err(refusal),
+                            Err(refusal) => Err(refusal.into()),
                         },
                     };
                     Ok(Ok(ReadNode {

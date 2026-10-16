@@ -251,6 +251,17 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc"
         }
     },
+    "lash-internal-checkpoint-encoder": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "blake3": "//third-party/rust:p0032",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "schemars": "//third-party/rust:p0309",
+            "serde": "//third-party/rust:p0317",
+            "thiserror": "//third-party/rust:p0375"
+        }
+    },
     "lash-internal-conformance": {
         "build": {},
         "dev": {
@@ -364,6 +375,7 @@ PACKAGE_DEPS = {
         "normal": {
             "async_trait": "//third-party/rust:p0016",
             "chrono": "//third-party/rust:p0048",
+            "lash_checkpoint_encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "rustix": "//third-party/rust:p0296",
@@ -412,6 +424,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "async_trait": "//third-party/rust:p0016",
+            "lash_checkpoint_encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_core_llm": "//crates/lash-core-llm:lash-core-llm",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -1004,7 +1017,7 @@ PACKAGE_DEPS = {
     "lash-internal-vm-releases": {
         "build": {
             "blake3": "//third-party/rust:p0032",
-            "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_checkpoint_encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",

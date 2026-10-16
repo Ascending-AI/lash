@@ -29,20 +29,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use lash_sansio::sync::MutexExt;
-
 use lash_kernel_doc::graph_tokens::{
     CanonicalFault, ChildRef, TokenCodec, TokenEvent, TokenReader, TokenWriter, encode_body,
     logical_digest, varint_len,
 };
 
-use super::commit::EncodeBudget;
 use super::node::{
     EncodedNode, INDEX_FANOUT, INLINE_TOKEN_MAX, LEAF_PAYLOAD_MAX, MAX_NODE_BYTES, NodeId,
     envelope_len, parse_envelope, write_envelope,
 };
 use super::refusal::GraphRefusal;
 use super::registry::{BodyShape, NodeKind};
+use crate::EncodeBudget;
 
 /// A logical body: one typed value's canonical tokens, references as
 /// digests, values unplaced.
@@ -197,7 +195,7 @@ pub fn encode_node(
 }
 
 /// The length of a text or bytes token holding `len` bytes.
-pub(crate) fn token_len(len: usize) -> u64 {
+pub fn token_len(len: usize) -> u64 {
     1 + varint_len(len as u64) as u64 + len as u64
 }
 
@@ -212,16 +210,16 @@ impl GraphStaging {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn isolated(budget: EncodeBudget) -> Self {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn isolated(budget: EncodeBudget) -> Self {
         Self {
             cache: Arc::new(Mutex::new(EncodingCache::default())),
             ..Self::new(budget)
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn sharing_cache(&self, budget: EncodeBudget) -> Self {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn sharing_cache(&self, budget: EncodeBudget) -> Self {
         Self {
             cache: Arc::clone(&self.cache),
             ..Self::new(budget)
@@ -395,7 +393,11 @@ impl GraphStaging {
         #[cfg(feature = "perf-witness")]
         crate::perf_witness::record_hash_pass(input.len());
         let key = (kind, TypedBody::logical(input).digest());
-        let prepared = self.cache.lock_recover().get(&key, input);
+        let prepared = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key, input);
         if let Some(prepared) = prepared {
             for node in &prepared.nodes {
                 self.stage_prepared(node.clone())?;
@@ -411,7 +413,10 @@ impl GraphStaging {
                 .as_ref()
                 .map(|nodes| nodes[start..].to_vec())
                 .unwrap_or_default();
-            self.cache.lock_recover().insert(key, input, root, nodes);
+            self.cache
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(key, input, root, nodes);
         }
         if outermost {
             self.recorded = None;
@@ -446,13 +451,12 @@ impl GraphStaging {
 
     /// Stages `text`'s leaves and index and returns its root, whatever its
     /// length: the caller has decided it is placed. A text that fits one
-    /// leaf is that one TextLeaf. [`GraphDecoder::text`] reads it back.
+    /// leaf is that one TextLeaf. The runtime graph decoder reads it back.
     ///
     /// # Errors
     ///
     /// [`GraphRefusal::EncodeMemoryLimit`] past the lease.
     ///
-    /// [`GraphDecoder::text`]: super::GraphDecoder::text
     pub fn place_text(&mut self, text: &str) -> Result<NodeId, GraphRefusal> {
         self.memoized(EncodingKind::Text, text.as_bytes(), |staging| {
             staging.encode_text(text)
@@ -479,7 +483,7 @@ impl GraphStaging {
     }
 
     /// Stages `bytes`' leaves and index and returns its root.
-    pub(crate) fn place_bytes(&mut self, bytes: &[u8]) -> Result<NodeId, GraphRefusal> {
+    pub fn place_bytes(&mut self, bytes: &[u8]) -> Result<NodeId, GraphRefusal> {
         self.memoized(EncodingKind::Bytes, bytes, |staging| {
             staging.encode_bytes(bytes)
         })
@@ -534,7 +538,7 @@ impl GraphStaging {
 
     /// Streams a placed logical body of `kind` through structure blocks and
     /// returns its WholeStream.
-    pub(crate) fn stream(&mut self, kind: NodeKind, placed: &[u8]) -> Result<NodeId, GraphRefusal> {
+    pub fn stream(&mut self, kind: NodeKind, placed: &[u8]) -> Result<NodeId, GraphRefusal> {
         let events = scan(placed, kind)?;
         let mut blocks = Vec::new();
         let mut start = 0;
@@ -618,7 +622,7 @@ fn one_token(logical: &[u8], kind: NodeKind) -> Result<(), GraphRefusal> {
 }
 
 /// A logical body's sorted, unique children and its physical form.
-pub(crate) fn to_physical(
+pub fn to_physical(
     logical: &[u8],
     kind: NodeKind,
 ) -> Result<(Vec<[u8; 32]>, Vec<u8>), GraphRefusal> {

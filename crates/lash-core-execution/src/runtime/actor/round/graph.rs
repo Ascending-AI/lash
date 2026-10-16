@@ -611,10 +611,10 @@ impl CallOutcome {
             presentation,
             &mut encoded,
         );
-        staging.encode(
+        Ok(staging.encode(
             NodeKind::CALL_OUTCOME,
             TypedBody::logical(&encoded.into_bytes()),
-        )
+        )?)
     }
 
     /// Load the live outcome and its shared archival body.
@@ -706,6 +706,7 @@ pub fn stage_value(
             TypedBody::logical(&body.into_bytes()),
         )
         .map(MaterialNode::Value)
+        .map_err(GraphRefusal::from)
 }
 
 /// Stages a material's payload as one FrozenValue holding its exact text,
@@ -1068,7 +1069,7 @@ impl RoundFact {
             &*staging,
             DecodeLimits::within_total(1 << 32),
         ))?;
-        staging.encode_value(NodeKind::ROUND_FACT, self)
+        Ok(staging.encode_value(NodeKind::ROUND_FACT, self)?)
     }
 
     /// Reads fact `id`, checking every reference it holds names a node of
@@ -1257,7 +1258,7 @@ impl TokenCodec for ReportView {
 impl ReportView {
     /// Stage only references to existing archival call bodies.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
-        staging.encode_value(NodeKind::REPORT_VIEW, self)
+        Ok(staging.encode_value(NodeKind::REPORT_VIEW, self)?)
     }
     /// Read and validate every archival reference.
     pub fn load(decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<Self, GraphRefusal> {

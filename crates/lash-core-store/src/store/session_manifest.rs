@@ -146,7 +146,7 @@ impl SessionCheckpoint {
                 })
             })
             .transpose()?;
-        staging.encode_value(
+        Ok(staging.encode_value(
             NodeKind::SESSION_MANIFEST,
             &ManifestBody {
                 schema_version: self.schema_version,
@@ -154,7 +154,7 @@ impl SessionCheckpoint {
                 components,
                 execution,
             },
-        )
+        )?)
     }
 
     /// This manifest's node and every node it stages, for a store to install.

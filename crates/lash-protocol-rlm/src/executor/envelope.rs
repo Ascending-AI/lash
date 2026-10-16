@@ -685,7 +685,7 @@ impl CellEnvelope {
             )?,
             release,
         };
-        staging.encode_value(NodeKind::CELL_ENVELOPE, &body)
+        Ok(staging.encode_value(NodeKind::CELL_ENVELOPE, &body)?)
     }
 
     /// Reads envelope `id` back, with the release manifest it pins,

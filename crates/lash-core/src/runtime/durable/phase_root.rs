@@ -122,7 +122,7 @@ impl StagedPhase {
                 config.stage(|text| {
                     staging
                         .encode_value(NodeKind::TURN_CONTENT, &ContentText(text))
-                        .map_err(refused)
+                        .map_err(|error| refused(error.into()))
                 })
             })
             .transpose()?;
@@ -141,7 +141,7 @@ impl StagedPhase {
                 .map_err(|error| format!("turn content {digest} is not text: {error}"))?;
             let node = staging
                 .encode_value(NodeKind::TURN_CONTENT, &ContentText(text.to_owned()))
-                .map_err(refused)?;
+                .map_err(|error| refused(error.into()))?;
             content.push((digest.as_str().to_owned(), node));
             stored.push((digest.clone(), CheckpointContentPin::new(node.0)));
         }
@@ -159,7 +159,7 @@ impl StagedPhase {
                     surface: config.as_ref().and_then(|config| config.surface),
                 },
             )
-            .map_err(refused)?;
+            .map_err(|error| refused(error.into()))?;
         let mut held_nodes = held
             .iter()
             .map(|(_, pin)| NodeId(*pin.as_bytes()))

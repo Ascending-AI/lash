@@ -41,10 +41,10 @@
 pub mod bodies;
 pub mod commit;
 pub mod decode;
-pub mod encode;
-pub mod node;
+pub use lash_checkpoint_encoder::encode;
+pub use lash_checkpoint_encoder::node;
 pub mod refusal;
-pub mod registry;
+pub use lash_checkpoint_encoder::registry;
 pub mod roots;
 /// The persistent heap's staging spool and candidate manifest (FIG-6195):
 /// declared ahead of the cutover, implemented by nothing yet.
@@ -61,6 +61,7 @@ pub use commit::{
 };
 pub use decode::{BlobEncoding, GraphDecoder, NodeSource, StoredNode, closure};
 pub use encode::{GraphStaging, TypedBody, encode_node};
+pub use lash_checkpoint_encoder::GraphRefusal as EncodingRefusal;
 pub use lash_kernel_doc::KernelDataLimits;
 pub use lash_kernel_doc::graph_tokens::{
     CanonicalFault, ChildRef, CodecVariant, DecodeDimension, TokenCodec, TokenError, TokenReader,

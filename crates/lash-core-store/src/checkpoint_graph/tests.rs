@@ -328,10 +328,12 @@ fn envelopes_are_bounded_at_64_kib() {
     let fits = fits.unwrap();
     assert_eq!(staging.get(&fits).unwrap().len(), MAX_NODE_BYTES);
     assert_eq!(
-        staging.encode(
-            NodeKind::TEXT_LEAF,
-            TypedBody::logical(&text_body(&"x".repeat(65_524)))
-        ),
+        staging
+            .encode(
+                NodeKind::TEXT_LEAF,
+                TypedBody::logical(&text_body(&"x".repeat(65_524)))
+            )
+            .map_err(GraphRefusal::from),
         Err(GraphRefusal::EncodedNodeTooLarge {
             bytes: MAX_NODE_BYTES + 1,
             limit: MAX_NODE_BYTES
@@ -342,7 +344,7 @@ fn envelopes_are_bounded_at_64_kib() {
     let over = raw(1, &[], &text_body(&"x".repeat(65_524)));
     assert_eq!(over.len(), MAX_NODE_BYTES + 1);
     assert_eq!(
-        check_envelope(&over.bytes, over.id, &limits()),
+        check_envelope(&over.bytes, over.id, &limits()).map_err(GraphRefusal::from),
         Err(GraphRefusal::EncodedNodeTooLarge {
             bytes: MAX_NODE_BYTES + 1,
             limit: MAX_NODE_BYTES
@@ -432,14 +434,14 @@ fn roots_are_bounded_at_4_kib_and_spill_into_streams() {
 fn every_envelope_refusal_names_its_cause() {
     for (name, envelope, refusal) in envelope_refusals() {
         assert_eq!(
-            check_envelope(&envelope.bytes, envelope.id, &limits()),
+            check_envelope(&envelope.bytes, envelope.id, &limits()).map_err(GraphRefusal::from),
             Err(refusal),
             "{name}"
         );
     }
     let node = raw(16, &[], &[0x00]);
     assert_eq!(
-        check_envelope(&node.bytes, NodeId([0; 32]), &limits()),
+        check_envelope(&node.bytes, NodeId([0; 32]), &limits()).map_err(GraphRefusal::from),
         Err(GraphRefusal::HashMismatch(NodeId([0; 32])))
     );
     assert_eq!(
@@ -450,7 +452,8 @@ fn every_envelope_refusal_names_its_cause() {
                 node_bytes: 4,
                 ..limits()
             }
-        ),
+        )
+        .map_err(GraphRefusal::from),
         Err(GraphRefusal::DecodeLimit {
             dimension: DecodeDimension::NodeBytes,
             actual: node.len(),
@@ -852,7 +855,9 @@ fn encoding_stays_within_its_memory_lease() {
     );
     let mut short = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(needed - 1)));
     assert_eq!(
-        short.encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&body)),
+        short
+            .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&body))
+            .map_err(GraphRefusal::from),
         Err(GraphRefusal::EncodeMemoryLimit)
     );
     assert!(short.budget().spent() < needed);
@@ -862,7 +867,7 @@ fn encoding_stays_within_its_memory_lease() {
         bytes: node.bytes.clone(),
     };
     assert_eq!(
-        staging().adopt(forged),
+        staging().adopt(forged).map_err(GraphRefusal::from),
         Err(GraphRefusal::HashMismatch(NodeId([0; 32])))
     );
     let mut adopted = staging();
@@ -1282,7 +1287,9 @@ fn repeated_captures_share_unchanged_graph_materialization() {
     }
     let mut refused = first.sharing_cache(EncodeBudget::new(ExplicitLimit::new(1)));
     assert_eq!(
-        refused.encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&first_body)),
+        refused
+            .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(&first_body))
+            .map_err(GraphRefusal::from),
         Err(GraphRefusal::EncodeMemoryLimit),
         "shared encoding still charges each new staging area"
     );

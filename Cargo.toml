@@ -10,6 +10,7 @@ members = [
     "crates/lash-core-ids",
     "crates/lash-core-llm",
     "crates/lash-core-store",
+    "crates/lash-checkpoint-encoder",
     "crates/lash-store-sql",
     "crates/lash-durable",
     "crates/lash-core-effect",
@@ -90,6 +91,7 @@ default-members = [
     "crates/lash-durable",
     "crates/lash-core-llm",
     "crates/lash-core-store",
+    "crates/lash-checkpoint-encoder",
     "crates/lash-core-effect",
     "crates/lash-core-execution",
     "crates/lash-core-worker",
@@ -304,6 +306,7 @@ lash = { package = "lash-runtime", path = "crates/lash", version = "=0.0.0-dev" 
 lash-core = { package = "lash-internal-core", path = "crates/lash-core", version = "=0.0.0-dev" }
 lash-core-ids = { package = "lash-internal-core-ids", path = "crates/lash-core-ids", version = "=0.0.0-dev" }
 lash-core-llm = { package = "lash-internal-core-llm", path = "crates/lash-core-llm", version = "=0.0.0-dev" }
+lash-checkpoint-encoder = { package = "lash-internal-checkpoint-encoder", path = "crates/lash-checkpoint-encoder", version = "=0.0.0-dev" }
 lash-core-store = { package = "lash-internal-core-store", path = "crates/lash-core-store", version = "=0.0.0-dev" }
 lash-core-effect = { package = "lash-internal-core-effect", path = "crates/lash-core-effect", version = "=0.0.0-dev" }
 lash-core-execution = { package = "lash-internal-core-execution", path = "crates/lash-core-execution", version = "=0.0.0-dev" }

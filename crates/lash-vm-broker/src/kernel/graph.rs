@@ -223,7 +223,7 @@ impl FrozenRequest {
     ///
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
-        staging.encode_value(NodeKind::FROZEN_REQUEST, &StoredRequest(self.clone()))
+        Ok(staging.encode_value(NodeKind::FROZEN_REQUEST, &StoredRequest(self.clone()))?)
     }
 
     /// Reads request `id`, a tool call's arguments projected again through
@@ -408,7 +408,7 @@ impl Admission {
     ///
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
-        staging.encode_value(NodeKind::ADMISSION, self)
+        Ok(staging.encode_value(NodeKind::ADMISSION, self)?)
     }
 
     /// The `effect_admissions` row this admission is published as: under
@@ -574,7 +574,7 @@ impl EffectMembership {
     ///
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
-        staging.encode_value(NodeKind::EFFECT_MEMBERSHIP, self)
+        Ok(staging.encode_value(NodeKind::EFFECT_MEMBERSHIP, self)?)
     }
 
     /// Reads membership `id` of `exec` with every admission it names,
@@ -925,7 +925,7 @@ pub fn owner_binding_node(exec: &ExecKey) -> Result<NodeId, GraphRefusal> {
     let mut staging = GraphStaging::new(lash_core_store::checkpoint_graph::EncodeBudget::new(
         lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
     ));
-    staging.encode_value(NodeKind::OWNER_BINDING, &owner_binding(exec))
+    Ok(staging.encode_value(NodeKind::OWNER_BINDING, &owner_binding(exec))?)
 }
 
 /// Stages `exec`'s complete execution root over `parts` and `membership`,
@@ -1027,7 +1027,7 @@ impl CellEnd {
     ///
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
-        staging.encode_value(NodeKind::CELL_END, self)
+        Ok(staging.encode_value(NodeKind::CELL_END, self)?)
     }
 
     /// Reads end `id`, checking each reference names a node of its kind.

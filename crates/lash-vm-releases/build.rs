@@ -193,9 +193,7 @@ fn dialect(
 /// worker: its release manifests with their references, and every node.
 #[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
 fn checkpoint_catalog(held: &releases::HeldReleases) -> Result<(Vec<u8>, Vec<u8>), BuildError> {
-    use lash_core_store::checkpoint_graph::{
-        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody,
-    };
+    use lash_checkpoint_encoder::{EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody};
     use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter};
 
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));

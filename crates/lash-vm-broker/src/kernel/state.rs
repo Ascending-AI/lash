@@ -60,12 +60,14 @@ fn stage(staging: &mut GraphStaging, kind: u32, logical: &[u8]) -> Result<ChildR
             lash_core_store::checkpoint_graph::TypedBody::logical(logical),
         )
         .map(|id| id.child_ref())
+        .map_err(GraphRefusal::from)
 }
 
 fn freeze(staging: &mut GraphStaging, datum: &FrozenDatum) -> Result<ChildRef, GraphRefusal> {
     staging
         .encode_value(NodeKind::FROZEN_VALUE, datum)
         .map(|id| id.child_ref())
+        .map_err(GraphRefusal::from)
 }
 
 /// The helper releases this build holds as graph nodes.
@@ -88,7 +90,8 @@ impl ReleaseGraph {
     /// The refusal of a node that does not check: a defect of the build.
     pub fn check(&self) -> Result<(), GraphStateFailure> {
         for (id, node) in &self.nodes {
-            check_envelope(&node.bytes, *id, &DecodeLimits::within_total(u64::MAX))?;
+            check_envelope(&node.bytes, *id, &DecodeLimits::within_total(u64::MAX))
+                .map_err(GraphRefusal::from)?;
             if self.manifests.get(&id.child_ref()).is_some() {
                 let _ = lash_core_store::checkpoint_graph::node::immutable_closure(*id);
             }

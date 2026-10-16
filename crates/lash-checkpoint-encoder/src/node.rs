@@ -6,12 +6,13 @@ use std::fmt;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_doc::graph_tokens::{
-    CanonicalFault, ChildRef, RefForm, TokenEvent, TokenReader, get_varint, put_varint,
+    CanonicalFault, ChildRef, RefForm, TokenCodec, TokenError, TokenEvent, TokenReader,
+    TokenWriter, get_varint, put_varint,
 };
 
 use super::refusal::{DecodeLimits, GraphRefusal};
 use super::registry::NodeKind;
-use crate::store::BlobRef;
+use crate::BlobRef;
 
 /// The four bytes every envelope starts with.
 pub const MAGIC: [u8; 4] = *b"LASH";
@@ -226,7 +227,7 @@ impl<'a> NodeEnvelope<'a> {
 
 /// Writes an envelope from its parts. Every caller passes a sorted, unique
 /// child table and a physical body that references each child.
-pub(crate) fn write_envelope(kind: NodeKind, children: &[[u8; 32]], body: &[u8]) -> Vec<u8> {
+pub fn write_envelope(kind: NodeKind, children: &[[u8; 32]], body: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(envelope_len(kind, children.len(), body.len()));
     out.extend_from_slice(&MAGIC);
     put_varint(&mut out, u64::from(kind.0));
@@ -242,7 +243,7 @@ pub(crate) fn write_envelope(kind: NodeKind, children: &[[u8; 32]], body: &[u8])
 }
 
 /// The length [`write_envelope`] produces.
-pub(crate) fn envelope_len(kind: NodeKind, children: usize, body: usize) -> usize {
+pub fn envelope_len(kind: NodeKind, children: usize, body: usize) -> usize {
     use lash_kernel_doc::graph_tokens::varint_len;
     MAGIC.len()
         + varint_len(u64::from(kind.0))
@@ -649,6 +650,16 @@ fn check_slots(body: &[u8], children: usize, node: Option<NodeId>) -> Result<(),
         });
     }
     Ok(())
+}
+
+impl TokenCodec for NodeId {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.child(self.child_ref());
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.child().map(Self::from)
+    }
 }
 
 #[cfg(test)]

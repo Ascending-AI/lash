@@ -43,64 +43,7 @@ pub fn validate_session_id(session_id: &SessionId) -> Result<(), StoreError> {
     }
 }
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(transparent)]
-pub struct BlobRef(pub String);
-
-impl BlobRef {
-    pub fn for_content(content: &[u8]) -> Self {
-        Self(crate::stable_hash::blake3_hex(
-            LASH_BLOB_DOMAIN_VERSION,
-            content,
-        ))
-    }
-
-    /// Hash one content preimage supplied as borrowed consecutive slices.
-    pub(crate) fn for_content_parts<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> Self {
-        let mut hasher =
-            lash_sansio::core_support::Blake3DomainHasher::new(LASH_BLOB_DOMAIN_VERSION);
-        for part in parts {
-            hasher.update(part);
-        }
-        Self(hasher.finalize_hex())
-    }
-
-    /// The raw 32-byte digest whose lowercase hex [`for_content`](Self::for_content)
-    /// spells: one hash domain for blobs and checkpoint graph nodes.
-    pub fn digest_for_content(content: &[u8]) -> [u8; 32] {
-        lash_sansio::core_support::blake3_domain_hash(LASH_BLOB_DOMAIN_VERSION, content)
-    }
-
-    /// Exposes the opaque durable blob reference to store implementors for backend round-tripping
-    /// without imposing path or URL semantics.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for BlobRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl From<String> for BlobRef {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
+pub use lash_checkpoint_encoder::BlobRef;
 
 /// JSON-owned fields persisted in the content-addressed config named by a revision's `config_ref`.
 ///

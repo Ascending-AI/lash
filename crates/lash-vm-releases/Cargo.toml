@@ -42,7 +42,7 @@ thiserror = { workspace = true }
 [build-dependencies]
 lash-helper-labels = { workspace = true }
 lash-kernel-state = { workspace = true }
-lash-core-store = { workspace = true }
+lash-checkpoint-encoder = { workspace = true }
 thiserror = { workspace = true }
 blake3 = { workspace = true }
 lash-kernel-doc = { workspace = true }

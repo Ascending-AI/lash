@@ -119,7 +119,7 @@ impl CallBody {
             answer,
             &mut body,
         );
-        staging.encode(NodeKind::CALL_BODY, TypedBody::logical(&body.into_bytes()))
+        Ok(staging.encode(NodeKind::CALL_BODY, TypedBody::logical(&body.into_bytes()))?)
     }
 
     /// Load an archival body without the admission or model presentation.

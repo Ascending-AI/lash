@@ -14,16 +14,6 @@ use super::refusal::GraphRefusal;
 use super::registry::NodeKind;
 use crate::store::plugin_writers::PluginCallbackIdentity;
 
-impl TokenCodec for NodeId {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.child(self.child_ref());
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.child().map(Self::from)
-    }
-}
-
 fn unsupported(variant: u32) -> TokenError {
     TokenError::UnsupportedVariant { variant }
 }

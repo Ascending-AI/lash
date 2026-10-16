@@ -21,7 +21,7 @@ default = []
 otel-trace = ["lash-trace/otel"]
 # Internal performance instrumentation. Production builds leave every call
 # site compiled out unless an internal witness explicitly enables this feature.
-perf-witness = ["dep:rustix"]
+perf-witness = ["dep:lash-checkpoint-encoder", "lash-checkpoint-encoder/perf-witness", "dep:rustix"]
 # Test-only observation hooks shared with lash-core's unit suites.
 testing = ["dep:tracing-subscriber", "lash-sansio/testing"]
 
@@ -29,6 +29,7 @@ testing = ["dep:tracing-subscriber", "lash-sansio/testing"]
 workspace = true
 
 [dependencies]
+lash-checkpoint-encoder = { workspace = true, optional = true }
 rustix = { version = "=1.1.4", optional = true, features = ["time"] }
 async-trait = { workspace = true }
 chrono = { workspace = true }

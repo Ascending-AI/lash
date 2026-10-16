@@ -54,7 +54,7 @@ impl NamespaceValue {
     ///
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
-        staging.encode_value(NodeKind::NAMESPACE_VALUE, self)
+        Ok(staging.encode_value(NodeKind::NAMESPACE_VALUE, self)?)
     }
 
     /// Reads value `root` of `plugin` from `source`.

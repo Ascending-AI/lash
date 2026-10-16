@@ -1,0 +1,29 @@
+[package]
+name = "lash-internal-checkpoint-encoder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Canonical checkpoint encoding shared by release generation and runtime storage."
+
+[lib]
+name = "lash_checkpoint_encoder"
+doctest = false
+
+[features]
+perf-witness = []
+testing = []
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-doc = { workspace = true }
+blake3 = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+schemars = { workspace = true }
+thiserror = { workspace = true }

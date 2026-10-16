@@ -777,7 +777,7 @@ impl HostState {
             processes: (self.processes.len(), self.processes.stage(staging, reads)?),
             reads: self.reads,
         };
-        staging.encode_value(NodeKind::HOST_ROOT, &body)
+        Ok(staging.encode_value(NodeKind::HOST_ROOT, &body)?)
     }
 
     /// Reads HostRoot `id` back whole, checking every tree's shape, every

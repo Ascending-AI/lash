@@ -186,7 +186,7 @@ impl<'s> GraphDecoder<'s> {
             self.bytes_read,
             self.limits.total_bytes,
         )?;
-        check_envelope(stored.bytes, id, &self.limits)
+        Ok(check_envelope(stored.bytes, id, &self.limits)?)
     }
 
     fn limit(
