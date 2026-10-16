@@ -587,6 +587,7 @@ impl Lowerer<'_> {
             // snapshot list would lose additions and visit deleted entries.
             // A list is the same live loop, as an array iterator reads it.
             let receiver = self.invoke("ts.receiver", std::slice::from_ref(&subject), Ty::Text)?;
+            let receiver = self.pin(receiver);
             let list = self.same(receiver.expr(), Operand::text("list").expr())?;
             let map = self.same(receiver.expr(), Operand::text("map").expr())?;
             let set = self.same(receiver.expr(), Operand::text("set").expr())?;
@@ -666,7 +667,11 @@ impl Lowerer<'_> {
     ) -> Lowering<()> {
         let receiver = match receiver {
             Some(receiver) => receiver,
-            None => self.invoke("ts.receiver", std::slice::from_ref(&subject), Ty::Text)?,
+            None => {
+                let receiver =
+                    self.invoke("ts.receiver", std::slice::from_ref(&subject), Ty::Text)?;
+                self.pin(receiver)
+            }
         };
         let text = self.same(receiver.expr(), Operand::text("text").expr())?;
         let text = self.let_expr(text, Ty::Bool);

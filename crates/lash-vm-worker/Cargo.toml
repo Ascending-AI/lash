@@ -33,9 +33,14 @@ dialect-typescript = [
     "dep:lash-ext-date-ecma",
     "dep:lash-ext-regex-ecma",
     "dep:lash-ext-url-whatwg",
+    "dep:lash-ext-ts-core",
     "lash-vm-releases/dialect-typescript",
 ]
-dialect-python = ["dep:lash-dialect-python", "lash-vm-releases/dialect-python"]
+dialect-python = [
+    "dep:lash-dialect-python",
+    "dep:lash-ext-py-core",
+    "lash-vm-releases/dialect-python",
+]
 dhat-heap = ["dep:dhat", "lash-vm-client/dhat-heap"]
 synthetic-next = [
     "lash-vm-protocol/synthetic-next",
@@ -80,6 +85,8 @@ lash-dialect-python = { workspace = true, optional = true }
 lash-ext-date-ecma = { workspace = true, optional = true }
 lash-ext-regex-ecma = { workspace = true, optional = true }
 lash-ext-url-whatwg = { workspace = true, optional = true }
+lash-ext-ts-core = { workspace = true, optional = true }
+lash-ext-py-core = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 rmp-serde = { workspace = true }

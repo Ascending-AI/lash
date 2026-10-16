@@ -420,9 +420,9 @@ impl Compiler<'_> {
 
     /// An action nested in an expression, its arguments in the registers
     /// from `dst` and its value to `dst`: its resume entry, with the roles
-    /// standing now, then its op. A library call whose native answers here
-    /// keeps its plain call op: its entry is for a run parked in the body
-    /// under a registry where the body runs.
+    /// standing now, then its op. A library call with a body is always
+    /// this op, its native answering first: a native may decline, and the
+    /// body's frame then stands at the action (`K-LIB-006`).
     fn nested(
         &mut self,
         ops: &mut Ops,
@@ -459,13 +459,7 @@ impl Compiler<'_> {
             None => self.exprs(ops, args, dst),
         };
         let act = ActIx(self.stream.nested.len() as u32);
-        let op = match kind {
-            NestedKind::Body(lib) if self.resolve.runs(lib) == Runs::Natively => Op::Call {
-                lib: LibIx(lib.0),
-                args,
-            },
-            _ => Op::Nested { act, args },
-        };
+        let op = Op::Nested { act, args };
         self.stream.nested_at.insert(site.clone(), act);
         self.stream.nested.push(Nested {
             site,
@@ -549,9 +543,9 @@ impl Compiler<'_> {
                 }
             },
             doc::Expr::Closure(closure) => {
-                // A closure runs only where it is applied, which the body of
-                // a function with a native implementation cannot do
-                // (`K-LIB-004`): wherever it runs, it is ordinary code.
+                // A closure runs only where it is applied, in the body that
+                // made it or wherever it escapes to: wherever it runs, it is
+                // ordinary code, charged as it runs (`K-CHG-007`).
                 let code = self.child(0, |c| {
                     c.code(&closure.params, &closure.body, false, true, false)
                 });

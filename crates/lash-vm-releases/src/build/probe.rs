@@ -108,6 +108,10 @@ pub(crate) fn answer_loaded(
             Value::Absent
         }
         Ok(Err(NativeError::Heap(error))) => panic!("native replay infrastructure fault: {error}"),
+        Ok(Err(NativeError::Decline)) => {
+            outcome.push_str("declined");
+            Value::Absent
+        }
         Err(_) => {
             outcome.push_str("panicked");
             Value::Absent

@@ -108,6 +108,7 @@ PACKAGE_DEPS = {
             "arbitrary": "//third-party/rust:p0012",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_py_core": "//crates/lash-ext-py-core:lash-ext-py-core",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
@@ -134,6 +135,8 @@ PACKAGE_DEPS = {
             "arbitrary": "//third-party/rust:p0012",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_py_core": "//crates/lash-ext-py-core:lash-ext-py-core",
+            "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance",
@@ -187,6 +190,14 @@ PACKAGE_DEPS = {
             "num_traits": "//third-party/rust:p0218"
         }
     },
+    "lash-ext-py-core": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "thiserror": "//third-party/rust:p0375"
+        }
+    },
     "lash-ext-regex-ecma": {
         "build": {},
         "dev": {
@@ -196,6 +207,14 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_regress": "//crates/lash-regress:lash-regress",
             "num_traits": "//third-party/rust:p0218",
+            "thiserror": "//third-party/rust:p0375"
+        }
+    },
+    "lash-ext-ts-core": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "thiserror": "//third-party/rust:p0375"
         }
     },
@@ -991,7 +1010,9 @@ PACKAGE_DEPS = {
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_py_core": "//crates/lash-ext-py-core:lash-ext-py-core",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_helper_labels": "//crates/lash-helper-labels:lash-helper-labels",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
@@ -1080,7 +1101,9 @@ PACKAGE_DEPS = {
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_py_core": "//crates/lash-ext-py-core:lash-ext-py-core",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
@@ -1116,8 +1139,12 @@ PACKAGE_DEPS = {
         "dev": {
             "blake3": "//third-party/rust:p0032",
             "kernel_embedder": "//examples/kernel-embedder:kernel-embedder",
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
+            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_py_core": "//crates/lash-ext-py-core:lash-ext-py-core",
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_ts_core": "//crates/lash-ext-ts-core:lash-ext-ts-core",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit"
         },

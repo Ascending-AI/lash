@@ -89,6 +89,7 @@ pub(super) const DATA: &str = r####"{
 "f6944b637f1027842f13e69177cac9940f58fa3ad77cd4b92ae76576203debf8":{"charge":353,"outcome":"raised \"normalization_form\" \"expected NFC, NFD, NFKC or NFKD\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "f6991c5e0eb4afae0894efa6682ac0000a832253f0c31b0ea73ffe904d364d0c":{"charge":41,"outcome":"raised \"type_error\" \"Expected text or absent base\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "f69b9063ebf0e870bc6f0dbbe06474e59b1e025c23048e4f2fa4a84fee89fd56":[{"bytes":"da5fb1725672645af471ebc23f3f616107c76aa29d9a59994cca612ff9acb1d489d0bd54500e648603e73e1e622024e4d58a151bcb4ec6edbe5fafe80dcfe86b3d6d955e66385e9807c17e042ae8e7d6bd5c7ea63f0b734be5b847db967f57f31238a6df90dbb6e9eced944511139f0070dc5901db3e76646a"},{"int":"-6275716548891084436"},{"int":"-943024016785850722"}],
+"f69bf535fe39501235cf144ae6fba99d7d99eb7a1054727fc63475b09385c727":[{"list":[{"text":"񗳼򉜅񖭫􅝽񏲓榪򆗹򜍲󋱴򚸌򹡐񀕠񳅪񿾈𕁷𲴗𽺍򉩰򚭄󲤒򄗀򯕋ﱡ𚟙󧻖󊶫򛠰󼅀񚛂𬄏󢕍𣑇񥏯򙚈񜦥򞍶񆤰󋗢򯰉𲖱򌶺󁺡򶛜꼑𮀏󹰏򴣷򴞦𣲩򥪐􋠥󚘕񻨙􈬭񛅻񱓙𷒰𹑙𵔱򃷛𗕠𛞊򠹥󕄹򻿛񬹤𞛸𞄵󪾷󋤨𛑚󨞲򢈽򮄹񡲻􃑂"},"null",{"float":"1.4366036360012851e-38"}]}],
 "f69c59f0abb1022acb05eab8b9dc93b99c95716ab3d1c645595e39b7d6392303":[{"float":"9.873807016164108e81"}],
 "f69cab41055acf94613a404592c87aa2fcb8bf00fea122d6668c045325f6d98c":[{"record":39},{"text":"񺧐򦚃􏚎󥻣傞񼶿񟯤񃴓򦞩򲤦𑃴濕𩁊񘇪񡉩񠸍񼕑򇚛𥲶󽮏󛏸𺒟񜠖"},"null"],
 "f69dfb54979e0340b3920336e2f88c78971b78e89e4b3c5b2a629130cffb5e95":[{"float":"6.610832687464383e-208"},{"float":"4.85325358921041e75"}],

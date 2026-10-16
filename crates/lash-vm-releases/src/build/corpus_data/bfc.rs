@@ -98,6 +98,7 @@ pub(super) const DATA: &str = r####"{
 "fcb03c72d87e15478a3927753eba0a17672737c9fcaf57118028f1a834aa823e":[{"int":"2431407469171936560"},{"int":"-5585836440346381782"}],
 "fcb39ae4f641aa9188cd12859e930d7b2fc29643b7a70fb2a9bbca1f2bfcbbd9":{"charge":3,"outcome":"ok {\"float\":\"-2.4355695297060184e-247\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "fcb3ce7a1327510a0f26df23c6e446592de747b5f41059a3f8b9118e1c3d7015":[{"list":86},{"text":"[]"}],
+"fcb7595d0dcb17f13c5b6d785a3755b775936144f062e71e6a3f67159b5d4fd4":{"charge":17,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "fcb7ac9b7bf1718b3aa7ccb27920f6fc99f1c2dfd88c23e066e313ca246c5d38":{"charge":255,"outcome":"raised \"number_range\" \"`limit` is negative: give the most pieces to return\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "fcb98b0c1a79b30cd8cd4caec43e99504e79669b2d2f1ec741df870ab1452e23":{"charge":529,"outcome":"ok {\"text\":\"󲮈𬯟󢆈񍇋򞪨꥽󂵯󝳵󇈌𱗨򻷃𰑸􀙰񽁼񥛜畱񚿛󂡄򕜔򥺺󽚇򧳪򓲓񓐪󬃂񪧃󘙐󭅜񓷾󮨅񑚑򝣼􇡍򡧽󮢎𔫟񷎊񘇭񋞮𳭁𾝷򃭹魏𢎹󫶾򮭅񍯓󜒤򋀭񞰍㒕󂆼󮓿􅻶󳷋󡵰򡽊񅯴񎉃򜍇򸴁񴉛򀘟揓󾇔𻼗􈆩\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "fcbc6859b8ba7dc81c085fc1077482d6dd86880c6844c161cb3964495154c7d6":[{"text":"󸮼򫎫򜘌󈒀󇮉򇴾񉹄􏑸󬦐򥀃󎡣󟽳򺁍𡁍򅴭󛣗󪡦𭪶􊲃򚤚󜳈󈕑򼘛𝵗򳬭󣀛󉒻򐕒򓗘󓎳𞔔򲯞񡐉􎡡󉿱򰺎򓌓󯆵𧴖𞙬򛪠򴏕ᨒ򋢦񁁗𳖷񤐜𽮔򺼣򏪽񆰈䣐󯡁𣧱󿗂𧒩𙸀񣔼󄙖襚񀃈򓓉񄋠𪩥󏡱񣏁𓿦𴀙𺻙򦯄󴀓񍱓񠬫򲿽𫫢𸴗췍񨄖񸾔󀦋𸝘򀉖򕟒򡇽𨲞𽘇񣹫򍓗캾􈲣󷭺󾄌𥏎󝓩򀤀𒼒񌟌󢭃򐯕"},{"int":"-8172548285971442046"}],

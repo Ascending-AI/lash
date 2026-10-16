@@ -140,6 +140,9 @@ impl From<lash_kernel_doc::NativeError> for Interrupt {
             NativeError::Guard(error) => Self::from(Halt::Fault(format!(
                 "an immutable constructor returned a guard: {error}"
             ))),
+            NativeError::Decline => {
+                Self::from(Halt::Fault("an immutable constructor declined".into()))
+            }
         }
     }
 }
@@ -878,7 +881,13 @@ impl KernelMachine {
                     return Err(MachineError::Host(fault));
                 }
                 Err(Halt::Bound(mut exceeded)) => {
-                    if exceeded.function.is_none()
+                    let operation = self
+                        .task(task)
+                        .ok()
+                        .and_then(|task| task.frames.operation().ok().flatten());
+                    if let Some(lib) = operation {
+                        exceeded.function = Some(self.exe.lib(lib).definition.name.clone());
+                    } else if exceeded.function.is_none()
                         && let Some(lib) = self
                             .frame(task)
                             .ok()

@@ -27,11 +27,16 @@ pub(super) fn registry() -> &'static Arc<FunctionRegistry> {
         let mut registry = super::kernel_registry();
         let mut library = lash_kernel_dialect::NamedLibrary::from_registry(&registry)
             .expect("unique kernel names");
+        let mut helpers = Vec::new();
         for definition in define_helpers(&mut library).unwrap_or_else(|error| panic!("{error}")) {
-            registry
-                .register(definition, None)
-                .unwrap_or_else(|error| panic!("{error}"));
+            helpers.push(
+                registry
+                    .register(definition, None)
+                    .unwrap_or_else(|error| panic!("{error}")),
+            );
         }
+        // The operations' natives, as a worker installs them.
+        lash_ext_ts_core::implement(&mut registry, helpers).expect("operation natives");
         Arc::new(registry)
     })
 }

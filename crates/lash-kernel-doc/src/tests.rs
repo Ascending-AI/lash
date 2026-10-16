@@ -592,9 +592,10 @@ fn the_nesting_limit_holds_in_text_json_and_validation() {
 }
 
 /// `K-LIB-003`, `K-LIB-004`: a function with a native implementation takes
-/// no function, and a body beside a native implementation cannot wait: it
-/// calls only functions that state a native implementation, so all it runs
-/// is covered by its formula (`K-CHG-007`).
+/// no function, and a body beside a native implementation cannot wait
+/// itself: it calls only functions that state a native implementation, so
+/// its own work is covered by its formula (`K-CHG-007`), and applies only
+/// closures, which run as ordinary code.
 #[test]
 fn a_native_function_takes_no_function_and_its_body_cannot_wait() {
     let (catalog, header) = catalog();
@@ -640,6 +641,23 @@ fn a_native_function_takes_no_function_and_its_body_cannot_wait() {
     ))
     .unwrap();
     assert_eq!(crate::validate_definition(&calls_native, &catalog), Ok(()));
+    let applies = parse_definition(&format!(
+        "function convert(x: Any) -> Any\nkernel 1\ncharge 1\nnative\n{uses}body {{\n  let y = apply x(1)\n  let g = fn(v) {{ return num.neg(v) }}\n  let z = apply g(y)\n  return z\n}}\n"
+    ))
+    .unwrap();
+    assert_eq!(crate::validate_definition(&applies, &catalog), Ok(()));
+    let closure_waits = parse_definition(&format!(
+        "function later(x: Any) -> Any\nkernel 1\ncharge 1\nnative\n{uses}body {{\n  let f = fn() {{ do sleep 1 return x }}\n  let y = apply f()\n  return y\n}}\n"
+    ))
+    .unwrap();
+    assert_eq!(
+        *crate::validate_definition(&closure_waits, &catalog)
+            .unwrap_err()
+            .reason,
+        InvalidReason::NativeBodyMayWait {
+            form: StatementForm::Sleep
+        }
+    );
 }
 
 /// `K-CHG-003`: formula arithmetic saturates.

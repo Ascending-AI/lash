@@ -64,6 +64,7 @@ impl Lowerer<'_> {
                     Ty::Unknown,
                 )?;
                 let next = self.invoke("ts.callable", &[next], Ty::Unknown)?;
+                let next = self.pin(next);
                 let exhausted = self.let_expr(Operand::bool(false).expr(), Ty::Bool);
                 for element in elements {
                     let item = self.iterator_value(&iterator, &next, &exhausted)?;

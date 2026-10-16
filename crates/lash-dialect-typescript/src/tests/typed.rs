@@ -9,14 +9,19 @@ use lash_kernel_doc::{EffectName, Signature, Type, print_document};
 use super::{lower_against, main_text};
 
 /// The statements of `source`'s lowered `main` that compute something: a
-/// direct kernel call or a helper call, without the binding's name. A
-/// function's calling convention (its closure, its token and its positional
-/// arguments) is not one.
+/// direct kernel call or a helper call, without the binding's name, or the
+/// call a `return` gives. A function's calling convention (its closure, its
+/// token and its positional arguments) is not one.
 fn operations(source: &str) -> Vec<String> {
     main_text(source)
         .lines()
-        .filter_map(|line| line.trim().split_once(" = "))
-        .map(|(_, value)| value.to_string())
+        .filter_map(|line| {
+            let line = line.trim();
+            line.split_once(" = ")
+                .map(|(_, value)| value)
+                .or_else(|| line.strip_prefix("return "))
+        })
+        .map(str::to_string)
         .filter(|value| value.contains('('))
         .filter(|value| {
             !value.starts_with("fn(")
@@ -28,31 +33,25 @@ fn operations(source: &str) -> Vec<String> {
 
 /// Where a type is not known the operation is the helper: an unannotated
 /// parameter, `any`, a union that nothing has narrowed, an operator with
-/// no kernel function of its own, and a value asserted `as any`.
+/// no kernel function of its own, and a value asserted `as any`. An
+/// operation helper, which states a native, is called inside the
+/// expression (FIG-6440); any other is invoked.
 #[test]
 fn unknown_types_keep_the_helper() {
     for (params, body, expected) in [
-        ("a, b", "a + b", "invoke ts.add(a, b)"),
-        ("a: any, b: number", "a + b", "invoke ts.add(a, b)"),
-        (
-            "a: number | string, b: number",
-            "a + b",
-            "invoke ts.add(a, b)",
-        ),
-        ("a: number, b: string", "a + b", "invoke ts.add(a, b)"),
+        ("a, b", "a + b", "ts.add(a, b)"),
+        ("a: any, b: number", "a + b", "ts.add(a, b)"),
+        ("a: number | string, b: number", "a + b", "ts.add(a, b)"),
+        ("a: number, b: string", "a + b", "ts.add(a, b)"),
         ("a: number, b: number", "a ** b", "invoke ts.pow(a, b)"),
-        ("a: string, b: string", "a < b", "invoke ts.lt(a, b)"),
+        ("a: string, b: string", "a < b", "ts.lt(a, b)"),
         (
             "a: string, b: string",
             "a === b",
             "invoke ts.strict_equals(a, b)",
         ),
-        (
-            "a: number, b: number",
-            "(a as any) + b",
-            "invoke ts.add(a, b)",
-        ),
-        ("a: Missing, b: number", "a + b", "invoke ts.add(a, b)"),
+        ("a: number, b: number", "(a as any) + b", "ts.add(a, b)"),
+        ("a: Missing, b: number", "a + b", "ts.add(a, b)"),
     ] {
         let operations = operations(&format!("function f({params}) {{ return {body}; }}"));
         assert_eq!(operations, [expected], "({params}) => {body}");
@@ -61,7 +60,7 @@ fn unknown_types_keep_the_helper() {
     // declares a type of the same name.
     assert_eq!(
         operations("type T = number; function f<T>(a: T, b: T) { return a + b; }"),
-        ["invoke ts.add(a, b)"]
+        ["ts.add(a, b)"]
     );
 }
 
@@ -107,7 +106,7 @@ fn a_tools_declared_result_type_is_stated_and_known() {
         "{text}"
     );
     assert!(computed("r").starts_with("num.mul(t"), "{text}");
-    assert!(computed("a").starts_with("invoke ts.add(t"), "{text}");
+    assert!(computed("a").starts_with("ts.add(t"), "{text}");
 }
 
 /// What a cell finishes with, which every law below finishes as JSON text.
@@ -201,9 +200,7 @@ fn a_function_binding_nothing_else_is_assigned_calls_its_closure() {
 /// `toString` of its own to run.
 #[test]
 fn a_float_in_a_template_is_spelled_as_javascript_spells_it() {
-    assert!(
-        main_text("const n = 1 + 1; const s = `${n}`;").contains("invoke ts.number.to_string(n)")
-    );
+    assert!(main_text("const n = 1 + 1; const s = `${n}`;").contains("ts.number.to_string(n)"));
     assert_eq!(
         finished(
             "const n = 0.1 + 0.2; \

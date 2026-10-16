@@ -51,6 +51,8 @@ lash-kernel-edit = { workspace = true }
 lash-kernel-lib = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
+lash-ext-ts-core = { workspace = true }
+lash-ext-py-core = { workspace = true }
 lash-kernel-vm = { workspace = true, features = ["perf-witness"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"

@@ -108,6 +108,7 @@ pub(super) const DATA: &str = r####"{
 "d4b42228f1fa30849eeb9d1a44cd8e22a57487711345b84adaa59faaeef310ec":{"charge":248,"outcome":"ok \"absent\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d4b6d857ff4af6ad76da913642243d9372d455721fcca6e83663233de647c143":[{"list":0},{"float":"-8.607485929567017e55"},{"int":"-1838207469858503113"},{"float":"8.600185590808164e21"},{"bool":false},{"bool":true}],
 "d4b72bce9167a0686b4cec37793d9ebb24e461368e8d62cbff5ceafb05fa60e9":[{"int":"-5518707064654907602"},{"int":"-655826633284280128"}],
+"d4b846c5311a4d2b22d4df212675e8d6eac0193dd8c5732856eafd2384ff217b":[{"text":"󫣚󩬫𐻝񻖀񧃫󈳊񥝓񷌽񥂛􁳺󘡃𓦓󍴠󤢚򚂋𬔊𓠀򶹰򡪬𽮙􌑮𪩦񴺲𐢯𸍾񻟸𰺗󯕊񹀠񸌀񟀆򌑦򇑮𚄆򶧄񖀗󤔗񥁝󥞽񟱒󘌪񃂬񎿍󨭒򘣄򩃕񸢴񻢥򁢔񈾥𔿺񎯥񅭲󑝄򃁪񾚊󀧇󜘔󧲘񤑡睊򧤜󙳮񼩗􁀃𝋣񮦆ꯕ󆯂󙮕򳯢󿬕𬆣􎋠􄄥򜓧򚲮􉑷񸚟󙡒󼷢񻓹򒿐󄾏򾓐򄤙𰧋򝜘񪢶𷡧񩵗󨎭򐧪𭍹𚺟🈂񅭦񯙐𓞼𣋓񭑶𝁞𴙾⵲"},"null"],
 "d4b8c82adebceeb4dfa8546ba47273336a94be747da36b5079f4599c84f48d0c":{"charge":24,"outcome":"ok {\"text\":\"2024-02-29\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d4b8e7549c0a39bf82feabe623703cf8e0f83483b8624edb5ecf5e60fa207210":{"charge":4,"outcome":"ok {\"float\":\"3.9697489903080525e-44\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d4b8f1ee21679ed9633fd92c84a37eb80c810f02c19e9b4d1701a14fe206514a":[{"float":"-8.252233286242414e-287"}],
@@ -139,5 +140,6 @@ pub(super) const DATA: &str = r####"{
 "d4ed05cdf0f79a2aa0cb68cacc3e998c4255ed4ed5b0738a9e1397b46dd19694":{"charge":6,"outcome":"ok {\"text\":\"nan\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d4ee06465a58ba72538ebe37c23f4b37c8e64fc1f194e27ac6e0449d5e2f17fd":[{"text":"12.5"},{"text":"Hello, Wörld"},{"text":"12.5"}],
 "d4f38367eeda4276fd8dd94b17be58fec53e4bdacece5da4b12cc5f531e63def":[{"float":"-8.505548578619871e-182"},{"float":"8.636863782139203e-182"}],
-"d4fc4b7169d3aa60b4baeda139d72e7037da601b27f5decdccc667bdf1a852fa":[{"record":15},{"text":"򐥒󱧀󲟳󆅼ࢾ񚜯玡"}]
+"d4fc4b7169d3aa60b4baeda139d72e7037da601b27f5decdccc667bdf1a852fa":[{"record":15},{"text":"򐥒󱧀󲟳󆅼ࢾ񚜯玡"}],
+"d4fd274ebfb72438c89a4e54609b266ec981851ccc657a46afd49291fa8f8056":{"charge":206,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0}
 }"####;

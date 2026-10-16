@@ -3,7 +3,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{EffectName, FunctionCatalog, Literal, Name, Unit};
+use lash_kernel_doc::{
+    ActKind, Action, Callee, EffectName, Expr, FunctionCatalog, FunctionId, Literal, Name, Unit,
+};
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, CalleeNode, Edge, EdgeKind, ExecutionSite, ExprNode, Graph,
@@ -391,24 +393,85 @@ struct Direct {
 }
 
 /// What a call or a `spawn` of `callee` lets a unit reach.
-fn reach(unit: &mut Direct, callee: &CalleeNode, catalog: &dyn FunctionCatalog) {
+fn reach(
+    unit: &mut Direct,
+    callee: &CalleeNode,
+    catalog: &dyn FunctionCatalog,
+    applies: &mut BTreeMap<FunctionId, bool>,
+) {
     match callee {
         CalleeNode::Declared(name) => {
             unit.reaches.insert(name.clone());
         }
         CalleeNode::Value(_) => unit.through_values = true,
         CalleeNode::Library(function) => {
-            unit.through_values |= catalog
-                .definition(function)
-                .is_none_or(|definition| !definition.has_native());
+            unit.through_values |= library_applies(catalog, function, applies);
         }
     }
+}
+
+/// Whether a call of a library function may apply a function it is
+/// passed: one with only a kernel-code body may, and so may one whose body
+/// beside a native implementation applies a closure or calls a function
+/// that may (`K-LIB-004`). `known` keeps each answer for the one graph.
+fn library_applies(
+    catalog: &dyn FunctionCatalog,
+    function: &FunctionId,
+    known: &mut BTreeMap<FunctionId, bool>,
+) -> bool {
+    if let Some(applies) = known.get(function) {
+        return *applies;
+    }
+    let applies = match catalog.definition(function) {
+        None => true,
+        Some(definition) if !definition.has_native() => true,
+        Some(definition) => definition.body().is_some_and(|body| {
+            let mut pending = vec![lash_kernel_doc::Node::Block(&body.block)];
+            let mut callees = Vec::new();
+            let mut applies = false;
+            while let Some(node) = pending.pop() {
+                match node {
+                    lash_kernel_doc::Node::Action(Action::Call {
+                        callee: Callee::Value(_),
+                        ..
+                    }) => applies = true,
+                    lash_kernel_doc::Node::Expr(Expr::Act(act))
+                        if matches!(act.kind, ActKind::Call(Callee::Value(_))) =>
+                    {
+                        applies = true;
+                    }
+                    lash_kernel_doc::Node::Action(Action::Call {
+                        callee: Callee::Library(callee),
+                        ..
+                    })
+                    | lash_kernel_doc::Node::Expr(Expr::Call {
+                        function: callee, ..
+                    }) => callees.push(*callee),
+                    lash_kernel_doc::Node::Expr(Expr::Act(act)) => {
+                        if let ActKind::Call(Callee::Library(callee)) = &act.kind {
+                            callees.push(*callee);
+                        }
+                    }
+                    _ => {}
+                }
+                pending.extend(node.children());
+            }
+            // Identities are content hashes, so the calls form no cycle.
+            applies
+                || callees
+                    .iter()
+                    .any(|callee| library_applies(catalog, callee, known))
+        }),
+    };
+    known.insert(*function, applies);
+    applies
 }
 
 /// Fills each unit's effect set: its own performs, then those of every
 /// declared function it calls, spawns or references, to a fixed point.
 fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
     let mut direct: BTreeMap<Unit, Direct> = BTreeMap::new();
+    let mut applies = BTreeMap::new();
     for node in &graph.nodes {
         let unit = direct.entry(node.site.unit.clone()).or_default();
         match &node.kind {
@@ -420,16 +483,19 @@ fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
                     unit.effects.insert(effect.clone());
                 }
                 ActNode::Call(callee) | ActNode::Spawn(callee) => {
-                    reach(unit, callee, catalog);
+                    reach(unit, callee, catalog, &mut applies);
                 }
                 ActNode::Sleep => {}
             },
+            NodeKind::Expr(ExprNode::Call { function, .. }) => {
+                unit.through_values |= library_applies(catalog, function, &mut applies);
+            }
             NodeKind::Action(action) => {
                 if let ActionNode::Perform { effect, .. } = action {
                     unit.effects.insert(effect.clone());
                 }
                 if let ActionNode::Call { callee, .. } | ActionNode::Spawn { callee, .. } = action {
-                    reach(unit, callee, catalog);
+                    reach(unit, callee, catalog, &mut applies);
                 }
                 for atom in atoms(action) {
                     if let AtomNode::Literal(Literal::Function(name)) = atom {

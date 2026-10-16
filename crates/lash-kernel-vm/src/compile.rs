@@ -17,7 +17,8 @@
 //! that pins it resumes in.
 //!
 //! A [`Layout`] permutes the tables and the frame slots, and chooses
-//! whether a native implementation's fast path answers the calls it can. No
+//! whether a native implementation's fast path answers the calls it can, and
+//! whether a native that stands beside a kernel body answers at all. No
 //! value, effect identity or charge may depend on it; the laws compile one
 //! document under several layouts and compare the runs.
 
@@ -47,10 +48,19 @@ pub(crate) use formula::{Charge, Fast, Plan, Source};
 /// How the executable is laid out. Layout `0` is the natural order; any
 /// other value permutes the code, block, statement and library tables and
 /// each frame's slots, and an odd one also calls every native
-/// implementation through its general call, never its fast path. It exists
-/// for tests: every layout runs a document the same way.
+/// implementation through its general call, never its fast path. One that
+/// leaves 3 when divided by 4 declines for every native that stands beside a
+/// kernel body: the body runs every call of such a function. It exists for
+/// tests: every layout runs a document the same way.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Layout(pub u64);
+
+impl Layout {
+    /// Every native that stands beside a kernel body declines.
+    fn declines(self) -> bool {
+        self.0 % 4 == 3
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct CodeId(pub(crate) u32);
@@ -250,8 +260,6 @@ impl PreparedLibrary {
                 let definition = registered.definition();
                 if machine_function(definition).is_some() || definition.body().is_none() {
                     Runs::Answers
-                } else if registered.native().is_some() {
-                    Runs::Natively
                 } else {
                     Runs::Body
                 }
@@ -298,14 +306,17 @@ impl PreparedLibrary {
             .iter()
             .map(|(function, registered)| {
                 let definition = Arc::clone(registered.definition());
-                let run = if let Some(machine) = machine_function(&definition) {
-                    LibRun::Machine(machine)
-                } else if let Some(native) = registered.native() {
-                    LibRun::Native(Arc::clone(native))
-                } else {
+                let body = bodies.get(function).copied();
+                let run = match (machine_function(&definition), registered.native(), body) {
+                    (Some(machine), _, _) => LibRun::Machine(machine),
+                    (None, Some(_), Some(body)) if layout.declines() => LibRun::Body(body),
+                    (None, Some(native), body) => LibRun::Native {
+                        native: Arc::clone(native),
+                        body,
+                    },
                     // A function with no native registered has a body, and
                     // the loop above gave every such body a code.
-                    LibRun::Body(bodies.get(function).copied().unwrap_or(CodeId(0)))
+                    (None, None, body) => LibRun::Body(body.unwrap_or(CodeId(0))),
                 };
                 let params = &definition.signature.params;
                 let charge = Plan::new(&definition.charge, params);
@@ -316,7 +327,9 @@ impl PreparedLibrary {
                 // A guarded call counts its work, which only the general
                 // call does; an odd layout takes the general call always.
                 let prepared = match &run {
-                    LibRun::Native(native) if limit.is_none() && layout.0.is_multiple_of(2) => {
+                    LibRun::Native { native, .. }
+                        if limit.is_none() && layout.0.is_multiple_of(2) =>
+                    {
                         native.prepare()
                     }
                     _ => None,
@@ -647,7 +660,12 @@ pub(crate) struct Lib {
 }
 
 pub(crate) enum LibRun {
-    Native(Arc<dyn NativeFunction>),
+    /// The native implementation, and the kernel body that runs a call it
+    /// declines (`NativeError::Decline`).
+    Native {
+        native: Arc<dyn NativeFunction>,
+        body: Option<CodeId>,
+    },
     Body(CodeId),
     Machine(MachineFunction),
 }
@@ -913,10 +931,8 @@ struct Resolve<'a> {
 enum Runs {
     /// It has no kernel body: it always answers at once.
     Answers,
-    /// It has a body, but its native implementation answers at once here:
-    /// a run parked in its body under another registry resumes here.
-    Natively,
-    /// It runs its body in a frame of its own.
+    /// It has a body, which runs in a frame of its own: always, or when
+    /// its native declines the call (`K-LIB-006`).
     Body,
 }
 
@@ -1008,9 +1024,8 @@ fn compile_document(
         .libs
         .iter()
         .map(|lib| match &lib.run {
-            LibRun::Body(_) => Runs::Body,
-            LibRun::Native(_) if lib.definition.body().is_some() => Runs::Natively,
-            LibRun::Native(_) | LibRun::Machine(_) => Runs::Answers,
+            LibRun::Body(_) | LibRun::Native { body: Some(_), .. } => Runs::Body,
+            LibRun::Native { body: None, .. } | LibRun::Machine(_) => Runs::Answers,
         })
         .collect();
     let mut compiler = Compiler::new(

@@ -651,11 +651,14 @@ fn unavoidable() -> Vec<lash_kernel_dialect::readability::Unavoidable> {
             "a property-key conversion lowering inserts; no source spells it",
         ),
     ] {
-        rules.push(Unavoidable {
-            rule,
-            node_kind: "Call",
-            reason,
-        });
+        // An operation helper is called inside the expression (FIG-6440).
+        for node_kind in ["Call", "ExpressionCall"] {
+            rules.push(Unavoidable {
+                rule,
+                node_kind,
+                reason,
+            });
+        }
     }
     rules
 }

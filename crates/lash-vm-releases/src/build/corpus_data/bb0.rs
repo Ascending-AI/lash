@@ -114,6 +114,7 @@ pub(super) const DATA: &str = r####"{
 "b0cbcb6294539acbea1c5859e824993609237bf62d35f2ad32dac7f41fe86d62":[{"record":1},{"text":"꛲񺴿𱖥󒣎򳬟󻲩򀖐񫞛𯨴򵫀塵𯶅󅌾񄠘򟲈󢽱󇥯𷉝򾇹􉹺𳿆𦨹򇒭󇌄񱫢󝱗􃰯"}],
 "b0d1ab83cde6ea5b791a441df9905b2063251acf1cc185bede9a2c10b503a6fb":{"charge":27,"outcome":"ok {\"text\":\"12.5\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b0d27801ecaa62e391587a0e0cf3ad525922e7a333a0c665a66fd145f91fc05c":{"charge":5,"outcome":"ok {\"int\":\"-2858569434418453650\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"b0d3060d6fd8eca1b2689b81853b0d5a86077a1e6df3e725f453975ae206d7dc":{"charge":159,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b0d311168afb7597ce343d80cd4b1d13c02f4a7d10f3201a17e1a5f1fe5af174":[{"float":"3.25"},{"float":"-1.7976931348623157e308"},{"float":"-1.7976931348623157e308"}],
 "b0d89ae3d450686d1a78699dc52b9bf64d17e51c4417f88cb116c914b96e2b60":{"charge":106931,"outcome":"raised \"type_error\" \"values have no shared ordering\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b0d91dd94ca7100c462a92fc6c2e1e56130cde57fd05a8763ee42246fdd8e3d6":[{"record":0},{"text":"󈱘񥽀󕇾󅳝񻜤񭅊񤡨"},{"text":"򶎪񵟭񩐂󋶪񅉑򄊵󚕰阺󪖖"}],

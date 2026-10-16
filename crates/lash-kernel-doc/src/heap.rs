@@ -440,6 +440,13 @@ pub enum NativeError {
     /// Heap access failed: the call ends the run as infrastructure.
     #[error(transparent)]
     Heap(#[from] HeapFault),
+    /// The native answers only some of its inputs and declines this one:
+    /// the definition's kernel body runs the call instead (an operation's
+    /// partial native). A declining native has done nothing a run sees: it
+    /// built nothing the call keeps and counted no guard work. A native
+    /// whose definition has no body never declines.
+    #[error("the native declined the call")]
+    Decline,
 }
 
 /// What a native function sees of the heap after the cutover: fallible

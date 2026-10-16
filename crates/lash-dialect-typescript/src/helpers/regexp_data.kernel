@@ -16,6 +16,7 @@ use ts.regexp.escaped_source
 function ts.regexp.escaped_source(pattern: Text) -> Text
 kernel 1
 charge sum(8, size(pattern), size(result))
+native
 body {
   if same(pattern, "") { return "(?:)" }
   let pieces = []
@@ -48,6 +49,7 @@ body {
 function ts.regexp.spell(pattern: Text, flags: Text) -> Text
 kernel 1
 charge sum(8, size(pattern), size(flags), size(result))
+native
 body {
   let source = invoke ts.regexp.escaped_source(pattern)
   return text.concat("/", text.concat(source, text.concat("/", flags)))

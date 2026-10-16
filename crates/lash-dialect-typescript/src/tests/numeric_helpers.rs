@@ -214,7 +214,7 @@ fn float(value: f64) -> Datum {
 
 /// ECMA numeric operators, K-CHG-007 and K-MACH-008: old exact pins stay
 /// runnable, every new numeric/fallback path survives export/import, and
-/// primitive numeric work is charged less without taxing float-pair add.
+/// each operation, charged its formula, is charged less than the old body.
 #[test]
 fn numeric_helpers_preserve_values_and_resume_with_less_work() {
     let kernels = kernels();
@@ -246,7 +246,9 @@ fn numeric_helpers_preserve_values_and_resume_with_less_work() {
         let before = run(&old, &a, &b, false).charged;
         let after = run(&new, &a, &b, false).charged;
         if name == "ts.add" {
-            assert_eq!(after, before, "float-pair add keeps its first exit");
+            // An operation is charged its formula, not its body's statements
+            // (FIG-6440, `K-CHG-007`), so even its first exit costs less.
+            assert!(after < before, "float-pair add: {after} >= {before}");
             for (left, right) in [(&a, &values[8]), (&values[8], &a)] {
                 assert!(
                     run(&new, left, right, false).charged < run(&old, left, right, false).charged,

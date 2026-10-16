@@ -72,6 +72,7 @@ pub(super) const DATA: &str = r####"{
 "23825fcf5c1eae6253ae91516902b978e88bb370d42302b093edbc3944bd3fca":{"charge":678,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `a` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "2385079e6d866cf8bb5e3b7373f3b43e60ffaec8724af1c84225f6e5fd49940d":[{"list":1},{"float":"3.3233483034439295e52"},"null"],
 "23861ef453cd3739f4c8d8aa04f1a41d028654641e83649c2341281bc230290c":[{"list":[{"int":"781983807267475535"},{"int":"2913704781690335663"},{"int":"1189018459834023564"},{"int":"-4123567299629789583"},{"int":"4542275689790160557"},{"int":"1092468848437501584"},{"int":"-2250234270447754579"}]}],
+"238697e234ac2f19f4361873876ff7bec55afc8fd4a4f950925cdf5cfb1d7f45":{"charge":30,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "238a23c220d31fdfc0dc6786598b0cb73d36fd627198a0030b65cf47c91734f9":[{"map":18},"null"],
 "238a7dfcf52841174785e2846a55c9cb57dabf7ac1a011914dc9422751f34126":[{"float":"1.62935204495372e285"},{"float":"-1.2550088723480865e-300"}],
 "238aed40655127d2995ee5cd89a88d143fa7cb45d397f7cb834ca242ecffd283":[{"text":"0"},{"text":"0"}],

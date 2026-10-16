@@ -281,9 +281,20 @@ impl KernelMachine {
                 let flow = self.call(task, exe, stmt, target, at, count - (at - args))?;
                 Ok(self.answered_at(flow, at, args))
             }
+            // An operation's native answers at once; only a call whose body
+            // runs, its native declining or absent, stands at the action.
             NestedKind::Body(lib) => {
-                self.capture(task, entry, act, PhaseRecord::Called)?;
-                self.call_lib(task, exe, *lib, args, count, Some(stmt))
+                let name = &exe.lib(*lib).definition.name;
+                match self
+                    .answer(task, exe, *lib, args, count, args)
+                    .map_err(|interrupt| interrupt.in_function(name))?
+                {
+                    super::ops::Answer::Done => Ok(Flow::Done),
+                    super::ops::Answer::Body(code) => {
+                        self.capture(task, entry, act, PhaseRecord::Called)?;
+                        self.enter_body(task, exe, *lib, code, args, Some(stmt))
+                    }
+                }
             }
             NestedKind::Spawn(callee) => {
                 let (target, at) = self.nested_target(exe, callee, args)?;

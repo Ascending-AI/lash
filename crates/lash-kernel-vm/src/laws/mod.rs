@@ -10,6 +10,7 @@ mod forms;
 mod frames;
 mod layout;
 mod observe;
+mod operations;
 mod paged;
 mod publish;
 mod stream;

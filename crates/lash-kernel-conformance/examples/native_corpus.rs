@@ -25,6 +25,45 @@ mod record;
 #[path = "../../lash-vm-releases/src/sealed.rs"]
 mod sealed;
 
+/// The kernel library and the machine's own functions, as every build
+/// registers them before a dialect adds its helpers.
+fn kernel() -> Result<lash_kernel_doc::FunctionRegistry, Box<dyn std::error::Error>> {
+    let mut registry = lash_kernel_doc::FunctionRegistry::new();
+    lash_kernel_lib::register_numbers(&mut registry)?;
+    lash_kernel_lib::register_text_json(&mut registry)?;
+    lash_kernel_vm::register_machine_functions(&mut registry)?;
+    lash_kernel_lib::register_collections(&mut registry)?;
+    Ok(registry)
+}
+
+type Failed = Box<dyn std::error::Error>;
+
+/// A dialect's helper definitions, defined against the kernel library.
+type Define = fn(
+    &mut lash_kernel_dialect::NamedLibrary,
+) -> Result<Vec<lash_kernel_doc::FunctionDefinition>, Failed>;
+
+/// Adds a dialect's operation natives to its registered helpers.
+type Implement = fn(
+    &mut lash_kernel_doc::FunctionRegistry,
+    Vec<lash_kernel_doc::FunctionId>,
+) -> Result<(), Failed>;
+
+/// Registers the helpers `define` defines against `registry`, as the
+/// release build does, and lets `implement` add their operations' natives.
+fn helpers(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    define: Define,
+    implement: Implement,
+) -> Result<(), Failed> {
+    let mut library = lash_kernel_dialect::NamedLibrary::from_registry(registry)?;
+    let validated = registry.validate_functions(define(&mut library)?)?;
+    implement(
+        registry,
+        validated.iter().map(|(function, _)| *function).collect(),
+    )
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::args_os()
         .nth(1)
@@ -56,34 +95,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             recorded.record_new(registry, dialect, release)
         }
     };
-    let mut registry = lash_kernel_doc::FunctionRegistry::new();
-    lash_kernel_lib::register_numbers(&mut registry)?;
-    lash_kernel_lib::register_text_json(&mut registry)?;
-    lash_kernel_vm::register_machine_functions(&mut registry)?;
-    lash_kernel_lib::register_collections(&mut registry)?;
-    if !audit {
-        record(&mut recorded, &registry, declared::PYTHON)?;
-    }
-    if extend {
-        recorded.extend_generated(&registry, declared::PYTHON, release)?;
-    }
+    // Each dialect's registry is the one its release build certifies.
+    let mut python = kernel()?;
+    helpers(
+        &mut python,
+        |library| Ok(lash_dialect_python::define_helpers(library)?),
+        |registry, helpers| Ok(lash_ext_py_core::implement(registry, helpers)?),
+    )?;
+    let mut typescript = kernel()?;
     lash_ext_regex_ecma::register(
-        &mut registry,
+        &mut typescript,
         &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(256)),
     )?;
-    lash_ext_date_ecma::register(&mut registry)?;
-    lash_ext_url_whatwg::register(&mut registry)?;
+    lash_ext_date_ecma::register(&mut typescript)?;
+    lash_ext_url_whatwg::register(&mut typescript)?;
+    helpers(
+        &mut typescript,
+        |library| Ok(lash_dialect_typescript::define_helpers(library)?),
+        |registry, helpers| Ok(lash_ext_ts_core::implement(registry, helpers)?),
+    )?;
+    let dialects = [
+        (declared::PYTHON, &python),
+        (declared::TYPESCRIPT, &typescript),
+    ];
     if audit {
-        for dialect in [declared::PYTHON, declared::TYPESCRIPT] {
-            for difference in recorded.audit(&registry, dialect, release)? {
+        for (dialect, registry) in dialects {
+            for difference in recorded.audit(registry, dialect, release)? {
                 println!("{}", serde_json::to_string(&difference)?);
             }
         }
         return Ok(());
     }
-    record(&mut recorded, &registry, declared::TYPESCRIPT)?;
-    if extend {
-        recorded.extend_generated(&registry, declared::TYPESCRIPT, release)?;
+    for (dialect, registry) in dialects {
+        record(&mut recorded, registry, dialect)?;
+        if extend {
+            recorded.extend_generated(registry, dialect, release)?;
+        }
     }
     recorded.write(
         &std::path::PathBuf::from(root).join("crates/lash-vm-releases/src/build/corpus_data"),

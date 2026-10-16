@@ -8,7 +8,7 @@
 //! entries under this layout, and the phase must agree with the action's
 //! kind and with how the task comes to the frame.
 use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
-use crate::compile::{Executable, Form, NestedKind, StmtId};
+use crate::compile::{Executable, Form, LibId, NestedKind, StmtId};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_exec::ActIx;
@@ -566,6 +566,37 @@ impl Frames {
             }
         }
         Ok(())
+    }
+    /// The operation the guest called, where the top of the stack runs
+    /// its body: the outermost of the uncharged library bodies above the
+    /// topmost charged frame. A bound passed there is the operation's, as
+    /// when its native passes it (`K-LIB-006`).
+    pub(super) fn operation(&self) -> Result<Option<LibId>, HeapFault> {
+        let mut operation = None;
+        for index in (0..self.len).rev() {
+            let resident = self.cache.iter().find(|(at, _)| *at == index);
+            let code = match resident {
+                Some((_, frame)) => frame.code,
+                None => {
+                    let site = row(&self.rows, index, &self.access)?
+                        .statement
+                        .resolve(&self.access)?;
+                    (0..site.path.len())
+                        .rev()
+                        .find_map(|length| {
+                            self.exe
+                                .code_at(&Site::new(site.unit.clone(), &site.path[..length]))
+                        })
+                        .ok_or_else(|| malformed("a frame has no admitted code body"))?
+                }
+            };
+            let code = self.exe.code(code);
+            match (&code.site.unit, code.charged || !code.site.path.is_empty()) {
+                (Unit::Library(function), false) => operation = self.exe.lib_of(function),
+                _ => break,
+            }
+        }
+        Ok(operation)
     }
     /// Applies `edit` to the saved continuation of the frame at `index`:
     /// in its decoded frame when the cache holds it, else in its row.

@@ -553,12 +553,17 @@ impl Scope<'_> {
             ActKind::Sleep => StatementForm::Sleep,
             ActKind::Spawn(_) => StatementForm::Spawn,
         };
-        let native_callee = matches!(
-            &act.kind,
-            ActKind::Call(Callee::Library(function))
-                if self.catalog.definition(function).is_some_and(FunctionDefinition::has_native)
-        );
-        if self.native_body && !native_callee {
+        // As for a statement action (`K-LIB-004`): a body beside a native
+        // may call functions that state one and apply a closure it holds.
+        let callable = match &act.kind {
+            ActKind::Call(Callee::Library(function)) => self
+                .catalog
+                .definition(function)
+                .is_some_and(FunctionDefinition::has_native),
+            ActKind::Call(Callee::Value(_)) => true,
+            _ => false,
+        };
+        if self.native_body && !callable {
             return Err(invalid(
                 Some(site),
                 InvalidReason::NativeBodyMayWait { form },
@@ -615,12 +620,24 @@ impl Scope<'_> {
             Action::Spawn { .. } => StatementForm::Spawn,
             Action::Cancel { .. } => StatementForm::Cancel,
         };
-        let native_callee = matches!(
-            action,
-            Action::Call { callee: Callee::Library(function), .. }
-                if self.catalog.definition(function).is_some_and(FunctionDefinition::has_native)
-        );
-        if self.native_body && !native_callee {
+        // A body beside a native implementation may call functions that
+        // state one, and apply a closure it holds: one it reaches through
+        // its arguments or one it made. It cannot wait itself (`K-LIB-004`).
+        let callable = match action {
+            Action::Call {
+                callee: Callee::Library(function),
+                ..
+            } => self
+                .catalog
+                .definition(function)
+                .is_some_and(FunctionDefinition::has_native),
+            Action::Call {
+                callee: Callee::Value(_),
+                ..
+            } => true,
+            _ => false,
+        };
+        if self.native_body && !callable {
             return Err(invalid(
                 Some(site),
                 InvalidReason::NativeBodyMayWait { form },

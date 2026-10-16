@@ -42,11 +42,17 @@ fn installed() -> &'static Installed {
             .unwrap_or_else(|error| panic!("{error}"));
         let mut library =
             NamedLibrary::from_registry(&registry).unwrap_or_else(|error| panic!("{error}"));
+        let mut helpers = Vec::new();
         for definition in define_helpers(&mut library).unwrap_or_else(|error| panic!("{error}")) {
-            registry
-                .register(definition, None)
-                .unwrap_or_else(|error| panic!("{error}"));
+            helpers.push(
+                registry
+                    .register(definition, None)
+                    .unwrap_or_else(|error| panic!("{error}")),
+            );
         }
+        // The operations' natives, as a worker installs them.
+        lash_ext_py_core::implement(&mut registry, helpers)
+            .unwrap_or_else(|error| panic!("{error}"));
         Installed {
             prepared: PreparedLibrary::new(Arc::new(registry)),
             library,
@@ -500,6 +506,7 @@ fn witness_rejects_unused_delivery_batches() {
 /// FIG-6102, K-CHG-007: integer add, sub and iadd do numeric work in
 /// their own bodies, without activating another Python helper. Their
 /// interpreted operations and numeric native charges account for the run.
+/// `py.add` is an operation whose native answers integers (FIG-6440).
 #[test]
 fn integer_arithmetic_runs_directly_and_accounts_for_its_body() {
     // Parameters have no local integer proof; this law exercises the
@@ -523,9 +530,16 @@ fn integer_arithmetic_runs_directly_and_accounts_for_its_body() {
     }
     assert_eq!(
         helpers,
-        BTreeMap::from([("py.add", 1), ("py.iadd", 1), ("py.sub", 1)]),
+        BTreeMap::from([("py.iadd", 1), ("py.sub", 1)]),
         "integer arithmetic must not activate nested Python numeric helpers"
     );
+    let natives: BTreeMap<&str, u64> = work
+        .natives
+        .iter()
+        .filter(|native| native.symbol.name.starts_with("py."))
+        .map(|native| (native.symbol.name.as_str(), native.counts.calls))
+        .collect();
+    assert_eq!(natives, BTreeMap::from([("py.add", 1)]));
 }
 
 // These previous definitions are held only by this law, as sealed releases

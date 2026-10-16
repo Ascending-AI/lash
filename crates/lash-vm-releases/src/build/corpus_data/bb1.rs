@@ -5,6 +5,7 @@ pub(super) const DATA: &str = r####"{
 "b1052f6219735ae92332c9c199bd85dca1b4b4ed0463ac9ec675d141aba296f4":{"charge":7,"outcome":"ok {\"int\":\"-3143185437618908175\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b109e34149b2b297da4fe03acf83e4f30e8ae61c334ad6d10edbf106cbe33eb6":[{"bytes":"4e6e9e8d42aaaf022c3a1cb0634fa3b68d188a931ce61b91cc3ba7661cda19496579a7b4b9ee0b59d5"},{"bytes":"8e0115cf70a213057f93a68daa1d4beb8e5b8904082650dabb945b83ba9150dc35f53eecb1d84365cbf28f0660badb8a171b9b14"}],
 "b10fe35e471bc77235263790f98448347d08bfb8bfd600a47c534fef29d4a2ea":[{"map":25},{"int":"-5645023788100417987"}],
+"b113686240d079344af0f3af4b128515e097d6cdbd46948f427597363060451c":{"charge":941,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b1141de93c4593d2253a7f270008b645a9d074c2bdb4b3191e9263cbed6a1f71":[{"float":"-5.795733458202226e-79"}],
 "b11669d6d5c9bae614b8673a21b1d3c3848295ba4d192ad4dead2f46822e21cf":[{"text":"񧓶󾎟񉾘򄢧򐗶𠩽򕼩󊏗󡥐񁝢򱇌񔃯򄞮򃲡𖢘񛑉󬵡򖺻㪦􎅓񟩑𖷥󦡾𔤮򜨼򙚨򐎅𤣂񮛓򞷞𩦅󩷶𣭍󻹻󱗇󮰬󭣴򓑅󵍭󿢋񁖺򨴑񴙋󹰇񂃿𴍾򂁸񱸸􊸄񟉘𽶼𒌇򷺁𠘼ᓺ񖩓󢡇񹧗񢴤򊩾􇲪񹳓򝴪󅸐򓂬𶯍󋱚𜎢𺒥𬒬򇸥𫖙񺲲󻥫򜛙󯔔񍗾񺟕𺇚򝸙󵇥𳈆򌗢󓓩򃓀񄚩򦱤􍞼񾄓񼰑񋯉􃳾򟌇󛄡󙠃𸗳򡠸񎈈􈇌󘇏𶌌򯋊񤞯"},{"int":"-4079804519368252192"},{"int":"1131535527027054505"}],
 "b1170e2430e0e55e674822c2431b45a9a471419b28389ae19e0ab6d5cbf4871c":[{"int":"6977251848788197548"},{"int":"-7162047255058579155"}],

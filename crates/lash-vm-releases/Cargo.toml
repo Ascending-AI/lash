@@ -17,15 +17,16 @@ doctest = false
 # Which dialects' helper releases the build defines and holds, each off by
 # default: a host names the dialects it builds with (FIG-5990). The
 # extensions (ECMAScript regular expressions and dates, WHATWG URLs) are the
-# TypeScript dialect's.
+# TypeScript dialect's, and each dialect has its operations' natives.
 [features]
 dialect-typescript = [
     "dep:lash-dialect-typescript",
     "dep:lash-ext-date-ecma",
     "dep:lash-ext-regex-ecma",
     "dep:lash-ext-url-whatwg",
+    "dep:lash-ext-ts-core",
 ]
-dialect-python = ["dep:lash-dialect-python"]
+dialect-python = ["dep:lash-dialect-python", "dep:lash-ext-py-core"]
 
 [lints]
 workspace = true
@@ -53,6 +54,8 @@ lash-dialect-python = { workspace = true, optional = true }
 lash-ext-date-ecma = { workspace = true, optional = true }
 lash-ext-regex-ecma = { workspace = true, optional = true }
 lash-ext-url-whatwg = { workspace = true, optional = true }
+lash-ext-ts-core = { workspace = true, optional = true }
+lash-ext-py-core = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 

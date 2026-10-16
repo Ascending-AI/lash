@@ -438,13 +438,17 @@ fn main() -> Result<(), String> {
     let registry = registry();
     let mut registry = (*registry).clone();
     let mut names = NamedLibrary::from_registry(&registry).expect("unique library names");
+    let mut helpers = Vec::new();
     for definition in
         lash_dialect_python::define_helpers(&mut names).unwrap_or_else(|error| panic!("{error}"))
     {
-        registry
-            .register(definition, None)
-            .unwrap_or_else(|error| panic!("{error}"));
+        helpers.push(
+            registry
+                .register(definition, None)
+                .unwrap_or_else(|error| panic!("{error}")),
+        );
     }
+    lash_ext_py_core::implement(&mut registry, helpers).expect("Python operation natives");
     let registry = Arc::new(registry);
     // Prepared once, as a worker prepares its registry: every library body
     // is compiled here; each live document's preparation is reused at start.

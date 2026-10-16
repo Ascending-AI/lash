@@ -134,6 +134,7 @@ fn run(
             Err(NativeError::Guard(error)) => Err(Failure::Guard(error)),
             Err(NativeError::Memory) => Err(Failure::Memory),
             Err(NativeError::Heap(error)) => Err(Failure::Heap(error)),
+            Err(NativeError::Decline) => unreachable!("a regex native has no body to decline to"),
         },
         spent: counter.spent(),
         charge,

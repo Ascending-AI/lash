@@ -50,6 +50,7 @@ pub(super) const DATA: &str = r####"{
 "7e4fd083241acca4a39e51d9434ebbe48947f94f7da9e1c123e1767d04f3f123":[{"float":"-3.308767351067649e54"}],
 "7e5739241ea63197c19bbe27ed48afffcbd1eb63e0754fbd3a2065ede6a55653":[{"float":"-3.247150303407773e-283"},{"float":"-4.526530980673676e-169"}],
 "7e5995f9916001853aabf8f2e3af1d6bd3c9486e30d65bd927013b7d62df8800":[{"text":"􏀋򨴫򂻱񦋬򲔩𾔣𥀩𙻉񪾴򰟫񜔤񡖮昅񕎉򷕮"},{"text":"󹞔𞶻󉲠􎖙"}],
+"7e59ab399396d9cf57876fcccb3ab05f2a121e9adb486d26e798d80b1895133b":[{"float":"6.778091459002426e-240"},"null"],
 "7e5a0c1c884220831c6beda046b78306a3d48cd9e581d6b397f20566f0dc7d0e":{"charge":13,"outcome":"ok {\"text\":\"é\"}","prepared_difference":null,"reservations":[[0,4]],"reserved":4,"spent":0},
 "7e5a5a81e4c1437b8e039dc5f04950f56fb678df1a85e5ab24b5cc4454a06f28":[{"int":"-2551968074941854058"},{"float":"2.0706553143684347e208"}],
 "7e5caafb6481a8223c362c4fe02d45987050fdd56669bd5c6e9e6c508463c531":[{"int":"-8854207796773909103"}],

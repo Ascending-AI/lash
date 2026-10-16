@@ -179,9 +179,10 @@ pub struct EffectSet {
     /// transitively.
     pub effects: BTreeSet<EffectName>,
     /// The unit, or a function it reaches, calls a function held in a
-    /// variable or a library function with a kernel-code body. What such a
-    /// call performs depends on the value passed, so `effects` bounds only
-    /// the code named above.
+    /// variable, a library function with only a kernel-code body, or one
+    /// whose body beside a native implementation applies a closure. What
+    /// such a call performs depends on the value passed, so `effects` bounds
+    /// only the code named above.
     pub through_values: bool,
 }
 

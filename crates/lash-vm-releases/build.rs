@@ -86,18 +86,26 @@ fn main() -> Result<(), BuildError> {
         library::register_kernel(&mut registry)?;
         write_kernel_set(&out, &registry)?;
         library::register_extensions(&mut registry)?;
-        dialect(&out, declared::TYPESCRIPT, registry, |library| {
-            Ok(lash_dialect_typescript::define_helpers(library)?)
-        })?;
+        dialect(
+            &out,
+            declared::TYPESCRIPT,
+            registry,
+            |library| Ok(lash_dialect_typescript::define_helpers(library)?),
+            library::implement_typescript,
+        )?;
     }
     #[cfg(feature = "dialect-python")]
     {
         let mut registry = FunctionRegistry::new();
         library::register_kernel(&mut registry)?;
         write_kernel_set(&out, &registry)?;
-        dialect(&out, declared::PYTHON, registry, |library| {
-            Ok(lash_dialect_python::define_helpers(library)?)
-        })?;
+        dialect(
+            &out,
+            declared::PYTHON,
+            registry,
+            |library| Ok(lash_dialect_python::define_helpers(library)?),
+            library::implement_python,
+        )?;
     }
     #[cfg(not(any(feature = "dialect-typescript", feature = "dialect-python")))]
     let _ = (&out, declared::TYPESCRIPT, declared::PYTHON);
@@ -107,8 +115,8 @@ fn main() -> Result<(), BuildError> {
 }
 
 /// Defines `dialect`'s helpers against `registry`, the library it ships
-/// with, resolves and checks its releases, and writes all of it under the
-/// dialect's name.
+/// with, adds the natives of its operations (`implement`), resolves and
+/// checks its releases, and writes all of it under the dialect's name.
 #[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
 #[expect(
     clippy::disallowed_methods,
@@ -119,6 +127,7 @@ fn dialect(
     dialect: &str,
     mut registry: FunctionRegistry,
     define: impl FnOnce(&mut NamedLibrary) -> Result<Vec<FunctionDefinition>, BuildError>,
+    implement: fn(&mut FunctionRegistry, &[lash_kernel_doc::FunctionId]) -> Result<(), String>,
 ) -> Result<(), BuildError> {
     let write =
         |file: &str, bytes: &[u8]| std::fs::write(out.join(format!("{dialect}_{file}")), bytes);
@@ -135,6 +144,8 @@ fn dialect(
     )?;
     let helper_names: Vec<_> = helpers.iter().map(|helper| helper.name.clone()).collect();
     let validated = registry.validate_functions(helpers)?;
+    let ids: Vec<_> = validated.iter().map(|(function, _)| *function).collect();
+    implement(&mut registry, &ids)?;
     sets::validate(&registry, &helper_names, dialect == "typescript")?;
     write("helpers.json", &validated.to_json()?)?;
 

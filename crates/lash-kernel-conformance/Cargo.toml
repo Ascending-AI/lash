@@ -43,6 +43,10 @@ lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }
 blake3.workspace = true
 lash-ext-date-ecma.workspace = true
 lash-ext-url-whatwg.workspace = true
+lash-dialect-python.workspace = true
+lash-dialect-typescript.workspace = true
+lash-ext-py-core.workspace = true
+lash-ext-ts-core.workspace = true
 
 [[example]]
 name = "native_corpus"

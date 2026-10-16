@@ -130,7 +130,10 @@ main {
     ));
 }
 
-/// P2: indirect callbacks of body and Both helpers cannot hide a held template.
+/// P2: indirect callbacks of body and Both helpers cannot hide a held
+/// template. A Both helper's body may apply a closure it is passed
+/// (`K-LIB-004`, FIG-6440), so it is admitted and its call, as a statement
+/// or inside an expression, is a call through values.
 #[test]
 fn helper_callbacks_through_values_are_certified_or_refused() {
     for both in [false, true] {
@@ -176,23 +179,9 @@ main {{ finish null }}
             };
             for text in spellings {
                 let document = parse_document(&text).unwrap();
-                let graph = match derive(&document, &catalog) {
-                    Ok(graph) => graph,
-                    Err(refusal) if both => {
-                        assert!(!refusal.errors.is_empty());
-                        assert!(
-                            refusal.errors.iter().all(|refused| matches!(
-                                refused.reason,
-                                crate::RefusalReason::Invalid(
-                                    lash_kernel_doc::InvalidReason::NativeBodyMayWait { .. }
-                                )
-                            )),
-                            "{refusal:?}"
-                        );
-                        continue;
-                    }
-                    Err(refusal) => panic!("{refusal:?}"),
-                };
+                let graph = derive(&document, &catalog).unwrap_or_else(|refusal| {
+                    panic!("helper callback {argument}, Both={both}: {refusal:?}")
+                });
                 let effects = entry_effects(&document, &graph, &catalog, &Name::new("start"));
                 assert!(
                     matches!(&effects, Ok(effects) if effects.contains_key(&EffectName::new("search.run").unwrap()))

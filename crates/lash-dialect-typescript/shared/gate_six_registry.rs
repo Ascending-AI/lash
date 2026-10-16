@@ -24,12 +24,17 @@ pub(crate) fn registry() -> Arc<FunctionRegistry> {
     lash_ext_date_ecma::register(&mut registry).expect("date extension registration");
     lash_ext_url_whatwg::register(&mut registry).expect("URL extension registration");
     let mut library = NamedLibrary::from_registry(&registry).expect("unique kernel names");
+    let mut helpers = Vec::new();
     for definition in lash_dialect_typescript::define_helpers(&mut library)
         .unwrap_or_else(|error| panic!("{error}"))
     {
-        registry
-            .register(definition, None)
-            .unwrap_or_else(|error| panic!("{error}"));
+        helpers.push(
+            registry
+                .register(definition, None)
+                .unwrap_or_else(|error| panic!("{error}")),
+        );
     }
+    // A worker adds its operations' natives, so the benchmark does too.
+    lash_ext_ts_core::implement(&mut registry, helpers).expect("TypeScript operation natives");
     Arc::new(registry)
 }

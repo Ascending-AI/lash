@@ -46,7 +46,8 @@ use ts.number.to_string
 function ts.string.trim_value(text: Text, leading: Bool, trailing: Bool) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
-charge sum(8, size(text))
+charge sum(8, product(sum(1, size(text)), 62), size(result))
+native
 body {
   return text.trim_set(text, "\u{0009}\u{000a}\u{000b}\u{000c}\u{000d} \u{00a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}", leading, trailing)
 }
@@ -55,6 +56,7 @@ function ts.number.digit(character: Text, radix: Int) -> Int
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
+native
 body {
   if eq(text.utf16_len(character), 1) {} else { return -1 }
   let unit = text.utf16_get(character, 0)
@@ -69,7 +71,8 @@ body {
 function ts.number.parse_int(source: Text, radix: Int, whole: Bool) -> Number
 kernel 1
 errors "type_error", "RangeError"
-charge sum(12, product(size(source), size(source)))
+charge sum(12, product(size(source), 16))
+native
 body {
   let source = invoke ts.string.trim_value(source, true, true)
   let length = text.len(source)
@@ -94,15 +97,24 @@ body {
   }
   let start = i
   let value = 0
+  # Once the value passes 1e308, a further digit makes it at least 2e308,
+  # past every float, so the result is an infinity: the value stops
+  # growing there and the parse stays linear in the source.
+  let large = false
+  let infinite = false
   while num.lt(i, length) {
     let character = text.slice(source, i, num.add(i, 1))
     let digit = invoke ts.number.digit(character, base)
     if num.lt(digit, 0) { break }
-    set value = num.add(num.mul(value, base), digit)
+    if large { set infinite = true } else {
+      set value = num.add(num.mul(value, base), digit)
+      set large = num.lt(1e308, value)
+    }
     set i = num.add(i, 1)
   }
   if eq(start, i) { return nan }
   if whole { if eq(i, length) {} else { return nan } }
+  if infinite { return num.mul(sign, inf) }
   try { return num.mul(sign, num.to_float(value)) } catch overflow { return num.mul(sign, inf) }
 }
 
@@ -110,6 +122,7 @@ function ts.number.parse_decimal(source: Text, whole: Bool) -> Number
 kernel 1
 errors "type_error", "RangeError"
 charge sum(16, product(size(source), 20))
+native
 body {
   let source = invoke ts.string.trim_value(source, true, true)
   let length = text.len(source)
@@ -167,7 +180,8 @@ let d = invoke ts.number.digit(builtin_arg_2, 10)
 function ts.number.parse(source: Text) -> Number
 kernel 1
 errors "type_error", "RangeError"
-charge sum(24, product(size(source), size(source)))
+charge sum(24, product(size(source), 24))
+native
 body {
   let source = invoke ts.string.trim_value(source, true, true)
   if same(source, "") { return 0.0 }
@@ -195,6 +209,7 @@ function ts.number.parts(value: Number) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
+native
 body {
   # Exact kernel integers have exact decimal digits, without binary64
   # rounding. All JavaScript floats use the shortest converter below.
@@ -220,6 +235,7 @@ function ts.number.layout(digits: Text, point: Int, scientific: Bool) -> Text
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
+native
 body {
   if scientific {
     let exponent = num.sub(point, 1)
@@ -243,6 +259,7 @@ function ts.number.to_string(value: Number) -> Text
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
+native
 body {
   # Every integer below 2^53 is a float exactly, so its shortest digits
   # are its decimal digits, and either zero's are "0". The most numbers

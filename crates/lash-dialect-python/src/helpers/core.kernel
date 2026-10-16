@@ -88,6 +88,7 @@ use py.add
 function py.exc.name(value: Any) -> Text
 kernel 1
 charge 6
+native
 body {
   if bool.not(same(kind(value), "error")) {
     return "Exception"
@@ -299,6 +300,7 @@ body {
 function py.type(value: Any) -> Text
 kernel 1
 charge 8
+native
 body {
   let k = kind(value)
   if same(k, "null") {
@@ -330,6 +332,7 @@ body {
 function py.fail(name: Text, message: Text) -> Any
 kernel 1
 charge 4
+native
 body {
   throw error.new(name, message, ((message,), null))
 }
@@ -490,6 +493,7 @@ body {
 function py.operand_error(operator: Text, left: Any, right: Any) -> Any
 kernel 1
 charge 8
+native
 body {
   let left_type = invoke py.type(left)
   let right_type = invoke py.type(right)
@@ -501,6 +505,7 @@ body {
 function py.truth(value: Any) -> Bool
 kernel 1
 charge 4
+native
 body {
   let k = kind(value)
   if same(k, "bool") {
@@ -541,6 +546,7 @@ body {
 function py.add(left: Any, right: Any) -> Any
 kernel 1
 charge sum(4, size(left), size(right))
+native
 body {
   let k = kind(left)
   let r = kind(right)

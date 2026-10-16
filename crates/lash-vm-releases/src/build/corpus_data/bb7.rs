@@ -2,6 +2,7 @@
 pub(super) const DATA: &str = r####"{
 "b70b7a2e4a138db282f2ddcc19eb796957d5efae292fe9312f529abc9999986a":[{"list":11}],
 "b70c89dd0e50c07dedb453c2d45dc689a4d02786077fca67501f4ee80b540426":[{"text":"򄤰򄶢򡾹񅏆򳫡􁫔񆿡𷥾򊐌򸡄򠑔򠽜󿁂𿄢񔩀죔󋙅𚉩󈕭򬼧󕅹򾦛񘪈򏦝󚬮򷯸񎼏"},{"text":"񓏧𣑀󼰨󰮰򕎧򈃀𕧁񘔲􈲸󫆡𱪂󓸷󞞋򽒄󻈭򢀉򗨉"},"null"],
+"b70df7e663505160d0a055e86231104a42e1266a7f7964bb64ac58e3226dffec":{"charge":64,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b70f55195ac32a57e7bb3df00393720920c359bb50aaba9607c654740e605be9":[{"text":"󟌏𶤩䖻񼯰󪁧񘻧򴈺񎐾񱱶"}],
 "b711dc58c7b605bfbf0ee84b7cfafcf8792c5b139055002841dc4c9507c88ad0":[{"float":"2.01165965315974e291"}],
 "b7126c2206c2ba1348615a66f427f71c31f57f6318d8e1d3ba95522c45367127":{"charge":68,"outcome":"ok {\"float\":\"1.806179973983887\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
@@ -118,6 +119,7 @@ pub(super) const DATA: &str = r####"{
 "b7db83dfb59c5d612dab47970c419c9efc52ad01883b2812069471351f67ba5a":{"charge":496,"outcome":"ok {\"int\":\"125\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b7dc9a9236edf9d89d834dbf121f0e225206808c6dca59dfa67099be57e84cf3":[{"list":13},{"int":"-6996955030634283421"}],
 "b7de54c520bba85824535552028d9f89583152df2ce4f87291b4f849fb9d94c2":{"charge":5,"outcome":"ok {\"float\":\"-5.963205499799162e120\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"b7df2ddcc5507f98d54b439cf0b9988fc8416a8c02eac0b99ab1b797294e3745":{"charge":16406,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b7e1e96fe218a42b6806d1babf49567958805e4723d34fbf680ee2ec318f0505":[{"int":"7626640482062404029"},{"int":"-403048665358629595"}],
 "b7e2632a702edc0f08eb73108c53bd8df35b3267167db0accc1b8fe8a471f5f0":[{"int":"8436683131497853718"}],
 "b7e30e107d2e278fcecbd553598cb52d3ec695851402bc85440f94cc7464b7b6":["null","null",{"text":"g"}],
@@ -132,6 +134,7 @@ pub(super) const DATA: &str = r####"{
 "b7ecb5f5072e9ec5bc766d4e459288f279da7c0d477b3794090ca1ca78a01db8":[{"float":"0.0"},{"float":"0.0"}],
 "b7eda6d1311538ef5c9f00c8b3011d244d0d6804af7639f6a345d3753b120398":[{"float":"1.2216733168584599e-99"},{"float":"-3.1532806221569097e-85"}],
 "b7ee18548d38e1d0a9d8a6e0eeb799de0da93a98e2cadab1de377f39b3b89ac1":[{"list":0},{"text":"󾋼򋰹񴤁󢇓𸍐󯡖󈰦񙺾򓈃󱺧𨵚󈳀򪏙惞񑶟񇱤򚮜﷋񙫰򪿅񿷚𘒡򸟨򐣧񀄶򱪴񝮁𝩶𧹂󗰾񺵆𔆜񥐟፷󸚑ᷜ𡣧񤴖񚘌𶙀񂒌񓿅󸫺𼕯􆜥纫𨺖𪨋󜾟󴧀񣅓ױ򚆺񜑹󨎱񮃶񾚷󄚺󳊷񟄒𚙰󙜼򨌒𣢔"}],
+"b7f0f625c36bb50d7f10bc631aedcf3ddb2742e416ebf98c3351dc4a2e4fe8e0":[{"list":[{"int":"-4596993754591870542"},{"bool":false},{"text":"񝶔򀌯񠳩󨂰򃦱𮶂𿛙󹭴򌭂򹡔󛹤񷠘𡻨󣋕􂿰񀦯󫑼途񜘴󅪸򝠍򆫽󅝨󿷆񥶽񸑆񮋎񗚋򅊦𘦃𳁐󂰰󍉨򐷌󰃗꼖򬇈󢱋񍻓񶦮򓻽񢟀󀮏򲩘󭀌򌲬񁰵񴕍񚪇𚰒񋟊򴨥񻯱🦀𵛳򆲞㷇򫩼򈨈𠬜񼠊򢤚󃟈񏎧🦀摳򙱻񍎃񒛤򇞩򾌆􅥀򟿲򥂍󄵬򺓶򩠿򠻏􏬒񼁤󼓤򗡭򑏝򡪺򺠏򃪟񚔪򚫠񠞵󃫺󹘏񅻣󀺞ጃ日􆁮򽤮𼄜򴞞󋪑񸖤񓆯򲈌󏥈񐂺𪀻񚦻𮈨𙇬𒿏𹡐򁵠񨥚򧓈򟀡򕞁񰥮棼򶬭𹲻㍂񆮤򯉳"}]}],
 "b7f37814a608ae82a250d08246d9ece3f02be9e625f7ed3fe411df7bf1e84ebc":{"charge":3,"outcome":"ok {\"float\":\"-4.491271976334551e292\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b7f61aabbf5f1686c42aa08a814cca74bddccf73b4c2e251b16651a889dd5711":[{"float":"-1.5457677681364834e163"},{"int":"8203278159235530365"}],
 "b7f70004c9977068d251e43daf96a14dfa5ab71b0d7c800c53c9df0bb1896927":{"charge":626,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `a` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

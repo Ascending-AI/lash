@@ -8,6 +8,7 @@ pub(super) const DATA: &str = r####"{
 "d205d8db7bc6251ea1d877564ce42944c0ee972be1731cb6f491587c92301443":[{"float":"-3.7438254268289594e21"}],
 "d207ad2bdc5f4524b8adf9ca7a9513e4b4bf00fd9c49cfc6139426dfbd72b32f":[{"map":45}],
 "d20d133ced27f22c60eb81c1bab9518605ee2856f791234a67d10ef91e9f5e16":{"charge":112,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `N` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"d20ed9e69f42190ff5128437b67425dee4f6d97917dee404c9bfc641912acc5c":{"charge":270,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "d20fe99e340badc0d8f003c80ab9b58366eaf18ad9e536024ee779ff43defaae":[{"int":"-7812702396606605826"}],
 "d2146ede693241f28a890d3beaea3c1b240860b34d17556077b0a55f2b4bad43":[{"float":"-1.9960629779838322e176"}],
 "d21590045ab1b6a04cac6ca927ee8a4b3ff36f18cf7770a883e41c88f96cc415":{"charge":5,"outcome":"ok {\"int\":\"-756947819745628607\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

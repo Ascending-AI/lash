@@ -233,6 +233,16 @@ pub enum RegistryError {
         name: FunctionName,
         function: FunctionId,
     },
+    /// A native implementation was offered for a function the registry
+    /// does not hold.
+    #[error("{function} is not registered, so no native implementation can be added to it")]
+    NotRegistered { function: FunctionId },
+    /// A native implementation was offered for a function that has one.
+    #[error("`{name}` ({function}) already has a native implementation")]
+    AlreadyImplemented {
+        name: FunctionName,
+        function: FunctionId,
+    },
     /// Validated functions were offered to a registry that does not hold
     /// exactly the functions they were validated against.
     #[error(
@@ -380,8 +390,53 @@ impl FunctionRegistry {
         Ok(())
     }
 
+    /// Adds the native implementation of a registered function whose
+    /// definition states one beside its kernel body: an operation's
+    /// partial native, which answers the inputs it can and declines the
+    /// rest to the body (`NativeError::Decline`). A dialect's helpers are
+    /// registered as their build validated them, and the embedder adds
+    /// their natives afterwards.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::NotRegistered`], [`RegistryError::NativeNotStated`]
+    /// and [`RegistryError::AlreadyImplemented`].
+    pub fn implement(
+        &mut self,
+        function: FunctionId,
+        native: Arc<dyn NativeFunction>,
+    ) -> Result<(), RegistryError> {
+        let registered = self
+            .functions
+            .get_mut(&function)
+            .ok_or(RegistryError::NotRegistered { function })?;
+        if !registered.definition.has_native() {
+            return Err(RegistryError::NativeNotStated {
+                name: registered.definition.name.clone(),
+            });
+        }
+        if registered.native.is_some() {
+            return Err(RegistryError::AlreadyImplemented {
+                name: registered.definition.name.clone(),
+                function,
+            });
+        }
+        registered.native = Some(native);
+        Ok(())
+    }
+
     pub fn get(&self, function: &FunctionId) -> Option<&RegisteredFunction> {
         self.functions.get(function)
+    }
+
+    /// The native implementation registered for a function named `name`,
+    /// when one is: what a partial native delegates to, so that it answers
+    /// exactly as the body's own call does.
+    pub fn native_named(&self, name: &str) -> Option<Arc<dyn NativeFunction>> {
+        self.functions
+            .values()
+            .filter(|registered| registered.definition.name.as_str() == name)
+            .find_map(|registered| registered.native.clone())
     }
 
     /// Export the complete library as typed, serialisable declarations.

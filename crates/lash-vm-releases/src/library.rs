@@ -1,7 +1,9 @@
 //! The library functions lash ships, each registered by the crate that
 //! implements it: what an embedding holds before a dialect adds its
 //! helpers. Every embedding holds the kernel library; the extensions are
-//! the TypeScript dialect's (FIG-5990).
+//! the TypeScript dialect's (FIG-5990). Each dialect's hot operations have
+//! partial natives in a dialect-free crate, added to the helpers once they
+//! are registered (FIG-6440).
 //!
 //! This crate's build script includes this file, and so does
 //! `lash-vm-worker`: the build defines each dialect's helpers and the
@@ -37,4 +39,26 @@ pub(crate) fn register_extensions(registry: &mut FunctionRegistry) -> Result<(),
     lash_ext_date_ecma::register(registry).map_err(|error| error.to_string())?;
     lash_ext_url_whatwg::register(registry).map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// Adds the natives of the TypeScript dialect's operations to its
+/// registered `helpers`.
+#[cfg(feature = "dialect-typescript")]
+pub(crate) fn implement_typescript(
+    registry: &mut FunctionRegistry,
+    helpers: &[lash_kernel_doc::FunctionId],
+) -> Result<(), String> {
+    lash_ext_ts_core::implement(registry, helpers.iter().copied())
+        .map_err(|error| error.to_string())
+}
+
+/// Adds the natives of the Python dialect's operations to its registered
+/// `helpers`.
+#[cfg(feature = "dialect-python")]
+pub(crate) fn implement_python(
+    registry: &mut FunctionRegistry,
+    helpers: &[lash_kernel_doc::FunctionId],
+) -> Result<(), String> {
+    lash_ext_py_core::implement(registry, helpers.iter().copied())
+        .map_err(|error| error.to_string())
 }

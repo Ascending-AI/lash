@@ -110,6 +110,7 @@ use ts.hole_value
 function ts.receiver(value: Any) -> Text
 kernel 1
 charge 3
+native
 body {
   let k = kind(value)
   # The kinds most receivers have come first: a string's and an array's
@@ -148,6 +149,7 @@ body {
 function ts.callable(value: Any) -> Any
 kernel 1
 charge 4
+native
 body {
   if same(kind(value), "tuple") {} else { return value }
   if same(value, ()) { return value }
@@ -200,6 +202,7 @@ body {
 function ts.is_primitive(value: Any) -> Bool
 kernel 1
 charge 4
+native
 body {
   let k = kind(value)
   if same(k, "float") { return true }
@@ -213,6 +216,7 @@ body {
 function ts.is_nullish(value: Any) -> Bool
 kernel 1
 charge 2
+native
 body {
   if same(value, null) {
     return true
@@ -249,6 +253,7 @@ body {
 function ts.to_boolean(value: Any) -> Bool
 kernel 1
 charge 3
+native
 body {
   let k = kind(value)
   if same(k, "bool") {
@@ -312,6 +317,7 @@ function ts.primitive_to_string(value: Any) -> Text
 kernel 1
 errors "type_error"
 charge sum(4, size(result))
+native
 body {
   let k = kind(value)
   if same(k, "text") {
@@ -345,6 +351,7 @@ function ts.primitive_to_number(value: Any) -> Number
 kernel 1
 errors "type_error"
 charge sum(4, size(value))
+native
 body {
   let k = kind(value)
   if same(k, "float") {
@@ -380,6 +387,7 @@ function ts.to_primitive(value: Any, hint: Text) -> Any
 kernel 1
 errors "type_error"
 charge sum(4, deep(value))
+native
 body {
   # A primitive is its own primitive: no hint changes it.
   let primitive = invoke ts.is_primitive(value)
@@ -527,6 +535,7 @@ function ts.add(left: Any, right: Any) -> Any
 kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
+native
 body {
   # Two numbers add and two texts join, whatever their conversions would
   # say.
@@ -883,6 +892,7 @@ function ts.relational(left: Any, right: Any) -> Tuple(Bool, Any, Any)
 kernel 1
 errors "type_error"
 charge sum(16, deep(left), deep(right))
+native
 body {
   let a = invoke ts.to_primitive(left, "number")
   let b = invoke ts.to_primitive(right, "number")
@@ -900,6 +910,7 @@ function ts.lt(left: Any, right: Any) -> Bool
 kernel 1
 errors "type_error"
 charge sum(20, deep(left), deep(right))
+native
 body {
   # Float pairs already have ECMA Number semantics, including NaN and zero.
   if same(kind(left), "float") {
@@ -916,6 +927,7 @@ function ts.gt(left: Any, right: Any) -> Bool
 kernel 1
 errors "type_error"
 charge sum(20, deep(left), deep(right))
+native
 body {
   let operands = invoke ts.relational(left, right)
   if operands[0] {
@@ -928,6 +940,7 @@ function ts.le(left: Any, right: Any) -> Bool
 kernel 1
 errors "type_error"
 charge sum(20, deep(left), deep(right))
+native
 body {
   let operands = invoke ts.relational(left, right)
   if operands[0] {
@@ -940,6 +953,7 @@ function ts.ge(left: Any, right: Any) -> Bool
 kernel 1
 errors "type_error"
 charge sum(20, deep(left), deep(right))
+native
 body {
   let operands = invoke ts.relational(left, right)
   if operands[0] {

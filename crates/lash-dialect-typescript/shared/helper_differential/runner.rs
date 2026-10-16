@@ -8,8 +8,8 @@ use lash_kernel_doc::{
     Timestamp, Type,
 };
 use lash_kernel_vm::{
-    Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, RunError,
-    Step, Target,
+    Bounds, CellStart, End, Host, Layout, Machine, Outcome, PreparedLibrary, Program, Request,
+    RunError, Step, Target,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -31,6 +31,14 @@ pub struct Case {
 pub struct Observed {
     pub result: Value,
     pub reached: BTreeSet<String>,
+    /// What the run was charged.
+    pub charged: u64,
+}
+
+/// A case lowered and admitted, or what refusing to lower it observes.
+pub enum Lowered {
+    Program(Program),
+    Refused(Observed),
 }
 
 pub struct Runner {
@@ -61,10 +69,21 @@ impl Runner {
             _ => return Err(format!("unknown dialect {dialect}")),
         }
         .map_err(|e| e.to_string())?;
+        let mut helpers = Vec::new();
         for definition in definitions {
-            registry
-                .register(definition, None)
-                .map_err(|e| e.to_string())?;
+            helpers.push(
+                registry
+                    .register(definition, None)
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        // The runner installs each dialect's operation natives, as a worker
+        // does (FIG-6440).
+        match dialect {
+            "typescript" => {
+                lash_ext_ts_core::implement(&mut registry, helpers).map_err(|e| e.to_string())?
+            }
+            _ => lash_ext_py_core::implement(&mut registry, helpers).map_err(|e| e.to_string())?,
         }
         Ok(Self {
             library,
@@ -73,6 +92,14 @@ impl Runner {
     }
 
     pub fn run(&self, case: &Case) -> Result<Observed, String> {
+        match self.lower(case)? {
+            Lowered::Program(program) => self.execute(case, &program, &[Layout::default()]),
+            Lowered::Refused(observed) => Ok(observed),
+        }
+    }
+
+    /// Lowers and admits `case`, or what a refusal to lower it observes.
+    pub fn lower(&self, case: &Case) -> Result<Lowered, String> {
         let effects = BTreeMap::from([(
             EffectName::new("observe").map_err(|e| e.to_string())?,
             Signature {
@@ -108,29 +135,48 @@ impl Runner {
         let lowered = match lowered {
             Ok(lowered) => lowered,
             Err(message) => {
-                return Ok(Observed {
+                return Ok(Lowered::Refused(Observed {
                     result: json!({"type":"refusal", "value":message.split(':').next().unwrap_or(&message)}),
                     reached: BTreeSet::new(),
-                });
+                    charged: 0,
+                }));
             }
         };
         let mut admission = lash_kernel_check::Environment::new(&self.library);
         admission.effects = effects;
         lash_kernel_check::admit(&lowered.document, &admission).map_err(|e| format!("{e:?}"))?;
-        let mut machine = crate::pages::start(
-            Program {
-                release: crate::pages::RELEASE,
-                document: Arc::new(lowered.document),
-                library: self.prepared.clone(),
-            },
-            Bounds {
-                charge: 50_000_000,
-                memory: 64 << 20,
-                call_depth: 200,
-                live_tasks: 100,
-                requests_per_park: 100,
-                join_members: 100,
-            },
+        Ok(Lowered::Program(Program {
+            release: crate::pages::RELEASE,
+            document: Arc::new(lowered.document),
+            library: self.prepared.clone(),
+        }))
+    }
+
+    /// Runs `program`, lowered from `case`, built in the first of
+    /// `layouts`. Given more than one, the run is sealed at each park and
+    /// opened cold in the next of them, by turns, before the park's
+    /// requests are answered.
+    pub fn execute(
+        &self,
+        case: &Case,
+        program: &Program,
+        layouts: &[Layout],
+    ) -> Result<Observed, String> {
+        let reopen = layouts.len() > 1;
+        let mut layouts = layouts.iter().copied().cycle();
+        let first = layouts.next().ok_or("a plan names a layout")?;
+        let bounds = Bounds {
+            charge: 50_000_000,
+            memory: 64 << 20,
+            call_depth: 200,
+            live_tasks: 100,
+            requests_per_park: 100,
+            join_members: 100,
+        };
+        let source = crate::pages::Source::default();
+        let mut machine = crate::pages::with_source(
+            program.clone(),
+            bounds,
             CellStart {
                 target: Target::Main,
                 args: vec![],
@@ -139,9 +185,12 @@ impl Runner {
                 modes: Default::default(),
                 host: Vec::new(),
             },
+            first,
+            &source,
         )
         .map_err(|e| e.to_string())?;
         machine.count_work();
+        let mut reached = BTreeSet::new();
         let mut host = ScriptHost {
             bits: case.bits,
             stride: case.stride,
@@ -155,6 +204,16 @@ impl Runner {
             {
                 Step::Slice => return Err("unbounded slice yielded".into()),
                 Step::Parked(park) => {
+                    if reopen {
+                        reached.extend(Self::reached(&machine)?);
+                        let charged = machine.meters().charged;
+                        let layout = layouts.next().ok_or("a plan names a layout")?;
+                        crate::pages::reopen(&mut machine, program, bounds, &source, layout);
+                        machine.count_work();
+                        if machine.meters().charged != charged {
+                            return Err("reopening changed the charge".into());
+                        }
+                    }
                     for request in park.requests {
                         let effect = match request {
                             Request::Effect(effect) => effect,
@@ -187,6 +246,16 @@ impl Runner {
                 Step::Ended(other) => return Err(format!("unexpected end: {other:?}")),
             }
         };
+        reached.extend(Self::reached(&machine)?);
+        Ok(Observed {
+            result,
+            reached,
+            charged: machine.meters().charged,
+        })
+    }
+
+    /// The library functions whose code or native ran in `machine`.
+    fn reached(machine: &lash_kernel_vm::KernelMachine) -> Result<BTreeSet<String>, String> {
         let work = machine.work().ok_or("work counting is enabled")?;
         let mut reached: BTreeSet<String> = work
             .codes
@@ -200,7 +269,7 @@ impl Runner {
                 .filter(|row| row.counts.calls > 0)
                 .map(|row| row.symbol.name),
         );
-        Ok(Observed { result, reached })
+        Ok(reached)
     }
 }
 

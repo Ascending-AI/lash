@@ -65,7 +65,7 @@ fn top_level_bindings_are_the_sessions() {
     assert_eq!(
         lowered.document.main,
         lash_kernel_doc::parse_document(&format!(
-            "kernel 1\nnumbers float\nuse ts.add = @{}\nmain {{\n  let seen = invoke ts.add(total, 1.0)\n  set total = seen\n}}\n",
+            "kernel 1\nnumbers float\nuse ts.add = @{}\nmain {{\n  let seen = ts.add(total, 1.0)\n  set total = seen\n}}\n",
             lash_kernel_dialect::Library::resolve(super::library(), "ts.add").unwrap()
         ))
         .unwrap()

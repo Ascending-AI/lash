@@ -250,10 +250,16 @@ pub struct Dialect {
     /// Registers the functions the dialect's helpers call beyond the
     /// kernel library's.
     extensions: Option<RegisterExtensions>,
+    /// Adds the natives of the dialect's operations to its registered
+    /// helpers.
+    natives: ImplementOperations,
 }
 
 /// Registers a dialect's extension functions.
 type RegisterExtensions = fn(&mut FunctionRegistry) -> Result<(), String>;
+
+/// Adds a dialect's operation natives to its helpers, by identity.
+type ImplementOperations = fn(&mut FunctionRegistry, &[FunctionId]) -> Result<(), String>;
 
 impl Dialect {
     /// The dialect's name: what a session records and a run names.
@@ -342,6 +348,7 @@ impl Embedder {
             name: _,
             package,
             extensions,
+            natives,
         } = dialect;
         let package = package?;
         if self.dialects.contains_key(&package.dialect) {
@@ -360,9 +367,11 @@ impl Embedder {
         }
         let helpers =
             ValidatedFunctions::from_json(built.helpers).map_err(|error| registry(&error))?;
+        let operations: Vec<FunctionId> = helpers.iter().map(|(function, _)| *function).collect();
         self.registry
             .register_validated(helpers)
             .map_err(|error| registry(&error))?;
+        natives(&mut self.registry, &operations).map_err(EmbedError::Registry)?;
         // The functions of the releases the dialect retains, validated
         // against exactly what it holds now, under no name: they are found
         // by identity alone (FIG-5799).
@@ -468,6 +477,7 @@ pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Dialect {
             functions: Vec::new(),
         }),
         extensions: Some(crate::library::register_extensions),
+        natives: crate::library::implement_typescript,
     }
 }
 
@@ -488,6 +498,7 @@ pub fn python_with_limits(limits: lash_dialect_python::SourceLimits) -> Dialect 
         name: lash_vm_releases::PYTHON,
         package: Ok(package),
         extensions: None,
+        natives: crate::library::implement_python,
     }
 }
 

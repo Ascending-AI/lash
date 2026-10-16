@@ -128,7 +128,7 @@ impl GuestSymbols {
                 LibSymbol {
                     token,
                     kind: match lib.run {
-                        LibRun::Native(_) => LibKind::Native,
+                        LibRun::Native { .. } => LibKind::Native,
                         LibRun::Machine(_) => LibKind::Machine,
                         LibRun::Body(_) => LibKind::Body,
                     },

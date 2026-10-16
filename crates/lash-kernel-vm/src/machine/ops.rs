@@ -31,7 +31,7 @@ use num_traits::ToPrimitive;
 use super::exec::Call;
 use super::stream::{Ran, Running};
 use super::{Control, Cursor, Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
-use crate::compile::{Charge, Executable, Form, LibId, LibRun, StmtId};
+use crate::compile::{Charge, CodeId, Executable, Form, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::heap::within_depth;
 use crate::interface::{Bound, Host};
@@ -378,8 +378,9 @@ impl KernelMachine {
     /// as its arguments: the one entry of every library call. A native
     /// implementation or a machine function answers at once, charged by
     /// its formula: `Done`, its value in `args`. A function that runs its
-    /// kernel body has that body's frame pushed, its arguments moved in,
-    /// the caller's statement `awaiting` waiting in it, if any: `Step`.
+    /// kernel body, its native declining or absent, has that body's frame
+    /// pushed, its arguments moved in, the caller's statement `awaiting`
+    /// waiting in it, if any: `Step`.
     pub(super) fn call_lib(
         &mut self,
         task: TaskId,
@@ -390,18 +391,32 @@ impl KernelMachine {
         awaiting: Option<StmtId>,
     ) -> Status {
         let function = exe.lib(lib);
-        if self
+        let code = match self
             .answer(task, exe, lib, args, count, args)
             .map_err(|interrupt| interrupt.in_function(&function.definition.name))?
         {
-            return Ok(Flow::Done);
-        }
-        let LibRun::Body(code) = &function.run else {
-            return Err(fault("a function with no body was run as one").into());
+            Answer::Done => return Ok(Flow::Done),
+            Answer::Body(code) => code,
         };
+        self.enter_body(task, exe, lib, code, args, awaiting)
+    }
+
+    /// Pushes the frame of library function `lib`'s kernel body `code`,
+    /// its arguments the registers from `args`, the caller's statement
+    /// `awaiting` waiting in it, if any: `Step`.
+    pub(super) fn enter_body(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: LibId,
+        code: CodeId,
+        args: Reg,
+        awaiting: Option<StmtId>,
+    ) -> Status {
+        let function = exe.lib(lib);
         // An argument the call leaves out is absent: the body binds every
         // parameter.
-        let call = Call::new(*code, args, function.arity).of_library(lib);
+        let call = Call::new(code, args, function.arity).of_library(lib);
         self.push_frame(task, exe, call.awaited_by(awaiting))?;
         Ok(Flow::Step)
     }
@@ -417,20 +432,23 @@ impl KernelMachine {
         count: usize,
     ) -> Eval<()> {
         let function = exe.lib(lib);
-        if self
+        match self
             .answer(task, exe, lib, args, count, args)
             .map_err(|interrupt| interrupt.in_function(&function.definition.name))?
         {
-            return Ok(());
+            Answer::Done => Ok(()),
+            Answer::Body(_) => {
+                Err(fault("a call that runs its body was lowered as one that answers").into())
+            }
         }
-        Err(fault("a call that runs its body was lowered as one that answers").into())
     }
 
     /// Answers a call of a library function that needs no frame: a native
     /// implementation or one of the machine's own, its value in `out`.
-    /// `false` leaves the arguments from `args`, one per parameter, for a
-    /// function that runs its kernel body.
-    fn answer(
+    /// [`Answer::Body`] leaves the arguments from `args`, one per parameter,
+    /// for the kernel body that runs the call: the function has no native,
+    /// or its native declined.
+    pub(super) fn answer(
         &mut self,
         task: TaskId,
         exe: &Executable,
@@ -438,7 +456,7 @@ impl KernelMachine {
         args: Reg,
         given: usize,
         out: Reg,
-    ) -> Eval<bool> {
+    ) -> Eval<Answer> {
         let function = exe.lib(lib);
         if given > function.arity {
             return raise(
@@ -460,7 +478,7 @@ impl KernelMachine {
             self.observe(Event::NativeEnter { task, lib });
         }
         let result = match &function.run {
-            LibRun::Body(_) => return Ok(false),
+            LibRun::Body(code) => return Ok(Answer::Body(*code)),
             LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args) {
                 Some(Value::Ref(Identity::Task(task))) => Ok(Value::Task(*task)),
                 Some(Value::Ref(Identity::Object(object))) => self
@@ -479,7 +497,7 @@ impl KernelMachine {
                 })?;
                 Ok(Value::List(self.alloc(ObjectInit::List(unfinished))?))
             }
-            LibRun::Native(native) => {
+            LibRun::Native { native, body } => {
                 if let Some((prepared, fast)) = &function.prepared {
                     // A result too deep to keep is the general call's to raise.
                     if let Some(value) = (prepared.entry)(&self.regs[args..end])
@@ -502,7 +520,7 @@ impl KernelMachine {
                         self.charge_call(exe, lib, units)?;
                         self.observe(Event::NativeExit);
                         self.put(out, value);
-                        return Ok(true);
+                        return Ok(Answer::Done);
                     }
                 }
                 let limit = function
@@ -561,6 +579,15 @@ impl KernelMachine {
                         return Err(bound(Bound::Memory, self.bounds.memory).into());
                     }
                     Err(NativeError::Heap(error)) => return Err(Halt::from(error).into()),
+                    // The body runs the call, charged by the formula when
+                    // its frame is left (`K-CHG-007`).
+                    Err(NativeError::Decline) => {
+                        let Some(body) = body else {
+                            return Err(fault("a native with no kernel body declined").into());
+                        };
+                        self.observe(Event::NativeExit);
+                        return Ok(Answer::Body(*body));
+                    }
                 }
             }
         };
@@ -573,7 +600,7 @@ impl KernelMachine {
         match result {
             Ok(value) => {
                 self.put(out, value);
-                Ok(true)
+                Ok(Answer::Done)
             }
             Err(value) => Err(Interrupt::raised(value)),
         }
@@ -711,4 +738,12 @@ impl KernelMachine {
             }
         }
     }
+}
+
+/// How [`KernelMachine::answer`] left a library call.
+pub(super) enum Answer {
+    /// Its value is in the call's result register.
+    Done,
+    /// The kernel body runs the call.
+    Body(CodeId),
 }

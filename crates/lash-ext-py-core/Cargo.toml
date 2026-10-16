@@ -1,0 +1,21 @@
+[package]
+name = "lash-ext-py-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Partial native implementations of the Python dialect's hot operations over kernel data"
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-doc = { workspace = true }
+thiserror = { workspace = true }

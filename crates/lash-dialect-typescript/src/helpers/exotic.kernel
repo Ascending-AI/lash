@@ -25,6 +25,7 @@ use ts.exotic.error_name
 function ts.exotic.error_name(value: Any) -> Any
 kernel 1
 charge 8
+native
 body {
   if same(kind(value.data), "record") {
     let properties = value.data.properties
@@ -43,6 +44,7 @@ body {
 function ts.exotic.to_primitive(value: Any, hint: Text) -> Any
 kernel 1
 charge 8
+native
 body {
   let k = kind(value)
   if same(k, "timestamp") {
@@ -70,6 +72,7 @@ body {
 function ts.exotic.get(target: Any, key: Any) -> Any
 kernel 1
 charge 8
+native
 body {
   let k = kind(target)
   if same(k, "error") {
