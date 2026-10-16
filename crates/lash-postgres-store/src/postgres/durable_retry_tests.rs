@@ -765,25 +765,35 @@ async fn durable_retries_end_within_the_operation_deadline() {
         .expect("open the isolated store");
     let store = storage.durable_store();
     let target = actor("stays-contended");
-    create(&store, &target).await;
-    inject(
-        &storage,
-        "stuck_attempts",
-        "INSERT",
-        "lash_actor_mail",
-        "40P01",
-        i64::MAX,
-    )
-    .await;
-
-    // Setup also releases connections. Wait until its releases are complete
-    // before counting the failed commits, and keep this task runnable during
-    // SQL so Tokio cannot auto-advance the frozen clock while I/O is pending.
-    while pool.num_idle() as u32 != pool.size() {
-        tokio::task::yield_now().await;
+    tokio::time::pause();
+    // Setup is PostgreSQL I/O, not time the retry policy spends. Keep a
+    // runnable branch while it completes so neither host load nor Tokio's
+    // automatic clock advance can consume the actor creation's deadline.
+    let setup = async {
+        create(&store, &target).await;
+        inject(
+            &storage,
+            "stuck_attempts",
+            "INSERT",
+            "lash_actor_mail",
+            "40P01",
+            i64::MAX,
+        )
+        .await;
+        // Setup releases connections too; none may count as a failed retry.
+        while pool.num_idle() as u32 != pool.size() {
+            tokio::task::yield_now().await;
+        }
+    };
+    tokio::pin!(setup);
+    loop {
+        tokio::select! {
+            biased;
+            () = &mut setup => break,
+            () = tokio::task::yield_now() => {}
+        }
     }
     let mut observed = releases.load(Ordering::Acquire);
-    tokio::time::pause();
     let started = Instant::now();
     let mut operation = Box::pin(append(&store, &target));
     let answered = loop {
