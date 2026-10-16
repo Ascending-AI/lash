@@ -168,6 +168,59 @@ impl Default for WorkerConfinement {
     }
 }
 
+/// Host policy for worker processes and their parent's temporary page storage.
+///
+/// # Staging capacity and lifetime
+///
+/// [`Self::staging_dir`] holds content-addressed checkpoint pages sealed by
+/// workers or the parent, plus candidate-publication manifests and temporary
+/// walk, sort and reachability files. Attachment uploads, tool attachment
+/// staging and attachment-store blob spooling use the host's attachment store;
+/// they do not consume this directory. Tool results encoded into checkpoint
+/// pages do consume it, under the same quota as other pages.
+///
+/// Let `Q = staging_quota_bytes`, `N` be the staged-page count when a
+/// candidate is built, and `E` its distinct directly referenced committed
+/// pages. During
+/// successful spool operations, peak file contents per spool are bounded by
+/// `Q + 99 * (N + E)` bytes: page contents total at most `Q`, and manifest
+/// sorting holds at most three copies of each 33-byte digest record (walk
+/// queue, input runs and merge output). A partial page write replaces its
+/// temporary name by rename; it does not add a second copy of the page.
+///
+/// A conservative bound using only the configured quota is
+/// `Q + 99 * floor(Q / 7)` bytes per spool. Each envelope uses at least seven
+/// bytes, and each distinct external reference needs a 32-byte child-table
+/// entry in a staged envelope, so `7 * N + 32 * E <= Q` and
+/// `N + E <= floor(Q / 7)`. At the standard 1 GiB quota this bound is
+/// 16,259,519,035 bytes (about 15.14 GiB); it allows pathological tiny pages,
+/// rather than predicting a typical session's usage.
+///
+/// A code-mode session's cells share one turn spool, so this is also its
+/// per-active-session bound. Multiply by the host's maximum number of live
+/// spools for a directory budget: independently staged process activations
+/// each add a spool. [`Self::max_workers`] limits checked-out workers, not
+/// live spools; a spool can remain while work waits on a tool or publication.
+/// Add filesystem block rounding, directories and inode headroom when sizing
+/// an `emptyDir`; the formulas bound file contents, not filesystem allocation.
+/// Failed filesystem operations can leave scratch files until the spool is
+/// dropped; the successful-operation bound does not cover repeated I/O failures.
+///
+/// FIG-6449 measured four concurrent producers sharing a full standard-quota
+/// spool: 16,385 pages, including maximum-size 65,536-byte pages, no external
+/// references, and a candidate sort over five runs. Peak file contents were
+/// 1,075,363,939 bytes, exactly `Q + 99 * N` and below the quota-only bound.
+/// The spool subtree used 1,080,016,896 allocated bytes at that peak on the
+/// measurement filesystem. Peak process RSS was 4,608 KiB under an 8 GiB
+/// address-space cap. This measures checkpoint staging, not an upload limit.
+///
+/// An authoritative publication deletes its candidate's pages and manifest;
+/// unrelated staged pages remain until retention or the turn ends. Ambiguous
+/// publication keeps its candidate for resolution. Dropping an activation's
+/// spool (or the last handle to a shared turn spool) removes its whole spool
+/// directory, including unpublished pages and scratch files. Cleanup after an
+/// I/O error is best effort. A dead parent's files are reaped when the next
+/// parent opens the same staging directory; committed state lives in the store.
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
     pub entry: WorkerEntry,
@@ -184,12 +237,15 @@ pub struct PoolConfig {
     pub confinement: WorkerConfinement,
     pub restart_window: Duration,
     pub max_restarts: usize,
-    /// The most bytes one activation may stage in its parent's spool before
-    /// a park publishes them (`D-CAP`); passing it is a host outcome.
+    /// The page-content quota per spool (`D-CAP`), shared by a session's
+    /// turn or owned by one independent activation; passing it is a host
+    /// outcome. Manifest scratch space is additional: see [`PoolConfig`]
+    /// for the peak-capacity formula. The standard quota is 1 GiB.
     pub staging_quota_bytes: u64,
-    /// The directory the parent's activations stage pages under; None
-    /// stages under the system temporary directory. Spools of parents
-    /// that died there are deleted when the next one opens it.
+    /// The directory for the parent's page spools. `None` uses
+    /// `std::env::temp_dir().join("lash-staging")`. See [`PoolConfig`] for
+    /// contents, per-session peak capacity, measurement and cleanup lifetime.
+    /// Spools of dead parents are deleted when the next parent opens it.
     pub staging_dir: Option<std::path::PathBuf>,
 }
 
