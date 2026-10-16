@@ -397,7 +397,12 @@ impl KernelMachine {
 
 fn start_interrupt(what: &str, error: Interrupt) -> StartError {
     match error {
-        Interrupt::Halt(Halt::Heap(error)) => StartError::Heap(error),
+        Interrupt::Halt(error) => match *error {
+            Halt::Heap(error) => StartError::Heap(*error),
+            other => StartError::Arguments {
+                problem: format!("{what}: {:?}", Interrupt::from(other)),
+            },
+        },
         other => StartError::Arguments {
             problem: format!("{what}: {other:?}"),
         },

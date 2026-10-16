@@ -59,7 +59,7 @@ impl KernelMachine {
             for _ in 0..edge.leaves {
                 if let Some(Control::Block { block, .. }) = frame.control.pop() {
                     for at in &exe.block(block).declares {
-                        frame.set_slot(*at, SlotState::Empty)?;
+                        frame.set_slot(*at, SlotState::Empty);
                     }
                 }
             }

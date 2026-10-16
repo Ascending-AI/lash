@@ -159,7 +159,7 @@ impl KernelMachine {
                 }
             }
             Some(_) => Err(fault("a loop or a try has no block running").into()),
-            None => Ok(Completion::Return(Value::Null)),
+            None => Ok(Completion::Return(Box::new(Value::Null))),
         }
     }
 
@@ -169,7 +169,7 @@ impl KernelMachine {
         let frame = self.frame(task)?;
         if let Some(Control::Block { block, .. }) = frame.control.pop() {
             for at in &exe.block(block).declares {
-                frame.set_slot(*at, SlotState::Empty)?;
+                frame.set_slot(*at, SlotState::Empty);
             }
         }
         Ok(())
@@ -191,7 +191,7 @@ impl KernelMachine {
     ) -> Eval<Completion> {
         let frame = self.frame(task)?;
         match frame.control.last_mut() {
-            None => Ok(Completion::Return(Value::Null)),
+            None => Ok(Completion::Return(Box::new(Value::Null))),
             Some(Control::Block { .. }) => Ok(Completion::Normal),
             Some(Control::For { .. } | Control::While { .. }) => {
                 self.next_iteration(task, host, exe)?;
@@ -233,8 +233,8 @@ impl KernelMachine {
     ) -> Result<(), Halt> {
         loop {
             if let Completion::Return(value) | Completion::Throw(value) = &mut departure {
-                *value = self.heap_write(|heap| {
-                    heap.canonical_value(value.clone())
+                **value = self.heap_write(|heap| {
+                    heap.canonical_value(value.as_ref().clone())
                         .map_err(super::write_halt)
                 })?;
             }
@@ -262,8 +262,8 @@ impl KernelMachine {
             }
             let Some(control) = frame.control.last_mut() else {
                 let result = match departure {
-                    Completion::Return(value) => Ok(value),
-                    Completion::Throw(value) => Err(value),
+                    Completion::Return(value) => Ok(*value),
+                    Completion::Throw(value) => Err(*value),
                     _ => return Err(fault("a break or a continue left its function")),
                 };
                 match self.leave_frame(task, host, exe, result)? {
@@ -282,8 +282,8 @@ impl KernelMachine {
                     Completion::Continue => {
                         departure = match self.next_iteration(task, host, exe) {
                             Ok(_) => Completion::Normal,
-                            Err(Interrupt::Raise(value)) => Completion::Throw(*value),
-                            Err(Interrupt::Halt(halt)) => return Err(halt),
+                            Err(Interrupt::Raise(value)) => Completion::Throw(value),
+                            Err(Interrupt::Halt(halt)) => return Err(*halt),
                         };
                     }
                     _ => {
@@ -297,7 +297,7 @@ impl KernelMachine {
                     };
                     match (&*phase, catch, finally, &departure) {
                         (TryPhase::Body, Some((binding, block)), _, Completion::Throw(value)) => {
-                            let value = value.clone();
+                            let value = value.as_ref().clone();
                             *phase = TryPhase::Catch;
                             self.push_block(task, block)?;
                             self.bind(task, binding.at, binding.shared, value)?;
@@ -361,7 +361,7 @@ impl KernelMachine {
                     })?;
                     self.continue_statement(task, host, exe, calling)
                 }
-                Err(value) => Ok(Some(Completion::Throw(value))),
+                Err(value) => Ok(Some(Completion::Throw(Box::new(value)))),
             };
         }
         Ok(match result {
@@ -375,11 +375,11 @@ impl KernelMachine {
                         self.take_edge_of(task, exe, stmt)?;
                         None
                     }
-                    Err(Interrupt::Raise(value)) => Some(Completion::Throw(*value)),
-                    Err(Interrupt::Halt(halt)) => return Err(halt),
+                    Err(Interrupt::Raise(value)) => Some(Completion::Throw(value)),
+                    Err(Interrupt::Halt(halt)) => return Err(*halt),
                 }
             }
-            Err(value) => Some(Completion::Throw(value)),
+            Err(value) => Some(Completion::Throw(Box::new(value))),
         })
     }
 
@@ -419,10 +419,12 @@ impl KernelMachine {
     }
 
     /// Keeps an ended frame's vectors for the next frame.
-    fn recycle(&mut self, frame: Frame) {
-        let Frame { mut control, .. } = frame;
+    fn recycle(&mut self, mut frame: Box<Frame>) {
+        let mut control = std::mem::take(&mut frame.control);
+        let mut slots = std::mem::take(&mut frame.slots);
         control.clear();
-        self.storage.frames.push(FrameStorage { control });
+        slots.clear();
+        self.storage.frames.push(FrameStorage { control, slots });
     }
 
     fn call_units_tree(
@@ -495,7 +497,7 @@ impl KernelMachine {
                 }
             }
         });
-        fault.map_or(Ok(units), |error| Err(Halt::Heap(error)))
+        fault.map_or(Ok(units), |error| Err(Halt::from(error)))
     }
 
     /// Pushes a frame that runs `code` with the call's arguments bound to
@@ -533,13 +535,18 @@ impl KernelMachine {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
         self.reserve_held(super::FRAME_BYTES)?;
-        let FrameStorage { mut control, .. } = self.storage.frames.pop().unwrap_or_default();
+        let FrameStorage {
+            mut control,
+            mut slots,
+        } = self.storage.frames.pop().unwrap_or_default();
+        slots.fresh(code.slots_by_at.len());
         control.push(Control::Block {
             block: code.body,
             next: 0,
         });
-        let mut frame = Frame {
+        let mut frame = Box::new(Frame {
             code: code_id,
+            slots,
             record: FrameRecord::fresh(lash_kernel_state::paged::SiteRef::new(
                 &code.site.child(0),
                 self.heap.pages(),
@@ -551,7 +558,7 @@ impl KernelMachine {
             library: None,
             calling: None,
             published: None,
-        };
+        });
         if let Some(lib) = library {
             let mut args = super::Tree::new(true);
             if exe.lib(lib).native {
@@ -571,12 +578,12 @@ impl KernelMachine {
             frame.library = Some(LibraryCall { lib, args });
         }
         for (capture, cell) in code.captures.iter().zip(captures) {
-            frame.set_slot(capture.inner_at, SlotState::Cell(*cell))?;
+            frame.set_slot(capture.inner_at, SlotState::Cell(*cell));
         }
         if let Some(stmt) = awaited_by {
             self.frame(task)?.awaiting = Some(stmt);
         }
-        self.task(task)?.frames.push(frame)?;
+        self.task(task)?.frames.push(frame);
         self.observe(Event::Push {
             task,
             code: code_id,
@@ -640,7 +647,7 @@ impl KernelMachine {
             self.reserve_held(value_bytes(&value))?;
             SlotState::Value(value)
         };
-        self.frame(task)?.set_slot(at, state)?;
+        self.frame(task)?.set_slot(at, state);
         Ok(())
     }
 
@@ -806,8 +813,8 @@ impl KernelMachine {
         let running = Running::new(task, exe, calling.stmt);
         let ran = match self.run(host, &running, calling.pc, calling.base) {
             Ok(ran) => ran,
-            Err(Interrupt::Raise(value)) => return Ok(Some(Completion::Throw(*value))),
-            Err(Interrupt::Halt(halt)) => return Err(halt),
+            Err(Interrupt::Raise(value)) => return Ok(Some(Completion::Throw(value))),
+            Err(Interrupt::Halt(halt)) => return Err(*halt),
         };
         match ran {
             Ran::Done => {
@@ -819,8 +826,8 @@ impl KernelMachine {
             // A `while` condition: the loop goes on as its test says.
             Ran::Tested(value) => match self.tested(task, value) {
                 Ok(_) => Ok(None),
-                Err(Interrupt::Raise(value)) => Ok(Some(Completion::Throw(*value))),
-                Err(Interrupt::Halt(halt)) => Err(halt),
+                Err(Interrupt::Raise(value)) => Ok(Some(Completion::Throw(value))),
+                Err(Interrupt::Halt(halt)) => Err(*halt),
             },
         }
     }

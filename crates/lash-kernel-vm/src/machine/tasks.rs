@@ -7,8 +7,10 @@ use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::sync::Arc;
+
+const CACHED_TASKS: usize = 64;
 
 impl Task {
     pub(super) fn fresh(
@@ -103,35 +105,37 @@ impl Tasks {
     }
     pub(super) fn get_mut(&mut self, index: usize) -> Result<Option<&mut Task>, HeapFault> {
         let index = index as u64;
-        if !self.cache.contains_key(&index) {
+        if self.cache.len() >= CACHED_TASKS && !self.cache.contains_key(&index) {
             self.make_room()?;
-            let Some(record) = self.rows.get(&ordinal_key(index), &self.access)? else {
-                return Ok(None);
-            };
-            let continues = matches!(
-                record.state,
-                TaskStateRecord::Waiting(_)
-                    | TaskStateRecord::Joining(_)
-                    | TaskStateRecord::JoiningMany(_)
-                    | TaskStateRecord::Resuming(_)
-            );
-            let frames = Frames::open(
-                record.frames.clone(),
-                self.access.clone(),
-                Arc::clone(&self.exe),
-                continues,
-            );
-            self.cache.insert(
-                index,
-                Task {
+        }
+        let task = match self.cache.entry(index) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let Some(record) = self.rows.get(&ordinal_key(index), &self.access)? else {
+                    return Ok(None);
+                };
+                let continues = matches!(
+                    record.state,
+                    TaskStateRecord::Waiting(_)
+                        | TaskStateRecord::Joining(_)
+                        | TaskStateRecord::JoiningMany(_)
+                        | TaskStateRecord::Resuming(_)
+                );
+                let frames = Frames::open(
+                    record.frames.clone(),
+                    self.access.clone(),
+                    Arc::clone(&self.exe),
+                    continues,
+                );
+                entry.insert(Task {
                     published: Some(record.clone()),
                     record,
                     frames,
                     called: 0,
-                },
-            );
-        }
-        Ok(self.cache.get_mut(&index))
+                })
+            }
+        };
+        Ok(Some(task))
     }
     pub(super) fn push(&mut self, mut task: Task) -> Result<(), HeapFault> {
         self.make_room()?;
@@ -208,16 +212,16 @@ impl Tasks {
         })?;
         malformed.map_or(Ok(()), Err)
     }
-    /// How many frames `id` has and those the cache holds, by index: the
-    /// top one, and those standing in a call made inside an expression. `None` when the task is not
-    /// cached.
+    /// How many frames `id` has and its resident live frames, by index.
+    /// Callers stay resident across calls; a cold stack loads its frames
+    /// as execution reaches them. `None` when the task is not cached.
     pub(super) fn cached_frames(&self, id: TaskId) -> Option<(usize, Vec<(usize, &super::Frame)>)> {
         self.cache
             .get(&id.0)
             .map(|task| (task.frames.len(), task.frames.cached()))
     }
     fn make_room(&mut self) -> Result<(), HeapFault> {
-        if self.cache.len() < 64 {
+        if self.cache.len() < CACHED_TASKS {
             return Ok(());
         }
         let Some(index) = self

@@ -237,11 +237,20 @@ element, entry and capture a trace walks costs at least 8 bytes, so U
 bounds the trace's work, while one list of scalars is one entity however
 long it is (FIG-6425).
 
-The machine publishes what its frames hold, not where they stand, at every
-statement end and before an allocation, a reservation or a call: the
-census's root cost counts held values only, so a frame that only moved is
-not written. Its coordinates are written where a reader needs them: at a
-park, a seal, a carry, a pushed frame and the frames view (FIG-6318).
+The machine keeps live slots and call stacks mutable between publication
+points (FIG-6435). Slot edits coalesce until a reader needs their declaring-site
+tree; calls which return before publication never enter the frame table.
+Frames are published for a precision check, a park, a seal, a carry or the
+frames view. Accounting reads held values only; coordinates are synchronized
+for readers which need them.
+
+A native uses the same precision guard as machine writes. A reservation or
+allocation below pressure publishes nothing. When a heap operation requests
+precision, the machine publishes its current holdings and retries that operation
+alone, leaving the native's stack and work counter intact. The heap refines with
+the retried operation's proposed graph in scope, including children the native
+holds only in that graph. A pure read or immutable payload construction needs
+no execution-record publication.
 
 Laws: `lash-kernel-vm`'s `laws::census`
 (`an_unreachable_cycle_never_fails_an_allocation`,

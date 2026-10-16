@@ -12,6 +12,7 @@ mod checkpoint;
 mod exec;
 mod frames;
 mod issued;
+mod native_heap;
 mod observing;
 mod ops;
 mod queue;
@@ -46,16 +47,17 @@ use session::{keyed, open_tree};
 /// What a frame is accounted before its variables.
 const FRAME_BYTES: u64 = 64;
 /// What ends a run from inside a statement.
+/// Rare payloads are boxed so successful frame lookups carry a small result.
 #[derive(Debug)]
 pub(crate) enum Halt {
-    Bound(BoundExceeded),
-    Finish(Datum),
-    Fail(Datum),
+    Bound(Box<BoundExceeded>),
+    Finish(Box<Datum>),
+    Fail(Box<Datum>),
     /// The machine's own state is inconsistent.
     Fault(String),
     /// The host failed a read-bound `perform` (`K-EFF-012`).
     Host(crate::interface::HostFault),
-    Heap(HeapFault),
+    Heap(Box<HeapFault>),
     Memory,
 }
 
@@ -73,7 +75,7 @@ impl Halt {
 #[derive(Debug)]
 pub(crate) enum Interrupt {
     Raise(Box<Value>),
-    Halt(Halt),
+    Halt(Box<Halt>),
 }
 
 impl Interrupt {
@@ -82,7 +84,7 @@ impl Interrupt {
     }
     fn in_function(self, function: &lash_kernel_doc::FunctionName) -> Self {
         match self {
-            Self::Halt(halt) => Self::Halt(halt.in_function(function)),
+            Self::Halt(halt) => Self::from((*halt).in_function(function)),
             other => other,
         }
     }
@@ -92,7 +94,7 @@ type Eval<T> = Result<T, Interrupt>;
 
 impl From<Halt> for Interrupt {
     fn from(halt: Halt) -> Self {
-        Self::Halt(halt)
+        Self::Halt(Box::new(halt))
     }
 }
 
@@ -108,12 +110,12 @@ pub(crate) fn error(kind: &str, message: impl Into<String>) -> Value {
 
 impl From<HeapFault> for Halt {
     fn from(error: HeapFault) -> Self {
-        Self::Heap(error)
+        Self::Heap(Box::new(error))
     }
 }
 impl From<HeapFault> for Interrupt {
     fn from(error: HeapFault) -> Self {
-        Self::Halt(error.into())
+        Self::from(Halt::from(error))
     }
 }
 impl From<HeapWriteError> for Interrupt {
@@ -122,7 +124,7 @@ impl From<HeapWriteError> for Interrupt {
             HeapWriteError::Raised { kind, message } => {
                 Self::raised(super::machine::error(kind, message))
             }
-            other => Self::Halt(write_halt(other)),
+            other => Self::from(write_halt(other)),
         }
     }
 }
@@ -131,9 +133,9 @@ impl From<lash_kernel_doc::NativeError> for Interrupt {
         use lash_kernel_doc::NativeError;
         match error {
             NativeError::Raised(error) => Self::raised(Value::Error(error)),
-            NativeError::Memory => Self::Halt(Halt::Memory),
-            NativeError::Heap(error) => Self::Halt(Halt::Heap(error)),
-            NativeError::Guard(error) => Self::Halt(Halt::Fault(format!(
+            NativeError::Memory => Self::from(Halt::Memory),
+            NativeError::Heap(error) => Self::from(Halt::from(error)),
+            NativeError::Guard(error) => Self::from(Halt::Fault(format!(
                 "an immutable constructor returned a guard: {error}"
             ))),
         }
@@ -157,11 +159,11 @@ fn fault(problem: &str) -> Halt {
 }
 
 fn bound(bound: Bound, limit: u64) -> Halt {
-    Halt::Bound(BoundExceeded {
+    Halt::Bound(Box::new(BoundExceeded {
         bound,
         limit,
         function: None,
-    })
+    }))
 }
 
 /// How a run that reached its end got there.
@@ -177,8 +179,8 @@ enum Completion {
     Normal,
     Break,
     Continue,
-    Return(Value),
-    Throw(Value),
+    Return(Box<Value>),
+    Throw(Box<Value>),
 }
 
 #[derive(Clone, Debug)]
@@ -193,9 +195,10 @@ enum SlotState {
 #[derive(Clone, Debug)]
 enum Cursor {
     List(EntityId, usize),
-    Tuple(TupleRef, usize),
+    Tuple(Arc<TupleRef>, usize),
     /// A map or a set, and the sequence number of the entry last visited.
-    Table(Value, Option<TableCursor>),
+    Map(EntityId, Option<TableCursor>),
+    Set(EntityId, Option<TableCursor>),
 }
 
 #[derive(Clone, Debug)]
@@ -247,6 +250,7 @@ struct Calling {
 #[derive(Debug, Default)]
 struct FrameStorage {
     control: Vec<Control>,
+    slots: frames::Slots,
 }
 
 /// Storage the machine reuses from call to call, so that a call allocates
@@ -258,6 +262,7 @@ struct Storage {
 
 struct Frame {
     code: CodeId,
+    slots: frames::Slots,
     record: FrameRecord,
     access: Access<'static>,
     exe: Arc<Executable>,
@@ -273,54 +278,6 @@ struct Frame {
     /// The record as last written to its row: what a flush compares to
     /// instead of reading the row back (FIG-6318).
     published: Option<FrameRecord>,
-}
-
-impl Frame {
-    fn slot(&self, at: u32) -> Result<SlotState, HeapFault> {
-        let code = self.exe.code(self.code);
-        let info = &code.slots[code.slots_by_at[at as usize] as usize];
-        let key = &info.key;
-        Ok(match self.record.bindings.get(key, &self.access)? {
-            None => SlotState::Empty,
-            Some(BindingRecord {
-                value: BoundRecord::Value(value),
-                ..
-            }) => SlotState::Value(value),
-            Some(BindingRecord {
-                value: BoundRecord::Shared(id),
-                ..
-            }) => SlotState::Cell(id),
-        })
-    }
-    fn set_slot(&mut self, at: u32, state: SlotState) -> Result<(), HeapFault> {
-        let code = self.exe.code(self.code);
-        let info = &code.slots[code.slots_by_at[at as usize] as usize];
-        let key = &info.key;
-        let value = match state {
-            SlotState::Empty => {
-                self.record.bindings.remove(key, &self.access)?;
-                return Ok(());
-            }
-            SlotState::Value(value) => BoundRecord::Value(value),
-            SlotState::Cell(id) => BoundRecord::Shared(id),
-        };
-        let (name, declared) = match self.record.bindings.get(key, &self.access)? {
-            Some(old) => (old.name, old.declared),
-            None => (
-                lash_kernel_state::paged::NameRef::new(&info.name, &self.access)?,
-                lash_kernel_state::paged::SiteRef::new(&info.declared, &self.access)?,
-            ),
-        };
-        self.record.bindings.write(
-            key.clone(),
-            BindingRecord {
-                name,
-                declared,
-                value,
-            },
-            &self.access,
-        )
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -599,24 +556,16 @@ impl KernelMachine {
     }
 
     fn publish(&mut self, coordinates: bool) -> Result<(), Halt> {
-        #[cfg(any(test, feature = "perf-witness"))]
-        crate::perf_witness::publish();
-        self.reconcile_sweep()?;
-        let tasks = if coordinates {
-            self.tasks.roots()?
-        } else {
-            self.tasks.holdings()?
-        };
-        self.heap
-            .set_execution_roots(
-                tasks,
-                self.joins.clone(),
-                &self.regs,
-                &self.pins.values,
-                &self.fresh,
-            )
-            .map_err(|e| self.heap_halt(e))?;
-        self.reconcile_sweep()
+        native_heap::Roots {
+            tasks: &mut self.tasks,
+            joins: &self.joins,
+            registers: &self.regs,
+            pinned: &self.pins.values,
+            fresh: &self.fresh,
+            refinements: &mut self.census_refinements,
+        }
+        .publish(&mut self.heap, coordinates)
+        .map_err(|error| self.heap_halt(error))
     }
 
     /// The law's hook at a statement boundary: a forced collection, one
@@ -685,7 +634,7 @@ impl KernelMachine {
     /// guest's own error, anything else is the machine's.
     fn ended_by(&mut self, halt: Halt) -> Result<Step, MachineError> {
         match halt {
-            Halt::Bound(exceeded) => Ok(self.finish_with(End::Error(RunError::Bound(exceeded)))),
+            Halt::Bound(exceeded) => Ok(self.finish_with(End::Error(RunError::Bound(*exceeded)))),
             Halt::Memory => Ok(self.finish_with(End::Error(RunError::Bound(BoundExceeded {
                 bound: Bound::Memory,
                 limit: self.bounds.memory,
@@ -752,8 +701,8 @@ impl KernelMachine {
             // Most statements complete normally: nothing departs.
             Ok(Completion::Normal) => return Ok(()),
             Ok(completion) => completion,
-            Err(Interrupt::Raise(value)) => Completion::Throw(*value),
-            Err(Interrupt::Halt(halt)) => return Err(halt),
+            Err(Interrupt::Raise(value)) => Completion::Throw(value),
+            Err(Interrupt::Halt(halt)) => return Err(*halt),
         };
         self.complete(task, host, exe, completion)
     }
@@ -964,9 +913,9 @@ impl KernelMachine {
                     {
                         exceeded.function = Some(self.exe.lib(lib).definition.name.clone());
                     }
-                    return Ok(self.finish_with(End::Error(RunError::Bound(exceeded))));
+                    return Ok(self.finish_with(End::Error(RunError::Bound(*exceeded))));
                 }
-                Err(Halt::Heap(error)) => return Err(MachineError::Heap(error)),
+                Err(Halt::Heap(error)) => return Err(MachineError::Heap(*error)),
                 Err(Halt::Memory) => {
                     return Ok(self.finish_with(End::Error(RunError::Bound(BoundExceeded {
                         bound: Bound::Memory,
@@ -975,13 +924,13 @@ impl KernelMachine {
                     }))));
                 }
                 Err(Halt::Finish(result)) => {
-                    return match self.conclude(Some(task), Ending::Finished(result)) {
+                    return match self.conclude(Some(task), Ending::Finished(*result)) {
                         Ok(end) => Ok(self.finish_with(end)),
                         Err(halt) => self.ended_by(halt),
                     };
                 }
                 Err(Halt::Fail(reason)) => {
-                    return match self.conclude(Some(task), Ending::Failed(reason)) {
+                    return match self.conclude(Some(task), Ending::Failed(*reason)) {
                         Ok(end) => Ok(self.finish_with(end)),
                         Err(halt) => self.ended_by(halt),
                     };
@@ -1023,13 +972,13 @@ impl KernelMachine {
 fn write_halt(error: HeapWriteError) -> Halt {
     match error {
         HeapWriteError::Memory => Halt::Memory,
-        HeapWriteError::Fault(error) => Halt::Heap(error),
+        HeapWriteError::Fault(error) => Halt::from(error),
         HeapWriteError::Raised { kind, message } => {
             Halt::Fault(format!("an allocation returned {kind}: {message}"))
         }
         // Every write a run makes goes through `heap_write`, which retries
         // a refused one.
-        HeapWriteError::NeedsPrecision { bytes } => Halt::Heap(HeapFault::Malformed(format!(
+        HeapWriteError::NeedsPrecision { bytes } => Halt::from(HeapFault::Malformed(format!(
             "a write refused for a refinement of {bytes} bytes outside the write wrapper"
         ))),
     }
@@ -1037,7 +986,7 @@ fn write_halt(error: HeapWriteError) -> Halt {
 
 fn machine_error(halt: Halt) -> MachineError {
     match halt {
-        Halt::Heap(error) => MachineError::Heap(error),
+        Halt::Heap(error) => MachineError::Heap(*error),
         Halt::Host(error) => MachineError::Host(error),
         other => MachineError::Fault {
             problem: format!("{other:?}"),

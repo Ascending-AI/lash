@@ -1,16 +1,16 @@
 //! Derived frame coordinates beside the canonical paged frame stack.
-//! Only the top frame is decoded for execution. Bindings stay in their
-//! declaring-site tree; syncing a frame updates bounded control records.
-use super::{Completion, Control, Cursor, Frame, LibraryCall, TryPhase};
+//! Slots are mutable while a frame executes. Synchronization publishes only
+//! their pending edits to the declaring-site tree, beside its control records.
+use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
 use crate::compile::{Executable, Form};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{
-    EnteredRecord, FinallyRecord, FrameRecord, IteratedRecord, LoopRecord,
+    BindingRecord, BoundRecord, EnteredRecord, FinallyRecord, FrameRecord, IteratedRecord,
+    LoopRecord,
 };
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 fn malformed(problem: impl Into<String>) -> HeapFault {
@@ -59,6 +59,119 @@ fn site_ref(
     lash_kernel_state::paged::SiteRef::new(site, access)
 }
 
+/// A slot is decoded on its first read after resume. Pending edits are
+/// authoritative until a publication; repeated assignments touch no tree.
+#[derive(Debug, Default)]
+pub(super) struct Slots {
+    values: Vec<Slot>,
+    pending: Vec<usize>,
+}
+
+#[derive(Debug)]
+struct Slot {
+    value: Option<SlotState>,
+    dirty: bool,
+}
+
+impl Slots {
+    pub(super) fn fresh(&mut self, len: usize) {
+        self.clear();
+        self.values.resize_with(len, || Slot {
+            value: Some(SlotState::Empty),
+            dirty: false,
+        });
+    }
+
+    fn unloaded(len: usize) -> Self {
+        Self {
+            values: (0..len)
+                .map(|_| Slot {
+                    value: None,
+                    dirty: false,
+                })
+                .collect(),
+            pending: Vec::new(),
+        }
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.values.clear();
+        self.pending.clear();
+    }
+}
+
+impl Frame {
+    /// Borrow the decoded state: a write need not clone the value it replaces.
+    pub(super) fn slot(&mut self, at: u32) -> Result<&SlotState, HeapFault> {
+        let slot = &mut self.slots.values[at as usize];
+        if slot.value.is_none() {
+            let code = self.exe.code(self.code);
+            let info = &code.slots[code.slots_by_at[at as usize] as usize];
+            slot.value = Some(match self.record.bindings.get(&info.key, &self.access)? {
+                None => SlotState::Empty,
+                Some(BindingRecord {
+                    value: BoundRecord::Value(value),
+                    ..
+                }) => SlotState::Value(value),
+                Some(BindingRecord {
+                    value: BoundRecord::Shared(id),
+                    ..
+                }) => SlotState::Cell(id),
+            });
+        }
+        slot.value
+            .as_ref()
+            .ok_or_else(|| malformed("a decoded slot has no value"))
+    }
+
+    pub(super) fn set_slot(&mut self, at: u32, value: SlotState) {
+        let at = at as usize;
+        let slot = &mut self.slots.values[at];
+        slot.value = Some(value);
+        if !slot.dirty {
+            slot.dirty = true;
+            self.slots.pending.push(at);
+        }
+    }
+
+    fn sync_slots(&mut self) -> Result<(), HeapFault> {
+        let code = self.exe.code(self.code);
+        for &at in &self.slots.pending {
+            let info = &code.slots[code.slots_by_at[at] as usize];
+            let slot = &mut self.slots.values[at];
+            let value = match slot.value.as_ref() {
+                Some(SlotState::Empty) => {
+                    self.record.bindings.remove(&info.key, &self.access)?;
+                    slot.dirty = false;
+                    continue;
+                }
+                Some(SlotState::Value(value)) => BoundRecord::Value(value.clone()),
+                Some(SlotState::Cell(id)) => BoundRecord::Shared(*id),
+                None => return Err(malformed("a pending slot has no value")),
+            };
+            let (name, declared) = match self.record.bindings.get(&info.key, &self.access)? {
+                Some(old) => (old.name, old.declared),
+                None => (
+                    lash_kernel_state::paged::NameRef::new(&info.name, &self.access)?,
+                    lash_kernel_state::paged::SiteRef::new(&info.declared, &self.access)?,
+                ),
+            };
+            self.record.bindings.write(
+                info.key.clone(),
+                BindingRecord {
+                    name,
+                    declared,
+                    value,
+                },
+                &self.access,
+            )?;
+            slot.dirty = false;
+        }
+        self.slots.pending.clear();
+        Ok(())
+    }
+}
+
 impl Frame {
     /// Brings the record up to the frame: its coordinates and its held
     /// values.
@@ -74,6 +187,7 @@ impl Frame {
     }
 
     fn sync_to(&mut self, coordinates: bool) -> Result<(), HeapFault> {
+        self.sync_slots()?;
         if coordinates && let Some(Control::Block { block, next }) = self.control.last() {
             let index = if self.awaiting.is_some() || self.calling.is_some() {
                 next.checked_sub(1)
@@ -109,9 +223,14 @@ impl Frame {
                     };
                     let (value, position) = match cursor {
                         Cursor::List(id, at) => (Value::List(*id), *at as u64),
-                        Cursor::Tuple(tuple, at) => (Value::Tuple(tuple.clone()), *at as u64),
-                        Cursor::Table(value, at) => {
-                            (value.clone(), at.map(|at| at.0).unwrap_or(u64::MAX))
+                        Cursor::Tuple(tuple, at) => {
+                            (Value::Tuple(tuple.as_ref().clone()), *at as u64)
+                        }
+                        Cursor::Map(id, at) => {
+                            (Value::Map(*id), at.map(|at| at.0).unwrap_or(u64::MAX))
+                        }
+                        Cursor::Set(id, at) => {
+                            (Value::Set(*id), at.map(|at| at.0).unwrap_or(u64::MAX))
                         }
                     };
                     if coordinates {
@@ -184,7 +303,7 @@ impl Frame {
                             write(
                                 &mut self.record.departing,
                                 departing,
-                                value.clone(),
+                                value.as_ref().clone(),
                                 &self.access,
                             )?;
                             departing += 1;
@@ -240,7 +359,10 @@ impl Frame {
 
 pub(super) struct Frames {
     pub(super) rows: Tree<FrameRecord>,
-    cache: BTreeMap<u64, Frame>,
+    len: u64,
+    // Resident frames are ordered by depth. Cold lower frames stay in rows
+    // until a return reaches them; push and pop always use the resident top.
+    cache: Vec<(u64, Box<Frame>)>,
     access: Access<'static>,
     exe: Arc<Executable>,
     continues: bool,
@@ -256,25 +378,26 @@ impl Frames {
         continues: bool,
     ) -> Self {
         Self {
+            len: rows.len(),
             rows,
-            cache: BTreeMap::new(),
+            cache: Vec::new(),
             access,
             exe,
             continues,
         }
     }
     pub(super) fn len(&self) -> usize {
-        self.rows.len() as usize
+        self.len as usize
     }
     pub(super) fn is_empty(&self) -> bool {
-        self.rows.len() == 0
+        self.len == 0
     }
     pub(super) fn last_mut(&mut self) -> Result<Option<&mut Frame>, HeapFault> {
         if self.is_empty() {
             return Ok(None);
         }
-        let index = self.rows.len() - 1;
-        if !self.cache.contains_key(&index) {
+        let index = self.len - 1;
+        if self.cache.last().is_none_or(|(at, _)| *at != index) {
             let record = row(&self.rows, index, &self.access)?;
             let frame = restore(
                 record,
@@ -282,44 +405,36 @@ impl Frames {
                 self.access.clone(),
                 Arc::clone(&self.exe),
             )?;
-            self.cache.insert(index, frame);
+            self.cache.push((index, frame));
         }
-        Ok(self.cache.get_mut(&index))
+        Ok(self.cache.last_mut().map(|(_, frame)| frame.as_mut()))
     }
-    pub(super) fn push(&mut self, mut frame: Frame) -> Result<(), HeapFault> {
-        self.flush()?;
-        // A frame standing in a call made inside an expression cannot be
-        // restored from its record until the callee returns, so it stays
-        // derived while pinned.
-        if !self.pinned() {
-            self.cache.clear();
-        }
-        frame.sync()?;
-        let index = self.rows.len();
-        self.rows
-            .write(ordinal_key(index), frame.record.clone(), &self.access)?;
-        frame.published = Some(frame.record.clone());
-        self.cache.insert(index, frame);
+    pub(super) fn push(&mut self, frame: Box<Frame>) {
+        // The live cache owns unpublished calls and their callers. Only a
+        // reader needs their persistent rows; returning before that reader
+        // discards the call without ever writing it.
+        self.cache.push((self.len, frame));
+        self.len += 1;
         self.continues = false;
-        Ok(())
     }
-    pub(super) fn pop(&mut self) -> Result<Option<Frame>, HeapFault> {
+    pub(super) fn pop(&mut self) -> Result<Option<Box<Frame>>, HeapFault> {
         if self.is_empty() {
             return Ok(None);
         }
         self.last_mut()?;
-        let index = self.rows.len() - 1;
-        let frame = self.cache.remove(&index);
-        self.rows.remove(&ordinal_key(index), &self.access)?;
+        let frame = self.cache.pop().map(|(_, frame)| frame);
+        self.len -= 1;
         self.continues = true;
         Ok(frame)
     }
     pub(super) fn clear(&mut self) {
         self.rows = Tree::new(true);
+        self.len = 0;
         self.cache.clear();
         self.continues = false;
     }
     pub(super) fn flush(&mut self) -> Result<(), HeapFault> {
+        truncate(&mut self.rows, self.len, &self.access)?;
         for (index, frame) in &mut self.cache {
             frame.sync()?;
             if !frame
@@ -339,6 +454,7 @@ impl Frames {
     /// is not written again (FIG-6318). The cache stays the authority for
     /// coordinates until [`Self::flush`].
     pub(super) fn flush_holdings(&mut self) -> Result<(), HeapFault> {
+        truncate(&mut self.rows, self.len, &self.access)?;
         for (index, frame) in &mut self.cache {
             frame.sync_holdings()?;
             if !frame
@@ -354,13 +470,13 @@ impl Frames {
         Ok(())
     }
     pub(super) fn pinned(&self) -> bool {
-        self.cache.values().any(|frame| frame.calling.is_some())
+        self.cache.iter().any(|(_, frame)| frame.calling.is_some())
     }
     /// The frames the cache holds, by their index in the stack.
     pub(super) fn cached(&self) -> Vec<(usize, &Frame)> {
         self.cache
             .iter()
-            .map(|(index, frame)| (*index as usize, frame))
+            .map(|(index, frame)| (*index as usize, frame.as_ref()))
             .collect()
     }
     pub(super) fn loop_coordinates(
@@ -387,7 +503,7 @@ fn restore(
     continues: bool,
     access: Access<'static>,
     exe: Arc<Executable>,
-) -> Result<Frame, HeapFault> {
+) -> Result<Box<Frame>, HeapFault> {
     let site = record.statement.resolve(&access)?;
     let code_id = (0..site.path.len())
         .rev()
@@ -455,10 +571,15 @@ fn restore(
                             .map_err(|_| malformed("list cursor overflows"))?,
                     ),
                     Value::Tuple(tuple) if position <= tuple.summary.len => {
-                        Cursor::Tuple(tuple, position as usize)
+                        Cursor::Tuple(Arc::new(tuple), position as usize)
                     }
-                    value @ (Value::Map(_) | Value::Set(_)) => Cursor::Table(
-                        value,
+                    Value::Map(id) => Cursor::Map(
+                        id,
+                        (position != u64::MAX)
+                            .then_some(lash_kernel_state::paged::TableCursor(position)),
+                    ),
+                    Value::Set(id) => Cursor::Set(
+                        id,
                         (position != u64::MAX)
                             .then_some(lash_kernel_state::paged::TableCursor(position)),
                     ),
@@ -508,8 +629,8 @@ fn restore(
                         EnteredRecord::Normal => Completion::Normal,
                         EnteredRecord::Break => Completion::Break,
                         EnteredRecord::Continue => Completion::Continue,
-                        EnteredRecord::Throw => Completion::Throw(value()?),
-                        EnteredRecord::Return => Completion::Return(value()?),
+                        EnteredRecord::Throw => Completion::Throw(Box::new(value()?)),
+                        EnteredRecord::Return => Completion::Return(Box::new(value()?)),
                     };
                     (TryPhase::Finally(completion), cleanup)
                 } else {
@@ -544,7 +665,8 @@ fn restore(
         _ if record.arguments.is_none() => None,
         _ => return Err(malformed("a non-library frame holds arguments")),
     };
-    Ok(Frame {
+    Ok(Box::new(Frame {
+        slots: Slots::unloaded(code.slots_by_at.len()),
         code: code_id,
         published: Some(record.clone()),
         record,
@@ -554,5 +676,94 @@ fn restore(
         awaiting,
         library,
         calling: None,
-    })
+    }))
+}
+
+#[cfg(test)]
+mod laws {
+    use super::*;
+    use crate::laws::embedder::Embedder;
+    use crate::machine::SlotState;
+    use lash_kernel_doc::TaskId;
+    use lash_kernel_state::paged::BoundRecord;
+
+    /// FIG-6435: local assignments coalesce until a reader publishes the
+    /// frame. Its previously published bindings remain a persistent version.
+    #[test]
+    fn local_slot_edits_leave_the_published_tree_alone_until_sync() {
+        let mut embedder = Embedder::new(
+            "fn local() { let x = true while x { set x = false } return x } main { let out = call local() return out }",
+        );
+        use crate::Machine;
+        assert!(matches!(
+            Machine::run(&mut embedder.machine, &mut embedder.world, 1).unwrap(),
+            crate::Step::Slice
+        ));
+        let frame = embedder.machine.frame(TaskId::MAIN).unwrap();
+        let before = frame.record.bindings.clone();
+        for n in 0..1_000 {
+            frame.set_slot(0, SlotState::Value(Value::Bool(n % 2 == 0)));
+        }
+        assert!(matches!(
+            frame.slot(0).unwrap(),
+            SlotState::Value(Value::Bool(false))
+        ));
+        assert!(
+            before.same_version(&frame.record.bindings),
+            "an unpublished slot edit wrote the binding tree"
+        );
+        frame.sync_holdings().unwrap();
+        let code = frame.exe.code(frame.code);
+        let key = code.slots[code.slots_by_at[0] as usize].key.clone();
+        assert!(matches!(
+            frame
+                .record
+                .bindings
+                .get(&key, &frame.access)
+                .unwrap()
+                .unwrap()
+                .value,
+            BoundRecord::Value(Value::Bool(false))
+        ));
+        assert!(before.is_empty());
+        let published = frame.record.bindings.clone();
+        frame.set_slot(0, SlotState::Empty);
+        assert!(matches!(frame.slot(0).unwrap(), SlotState::Empty));
+        assert!(published.same_version(&frame.record.bindings));
+        frame.sync().unwrap();
+        assert!(frame.record.bindings.is_empty());
+        assert_eq!(published.len(), 1);
+    }
+
+    /// FIG-6435: a call which nobody publishes need not edit the persistent
+    /// frame table. A reader still sees the entire live stack at publication.
+    #[test]
+    fn calls_leave_the_frame_table_alone_until_publication() {
+        let mut embedder = Embedder::new("main { return null }");
+        let machine = &mut embedder.machine;
+        let exe = Arc::clone(&machine.exe);
+        let before = machine.task(TaskId::MAIN).unwrap().frames.rows.clone();
+        machine
+            .push_frame(
+                TaskId::MAIN,
+                &exe,
+                crate::machine::exec::Call::new(exe.main, 0, 0),
+            )
+            .unwrap();
+        let frames = &mut machine.task(TaskId::MAIN).unwrap().frames;
+        assert_eq!(frames.len(), 2);
+        assert!(
+            before.same_version(&frames.rows),
+            "a call published the frame table"
+        );
+        let frame = frames.pop().unwrap().unwrap();
+        assert_eq!(frames.len(), 1);
+        assert!(before.same_version(&frames.rows));
+        frames.push(frame);
+        frames.flush_holdings().unwrap();
+        assert_eq!(frames.rows.len(), 2);
+        frames.pop().unwrap().unwrap();
+        frames.flush_holdings().unwrap();
+        assert_eq!(frames.rows.len(), 1);
+    }
 }

@@ -106,3 +106,42 @@ fn the_memory_verdict_is_one_whatever_the_slicing_and_the_garbage() {
         }
     }
 }
+
+/// K-BND-003: replacing a local with a larger holding pays its growth
+/// before a later print, even while its frame is unpublished.
+#[test]
+fn growing_local_holdings_have_one_verdict_before_the_next_print() {
+    let program = r#"
+fn local(t) {
+  let a = null
+  let b = null
+  let c = null
+  print "before"
+  set a = t
+  set b = t
+  set c = t
+  print "escaped"
+  return [t, a, b, c]
+}
+main {
+  let s = work.repeat(16777216)
+  let out = call local(s)
+  return out
+}
+"#;
+    let memory = End::Error(RunError::Bound(BoundExceeded {
+        bound: Bound::Memory,
+        limit: 64 << 20,
+        function: None,
+    }));
+    for slice in [u64::MAX, 1] {
+        for collect in [false, true] {
+            let (end, printed) = verdict(program, slice, collect);
+            assert_eq!(
+                (&end, &printed),
+                (&memory, &vec![text("before")]),
+                "slice {slice}, collected {collect}"
+            );
+        }
+    }
+}

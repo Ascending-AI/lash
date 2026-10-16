@@ -36,8 +36,8 @@ pub(super) enum Ran {
     Step,
     /// Departing: a `break`, a `continue` or a `return`.
     Depart(Completion),
-    /// A `while` condition's value.
-    Tested(Value),
+    /// A `while` condition, checked before leaving the register window.
+    Tested(bool),
 }
 
 /// The register window's place `r`.
@@ -168,7 +168,7 @@ impl KernelMachine {
                     )?;
                 }
                 Op::LetEnd { local } => {
-                    self.frame(task)?.set_slot(local.at, SlotState::Empty)?;
+                    self.frame(task)?.set_slot(local.at, SlotState::Empty);
                 }
                 Op::Bind { local, src } => {
                     let value = self.take(at(base, src));
@@ -194,7 +194,12 @@ impl KernelMachine {
                     self.push_block(task, block)?;
                     return Ok(Ran::Step);
                 }
-                Op::Test { cond } => return Ok(Ran::Tested(self.take(at(base, cond)))),
+                Op::Test { cond } => {
+                    let Value::Bool(tested) = self.take(at(base, cond)) else {
+                        return raise("type_error", "a `while` condition must be a bool");
+                    };
+                    return Ok(Ran::Tested(tested));
+                }
                 Op::End => return Ok(Ran::Done),
                 op => {
                     if let Some(ran) = self.run_rare(host, running, op, base)? {
@@ -373,7 +378,7 @@ impl KernelMachine {
                     // that cannot is refused here, where a `catch` sees it.
                     self.copy_out(&value)?;
                 }
-                Ran::Depart(Completion::Return(value))
+                Ran::Depart(Completion::Return(Box::new(value)))
             }
             Op::Throw { src } => return Err(Interrupt::raised(self.take(at(base, src)))),
             Op::Print { src } => {
@@ -384,11 +389,11 @@ impl KernelMachine {
             }
             Op::Finish { src } => {
                 let value = self.take(at(base, src));
-                return Err(Halt::Finish(self.copy_out(&value)?).into());
+                return Err(Halt::Finish(Box::new(self.copy_out(&value)?)).into());
             }
             Op::Fail { src } => {
                 let value = self.take(at(base, src));
-                return Err(Halt::Fail(self.copy_out(&value)?).into());
+                return Err(Halt::Fail(Box::new(self.copy_out(&value)?)).into());
             }
             Op::Charge { .. }
             | Op::ChargeLocal { .. }
@@ -500,7 +505,7 @@ impl KernelMachine {
                         &exe.code(code).slots[capture.inner as usize].name,
                         &access,
                     )?,
-                    cell,
+                    *cell,
                 )),
                 _ => return Err(fault("a captured variable has no cell").into()),
             }
@@ -562,8 +567,11 @@ impl KernelMachine {
         let frame = self.frame(task)?;
         let code = frame.code;
         match frame.slot(local.at)? {
-            SlotState::Value(value) => Ok(value),
-            SlotState::Cell(cell) => Ok(self.heap.variable_get(cell)?),
+            SlotState::Value(value) => Ok(value.clone()),
+            SlotState::Cell(cell) => {
+                let cell = *cell;
+                Ok(self.heap.variable_get(cell)?)
+            }
             SlotState::Empty => unbound(&exe.code(code).slots[local.slot as usize].name),
         }
     }
@@ -577,10 +585,21 @@ impl KernelMachine {
         let frame = self.frame(task)?;
         let code = frame.code;
         match frame.slot(local.at)? {
-            SlotState::Value(_) => {
-                frame.set_slot(local.at, SlotState::Value(value))?;
+            SlotState::Value(old) => {
+                let growth =
+                    crate::heap::value_bytes(&value).saturating_sub(crate::heap::value_bytes(old));
+                if growth == 0 {
+                    frame.set_slot(local.at, SlotState::Value(value));
+                } else {
+                    // The slot's old holding already pays for that much.
+                    // Hold its growth before publishing or changing it.
+                    self.reserve_held(growth)?;
+                    self.frame(task)?
+                        .set_slot(local.at, SlotState::Value(value));
+                }
             }
             SlotState::Cell(cell) => {
+                let cell = *cell;
                 self.heap_write(|heap| {
                     heap.variable_write(cell, value.clone())
                         .map_err(Interrupt::from)

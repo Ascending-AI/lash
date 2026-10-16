@@ -245,3 +245,28 @@ fn a_slice_publishes_its_roots_a_constant_number_of_times() {
     );
     assert!(few <= 3, "{few} publishes in one slice");
 }
+
+/// FIG-6435: only pressure needs current execution roots. Native reads,
+/// reservations and allocations below that point need no publication.
+#[test]
+fn native_calls_publish_execution_records_only_under_pressure() {
+    let publications = |n, call| {
+        let text = format!(
+            "fn looped() {{ let i = 0 while num.lt(i, {n}) {{\n\
+             let x = {call} set i = num.add(i, 1) }} return i }}\n\
+             main {{ let out = call looped() return out }}"
+        );
+        let mut embedder = Embedder::new(&text);
+        crate::perf_witness::enable_work();
+        let end = Machine::run(&mut embedder.machine, &mut embedder.world, u64::MAX).unwrap();
+        let work = crate::perf_witness::take_work().unwrap();
+        assert!(matches!(end, Step::Ended(End::Finished(_))), "{end:?}");
+        work.root_publishes
+    };
+    for call in ["work.spin(1)", "work.fill(1)"] {
+        let few = publications(4, call);
+        let many = publications(1_000, call);
+        assert_eq!(few, many, "{call} published without pressure");
+        assert!(few <= 3, "{few} publications in one slice for {call}");
+    }
+}

@@ -524,14 +524,20 @@ impl KernelMachine {
                         })
                     })
                     .transpose()?;
-                // A native reserves before it builds, so its refinement
-                // runs at once, over what the run holds now: a deferred one
-                // would let it build past the bound first (FIG-6318).
-                self.publish_holdings()?;
                 let mut counter = WorkCounter::new(limit);
                 let answer = native.call(NativeCall {
                     args: &self.regs[args..end],
-                    heap: &mut self.heap,
+                    heap: &mut super::native_heap::CallHeap {
+                        heap: &mut self.heap,
+                        roots: super::native_heap::Roots {
+                            tasks: &mut self.tasks,
+                            joins: &self.joins,
+                            registers: &self.regs,
+                            pinned: &self.pins.values,
+                            fresh: &self.fresh,
+                            refinements: &mut self.census_refinements,
+                        },
+                    },
                     counter: &mut counter,
                 });
                 self.heap.execution_roots_moved();
@@ -564,7 +570,7 @@ impl KernelMachine {
                     Err(NativeError::Memory) => {
                         return Err(bound(Bound::Memory, self.bounds.memory).into());
                     }
-                    Err(NativeError::Heap(error)) => return Err(Halt::Heap(error).into()),
+                    Err(NativeError::Heap(error)) => return Err(Halt::from(error).into()),
                 }
             }
         };
@@ -596,8 +602,9 @@ impl KernelMachine {
     ) -> Status {
         let cursor = match self.take(iterable) {
             Value::List(id) => Cursor::List(id, 0),
-            Value::Tuple(items) => Cursor::Tuple(items, 0),
-            value @ (Value::Map(_) | Value::Set(_)) => Cursor::Table(value, None),
+            Value::Tuple(items) => Cursor::Tuple(std::sync::Arc::new(items), 0),
+            Value::Map(id) => Cursor::Map(id, None),
+            Value::Set(id) => Cursor::Set(id, None),
             _ => {
                 return raise(
                     "type_error",
@@ -654,15 +661,8 @@ impl KernelMachine {
                         *position += usize::from(element.is_some());
                         element
                     }
-                    Cursor::Table(table, last) => {
-                        let next = self.heap.table_after(
-                            table.object().ok_or_else(|| {
-                                lash_kernel_doc::heap::HeapFault::Malformed(
-                                    "table cursor has no identity".into(),
-                                )
-                            })?,
-                            *last,
-                        )?;
+                    Cursor::Map(id, last) | Cursor::Set(id, last) => {
+                        let next = self.heap.table_after(*id, *last)?;
                         next.map(|(sequence, key)| {
                             *last = Some(sequence);
                             key
@@ -700,7 +700,7 @@ impl KernelMachine {
 
     /// The innermost `while` loop's condition gave `value`: its next
     /// iteration starts, `Step`, or it ends, `Done` (`K-FORM-013`).
-    pub(super) fn tested(&mut self, task: TaskId, value: Value) -> Status {
+    pub(super) fn tested(&mut self, task: TaskId, value: bool) -> Status {
         let frame = self.frame(task)?;
         let Some(Control::While { stmt, started }) = frame.control.last_mut() else {
             return Err(fault("a `while` condition stands in no `while` loop").into());
@@ -710,16 +710,15 @@ impl KernelMachine {
         };
         let body = *body;
         match value {
-            Value::Bool(true) => {
+            true => {
                 *started += 1;
                 self.push_block(task, body)?;
                 Ok(Flow::Step)
             }
-            Value::Bool(false) => {
+            false => {
                 frame.control.pop();
                 Ok(Flow::Done)
             }
-            _ => raise("type_error", "a `while` condition must be a bool"),
         }
     }
 }
