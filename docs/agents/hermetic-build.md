@@ -621,22 +621,24 @@ operations do not acquire a phase slot. `KILN_ADMISSION=off` bypasses admission.
 ### Queue priority
 
 The driver sends `KILN_RE_PRIORITY` as the priority of every Execute request,
-as `-c kiln.re_priority=<n>`: `0` when the variable is unset, and an error
+as `-c kiln.re_priority=<n>`: `100` when the variable is unset, and an error
 before Buck2 starts when it is not an integer from -1000 to 1000. Kiln exports
-`100` for `kiln build|check|test|clippy|doc|run` and `0` for `kiln gate` and
-the commands a gate's script runs. Required CI in `ci.yml` and the push
-static checks set `10`; optional cache warming sets `0` and its Buck2
-commands use 16 jobs. Direct `scripts/hermetic-build.sh` calls default to `0`.
-The pool queue serves the higher priority first, then the older request,
-so interactive Kiln commands outrank required CI, which outranks prewarm.
+`100` for `kiln build|check|test|clippy|doc|run`; required CI in `ci.yml` and
+`static-checks.yml` also sends `100`. `kiln gate` and the commands a gate's
+script runs use `100`, as do direct `scripts/hermetic-build.sh` calls.
+An explicit `KILN_RE_PRIORITY` overrides the default, including for gates.
+Only scheduled or on-demand full campaigns explicitly export `KILN_RE_PRIORITY=0`.
+The pool queue serves the higher priority first, then the older request.
+Required CI, interactive commands and agent work share priority `100` and
+run oldest first.
 
 - **No preemption.** Priority orders queued actions only. A running action is
   never interrupted, and a request for an action already queued keeps that
   action's priority.
-- **One fork, two priorities.** The priority is part of the graph's
-  configuration, so a gate and an agent command in one fork serialize, and the
-  first command after a change of priority re-analyses the graph. Run a gate in
-  its own fork.
+- **Priority changes.** The priority is part of the graph's configuration, so
+  commands with different priorities in one fork serialize, and the first
+  command after a change of priority re-analyses the graph. Run a gate in its
+  own fork.
 
 Artifact consumers request final materialization and use the native build report:
 

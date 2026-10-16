@@ -8,7 +8,7 @@ MEMORY_SCALE = int(read_root_config("kiln", "memory_scale", "1"))
 
 # `-c kiln.re_priority=N` is the priority of every Execute request the
 # invocation sends: the pool queue serves a higher one first and never
-# preempts a running action. The driver passes KILN_RE_PRIORITY, 0 when unset.
+# preempts a running action. The driver passes KILN_RE_PRIORITY, 100 when unset.
 RE_PRIORITY = int(read_root_config("kiln", "re_priority", "0"))
 if RE_PRIORITY < -1000 or RE_PRIORITY > 1000:
     fail("kiln.re_priority (KILN_RE_PRIORITY) must be an integer from -1000 to 1000, not {}".format(RE_PRIORITY))

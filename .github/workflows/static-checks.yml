@@ -15,8 +15,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Required checks queue below interactive Kiln, which stays at 100.
-  KILN_RE_PRIORITY: "10"
+  # Required CI queues with interactive and agent work at 100, oldest first.
+  KILN_RE_PRIORITY: "100"
   LASH_CI_FEATURES: ""
   RUSTFLAGS: -C link-arg=-fuse-ld=mold
 

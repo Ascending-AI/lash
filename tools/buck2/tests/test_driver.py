@@ -457,7 +457,7 @@ class DriverTests(unittest.TestCase):
     def test_every_graph_command_carries_the_queue_priority(self):
         inventory = {'packages': [{'targets': [{'label': '//lib:lib', 'build_label': '//lib:lib[static]', 'check_label': '//lib:lib[check]', 'clippy_label': '//lib:lib[clippy.txt]', 'doc_label': '//lib:lib[doc]'}]}]}
         commands = [[operation, '//lib:lib'] for operation in ('build', 'check', 'clippy', 'doc', 'test', 'run')] + [['--local', 'analyze', '//lib:lib']]
-        for exported, expected in ((None, '0'), ('100', '100'), ('-1000', '-1000')):
+        for exported, expected in ((None, '100'), ('0', '0'), ('100', '100'), ('-1000', '-1000')):
             environment = {} if exported is None else {'KILN_RE_PRIORITY': exported}
             with patch.dict(os.environ, environment), self.subTest(exported=exported):
                 if exported is None:

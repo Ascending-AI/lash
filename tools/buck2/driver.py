@@ -96,7 +96,7 @@ def validate_remote_configuration(path):
 
 
 def re_priority(environment):
-    value = environment.get(RE_PRIORITY_VARIABLE, '0')
+    value = environment.get(RE_PRIORITY_VARIABLE, '100')
     if not re.fullmatch(r'0|-?[1-9][0-9]*', value) or abs(int(value)) > RE_PRIORITY_LIMIT:
         raise ValueError(f'{RE_PRIORITY_VARIABLE} must be an integer from -{RE_PRIORITY_LIMIT} to {RE_PRIORITY_LIMIT}, not {value!r}')
     return int(value)
