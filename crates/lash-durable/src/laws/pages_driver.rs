@@ -7,7 +7,7 @@
 //! A law serves a production runner over [`Retiring`], which forwards every
 //! call to the dialect's store unchanged and records, in order, what the
 //! node's retirement task and its claims saw and did: the counted oracles.
-//! Only the law can close its step gate or cut a step.
+//! Only the law can close its step or observation gate, or cut a step.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -49,6 +49,8 @@ enum Seen {
     Called,
     /// A retirement step committed, with what it did.
     Step(RetirementProgress),
+    /// The last batch committed, but its result is behind the observation gate.
+    StepPending,
     /// The law's cut fired in a step: the node dies there.
     Cut,
     /// A claim attempt, recorded before entering the store's await.
@@ -102,6 +104,8 @@ struct Probe {
     turns: Arc<Turns>,
     /// Whether retirement steps may run.
     gate: watch::Sender<bool>,
+    /// Whether a committed final step may record its result.
+    step_observation: watch::Sender<bool>,
     calls: AtomicU32,
     /// The call whose batch the node dies in, and where.
     cut: Option<(u32, BatchCut)>,
@@ -167,6 +171,8 @@ struct Retiring {
     probe: Arc<Probe>,
     /// Park after a successful claim, before recording its outcome.
     cut_claim: bool,
+    /// Force the final commit to precede observation of its result.
+    pause_drained_step: bool,
 }
 
 impl Retiring {
@@ -186,12 +192,29 @@ impl Retiring {
                 seen: Mutex::new(Vec::new()),
                 turns: Arc::default(),
                 gate: watch::Sender::new(open),
+                step_observation: watch::Sender::new(true),
                 calls: AtomicU32::new(0),
                 cut,
                 claim_observed: watch::Sender::new(false),
             }),
             cut_claim: false,
+            pause_drained_step: false,
         })
+    }
+
+    /// Stop a healthy node only after its retirement task observed the
+    /// drained frontier. That task records each step before reading its next
+    /// backlog; an independent reader can see the final commit too early.
+    async fn finish(&self, node: LawNode) -> LawOutcome {
+        self.probe.step_observation.send_replace(true);
+        self.probe
+            .until(
+                "the retirement task observes its drained frontier",
+                |seen| seen.contains(&Seen::Backlog(0)),
+            )
+            .await?;
+        node.kill().await;
+        Ok(())
     }
 
     /// Serve production's runner as node `name` over this store.
@@ -338,11 +361,7 @@ pub async fn a_node_retires_sealed_pages_on_its_own(tier: &dyn PageTier) -> LawO
             backlog_limit: RetirementSettings::MAX_BACKLOG_LIMIT,
         },
     );
-    within("the node retires every hold", || async {
-        Ok(holds(tier).await? == 0)
-    })
-    .await?;
-    node.kill().await;
+    store.finish(node).await?;
     retired.reclaimed(tier).await?;
     let batches = counted(&store.probe.steps(), BATCH, retired.unowned())?;
     eprintln!(
@@ -535,13 +554,34 @@ pub async fn a_crash_in_a_retirement_batch_resumes_without_leak_or_double_free(
             holds(&*tier).await? > 0,
             "{round}: the frontier did not survive the crash"
         );
-        let resuming = Retiring::over(&*tier, true, None)?;
+        let mut resuming = Retiring::over(&*tier, true, None)?;
+        resuming.pause_drained_step = true;
+        resuming.probe.step_observation.send_replace(false);
         let node = resuming.serve(&format!("pages-crash-{round}-b"), settings);
         within("the next node retires every hold", || async {
             Ok(holds(&*tier).await? == 0)
         })
         .await?;
-        node.kill().await;
+        resuming
+            .probe
+            .until("the final commit precedes its observation", |seen| {
+                seen.contains(&Seen::StepPending)
+            })
+            .await?;
+        let observed_deleted: u64 = committed
+            .iter()
+            .chain(resuming.probe.steps().iter())
+            .map(|step| step.nodes_deleted)
+            .sum();
+        ensure!(
+            observed_deleted < retired.unowned(),
+            "the forced commit-before-observation window lost no evidence"
+        );
+        eprintln!(
+            "crash {round}: holds=0 before_observation={observed_deleted} expected={}",
+            retired.unowned()
+        );
+        resuming.finish(node).await?;
         retired.reclaimed(&*tier).await?;
         let steps: Vec<RetirementProgress> = committed
             .into_iter()
@@ -616,6 +656,14 @@ impl PageStore for Retiring {
         }
         let progress = self.inner.retire_step(budget).await;
         if let Ok(progress) = &progress {
+            if self.pause_drained_step
+                && *progress != RetirementProgress::default()
+                && self.inner.retirement_backlog().await?.holds == 0
+            {
+                self.probe.see(Seen::StepPending);
+                let mut observation = self.probe.step_observation.subscribe();
+                let _ = observation.wait_for(|open| *open).await;
+            }
             self.probe.see(Seen::Step(*progress));
         }
         if cut == Some(BatchCut::AfterCommit) {
