@@ -50,7 +50,21 @@ pub enum WorkerLimit {
         size: u64,
         bound: u64,
     },
-    Deadline,
+    /// The execution's CPU time passed its configured budget: the parent's
+    /// cumulative accounting across the execution's attempts, or the CPU
+    /// ceiling the worker set from that budget (`SIGXCPU`).
+    Cpu {
+        bound_ms: u64,
+    },
+    /// One exchange computed or serialized past its configured wall-clock
+    /// deadline.
+    Deadline {
+        bound_ms: u64,
+    },
+    /// The execution spent its configured replacement attempts.
+    Attempts {
+        bound: u32,
+    },
 }
 
 impl WorkerLimit {
@@ -59,11 +73,14 @@ impl WorkerLimit {
     /// the VM against the run's own bounds, and a step's observations
     /// against its heap budget, so every execution of the run meets them at
     /// the same point. Encoded effect values, VM state and frames likewise
-    /// meet their size bounds on every execution. A deadline is the host's clock, or its
-    /// cumulative CPU and attempt accounting: a replay, or another host with
-    /// capacity, answers it differently (FIG-4451).
+    /// meet their size bounds on every execution. The CPU budget and the
+    /// compute deadline are limits lash set on the run's worker: the same
+    /// run on the same inputs meets them again, so they are the run's own
+    /// end, never a retry (FIG-6523). Only the replacement attempts are
+    /// the host's: they count infrastructure losses, which a replay, or
+    /// another host with capacity, answers differently (FIG-4451).
     pub const fn is_host_verdict(self) -> bool {
-        matches!(self, Self::Deadline)
+        matches!(self, Self::Attempts { .. })
     }
 }
 
@@ -81,6 +98,11 @@ impl std::fmt::Display for WorkerLimit {
                 f,
                 "{kind:?} frame of {size} bytes exceeds its {bound}-byte bound"
             ),
+            Self::Cpu { bound_ms } => write!(f, "CPU time exceeds its {bound_ms} ms budget"),
+            Self::Deadline { bound_ms } => {
+                write!(f, "computation exceeds its {bound_ms} ms deadline")
+            }
+            Self::Attempts { bound } => write!(f, "the execution spent its {bound} attempts"),
             other => write!(f, "{other:?}"),
         }
     }

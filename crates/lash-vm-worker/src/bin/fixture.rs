@@ -146,6 +146,17 @@ fn main() {
             }
             panic!("a panic with a backtrace requested");
         }
+        // `xcpu` is sent `SIGXCPU` as a run starts, long before it could
+        // spend its CPU budget: a signal no ceiling of lash's raised.
+        if mode == "xcpu" && starts {
+            #[expect(
+                unsafe_code,
+                reason = "the fixture signals itself as a host outside lash would"
+            )]
+            unsafe {
+                libc::raise(libc::SIGXCPU);
+            }
+        }
         if mode == "hang" && starts {
             std::thread::sleep(std::time::Duration::from_secs(60));
         }

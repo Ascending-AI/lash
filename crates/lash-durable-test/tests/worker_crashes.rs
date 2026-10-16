@@ -13,6 +13,10 @@
 //!
 //! The same served turn, with no worker killed, is what a cell costs the
 //! worker boundary: one lease and a counted number of frames (FIG-5921).
+//!
+//! A worker lost to a limit lash itself set on it, its CPU budget or its
+//! compute deadline, is the cell's own end, never a crash: the cell is
+//! refused once with that limit, and the model reads it (FIG-6523).
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 #[path = "support/served.rs"]
@@ -325,6 +329,180 @@ async fn a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease(tier: T
     world.shutdown().await;
 }
 
+/// A cell that computes until a limit stops it: no fuel or memory bound
+/// does, under [`unbounded_rlm`].
+const HEAVY: &str = "let n = 0; while (n >= 0) { n = n + 1; } await control.finish(n);";
+
+/// A limit lash sets on the cell's worker, configured small.
+#[derive(Clone, Copy, Debug)]
+enum Limit {
+    /// The execution's CPU budget: the kernel stops the worker at the CPU
+    /// ceiling the worker set from it (`SIGXCPU`).
+    Cpu,
+    /// One exchange's compute deadline: the parent stops waiting.
+    Deadline,
+}
+
+impl Limit {
+    fn configure(self, deadlines: &mut lash::vm::WorkerDeadlines) {
+        match self {
+            Self::Cpu => deadlines.cumulative_cpu = std::time::Duration::from_secs(1),
+            Self::Deadline => deadlines.compute = std::time::Duration::from_secs(1),
+        }
+    }
+
+    /// The typed limit the cell's failure carries, as it encodes.
+    fn typed(self) -> serde_json::Value {
+        match self {
+            Self::Cpu => serde_json::json!({ "cpu": { "bound_ms": 1000 } }),
+            Self::Deadline => serde_json::json!({ "deadline": { "bound_ms": 1000 } }),
+        }
+    }
+
+    /// The refusal the model reads.
+    fn refusal(self) -> &'static str {
+        match self {
+            Self::Cpu => "CELL_BOUND_EXCEEDED: worker CPU time limit exceeded (limit 1000 ms)",
+            Self::Deadline => {
+                "CELL_BOUND_EXCEEDED: worker compute deadline exceeded (limit 1000 ms)"
+            }
+        }
+    }
+}
+
+/// [`served::rlm`] with no instruction bound, so only a worker limit ends
+/// [`HEAVY`].
+fn unbounded_rlm(workers: lash::vm::WorkerService) -> lash::rlm::RlmProtocolPluginFactory {
+    lash::rlm::RlmProtocolPluginFactory::new(
+        lash::rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash::rlm::RlmChannel::Cell)
+            .instruction_limit(lash::rlm::InstructionBound::unbounded())
+            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
+            .build(),
+        lash::rlm::CellDialect::typescript(),
+    )
+    .with_worker_service(workers)
+}
+
+/// The settled output of `session`'s turn of `input`, or the park its
+/// session took instead: a parked turn never settles.
+async fn settled_or_parked(
+    world: &World,
+    session: &lash::DurableSession,
+    input: &str,
+) -> Result<lash::TurnOutput, String> {
+    let actor = lash_core::durable_port::ActorKey::session(input).expect("a session actor key");
+    let durable = Arc::clone(world.backend.durable());
+    let parked = async {
+        loop {
+            if let Ok(Some(snapshot)) = durable.actor(&actor).await
+                && snapshot.state == lash_core::durable_port::ActorState::Parked
+            {
+                return snapshot.park.unwrap_or_default();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    };
+    let output = session.send(lash::TurnInput::text(input)).output();
+    tokio::time::timeout(served::WATCHDOG, async {
+        tokio::select! {
+            output = output => Ok(output.expect("the turn answers")),
+            park = parked => Err(park),
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("deadlock watchdog: the turn of `{input}` never settled"))
+}
+
+/// FIG-6523: a cell whose worker meets `limit` is refused with it and its
+/// configured value. The same cell meets it again, so its one run is its
+/// answer: the next model step reads the refusal, the turn goes on to its
+/// answer, and no pass runs the cell again or parks the session. Before,
+/// the loss was a retried crash or deadline, pass after pass, until the
+/// session parked and the model never saw it.
+async fn worker_limit_case(tier: Tier, limit: Limit) {
+    let mut config = lash::vm::WorkerService::default().config().clone();
+    config.max_workers = 1;
+    // One exchange runs the loop until the limit stops it.
+    config.tuning.slice = 1 << 50;
+    limit.configure(&mut config.deadlines);
+    let workers = lash::vm::WorkerService::new(config).with_worker_receipts();
+    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
+    let model = {
+        let requests = Arc::clone(&requests);
+        lash_core::testing::TestProvider::builder()
+            .kind("worker-limit")
+            .complete(move |request: LlmRequest| {
+                let mut asked = requests.lock().unwrap();
+                asked.push(serde_json::to_string(&request.messages).expect("a request encodes"));
+                let response = if asked.len() == 1 {
+                    served::cell(HEAVY)
+                } else {
+                    served::text(&request, "done")
+                };
+                async move { Ok(response) }
+            })
+            .build()
+            .into_handle()
+    };
+    let Some(world) = World::with_model(tier, Vec::new(), model, |backend| {
+        lash::LashCore::rlm_builder(backend.clone(), unbounded_rlm(workers.clone()))
+    })
+    .await
+    else {
+        return;
+    };
+    let input = format!("worker-limit-{limit:?}").to_lowercase();
+    let session = world.session(&input, served::spec(8)).await;
+    let settled = settled_or_parked(&world, &session, &input).await;
+    let runs = workers
+        .worker_receipts()
+        .iter()
+        .filter(|receipt| format!("{:?}", receipt.path) == "Cell")
+        .count();
+    let output = settled.unwrap_or_else(|park| {
+        panic!("the turn parked after {runs} runs of the cell instead of answering: {park}")
+    });
+    assert_eq!(runs, 1, "no pass runs the refused cell again");
+    let asked = requests.lock().unwrap().clone();
+    assert_eq!(asked.len(), 2, "the model is asked once after the cell");
+    assert!(
+        asked[1].contains(limit.refusal()),
+        "the next model step reads the refusal: {}",
+        asked[1]
+    );
+    assert_eq!(output.assistant_message(), Some("done"));
+    let transcript = session.transcript().await.expect("the transcript decodes");
+    let failures: Vec<_> = transcript
+        .visible()
+        .filter_map(|entry| match &entry.item {
+            lash::transcript::TranscriptItem::Cell(cell) => match &cell.result {
+                lash::transcript::CellOutcome::Failed(failure) => Some(failure.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "one refused cell: {failures:?}");
+    assert_eq!(
+        serde_json::to_value(failures[0].worker_limit).expect("a limit encodes"),
+        limit.typed(),
+        "the refusal carries the typed limit: {:?}",
+        failures[0]
+    );
+    world.shutdown().await;
+}
+
+async fn a_cell_past_its_worker_cpu_budget_is_refused_once_and_the_model_reads_it(tier: Tier) {
+    worker_limit_case(tier, Limit::Cpu).await;
+}
+
+async fn a_cell_past_its_worker_compute_deadline_is_refused_once_and_the_model_reads_it(
+    tier: Tier,
+) {
+    worker_limit_case(tier, Limit::Deadline).await;
+}
+
 async fn a_lowering_worker_crash_is_never_a_recorded_host_cell_failure(tier: Tier) {
     setup_crash_case(tier, Request::Lower).await;
 }
@@ -337,4 +515,6 @@ tiered_laws!(
     a_lowering_worker_crash_is_never_a_recorded_host_cell_failure,
     a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure,
     a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease,
+    a_cell_past_its_worker_cpu_budget_is_refused_once_and_the_model_reads_it,
+    a_cell_past_its_worker_compute_deadline_is_refused_once_and_the_model_reads_it,
 );

@@ -26,6 +26,10 @@ pub struct Worker {
     pub cpu_nanos: u64,
     /// How long a worker whose stream ended has to report its exit.
     exit_grace: Duration,
+    /// The execution's CPU budget, from which the worker sets its own CPU
+    /// ceiling, and the limit a run meets past it.
+    cpu_budget: Duration,
+    cpu_limit: lash_vm_protocol::WorkerLimit,
 }
 
 impl Worker {
@@ -97,6 +101,8 @@ impl Worker {
                 .with_detail_limit(config.tuning.diagnostic_bytes),
             cpu_nanos: 0,
             exit_grace: config.deadlines.cancel_grace,
+            cpu_budget: config.deadlines.cumulative_cpu,
+            cpu_limit: config.deadlines.cpu_limit(),
         })
     }
 
@@ -152,10 +158,7 @@ impl Worker {
                         .counters
                         .crashes += 1;
                 }
-                return Err(InfrastructureOutcome::WorkerCrashed {
-                    evidence: self.exit_evidence(),
-                }
-                .into());
+                return Err(self.lost().into());
             }
             result => result.map_err(|error| error.with_silence(started.elapsed()))?,
         };
@@ -165,6 +168,27 @@ impl Worker {
             bytes.capacity() + self.inbound.buffer_capacity(),
             self.measurements.as_ref(),
         )
+    }
+
+    /// What the end of this worker's stream is to its run. The worker sets
+    /// its own CPU ceiling from the execution's CPU budget, and the kernel
+    /// stops it there with `SIGXCPU`: a worker so stopped, with that budget
+    /// spent, met the run's CPU limit, which the same run meets again. Any
+    /// other end, a `SIGXCPU` lash did not cause among them, is a crash
+    /// (FIG-6523).
+    fn lost(&mut self) -> InfrastructureOutcome {
+        let evidence = self.exit_evidence();
+        if evidence
+            == (lash_vm_protocol::SupervisorEvidence::Signalled {
+                signal: libc::SIGXCPU,
+            })
+            && Duration::from_nanos(self.terminate()) >= self.cpu_budget
+        {
+            return InfrastructureOutcome::WorkerLimitExceeded {
+                limit: self.cpu_limit,
+            };
+        }
+        InfrastructureOutcome::WorkerCrashed { evidence }
     }
 
     fn exit_evidence(&self) -> lash_vm_protocol::SupervisorEvidence {

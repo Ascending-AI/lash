@@ -86,6 +86,35 @@ pub const CELL_DEADLOCK: &str = "CELL_DEADLOCK";
 /// The stable code of a cell that passed an execution bound.
 pub const CELL_BOUND_EXCEEDED: &str = "CELL_BOUND_EXCEEDED";
 
+/// The failure of a cell whose run met a limit of its own at the worker
+/// boundary. The CPU budget and the compute deadline are limits lash set on
+/// the cell's worker: the same cell on the same inputs meets them again, so
+/// the cell is refused with the bound it passed and its configured value,
+/// as an execution bound is, and the model repairs from it (FIG-6523).
+pub(crate) fn worker_limit_failure(limit: lash_vm_client::WorkerLimit) -> CellFailure {
+    let (what, bound_ms, repair) = match limit {
+        lash_vm_client::WorkerLimit::Cpu { bound_ms } => (
+            "worker CPU time limit exceeded",
+            bound_ms,
+            "Reduce the computation or split it across smaller cells to fit the CPU time limit.",
+        ),
+        lash_vm_client::WorkerLimit::Deadline { bound_ms } => (
+            "worker compute deadline exceeded",
+            bound_ms,
+            "Reduce the computation or split it across smaller cells to finish within the deadline.",
+        ),
+        other => {
+            return CellFailure::new(CellFailureKind::Program, other.to_string())
+                .with_worker_limit(other);
+        }
+    };
+    CellFailure::new(
+        CellFailureKind::Policy,
+        format!("{CELL_BOUND_EXCEEDED}: {what} (limit {bound_ms} ms)\n{repair}"),
+    )
+    .with_worker_limit(limit)
+}
+
 /// What the kernel or the dialect made of a cell that did not complete, as
 /// typed facts: the cell's failure is rendered from one of these and from
 /// nothing else.

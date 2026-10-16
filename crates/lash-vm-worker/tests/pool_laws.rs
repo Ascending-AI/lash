@@ -80,6 +80,7 @@ under_each_embedding!(
     a_run_cancel_is_observed_where_a_slice_returns,
     a_passed_bound_is_the_runs_typed_end_and_the_worker_is_reused,
     worker_crash_mid_run_leaves_the_parent_running,
+    a_sigxcpu_lash_did_not_cause_is_a_crash_the_host_retries,
     a_forbidden_syscall_kills_the_worker_with_typed_evidence,
     a_panic_with_a_backtrace_requested_is_typed_not_a_forbidden_syscall,
     the_address_space_ceiling_bounds_a_runs_allocation,
@@ -1020,6 +1021,36 @@ fn worker_crash_mid_run_leaves_the_parent_running() {
     let next = checkout(&pool);
     assert_ne!(next.pid(), Some(pid));
     next.release().expect("pristine replacement");
+}
+
+/// FIG-6523: the kernel stops a worker with `SIGXCPU` at the CPU ceiling
+/// the worker set from its execution's CPU budget, which is the run's own
+/// limit. A `SIGXCPU` that reaches a worker with that budget unspent is no
+/// limit of lash's: it stays a crash, the host's verdict, which the host
+/// retries.
+fn a_sigxcpu_lash_did_not_cause_is_a_crash_the_host_retries() {
+    let pool = WorkerPool::new(config("xcpu")).expect("pool");
+    let (identity, document) = document(TOOL_LOOP);
+    let mut worker = checkout(&pool);
+    worker
+        .start(
+            fresh(&document, Target::Main, Vec::new()),
+            &identity,
+            ExecutionClass::Cell,
+        )
+        .expect("the parent takes the run");
+    let Err(lost) = worker.run(SLICE, false) else {
+        panic!("the signalled worker answers nothing")
+    };
+    assert_eq!(
+        lost,
+        PoolError::Infrastructure(InfrastructureOutcome::WorkerCrashed {
+            evidence: SupervisorEvidence::Signalled {
+                signal: libc::SIGXCPU
+            }
+        })
+    );
+    assert!(lost.is_host_verdict(), "the host retries a crash: {lost:?}");
 }
 
 /// FIG-5858: a worker serves under a system-call allowlist. A call outside

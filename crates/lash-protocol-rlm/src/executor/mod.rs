@@ -1350,13 +1350,7 @@ fn broker_failure(
             {
                 return exec_response_from(
                     collected,
-                    lash_core::CellOutcome::Failed(
-                        lash_core::CellFailure::new(
-                            lash_core::CellFailureKind::Program,
-                            limit.to_string(),
-                        )
-                        .with_worker_limit(*limit),
-                    ),
+                    lash_core::CellOutcome::Failed(crate::feedback::worker_limit_failure(*limit)),
                 );
             }
             // The state a resumed cell runs on from is refused: another
@@ -1474,11 +1468,8 @@ fn worker_setup_failure(
     ) = &error
         && !limit.is_host_verdict()
     {
-        let mut response = exec_setup_failure_or_stop(
-            state,
-            ctx,
-            lash_core::CellFailure::new(lash_core::CellFailureKind::Program, limit.to_string()),
-        );
+        let mut response =
+            exec_setup_failure_or_stop(state, ctx, crate::feedback::worker_limit_failure(*limit));
         if let lash_core::CellOutcome::Failed(failure) = &mut response.result {
             failure.worker_limit = Some(*limit);
         }

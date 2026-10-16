@@ -5574,8 +5574,7 @@
           "enum": [
             "fuel",
             "heap",
-            "depth",
-            "deadline"
+            "depth"
           ],
           "type": "string"
         },
@@ -5672,6 +5671,75 @@
           },
           "required": [
             "frame"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The execution's CPU time passed its configured budget: the parent's\ncumulative accounting across the execution's attempts, or the CPU\nceiling the worker set from that budget (`SIGXCPU`).",
+          "properties": {
+            "cpu": {
+              "properties": {
+                "bound_ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bound_ms"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "cpu"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One exchange computed or serialized past its configured wall-clock\ndeadline.",
+          "properties": {
+            "deadline": {
+              "properties": {
+                "bound_ms": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bound_ms"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "deadline"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The execution spent its configured replacement attempts.",
+          "properties": {
+            "attempts": {
+              "properties": {
+                "bound": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bound"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "attempts"
           ],
           "type": "object"
         }

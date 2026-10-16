@@ -40,10 +40,12 @@ impl ExecutionBudget {
     fn admit(&self, config: &PoolConfig) -> Result<(), PoolError> {
         let mut totals = lock(&self.0);
         if totals.replacement && totals.attempts >= config.deadlines.max_attempts {
-            return Err(PoolError::RetryLimitExceeded);
+            return Err(PoolError::RetryLimitExceeded {
+                bound: config.deadlines.max_attempts,
+            });
         }
         if totals.cpu_nanos >= nanos(config.deadlines.cumulative_cpu) {
-            return Err(limit(WorkerLimit::Deadline));
+            return Err(limit(config.deadlines.cpu_limit()));
         }
         if totals.attempts == 0 || totals.replacement {
             totals.attempts += 1;
@@ -55,7 +57,7 @@ impl ExecutionBudget {
         let mut totals = lock(&self.0);
         totals.cpu_nanos = totals.cpu_nanos.saturating_add(delta);
         if totals.cpu_nanos >= nanos(config.deadlines.cumulative_cpu) {
-            return Err(limit(WorkerLimit::Deadline));
+            return Err(limit(config.deadlines.cpu_limit()));
         }
         Ok(())
     }
@@ -995,7 +997,7 @@ impl Checkout {
                 result,
                 Err(PoolError::Infrastructure(
                     InfrastructureOutcome::WorkerLimitExceeded {
-                        limit: WorkerLimit::Deadline
+                        limit: WorkerLimit::Cpu { .. } | WorkerLimit::Deadline { .. }
                     }
                 ))
             ) {
@@ -1008,17 +1010,22 @@ impl Checkout {
         }
         result
     }
+    /// How long the worker may stay silent in `phase`: its configured
+    /// compute or serialization deadline, else the exchange's `timeout`.
+    fn phase_bound(&self, phase: Option<WorkerPhase>, timeout: Duration) -> Duration {
+        match phase {
+            Some(WorkerPhase::Computing) => self.pool.config.deadlines.compute,
+            Some(WorkerPhase::Serializing) => self.pool.config.deadlines.serialization,
+            Some(WorkerPhase::Responding) | None => timeout,
+        }
+    }
     /// The worker's answer to the request just sent, its progress and
     /// prints taken on the way.
     fn answer(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
         // A worker answered a page exchange computes on, under a fresh
         // compute deadline: none ran while the parent served its pages.
         let mut phase = self.paged.take();
-        let mut deadline = Instant::now()
-            + match phase {
-                Some(WorkerPhase::Computing) => self.pool.config.deadlines.compute,
-                _ => timeout,
-            };
+        let mut deadline = Instant::now() + self.phase_bound(phase, timeout);
         #[cfg(feature = "testing")]
         let mut phase_started = Instant::now();
         loop {
@@ -1028,21 +1035,28 @@ impl Checkout {
                 .ok_or_else(PoolError::eof)?
                 .receive(deadline);
             let frame = match received {
+                // The run's own computation or serialization outlasted its
+                // deadline: the same run meets it again (FIG-6523).
                 Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerUnresponsive {
                     ..
-                })) if phase.is_some() => {
+                })) if matches!(
+                    phase,
+                    Some(WorkerPhase::Computing | WorkerPhase::Serializing)
+                ) =>
+                {
                     #[cfg(feature = "testing")]
                     self.pool.report_deadline(
                         &lock(&self.pool.state),
                         match phase {
                             Some(WorkerPhase::Computing) => "compute",
-                            Some(WorkerPhase::Serializing) => "serialization",
-                            _ => "responding",
+                            _ => "serialization",
                         },
                         phase_started.elapsed(),
                         &self.budget,
                     );
-                    return Err(limit(WorkerLimit::Deadline));
+                    return Err(limit(crate::config::deadline_limit(
+                        self.phase_bound(phase, timeout),
+                    )));
                 }
                 Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerUnresponsive {
                     ..
@@ -1106,12 +1120,7 @@ impl Checkout {
                     {
                         phase_started = Instant::now();
                     }
-                    deadline = Instant::now()
-                        + match next {
-                            WorkerPhase::Computing => self.pool.config.deadlines.compute,
-                            WorkerPhase::Serializing => self.pool.config.deadlines.serialization,
-                            WorkerPhase::Responding => timeout,
-                        };
+                    deadline = Instant::now() + self.phase_bound(phase, timeout);
                 }
                 WorkerMessage::Refused { refusal } => {
                     return Err(refusal.into_outcome().into());
@@ -1315,7 +1324,7 @@ pub mod runtime_ops {
                         if matches!(
                             error,
                             PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
-                                limit: WorkerLimit::Deadline
+                                limit: WorkerLimit::Cpu { .. }
                             })
                         ) {
                             self.0.report_deadline(

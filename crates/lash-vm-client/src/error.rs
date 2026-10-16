@@ -16,8 +16,8 @@ pub enum PoolError {
     CheckoutTimedOut,
     #[error("repeated worker failures exhausted the restart window")]
     RestartStorm,
-    #[error("the execution exhausted its replacement attempt budget")]
-    RetryLimitExceeded,
+    #[error("the execution exhausted its {bound} replacement attempts")]
+    RetryLimitExceeded { bound: u32 },
     #[error("worker pool configuration is invalid")]
     InvalidConfiguration,
     #[error("this platform has no worker descriptor adapter")]
@@ -46,14 +46,15 @@ impl PoolError {
     }
 
     /// Whether this is a verdict of the host and the attempt that met it:
-    /// its worker failure, worker budget (a deadline, cumulative CPU or
-    /// replacement attempts), pool capacity, or recovery store. It is read
-    /// live, outside any recorded step, and a replay or another host with
-    /// capacity answers it differently, so it fails the attempt and is never
-    /// an execution's recorded outcome (FIG-4451, FIG-4459). Infrastructure
-    /// faults use the same retryability classification during setup and
-    /// execution. A deployment fault also aborts uncommitted work, but parks
-    /// instead of retrying. Only a limit of the run itself remains a recorded outcome.
+    /// its worker failure, replacement attempts, pool capacity, or recovery
+    /// store. It is read live, outside any recorded step, and a replay or
+    /// another host with capacity answers it differently, so it fails the
+    /// attempt and is never an execution's recorded outcome (FIG-4451,
+    /// FIG-4459). Infrastructure faults use the same retryability
+    /// classification during setup and execution. A deployment fault also
+    /// aborts uncommitted work, but parks instead of retrying. A limit of the
+    /// run itself, the CPU budget and compute deadline lash set on its worker
+    /// among them (FIG-6523), remains a recorded outcome.
     pub fn is_host_verdict(&self) -> bool {
         match self {
             Self::Infrastructure(outcome) => {
@@ -62,7 +63,7 @@ impl PoolError {
             Self::QueueFull { .. }
             | Self::CheckoutTimedOut
             | Self::RestartStorm
-            | Self::RetryLimitExceeded => true,
+            | Self::RetryLimitExceeded { .. } => true,
             Self::ProtocolVersion(_)
             | Self::InvalidConfiguration
             | Self::UnsupportedPlatform
@@ -90,10 +91,10 @@ impl PoolError {
         let fault = match self {
             Self::Infrastructure(outcome) => return outcome,
             Self::ProtocolVersion(refusal) => return ProtocolBreach::Version { refusal }.into(),
-            // The attempt budget is the host's clock, like a deadline.
-            Self::RetryLimitExceeded => {
+            // The attempt budget counts the host's losses: its verdict.
+            Self::RetryLimitExceeded { bound } => {
                 return InfrastructureOutcome::WorkerLimitExceeded {
-                    limit: WorkerLimit::Deadline,
+                    limit: WorkerLimit::Attempts { bound },
                 };
             }
             Self::QueueFull { bytes } => PoolFault::QueueFull {
@@ -183,7 +184,7 @@ mod tests {
             InfrastructureOutcome::WorkerUnresponsive { silent_ms: 10 },
             ProtocolBreach::from(lash_vm_protocol::SequenceFault::UnexpectedServiceResponse).into(),
             InfrastructureOutcome::WorkerLimitExceeded {
-                limit: WorkerLimit::Deadline,
+                limit: WorkerLimit::Attempts { bound: 3 },
             },
         ] {
             assert!(
@@ -196,6 +197,8 @@ mod tests {
             WorkerLimit::Heap,
             WorkerLimit::Depth,
             WorkerLimit::Observations,
+            WorkerLimit::Cpu { bound_ms: 1 },
+            WorkerLimit::Deadline { bound_ms: 1 },
             WorkerLimit::EffectValue { size: 2, bound: 1 },
             WorkerLimit::VmState { size: 2, bound: 1 },
             WorkerLimit::Frame {

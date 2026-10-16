@@ -57,6 +57,25 @@ impl Deadlines {
             max_attempts: 3,
         }
     }
+
+    /// What an execution meets past its cumulative CPU budget, whether the
+    /// parent's accounting or the worker's own ceiling saw it.
+    pub(crate) fn cpu_limit(&self) -> lash_vm_protocol::WorkerLimit {
+        lash_vm_protocol::WorkerLimit::Cpu {
+            bound_ms: millis(self.cumulative_cpu),
+        }
+    }
+}
+
+/// What an exchange meets when it computes or serializes past `bound`.
+pub(crate) fn deadline_limit(bound: Duration) -> lash_vm_protocol::WorkerLimit {
+    lash_vm_protocol::WorkerLimit::Deadline {
+        bound_ms: millis(bound),
+    }
+}
+
+fn millis(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 /// Worker-local transport and execution working policy.
