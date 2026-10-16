@@ -352,6 +352,7 @@ mod blake3_domain_tests {
     fn domain_literals(source: &str) -> BTreeSet<String> {
         let constructors = [
             ("Blake3DomainHasher", "::new("),
+            ("blake3::Hasher", "::new_derive_key("),
             ("blake3_domain_hash", "("),
             ("blake3_domain_hash_hex", "("),
             ("blake3_hex", "("),

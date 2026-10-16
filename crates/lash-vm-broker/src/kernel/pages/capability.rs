@@ -14,6 +14,11 @@ use std::hash::{BuildHasher, Hasher};
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_vm_protocol::page::{PageAuthority, PageCapability};
 
+/// The context used to derive fresh activation capability keys.
+/// version_surface = "coexist"
+/// version_guard(items(PAGE_CAPABILITY_KEY_DOMAIN, fresh))
+const PAGE_CAPABILITY_KEY_DOMAIN: &str = "lash-page-capability-key/v1";
+
 /// The parent's MAC key for the capabilities of its activations.
 #[derive(Clone)]
 pub struct CapabilityKey([u8; 32]);
@@ -36,7 +41,7 @@ impl CapabilityKey {
     /// bits a worker cannot predict, stretched to the MAC's key size.
     #[must_use]
     pub fn fresh() -> Self {
-        let mut seed = blake3::Hasher::new_derive_key("lash page capability key v1");
+        let mut seed = blake3::Hasher::new_derive_key(PAGE_CAPABILITY_KEY_DOMAIN);
         for lane in 0_u64..4 {
             let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
             hasher.write_u64(lane);
