@@ -943,53 +943,71 @@ fn live_roles_match_every_resume_entry() {
     }
 }
 
-/// Positions an action cannot be nested in are refused with a typed
-/// reason: a `while` condition and an assignment's place; and `yield`
-/// and `cancel` stay statements.
+/// K-EVAL-008: actions in a `while` condition or an assignment's place
+/// are refused at admission with their typed reason and site, before even
+/// an earlier effect can run.
 #[test]
 fn refused_positions_are_typed() {
-    let library = embedder::library(true);
-    for (text, reason) in [
+    for (body, position, path) in [
         (
-            "main { let x = 1\n  while [perform echo(\"w\") as Any][0] { let c = x } }",
+            "let x = 1\n  while [perform echo(\"w\") as Any][0] { let c = x }",
             "a `while` condition",
+            vec![2, 0, 0, 0],
         ),
         (
-            "main { let t = [0]\n  set t[perform echo(\"i\") as Any] = 9 }",
+            "let t = [0]\n  set t[perform echo(\"i\") as Any] = 9",
             "an assignment's place",
+            vec![2, 1],
         ),
         (
-            "main { let t = [0]\n  set [perform echo(\"t\") as Any][0] = 9 }",
+            "let t = [0]\n  set [perform echo(\"t\") as Any][0] = 9",
             "an assignment's place",
+            vec![2, 0, 0],
+        ),
+        (
+            "while [yield] { return null }",
+            "a `while` condition",
+            vec![1, 0, 0],
+        ),
+        (
+            "let t = [0] set t[yield] = 9",
+            "an assignment's place",
+            vec![2, 1],
+        ),
+        (
+            "let h = spawn call f() while [cancel h] { return null }",
+            "a `while` condition",
+            vec![2, 0, 0],
+        ),
+        (
+            "let h = spawn call f() let t = [0] set t[cancel h] = 9",
+            "an assignment's place",
+            vec![3, 1],
         ),
     ] {
-        let text = format!("numbers by_spelling\n{}{text}", library.header);
-        let document = lash_kernel_doc::parse_document(&text)
-            .unwrap_or_else(|error| panic!("{error}\n{text}"));
-        let problem =
-            lash_kernel_doc::validate_document(&document, library.registry.as_ref()).unwrap_err();
-        let problem = format!("{problem}");
-        assert!(
-            problem.contains(&format!("an action cannot be nested in {reason}")),
-            "`{text}` refused with {problem}"
+        let text =
+            format!("fn f() {{ return 1 }}\nmain {{ do perform echo(\"before\") as Any {body} }}");
+        // Starting takes no Host: refusal precedes the first run and any effect.
+        let problem = match Embedder::try_with(&text, Setup::default()) {
+            Err(crate::StartError::NotAdmitted(problem)) => problem,
+            Err(error) => panic!("`{text}` refused with {error}"),
+            Ok(_) => panic!("`{text}` was admitted"),
+        };
+        assert_eq!(
+            *problem.reason,
+            lash_kernel_doc::InvalidReason::NestedActionPosition {
+                position: position.into(),
+            },
+            "{text}"
         );
-    }
-    // A nested `join` is admitted (`nested_join_resumes_exactly`).
-    for text in [
-        "main { let r = [yield] }",
-        "main { let h = spawn call f() let r = [cancel h] }",
-    ] {
-        let text = format!(
-            "numbers by_spelling\n{}fn f() {{ return 1 }}\n{text}",
-            library.header
+        assert_eq!(
+            problem.site,
+            Some(lash_kernel_doc::Site::new(
+                lash_kernel_doc::Unit::Main,
+                path
+            )),
+            "{text}"
         );
-        let admitted = lash_kernel_doc::parse_document(&text)
-            .map_err(|error| error.to_string())
-            .and_then(|document| {
-                lash_kernel_doc::validate_document(&document, library.registry.as_ref())
-                    .map_err(|error| error.to_string())
-            });
-        assert!(admitted.is_err(), "`{text}` was admitted");
     }
 }
 
@@ -1031,13 +1049,15 @@ fn do_expressions_resume_after_each_action_without_repeating_operands() {
 fn idle() { do yield return null }
 main {
   do call child()
+  let yielded = [yield]
+  print yielded
   do [1, yield, perform echo("x") as Any]
   try { do let(h = spawn call idle(), (cancel(h), join(h))) } catch e {}
   return "done"
 }"#,
         &["child", "x"],
         &text("done"),
-        &[],
+        &[list(&[Datum::Null])],
         &[
             PhaseRecord::Called,
             PhaseRecord::Waiting,
