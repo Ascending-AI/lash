@@ -742,12 +742,13 @@ mod deferred_laws {
         )))
     }
 
-    /// STATIC-CALL-IS-NOT-DEFERRED-EVIDENCE: resolving a builtin selects no tool.
+    /// STATIC-CALL-IS-NOT-DEFERRED-EVIDENCE: an offered call cannot supply
+    /// attribution for an empty resolver, even when a deferred call exercises it.
     #[tokio::test]
     async fn static_call_cannot_certify_an_empty_deferred_resolver() {
         let resolutions = Arc::new(AtomicUsize::new(0));
         let scenario: Arc<dyn PluginScenario> = Arc::new(Scenario {
-            code: "const nonce = Math.random(); await tools.lookup({});",
+            code: "await tools.lookup({}); await tools.send_email({});",
         });
         let report = certify_plugin_with(
             factory(true, Arc::clone(&resolutions)).unwrap(),

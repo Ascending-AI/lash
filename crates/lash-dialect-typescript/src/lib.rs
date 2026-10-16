@@ -140,7 +140,8 @@ impl Parser {
         }
     }
 
-    /// Finds tool calls using the same scopes and built-ins as lowering.
+    /// Finds free dotted tool calls in lexical scopes without lowering.
+    /// A lowering refusal elsewhere in the parsed cell cannot hide a call.
     pub fn tool_calls(
         &mut self,
         source: &str,
@@ -152,15 +153,7 @@ impl Parser {
             environment.effects,
         )?;
         let program = self.parser.parse(source)?;
-        let mut calls = std::collections::BTreeSet::new();
-        lower::lower_with_calls(
-            &program,
-            source,
-            environment,
-            Mode::Cell(cell),
-            Some(&mut calls),
-        )?;
-        Ok(calls)
+        Ok(lower::tool_calls(&program, cell.bindings))
     }
 
     /// Lowers as [`lower`] does. A cell reuses the parser thread; a module,

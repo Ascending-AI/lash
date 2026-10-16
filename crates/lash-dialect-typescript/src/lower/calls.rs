@@ -7,6 +7,26 @@ use crate::adapter as ast;
 use crate::builtins::Receiver;
 use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 
+mod discovery;
+pub(crate) use discovery::tool_calls;
+
+/// A statically spelled path and its root, before lexical resolution.
+/// Computed properties and expression receivers are value operations.
+pub(super) fn static_path(expr: &ast::Expr) -> Option<(&str, String)> {
+    match expr {
+        ast::Expr::Ident(name, _) => Some((name, name.clone())),
+        ast::Expr::Member {
+            object,
+            property: ast::MemberProperty::Field(field),
+            ..
+        } => {
+            let (root, path) = static_path(object)?;
+            Some((root, format!("{path}.{field}")))
+        }
+        _ => None,
+    }
+}
+
 /// The methods every built-in function or object inherits, which a call of
 /// a built-in path may name although no row has the whole path.
 const INHERITED: &[&str] = &[
@@ -808,15 +828,6 @@ impl Lowerer<'_> {
                     Some(span),
                 )
             });
-        }
-        if let Some(path) = self.unbound_path(callee)
-            && !crate::builtins::is_global(path.split('.').next().unwrap_or_default())
-            && path != "sleep"
-            && let Some(calls) = &mut self.calls
-        {
-            calls.insert(path);
-            self.arguments(args)?;
-            return Ok(Operand::undefined());
         }
         if let Some(wait) = self.wait_of(callee) {
             return self.lower_wait_call(wait, args, span);

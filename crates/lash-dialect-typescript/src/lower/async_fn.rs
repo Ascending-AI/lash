@@ -91,8 +91,7 @@ impl Lowerer<'_> {
     /// `await value`. The statements of everything the source evaluated
     /// before it are already emitted.
     pub(super) fn lower_await(&mut self, value: &ast::Expr, span: SourceSpan) -> Lowering<Operand> {
-        if self.calls.is_none()
-            && let ast::Expr::Call { callee, args, .. } = value
+        if let ast::Expr::Call { callee, args, .. } = value
             && let Some(wait) = self.wait_of(callee)
         {
             let control = self.control_call(&wait);
@@ -204,15 +203,8 @@ impl Lowerer<'_> {
 
     /// `a.b.c` as a dotted path, when the source does not bind `a`.
     pub(super) fn unbound_path(&self, expr: &ast::Expr) -> Option<String> {
-        match expr {
-            ast::Expr::Ident(name, _) => (!self.is_bound(name)).then(|| name.clone()),
-            ast::Expr::Member {
-                object,
-                property: ast::MemberProperty::Field(field),
-                ..
-            } => Some(format!("{}.{field}", self.unbound_path(object)?)),
-            _ => None,
-        }
+        let (root, path) = super::calls::static_path(expr)?;
+        (!self.is_bound(root)).then_some(path)
     }
 
     /// The arguments of a wait, evaluated left to right, as the atoms its

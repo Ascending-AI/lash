@@ -356,3 +356,31 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
         std::collections::BTreeSet::from(["items.sort".into(), "other.fetch".into()])
     );
 }
+
+/// FIG-6556: discovery is lexical even when lowering refuses earlier code;
+/// bare unknown names never become deferred tool authority.
+#[test]
+fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
+    for source in [
+        "Math.random(); workflows_create(); await tools.lookup({ nested: other.fetch({}) });",
+        "(1).toLocaleString(); workflows_create(); await tools.lookup({ nested: other.fetch({}) });",
+    ] {
+        let calls = crate::Parser::default()
+            .tool_calls(
+                source,
+                &lash_kernel_dialect::Environment {
+                    library: super::library(),
+                    effects: &Default::default(),
+                    controls: &Default::default(),
+                    tool_roots: &Default::default(),
+                },
+                lash_kernel_dialect::CellEnvironment::first(),
+            )
+            .expect("discovery does not lower unrelated refusals");
+        assert_eq!(
+            calls,
+            std::collections::BTreeSet::from(["tools.lookup".into(), "other.fetch".into()]),
+            "{source}"
+        );
+    }
+}

@@ -27,6 +27,7 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod async_fn;
 mod calls;
+pub(crate) use calls::tool_calls;
 mod expressions;
 mod functions;
 mod lazy;
@@ -280,7 +281,6 @@ struct FunctionFrame {
 
 pub(crate) struct Lowerer<'a> {
     source: &'a str,
-    calls: Option<&'a mut BTreeSet<String>>,
     /// The entries of a workflow module, as they are lowered; `None` for a
     /// cell.
     module: Option<workflow::Module>,
@@ -369,16 +369,6 @@ pub(crate) fn lower(
     environment: &Environment<'_>,
     mode: Mode<'_>,
 ) -> Lowering<Lowered> {
-    lower_with_calls(program, source, environment, mode, None)
-}
-
-pub(crate) fn lower_with_calls(
-    program: &ast::Program,
-    source: &str,
-    environment: &Environment<'_>,
-    mode: Mode<'_>,
-    calls: Option<&mut BTreeSet<String>>,
-) -> Lowering<Lowered> {
     let (cell, module) = match mode {
         Mode::Cell(cell) => (cell, None),
         Mode::Module => (CellEnvironment::first(), Some(workflow::Module::new())),
@@ -391,7 +381,6 @@ pub(crate) fn lower_with_calls(
     taken.extend(cell.bindings.iter().map(|name| name.as_str().to_string()));
     let mut lowerer = Lowerer {
         source,
-        calls,
         module,
         library: environment.library,
         effects: environment.effects,
