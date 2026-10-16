@@ -50,11 +50,7 @@ const ANCESTORS: &[&str] = &["Function.prototype", "Error.prototype", "Object.pr
 /// The generated sources that come before the member readers, in the order
 /// they must be defined.
 pub(crate) fn sources(table: &Table) -> Vec<String> {
-    vec![
-        READ.to_string(),
-        CALL_MEMBER.to_string(),
-        in_operator(table),
-    ]
+    vec![READ.to_string(), in_operator(table)]
 }
 
 fn header(uses: impl IntoIterator<Item = String>) -> String {
@@ -400,17 +396,3 @@ fn in_operator(table: &Table) -> String {
         common.join(", ")
     )
 }
-
-/// `target.key(args)` where neither a row nor a built-in has the name: the
-/// member, called with the object as `this`.
-const CALL_MEMBER: &str = "use ts.read\nuse ts.call_value\n\
-function ts.call_member(target: Any, key: Any, args: List(Any)) -> Any
-kernel 1
-errors \"type_error\"
-charge sum(16, deep(key))
-body {
-  let member = invoke ts.read(target, key)
-  let outcome = invoke ts.call_value(member, target, key, args)
-  return outcome
-}
-";

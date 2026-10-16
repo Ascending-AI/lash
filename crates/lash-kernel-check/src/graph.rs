@@ -10,7 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    EffectName, FunctionId, JoinMode, Literal, Name, Signature, Site, Type, Unit,
+    EffectName, FunctionId, JoinMode, Literal, Name, Protocol, Signature, Site, Type, Unit,
 };
 
 macro_rules! dense_id {
@@ -232,11 +232,17 @@ pub enum StmtNode {
     For {
         binding: BindingId,
         iterable: NodeId,
+        /// The protocol the loop opens and steps its value with, if any
+        /// (`K-ITER-005`).
+        via: Option<Protocol>,
         body: NodeId,
+        /// What runs when the loop ends but by `break`, when it is written.
+        else_block: Option<NodeId>,
     },
     While {
         condition: NodeId,
         body: NodeId,
+        else_block: Option<NodeId>,
     },
     /// `target` is the loop it ends.
     Break {
@@ -450,8 +456,23 @@ impl GraphNode {
                     then_block,
                     else_block,
                 } => out.extend([*condition, *then_block, *else_block]),
-                StmtNode::For { iterable, body, .. } => out.extend([*iterable, *body]),
-                StmtNode::While { condition, body } => out.extend([*condition, *body]),
+                StmtNode::For {
+                    iterable,
+                    body,
+                    else_block,
+                    ..
+                } => {
+                    out.extend([*iterable, *body]);
+                    out.extend(else_block);
+                }
+                StmtNode::While {
+                    condition,
+                    body,
+                    else_block,
+                } => {
+                    out.extend([*condition, *body]);
+                    out.extend(else_block);
+                }
                 StmtNode::Break { .. } | StmtNode::Continue { .. } => {}
                 StmtNode::Return { value }
                 | StmtNode::Throw { value }
@@ -554,7 +575,8 @@ pub enum EdgeKind {
     Next,
     /// From an `if` to its first statement when the condition holds.
     Then,
-    /// From an `if` to its first statement when the condition does not.
+    /// From an `if` to its first statement when the condition does not;
+    /// from a loop to its `else` block's when it ends but by `break`.
     Else,
     /// From a loop or a `try` into its body.
     Body,

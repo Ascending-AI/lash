@@ -36,6 +36,9 @@ fn scan(
     let mut pending = vec![Node::Block(block)];
     while let Some(node) = pending.pop() {
         match node {
+            Node::Stmt(lash_kernel_doc::Stmt::For { via: Some(via), .. }) => {
+                functions.extend(via.functions())
+            }
             Node::Block(_) | Node::Stmt(_) => {}
             Node::Expr(expr) => match expr {
                 Expr::Call { function, .. } => {

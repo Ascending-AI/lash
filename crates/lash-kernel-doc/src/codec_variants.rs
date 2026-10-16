@@ -86,8 +86,14 @@ impl CodecVariant for Stmt {
             Self::Remove { .. } => 2,
             Self::Do { .. } => 3,
             Self::If { .. } => 4,
-            Self::For { .. } => 5,
-            Self::While { .. } => 6,
+            // A loop with a protocol or an `else` takes a number of its own,
+            // so that every loop without either keeps its encoding.
+            Self::For {
+                via: None,
+                else_block,
+                ..
+            } if else_block.is_empty() => 5,
+            Self::While { else_block, .. } if else_block.is_empty() => 6,
             Self::Break => 7,
             Self::Continue => 8,
             Self::Return { .. } => 9,
@@ -96,6 +102,8 @@ impl CodecVariant for Stmt {
             Self::Print { .. } => 12,
             Self::Finish { .. } => 13,
             Self::Fail { .. } => 14,
+            Self::For { .. } => 15,
+            Self::While { .. } => 16,
         }
     }
 }

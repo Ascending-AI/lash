@@ -25,6 +25,13 @@ py.fail	Python fail
 py.float	Python float
 py.float_text	Python float text
 py.floordiv	Python floordiv
+py.for_in.check	Python for check
+py.for_in.item	Python for item
+py.for_in.items	Python for items
+py.for_in.keys	Python for keys
+py.for_in.open	Python for open
+py.for_in.value	Python for value
+py.for_in.values	Python for values
 py.format	Python format
 py.format.exponent	Python format exponent
 py.format.group	Python format group
@@ -35,9 +42,6 @@ py.index	Python index
 py.int	Python int
 py.is_number	Python is number
 py.isinstance	Python isinstance
-py.iter	Python iter
-py.iter_guard	Python iter guard
-py.iter_size	Python iter size
 py.length	Python length
 py.method.add	Python method add
 py.method.append	Python method append

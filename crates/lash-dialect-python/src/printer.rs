@@ -236,20 +236,43 @@ impl Renderer<'_> {
             k::Stmt::For {
                 binding,
                 iterable,
+                via,
                 body,
+                else_block,
             } => {
                 self.out.write("with k.for_(");
                 self.name(binding);
                 self.scope.introduce(binding);
+                // A protocol's hooks follow the binding, `None` for one it
+                // omits.
+                if let Some(via) = via {
+                    for hook in [Some(via.open), via.next, via.item, via.check] {
+                        self.out.write(", ");
+                        match hook {
+                            Some(id) => self.helper(&id),
+                            None => self.out.write("None"),
+                        }
+                    }
+                }
                 self.suite();
                 self.expr(iterable);
                 self.block(body);
+                if !else_block.is_empty() {
+                    self.block(else_block);
+                }
             }
-            k::Stmt::While { condition, body } => {
+            k::Stmt::While {
+                condition,
+                body,
+                else_block,
+            } => {
                 self.out.write("with k.while_(");
                 self.suite();
                 self.expr(condition);
                 self.block(body);
+                if !else_block.is_empty() {
+                    self.block(else_block);
+                }
             }
             k::Stmt::Return { value }
             | k::Stmt::Throw { value }

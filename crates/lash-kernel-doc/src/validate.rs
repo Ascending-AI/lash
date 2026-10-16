@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 
 use crate::ast::{
     ActExpr, ActKind, Action, Atom, Block, Callee, Closure, Expr, Literal, Member, Node, Place,
-    Rhs, Site, Stmt, Unit,
+    Protocol, Rhs, Site, Stmt, Unit,
 };
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
@@ -496,17 +496,28 @@ impl Scope<'_> {
             Stmt::For {
                 binding,
                 iterable,
+                via,
                 body,
+                else_block,
             } => {
                 check_name(binding, Some(site))?;
+                if let Some(via) = via {
+                    self.check_protocol(via, site)?;
+                }
                 self.check_expr(iterable, &child())?;
-                self.check_block(body, &child(), true)
+                self.check_block(body, &child(), true)?;
+                self.check_block(else_block, &child(), in_loop)
             }
-            Stmt::While { condition, body } => {
+            Stmt::While {
+                condition,
+                body,
+                else_block,
+            } => {
                 let at = child();
                 nested_action(condition, &at, "a `while` condition")?;
                 self.check_expr(condition, &at)?;
-                self.check_block(body, &child(), true)
+                self.check_block(body, &child(), true)?;
+                self.check_block(else_block, &child(), in_loop)
             }
             Stmt::Break => loop_control(in_loop, "break", site),
             Stmt::Continue => loop_control(in_loop, "continue", site),
@@ -735,6 +746,32 @@ impl Scope<'_> {
                 check_arity(definition.name.as_str(), given, &definition.signature, site)
             }
         }
+    }
+
+    /// A loop protocol's functions: each listed and taking its hook's
+    /// arguments, and, in a body beside a native implementation, native
+    /// (`K-ITER-005`, `K-LIB-004`).
+    fn check_protocol(&self, via: &Protocol, site: &Site) -> Result<(), Invalid> {
+        let hooks = [
+            (Some(&via.open), 1),
+            (via.next.as_ref(), 1),
+            (via.item.as_ref(), 2),
+            (via.check.as_ref(), 4),
+        ];
+        for (function, given) in hooks {
+            let Some(function) = function else { continue };
+            let definition = self.listed(function, site)?;
+            if self.native_body && !definition.has_native() {
+                return Err(invalid(
+                    Some(site),
+                    InvalidReason::NativeBodyMayWait {
+                        form: StatementForm::Call,
+                    },
+                ));
+            }
+            check_arity(definition.name.as_str(), given, &definition.signature, site)?;
+        }
+        Ok(())
     }
 
     /// The parameter count of the declared function `name`.

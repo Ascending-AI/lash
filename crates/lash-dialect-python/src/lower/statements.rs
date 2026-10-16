@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{Closure, Expr, Literal, Member, Name, Place, Rhs, Stmt};
+use lash_kernel_doc::{Closure, Expr, Literal, Member, Name, Place, Protocol, Rhs, Stmt};
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -18,18 +18,8 @@ pub(super) enum Body<'a> {
     Value(&'a PyExpr),
 }
 
-/// What a `for` walks, with checkpointed Python iterator state.
-pub(super) type ForHeader = (Operand, Option<IterGuard>);
-
-pub(super) struct IterGuard {
-    watched: Operand,
-    size: Operand,
-    remaining: Name,
-}
-
-/// The built-in calls whose result is a fresh list, which no loop over it
-/// can find changed in size.
-const FRESH_ITERABLES: &[&str] = &["range", "enumerate", "zip", "sorted", "reversed", "list"];
+/// What a `for` walks, and the protocol it walks it through.
+pub(super) type ForHeader = (Operand, Protocol);
 
 impl Lowerer<'_> {
     pub(super) fn statements(&mut self, body: &[PyStmt]) -> Lowering<()> {
@@ -131,24 +121,18 @@ impl Lowerer<'_> {
             }
             PyStmt::Pass(_) => Ok(()),
             PyStmt::Break(node) => {
-                let Some(flag) = self.scope().loops.last().cloned() else {
+                if self.scope().loops == 0 {
                     return Err(diagnostics::diagnostic(
                         Code::Syntax,
                         "`break` outside a loop",
                         node.range,
                     ));
-                };
-                if let Some(flag) = flag {
-                    self.emit(Stmt::Assign {
-                        place: Place::Variable(flag),
-                        value: Rhs::Expr(Expr::Literal(Literal::Bool(true))),
-                    });
                 }
                 self.emit(Stmt::Break);
                 Ok(())
             }
             PyStmt::Continue(node) => {
-                if self.scope().loops.is_empty() {
+                if self.scope().loops == 0 {
                     return Err(diagnostics::diagnostic(
                         Code::Syntax,
                         "`continue` outside a loop",
@@ -305,143 +289,123 @@ impl Lowerer<'_> {
         }
     }
 
-    /// A variable that records a `break`, declared false.
-    pub(super) fn break_flag(&mut self) -> Name {
-        let flag = self.fresh("broke");
-        self.emit(Stmt::Let {
-            name: flag.clone(),
-            value: Rhs::Expr(Expr::Literal(Literal::Bool(false))),
-        });
-        flag
-    }
-
     fn while_loop(
         &mut self,
         while_loop: &ast::StmtWhile,
         span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
-        let flag = (!while_loop.orelse.is_empty() && scope::breaks(&while_loop.body))
-            .then(|| self.break_flag());
-        // A test that needs statements of its own runs at the top of each
-        // iteration, inside the block.
-        let mut simple = None;
-        let body = self.block(|this| {
-            let test = this.expr(&while_loop.test)?;
-            let condition = this.truth(test)?;
-            if this.buf.is_empty() {
-                simple = Some(condition);
-            } else {
-                let done = this.not(condition)?;
-                let leave = this.single(Stmt::Break);
-                this.emit_if(done, leave, Buf::default());
-            }
-            this.scope_mut().loops.push(flag.clone());
-            let result = this.statements(&while_loop.body);
-            this.scope_mut().loops.pop();
-            result
-        })?;
-        self.span = span;
-        let condition = simple.unwrap_or(Expr::Literal(Literal::Bool(true)));
-        self.emit_while(condition, body);
-        self.loop_else(flag, None, &while_loop.orelse, span)
+        self.python_while(
+            |this| {
+                let test = this.expr(&while_loop.test)?;
+                this.truth(test)
+            },
+            |this| this.statements(&while_loop.body),
+            &while_loop.orelse,
+            span,
+        )
     }
 
-    /// What follows a loop that was not left by `break`: the size check of
-    /// a dict or set that was walked, then the `else` suite.
-    pub(super) fn loop_else(
+    /// A Python `while`, whose test `test` lowers and whose suite `body`
+    /// lowers, as a kernel `while` with its `else`. A test that needs
+    /// statements of its own runs at the top of each pass, inside the
+    /// loop: it leaves by `break` when the loop has no `else`, and otherwise
+    /// records its answer for the loop's own test, so that the `else` runs.
+    pub(super) fn python_while(
         &mut self,
-        flag: Option<Name>,
-        guard: Option<&IterGuard>,
+        test: impl FnOnce(&mut Self) -> Lowering<Expr>,
+        body: impl FnOnce(&mut Self) -> Lowering<()>,
         orelse: &[PyStmt],
         span: Option<lash_kernel_doc::Span>,
     ) -> Lowering<()> {
-        let tail = |this: &mut Self| -> Lowering<()> {
-            if let Some(guard) = guard {
-                this.iter_guard(guard, false)?;
+        let mut simple = None;
+        let mut going = None;
+        let block = self.block(|this| {
+            let condition = test(this)?;
+            if this.buf.is_empty() {
+                simple = Some(condition);
+                return this.loop_body(body);
             }
-            this.statements(orelse)
+            if orelse.is_empty() {
+                let done = this.not(condition)?;
+                let leave = this.single(Stmt::Break);
+                this.emit_if(done, leave, Buf::default());
+                return this.loop_body(body);
+            }
+            let go = this.fresh("go");
+            this.emit(Stmt::Assign {
+                place: Place::Variable(go.clone()),
+                value: Rhs::Expr(condition),
+            });
+            let pass = this.block(|this| this.loop_body(body))?;
+            this.emit_if(Expr::Variable(go.clone()), pass, Buf::default());
+            going = Some(go);
+            Ok(())
+        })?;
+        let orelse = self.block(|this| this.statements(orelse))?;
+        self.span = span;
+        let condition = match (simple, going) {
+            (Some(condition), _) => condition,
+            (None, Some(go)) => {
+                self.emit(Stmt::Let {
+                    name: go.clone(),
+                    value: Rhs::Expr(Expr::Literal(Literal::Bool(true))),
+                });
+                Expr::Variable(go)
+            }
+            (None, None) => Expr::Literal(Literal::Bool(true)),
         };
-        match flag {
-            Some(flag) => {
-                let unbroken = self.not(Expr::Variable(flag))?;
-                let then_block = self.block(tail)?;
-                self.span = span;
-                self.emit_if(unbroken, then_block, Buf::default());
-                Ok(())
-            }
-            None => tail(self),
-        }
+        self.emit_while(condition, block, orelse);
+        Ok(())
     }
 
-    /// What a `for` walks, and the dict or set whose size it must find
-    /// unchanged, with that size.
+    /// The suite of a loop, where `break` and `continue` are this loop's.
+    fn loop_body(&mut self, body: impl FnOnce(&mut Self) -> Lowering<()>) -> Lowering<()> {
+        self.scope_mut().loops += 1;
+        let result = body(self);
+        self.scope_mut().loops -= 1;
+        result
+    }
+
+    /// What a `for` walks, and the protocol it walks it through
+    /// (`K-ITER-005`): a value through `py.for_in`, which checks a dict or
+    /// a set for changes as CPython's iterator does (FIG-6406), and a dict
+    /// view through its own protocol over the dict.
     pub(super) fn for_header(&mut self, iter: &PyExpr) -> Lowering<ForHeader> {
         if let PyExpr::Call(call) = iter {
             match call.func.as_ref() {
-                // `for k, v in d.items()`: the view is walked as a list,
-                // and the dict itself is watched.
+                // `for k, v in d.items()`: the dict itself is walked, and
+                // each pass binds what the view would give.
                 PyExpr::Attribute(attribute)
                     if call.arguments.is_empty()
                         && matches!(attribute.attr.id.as_str(), "items" | "keys" | "values")
                         && !self.is_asyncio(&attribute.value) =>
                 {
                     let receiver = self.expr(&attribute.value)?;
-                    let receiver = self.pin(receiver);
-                    let method = format!("py.method.{}", attribute.attr.id.as_str());
-                    let walked = self.invoke(&method, std::slice::from_ref(&receiver), Ty::List)?;
-                    let guard = self.iter_state(receiver)?;
-                    return Ok((walked, Some(guard)));
-                }
-                PyExpr::Name(name)
-                    if FRESH_ITERABLES.contains(&name.id.as_str())
-                        && self.variable(name.id.as_str()).is_none() =>
-                {
-                    let walked = self.expr(iter)?;
-                    return Ok((self.pin(walked), None));
+                    let view = attribute.attr.id.as_str();
+                    let item = match view {
+                        "items" => Some(self.function("py.for_in.item")?),
+                        "values" => Some(self.function("py.for_in.value")?),
+                        _ => None,
+                    };
+                    let via = Protocol {
+                        open: self.function(&format!("py.for_in.{view}"))?,
+                        next: None,
+                        item,
+                        check: Some(self.function("py.for_in.check")?),
+                    };
+                    return Ok((receiver, via));
                 }
                 _ => {}
             }
         }
-        if matches!(
-            iter,
-            PyExpr::List(_) | PyExpr::Tuple(_) | PyExpr::ListComp(_) | PyExpr::Generator(_)
-        ) {
-            let walked = self.expr(iter)?;
-            return Ok((self.pin(walked), None));
-        }
         let value = self.expr(iter)?;
-        let walked = self.invoke("py.iter", &[value], Ty::Unknown)?;
-        let guard = self.iter_state(walked.clone())?;
-        Ok((walked, Some(guard)))
-    }
-
-    fn iter_state(&mut self, watched: Operand) -> Lowering<IterGuard> {
-        let size = self.invoke("py.iter_size", std::slice::from_ref(&watched), Ty::Int)?;
-        let remaining = self.temp();
-        self.emit(Stmt::Let {
-            name: remaining.clone(),
-            value: Rhs::Expr(size.expr.clone()),
-        });
-        Ok(IterGuard {
-            watched,
-            size,
-            remaining,
-        })
-    }
-
-    pub(super) fn iter_guard(&mut self, guard: &IterGuard, more: bool) -> Lowering<()> {
-        let next = self.invoke(
-            "py.iter_guard",
-            &[
-                guard.watched.clone(),
-                guard.size.clone(),
-                Operand::temp(guard.remaining.clone(), Ty::Int),
-                Operand::literal(Literal::Bool(more), Ty::Bool),
-            ],
-            Ty::Int,
-        )?;
-        self.store(Place::Variable(guard.remaining.clone()), next);
-        Ok(())
+        let via = Protocol {
+            open: self.function("py.for_in.open")?,
+            next: None,
+            item: None,
+            check: Some(self.function("py.for_in.check")?),
+        };
+        Ok((value, via))
     }
 
     fn for_loop(
@@ -464,27 +428,19 @@ impl Lowerer<'_> {
         {
             return self.range_loop(for_loop, call, span);
         }
-        let (walked, guard) = self.for_header(&for_loop.iter)?;
-        let breaks = scope::breaks(&for_loop.body);
-        let flag =
-            (breaks && (guard.is_some() || !for_loop.orelse.is_empty())).then(|| self.break_flag());
+        let (walked, via) = self.for_header(&for_loop.iter)?;
         let binding = self.temp();
         let body = self.block(|this| {
-            if let Some(guard) = &guard {
-                this.iter_guard(guard, true)?;
-            }
             this.assign(
                 &for_loop.target,
                 Operand::temp(binding.clone(), Ty::Unknown),
             )?;
-            this.scope_mut().loops.push(flag.clone());
-            let result = this.statements(&for_loop.body);
-            this.scope_mut().loops.pop();
-            result
+            this.loop_body(|this| this.statements(&for_loop.body))
         })?;
+        let orelse = self.block(|this| this.statements(&for_loop.orelse))?;
         self.span = span;
-        self.emit_for(binding, walked.expr, body);
-        self.loop_else(flag, guard.as_ref(), &for_loop.orelse, span)
+        self.emit_for(binding, walked.expr, Some(via), body, orelse);
+        Ok(())
     }
 
     /// Writes `value` to an assignment target.
@@ -1129,7 +1085,7 @@ impl Lowerer<'_> {
             integer_locals,
             bound: vec![params.iter().cloned().collect::<BTreeSet<String>>()],
             handlers: active.iter().cloned().map(Active::Passed).collect(),
-            loops: Vec::new(),
+            loops: 0,
         });
         let span = self.span;
         let block = self.block(|this| {

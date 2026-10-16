@@ -220,7 +220,9 @@ impl Linker {
             Stmt::For {
                 binding,
                 iterable,
+                via,
                 body,
+                else_block,
             } => {
                 let iterable = self.expr(iterable, slots.take(), id, scope);
                 self.loops.push(id);
@@ -234,18 +236,34 @@ impl Linker {
                     Some(id),
                 );
                 self.loops.pop();
+                // The `else` runs after the loop: a `break` in it is the
+                // enclosing loop's.
+                let else_block = (!else_block.is_empty())
+                    .then(|| self.plain_block(else_block, slots.take(), id, scope));
                 StmtNode::For {
                     binding: declared[0],
                     iterable,
+                    via: *via,
                     body,
+                    else_block,
                 }
             }
-            Stmt::While { condition, body } => {
+            Stmt::While {
+                condition,
+                body,
+                else_block,
+            } => {
                 let condition = self.expr(condition, slots.take(), id, scope);
                 self.loops.push(id);
                 let body = self.plain_block(body, slots.take(), id, scope);
                 self.loops.pop();
-                StmtNode::While { condition, body }
+                let else_block = (!else_block.is_empty())
+                    .then(|| self.plain_block(else_block, slots.take(), id, scope));
+                StmtNode::While {
+                    condition,
+                    body,
+                    else_block,
+                }
             }
             // Validation has refused a `break` or `continue` outside a
             // loop, so there is one.

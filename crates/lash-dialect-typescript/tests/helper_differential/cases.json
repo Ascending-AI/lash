@@ -8041,6 +8041,21 @@
     "source": "d={'0':1,'1':1,'2':1}\nfor k in d:\n    del d[k]\n    d[k+'x']=1\n"
   },
   {
+    "id": "python/iteration/dict-views-live",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nr=[]\nfor k, v in d.items():\n    d['b']=20\n    r.append([k, v])\nfor v in d.values():\n    r.append(v)\nfor k in d.keys():\n    r.append(k)\nawait observe(r)\n"
+  },
+  {
+    "id": "python/iteration/dict-view-resized",
+    "dialect": "python",
+    "source": "d={'a':1,'b':2}\nseen=[]\ntry:\n    for k, v in d.items():\n        seen.append(k)\n        d[k+'x']=v\nexcept RuntimeError as e:\n    await observe(str(e))\nawait observe(seen)\n"
+  },
+  {
+    "id": "python/iteration/loop-else",
+    "dialect": "python",
+    "source": "r=[]\nfor x in [1, 2]:\n    r.append(x)\nelse:\n    r.append('done')\nfor x in [1, 2]:\n    break\nelse:\n    r.append('never')\nn=0\nwhile n < 2:\n    n=n+1\nelse:\n    r.append(n)\nawait observe(r)\n"
+  },
+  {
     "id": "typescript/operand-order/compound",
     "dialect": "typescript",
     "source": "const o = { n: 1 }; o.n += (o.n = 2); await observe(o.n);"

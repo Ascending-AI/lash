@@ -1216,55 +1216,37 @@ body {
   return 0
 }
 
-# What a `for` walks: a list, tuple, dict or set as it is, a host record's
-# keys, and a str as the list of its characters.
-function py.iter(value: Any) -> Any
+# `for`'s protocol (`K-ITER-005`): what a loop walks of a value. A list, a
+# tuple, a dict, a set and a str are walked live by the loop's own cursor, a
+# str by code point; a record by a snapshot of its keys.
+function py.for_in.open(value: Any) -> Any
 kernel 1
-charge sum(4, size(value))
+charge 4
 body {
   let k = kind(value)
-  if same(k, "text") {
-    return text.split(value, "")
-  }
   if same(k, "record") {
     return record.keys(value)
   }
-  for walked in ["list", "tuple", "map", "set"] {
+  for walked in ["list", "tuple", "map", "set", "text"] {
     if same(k, walked) {
       return value
     }
   }
   let name = invoke py.type(value)
-  let hoisted20 = text.join(["'", name, "' object is not iterable"], "")
-  do invoke py.fail("TypeError", hoisted20)
+  let message = text.join(["'", name, "' object is not iterable"], "")
+  do invoke py.fail("TypeError", message)
   return null
 }
 
-# The size a dict or a set has when a loop over it starts, and -1 for
-# anything else.
-function py.iter_size(value: Any) -> Int
-kernel 1
-charge 3
-body {
-  let k = kind(value)
-  if same(k, "map") {
-    return map.len(value)
-  }
-  if same(k, "set") {
-    return set.len(value)
-  }
-  return -1
-}
-
-# Size is checked even at exhaustion. Only a dict with an actual next
-# entry checks/decrements the remaining-entry budget; sets do not enforce it.
-function py.iter_guard(value: Any, size: Int, remaining: Int, more: Bool) -> Int
+# A dict or a set walked by a loop is checked before each step and at
+# exhaustion against `size`, its size when the loop opened it. A dict also
+# spends one of its `remaining` entries per step it finds one, and refuses
+# an entry it did not expect, as CPython's iterator does (FIG-6406). Gives
+# what remains.
+function py.for_in.check(value: Any, size: Int, remaining: Int, more: Bool) -> Int
 kernel 1
 charge 4
 body {
-  if lt(size, 0) {
-    return remaining
-  }
   if same(kind(value), "map") {
     if bool.not(eq(map.len(value), size)) {
       do invoke py.fail("RuntimeError", "dictionary changed size during iteration")

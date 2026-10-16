@@ -199,6 +199,7 @@ fn readable_controls_names_and_implicit_else_preserve_statement_boundaries() {
             k::Stmt::For {
                 binding: "item".into(),
                 iterable: k::Expr::List(vec![variable("λ")]),
+                via: None,
                 body: vec![k::Stmt::If {
                     condition: variable("item"),
                     then_block: vec![k::Stmt::Print {
@@ -206,10 +207,12 @@ fn readable_controls_names_and_implicit_else_preserve_statement_boundaries() {
                     }],
                     else_block: vec![],
                 }],
+                else_block: vec![],
             },
             k::Stmt::While {
                 condition: literal(k::Literal::Bool(false)),
                 body: vec![k::Stmt::Break],
+                else_block: vec![],
             },
             k::Stmt::Try(k::TryStmt {
                 body: vec![],
@@ -633,10 +636,6 @@ fn unavoidable() -> Vec<lash_kernel_dialect::readability::Unavoidable> {
         (
             "helper_ts_pad",
             "argument padding lowering inserts; no source spells it",
-        ),
-        (
-            "helper_ts_iterate",
-            "an iteration step lowering inserts; no source spells it",
         ),
         (
             "helper_ts_array_iterator",

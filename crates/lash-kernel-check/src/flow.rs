@@ -192,10 +192,22 @@ impl Flow<'_> {
                 taken.merge(self.block(*then_block, routes));
                 taken.merge(self.block(*else_block, routes));
             }
-            StmtNode::For { body, .. } | StmtNode::While { body, .. } => {
+            StmtNode::For {
+                body, else_block, ..
+            }
+            | StmtNode::While {
+                body, else_block, ..
+            } => {
                 let again = Target::Node(id);
                 self.edge(id, self.entry(*body, again), EdgeKind::Body);
-                self.edge(id, routes.next, EdgeKind::Next);
+                // The loop ends into its `else`; a `break` leaves past it.
+                match else_block {
+                    Some(else_block) => {
+                        self.edge(id, self.entry(*else_block, routes.next), EdgeKind::Else);
+                        taken.merge(self.block(*else_block, routes));
+                    }
+                    None => self.edge(id, routes.next, EdgeKind::Next),
+                }
                 let inner = self.block(
                     *body,
                     Routes {

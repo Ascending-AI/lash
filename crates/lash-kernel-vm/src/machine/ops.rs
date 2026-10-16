@@ -29,12 +29,11 @@ use lash_kernel_doc::{EntityId, Identity, NativeCall, NativeError, TaskId, Value
 use num_traits::ToPrimitive;
 
 use super::exec::Call;
-use super::stream::{Ran, Running};
-use super::{Control, Cursor, Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
-use crate::compile::{Charge, CodeId, Executable, Form, LibId, LibRun, StmtId};
+use super::{Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
+use crate::compile::{Charge, CodeId, Executable, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::heap::within_depth;
-use crate::interface::{Bound, Host};
+use crate::interface::Bound;
 use crate::observe::Event;
 use lash_kernel_doc::NativeHeap;
 use lash_kernel_doc::heap::{FieldName, IntRef};
@@ -611,145 +610,6 @@ impl KernelMachine {
                 Ok(Answer::Done)
             }
             Err(value) => Err(Interrupt::raised(value)),
-        }
-    }
-
-    /// Starts a `for` over the value in `iterable` (`K-ITER-002`): raises
-    /// `type_error` unless it is a list, a tuple, a map or a set, then takes
-    /// the first iteration step.
-    pub(super) fn for_start(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-        stmt: StmtId,
-        iterable: Reg,
-    ) -> Status {
-        let cursor = match self.take(iterable) {
-            Value::List(id) => Cursor::List(id, 0),
-            Value::Tuple(items) => Cursor::Tuple(items, 0),
-            Value::Map(id) => Cursor::Map(id, None),
-            Value::Set(id) => Cursor::Set(id, None),
-            _ => {
-                return raise(
-                    "type_error",
-                    "`for` iterates a list, a tuple, a map or a set",
-                );
-            }
-        };
-        self.frame(task)?.control.push(Control::For {
-            stmt,
-            cursor,
-            started: 0,
-        });
-        self.next_iteration(task, host, exe)
-    }
-
-    /// The iteration step: tests the innermost loop's continuation and
-    /// starts its next iteration, `Step`, or ends it, `Done` (`K-ITER-002`,
-    /// `K-ITER-003`, `K-FORM-013`).
-    pub(super) fn next_iteration(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-    ) -> Status {
-        self.charge(self.costs.loop_test)?;
-        // Borrowed by field, so that the loop's position can be read
-        // against the heap.
-        let Some(frame) = self
-            .tasks
-            .get_mut(task.0 as usize)?
-            .ok_or_else(|| fault("a running task is missing"))?
-            .frames
-            .last_mut()?
-        else {
-            return Err(fault("a running task has no frame").into());
-        };
-        match frame.control.last_mut() {
-            Some(Control::For {
-                stmt,
-                cursor,
-                started,
-            }) => {
-                let Form::For { binding, body, .. } = &exe.stmt(*stmt).form else {
-                    return Err(fault("a `for` loop is not at a `for`").into());
-                };
-                let element = match cursor {
-                    Cursor::List(list, position) => {
-                        let element = self.heap.list_get(*list, *position as u64)?;
-                        *position += usize::from(element.is_some());
-                        element
-                    }
-                    Cursor::Tuple(items, position) => {
-                        let element = self.heap.tuple_get(items, *position as u64)?;
-                        *position += usize::from(element.is_some());
-                        element
-                    }
-                    Cursor::Map(id, last) | Cursor::Set(id, last) => {
-                        let next = self.heap.table_after(*id, *last)?;
-                        next.map(|(sequence, key)| {
-                            *last = Some(sequence);
-                            key
-                        })
-                    }
-                };
-                match element {
-                    Some(element) => {
-                        *started += 1;
-                        self.push_block(task, *body)?;
-                        self.bind(task, binding.at, binding.shared, element)?;
-                        Ok(Flow::Step)
-                    }
-                    None => {
-                        frame.control.pop();
-                        Ok(Flow::Done)
-                    }
-                }
-            }
-            Some(Control::While { stmt, .. }) => {
-                let running = Running::new(task, exe, *stmt);
-                if !self.ran.is_empty()
-                    && let Some(statement) = running.stmt.ordinal
-                    && let Some(ordinal) = exe.condition_ordinals.get(&statement.get())
-                {
-                    self.ran[*ordinal as usize] += 1;
-                }
-                let Form::While { test, .. } = &running.stmt.form else {
-                    return Err(fault("a `while` loop is not at a `while`").into());
-                };
-                match self.run(host, &running, test.start as usize)? {
-                    Ran::Tested(value) => self.tested(task, value),
-                    // The condition stands at a call made inside it.
-                    Ran::Step => Ok(Flow::Step),
-                    _ => Err(fault("a `while` condition gave no value").into()),
-                }
-            }
-            _ => Err(fault("no loop is innermost").into()),
-        }
-    }
-
-    /// The innermost `while` loop's condition gave `value`: its next
-    /// iteration starts, `Step`, or it ends, `Done` (`K-FORM-013`).
-    pub(super) fn tested(&mut self, task: TaskId, value: bool) -> Status {
-        let frame = self.frame(task)?;
-        let Some(Control::While { stmt, started }) = frame.control.last_mut() else {
-            return Err(fault("a `while` condition stands in no `while` loop").into());
-        };
-        let Form::While { body, .. } = &frame.exe.stmt(*stmt).form else {
-            return Err(fault("a `while` loop is not at a `while`").into());
-        };
-        let body = *body;
-        match value {
-            true => {
-                *started += 1;
-                self.push_block(task, body)?;
-                Ok(Flow::Step)
-            }
-            false => {
-                frame.control.pop();
-                Ok(Flow::Done)
-            }
         }
     }
 }

@@ -422,6 +422,14 @@ impl Renderer<'_> {
             self.readable_block(else_block);
         }
     }
+    /// A loop's `else` suite, which an empty `else` has none of.
+    fn loop_else(&mut self, else_block: &k::Block) {
+        if !else_block.is_empty() {
+            self.padding();
+            self.out.write("else:\n");
+            self.readable_block(else_block);
+        }
+    }
     pub(super) fn readable_statement(&mut self, stmt: &k::Stmt) -> bool {
         match stmt {
             k::Stmt::Let {
@@ -525,24 +533,42 @@ impl Renderer<'_> {
             } if self.inline.contains(condition) => {
                 self.readable_if(condition, then_block, else_block, "if");
             }
+            // Python's `for` is a loop through `py.for_in`, or through a
+            // dict view's protocol when it walks the view; in a base that
+            // labels no such protocol, the kernel's own loop.
             k::Stmt::For {
                 binding,
                 iterable,
+                via,
                 body,
-            } if self.inline.contains(iterable) => {
+                else_block,
+            } if self.inline.contains(iterable)
+                && self.operators.native_loop(via.as_ref()).is_some() =>
+            {
                 self.out.write("for ");
                 self.name(binding);
                 self.scope.introduce(binding);
                 self.out.write(" in ");
                 self.inline_expr(iterable);
+                if let Some(Some(view)) = self.operators.native_loop(via.as_ref()) {
+                    self.out.write(".");
+                    self.out.write(view);
+                    self.out.write("()");
+                }
                 self.out.write(":\n");
                 self.readable_block(body);
+                self.loop_else(else_block);
             }
-            k::Stmt::While { condition, body } if self.inline.contains(condition) => {
+            k::Stmt::While {
+                condition,
+                body,
+                else_block,
+            } if self.inline.contains(condition) => {
                 self.out.write("while ");
                 self.inline_expr(condition);
                 self.out.write(":\n");
                 self.readable_block(body);
+                self.loop_else(else_block);
             }
             k::Stmt::Try(scope) if scope.catch.is_some() || scope.finally.is_some() => {
                 self.out.write("try:\n");

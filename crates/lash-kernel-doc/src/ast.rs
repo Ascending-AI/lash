@@ -48,15 +48,25 @@ pub enum Stmt {
         else_block: Block,
     },
     /// Runs `body` once per element of a collection, binding each to
-    /// `binding`.
+    /// `binding`, then `else_block` unless a `break` left the loop. With
+    /// `via`, a dialect's protocol opens the iterated value and steps it
+    /// (`K-ITER-005`).
     For {
         binding: Name,
         iterable: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        via: Option<Protocol>,
         body: Block,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        else_block: Block,
     },
+    /// Runs `body` while `condition` holds, then `else_block` unless a
+    /// `break` left the loop.
     While {
         condition: Expr,
         body: Block,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        else_block: Block,
     },
     Break,
     Continue,
@@ -78,6 +88,40 @@ pub enum Stmt {
     Fail {
         value: Expr,
     },
+}
+
+/// A dialect's iteration protocol: the library functions a `for … via`
+/// calls at its header, by identity (`K-ITER-005`). Each is listed in the
+/// manifest as any library function a document reaches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Protocol {
+    /// Takes the iterated value to what the loop walks: a list, a tuple, a
+    /// map, a set or a text, which the loop's own cursor walks, or any
+    /// other value, a driver that `next` steps.
+    pub open: FunctionId,
+    /// Steps a driver: an empty tuple when it is exhausted, else a tuple of
+    /// one item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<FunctionId>,
+    /// Takes what was walked and an item of it to the value bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<FunctionId>,
+    /// Checks a map or a set against its size when the loop opened it and
+    /// the items it may still give, after each step; gives that budget
+    /// anew.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<FunctionId>,
+}
+
+impl Protocol {
+    /// Its functions, in the order kernel text writes them.
+    pub fn functions(&self) -> impl Iterator<Item = &FunctionId> {
+        std::iter::once(&self.open)
+            .chain(self.next.as_ref())
+            .chain(self.item.as_ref())
+            .chain(self.check.as_ref())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -502,13 +546,30 @@ impl<'a> Node<'a> {
                     out.push(Node::Block(then_block));
                     out.push(Node::Block(else_block));
                 }
-                Stmt::For { iterable, body, .. } => {
+                // An empty `else` is no child, so a loop without one has
+                // the sites it always had.
+                Stmt::For {
+                    iterable,
+                    body,
+                    else_block,
+                    ..
+                } => {
                     out.push(Node::Expr(iterable));
                     out.push(Node::Block(body));
+                    if !else_block.is_empty() {
+                        out.push(Node::Block(else_block));
+                    }
                 }
-                Stmt::While { condition, body } => {
+                Stmt::While {
+                    condition,
+                    body,
+                    else_block,
+                } => {
                     out.push(Node::Expr(condition));
                     out.push(Node::Block(body));
+                    if !else_block.is_empty() {
+                        out.push(Node::Block(else_block));
+                    }
                 }
                 Stmt::Break | Stmt::Continue => {}
                 Stmt::Return { value }

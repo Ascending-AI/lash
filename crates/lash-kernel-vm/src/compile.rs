@@ -796,13 +796,19 @@ pub(crate) enum Form {
     For {
         site: Site,
         binding: Local,
+        /// The protocol hooks the loop opens and steps its value with
+        /// (`K-ITER-005`).
+        via: Option<Via>,
         body: BlockId,
+        /// What runs when the loop ends but by `break`.
+        else_block: Option<BlockId>,
     },
     While {
         site: Site,
         /// The condition's ops, which every iteration step runs.
         test: OpRange,
         body: BlockId,
+        else_block: Option<BlockId>,
     },
     Try {
         site: Site,
@@ -812,6 +818,15 @@ pub(crate) enum Form {
     },
     /// An action statement: `let`, an assignment or `do` of an action.
     Action(Action),
+}
+
+/// A loop protocol's hooks, compiled (`K-ITER-005`).
+#[derive(Clone, Copy)]
+pub(crate) struct Via {
+    pub(crate) open: LibId,
+    pub(crate) next: Option<LibId>,
+    pub(crate) item: Option<LibId>,
+    pub(crate) check: Option<LibId>,
 }
 
 impl Stmt {
@@ -830,7 +845,12 @@ impl Form {
                 then_block,
                 else_block,
             } => vec![*then_block, *else_block],
-            Form::For { body, .. } | Form::While { body, .. } => vec![*body],
+            Form::For {
+                body, else_block, ..
+            }
+            | Form::While {
+                body, else_block, ..
+            } => std::iter::once(*body).chain(*else_block).collect(),
             Form::Try {
                 body,
                 catch,
@@ -1237,8 +1257,25 @@ fn step_edges(codes: &[Code], blocks: &[Block], stmts: &[Stmt], base: Base) -> V
                     };
                     pending.extend([(*then_block, arm), (*else_block, arm)]);
                 }
-                Form::For { body, .. } | Form::While { body, .. } => {
+                // The `else` runs once the loop has left the frame's
+                // control: like an `if` arm, it is left with what the
+                // loop's own step leaves.
+                Form::For {
+                    body, else_block, ..
+                }
+                | Form::While {
+                    body, else_block, ..
+                } => {
                     pending.push((*body, TO_END));
+                    pending.extend(else_block.map(|block| {
+                        (
+                            block,
+                            StepEdge {
+                                leaves: edge.leaves + 1,
+                                next: edge.next,
+                            },
+                        )
+                    }));
                 }
                 Form::Try {
                     body,
@@ -1632,11 +1669,22 @@ impl Placer<'_> {
                 then_block,
                 else_block,
             } => blocks.extend([*then_block, *else_block]),
-            Form::For { binding, body, .. } => {
+            Form::For {
+                binding,
+                body,
+                else_block,
+                ..
+            } => {
                 self.local(binding);
                 blocks.push(*body);
+                blocks.extend(*else_block);
             }
-            Form::While { body, .. } => blocks.push(*body),
+            Form::While {
+                body, else_block, ..
+            } => {
+                blocks.push(*body);
+                blocks.extend(*else_block);
+            }
             Form::Try {
                 body,
                 catch,

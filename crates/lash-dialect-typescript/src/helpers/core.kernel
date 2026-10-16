@@ -1719,19 +1719,3 @@ body {
   }
   return {__ts_brand: (), __ts_type: "brand:ts.arguments", properties: properties, hidden: set{"length"}}
 }
-
-# Calls `member`, read as `target`'s member `key`, with `target` as `this`.
-function ts.call_value(member: Any, target: Any, key: Any, args: List(Any)) -> Any
-kernel 1
-errors "type_error"
-charge 8
-body {
-  let method = invoke ts.callable(member)
-  let k = invoke ts.receiver(method)
-  if same(k, "closure") {
-    let outcome = apply method(target, args)
-    return outcome
-  }
-  let name = invoke ts.to_property_key(key)
-  throw error.new("type_error", text.concat(name, " is not a function"), null)
-}

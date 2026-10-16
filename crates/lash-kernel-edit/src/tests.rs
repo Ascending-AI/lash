@@ -584,6 +584,11 @@ fn canvas_wrap() {
             Cause::EscapingBinding,
         ),
         (
+            "for item in [1] { print 1 } else { print 2 }",
+            Branch::Body,
+            Cause::NonEmptyDiscardedArm,
+        ),
+        (
             "for item in [1] { break }",
             Branch::Body,
             Cause::ControlTargetLost,

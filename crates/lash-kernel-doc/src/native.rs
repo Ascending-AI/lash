@@ -164,6 +164,9 @@ impl RegisteredFunction {
                         ) => {
                             callees.insert(*function);
                         }
+                        crate::Node::Stmt(crate::Stmt::For { via: Some(via), .. }) => {
+                            callees.extend(via.functions());
+                        }
                         _ => {}
                     }
                     pending.extend(node.children());

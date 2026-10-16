@@ -209,16 +209,6 @@ impl PartialOrd for Operator {
     }
 }
 
-/// How an exported library action is spelled when an author could have
-/// written it. Each is the node's exact inverse: the atoms stand where
-/// authored lowering took them from.
-pub(crate) enum Authored<'a> {
-    /// `console.log(...args)`: `ts.console.log` with no receiver.
-    ConsoleLog,
-    /// `target.name(...args)`: `ts.call_member` of an identifier name.
-    Method(&'a str),
-}
-
 impl Operators {
     /// The one function the base document labels `label`.
     pub(crate) fn unique(&self, label: &str) -> Option<k::FunctionId> {
@@ -230,29 +220,27 @@ impl Operators {
         let id = ids.next()?;
         ids.next().is_none().then_some(id)
     }
-    /// The authored spelling of a library action, if it has one.
-    pub(crate) fn authored<'a>(
-        &self,
-        id: &k::FunctionId,
-        args: &'a [k::Atom],
-    ) -> Option<Authored<'a>> {
-        let label = self.functions.get(id)?.as_str();
-        if self.unique(label) != Some(*id) {
-            return None;
-        }
-        match (label, args) {
-            ("ts.console.log", [k::Atom::Literal(k::Literal::Absent), k::Atom::Variable(_)]) => {
-                Some(Authored::ConsoleLog)
-            }
-            (
-                "ts.call_member",
-                [
-                    k::Atom::Variable(_),
-                    k::Atom::Literal(k::Literal::Text(name)),
-                    k::Atom::Variable(_),
-                ],
-            ) if crate::printer::property_identifier(name) => Some(Authored::Method(name)),
-            _ => None,
-        }
+    /// The `for...of` protocol of the base document: the one function
+    /// labelled each of `ts.for_of.open`, `.next` and `.item`.
+    pub(crate) fn for_of(&self) -> Option<k::Protocol> {
+        Some(k::Protocol {
+            open: self.unique("ts.for_of.open")?,
+            next: Some(self.unique("ts.for_of.next")?),
+            item: Some(self.unique("ts.for_of.item")?),
+            check: None,
+        })
+    }
+    /// Whether a library action is `console.log(...args)`, as an author
+    /// writes it: `ts.console.log` with no receiver, which the base
+    /// document labels once.
+    pub(crate) fn console_log(&self, id: &k::FunctionId, args: &[k::Atom]) -> bool {
+        self.functions
+            .get(id)
+            .is_some_and(|label| label.as_str() == "ts.console.log")
+            && self.unique("ts.console.log") == Some(*id)
+            && matches!(
+                args,
+                [k::Atom::Literal(k::Literal::Absent), k::Atom::Variable(_)]
+            )
     }
 }

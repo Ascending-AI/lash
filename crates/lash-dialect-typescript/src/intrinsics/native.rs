@@ -116,9 +116,9 @@ impl Reader {
         }
         None
     }
-    /// A library action spelled as an author writes it: `console.log(...args)`
-    /// or `target.name(...args)` (generated_operators::Authored). None when
-    /// the expression is not one; the base document must hold the helper once.
+    /// A library action spelled as an author writes it: `console.log(...args)`.
+    /// None when the expression is not one; the base document must hold the
+    /// helper once.
     fn authored_action(&mut self, expr: &s::Expr) -> Option<Result<k::Action, Diagnostic>> {
         let s::Expr::Call(call) = expr else {
             return None;
@@ -139,25 +139,17 @@ impl Reader {
             return None;
         };
         argument.spread?;
-        let (label, console) = if target.sym == "console" && name.sym == "log" {
-            ("ts.console.log", true)
-        } else {
-            ("ts.call_member", false)
-        };
-        let function = self.operators.unique(label)?;
+        if target.sym != "console" || name.sym != "log" {
+            return None;
+        }
+        let function = self.operators.unique("ts.console.log")?;
         Some((|| {
-            let args = self.atom(&argument.expr)?;
             Ok(k::Action::Call {
                 callee: k::Callee::Library(function),
-                args: if console {
-                    vec![k::Atom::Literal(k::Literal::Absent), args]
-                } else {
-                    vec![
-                        k::Atom::Variable(self.name(target)?),
-                        k::Atom::Literal(k::Literal::Text(name.sym.to_string())),
-                        args,
-                    ]
-                },
+                args: vec![
+                    k::Atom::Literal(k::Literal::Absent),
+                    self.atom(&argument.expr)?,
+                ],
             })
         })())
     }

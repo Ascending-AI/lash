@@ -269,20 +269,45 @@ impl<'a> Printer<'a> {
             Stmt::For {
                 binding,
                 iterable,
+                via,
                 body,
+                else_block,
             } => {
                 self.out.push_str("for ");
                 self.name(binding);
                 self.out.push_str(" in ");
                 self.expr(iterable);
+                if let Some(via) = via {
+                    self.out.push_str(" via (open ");
+                    self.function(&via.open);
+                    for (word, hook) in [
+                        ("next", &via.next),
+                        ("item", &via.item),
+                        ("check", &via.check),
+                    ] {
+                        if let Some(hook) = hook {
+                            self.out.push_str(", ");
+                            self.out.push_str(word);
+                            self.out.push(' ');
+                            self.function(hook);
+                        }
+                    }
+                    self.out.push(')');
+                }
                 self.out.push(' ');
                 self.block(body);
+                self.loop_else(else_block);
             }
-            Stmt::While { condition, body } => {
+            Stmt::While {
+                condition,
+                body,
+                else_block,
+            } => {
                 self.out.push_str("while ");
                 self.expr(condition);
                 self.out.push(' ');
                 self.block(body);
+                self.loop_else(else_block);
             }
             Stmt::Break => self.out.push_str("break"),
             Stmt::Continue => self.out.push_str("continue"),
@@ -400,6 +425,13 @@ impl<'a> Printer<'a> {
                 self.out.push_str("invoke ");
                 self.function(function);
             }
+        }
+    }
+
+    fn loop_else(&mut self, else_block: &Block) {
+        if !else_block.is_empty() {
+            self.out.push_str(" else ");
+            self.block(else_block);
         }
     }
 

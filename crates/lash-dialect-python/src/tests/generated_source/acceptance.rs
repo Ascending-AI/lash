@@ -420,18 +420,6 @@ fn unavoidable() -> Vec<Unavoidable> {
             "a typed failure lowering raises; no source spells it",
         ),
         (
-            "helper_py_iter",
-            "a for-loop iteration step lowering inserts; no source spells it",
-        ),
-        (
-            "helper_py_iter_guard",
-            "a for-loop guard lowering inserts; no source spells it",
-        ),
-        (
-            "helper_py_iter_size",
-            "a for-loop size check lowering inserts; no source spells it",
-        ),
-        (
             "helper_py_name_check",
             "an unbound-name check lowering inserts; no source spells it",
         ),

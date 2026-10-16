@@ -127,6 +127,41 @@ impl Operators {
         let id = ids.next()?;
         ids.next().is_none().then_some(id)
     }
+    /// The `for` protocol of the base document that a native loop over
+    /// `view` spells (`for x in e:` for none, `for x in e.items():` for
+    /// `items`): the one function labelled each of its hooks.
+    pub(crate) fn for_in(&self, view: Option<&str>) -> Option<k::Protocol> {
+        let (open, item) = match view {
+            None => ("py.for_in.open", None),
+            Some("keys") => ("py.for_in.keys", None),
+            Some("values") => ("py.for_in.values", Some("py.for_in.value")),
+            Some("items") => ("py.for_in.items", Some("py.for_in.item")),
+            Some(_) => return None,
+        };
+        Some(k::Protocol {
+            open: self.unique(open)?,
+            next: None,
+            item: match item {
+                Some(item) => Some(self.unique(item)?),
+                None => None,
+            },
+            check: Some(self.unique("py.for_in.check")?),
+        })
+    }
+    /// The view a native `for` spells for a loop through `via`, or none:
+    /// `Some(None)` for `for x in e:`, `Some(Some("items"))` for
+    /// `for x in e.items():`. Python's `for` is the loop through the base's
+    /// `py.for_in` protocol, or, in a base that labels no such protocol, the
+    /// kernel's own loop (`via` none).
+    pub(crate) fn native_loop(&self, via: Option<&k::Protocol>) -> Option<Option<&'static str>> {
+        match (self.for_in(None).is_some(), via) {
+            (true, Some(via)) => [None, Some("keys"), Some("values"), Some("items")]
+                .into_iter()
+                .find(|view| self.for_in(*view).as_ref() == Some(via)),
+            (false, None) => Some(None),
+            _ => None,
+        }
+    }
     /// The authored spelling of a library action, if it has one: a label
     /// the document holds once, and for a method a variable receiver.
     pub(crate) fn authored(&self, id: &k::FunctionId, args: &[k::Atom]) -> Option<Authored> {

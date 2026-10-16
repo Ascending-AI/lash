@@ -412,21 +412,45 @@ impl Graph {
                     self.block(then_block, &scope, owner);
                     self.block(else_block, &scope, owner);
                 }
-                Stmt::While { condition, body } => {
+                Stmt::While {
+                    condition,
+                    body,
+                    else_block,
+                } => {
                     self.expr(condition, &scope, owner);
                     self.block(body, &scope, owner);
+                    self.block(else_block, &scope, owner);
                 }
                 Stmt::For {
                     binding,
                     iterable,
+                    via,
                     body,
+                    else_block,
                 } => {
                     let iterable = self.expr(iterable, &scope, owner);
-                    let mut inner = scope.clone();
                     let item = self.slot();
-                    self.alias(iterable, item);
+                    match via {
+                        None => self.alias(iterable, item),
+                        // The hooks are library calls: on the iterated
+                        // value, what open gives, and its items.
+                        Some(via) => {
+                            let source = self.library_call(via.open, vec![iterable], owner);
+                            for hook in [via.next, via.check].into_iter().flatten() {
+                                let stepped = self.library_call(hook, vec![source], owner);
+                                self.alias(stepped, item);
+                            }
+                            if let Some(hook) = via.item {
+                                let element = self.library_call(hook, vec![source, item], owner);
+                                self.alias(element, item);
+                            }
+                            self.alias(source, item);
+                        }
+                    }
+                    let mut inner = scope.clone();
                     inner.insert(binding.clone(), item);
                     self.block(body, &inner, owner);
+                    self.block(else_block, &scope, owner);
                 }
                 Stmt::Try(stmt) => {
                     self.block(&stmt.body, &scope, owner);

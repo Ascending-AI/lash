@@ -74,13 +74,29 @@ impl<'a> NodeMut<'a> {
                     out.push(NodeMut::Block(then_block));
                     out.push(NodeMut::Block(else_block));
                 }
-                Stmt::For { iterable, body, .. } => {
+                // As `Node::children`: an empty `else` is no child.
+                Stmt::For {
+                    iterable,
+                    body,
+                    else_block,
+                    ..
+                } => {
                     out.push(NodeMut::Expr(iterable));
                     out.push(NodeMut::Block(body));
+                    if !else_block.is_empty() {
+                        out.push(NodeMut::Block(else_block));
+                    }
                 }
-                Stmt::While { condition, body } => {
+                Stmt::While {
+                    condition,
+                    body,
+                    else_block,
+                } => {
                     out.push(NodeMut::Expr(condition));
                     out.push(NodeMut::Block(body));
+                    if !else_block.is_empty() {
+                        out.push(NodeMut::Block(else_block));
+                    }
                 }
                 Stmt::Break | Stmt::Continue => {}
                 Stmt::Return { value }

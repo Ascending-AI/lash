@@ -77,8 +77,6 @@ ts.boolean.convert	TypeScript boolean convert
 ts.boolean.toString	TypeScript boolean toString
 ts.boolean.valueOf	TypeScript boolean valueOf
 ts.boundary	TypeScript boundary
-ts.call_member	TypeScript call member
-ts.call_value	TypeScript call value
 ts.callable	TypeScript callable
 ts.console.json	TypeScript console json
 ts.console.log	TypeScript console log
@@ -156,6 +154,9 @@ ts.exotic.get	TypeScript exotic get
 ts.exotic.iterate	TypeScript exotic iterate
 ts.exotic.set	TypeScript exotic set
 ts.exotic.to_primitive	TypeScript exotic to primitive
+ts.for_of.item	TypeScript for-of item
+ts.for_of.next	TypeScript for-of next
+ts.for_of.open	TypeScript for-of open
 ts.function.apply	TypeScript function apply
 ts.function.bind	TypeScript function bind
 ts.function.call	TypeScript function call

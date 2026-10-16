@@ -580,15 +580,12 @@ impl Lowerer<'_> {
                 "await inside an ordinary `for` loop",
             ));
         }
-        let (walked, guard) = match header {
+        let (walked, via) = match header {
             Some(header) => header,
             None => self.for_header(&generator.iter)?,
         };
         let binding = self.temp();
         let body = self.block(|this| {
-            if let Some(guard) = &guard {
-                this.iter_guard(guard, true)?;
-            }
             this.assign(
                 &generator.target,
                 Operand::temp(binding.clone(), Ty::Unknown),
@@ -602,12 +599,7 @@ impl Lowerer<'_> {
             }
             this.conditions(&generator.ifs, rest, collect, out)
         })?;
-        self.emit_for(binding, walked.expr, body);
-        // A dict or a set that changed size in the last pass is refused
-        // too, as Python's next step of the iteration would.
-        if let Some(guard) = &guard {
-            self.iter_guard(guard, false)?;
-        }
+        self.emit_for(binding, walked.expr, Some(via), body, Buf::default());
         Ok(())
     }
 

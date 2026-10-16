@@ -14,6 +14,7 @@ mod checkpoint;
 mod exec;
 mod frames;
 mod issued;
+mod loops;
 mod native_heap;
 mod observing;
 mod ops;
@@ -36,14 +37,15 @@ use crate::interface::{
     Meters, Outcome, Park, Program, RunError, StartError, Step, WaitId,
 };
 use crate::observe::{Event, GuestPhase, Observer};
-use lash_kernel_doc::heap::{ErrorRef, HeapFault, PageId, TupleRef};
+use lash_kernel_doc::heap::{ErrorRef, HeapFault, PageId};
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::tree::{Access, Tree};
 use lash_kernel_state::paged::{
     BindingRecord, BoundRecord, EndedTask, FrameRecord, HeapLifecycle, HeapWriteError,
     IncomingRecord as Incoming, JoinerRecord as Joiner, ListJoinRecord as ListJoin, PagedHeap,
-    SemanticHeap, TableCursor, TaskStateRecord as TaskState, WaitPhase, WaitRecord,
+    SemanticHeap, TaskStateRecord as TaskState, WaitPhase, WaitRecord,
 };
+use loops::Cursor;
 use session::{keyed, open_tree};
 
 /// What a frame is accounted before its variables.
@@ -196,16 +198,6 @@ enum SlotState {
     Cell(EntityId),
 }
 
-/// A loop's position in what it iterates (`K-ITER-002`, `K-ITER-003`).
-#[derive(Clone, Debug)]
-enum Cursor {
-    List(EntityId, usize),
-    Tuple(Arc<TupleRef>, usize),
-    /// A map or a set, and the sequence number of the entry last visited.
-    Map(EntityId, Option<TableCursor>),
-    Set(EntityId, Option<TableCursor>),
-}
-
 #[derive(Clone, Debug)]
 enum TryPhase {
     Body,
@@ -224,6 +216,8 @@ enum Control {
         stmt: StmtId,
         cursor: Cursor,
         started: u64,
+        header: loops::Header,
+        guard: Option<Box<loops::Guard>>,
     },
     While {
         stmt: StmtId,
@@ -1049,6 +1043,28 @@ impl KernelMachine {
             })
             .expect("the task rows read");
         phases
+    }
+
+    /// The header of every published loop row: where each loop stood.
+    pub(crate) fn loop_headers(&mut self) -> Vec<lash_kernel_state::paged::HeaderRecord> {
+        let mut headers = Vec::new();
+        let access = self.heap.pages().clone();
+        self.publish(true).expect("the run publishes");
+        self.tasks
+            .visit(&mut |_, task| {
+                for index in 0..task.frames.len() {
+                    if let Ok(Some((_, frame))) = task.frames.rank_get(index, &access) {
+                        for at in 0..frame.loops.len() {
+                            if let Ok(Some((_, row))) = frame.loops.rank_get(at, &access) {
+                                headers.push(row.header);
+                            }
+                        }
+                    }
+                }
+                true
+            })
+            .expect("the task rows read");
+        headers
     }
 
     /// Applies `edit` to the saved continuation of `task`'s frame

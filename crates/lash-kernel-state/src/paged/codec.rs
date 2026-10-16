@@ -417,7 +417,23 @@ impl TokenCodec for BoundRecord {
         })
     }
 }
-record!(LoopRecord { site: SiteRef, started: u64, position: Option<u64> });
+record!(LoopRecord {
+    site: SiteRef,
+    started: u64,
+    header: HeaderRecord,
+    cursor: Option<CursorRecord>
+});
+units!(HeaderRecord { Body = 0, Open = 1, Pull = 2, Check = 3, Exhausted = 4, Item = 5 });
+record!(CursorRecord {
+    kind: CursorKind,
+    position: u64,
+    guard: Option<GuardRecord>
+});
+units!(CursorKind { List = 0, Tuple = 1, Table = 2, Text = 3, Driver = 4 });
+record!(GuardRecord {
+    size: u64,
+    remaining: u64
+});
 record!(FinallyRecord {
     site: SiteRef,
     entered: EnteredRecord

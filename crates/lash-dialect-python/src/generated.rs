@@ -650,11 +650,32 @@ impl<'a> Reader<'a> {
             "for_" => {
                 let binding = self.name(&mut c)?;
                 self.scope.introduce(&binding);
+                let via = if c.take(",") {
+                    let open = self.id(&mut c)?;
+                    let hook = |c: &mut Cursor<'_>| -> Result<Option<k::FunctionId>> {
+                        c.expect(",")?;
+                        if c.take("None") {
+                            Ok(None)
+                        } else {
+                            self.id(c).map(Some)
+                        }
+                    };
+                    Some(k::Protocol {
+                        open,
+                        next: hook(&mut c)?,
+                        item: hook(&mut c)?,
+                        check: hook(&mut c)?,
+                    })
+                } else {
+                    None
+                };
                 c.end(true)?;
                 k::Stmt::For {
                     binding,
                     iterable: self.expr(i, d)?,
+                    via,
                     body: self.block(i, d)?,
+                    else_block: self.generic_else(i, d)?,
                 }
             }
             "while_" => {
@@ -662,6 +683,7 @@ impl<'a> Reader<'a> {
                 k::Stmt::While {
                     condition: self.expr(i, d)?,
                     body: self.block(i, d)?,
+                    else_block: self.generic_else(i, d)?,
                 }
             }
             "return_" | "throw" | "print" | "finish" | "fail" => {
@@ -732,6 +754,31 @@ impl<'a> Reader<'a> {
         }
         self.closed(indent - 1)?;
         Ok(body)
+    }
+    /// A loop's `else` suite, or the empty block when it has none.
+    fn readable_else(&mut self, indent: usize, depth: usize) -> Result<k::Block> {
+        if !self.starts(indent, "else:") {
+            return Ok(Vec::new());
+        }
+        let (mut c, _) = self.line(indent)?;
+        c.expect("else:")?;
+        c.finish()?;
+        let block = self.readable_block(indent + 1, depth)?;
+        if block.is_empty() {
+            return Err(invalid("an empty loop else is omitted"));
+        }
+        Ok(block)
+    }
+    /// A generic loop's `else` block, when one follows its body.
+    fn generic_else(&mut self, indent: usize, depth: usize) -> Result<k::Block> {
+        if !self.more(indent) {
+            return Ok(Vec::new());
+        }
+        let block = self.block(indent, depth)?;
+        if block.is_empty() {
+            return Err(invalid("an empty loop else is omitted"));
+        }
+        Ok(block)
     }
     fn readable_if(&mut self, mut c: Cursor<'_>, indent: usize, depth: usize) -> Result<k::Stmt> {
         self.depth(depth)?;
@@ -848,13 +895,40 @@ impl<'a> Reader<'a> {
             let binding = self.name(&mut c)?;
             self.scope.introduce(&binding);
             c.expect("in ")?;
-            let iterable = self.inline(&mut c, depth + 1)?;
-            c.expect(":")?;
-            c.finish()?;
+            // No inline expression ends in a call, so a view's call ends
+            // the line only where the loop walks the view.
+            let header = c.text.trim_end();
+            let (walked, view) = ["keys", "values", "items"]
+                .into_iter()
+                .find_map(|view| {
+                    header
+                        .strip_suffix(&format!(".{view}():"))
+                        .map(|walked| (walked, Some(view)))
+                })
+                .unwrap_or((header.strip_suffix(':').unwrap_or(header), None));
+            let mut walked = Cursor::new(walked);
+            let iterable = self.inline(&mut walked, depth + 1)?;
+            walked.finish()?;
+            // The base's `py.for_in` protocol, or the kernel's own loop in
+            // a base that labels none.
+            let via = match (self.operators.for_in(None), view) {
+                (None, None) => None,
+                (Some(_), view) => Some(
+                    self.operators
+                        .for_in(view)
+                        .ok_or_else(|| invalid("the base document holds no view protocol"))?,
+                ),
+                (None, Some(_)) => return Err(invalid("a view loop needs py.for_in")),
+            };
+            if !header.ends_with(':') {
+                return Err(invalid("expected :"));
+            }
             k::Stmt::For {
                 binding,
                 iterable,
+                via,
                 body: self.readable_block(indent + 1, depth + 1)?,
+                else_block: self.readable_else(indent, depth + 1)?,
             }
         } else if c.take("while ") {
             let condition = self.inline(&mut c, depth + 1)?;
@@ -863,6 +937,7 @@ impl<'a> Reader<'a> {
             k::Stmt::While {
                 condition,
                 body: self.readable_block(indent + 1, depth + 1)?,
+                else_block: self.readable_else(indent, depth + 1)?,
             }
         } else if c.take("try:") {
             c.finish()?;

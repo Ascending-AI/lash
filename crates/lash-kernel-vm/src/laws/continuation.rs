@@ -21,7 +21,8 @@ use std::collections::BTreeMap;
 
 use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, TaskId, Value, parse_definition};
 use lash_kernel_state::paged::{
-    IncomingRecord, PendingRecord, PhaseRecord, RoleRecord, RolesRecord, TaskStateRecord,
+    HeaderRecord, IncomingRecord, PendingRecord, PhaseRecord, RoleRecord, RolesRecord,
+    TaskStateRecord,
 };
 
 use super::embedder::{self, Embedder, Setup, label};
@@ -97,6 +98,8 @@ struct Drive {
     /// Sealed and opened cold at every slice and park.
     reopens: bool,
     bounds: Bounds,
+    /// The library functions the run's text may call.
+    probes: embedder::Probes,
 }
 
 impl Drive {
@@ -105,16 +108,26 @@ impl Drive {
             slice,
             reopens,
             bounds: embedder::ROOMY,
+            probes: bodies,
         }
     }
 }
 
+/// Where a run's frames stood at its reopens: the phases of nested
+/// actions and the headers of protocol loops.
+#[derive(Default)]
+struct Seen {
+    phases: Vec<PhaseRecord>,
+    headers: Vec<HeaderRecord>,
+}
+
 /// Runs `text`, answering parks with the requests `order` names and then
-/// oldest first. Gives the trace and the phases its frames stood at at
-/// each reopen.
-fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Vec<PhaseRecord>) {
+/// oldest first. Gives the trace and where its frames stood at each
+/// reopen.
+fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
     let setup = Setup {
         bounds: drive.bounds,
+        probes: Some(drive.probes),
         ..setup(drive.slice)
     };
     let mut embedder = match Embedder::try_with(text, setup) {
@@ -127,12 +140,12 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Vec<PhaseRecord>) 
                 charged: 0,
                 starts: BTreeMap::new(),
             };
-            return (trace, Vec::new());
+            return (trace, Seen::default());
         }
     };
     embedder.machine.set_observe(Observe::Counts);
     let mut starts: BTreeMap<u32, u64> = BTreeMap::new();
-    let mut phases = Vec::new();
+    let mut seen = Seen::default();
     let mut order = order.iter();
     let mut hops = 0;
     let end = loop {
@@ -152,13 +165,14 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Vec<PhaseRecord>) 
         }
         if drive.reopens {
             hops += 1;
-            phases.extend(
+            seen.phases.extend(
                 embedder
                     .machine
                     .pending_phases()
                     .into_iter()
                     .map(|(_, _, phase)| phase),
             );
+            seen.headers.extend(embedder.machine.loop_headers());
             let (layout, native_twice) = hop(hops);
             if let Err(error) = embedder.try_reopen(layout, native_twice) {
                 break format!("reopen refused: {error}");
@@ -190,28 +204,42 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Vec<PhaseRecord>) 
         charged: embedder.machine.meters().charged,
         starts,
     };
-    (trace, phases)
+    (trace, seen)
 }
 
 /// CONT-EXACT and CONT-ONCE of one case: the uninterrupted run gives
 /// `expected` and prints `printed`; every sliced and reopened run leaves
 /// its trace; the reopened runs see each phase of `want`.
 fn case(text: &str, order: &[&str], expected: &Datum, printed: &[Datum], want: &[PhaseRecord]) {
-    let (reference, _) = drive(text, order, Drive::new(u64::MAX, false));
-    assert_eq!(reference.end, format!("Finished({expected:?})"), "{text}");
-    let printed: Vec<String> = printed.iter().map(|datum| format!("{datum:?}")).collect();
-    assert_eq!(reference.printed, printed, "{text}");
-    let mut phases = Vec::new();
-    for slice in [u64::MAX, 1, 0] {
-        let (sliced, _) = drive(text, order, Drive::new(slice, false));
-        assert_eq!(sliced, reference, "slice {slice}: {text}");
-        let (reopened, seen) = drive(text, order, Drive::new(slice, true));
-        assert_eq!(reopened, reference, "reopened at slice {slice}: {text}");
-        phases.extend(seen);
-    }
+    let phases = exact(Drive::new(u64::MAX, false), text, order, expected, printed).phases;
     for phase in want {
         assert!(phases.contains(phase), "the reopens saw {phases:?}: {text}");
     }
+}
+
+/// The run of `text` under `base`, uninterrupted, gives `expected` and
+/// prints `printed`, and every sliced and reopened run leaves its trace.
+/// Gives where the reopened runs' frames stood.
+fn exact(base: Drive, text: &str, order: &[&str], expected: &Datum, printed: &[Datum]) -> Seen {
+    let at = |slice, reopens| Drive {
+        slice,
+        reopens,
+        ..base
+    };
+    let (reference, _) = drive(text, order, at(u64::MAX, false));
+    assert_eq!(reference.end, format!("Finished({expected:?})"), "{text}");
+    let printed: Vec<String> = printed.iter().map(|datum| format!("{datum:?}")).collect();
+    assert_eq!(reference.printed, printed, "{text}");
+    let mut seen = Seen::default();
+    for slice in [u64::MAX, 1, 0] {
+        let (sliced, _) = drive(text, order, at(slice, false));
+        assert_eq!(sliced, reference, "slice {slice}: {text}");
+        let (reopened, at_reopens) = drive(text, order, at(slice, true));
+        assert_eq!(reopened, reference, "reopened at slice {slice}: {text}");
+        seen.phases.extend(at_reopens.phases);
+        seen.headers.extend(at_reopens.headers);
+    }
+    seen
 }
 
 fn text(datum: &str) -> Datum {
@@ -991,3 +1019,5 @@ fn nested_join_resumes_exactly() {
     );
     case(NESTED_JOIN_HOISTED, &["b", "a"], &expected, &[], &[]);
 }
+
+mod protocol;

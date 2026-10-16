@@ -21,8 +21,19 @@ mod pages;
 #[global_allocator]
 static ALLOCATOR: &stats_alloc::StatsAlloc<std::alloc::System> = &stats_alloc::INSTRUMENTED_SYSTEM;
 
+/// Held by each law here while it runs: the allocator counts every thread,
+/// so a law that counts allocations runs alone.
+static ALONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn alone() -> std::sync::MutexGuard<'static, ()> {
+    ALONE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 fn an_admitted_baseline_cell_starts_with_at_most_one_thousand_allocations() {
+    let _alone = alone();
     let registry = gate_six_registry::registry();
     let library = NamedLibrary::from_registry(&registry).unwrap();
     let effects = gate_six::effects();
@@ -84,6 +95,7 @@ fn an_admitted_baseline_cell_starts_with_at_most_one_thousand_allocations() {
 /// statement trace at unlimited, one-charge and zero-charge slices.
 #[test]
 fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
+    let _alone = alone();
     use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
     use lash_kernel_vm::{End, Host, Observe, Outcome, Request, Step};
     struct Console;
@@ -214,6 +226,7 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
 /// native classification cannot mask a regression in interpreted cells.
 #[test]
 fn a_host_json_cell_bounds_allocations_on_both_serializer_paths() {
+    let _alone = alone();
     use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Timestamp};
     use lash_kernel_vm::{End, Host, Outcome, Request, Step};
     struct Console(Vec<Datum>);

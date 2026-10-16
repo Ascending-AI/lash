@@ -22,6 +22,79 @@ fn readable_if_has_a_direct_exact_inverse() {
         printed.source
     );
 }
+/// A document whose manifest labels the `py.for_in` hooks, with a loop
+/// through `hooks` (by label) over `ready`.
+fn protocol_loop(hooks: [Option<&str>; 4], else_block: k::Block) -> k::Document {
+    let mut doc = document(k::Stmt::Break);
+    let mut count = 40;
+    let mut id = |label: Option<&str>| {
+        label.map(|label| {
+            let functions = &mut doc.manifest.functions;
+            if let Some((id, _)) = functions.iter().find(|(_, name)| name.as_str() == label) {
+                return *id;
+            }
+            count += 1;
+            let id = k::FunctionId::from_bytes([count; 32]);
+            functions.insert(id, k::FunctionName::new(label).unwrap());
+            id
+        })
+    };
+    let [open, next, item, check] = hooks.map(&mut id);
+    // The base labels Python's own protocol whichever the loop goes through.
+    id(Some("py.for_in.open"));
+    id(Some("py.for_in.check"));
+    doc.main = vec![k::Stmt::For {
+        binding: "item".into(),
+        iterable: variable("ready"),
+        via: Some(k::Protocol {
+            open: open.unwrap(),
+            next,
+            item,
+            check,
+        }),
+        body: vec![k::Stmt::Break],
+        else_block,
+    }];
+    doc
+}
+/// In a base that labels the `py.for_in` protocol, a loop through it or a
+/// dict view's protocol is Python's own `for`, its `else` Python's; another
+/// protocol, and the kernel's own loop, name their hooks.
+#[test]
+fn protocol_loops_print_as_python_for_with_its_else() {
+    let check = Some("py.for_in.check");
+    for (hooks, expected) in [
+        (
+            [Some("py.for_in.open"), None, None, check],
+            "    for item in ready:\n        break\n    else:\n        print(1)\n",
+        ),
+        (
+            [Some("py.for_in.items"), None, Some("py.for_in.item"), check],
+            "    for item in ready.items():\n        break\n    else:\n        print(1)\n",
+        ),
+        (
+            [Some("py.for_in.values"), None, None, check],
+            "with k.for_(item, helper_py_for_in_values, None, None, helper_py_for_in_check):",
+        ),
+    ] {
+        let doc = protocol_loop(hooks, vec![k::Stmt::Print { value: int(1) }]);
+        let printed = roundtrip(&doc, true);
+        assert!(printed.source.contains(expected), "{}", printed.source);
+    }
+    let mut doc = protocol_loop([Some("py.for_in.open"), None, None, check], vec![]);
+    let printed = roundtrip(&doc, true);
+    assert!(!printed.source.contains("else"), "{}", printed.source);
+    let k::Stmt::For { via, .. } = &mut doc.main[0] else {
+        unreachable!("the case is a loop")
+    };
+    *via = None;
+    let printed = roundtrip(&doc, true);
+    assert!(
+        printed.source.contains("with k.for_(item):"),
+        "{}",
+        printed.source
+    );
+}
 fn closure() -> k::Expr {
     k::Expr::Closure(Box::new(k::Closure {
         params: vec![],
@@ -92,11 +165,15 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
                 "with k.if_():"
             },
         );
+        // In a base that labels no `py.for_in` protocol, Python's `for` is
+        // the kernel's own loop.
         spelling(
             k::Stmt::For {
                 binding: "item".into(),
                 iterable: expr.clone(),
+                via: None,
                 body: vec![],
+                else_block: vec![],
             },
             if native {
                 "for item in ready:\n"
@@ -108,6 +185,7 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
             k::Stmt::While {
                 condition: expr.clone(),
                 body: vec![],
+                else_block: vec![],
             },
             if native {
                 "while ready:\n"
@@ -386,11 +464,14 @@ fn bounded_readable_interactions_preserve_exact_bytes_and_maps() {
                         2 => k::Stmt::For {
                             binding: name.into(),
                             iterable: value,
+                            via: None,
                             body,
+                            else_block: vec![],
                         },
                         3 => k::Stmt::While {
                             condition: value,
                             body,
+                            else_block: vec![],
                         },
                         4..=6 => k::Stmt::Try(k::TryStmt {
                             body,

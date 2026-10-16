@@ -4511,6 +4511,158 @@
       "type": "observations",
       "value": []
     },
+    "python/iteration/dict-views-live": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "str",
+                  "value": [
+                    97
+                  ]
+                },
+                {
+                  "type": "int",
+                  "value": "1"
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "value": [
+                {
+                  "type": "str",
+                  "value": [
+                    98
+                  ]
+                },
+                {
+                  "type": "int",
+                  "value": "20"
+                }
+              ]
+            },
+            {
+              "type": "int",
+              "value": "1"
+            },
+            {
+              "type": "int",
+              "value": "20"
+            },
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            },
+            {
+              "type": "str",
+              "value": [
+                98
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/dict-view-resized": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "str",
+          "value": [
+            100,
+            105,
+            99,
+            116,
+            105,
+            111,
+            110,
+            97,
+            114,
+            121,
+            32,
+            99,
+            104,
+            97,
+            110,
+            103,
+            101,
+            100,
+            32,
+            115,
+            105,
+            122,
+            101,
+            32,
+            100,
+            117,
+            114,
+            105,
+            110,
+            103,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            105,
+            111,
+            110
+          ]
+        },
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "str",
+              "value": [
+                97
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "python/iteration/loop-else": {
+      "type": "observations",
+      "value": [
+        {
+          "type": "list",
+          "value": [
+            {
+              "type": "int",
+              "value": "1"
+            },
+            {
+              "type": "int",
+              "value": "2"
+            },
+            {
+              "type": "str",
+              "value": [
+                100,
+                111,
+                110,
+                101
+              ]
+            },
+            {
+              "type": "int",
+              "value": "2"
+            }
+          ]
+        }
+      ]
+    },
     "python/lazy_expression/conditional_true_raise": {
       "type": "observations",
       "value": [

@@ -409,33 +409,6 @@ pub(crate) fn rebound(body: &[Stmt]) -> (BTreeSet<String>, BTreeSet<String>) {
     (globals, nonlocals)
 }
 
-/// Whether `body` holds a `break` of the loop it is the body of.
-pub(crate) fn breaks(body: &[Stmt]) -> bool {
-    body.iter().any(|statement| match statement {
-        Stmt::Break(_) => true,
-        Stmt::If(branch) => {
-            breaks(&branch.body)
-                || branch
-                    .elif_else_clauses
-                    .iter()
-                    .any(|clause| breaks(&clause.body))
-        }
-        Stmt::Try(attempt) => {
-            breaks(&attempt.body)
-                || attempt
-                    .handlers
-                    .iter()
-                    .any(|ast::ExceptHandler::ExceptHandler(handler)| breaks(&handler.body))
-                || breaks(&attempt.orelse)
-                || breaks(&attempt.finalbody)
-        }
-        // A loop's `else` belongs to the loop around it.
-        Stmt::For(for_loop) => breaks(&for_loop.orelse),
-        Stmt::While(while_loop) => breaks(&while_loop.orelse),
-        _ => false,
-    })
-}
-
 /// A deliberately scope-wide proof: every definition of a candidate local
 /// must produce an integer on successful execution. Remove candidates until
 /// their dependencies are closed. This admits loop-carried integer recurrences

@@ -7,6 +7,7 @@ mod deviations;
 mod machine;
 mod module;
 mod pages;
+mod protocol_loops;
 mod refusals;
 mod replies;
 mod session;

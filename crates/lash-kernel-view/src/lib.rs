@@ -148,7 +148,8 @@ pub enum ScopeKind {
     Closure,
     /// An `if`'s block taken when its condition holds.
     Then,
-    /// An `if`'s block taken when its condition does not hold.
+    /// An `if`'s block taken when its condition does not hold, or a loop's
+    /// block run when it ends but by `break`.
     Else,
     /// A `for` loop's body.
     For,
@@ -698,8 +699,18 @@ impl<'a> Walk<'a> {
                 (*then_block, ScopeKind::Then),
                 (*else_block, ScopeKind::Else),
             ]),
-            StmtNode::For { body, .. } => opens.push((*body, ScopeKind::For)),
-            StmtNode::While { body, .. } => opens.push((*body, ScopeKind::While)),
+            StmtNode::For {
+                body, else_block, ..
+            } => {
+                opens.push((*body, ScopeKind::For));
+                opens.extend(else_block.map(|block| (block, ScopeKind::Else)));
+            }
+            StmtNode::While {
+                body, else_block, ..
+            } => {
+                opens.push((*body, ScopeKind::While));
+                opens.extend(else_block.map(|block| (block, ScopeKind::Else)));
+            }
             StmtNode::Try {
                 body,
                 catch,

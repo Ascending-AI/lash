@@ -33,8 +33,9 @@ use lash_kernel_doc::heap::{HeapFault, PageRef};
 ///         path = "crates/lash-kernel-state/src/paged/root.rs",
 ///         KeyedRoot, SequenceRoot, HeapRoot, RootStatus, EndedRecord, SavedMeters, CellTargetKind,
 ///         CheckpointRoot, JoinerRecord, TaskStateRecord, IncomingRecord, EndedTask, BindingRecord,
-///         FunctionRecord, BoundRecord, LoopRecord, FinallyRecord, EnteredRecord, WaitRecord,
-///         WaitKindRecord, WaitPhase, CommittedOutcomeRecord, ListJoinRecord,
+///         FunctionRecord, BoundRecord, LoopRecord, HeaderRecord, CursorRecord, CursorKind,
+///         GuardRecord, FinallyRecord, EnteredRecord, WaitRecord, WaitKindRecord, WaitPhase,
+///         CommittedOutcomeRecord, ListJoinRecord,
 ///     ),
 ///     items(path = "crates/lash-kernel-state/src/paged/census.rs", AccountingMetric, AccountingCertificate),
 ///     items(

@@ -38,7 +38,10 @@ impl NamePlan {
                         place: k::Place::Variable(name),
                         ..
                     }) => add(name),
-                    k::Node::Stmt(k::Stmt::For { binding, .. }) => add(binding),
+                    k::Node::Stmt(k::Stmt::For { binding, via, .. }) => {
+                        add(binding);
+                        ids.extend(via.iter().flat_map(k::Protocol::functions));
+                    }
                     k::Node::Stmt(k::Stmt::Try(scope)) => {
                         if let Some(catch) = &scope.catch {
                             add(&catch.binding);

@@ -4,14 +4,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{invalid, variant};
+use super::{invalid, unsupported, variant};
 use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
 use crate::{
     ActExpr, ActKind, Action, Atom, Bytes, Callee, Catch, Closure, Document, Expr, Float, Formula,
     Function, FunctionBody, FunctionDefinition, FunctionId, Guard, Implementation, Integer,
     JoinMode, Literal, Manifest, MapEntry, MapType, Member, Name, NumberPolicy, Operand, Param,
-    Place, ProjectionRead, QualifiedName, RecordEntry, RecordType, RecordTypeField, Rhs, Signature,
-    Stmt, TryStmt, Type,
+    Place, ProjectionRead, Protocol, QualifiedName, RecordEntry, RecordType, RecordTypeField, Rhs,
+    Signature, Stmt, TryStmt, Type,
 };
 
 // Types and signatures.
@@ -676,6 +676,26 @@ impl TokenCodec for Catch {
     }
 }
 
+impl TokenCodec for Protocol {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(4);
+        self.open.encode(out);
+        self.next.encode(out);
+        self.item.encode(out);
+        self.check.encode(out);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(4)?;
+        Ok(Self {
+            open: FunctionId::decode(input)?,
+            next: Option::decode(input)?,
+            item: Option::decode(input)?,
+            check: Option::decode(input)?,
+        })
+    }
+}
+
 impl TokenCodec for TryStmt {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(3);
@@ -729,17 +749,34 @@ impl TokenCodec for Stmt {
             Self::For {
                 binding,
                 iterable,
+                via,
                 body,
+                else_block,
             } => {
-                out.sum(number, 3);
+                let extended = number == 15;
+                out.sum(number, if extended { 5 } else { 3 });
                 binding.encode(out);
                 iterable.encode(out);
+                if extended {
+                    via.encode(out);
+                }
                 body.encode(out);
+                if extended {
+                    else_block.encode(out);
+                }
             }
-            Self::While { condition, body } => {
-                out.sum(number, 2);
+            Self::While {
+                condition,
+                body,
+                else_block,
+            } => {
+                let extended = number == 16;
+                out.sum(number, if extended { 3 } else { 2 });
                 condition.encode(out);
                 body.encode(out);
+                if extended {
+                    else_block.encode(out);
+                }
             }
             Self::Break | Self::Continue => out.sum(number, 0),
             Self::Return { value }
@@ -762,7 +799,8 @@ impl TokenCodec for Stmt {
             let number = variant(input, |variant| match variant {
                 0 | 1 | 6 => Some(2),
                 2 | 3 | 9..=14 => Some(1),
-                4 | 5 => Some(3),
+                4 | 5 | 16 => Some(3),
+                15 => Some(5),
                 7 | 8 => Some(0),
                 _ => None,
             })?;
@@ -789,12 +827,40 @@ impl TokenCodec for Stmt {
                 5 => Self::For {
                     binding: Name::decode(input)?,
                     iterable: Expr::decode(input)?,
+                    via: None,
                     body: Vec::decode(input)?,
+                    else_block: Vec::new(),
                 },
                 6 => Self::While {
                     condition: Expr::decode(input)?,
                     body: Vec::decode(input)?,
+                    else_block: Vec::new(),
                 },
+                15 => {
+                    let stmt = Self::For {
+                        binding: Name::decode(input)?,
+                        iterable: Expr::decode(input)?,
+                        via: Option::decode(input)?,
+                        body: Vec::decode(input)?,
+                        else_block: Vec::decode(input)?,
+                    };
+                    // A loop with neither has the one encoding, number 5.
+                    if stmt.codec_variant() != 15 {
+                        return Err(unsupported(15));
+                    }
+                    stmt
+                }
+                16 => {
+                    let stmt = Self::While {
+                        condition: Expr::decode(input)?,
+                        body: Vec::decode(input)?,
+                        else_block: Vec::decode(input)?,
+                    };
+                    if stmt.codec_variant() != 16 {
+                        return Err(unsupported(16));
+                    }
+                    stmt
+                }
                 7 => Self::Break,
                 8 => Self::Continue,
                 9 => Self::Return {
@@ -810,9 +876,10 @@ impl TokenCodec for Stmt {
                 13 => Self::Finish {
                     value: Expr::decode(input)?,
                 },
-                _ => Self::Fail {
+                14 => Self::Fail {
                     value: Expr::decode(input)?,
                 },
+                _ => return Err(unsupported(number)),
             })
         })
     }

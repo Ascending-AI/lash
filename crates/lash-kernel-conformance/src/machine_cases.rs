@@ -146,6 +146,11 @@ fn k_id_003() {
 }
 
 #[test]
+fn k_iter_005() {
+    super::run_rule("K-ITER-005", include_str!("../corpus/iter/K-ITER-005.json"));
+}
+
+#[test]
 fn k_key_001() {
     super::run_rule("K-KEY-001", include_str!("../corpus/key/K-KEY-001.json"));
 }

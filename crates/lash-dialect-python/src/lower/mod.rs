@@ -120,9 +120,18 @@ struct Scope {
     /// The exceptions being handled where the lowering is, innermost last:
     /// what a bare `raise` raises again.
     handlers: Vec<Active>,
-    /// The loops being lowered, innermost last, each with the variable
-    /// that records its `break` when something needs to know.
-    loops: Vec<Option<Name>>,
+    /// How many loops the lowering is inside, in this scope.
+    loops: usize,
+}
+
+/// The notes of a loop's blocks: its body's, then its `else`'s when the
+/// `else` is a child, which an empty one is not.
+fn loop_blocks(body: Vec<Note>, orelse: &Buf) -> Vec<Vec<Note>> {
+    let mut blocks = vec![body];
+    if !orelse.stmts.is_empty() {
+        blocks.push(orelse.notes.clone());
+    }
+    blocks
 }
 
 /// The exception a bare `raise` raises again.
@@ -313,7 +322,7 @@ pub(crate) fn lower_with_calls(
             integer_locals,
             bound: vec![BTreeSet::new()],
             handlers: Vec::new(),
-            loops: Vec::new(),
+            loops: 0,
         }],
         renames: Vec::new(),
         unbound_renames: BTreeSet::new(),
@@ -773,24 +782,36 @@ impl Lowerer<'_> {
         );
     }
 
-    fn emit_while(&mut self, condition: Expr, body: Buf) {
+    fn emit_while(&mut self, condition: Expr, body: Buf, orelse: Buf) {
+        let blocks = loop_blocks(body.notes, &orelse);
         self.push(
             Stmt::While {
                 condition,
                 body: body.stmts,
+                else_block: orelse.stmts,
             },
-            vec![body.notes],
+            blocks,
         );
     }
 
-    fn emit_for(&mut self, binding: Name, iterable: Expr, body: Buf) {
+    fn emit_for(
+        &mut self,
+        binding: Name,
+        iterable: Expr,
+        via: Option<lash_kernel_doc::Protocol>,
+        body: Buf,
+        orelse: Buf,
+    ) {
+        let blocks = loop_blocks(body.notes, &orelse);
         self.push(
             Stmt::For {
                 binding,
                 iterable,
+                via,
                 body: body.stmts,
+                else_block: orelse.stmts,
             },
-            vec![body.notes],
+            blocks,
         );
     }
 

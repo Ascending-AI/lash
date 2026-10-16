@@ -62,8 +62,8 @@ mod tests;
 
 pub use ast::{
     ActExpr, ActKind, Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode,
-    Literal, MapEntry, Member, Node, Place, ProjectionRead, RecordEntry, Rhs, Site, Stmt, TryStmt,
-    Unit,
+    Literal, MapEntry, Member, Node, Place, ProjectionRead, Protocol, RecordEntry, Rhs, Site, Stmt,
+    TryStmt, Unit,
 };
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{

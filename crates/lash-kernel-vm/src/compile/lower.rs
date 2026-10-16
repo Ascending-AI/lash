@@ -16,7 +16,7 @@
 //! its code is complete (`super::Placer`).
 
 use lash_kernel_doc as doc;
-use lash_kernel_doc::Name;
+use lash_kernel_doc::{FunctionId, Name};
 use lash_kernel_exec::{
     ActIx, BlockIx, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx, Op, OpRange,
     Reg, RegRange,
@@ -24,7 +24,7 @@ use lash_kernel_exec::{
 
 use super::{
     Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Nested, NestedCallee,
-    NestedKind, Runs, Stmt, Var,
+    NestedKind, Runs, Stmt, Var, Via,
 };
 
 /// One statement's ops as they are gathered, and how many registers they
@@ -199,18 +199,35 @@ impl Compiler<'_> {
             doc::Stmt::For {
                 binding,
                 iterable,
+                via,
                 body,
+                else_block,
             } => {
                 self.child(0, |c| c.expr(&mut ops, iterable, Reg(0)));
                 let (body, bound) = self.child(1, |c| c.block(body, std::slice::from_ref(binding)));
+                let else_block =
+                    (!else_block.is_empty()).then(|| self.child(2, |c| c.block(else_block, &[]).0));
+                let via = via.as_ref().map(|via| self.via(via));
+                if let Some(Err(function)) = via {
+                    // Validation refuses a hook it cannot resolve; a
+                    // variable of its name is what is left to mean.
+                    let name = self.name(Name::new(function.to_string()));
+                    ops.push(Op::Unbound { dst: Reg(1), name });
+                }
                 ops.push(Op::ForIn { iterable: Reg(0) });
                 Form::For {
                     site: self.site(),
                     binding: Local::unplaced(bound.first().copied().unwrap_or(0)),
+                    via: via.and_then(Result::ok),
                     body,
+                    else_block,
                 }
             }
-            doc::Stmt::While { condition, body } => {
+            doc::Stmt::While {
+                condition,
+                body,
+                else_block,
+            } => {
                 // The condition's ops follow the `while`'s own: its test
                 // range, which the machine places once the range is known.
                 ops.push(Op::While);
@@ -220,6 +237,8 @@ impl Compiler<'_> {
                     site: self.site(),
                     test: OpRange { start: 1, len: 0 },
                     body: self.child(1, |c| c.block(body, &[]).0),
+                    else_block: (!else_block.is_empty())
+                        .then(|| self.child(2, |c| c.block(else_block, &[]).0)),
                 }
             }
             doc::Stmt::Break => {
@@ -283,6 +302,19 @@ impl Compiler<'_> {
             regs: ops.regs,
             form,
         }
+    }
+
+    /// A loop protocol's hooks by their library ids, or the first hook the
+    /// document cannot reach.
+    fn via(&self, via: &doc::Protocol) -> Result<Via, FunctionId> {
+        let lib = |function: &FunctionId| self.resolve.lib(function).ok_or(*function);
+        let hook = |function: &Option<FunctionId>| function.as_ref().map(lib).transpose();
+        Ok(Via {
+            open: lib(&via.open)?,
+            next: hook(&via.next)?,
+            item: hook(&via.item)?,
+            check: hook(&via.check)?,
+        })
     }
 
     /// A statement's ops, gathered in a buffer an earlier statement left.

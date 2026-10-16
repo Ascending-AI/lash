@@ -23,14 +23,14 @@ use serde::Deserialize;
 use super::pages::{self, Session};
 use crate::define_helpers;
 
-struct Installed {
-    prepared: PreparedLibrary,
+pub(super) struct Installed {
+    pub(super) prepared: PreparedLibrary,
     library: NamedLibrary,
 }
 
 /// The kernel library with the dialect's helpers: the registry a machine
 /// runs with and the library the front end lowers against.
-fn installed() -> &'static Installed {
+pub(super) fn installed() -> &'static Installed {
     static INSTALLED: OnceLock<Installed> = OnceLock::new();
     INSTALLED.get_or_init(|| {
         let mut registry = FunctionRegistry::new();
@@ -144,7 +144,7 @@ pub(crate) fn kernel_text(source: &str) -> String {
     lash_kernel_doc::print_document(&lowered.document)
 }
 
-const BOUNDS: Bounds = Bounds {
+pub(super) const BOUNDS: Bounds = Bounds {
     charge: 50_000_000,
     memory: 64 << 20,
     call_depth: 200,
@@ -253,7 +253,7 @@ fn answer(request: &Request) -> (WaitId, Outcome) {
     }
 }
 
-fn ending(end: End) -> String {
+pub(super) fn ending(end: End) -> String {
     match end {
         End::Finished(_) => "ok".to_string(),
         End::Error(RunError::Uncaught(Datum::Error(error))) => {
@@ -666,7 +666,7 @@ except TypeError as e:
     print(e)
 ";
 
-fn execution_observation(
+pub(super) fn execution_observation(
     program: Program,
     bounds: Bounds,
     rebuild: bool,

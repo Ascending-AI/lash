@@ -371,13 +371,21 @@ impl Reads {
                 binding,
                 iterable,
                 body,
+                else_block,
+                ..
             } => {
                 self.expr(iterable, bound);
                 self.scoped(binding, body, bound);
+                self.block(else_block, bound);
             }
-            Stmt::While { condition, body } => {
+            Stmt::While {
+                condition,
+                body,
+                else_block,
+            } => {
                 self.expr(condition, bound);
                 self.block(body, bound);
+                self.block(else_block, bound);
             }
             Stmt::Break | Stmt::Continue => {}
             Stmt::Return { value }

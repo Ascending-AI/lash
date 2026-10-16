@@ -835,6 +835,15 @@ impl KernelMachine {
         };
         let nested = frame.nested.take();
         let pending = frame.record.pending.take();
+        // A `for`'s protocol hook answered from its frame: the header
+        // goes on (`K-ITER-005`).
+        if nested.is_none() && pending.is_none() && self.in_header(task)? {
+            let ran = match self.header_answered(task, host, exe, value)? {
+                super::ops::Flow::Done => Ran::Done,
+                super::ops::Flow::Step => Ran::Step,
+            };
+            return Ok((id, ran));
+        }
         let running = Running::new(task, exe, id);
         let (Some(act), Some(pending)) = (nested, pending) else {
             if nested.is_some() {

@@ -1,10 +1,10 @@
 //! FIG-6160: builtin range iteration uses an integer counter, never a list.
 
-use lash_kernel_doc::{Expr, Integer, Literal, Place, Rhs, Stmt};
+use lash_kernel_doc::{Expr, Integer, Literal, Place, Rhs};
 use ruff_python_ast as ast;
 
 use super::{Buf, Lowerer, Lowering, Operand};
-use crate::scope::{self, Ty};
+use crate::scope::Ty;
 
 impl Lowerer<'_> {
     pub(super) fn range_loop(
@@ -86,8 +86,6 @@ impl Lowerer<'_> {
         let Expr::Variable(counter_name) = &counter.expr else {
             unreachable!("a temporary is a variable");
         };
-        let flag = (!for_loop.orelse.is_empty() && scope::breaks(&for_loop.body))
-            .then(|| self.break_flag());
         // The usual omitted step needs just one comparison per iteration.
         // For a dynamic step, select the comparison once per loop test.
         let direction = match &step.expr {
@@ -100,28 +98,34 @@ impl Lowerer<'_> {
         } else {
             None
         };
-        let condition = match direction {
-            Some(positive) => self.native(
+        let test = |this: &mut Self| match (direction, &positive) {
+            (Some(positive), _) => this.native(
                 if positive { "int.lt" } else { "int.gt" },
                 vec![counter.expr.clone(), stop.expr.clone()],
-            )?,
-            None => Expr::Literal(Literal::Bool(true)),
-        };
-        let body = self.block(|this| {
-            if let Some(positive) = positive {
-                let mut exhausted = |comparison| {
-                    this.block(|this| {
-                        let done =
-                            this.native(comparison, vec![counter.expr.clone(), stop.expr.clone()])?;
-                        let leave = this.single(Stmt::Break);
-                        this.emit_if(done, leave, Buf::default());
-                        Ok(())
-                    })
+            ),
+            (None, Some(positive)) => {
+                let ascending =
+                    this.native("int.lt", vec![counter.expr.clone(), stop.expr.clone()])?;
+                let more = this.let_rhs(Rhs::Expr(ascending), Ty::Bool);
+                let Expr::Variable(more_name) = &more.expr else {
+                    unreachable!("a temporary is a variable");
                 };
-                let ascending = exhausted("int.ge")?;
-                let descending = exhausted("int.le")?;
-                this.emit_if(positive.expr, ascending, descending);
+                let descending =
+                    this.native("int.gt", vec![counter.expr.clone(), stop.expr.clone()])?;
+                let descends = this.block(|this| {
+                    this.store(
+                        Place::Variable(more_name.clone()),
+                        Operand::inline(descending, Ty::Bool),
+                    );
+                    Ok(())
+                })?;
+                let negative = this.not(positive.expr.clone())?;
+                this.emit_if(negative, descends, Buf::default());
+                Ok(more.expr)
             }
+            (None, None) => unreachable!("a dynamic step has its direction"),
+        };
+        let body = |this: &mut Self| {
             this.assign(&for_loop.target, counter.clone())?;
             // Advance before the body so continue (including through finally)
             // cannot skip it, and rebinding the Python target cannot change it.
@@ -130,13 +134,8 @@ impl Lowerer<'_> {
                 Place::Variable(counter_name.clone()),
                 Operand::inline(next, Ty::Int),
             );
-            this.scope_mut().loops.push(flag.clone());
-            let result = this.statements(&for_loop.body);
-            this.scope_mut().loops.pop();
-            result
-        })?;
-        self.span = span;
-        self.emit_while(condition, body);
-        self.loop_else(flag, None, &for_loop.orelse, span)
+            this.statements(&for_loop.body)
+        };
+        self.python_while(test, body, &for_loop.orelse, span)
     }
 }

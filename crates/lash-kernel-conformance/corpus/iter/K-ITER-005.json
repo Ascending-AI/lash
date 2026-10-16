@@ -1,0 +1,74 @@
+{
+  "rule": "K-ITER-005",
+  "cases": [
+    {
+      "name": "a protocol's open chooses what the loop walks",
+      "document": "kernel 1\nnumbers by_spelling\nuse list.copy = @9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nmain { let xs = [1, 2] for x in xs via (open list.copy) { print x set xs[list.len(xs)] = 3 } finish xs }\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "2"
+              },
+              {
+                "int": "3"
+              },
+              {
+                "int": "3"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "an opened text is walked by code point",
+      "document": "kernel 1\nnumbers by_spelling\nuse float.to_text = @957826df86783362d38a492b8f352cbb455383fc80c31ad8a47fa6fe2bec525c\nmain { for c in 1.5 via (open float.to_text) { print c } }\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "1"
+          },
+          {
+            "text": "."
+          },
+          {
+            "text": "5"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "an opened value no cursor walks and no next steps raises type_error",
+      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nmain { try { for x in [7] via (open list.len) { print x } } catch e { print e.kind } }\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

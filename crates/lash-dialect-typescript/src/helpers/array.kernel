@@ -1691,6 +1691,68 @@ body {
   return iterator
 }
 
+# `for...of`'s protocol (`K-ITER-005`). An array, a Map, a Set and a string
+# are walked live by the loop's own cursor, a string by code point, and a
+# regex match by its backing list. Any other iterable is stepped through its
+# iterator, whose `next` is read once, here, as GetIterator reads it.
+function ts.for_of.open(subject: Any) -> Any
+kernel 1
+errors "type_error"
+charge 8
+body {
+  let k = invoke ts.receiver(subject)
+  for walked in ["list", "map", "set", "text"] {
+    if same(k, walked) { return subject }
+  }
+  if same(k, "brand:regex.match") { return subject.items }
+  let iterator = invoke ts.array.iterator(subject)
+  let method = iterator.next
+  let next = invoke ts.callable(method)
+  return {iterator: iterator, next: next}
+}
+
+# One step of an iterator `ts.for_of.open` gave: an empty tuple when its
+# result is done, else a tuple of its value.
+function ts.for_of.next(driver: Any) -> Any
+kernel 1
+errors "type_error"
+charge 8
+body {
+  let iterator = driver.iterator
+  let next = driver.next
+  let none = []
+  let step = apply next(iterator, none)
+  let done = invoke ts.get(step, "done")
+  let finished = invoke ts.to_boolean(done)
+  if finished { return () }
+  let value = invoke ts.get(step, "value")
+  return (value,)
+}
+
+# What a pass of `for...of` binds: an array's hole is undefined, a Map's
+# entry is `[key, value]` with its value read now, and a Set's member is
+# its JavaScript value.
+function ts.for_of.item(source: Any, raw: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let k = kind(source)
+  if same(k, "list") {
+    if same(raw, ()) { return absent }
+    return raw
+  }
+  if same(k, "map") {
+    let key = invoke ts.map.value(raw)
+    return [key, source[raw]]
+  }
+  if same(k, "set") {
+    let member = invoke ts.map.value(raw)
+    return member
+  }
+  return raw
+}
+
 function ts.array.from(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"

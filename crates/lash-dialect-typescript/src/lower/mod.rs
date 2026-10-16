@@ -79,17 +79,18 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.bit_not",
     "ts.bit_or",
     "ts.bit_xor",
-    "ts.call_member",
     "ts.callable",
     "ts.delete",
     "ts.div",
+    "ts.for_of.item",
+    "ts.for_of.next",
+    "ts.for_of.open",
     "ts.ge",
     "ts.get",
     "ts.gt",
     "ts.has",
     "ts.in",
     "ts.is_nullish",
-    "ts.iterate",
     "ts.keys",
     "ts.le",
     "ts.loose_equals",
@@ -898,17 +899,26 @@ impl Lowerer<'_> {
             Stmt::While {
                 condition,
                 body: body.stmts,
+                else_block: Vec::new(),
             },
             vec![body.notes],
         );
     }
 
-    fn emit_for(&mut self, binding: Name, iterable: Expr, body: Buf) {
+    fn emit_for(
+        &mut self,
+        binding: Name,
+        iterable: Expr,
+        via: Option<lash_kernel_doc::Protocol>,
+        body: Buf,
+    ) {
         self.push(
             Stmt::For {
                 binding,
                 iterable,
+                via,
                 body: body.stmts,
+                else_block: Vec::new(),
             },
             vec![body.notes],
         );

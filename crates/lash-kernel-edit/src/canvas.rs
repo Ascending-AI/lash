@@ -322,7 +322,9 @@ impl Working {
             Wrapper::For { binding, iterable } => Stmt::For {
                 binding: binding.clone(),
                 iterable: iterable.clone(),
+                via: None,
                 body,
+                else_block: vec![],
             },
             Wrapper::Try { catch_binding } => Stmt::Try(TryStmt {
                 body,
@@ -373,8 +375,18 @@ impl Working {
                 }
                 (if branch == Branch::Then { 1 } else { 2 }, None, false)
             }
-            (Stmt::For { iterable, .. }, Branch::Body) => {
+            (
+                Stmt::For {
+                    iterable,
+                    else_block,
+                    ..
+                },
+                Branch::Body,
+            ) => {
                 header(iterable, base)?;
+                if !else_block.is_empty() {
+                    return Err(at(base, Cause::NonEmptyDiscardedArm));
+                }
                 (1, Some(()), true)
             }
             (Stmt::Try(scope), Branch::Body) => {

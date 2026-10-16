@@ -111,13 +111,39 @@ pub(crate) fn replace_in_block(block: &mut Block, functions: &BTreeMap<FunctionI
                 replace_in_block(then_block, functions);
                 replace_in_block(else_block, functions);
             }
-            Stmt::For { iterable, body, .. } => {
+            Stmt::For {
+                iterable,
+                via,
+                body,
+                else_block,
+                ..
+            } => {
                 replace_in_expr(iterable, functions);
+                if let Some(via) = via {
+                    let replace = |id: &mut FunctionId| {
+                        if let Some(to) = functions.get(id) {
+                            *id = *to;
+                        }
+                    };
+                    replace(&mut via.open);
+                    for hook in [&mut via.next, &mut via.item, &mut via.check]
+                        .into_iter()
+                        .flatten()
+                    {
+                        replace(hook);
+                    }
+                }
                 replace_in_block(body, functions);
+                replace_in_block(else_block, functions);
             }
-            Stmt::While { condition, body } => {
+            Stmt::While {
+                condition,
+                body,
+                else_block,
+            } => {
                 replace_in_expr(condition, functions);
                 replace_in_block(body, functions);
+                replace_in_block(else_block, functions);
             }
             Stmt::Break | Stmt::Continue => {}
             Stmt::Return { value }

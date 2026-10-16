@@ -57,6 +57,9 @@ use py.to_set
 use py.sorted
 use py.set_op
 use py.no_attribute
+use py.method.keys
+use py.method.values
+use py.method.items
 use py.text_of
 
 function py.no_attribute(receiver: Any, name: Text) -> Any
@@ -424,6 +427,56 @@ body {
   }
   do invoke py.no_attribute(self, "items")
   return null
+}
+
+# The protocols of a loop over a dict view, `for k in d.keys()`, `.values()`
+# and `.items()` (`K-ITER-005`): a dict is walked live through its keys and
+# checked as a loop over the dict itself is (`py.for_in.check`); anything
+# else is walked as the method gives it.
+function py.for_in.keys(self: Any) -> Any
+kernel 1
+charge 4
+body {
+  if same(kind(self), "map") { return self }
+  let keys = invoke py.method.keys(self)
+  return keys
+}
+
+function py.for_in.values(self: Any) -> Any
+kernel 1
+charge 4
+body {
+  if same(kind(self), "map") { return self }
+  let values = invoke py.method.values(self)
+  return values
+}
+
+function py.for_in.items(self: Any) -> Any
+kernel 1
+charge 4
+body {
+  if same(kind(self), "map") { return self }
+  let items = invoke py.method.items(self)
+  return items
+}
+
+# What a pass over `.values()` binds: the value a dict holds for the key now.
+function py.for_in.value(source: Any, key: Any) -> Any
+kernel 1
+charge 2
+body {
+  if same(kind(source), "map") { return source[key] }
+  return key
+}
+
+# What a pass over `.items()` binds: the key and the value a dict holds for
+# it now.
+function py.for_in.item(source: Any, key: Any) -> Any
+kernel 1
+charge 2
+body {
+  if same(kind(source), "map") { return (key, source[key]) }
+  return key
 }
 
 function py.method.setdefault(self: Any, key: Any, default?: Any) -> Any

@@ -7,6 +7,7 @@
 //! the action and its roles are found by site in the statement's resume
 //! entries under this layout, and the phase must agree with the action's
 //! kind and with how the task comes to the frame.
+use super::loops::{Guard, Header, TextCursor};
 use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
 use crate::compile::{Executable, Form, LibId, NestedKind, StmtId};
 use lash_kernel_doc::heap::HeapFault;
@@ -15,8 +16,9 @@ use lash_kernel_exec::ActIx;
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{
-    BindingRecord, BoundRecord, EnteredRecord, FinallyRecord, FrameRecord, IncomingRecord,
-    IteratedRecord, LoopRecord, PendingRecord, PhaseRecord, RoleRecord, TaskStateRecord,
+    BindingRecord, BoundRecord, CursorKind, CursorRecord, EnteredRecord, FinallyRecord,
+    FrameRecord, GuardRecord, HeaderRecord, IncomingRecord, IteratedRecord, LoopRecord,
+    PendingRecord, PhaseRecord, RoleRecord, TableCursor, TaskStateRecord,
 };
 use std::collections::BTreeSet;
 use std::fmt;
@@ -294,14 +296,15 @@ impl Frame {
     fn sync_to(&mut self, coordinates: bool) -> Result<(), HeapFault> {
         self.sync_slots()?;
         // A frame stands at its block's next statement, or at the statement
-        // it waits in: a `while` waits in its condition above its loop.
+        // it waits in: a `while` waits in its condition above its loop, a
+        // `for` in a protocol hook of its header.
         let block = match self.control.as_slice() {
             [.., Control::Block { block, next }] => Some((*block, *next)),
-            [.., Control::Block { block, next }, Control::While { .. }]
-                if self.awaiting.is_some() =>
-            {
-                Some((*block, *next))
-            }
+            [
+                ..,
+                Control::Block { block, next },
+                Control::While { .. } | Control::For { .. },
+            ] if self.awaiting.is_some() => Some((*block, *next)),
             _ => None,
         };
         if coordinates && let Some((block, next)) = block {
@@ -333,19 +336,11 @@ impl Frame {
                     stmt,
                     cursor,
                     started,
+                    header,
+                    guard,
                 } => {
                     let Form::For { site, .. } = &self.exe.stmt(*stmt).form else {
                         return Err(malformed("a for cursor stands at another form"));
-                    };
-                    let (value, position) = match cursor {
-                        Cursor::List(id, at) => (Value::List(*id), *at as u64),
-                        Cursor::Tuple(tuple, at) => (Value::Tuple(Arc::clone(tuple)), *at as u64),
-                        Cursor::Map(id, at) => {
-                            (Value::Map(*id), at.map(|at| at.0).unwrap_or(u64::MAX))
-                        }
-                        Cursor::Set(id, at) => {
-                            (Value::Set(*id), at.map(|at| at.0).unwrap_or(u64::MAX))
-                        }
                     };
                     if coordinates {
                         let saved_site = site_ref(
@@ -362,19 +357,23 @@ impl Frame {
                             LoopRecord {
                                 site: saved_site,
                                 started: *started,
-                                position: Some(position),
+                                header: header_record(header),
+                                cursor: cursor_record(cursor, guard.as_deref()),
                             },
                             &self.access,
                         )?;
                     }
-                    write(
-                        &mut self.record.iterated,
-                        iterated,
-                        IteratedRecord(value),
-                        &self.access,
-                    )?;
+                    // What it walks, then the item a hook holds.
+                    for value in cursor.walked().into_iter().chain(header.held()) {
+                        write(
+                            &mut self.record.iterated,
+                            iterated,
+                            IteratedRecord(value),
+                            &self.access,
+                        )?;
+                        iterated += 1;
+                    }
                     loops += 1;
-                    iterated += 1;
                 }
                 Control::While { stmt, started } => {
                     let Form::While { site, .. } = &self.exe.stmt(*stmt).form else {
@@ -395,7 +394,8 @@ impl Frame {
                             LoopRecord {
                                 site: saved_site,
                                 started: *started,
-                                position: None,
+                                header: HeaderRecord::Body,
+                                cursor: None,
                             },
                             &self.access,
                         )?;
@@ -704,8 +704,8 @@ fn restore(
                 if let Form::While { site: at, .. } = &exe.stmt(stmt).form {
                     let saved = row(&record.loops, loops, &access)?;
                     loops += 1;
-                    if !saved.site.matches(at, &access)? || saved.position.is_some() {
-                        return Err(malformed("a saved while has another site or a position"));
+                    if !saved.site.matches(at, &access)? || saved.cursor.is_some() {
+                        return Err(malformed("a saved while has another site or a cursor"));
                     }
                     control.push(Control::While {
                         stmt,
@@ -715,16 +715,34 @@ fn restore(
                 break;
             } else if parked != ParkKind::Fresh {
                 let stmt = *stmts.get(index).ok_or_else(nowhere)?;
-                let Form::Action(action) = &exe.stmt(stmt).form else {
-                    return Err(malformed("a resuming frame has no action"));
-                };
-                // Only a `then yield` wait owes a turn once delivered.
-                if parked == ParkKind::Delivered && !action.kind.then_yield() {
-                    return Err(malformed(format!(
-                        "the task's state disagrees with the action at {site}"
-                    )));
-                }
                 awaiting = Some(stmt);
+                match &exe.stmt(stmt).form {
+                    // Only a `then yield` wait owes a turn once delivered.
+                    Form::Action(action)
+                        if parked == ParkKind::Delivered && !action.kind.then_yield() =>
+                    {
+                        return Err(malformed(format!(
+                            "the task's state disagrees with the action at {site}"
+                        )));
+                    }
+                    Form::Action(_) => {}
+                    // A `for` waits in a protocol hook of its header: it
+                    // stands above its loop.
+                    Form::For { site: at, .. } if parked == ParkKind::Returned => {
+                        let saved = row(&record.loops, loops, &access)?;
+                        loops += 1;
+                        if !saved.site.matches(at, &access)? || saved.header == HeaderRecord::Body {
+                            return Err(malformed("a saved header has another site or none"));
+                        }
+                        control.push(Control::Block {
+                            block,
+                            next: index + 1,
+                        });
+                        control.push(saved_for(stmt, &saved, &record, &mut iterated, &access)?);
+                        break;
+                    }
+                    _ => return Err(malformed("a resuming frame has no action")),
+                }
                 index + 1
             } else if index <= stmts.len() {
                 index
@@ -752,47 +770,26 @@ fn restore(
             Form::For { site, body, .. } if at(*body) => {
                 let saved = row(&record.loops, loops, &access)?;
                 loops += 1;
-                if !saved.site.matches(site, &access)? {
-                    return Err(malformed("a saved loop belongs to another site"));
+                if !saved.site.matches(site, &access)? || saved.header != HeaderRecord::Body {
+                    return Err(malformed("a saved loop belongs to another site or header"));
                 }
-                let value = row(&record.iterated, iterated, &access)?.0;
-                iterated += 1;
-                let position = saved
-                    .position
-                    .ok_or_else(|| malformed("a for has no position"))?;
-                let cursor = match value {
-                    Value::List(id) => Cursor::List(
-                        id,
-                        usize::try_from(position)
-                            .map_err(|_| malformed("list cursor overflows"))?,
-                    ),
-                    Value::Tuple(tuple) if position <= tuple.summary.len => {
-                        Cursor::Tuple(tuple, position as usize)
-                    }
-                    Value::Map(id) => Cursor::Map(
-                        id,
-                        (position != u64::MAX)
-                            .then_some(lash_kernel_state::paged::TableCursor(position)),
-                    ),
-                    Value::Set(id) => Cursor::Set(
-                        id,
-                        (position != u64::MAX)
-                            .then_some(lash_kernel_state::paged::TableCursor(position)),
-                    ),
-                    _ => return Err(malformed("a for cursor has another kind or extent")),
-                };
-                control.push(Control::For {
-                    stmt,
-                    cursor,
-                    started: saved.started,
-                });
+                control.push(saved_for(stmt, &saved, &record, &mut iterated, &access)?);
                 *body
             }
+            // A loop's `else` runs once the loop has left the control.
+            Form::For {
+                else_block: Some(else_block),
+                ..
+            }
+            | Form::While {
+                else_block: Some(else_block),
+                ..
+            } if at(*else_block) => *else_block,
             Form::While { site, body, .. } if at(*body) => {
                 let saved = row(&record.loops, loops, &access)?;
                 loops += 1;
-                if !saved.site.matches(site, &access)? || saved.position.is_some() {
-                    return Err(malformed("a saved while has another site or a position"));
+                if !saved.site.matches(site, &access)? || saved.cursor.is_some() {
+                    return Err(malformed("a saved while has another site or a cursor"));
                 }
                 control.push(Control::While {
                     stmt,
@@ -873,6 +870,124 @@ fn restore(
         nested,
         library,
     }))
+}
+
+fn header_record(header: &Header) -> HeaderRecord {
+    match header {
+        Header::Body => HeaderRecord::Body,
+        Header::Open => HeaderRecord::Open,
+        Header::Pull => HeaderRecord::Pull,
+        Header::Check(_) => HeaderRecord::Check,
+        Header::Exhausted => HeaderRecord::Exhausted,
+        Header::Item(_) => HeaderRecord::Item,
+    }
+}
+
+fn cursor_record(cursor: &Cursor, guard: Option<&Guard>) -> Option<CursorRecord> {
+    let table = |at: &Option<TableCursor>| at.map(|at| at.0).unwrap_or(u64::MAX);
+    let (kind, position) = match cursor {
+        Cursor::Opening => return None,
+        Cursor::List(_, at) => (CursorKind::List, *at as u64),
+        Cursor::Tuple(_, at) => (CursorKind::Tuple, *at as u64),
+        Cursor::Map(_, at) | Cursor::Set(_, at) => (CursorKind::Table, table(at)),
+        Cursor::Text(text) => (CursorKind::Text, text.index),
+        Cursor::Driver(_) => (CursorKind::Driver, 0),
+    };
+    Some(CursorRecord {
+        kind,
+        position,
+        guard: guard.map(|guard| GuardRecord {
+            size: guard.size,
+            remaining: guard.remaining,
+        }),
+    })
+}
+
+/// The `for` loop of statement `stmt` as `saved` records it, its held
+/// values the frame's next `iterated` rows: what it walks, then the item a
+/// hook holds (`K-ITER-005`).
+fn saved_for(
+    stmt: StmtId,
+    saved: &LoopRecord,
+    record: &FrameRecord,
+    iterated: &mut u64,
+    access: &Access<'_>,
+) -> Result<Control, HeapFault> {
+    let mut held = || {
+        let value = row(&record.iterated, *iterated, access)?.0;
+        *iterated += 1;
+        Ok::<_, HeapFault>(value)
+    };
+    let (cursor, guard) = match (saved.cursor, saved.header) {
+        (None, HeaderRecord::Open) => (Cursor::Opening, None),
+        (
+            Some(CursorRecord {
+                kind,
+                position,
+                guard,
+            }),
+            header,
+        ) if header != HeaderRecord::Open => {
+            let cursor = match (kind, held()?) {
+                (CursorKind::List, Value::List(id)) => Cursor::List(
+                    id,
+                    usize::try_from(position).map_err(|_| malformed("list cursor overflows"))?,
+                ),
+                (CursorKind::Tuple, Value::Tuple(tuple)) if position <= tuple.summary.len => {
+                    Cursor::Tuple(tuple, position as usize)
+                }
+                (CursorKind::Table, Value::Map(id)) => {
+                    Cursor::Map(id, (position != u64::MAX).then_some(TableCursor(position)))
+                }
+                (CursorKind::Table, Value::Set(id)) => {
+                    Cursor::Set(id, (position != u64::MAX).then_some(TableCursor(position)))
+                }
+                (CursorKind::Text, Value::Text(text)) if position <= text.summary.chars => {
+                    // A text held in the activation is walked by byte
+                    // offset; a paged one by index.
+                    let offset = match &text.body {
+                        lash_kernel_doc::heap::Payload::Resident(body) => body
+                            .char_indices()
+                            .nth(position as usize)
+                            .map_or(body.len(), |(at, _)| at),
+                        lash_kernel_doc::heap::Payload::Paged(_) => 0,
+                    };
+                    Cursor::Text(Box::new(TextCursor {
+                        text,
+                        index: position,
+                        offset,
+                    }))
+                }
+                (CursorKind::Driver, driver) if position == 0 => Cursor::Driver(Box::new(driver)),
+                _ => return Err(malformed("a for cursor has another kind or extent")),
+            };
+            let guard = match (guard, &cursor) {
+                (None, _) => None,
+                (Some(GuardRecord { size, remaining }), Cursor::Map(..) | Cursor::Set(..)) => {
+                    Some(Box::new(Guard { size, remaining }))
+                }
+                _ => return Err(malformed("a guard stands on no map or set")),
+            };
+            (cursor, guard)
+        }
+        _ => return Err(malformed("a for's header and cursor disagree")),
+    };
+    let header = match saved.header {
+        HeaderRecord::Body => Header::Body,
+        HeaderRecord::Open => Header::Open,
+        HeaderRecord::Pull if matches!(cursor, Cursor::Driver(_)) => Header::Pull,
+        HeaderRecord::Check if guard.is_some() => Header::Check(Box::new(held()?)),
+        HeaderRecord::Exhausted if guard.is_some() => Header::Exhausted,
+        HeaderRecord::Item => Header::Item(Box::new(held()?)),
+        _ => return Err(malformed("a for's header stands where its cursor cannot")),
+    };
+    Ok(Control::For {
+        stmt,
+        cursor,
+        started: saved.started,
+        header,
+        guard,
+    })
 }
 
 /// The resume entry of `pending`, the continuation a frame saved where it

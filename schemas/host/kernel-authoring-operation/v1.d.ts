@@ -354,6 +354,35 @@ export type ProjectionRead = {
   "request": Expr;
 };
 
+/**
+ * A dialect's iteration protocol: the library functions a `for … via`
+ * calls at its header, by identity (`K-ITER-005`). Each is listed in the
+ * manifest as any library function a document reaches.
+ */
+export type Protocol = {
+  /**
+   * Checks a map or a set against its size when the loop opened it and
+   * the items it may still give, after each step; gives that budget
+   * anew.
+   */
+  "check"?: (FunctionId | null);
+  /**
+   * Takes what was walked and an item of it to the value bound.
+   */
+  "item"?: (FunctionId | null);
+  /**
+   * Steps a driver: an empty tuple when it is exhausted, else a tuple of
+   * one item.
+   */
+  "next"?: (FunctionId | null);
+  /**
+   * Takes the iterated value to what the loop walks: a list, a tuple, a
+   * map, a set or a text, which the loop's own cursor walks, or any
+   * other value, a driver that `next` steps.
+   */
+  "open": FunctionId;
+};
+
 export type QualifiedName = string;
 
 export type RecordEntry = {
@@ -436,12 +465,15 @@ export type Stmt = (("break" | "continue") | {
   "for": {
     "binding": Name;
     "body": Array<Stmt>;
+    "else_block"?: Array<Stmt>;
     "iterable": Expr;
+    "via"?: (Protocol | null);
   };
 } | {
   "while": {
     "body": Array<Stmt>;
     "condition": Expr;
+    "else_block"?: Array<Stmt>;
   };
 } | {
   "return": {

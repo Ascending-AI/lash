@@ -16,6 +16,37 @@ impl Reader {
             Err(invalid("kernel control needs a block", Some(stmt.span())))
         }
     }
+    /// What a `for (const x of ...)` walks and its protocol: the base's
+    /// `ts.for_of`, or the hooks `k.via(iterable, open, next, item, check)`
+    /// names, `undefined` for one it omits.
+    fn protocol(&mut self, right: &s::Expr) -> Result<(k::Expr, k::Protocol), Diagnostic> {
+        let args = match invocation(right) {
+            Ok((name, args)) if name == "via" => args,
+            _ => {
+                let via = self.operators.for_of().ok_or_else(|| {
+                    invalid(
+                        "the base document holds no ts.for_of protocol",
+                        Some(right.span()),
+                    )
+                })?;
+                return Ok((self.expression(right)?, via));
+            }
+        };
+        let [iterable, open, next, item, check] = args[..] else {
+            return Err(invalid("k.via takes five arguments", Some(right.span())));
+        };
+        let hook = |expr: &s::Expr| match expr {
+            s::Expr::Ident(ident) if ident.sym.as_ref() == "undefined" => Ok(None),
+            expr => self.id(expr).map(Some),
+        };
+        let via = k::Protocol {
+            open: hook(open)?.ok_or_else(|| invalid("k.via needs open", Some(right.span())))?,
+            next: hook(next)?,
+            item: hook(item)?,
+            check: hook(check)?,
+        };
+        Ok((self.expression(iterable)?, via))
+    }
     pub(super) fn statement(&mut self, stmt: &s::Stmt) -> Result<k::Stmt, Diagnostic> {
         let stmt = self.read_statement(stmt)?;
         self.types.statement(&stmt, self.operators.functions());
@@ -74,9 +105,19 @@ impl Reader {
                         Some(stmt.span()),
                     ));
                 };
-                if var.kind != s::VarDeclKind::Let || var.declare {
+                if var.declare {
                     return Err(invalid("kernel iteration uses let", Some(stmt.span())));
                 }
+                let protocol = match var.kind {
+                    s::VarDeclKind::Let => false,
+                    s::VarDeclKind::Const => true,
+                    s::VarDeclKind::Var => {
+                        return Err(invalid(
+                            "kernel iteration uses let or const",
+                            Some(stmt.span()),
+                        ));
+                    }
+                };
                 let [binding] = var.decls.as_slice() else {
                     return Err(invalid(
                         "kernel iteration binds one name",
@@ -96,15 +137,25 @@ impl Reader {
                         Some(stmt.span()),
                     ));
                 }
+                let binding = self.name(&name.id)?;
+                let (iterable, via) = if protocol {
+                    let (iterable, via) = self.protocol(&statement.right)?;
+                    (iterable, Some(via))
+                } else {
+                    (self.expression(&statement.right)?, None)
+                };
                 k::Stmt::For {
-                    binding: self.name(&name.id)?,
-                    iterable: self.expression(&statement.right)?,
+                    binding,
+                    iterable,
+                    via,
                     body: self.body(&statement.body)?,
+                    else_block: Vec::new(),
                 }
             }
             s::Stmt::While(statement) => k::Stmt::While {
                 condition: self.expression(&statement.test)?,
                 body: self.body(&statement.body)?,
+                else_block: Vec::new(),
             },
             s::Stmt::Break(statement) if statement.label.is_none() => k::Stmt::Break,
             s::Stmt::Continue(statement) if statement.label.is_none() => k::Stmt::Continue,

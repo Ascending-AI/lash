@@ -142,6 +142,9 @@ fn collect_calls(node: Node<'_>, called: &mut BTreeSet<FunctionId>) {
         ) => {
             called.insert(*function);
         }
+        Node::Stmt(lash_kernel_doc::Stmt::For { via: Some(via), .. }) => {
+            called.extend(via.functions())
+        }
         _ => {}
     }
     for child in node.children() {

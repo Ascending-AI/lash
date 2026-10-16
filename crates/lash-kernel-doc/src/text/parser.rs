@@ -8,7 +8,7 @@ use super::lexer::{Spanned, Token, lex};
 use super::{ParseError, ParseErrorReason, is_keyword};
 use crate::ast::{
     ActExpr, ActKind, Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode,
-    Literal, MapEntry, Member, Place, ProjectionRead, RecordEntry, Rhs, Stmt, TryStmt,
+    Literal, MapEntry, Member, Place, ProjectionRead, Protocol, RecordEntry, Rhs, Stmt, TryStmt,
 };
 use crate::document::{Document, Manifest};
 use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Operand};
@@ -536,15 +536,25 @@ impl Parser {
             "for" => {
                 let binding = self.name()?;
                 self.expect_keyword("in")?;
+                let iterable = self.expr()?;
+                let via = if self.eat_word("via") {
+                    Some(self.protocol()?)
+                } else {
+                    None
+                };
+                let body = self.block()?;
                 Stmt::For {
                     binding,
-                    iterable: self.expr()?,
-                    body: self.block()?,
+                    iterable,
+                    via,
+                    body,
+                    else_block: self.loop_else()?,
                 }
             }
             "while" => Stmt::While {
                 condition: self.expr()?,
                 body: self.block()?,
+                else_block: self.loop_else()?,
             },
             "break" => Stmt::Break,
             "continue" => Stmt::Continue,
@@ -821,6 +831,45 @@ impl Parser {
     }
 
     /// A library function: `@<hex>`, or the name one `use` line gives.
+    /// `(open f, next f, item f, check f)`: a loop protocol, its hooks in
+    /// this order, each but `open` optional.
+    fn protocol(&mut self) -> Parsed<Protocol> {
+        self.expect(&Token::LParen)?;
+        self.expect_keyword("open")?;
+        let open = self.function_reference()?;
+        let mut hooks = [None, None, None];
+        let mut after = 0;
+        while self.eat(&Token::Comma) {
+            let Some(at) = ["next", "item", "check"]
+                .iter()
+                .skip(after)
+                .position(|word| self.is_word(word))
+            else {
+                return Err(self.unexpected("`next`, `item` or `check`, in that order"));
+            };
+            self.position += 1;
+            hooks[after + at] = Some(self.function_reference()?);
+            after += at + 1;
+        }
+        self.expect(&Token::RParen)?;
+        let [next, item, check] = hooks;
+        Ok(Protocol {
+            open,
+            next,
+            item,
+            check,
+        })
+    }
+
+    /// A loop's `else` block, or none.
+    fn loop_else(&mut self) -> Parsed<Block> {
+        if self.eat_word("else") {
+            self.block()
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
     fn function_reference(&mut self) -> Parsed<FunctionId> {
         if let Token::Identity(function) = self.peek() {
             let function = *function;

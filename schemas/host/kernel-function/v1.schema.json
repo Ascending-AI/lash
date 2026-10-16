@@ -1258,6 +1258,53 @@
       ],
       "type": "object"
     },
+    "Protocol": {
+      "additionalProperties": false,
+      "description": "A dialect's iteration protocol: the library functions a `for \u2026 via`\ncalls at its header, by identity (`K-ITER-005`). Each is listed in the\nmanifest as any library function a document reaches.",
+      "properties": {
+        "check": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Checks a map or a set against its size when the loop opened it and\nthe items it may still give, after each step; gives that budget\nanew."
+        },
+        "item": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Takes what was walked and an item of it to the value bound."
+        },
+        "next": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FunctionId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Steps a driver: an empty tuple when it is exhausted, else a tuple of\none item."
+        },
+        "open": {
+          "$ref": "#/$defs/FunctionId",
+          "description": "Takes the iterated value to what the loop walks: a list, a tuple, a\nmap, a set or a text, which the loop's own cursor walks, or any\nother value, a driver that `next` steps."
+        }
+      },
+      "required": [
+        "open"
+      ],
+      "type": "object"
+    },
     "QualifiedName": {
       "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
       "type": "string"
@@ -1510,7 +1557,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Runs `body` once per element of a collection, binding each to\n`binding`.",
+          "description": "Runs `body` once per element of a collection, binding each to\n`binding`, then `else_block` unless a `break` left the loop. With\n`via`, a dialect's protocol opens the iterated value and steps it\n(`K-ITER-005`).",
           "properties": {
             "for": {
               "additionalProperties": false,
@@ -1524,8 +1571,24 @@
                   },
                   "type": "array"
                 },
+                "else_block": {
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  },
+                  "type": "array"
+                },
                 "iterable": {
                   "$ref": "#/$defs/Expr"
+                },
+                "via": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Protocol"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -1543,6 +1606,7 @@
         },
         {
           "additionalProperties": false,
+          "description": "Runs `body` while `condition` holds, then `else_block` unless a\n`break` left the loop.",
           "properties": {
             "while": {
               "additionalProperties": false,
@@ -1555,6 +1619,12 @@
                 },
                 "condition": {
                   "$ref": "#/$defs/Expr"
+                },
+                "else_block": {
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  },
+                  "type": "array"
                 }
               },
               "required": [

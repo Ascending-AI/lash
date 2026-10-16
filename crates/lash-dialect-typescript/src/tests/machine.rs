@@ -445,7 +445,7 @@ pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
 
 /// Executes with a fresh serialized import at slices and parks. Neither
 /// source facts nor operand metadata may be required by resumed execution.
-fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, usize) {
+pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, usize) {
     let program = Program {
         release: super::pages::RELEASE,
         document: Arc::clone(

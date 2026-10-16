@@ -249,21 +249,6 @@ const ROWS: &[Row] = &[
         },
         answer: || number(4.0),
     },
-    Row {
-        code: "TS_TYPED_ARRAY_ITERATION",
-        ecmascript: "`for (x of xs)` iterates whatever `xs` is.",
-        dialect: "With `xs` declared an array, a value that is not an array raises `type_error`.",
-        raises: "type_error",
-        program: |declared| {
-            program(
-                declared,
-                &[("xs", "number[]")],
-                "let n = 0; for (const x of xs) { n = n + 1; } return n;",
-                "'ab' as any",
-            )
-        },
-        answer: || number(2.0),
-    },
 ];
 
 /// The law of one row: the declared program raises the row's typed error,
@@ -316,7 +301,6 @@ rows! {
     array_index_out_of_range_raises => "TS_TYPED_ARRAY_INDEX_RANGE",
     array_length_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_LENGTH",
     array_method_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_METHOD",
-    array_iteration_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_ITERATION",
 }
 
 /// The register's `TS_TYPED_*` rows are the rows here, in the same words,

@@ -202,6 +202,7 @@ fn coarse_eval() {
         .push(Stmt::While {
             condition: action("test"),
             body: Vec::new(),
+            else_block: Vec::new(),
         });
     refuse(forbidden_while, "a `while` condition");
     for name in ["target", "index"] {

@@ -384,9 +384,60 @@ pub enum BoundRecord {
 pub struct LoopRecord {
     pub site: SiteRef,
     pub started: u64,
-    /// A `for`'s position; a map or set position is its
-    /// [`TableCursor`](super::TableCursor), not a count.
-    pub position: Option<u64>,
+    /// Where a `for`'s header stands; a `while` is always in its body.
+    pub header: HeaderRecord,
+    /// What a `for` walks and where; `None` for a `while` and for a `for`
+    /// still opening its value.
+    pub cursor: Option<CursorRecord>,
+}
+
+/// Where a `for`'s header stands (`K-ITER-005`): in the body, or in the
+/// protocol hook whose frame runs above the loop's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeaderRecord {
+    Body,
+    /// `open` takes the iterated value to what the loop walks.
+    Open,
+    /// `next` steps the driver.
+    Pull,
+    /// `check` runs with a stepped item held.
+    Check,
+    /// `check` runs at exhaustion, no item held.
+    Exhausted,
+    /// `item` takes the held item to the value bound.
+    Item,
+}
+
+/// A `for`'s cursor. What it walks is the loop's held value; a stepped item
+/// awaiting its hook is held after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CursorRecord {
+    pub kind: CursorKind,
+    /// A list's or a tuple's next index; a map's or a set's last visited
+    /// [`TableCursor`](super::TableCursor), `u64::MAX` before the first; a
+    /// text's next code point, by index; 0 for a driver.
+    pub position: u64,
+    /// A map's or a set's size when the loop opened it and the items the
+    /// protocol's `check` still allows, when it has one.
+    pub guard: Option<GuardRecord>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorKind {
+    List,
+    Tuple,
+    /// A map's keys or a set's members.
+    Table,
+    /// A text's code points.
+    Text,
+    /// A value the protocol's `next` steps.
+    Driver,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuardRecord {
+    pub size: u64,
+    pub remaining: u64,
 }
 
 #[derive(Clone, Debug)]

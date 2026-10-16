@@ -25,6 +25,13 @@ py.fail	total
 py.float	total
 py.float_text	total
 py.floordiv	total
+py.for_in.check	total
+py.for_in.item	total
+py.for_in.items	total
+py.for_in.keys	total
+py.for_in.open	total
+py.for_in.value	total
+py.for_in.values	total
 py.format	total
 py.format.exponent	total
 py.format.group	total
@@ -35,9 +42,6 @@ py.index	total
 py.int	total
 py.is_number	total
 py.isinstance	total
-py.iter	total
-py.iter_guard	total
-py.iter_size	total
 py.length	total
 py.method.add	total
 py.method.append	total
@@ -193,8 +197,6 @@ ts.boolean.convert	total
 ts.boolean.toString	total
 ts.boolean.valueOf	total
 ts.boundary	total
-ts.call_member	operation
-ts.call_value	operation
 ts.callable	total
 ts.console.json	total
 ts.console.log	body
@@ -272,6 +274,9 @@ ts.exotic.get	total
 ts.exotic.iterate	body
 ts.exotic.set	total
 ts.exotic.to_primitive	total
+ts.for_of.item	body
+ts.for_of.next	operation
+ts.for_of.open	body
 ts.function.apply	operation
 ts.function.bind	operation
 ts.function.call	operation

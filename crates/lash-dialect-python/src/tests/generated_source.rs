@@ -677,11 +677,32 @@ fn inventory_document() -> k::Document {
         S::For {
             binding: "item".into(),
             iterable: E::List(vec![]),
+            via: None,
             body: vec![S::Continue, S::Break],
+            else_block: vec![S::Print {
+                value: E::Literal(L::Bool(true)),
+            }],
+        },
+        S::For {
+            binding: "item".into(),
+            iterable: E::List(vec![]),
+            via: Some(k::Protocol {
+                open: id,
+                next: None,
+                item: Some(id),
+                check: None,
+            }),
+            body: vec![S::Print {
+                value: E::Variable("item".into()),
+            }],
+            else_block: vec![],
         },
         S::While {
             condition: E::Literal(L::Bool(false)),
             body: vec![S::Break],
+            else_block: vec![S::Print {
+                value: E::Literal(L::Bool(false)),
+            }],
         },
         S::Try(k::TryStmt {
             body: vec![S::Throw {
@@ -850,13 +871,19 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
             k::Stmt::For {
                 binding,
                 iterable,
+                via,
                 body,
+                else_block,
             } => {
-                let _ = (binding, iterable, body);
+                let _ = (binding, iterable, via, body, else_block);
                 "for"
             }
-            k::Stmt::While { condition, body } => {
-                let _ = (condition, body);
+            k::Stmt::While {
+                condition,
+                body,
+                else_block,
+            } => {
+                let _ = (condition, body, else_block);
                 "while"
             }
             k::Stmt::Break => "break",

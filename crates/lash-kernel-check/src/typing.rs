@@ -86,20 +86,35 @@ impl Typer<'_> {
             StmtNode::For {
                 binding,
                 iterable,
+                via,
                 body,
+                else_block,
             } => {
-                let element = match self.value(iterable) {
-                    Type::List(item) | Type::Set(item) => *item,
-                    Type::Map(map) => map.key,
-                    Type::Tuple(members) => union(members),
-                    _ => Type::Any,
+                let walked = self.value(iterable);
+                // A protocol's hooks decide what is bound.
+                let element = match (via, walked) {
+                    (Some(_), _) => Type::Any,
+                    (None, Type::List(item) | Type::Set(item)) => *item,
+                    (None, Type::Map(map)) => map.key,
+                    (None, Type::Tuple(members)) => union(members),
+                    (None, _) => Type::Any,
                 };
                 self.bind(binding, &element);
                 self.block(body);
+                if let Some(else_block) = else_block {
+                    self.block(else_block);
+                }
             }
-            StmtNode::While { condition, body } => {
+            StmtNode::While {
+                condition,
+                body,
+                else_block,
+            } => {
                 self.value(condition);
                 self.block(body);
+                if let Some(else_block) = else_block {
+                    self.block(else_block);
+                }
             }
             StmtNode::Break { .. } | StmtNode::Continue { .. } => {}
             StmtNode::Return { value }

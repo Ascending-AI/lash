@@ -28,6 +28,7 @@ mod positional;
 mod printer;
 mod printer_corpus;
 mod process;
+mod protocol_loops;
 mod readable_source;
 mod remaining_builtins;
 mod source_map;

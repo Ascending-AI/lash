@@ -280,19 +280,53 @@ impl Renderer<'_> {
                     self.block(else_block);
                 }
             }
+            // The front end writes no loop `else`, so its source has no
+            // spelling for one.
+            k::Stmt::For { else_block, .. } | k::Stmt::While { else_block, .. }
+                if !else_block.is_empty() =>
+            {
+                self.out.refuse(PrintError::Invalid(
+                    "a loop's else block has no generated TypeScript spelling".into(),
+                ));
+            }
             k::Stmt::For {
                 binding,
                 iterable,
+                via,
                 body,
+                ..
             } => {
-                self.out.write("for (let ");
+                // `let` is the kernel's own loop and `const` a loop through
+                // the base's `ts.for_of` protocol; another protocol names
+                // its hooks.
+                self.out.write(if via.is_some() {
+                    "for (const "
+                } else {
+                    "for (let "
+                });
                 self.name(binding);
                 self.out.write(" of ");
-                self.expr(iterable);
+                match via {
+                    Some(via) if Some(*via) != self.operators.for_of() => {
+                        self.out.write("k.via(");
+                        self.expr(iterable);
+                        for hook in [Some(via.open), via.next, via.item, via.check] {
+                            self.out.write(", ");
+                            match hook {
+                                Some(id) => self.helper(&id),
+                                None => self.out.write("undefined"),
+                            }
+                        }
+                        self.out.write(")");
+                    }
+                    _ => self.expr(iterable),
+                }
                 self.out.write(") ");
                 self.block(body);
             }
-            k::Stmt::While { condition, body } => {
+            k::Stmt::While {
+                condition, body, ..
+            } => {
                 self.out.write("while (");
                 self.expr(condition);
                 self.out.write(") ");
@@ -466,21 +500,9 @@ impl Renderer<'_> {
             k::Action::Call {
                 callee: k::Callee::Library(id),
                 args,
-            } if self.operators.authored(id, args).is_some() => {
-                match self.operators.authored(id, args) {
-                    Some(generated_operators::Authored::ConsoleLog) => {
-                        self.out.write("console.log(...");
-                        self.atom(&args[1]);
-                    }
-                    Some(generated_operators::Authored::Method(name)) => {
-                        self.atom(&args[0]);
-                        self.out.write(".");
-                        self.out.write(name);
-                        self.out.write("(...");
-                        self.atom(&args[2]);
-                    }
-                    None => unreachable!("guarded above"),
-                }
+            } if self.operators.console_log(id, args) => {
+                self.out.write("console.log(...");
+                self.atom(&args[1]);
                 self.out.write(")");
             }
             k::Action::Call { callee, args } => {
