@@ -415,8 +415,22 @@ async fn named_inputs_reach_effects_and_the_final_workflow_output() {
         workflow["document"]["entries"]["deep_research"]["params"][0]["ty"],
         "text"
     );
-    assert_eq!(workflow["view"]["dataflow"]["bindings"][0]["type"], "any");
-    assert_eq!(workflow["view"]["dataflow"]["returns"][0]["type"], "any");
+    // Awaited effects bind their declared record result directly. Find the
+    // source bindings by name; the view also includes entry adapter bindings.
+    let bindings = workflow["view"]["dataflow"]["bindings"]
+        .as_array()
+        .expect("dataflow bindings");
+    for name in ["evidence", "report"] {
+        let binding = bindings
+            .iter()
+            .find(|binding| binding["name"] == name)
+            .expect("the awaited effect's binding");
+        assert_eq!(binding["type"], json!({"record": {"rest": "any"}}));
+    }
+    assert_eq!(
+        workflow["view"]["dataflow"]["returns"][0]["type"],
+        json!({"record": {"rest": "any"}})
+    );
     let refused = client
         .post(format!("{base}/run"))
         .json(&json!({"version": 0, "inputs":{"topic":"Should not run"}}))
