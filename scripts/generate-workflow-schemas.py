@@ -15,14 +15,17 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "schemas" / "host"
 
-# The workflow view declaration is also committed inside the crate that owns
-# the view, where `lash::workflow::view::TYPESCRIPT_DECLARATION` ships it via
-# include_str!, so a host that vendors lash can check its copy hermetically.
-# The crate's laws check both files hold the same bytes.
+# The workflow view contracts are also committed inside the crate that owns
+# the view, where TYPESCRIPT_DECLARATION and JSON_SCHEMA ship them via
+# include_str!, so a host that vendors lash can check its copies hermetically.
+# The crate's drift law checks both copies against the repository schemas.
 CRATE_DECLARATIONS = {
     Path("kernel-workflow-view") / "v1.d.ts": Path("crates")
     / "lash-kernel-edit"
     / "kernel-workflow-view-v1.d.ts",
+    Path("kernel-workflow-view") / "v1.schema.json": Path("crates")
+    / "lash-kernel-edit"
+    / "kernel-workflow-view-v1.schema.json",
 }
 
 

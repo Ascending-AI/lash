@@ -2,7 +2,7 @@
 //! before sampling, export selection or host enrichment can change it.
 use super::*;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
-use registry::Metric as M;
+use registry::{COUNT_BOUNDARIES, DURATION_BOUNDARIES, Metric as M};
 
 #[derive(Clone)]
 pub(super) struct GenAiMetrics {
@@ -152,9 +152,17 @@ fn token(attributes: &[KeyValue], key: A) -> Option<u64> {
 
 fn seconds(meter: &Meter, metric: M) -> Histogram<f64> {
     let def = metric.definition();
-    meter.f64_histogram(def.name).with_unit(def.unit).build()
+    meter
+        .f64_histogram(def.name)
+        .with_unit(def.unit)
+        .with_boundaries(DURATION_BOUNDARIES.to_vec())
+        .build()
 }
 fn count(meter: &Meter, metric: M) -> Histogram<u64> {
     let def = metric.definition();
-    meter.u64_histogram(def.name).with_unit(def.unit).build()
+    meter
+        .u64_histogram(def.name)
+        .with_unit(def.unit)
+        .with_boundaries(COUNT_BOUNDARIES.to_vec())
+        .build()
 }

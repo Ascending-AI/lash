@@ -2,7 +2,7 @@
 
 Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions-genai@07794021bfe46e1c241408b6f55cb4354bd28318`. Exported changes require a release note. No schema URL is claimed.
 
-`TurnCompleted.output` carries the settled assistant answer under `OutputMessages` consent; its closer alone supplies `gen_ai.output.messages` on `invoke_agent`. Content is omitted by default and passes through the content hook and bounds. Model decorators read the logical chat span from `LlmRequestScope.trace_carrier` (absent when no model span is built). Content hooks identify tool records through `ContentView.tool_name`.
+`TurnCompleted.output` carries the settled assistant answer under `OutputMessages` consent; its closer alone supplies `gen_ai.output.messages` on `invoke_agent`. An assistant message supplies its text; a declared finish control supplies one assistant text part, with string values verbatim and other values as compact JSON. Content is omitted by default and passes through the content hook and bounds. Model decorators read the logical chat span from `LlmRequestScope.trace_carrier` (absent when no model span is built). Content hooks identify tool records through `ContentView.tool_name`.
 
 | Span name or prefix | Kind | Ownership | Semconv type |
 |---|---|---|---|
@@ -44,6 +44,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `gen_ai.tool.call.id` | String | Provenance | tool, process, tool_intent |
 | `lash.cell.id` | String | Provenance | cell |
 | `lash.cell.language` | String | Provenance | cell |
+| `lash.cell.trailing_discarded` | Integer | Provenance | cell |
 | `lash.cell.tool_calls` | Integer | Provenance | cell |
 | `gen_ai.usage.input_tokens` | Integer | Provenance | model |
 | `gen_ai.usage.output_tokens` | Integer | Provenance | model |
@@ -114,7 +115,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `model` | 45 |
 | `model_attempt` | 28 |
 | `tool` | 31 |
-| `cell` | 28 |
+| `cell` | 29 |
 | `process` | 26 |
 | `workflow` | 24 |
 | `workflow_node` | 20 |
@@ -156,3 +157,5 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `lash.obligations.stalled` | Gauge | `` | Gauge |
 | `lash.recovery_leader` | Gauge | `` | Physical |
 | `lash.recovery_leader.term` | Gauge | `` | Physical |
+
+GenAI histograms supply advisory semconv boundaries. Durations in seconds: `[0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92]`. Token and call counts: `[1.0, 4.0, 16.0, 64.0, 256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0, 16777216.0, 67108864.0]`. Host meter-provider views take precedence.

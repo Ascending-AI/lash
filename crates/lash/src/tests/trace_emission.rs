@@ -264,6 +264,87 @@ async fn a_turn_closer_exports_its_answer_only_with_output_consent() -> Result<(
     Ok(())
 }
 
+/// FIG-6434: control.finish carries its value as one assistant text part,
+/// on the committed closer and its span, under OutputMessages consent.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_control_finished_turn_exports_its_value_only_with_output_consent() -> Result<()> {
+    for (value, text) in [
+        (serde_json::json!("Sent a joke"), "Sent a joke"),
+        (serde_json::json!({"a": 1}), r#"{"a":1}"#),
+    ] {
+        for capture in [lash_trace::Capture::Omitted, lash_trace::Capture::Captured] {
+            let response = super::output_retention::control_cell_response(
+                &crate::rlm::CellDialect::typescript(),
+                crate::rlm::RlmChannel::Cell,
+                0,
+                format!("await control.finish({value});"),
+            );
+            let builder = explicit_ephemeral_facets(rlm_core_builder_over(
+                sqlite_memory_store_backend().await,
+            ))
+            .serve_test_llm_profile(
+                mock_provider(vec![lash_core::testing::runtime_helpers::MockCall {
+                    stream_events: Vec::new(),
+                    response: Ok(response),
+                }])
+                .into_handle(),
+                mock_llm_profile_spec(),
+            )
+            .content_policy(
+                lash_trace::ContentPolicy::omitted()
+                    .with(lash_trace::ContentCategory::OutputMessages, capture),
+            );
+            let (observed, builder) = Observed::install(builder);
+            let core = builder.build(crate::testing::runtime_lease_owner())?;
+            let session = core
+                .session(crate::SessionId::parse("control-finish-answer").unwrap())
+                .create(crate::SessionCreation::root(mock_session_spec()))
+                .await?;
+            let result = session.send(TurnInput::text("finish")).output().await?;
+            assert!(
+                matches!(
+                    &result.result.outcome,
+                    crate::TurnOutcome::Finished(crate::TurnFinish::Finished { value: actual, .. })
+                        if actual == &value
+                ),
+                "{:?}",
+                result.result.outcome
+            );
+            let records = observed.records(&core, "turn_completed");
+            assert_eq!(records.len(), 1);
+            let lash_trace::TraceEvent::TurnCompleted { output, .. } = &records[0].event else {
+                unreachable!()
+            };
+            let spans = observed.spans("invoke_agent");
+            assert_eq!(spans.len(), 1);
+            let exported = attribute(&spans[0], "gen_ai.output.messages");
+            if capture == lash_trace::Capture::Captured {
+                assert_eq!(
+                    output,
+                    &vec![lash_trace::TraceLlmMessage {
+                        role: "assistant".into(),
+                        blocks: vec![lash_trace::TraceContentBlock::Text {
+                            text: text.to_owned(),
+                            cache_breakpoint: false,
+                        }],
+                    }]
+                );
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(&exported.expect("captured output"))
+                        .unwrap(),
+                    serde_json::json!([{"role":"assistant","parts":[{"type":"text","content":text}]}])
+                );
+            } else {
+                assert!(output.is_empty());
+                assert!(exported.is_none());
+            }
+            core.shutdown().await?;
+        }
+    }
+    Ok(())
+}
+
 /// `turn_started`: the turn's admission, once, opening the turn's span at
 /// its scope's retained start, where the exported `invoke_agent` starts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

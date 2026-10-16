@@ -280,13 +280,17 @@ main { finish null }
     assert_eq!((&opening.block, opening.depth), (&then.block, then.depth));
 }
 
-/// The declaration the crate ships is byte-identical to the checked-in host
-/// schema file, so a host that vendors lash checks the same contract.
+/// The contracts the crate ships are byte-identical to the checked-in host
+/// schema files, so a host that vendors lash checks the same contracts.
 #[test]
-fn the_shipped_typescript_declaration_is_the_checked_in_schema_file() {
+fn the_shipped_view_contracts_are_the_checked_in_schema_files() {
     assert_eq!(
         crate::view::TYPESCRIPT_DECLARATION,
         include_str!("../../../schemas/host/kernel-workflow-view/v1.d.ts")
+    );
+    assert_eq!(
+        crate::view::JSON_SCHEMA,
+        include_str!("../../../schemas/host/kernel-workflow-view/v1.schema.json")
     );
 }
 

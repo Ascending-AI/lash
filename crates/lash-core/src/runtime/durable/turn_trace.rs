@@ -230,20 +230,23 @@ pub(super) fn output(
         return Vec::new();
     }
     let RunTerminalCause::Committed {
-        outcome:
-            RunCommittedOutcome::Finished {
-                finish: TurnFinish::AssistantMessage { text },
-                ..
-            },
+        outcome: RunCommittedOutcome::Finished { finish, .. },
         ..
     } = cause
     else {
         return Vec::new();
     };
+    let text = match finish {
+        TurnFinish::AssistantMessage { text } => text.clone(),
+        TurnFinish::Finished { value, .. } => match value {
+            serde_json::Value::String(text) => text.clone(),
+            value => value.to_string(),
+        },
+    };
     vec![lash_trace::TraceLlmMessage {
         role: "assistant".into(),
         blocks: vec![lash_trace::TraceContentBlock::Text {
-            text: text.clone(),
+            text,
             cache_breakpoint: false,
         }],
     }]

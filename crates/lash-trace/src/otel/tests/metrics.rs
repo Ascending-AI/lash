@@ -387,3 +387,71 @@ fn agent_tool_and_workflow_metrics_use_their_closing_positions() {
     }
     assert_eq!(found, 6);
 }
+
+/// FIG-6434: a host SDK without views gets semconv buckets, so a 0.3s
+/// inference is observable in the 0.32s bucket rather than a 5s bucket.
+#[test]
+fn genai_histograms_use_semconv_boundaries_without_host_views() {
+    let (provider, meter, _, metrics) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::standard());
+    let mut record = chat(&adapter);
+    let position = record.position.as_mut().unwrap();
+    position.ended_at = Some(
+        TraceTimestamp::from_system_time(
+            position.started_at.to_system_time() + Duration::from_millis(300),
+        )
+        .unwrap(),
+    );
+    adapter.append(&record).unwrap();
+    emit_remaining_metrics(&adapter);
+    meter.force_flush().unwrap();
+    let exported = metrics.get_finished_metrics().unwrap();
+    let durations = [
+        0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92,
+    ];
+    let counts = [
+        1.0, 4.0, 16.0, 64.0, 256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0,
+        4194304.0, 16777216.0, 67108864.0,
+    ];
+    let mut histograms = 0;
+    for metric in exported
+        .last()
+        .unwrap()
+        .scope_metrics()
+        .flat_map(|scope| scope.metrics())
+    {
+        if !metric.name().starts_with("gen_ai.") {
+            continue;
+        }
+        match metric.data() {
+            AggregatedMetrics::F64(MetricData::Histogram(histogram)) => {
+                for point in histogram.data_points() {
+                    assert_eq!(
+                        point.bounds().collect::<Vec<_>>(),
+                        durations,
+                        "{}",
+                        metric.name()
+                    );
+                }
+                if metric.name() == "gen_ai.client.inference.duration" {
+                    let point = histogram.data_points().next().unwrap();
+                    assert_eq!(point.bucket_counts().nth(5), Some(1), "0.3s lands at 0.32s");
+                }
+                histograms += 1;
+            }
+            AggregatedMetrics::U64(MetricData::Histogram(histogram)) => {
+                for point in histogram.data_points() {
+                    assert_eq!(
+                        point.bounds().collect::<Vec<_>>(),
+                        counts,
+                        "{}",
+                        metric.name()
+                    );
+                }
+                histograms += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(histograms, 9, "every GenAI histogram has advisory bounds");
+}

@@ -47,6 +47,14 @@ use serde::{Deserialize, Serialize};
 /// constraints and validation.
 pub const TYPESCRIPT_DECLARATION: &str = include_str!("../kernel-workflow-view-v1.d.ts");
 
+/// The `kernel-workflow-view` host JSON Schema, byte-identical to
+/// `schemas/host/kernel-workflow-view/v1.schema.json`.
+///
+/// Like [`TYPESCRIPT_DECLARATION`], this ships the generated contract to hosts
+/// that vendor the crate without the repository-root `schemas/` tree.
+/// Regenerate both copies with `scripts/generate-workflow-schemas.py`.
+pub const JSON_SCHEMA: &str = include_str!("../kernel-workflow-view-v1.schema.json");
+
 /// One entry of a document as a canvas reads it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

@@ -129,7 +129,8 @@
   },
   "crates/lash-kernel-edit": {
     "compile_data": [
-      "kernel-workflow-view-v1.d.ts"
+      "kernel-workflow-view-v1.d.ts",
+      "kernel-workflow-view-v1.schema.json"
     ]
   },
   "crates/lash-postgres-store": {

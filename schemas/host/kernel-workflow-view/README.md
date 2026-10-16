@@ -18,7 +18,9 @@ A host that vendors lash cannot see this directory; it reads the same `v1.d.ts`
 bytes from `lash::workflow::view::TYPESCRIPT_DECLARATION`, which `include_str!`s
 the generated copy committed as
 `crates/lash-kernel-edit/kernel-workflow-view-v1.d.ts`. The crate's laws check
-both files hold the same bytes.
+both files hold the same bytes. `lash::workflow::view::JSON_SCHEMA` likewise
+ships `v1.schema.json` from the generated crate-local
+`kernel-workflow-view-v1.schema.json`; the same drift law checks its bytes.
 
 Both files are produced by `scripts/generate-workflow-schemas.py`, and
 `kiln build //:schema_checks` checks both against fresh generation. To refresh:

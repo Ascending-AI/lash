@@ -217,14 +217,15 @@ pub use lash_kernel_edit::authoring;
 ///
 /// [`TYPESCRIPT_DECLARATION`] ships the `kernel-workflow-view` schema's
 /// generated `.d.ts` inside the crate, so a host that vendors lash can check
-/// its own TypeScript copy hermetically against the same bytes.
+/// its own TypeScript copy hermetically against the same bytes. [`JSON_SCHEMA`]
+/// ships the authoritative JSON Schema for validation and constraints.
 pub mod view {
     pub use lash_kernel_edit::view::{
         ActionView, ArgumentView, AssignmentView, BindingKind, BindingView, CalleeView, Dataflow,
-        ExecutionSiteView, ExpressionView, PathSite, PathStep, RanCounts, ReplayPath, ReturnView,
-        RunObservation, ScopeCoverage, ScopeKind, ScopeView, SiteKind, StatementCoverage,
-        StatementView, TYPESCRIPT_DECLARATION, TaskPath, Use, ViewError, WorkflowCoverage,
-        WorkflowView, coverage, path,
+        ExecutionSiteView, ExpressionView, JSON_SCHEMA, PathSite, PathStep, RanCounts, ReplayPath,
+        ReturnView, RunObservation, ScopeCoverage, ScopeKind, ScopeView, SiteKind,
+        StatementCoverage, StatementView, TYPESCRIPT_DECLARATION, TaskPath, Use, ViewError,
+        WorkflowCoverage, WorkflowView, coverage, path,
     };
 
     /// The view of `document` at the entry it is entered at.

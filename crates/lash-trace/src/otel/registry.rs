@@ -9,6 +9,19 @@ pub const LASH_INSTRUMENTATION_CONTRACT: &str = "1.0";
 pub const GEN_AI_SEMCONV_SNAPSHOT: &str =
     "open-telemetry/semantic-conventions-genai@07794021bfe46e1c241408b6f55cb4354bd28318";
 
+// Advisory ExplicitBucketBoundaries from GEN_AI_SEMCONV_SNAPSHOT:
+// docs/gen-ai/client-inference.md (durations) and gen-ai-token-metrics.md
+// (operation tokens). Apply the count preset to agent call counts too.
+#[cfg(feature = "otel")]
+pub(crate) const DURATION_BOUNDARIES: [f64; 14] = [
+    0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92,
+];
+#[cfg(feature = "otel")]
+pub(crate) const COUNT_BOUNDARIES: [f64; 14] = [
+    1.0, 4.0, 16.0, 64.0, 256.0, 1024.0, 4096.0, 16384.0, 65536.0, 262144.0, 1048576.0, 4194304.0,
+    16777216.0, 67108864.0,
+];
+
 /// The semantic-convention discriminator for an adapter's wire protocol.
 pub(crate) fn gen_ai_provider_name(kind: &str) -> &str {
     match kind {
@@ -337,7 +350,7 @@ metrics! {
 pub fn contract_markdown() -> String {
     use std::fmt::Write;
     let mut out = format!(
-        "# Lash instrumentation contract\n\nScope `{LASH_INSTRUMENTATION_NAME}`, version `{LASH_INSTRUMENTATION_CONTRACT}`. GenAI snapshot `{GEN_AI_SEMCONV_SNAPSHOT}`. Exported changes require a release note. No schema URL is claimed.\n\n`TurnCompleted.output` carries the settled assistant answer under `OutputMessages` consent; its closer alone supplies `gen_ai.output.messages` on `invoke_agent`. Content is omitted by default and passes through the content hook and bounds. Model decorators read the logical chat span from `LlmRequestScope.trace_carrier` (absent when no model span is built). Content hooks identify tool records through `ContentView.tool_name`.\n\n| Span name or prefix | Kind | Ownership | Semconv type |\n|---|---|---|---|\n"
+        "# Lash instrumentation contract\n\nScope `{LASH_INSTRUMENTATION_NAME}`, version `{LASH_INSTRUMENTATION_CONTRACT}`. GenAI snapshot `{GEN_AI_SEMCONV_SNAPSHOT}`. Exported changes require a release note. No schema URL is claimed.\n\n`TurnCompleted.output` carries the settled assistant answer under `OutputMessages` consent; its closer alone supplies `gen_ai.output.messages` on `invoke_agent`. An assistant message supplies its text; a declared finish control supplies one assistant text part, with string values verbatim and other values as compact JSON. Content is omitted by default and passes through the content hook and bounds. Model decorators read the logical chat span from `LlmRequestScope.trace_carrier` (absent when no model span is built). Content hooks identify tool records through `ContentView.tool_name`.\n\n| Span name or prefix | Kind | Ownership | Semconv type |\n|---|---|---|---|\n"
     );
     for span in SPANS {
         let _ = writeln!(
@@ -378,6 +391,11 @@ pub fn contract_markdown() -> String {
             metric.name, metric.kind, metric.unit, metric.ownership
         );
     }
+    let _ = writeln!(
+        out,
+        "\nGenAI histograms supply advisory semconv boundaries. Durations in seconds: `{:?}`. Token and call counts: `{:?}`. Host meter-provider views take precedence.",
+        DURATION_BOUNDARIES, COUNT_BOUNDARIES,
+    );
     out
 }
 
