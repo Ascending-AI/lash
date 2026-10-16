@@ -12,6 +12,16 @@ use std::sync::{Arc, Mutex};
 /// recently used entries.
 pub const SEGMENT_CACHE_BUDGET_BYTES: usize = 64 * 1024 * 1024;
 
+/// The provider lowering's request-level context identity.
+/// version_surface = "coexist"
+/// version_guard(items(SEGMENT_CONTEXT_DOMAIN, SegmentContextKey))
+const SEGMENT_CONTEXT_DOMAIN: &str = "lash request segment context v1";
+
+/// The identity of one lowered request segment within its context.
+/// version_surface = "coexist"
+/// version_guard(items(SEGMENT_KEY_DOMAIN, SegmentKey))
+const SEGMENT_KEY_DOMAIN: &str = "lash request segment key v1";
+
 /// The request-level inputs one provider's lowering reads (its model, the
 /// session's attachment acceptance, dialect flags, codec revision): what a
 /// message's lowering may depend on besides the message. Two calls whose
@@ -34,7 +44,7 @@ impl SegmentContext {
     /// A context in `namespace`, a name and revision of the lowering that
     /// owns it: a lowering that changes what it writes changes its name.
     pub fn new(namespace: &str) -> Self {
-        let mut hasher = blake3::Hasher::new_derive_key("lash request segment context v1");
+        let mut hasher = blake3::Hasher::new_derive_key(SEGMENT_CONTEXT_DOMAIN);
         hasher.update(&(namespace.len() as u64).to_be_bytes());
         hasher.update(namespace.as_bytes());
         Self(hasher)
@@ -76,7 +86,7 @@ pub struct SegmentKey<'a> {
 
 impl<'a> SegmentKey<'a> {
     pub fn new(context: &SegmentContextKey) -> Self {
-        let mut hasher = blake3::Hasher::new_derive_key("lash request segment key v1");
+        let mut hasher = blake3::Hasher::new_derive_key(SEGMENT_KEY_DOMAIN);
         hasher.update(&context.0);
         Self {
             hasher,

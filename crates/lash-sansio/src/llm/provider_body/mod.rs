@@ -32,6 +32,11 @@ pub struct SlotCodec {
 /// The codec of the canonical body: a request's own JSON.
 const CANONICAL_CODEC: &str = "lash.canonical";
 
+/// The transient marker used to round-trip a request body's attachment slots.
+/// version_surface = "coexist"
+/// version_guard(items(BODY_SLOT_MARKER_DOMAIN, to_json))
+const BODY_SLOT_MARKER_DOMAIN: &str = "lash request body slot marker v1";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttachmentSlot {
@@ -773,7 +778,7 @@ impl RecordedRequestTemplate {
     pub fn to_json(&self) -> Result<TemplateJson, TemplateError> {
         // Each slot stands as a marker no literal can spell: it names a
         // digest of the body's own literals.
-        let mut digest = blake3::Hasher::new_derive_key("lash request body slot marker v1");
+        let mut digest = blake3::Hasher::new_derive_key(BODY_SLOT_MARKER_DOMAIN);
         for part in self.parts() {
             if let BodyPart::Literal(text) = part {
                 digest.update(text.as_bytes());

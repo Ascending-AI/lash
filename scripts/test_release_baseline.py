@@ -425,6 +425,24 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             self.assertEqual(len(errors), 1, errors)
             self.assertIn(str(baseline.PREDECESSOR_TABLE), errors[0])
 
+    def test_space_separated_hash_domains_are_generated_from_source_identities(self):
+        domains = {
+            "BODY_SLOT_MARKER_DOMAIN": "lash request body slot marker v1",
+            "SEGMENT_CONTEXT_DOMAIN": "lash request segment context v1",
+            "SEGMENT_KEY_DOMAIN": "lash request segment key v1",
+        }
+        source = "\n".join(f"const {name}: &str = {json.dumps(value)};"
+                           for name, value in domains.items())
+        rows = [dict(key=f"request.rs:{name}",
+                     default=baseline.resolve(source, name, False),
+                     synthetic=baseline.resolve(source, name, True))
+                for name in domains]
+        self.assertEqual(baseline.hash_domains(rows), sorted(domains.values()))
+        table = baseline.generated_tables(rows, [])[baseline.BLAKE3_DOMAIN_TABLE]
+        for value in domains.values():
+            self.assertIn(f"    {json.dumps(value)},\n", table)
+            self.assertEqual(baseline.baseline_of(value[:-1] + "7"), value)
+
     def test_generated_tables_are_current(self):
         self.assertEqual(baseline.table_mismatches(ROOT, baseline.inventory(ROOT)), [])
         # Every literal the reset used to patch in place is gone from the code
