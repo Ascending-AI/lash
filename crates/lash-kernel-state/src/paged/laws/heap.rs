@@ -1640,3 +1640,5 @@ fn paged_text_cursor_preserves_boundary_fault_order() {
     let mut cursor = payload::TextCursor::new(text, 4095);
     assert!(matches!(cursor.next(&heap), Err(HeapFault::Missing { page }) if page == missing));
 }
+
+include!("heap_ownership.rs");

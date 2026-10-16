@@ -14,6 +14,19 @@ use std::ops::{ControlFlow, Range};
 use std::rc::Rc;
 use std::sync::Arc;
 
+/// A canonical native aggregate awaiting admission. It owns its tree until
+/// installation succeeds; a precision refusal leaves it available for retry.
+/// It is transient, belongs to the heap that prepared it, and is never cloned
+/// or stored in a checkpoint.
+pub struct ObjectProposal {
+    head: Option<ObjectHead>,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static HEAD_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 pub struct PagedHeap {
     pub(super) access: Access<'static>,
     pub(super) limits: lash_kernel_doc::KernelDataLimits,
@@ -281,7 +294,96 @@ impl PagedHeap {
         self.census = Some(census);
         result
     }
+    /// Canonicalizes and builds a native aggregate once, before admission.
+    /// No entity identity or reservation is consumed by preparation.
+    pub fn prepare_allocation(&mut self, object: Object) -> Result<ObjectProposal, NativeError> {
+        self.prepare_object(match object {
+            Object::List(v) => ObjectInit::List(v),
+            Object::Map(v) => ObjectInit::Map(v),
+            Object::Set(v) => ObjectInit::Set(v),
+            Object::Record(v) => ObjectInit::Record(v),
+        })
+        .map_err(native_write)
+    }
+    /// Admits and installs a prepared native aggregate. On a precision refusal,
+    /// publish the execution roots and retry this operation with the same
+    /// proposal. The proposed graph participates in refinement after installation,
+    /// exactly as an ordinary allocation's graph does.
+    pub fn allocate_prepared(
+        &mut self,
+        proposal: &mut ObjectProposal,
+    ) -> Result<EntityId, NativeError> {
+        self.install_object(proposal).map_err(native_write)
+    }
+    fn prepare_object(&mut self, init: ObjectInit) -> Result<ObjectProposal, HeapWriteError> {
+        let init = match init {
+            ObjectInit::List(v) => ObjectInit::List(
+                v.into_iter()
+                    .map(|v| self.canonical(v))
+                    .collect::<Result<_, _>>()?,
+            ),
+            ObjectInit::Map(v) => ObjectInit::Map(
+                v.into_iter()
+                    .map(|(k, v)| Ok((self.canonical(k)?, self.canonical(v)?)))
+                    .collect::<Result<_, HeapWriteError>>()?,
+            ),
+            ObjectInit::Set(v) => ObjectInit::Set(
+                v.into_iter()
+                    .map(|v| self.canonical(v))
+                    .collect::<Result<_, _>>()?,
+            ),
+            ObjectInit::Record(v) => ObjectInit::Record(
+                v.into_iter()
+                    .map(|(k, v)| {
+                        let Value::Text(k) = self.canonical(Value::Text(k))? else {
+                            return Err(
+                                HeapFault::Malformed("record field is not text".into()).into()
+                            );
+                        };
+                        Ok((k, self.canonical(v)?))
+                    })
+                    .collect::<Result<_, HeapWriteError>>()?,
+            ),
+            ObjectInit::Variable(v) => ObjectInit::Variable(self.canonical(v)?),
+            other => other,
+        };
+        Ok(ObjectProposal {
+            head: Some(self.make_head(init)?),
+        })
+    }
+    fn install_object(
+        &mut self,
+        proposal: &mut ObjectProposal,
+    ) -> Result<EntityId, HeapWriteError> {
+        let head = proposal.head.as_ref().ok_or_else(|| {
+            HeapFault::Malformed("an object proposal was already installed".into())
+        })?;
+        let id = EntityId {
+            family: FamilyId::PRIMARY,
+            ordinal: self.next_ordinal,
+        };
+        let next = self
+            .next_ordinal
+            .checked_add(1)
+            .ok_or_else(|| HeapFault::Malformed("identity ordinal overflow".into()))?;
+        self.change_head(
+            id,
+            head.cost(),
+            head.kind() == ObjectKind::Closure,
+            head.task_edges(),
+            |heap| {
+                let head = proposal.head.take().ok_or_else(|| {
+                    HeapFault::Malformed("an object proposal was already installed".into())
+                })?;
+                heap.insert_working(id, head)
+            },
+        )?;
+        self.next_ordinal = next;
+        Ok(id)
+    }
     fn make_head(&self, init: ObjectInit) -> Result<ObjectHead, HeapFault> {
+        #[cfg(test)]
+        HEAD_BUILDS.set(HEAD_BUILDS.get() + 1);
         let body = match init {
             ObjectInit::List(values) => {
                 let mut rows = Tree::new(true);
@@ -617,56 +719,10 @@ impl SemanticHeap for PagedHeap {
         })
     }
     fn allocate_object(&mut self, init: ObjectInit) -> Result<EntityId, HeapWriteError> {
-        let init = match init {
-            ObjectInit::List(v) => ObjectInit::List(
-                v.into_iter()
-                    .map(|v| self.canonical(v))
-                    .collect::<Result<_, _>>()?,
-            ),
-            ObjectInit::Map(v) => ObjectInit::Map(
-                v.into_iter()
-                    .map(|(k, v)| Ok((self.canonical(k)?, self.canonical(v)?)))
-                    .collect::<Result<_, HeapWriteError>>()?,
-            ),
-            ObjectInit::Set(v) => ObjectInit::Set(
-                v.into_iter()
-                    .map(|v| self.canonical(v))
-                    .collect::<Result<_, _>>()?,
-            ),
-            ObjectInit::Record(v) => ObjectInit::Record(
-                v.into_iter()
-                    .map(|(k, v)| {
-                        let Value::Text(k) = self.canonical(Value::Text(k))? else {
-                            return Err(
-                                HeapFault::Malformed("record field is not text".into()).into()
-                            );
-                        };
-                        Ok((k, self.canonical(v)?))
-                    })
-                    .collect::<Result<_, HeapWriteError>>()?,
-            ),
-            ObjectInit::Variable(v) => ObjectInit::Variable(self.canonical(v)?),
-            other => other,
-        };
-        let head = self.make_head(init)?;
-        let id = EntityId {
-            family: FamilyId::PRIMARY,
-            ordinal: self.next_ordinal,
-        };
-        let next = self
-            .next_ordinal
-            .checked_add(1)
-            .ok_or_else(|| HeapFault::Malformed("identity ordinal overflow".into()))?;
-        self.change_head(
-            id,
-            head.cost(),
-            head.kind() == ObjectKind::Closure,
-            head.task_edges(),
-            |heap| heap.insert_working(id, head),
-        )?;
-        self.next_ordinal = next;
-        Ok(id)
+        let mut proposal = self.prepare_object(init)?;
+        self.install_object(&mut proposal)
     }
+
     fn list_write(
         &mut self,
         list: EntityId,

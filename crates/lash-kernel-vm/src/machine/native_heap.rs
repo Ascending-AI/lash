@@ -157,7 +157,9 @@ impl NativeHeap for CallHeap<'_> {
         self.write(|heap| heap.slice(value, range.clone()))
     }
     fn allocate(&mut self, object: Object) -> Result<EntityId, NativeError> {
-        self.write(|heap| heap.allocate(object.clone()))
+        self.heap.take_refusal();
+        let mut proposal = self.heap.prepare_allocation(object)?;
+        self.write(|heap| heap.allocate_prepared(&mut proposal))
     }
     fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
         self.write(|heap| heap.reserve(values, bytes))
@@ -301,6 +303,92 @@ mod laws {
             "scratch retained an owned value past its boundary"
         );
         assert_projection(machine, &[]);
+    }
+
+    /// NATIVE-PROPOSAL-MOVE-ONCE: a native's owned aggregate buffer is
+    /// consumed, including when only the refused heap operation retries.
+    #[test]
+    fn native_proposal_moves_once() {
+        use crate::laws::text_projection::count_allocations;
+        use lash_kernel_doc::{NativeCall, NativeFunction};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct CopyList(AtomicUsize);
+        impl NativeFunction for CopyList {
+            fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                let Value::List(source) = call.args[0] else {
+                    panic!("list input")
+                };
+                let mut members = Vec::with_capacity(257);
+                for i in 0..257 {
+                    members.push(call.heap.list_get(source, i)?.expect("source member"));
+                }
+                call.heap.allocate(Object::List(members)).map(Value::List)
+            }
+        }
+        for pressure in [false, true] {
+            let mut embedder = Embedder::with(
+                "main { return null }",
+                Setup {
+                    bounds: Bounds {
+                        memory: 32768,
+                        ..crate::laws::embedder::ROOMY
+                    },
+                    ..Setup::default()
+                },
+            );
+            let machine = &mut embedder.machine;
+            machine.heap.execution_roots_moved();
+            let mut heap = CallHeap {
+                heap: &mut machine.heap,
+                roots: Roots {
+                    tasks: &mut machine.tasks,
+                    joins: &machine.joins,
+                    registers: &machine.regs,
+                    pinned: &machine.pins.values,
+                    pinned_bytes: machine.pins.bytes,
+                    fresh: &machine.fresh,
+                    refinements: &mut machine.census_refinements,
+                },
+            };
+            if pressure {
+                heap.allocate(Object::List(vec![Value::Null; 1500]))
+                    .unwrap();
+            }
+            let child = heap.allocate(Object::List(vec![Value::Null; 100])).unwrap();
+            let source = heap
+                .allocate(Object::List(vec![Value::List(child); 257]))
+                .unwrap();
+            let before = heap.heap.certificate().refinements;
+            let native = CopyList(AtomicUsize::new(0));
+            let (parent, buffers) = count_allocations(257 * std::mem::size_of::<Value>(), || {
+                native.call(NativeCall {
+                    args: &[Value::List(source)],
+                    heap: &mut heap,
+                    counter: &mut lash_kernel_doc::WorkCounter::new(None),
+                })
+            });
+            let Value::List(parent) = parent.unwrap() else {
+                panic!("copied list")
+            };
+            assert_eq!(native.0.load(Ordering::Relaxed), 1);
+            assert_eq!(
+                heap.heap.certificate().refinements,
+                before + u64::from(pressure)
+            );
+            assert_eq!(heap.len(parent).unwrap(), 257);
+            assert_eq!(heap.len(child).unwrap(), 100);
+            assert!(
+                matches!(heap.list_get(parent, 256).unwrap(), Some(Value::List(id)) if id == child)
+            );
+            println!("pressure={pressure} aggregate_buffers={buffers} native_calls=1");
+            // One buffer belongs to the native's copy. None belongs to the
+            // retry wrapper, on success or through the forced refinement.
+            assert_eq!(
+                buffers, 1,
+                "native aggregate input must move, including across precision"
+            );
+        }
     }
 
     /// K-BND-003: the operation which requested precision must bring its

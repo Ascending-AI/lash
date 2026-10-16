@@ -115,6 +115,25 @@ impl Drop for Measurement {
     }
 }
 
+/// Counts allocations of one exact size while the calling thread runs `run`.
+/// A prime-sized aggregate distinguishes its owned input buffer from bounded
+/// tree leaves and the publication scratch buffers.
+pub(crate) fn count_allocations<R>(bytes: usize, run: impl FnOnce() -> R) -> (R, usize) {
+    let measurement = Measurement::start();
+    let result = run();
+    let window = WINDOW.with(|window| window.borrow_mut().take().unwrap());
+    assert!(
+        window.len <= window.events.len(),
+        "allocation observer overflow"
+    );
+    let count = window.events[..window.len]
+        .iter()
+        .filter(|event| event.bytes == bytes)
+        .count();
+    drop(measurement);
+    (result, count)
+}
+
 struct FaultSource {
     source: Source,
     page: PageId,

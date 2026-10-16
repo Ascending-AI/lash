@@ -1224,6 +1224,7 @@ fn make_dirty<T: Cell>(
     }
 }
 fn dirty<T: Cell>(node: Node<T>, access: &Access<'_>, seq: bool) -> Result<Branch<T>, HeapFault> {
+    let page = Rc::new(residency::DirtyNode::new(node));
     let mut branch = Branch {
         family: None,
         encoded_bytes: None,
@@ -1232,12 +1233,10 @@ fn dirty<T: Cell>(node: Node<T>, access: &Access<'_>, seq: bool) -> Result<Branc
         members_known: true,
         first: Key(Vec::new()),
         summary: Summary::default(),
-        link: Link::Dirty(Rc::new(residency::DirtyNode::new(node.clone()))),
+        link: Link::Dirty(Rc::clone(&page)),
     };
-    refresh(&mut branch, &node)?;
-    if let Link::Dirty(page) = &branch.link {
-        access.track(page, &node, seq);
-    }
+    refresh(&mut branch, &page.borrow())?;
+    access.track(&page, &page.borrow(), seq);
     Ok(branch)
 }
 fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFault> {

@@ -16,5 +16,5 @@ mod paged;
 mod publish;
 mod stream;
 mod tasks;
-mod text_projection;
+pub(crate) mod text_projection;
 mod verdict;
