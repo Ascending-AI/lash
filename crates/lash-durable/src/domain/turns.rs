@@ -405,7 +405,7 @@ pub struct TurnNamespace {
     pub entry: lash_core_store::plugin_state::NamespaceEntry,
     /// Its values body, absent exactly when the values are the run's base.
     /// A present body must match the entry's content address.
-    pub body: Option<std::sync::Arc<[u8]>>,
+    pub body: Option<lash_core_store::plugin_state::NamespaceBody>,
 }
 
 /// Where the values of a run namespace write are held.
@@ -416,15 +416,15 @@ pub enum RunValuesWrite {
     /// Retain the row's current values body for a metadata-only write.
     Held,
     /// Replace the row's values with this body.
-    Body(std::sync::Arc<[u8]>),
+    Body(lash_core_store::plugin_state::NamespaceBody),
 }
 
 impl RunValuesWrite {
-    /// The body to bind for a replacement; base and held bind SQL NULL.
+    /// The root envelope of a replacement; base and held carry no new root.
     #[must_use]
     pub fn body(&self) -> Option<&[u8]> {
         match self {
-            Self::Body(body) => Some(body),
+            Self::Body(body) => Some(&body.bytes),
             Self::Base | Self::Held => None,
         }
     }

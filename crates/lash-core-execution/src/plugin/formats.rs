@@ -140,11 +140,12 @@ impl PluginHost {
                 }
             })?;
             let value = factory.encode_format(to, FormatNamespace::State, &value)?;
-            namespace.values =
-                serde_json::from_value(value).map_err(|error| PluginError::StoredDataCorrupt {
+            namespace.replace_values(serde_json::from_value(value).map_err(|error| {
+                PluginError::StoredDataCorrupt {
                     record_kind: "plugin_state".into(),
                     message: error.to_string(),
-                })?;
+                }
+            })?);
             super::state::validate_namespace(&namespace.values, self.data_limits().plugin_state)?;
             namespace.format_version = to;
         }
@@ -244,7 +245,7 @@ fn decode_namespace_for(
         message: error.to_string(),
     })?;
     super::state::validate_namespace(&values, limits)?;
-    namespace.values = std::sync::Arc::new(values);
+    namespace.replace_values(std::sync::Arc::new(values));
     namespace.format_version = native;
     namespace.generation = namespace.generation.checked_add(1).ok_or_else(|| {
         PluginError::MonotonicCounterOverflow {

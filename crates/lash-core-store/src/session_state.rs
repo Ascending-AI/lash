@@ -74,7 +74,7 @@ mod plugin_admission;
 mod plugin_source;
 use checkpoint_component::{
     PendingCheckpointComponentBody, PluginStateRecord, ResidentCheckpointComponent,
-    ResidentCheckpointComponentBody,
+    ResidentCheckpointComponentBody, assemble_plugin_state,
 };
 pub use plugin_source::SessionPluginStateSource;
 
@@ -229,7 +229,8 @@ impl RuntimeCheckpointComponents {
                     fleet_format,
                 )?
                 .expect("present plugin-state component");
-            let (snapshot, record) = assemble_plugin_state(&entries, map)?;
+            let (snapshot, record) =
+                assemble_plugin_state(&entries, map, &checkpoint.namespace_nodes)?;
             entries.insert(
                 key,
                 ResidentCheckpointComponent::Unchanged {
@@ -340,6 +341,23 @@ impl RuntimeCheckpointComponents {
             turn_state,
             components,
             execution,
+            namespace_nodes: self
+                .plugin_record()
+                .map(|record| {
+                    record
+                        .bodies
+                        .iter()
+                        .filter(|(plugin, _)| {
+                            matches!(
+                                self.entries
+                                    .get(&crate::plugin_state::namespace_component_key(plugin)),
+                                Some(ResidentCheckpointComponent::Changed { .. })
+                            )
+                        })
+                        .flat_map(|(_, body)| body.published.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
     }
 
@@ -391,8 +409,7 @@ impl RuntimeCheckpointComponents {
                 committed
                     && namespace.is_recorded_by(entry)
                     && (record.known_values(plugin, &namespace.values).is_some()
-                        || crate::plugin_state::NamespaceBody::encode(&namespace.values).values
-                            == entry.values)
+                        || namespace.body().values == entry.values)
             })
     }
 
@@ -411,7 +428,10 @@ impl RuntimeCheckpointComponents {
             return;
         };
         let previous = self.plugin_record().cloned().unwrap_or_default();
-        let mut record = PluginStateRecord::default();
+        let mut record = PluginStateRecord {
+            held_nodes: previous.held_nodes.clone(),
+            ..Default::default()
+        };
         for (plugin, namespace) in &snapshot.plugins {
             let body_key = crate::plugin_state::namespace_component_key(plugin);
             let durable = self
@@ -420,10 +440,16 @@ impl RuntimeCheckpointComponents {
                 .and_then(|entry| entry.descriptor().cloned());
             let values = match previous.known_values(plugin, &namespace.values) {
                 Some(values) if durable.as_ref().map(|d| &d.blob_ref) == Some(values) => {
+                    if let Some(body) = previous.bodies.get(plugin) {
+                        record.bodies.insert(plugin.clone(), body.clone());
+                    }
                     values.clone()
                 }
                 _ => {
-                    let body = crate::plugin_state::NamespaceBody::encode(&namespace.values);
+                    let body = namespace
+                        .body()
+                        .publication_excluding(previous.held_nodes.get(plugin));
+                    record.bodies.insert(plugin.clone(), body.clone());
                     let values = body.values.clone();
                     let component = match durable {
                         Some(descriptor) if descriptor.blob_ref == body.values => {
@@ -449,6 +475,9 @@ impl RuntimeCheckpointComponents {
                 .encoded_from
                 .insert(plugin.clone(), std::sync::Arc::downgrade(&namespace.values));
         }
+        record
+            .held_nodes
+            .retain(|plugin, _| snapshot.plugins.contains_key(plugin));
         self.entries.retain(|key, _| {
             crate::plugin_state::namespace_component_plugin(key)
                 .is_none_or(|plugin| snapshot.plugins.contains_key(plugin))
@@ -1538,58 +1567,4 @@ fn session_append_node_draft(
             crate::session_graph::SessionNodeDraft::plugin(plugin_type.clone(), body.clone())
         }
     }
-}
-
-/// The resident plugin state a head's namespace map and its loaded values
-/// bodies hold, and the record that keeps the map resident.
-fn assemble_plugin_state(
-    entries: &std::collections::BTreeMap<String, ResidentCheckpointComponent>,
-    map: crate::plugin_state::PluginStateMap,
-) -> Result<(crate::PluginState, PluginStateRecord), crate::StoreError> {
-    let mut state = crate::PluginState::default();
-    let mut record = PluginStateRecord::default();
-    for (plugin, entry) in &map.plugins {
-        let key = crate::plugin_state::namespace_component_key(plugin);
-        let component = entries
-            .get(&key)
-            .ok_or_else(|| crate::StoreError::StoredDataCorrupt {
-                record_kind: "HydratedSessionCheckpoint",
-                message: format!("plugin `{plugin}` has no values body"),
-            })?;
-        if component
-            .descriptor()
-            .map(|descriptor| &descriptor.blob_ref)
-            != Some(&entry.values)
-        {
-            return Err(crate::StoreError::StoredDataCorrupt {
-                record_kind: "HydratedSessionCheckpoint",
-                message: format!("plugin `{plugin}`'s values body is not its map entry's"),
-            });
-        }
-        let bytes =
-            component
-                .opaque_body()
-                .ok_or_else(|| crate::StoreError::StoredDataCorrupt {
-                    record_kind: "HydratedSessionCheckpoint",
-                    message: format!("plugin `{plugin}`'s values body was not hydrated"),
-                })?;
-        let values = crate::plugin_state::NamespaceBody::decode(plugin, &entry.values, &bytes)?;
-        record
-            .encoded_from
-            .insert(plugin.clone(), std::sync::Arc::downgrade(&values));
-        state
-            .plugins
-            .insert(plugin.clone(), entry.namespace(values));
-    }
-    if let Some(stray) = entries.keys().find_map(|key| {
-        crate::plugin_state::namespace_component_plugin(key)
-            .filter(|plugin| !map.plugins.contains_key(*plugin))
-    }) {
-        return Err(crate::StoreError::StoredDataCorrupt {
-            record_kind: "HydratedSessionCheckpoint",
-            message: format!("plugin `{stray}`'s values body has no map entry"),
-        });
-    }
-    record.map = map;
-    Ok((state, record))
 }

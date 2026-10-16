@@ -165,7 +165,7 @@ struct World {
     reductions: AtomicUsize,
     /// Store reads taken between the revert law's model calls.
     overlay_store: Mutex<Option<Arc<dyn DurableStore>>>,
-    overlay_bodies: Mutex<Vec<Option<Arc<[u8]>>>>,
+    overlay_bodies: Mutex<Vec<Option<lash_core_store::plugin_state::NamespaceBody>>>,
 }
 
 fn tool_definition(name: &str) -> lash_core::ToolDefinition {

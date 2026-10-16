@@ -769,3 +769,48 @@ fn a_checkpoint_naming_the_retired_tool_state_component_is_refused() {
         })
     ));
 }
+
+/// COMMITTED-BODY-RELEASE and PLUGIN-KEY-LOCAL-PUBLICATION: discarding
+/// committed payloads drops the encoding cache, retaining only the addresses
+/// needed to avoid publishing unchanged values with the next head.
+#[test]
+fn released_plugin_bodies_drop_their_cache_and_keep_only_held_addresses() {
+    let namespace = |value: &str, generation| crate::plugin_state::PluginNamespaceState {
+        generation,
+        values: std::collections::BTreeMap::from([
+            ("a".to_owned(), serde_json::Value::String(value.to_owned())),
+            (
+                "z".to_owned(),
+                serde_json::Value::String("x".repeat(1024 * 1024)),
+            ),
+        ])
+        .into(),
+        ..Default::default()
+    };
+    let mut state = ambient();
+    let initial = namespace("0", 0);
+    let values = std::sync::Arc::downgrade(&initial.values);
+    state.set_plugin_state(Some(crate::PluginState {
+        plugins: std::collections::BTreeMap::from([("keyed".into(), initial)]),
+    }));
+    state.apply_persisted_commit_result(commit_result_for(&state));
+    assert!(state.plugin_state().is_none());
+    assert!(
+        values.upgrade().is_none(),
+        "a discarded namespace's encoding cache retained its values"
+    );
+
+    state.set_plugin_state(Some(crate::PluginState {
+        plugins: std::collections::BTreeMap::from([("keyed".into(), namespace("1", 1))]),
+    }));
+    let next = crate::RuntimeCommit::persisted_state_for_test(&state);
+    assert!(next.checkpoint.namespace_nodes.len() <= 3);
+    assert!(
+        next.checkpoint
+            .namespace_nodes
+            .values()
+            .map(|node| node.bytes.len())
+            .sum::<usize>()
+            < 1024
+    );
+}

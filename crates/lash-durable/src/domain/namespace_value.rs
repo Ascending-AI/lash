@@ -1,14 +1,10 @@
 //! A run namespace's values as a NamespaceValue node (FIG-5887 §3, kind 35;
 //! §7, `turn_namespaces.graph_root_ref`).
 //!
-//! A plugin's namespace values are its own bytes, so the node holds them as
-//! an explicitly opaque body (variant 1) beside the plugin that owns them.
-//! Their bytes are placed like any other: past the inline bound they are
-//! shared BytesLeaf nodes, so a namespace that a run rewrites with the same
-//! values installs nothing new. Variant 0 is reserved for a first-party
-//! typed value.
+//! Each root binds its plugin to a persistent keyed map. Values and index
+//! paths are shared graph children, never an opaque namespace-wide stream.
 
-use std::sync::Arc;
+use lash_core_store::plugin_state::NamespaceBody;
 
 use lash_core_store::checkpoint_graph::{
     DecodeLimits, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, NodeSource,
@@ -20,29 +16,30 @@ use lash_core_store::checkpoint_graph::{
 pub struct NamespaceValue {
     /// The plugin that owns the namespace.
     pub plugin: String,
-    /// Its values, opaque to everything but that plugin.
-    pub body: Arc<[u8]>,
+    /// Its persistent keyed values graph.
+    pub body: NamespaceBody,
 }
 
-impl TokenCodec for NamespaceValue {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        out.text(&self.plugin);
-        out.sum(1, 1);
-        out.bytes(&self.body);
-    }
+struct NamespaceRoot {
+    plugin: String,
+    map: NodeId,
+}
 
+impl TokenCodec for NamespaceRoot {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.sum(2, 2);
+        out.text(&self.plugin);
+        self.map.encode(out);
+    }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        let plugin = input.text()?.to_owned();
         let (variant, fields) = input.sum()?;
-        if variant != 1 {
+        if variant != 2 {
             return Err(TokenError::UnsupportedVariant { variant });
         }
-        TokenReader::expect_fields(fields, 1)?;
+        TokenReader::expect_fields(fields, 2)?;
         Ok(Self {
-            plugin,
-            body: input.bytes()?.into(),
+            plugin: input.text()?.to_owned(),
+            map: NodeId::decode(input)?,
         })
     }
 }
@@ -54,7 +51,16 @@ impl NamespaceValue {
     ///
     /// Any refusal of the staging area.
     pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
-        Ok(staging.encode_value(NodeKind::NAMESPACE_VALUE, self)?)
+        for node in self.body.published.values() {
+            staging.adopt(node.clone())?;
+        }
+        Ok(staging.encode_value(
+            NodeKind::NAMESPACE_VALUE,
+            &NamespaceRoot {
+                plugin: self.plugin.clone(),
+                map: self.body.root(),
+            },
+        )?)
     }
 
     /// Reads value `root` of `plugin` from `source`.
@@ -69,7 +75,7 @@ impl NamespaceValue {
         plugin: &str,
         limits: DecodeLimits,
     ) -> Result<Self, GraphRefusal> {
-        let value: Self =
+        let value: NamespaceRoot =
             GraphDecoder::new(source, limits).decode(root, NodeKind::NAMESPACE_VALUE)?;
         if value.plugin != plugin {
             return Err(GraphRefusal::InvalidBody {
@@ -80,6 +86,10 @@ impl NamespaceValue {
                 ),
             });
         }
-        Ok(value)
+        let body = NamespaceBody::load(source, value.map, limits)?;
+        Ok(Self {
+            plugin: value.plugin,
+            body,
+        })
     }
 }

@@ -619,6 +619,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
             serde_json::json!({"mode": "durable"}),
         )])
         .into(),
+        encoding: Default::default(),
     };
     let namespace_body = NamespaceBody::encode(&namespace.values);
     let plugin_state = PluginStateMap {
@@ -663,6 +664,7 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
         },
         components,
         execution: Some(differential_execution()),
+        namespace_nodes: namespace_body.graph,
     }
 }
 
@@ -706,6 +708,7 @@ fn checkpoint_from_spec(
             HydratedSessionCheckpoint {
                 turn_state: checkpoint_bodies().turn_state,
                 components,
+                namespace_nodes: Default::default(),
                 execution: Some(lash_core::store::CheckpointExecution {
                     root: differential_execution().root,
                     descriptor: None,
@@ -727,6 +730,7 @@ fn checkpoint_from_spec(
             HydratedSessionCheckpoint {
                 turn_state: checkpoint_bodies().turn_state,
                 components,
+                namespace_nodes: Default::default(),
                 execution: None,
             }
         }

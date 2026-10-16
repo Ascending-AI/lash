@@ -85,6 +85,7 @@ fn checkpoint_with_unchanged_components(manifest: &SessionCheckpoint) -> Hydrate
             })
             .collect(),
         execution: None,
+        namespace_nodes: Default::default(),
     }
 }
 

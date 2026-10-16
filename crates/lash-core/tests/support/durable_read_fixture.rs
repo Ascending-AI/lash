@@ -1049,6 +1049,7 @@ fn fixture_plugin_state() -> PluginState {
             PluginNamespaceState {
                 format_version: lash_core::FormatVersion::ONE,
                 generation: 887,
+                encoding: Default::default(),
                 publication: Default::default(),
                 fork: Default::default(),
                 values: std::collections::BTreeMap::from([(

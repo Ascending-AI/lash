@@ -57,6 +57,7 @@ pub(super) async fn plugin_state_corrupt_boundary(store: Arc<dyn RuntimeStore>, 
                 "bad key".into(),
                 serde_json::json!(17),
             )])),
+            encoding: Default::default(),
         },
     );
     state.set_plugin_state(Some(snapshot));

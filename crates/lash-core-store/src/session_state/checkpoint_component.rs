@@ -24,6 +24,15 @@ pub(super) enum ResidentCheckpointComponentBody {
 pub(super) struct PluginStateRecord {
     pub(super) map: crate::plugin_state::PluginStateMap,
     #[serde(skip)]
+    pub(super) bodies: std::collections::BTreeMap<String, crate::plugin_state::NamespaceBody>,
+    /// Addresses reachable from the committed roots, without payloads. They
+    /// remain useful after body release when the next capture changes a key.
+    #[serde(skip)]
+    pub(super) held_nodes: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeSet<crate::checkpoint_graph::NodeId>,
+    >,
+    #[serde(skip)]
     pub(super) encoded_from: std::collections::BTreeMap<
         String,
         std::sync::Weak<std::collections::BTreeMap<String, serde_json::Value>>,
@@ -31,6 +40,20 @@ pub(super) struct PluginStateRecord {
 }
 
 impl PluginStateRecord {
+    fn adopt_bodies(&mut self) {
+        for (plugin, body) in &self.bodies {
+            self.held_nodes
+                .insert(plugin.clone(), body.graph.keys().copied().collect());
+        }
+        self.held_nodes
+            .retain(|plugin, _| self.map.plugins.contains_key(plugin));
+    }
+
+    fn release_bodies(&mut self) {
+        self.bodies.clear();
+        self.encoded_from.clear();
+    }
+
     pub(super) fn generations(&self) -> std::collections::BTreeMap<String, u64> {
         self.map
             .plugins
@@ -155,7 +178,7 @@ impl ResidentCheckpointComponent {
     /// Adopts the committed manifest's durable ref. A changed body stays
     /// resident as the unchanged component's second copy.
     pub(super) fn adopt_descriptor(&mut self, descriptor: crate::CheckpointComponentDescriptor) {
-        let body = match self {
+        let mut body = match self {
             Self::Unchanged { body, .. } => {
                 std::mem::replace(body, ResidentCheckpointComponentBody::Opaque(None))
             }
@@ -164,6 +187,9 @@ impl ResidentCheckpointComponent {
                     .into_resident()
             }
         };
+        if let ResidentCheckpointComponentBody::PluginState { map, .. } = &mut body {
+            map.adopt_bodies();
+        }
         *self = Self::Unchanged { descriptor, body };
     }
 
@@ -175,8 +201,9 @@ impl ResidentCheckpointComponent {
         let released = match self {
             Self::Unchanged { body, .. } => {
                 match body {
-                    ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
-                        *snapshot = None
+                    ResidentCheckpointComponentBody::PluginState { snapshot, map } => {
+                        *snapshot = None;
+                        map.release_bodies();
                     }
                     ResidentCheckpointComponentBody::Opaque(_) => {}
                 }
@@ -185,6 +212,7 @@ impl ResidentCheckpointComponent {
             Self::Changed { descriptor, body } => {
                 let released = match body {
                     PendingCheckpointComponentBody::PluginState { map, .. } => {
+                        map.release_bodies();
                         ResidentCheckpointComponentBody::PluginState {
                             snapshot: None,
                             map: std::mem::take(map),
@@ -216,8 +244,9 @@ impl ResidentCheckpointComponent {
         let released = match self {
             Self::Unchanged { body, .. } => {
                 match body {
-                    ResidentCheckpointComponentBody::PluginState { snapshot, .. } => {
-                        *snapshot = None
+                    ResidentCheckpointComponentBody::PluginState { snapshot, map } => {
+                        *snapshot = None;
+                        map.release_bodies();
                     }
                     ResidentCheckpointComponentBody::Opaque(payload) => *payload = None,
                 }
@@ -226,6 +255,7 @@ impl ResidentCheckpointComponent {
             Self::Changed { descriptor, body } => {
                 let released = match body {
                     PendingCheckpointComponentBody::PluginState { map, .. } => {
+                        map.release_bodies();
                         ResidentCheckpointComponentBody::PluginState {
                             snapshot: None,
                             map: std::mem::take(map),
@@ -247,4 +277,88 @@ impl ResidentCheckpointComponent {
             None => false,
         }
     }
+}
+
+/// The resident plugin state a head's namespace map and its loaded values
+/// bodies hold, and the record that keeps the map resident.
+pub(super) fn assemble_plugin_state(
+    entries: &std::collections::BTreeMap<String, ResidentCheckpointComponent>,
+    map: crate::plugin_state::PluginStateMap,
+    namespace_nodes: &std::collections::BTreeMap<
+        crate::checkpoint_graph::NodeId,
+        crate::checkpoint_graph::EncodedNode,
+    >,
+) -> Result<(crate::PluginState, PluginStateRecord), crate::StoreError> {
+    let mut state = crate::PluginState::default();
+    let mut record = PluginStateRecord::default();
+    for (plugin, entry) in &map.plugins {
+        let key = crate::plugin_state::namespace_component_key(plugin);
+        let component = entries
+            .get(&key)
+            .ok_or_else(|| crate::StoreError::StoredDataCorrupt {
+                record_kind: "HydratedSessionCheckpoint",
+                message: format!("plugin `{plugin}` has no values body"),
+            })?;
+        if component
+            .descriptor()
+            .map(|descriptor| &descriptor.blob_ref)
+            != Some(&entry.values)
+        {
+            return Err(crate::StoreError::StoredDataCorrupt {
+                record_kind: "HydratedSessionCheckpoint",
+                message: format!("plugin `{plugin}`'s values body is not its map entry's"),
+            });
+        }
+        let bytes =
+            component
+                .opaque_body()
+                .ok_or_else(|| crate::StoreError::StoredDataCorrupt {
+                    record_kind: "HydratedSessionCheckpoint",
+                    message: format!("plugin `{plugin}`'s values body was not hydrated"),
+                })?;
+        let root =
+            crate::checkpoint_graph::NodeId::from_hex(entry.values.as_str()).ok_or_else(|| {
+                crate::StoreError::StoredDataCorrupt {
+                    record_kind: "plugin namespace",
+                    message: "invalid map root".into(),
+                }
+            })?;
+        let body = crate::plugin_state::NamespaceBody::load(
+            namespace_nodes,
+            root,
+            crate::checkpoint_graph::DecodeLimits::within_total(1 << 32),
+        )
+        .map_err(|error| crate::StoreError::StoredDataCorrupt {
+            record_kind: "plugin namespace",
+            message: error.to_string(),
+        })?;
+        if body.bytes != bytes {
+            return Err(crate::StoreError::StoredDataCorrupt {
+                record_kind: "plugin namespace",
+                message: "map root body differs".into(),
+            });
+        }
+        let values = body.snapshot();
+        record
+            .held_nodes
+            .insert(plugin.clone(), body.graph.keys().copied().collect());
+        record.bodies.insert(plugin.clone(), body.clone());
+        record
+            .encoded_from
+            .insert(plugin.clone(), std::sync::Arc::downgrade(&values));
+        let mut namespace = entry.namespace(values);
+        namespace.encoding = crate::plugin_state::NamespaceEncoding::recorded(body);
+        state.plugins.insert(plugin.clone(), namespace);
+    }
+    if let Some(stray) = entries.keys().find_map(|key| {
+        crate::plugin_state::namespace_component_plugin(key)
+            .filter(|plugin| !map.plugins.contains_key(*plugin))
+    }) {
+        return Err(crate::StoreError::StoredDataCorrupt {
+            record_kind: "HydratedSessionCheckpoint",
+            message: format!("plugin `{stray}`'s values body has no map entry"),
+        });
+    }
+    record.map = map;
+    Ok((state, record))
 }

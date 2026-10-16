@@ -369,7 +369,14 @@ impl RuntimeCommit {
             .values()
             .filter_map(HydratedCheckpointComponent::body)
             .fold(0usize, |total, body| total.saturating_add(body.len()));
-        let checkpoint_bytes = checkpoint_root_bytes.saturating_add(changed_component_bytes);
+        let namespace_bytes = self
+            .checkpoint
+            .namespace_nodes
+            .values()
+            .fold(0usize, |total, node| total.saturating_add(node.bytes.len()));
+        let checkpoint_bytes = checkpoint_root_bytes
+            .saturating_add(changed_component_bytes)
+            .saturating_add(namespace_bytes);
         let attachment_referrer_bytes = self
             .committed_attachment_ids
             .iter()

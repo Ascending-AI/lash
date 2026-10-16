@@ -868,6 +868,7 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
                 publication: Default::default(),
                 fork: Default::default(),
                 values: values.into(),
+                encoding: Default::default(),
             },
         )]),
     };

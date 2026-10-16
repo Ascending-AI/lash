@@ -27,13 +27,14 @@ pub(super) struct RunRows {
     base_values: BTreeMap<String, crate::BlobRef>,
     /// The entry each namespace's run row records.
     rows: BTreeMap<String, NamespaceEntry>,
+    bodies: BTreeMap<String, NamespaceBody>,
 }
 
 impl RunRows {
     fn base_values(&mut self, plugin: &str) -> Option<&crate::BlobRef> {
         if !self.base_values.contains_key(plugin) {
             let namespace = self.base.plugins.get(plugin)?;
-            let values = NamespaceBody::encode(&namespace.values).values;
+            let values = namespace.body().values;
             self.base_values.insert(plugin.to_owned(), values);
         }
         self.base_values.get(plugin)
@@ -93,6 +94,7 @@ impl crate::PluginSession {
             base: registry.data.clone(),
             base_values: BTreeMap::new(),
             rows: BTreeMap::new(),
+            bodies: BTreeMap::new(),
         });
     }
 
@@ -117,7 +119,7 @@ impl crate::PluginSession {
                 (None, Some(base)) if is_base(namespace, base) => continue,
                 _ => {}
             }
-            let body = NamespaceBody::encode(&namespace.values);
+            let body = namespace.body();
             let values = if run.base_values(plugin) == Some(&body.values) {
                 RunValuesWrite::Base
             } else if run
@@ -127,11 +129,16 @@ impl crate::PluginSession {
             {
                 RunValuesWrite::Held
             } else {
-                RunValuesWrite::Body(body.bytes)
+                let previous = run
+                    .bodies
+                    .get(plugin)
+                    .cloned()
+                    .or_else(|| run.base.plugins.get(plugin).map(PluginNamespaceState::body));
+                RunValuesWrite::Body(body.publication_after(previous.as_ref(), true))
             };
             changes.push(TurnNamespaceWrite {
                 plugin: plugin.clone(),
-                entry: namespace.entry(body.values),
+                entry: namespace.entry(body.values.clone()),
                 values,
             });
         }
@@ -144,6 +151,15 @@ impl crate::PluginSession {
         let mut registry = self.state.lock_recover();
         if let Some(run) = registry.run.as_mut() {
             for namespace in written {
+                match &namespace.values {
+                    RunValuesWrite::Body(body) => {
+                        run.bodies.insert(namespace.plugin.clone(), body.clone());
+                    }
+                    RunValuesWrite::Base => {
+                        run.bodies.remove(&namespace.plugin);
+                    }
+                    RunValuesWrite::Held => {}
+                }
                 run.rows
                     .insert(namespace.plugin.clone(), namespace.entry.clone());
             }
@@ -170,7 +186,8 @@ impl crate::PluginSession {
         let mut state = run.base.clone();
         for row in &rows {
             let values = match &row.body {
-                Some(bytes) => NamespaceBody::decode(&row.plugin, &row.entry.values, bytes)?,
+                Some(body) if body.root().to_hex() == row.entry.values.as_str() => body.snapshot(),
+                Some(_) => return Err(unrecorded_values(&row.plugin)),
                 None if run.base_values(&row.plugin) == Some(&row.entry.values) => run
                     .base
                     .plugins
@@ -179,11 +196,20 @@ impl crate::PluginSession {
                     .ok_or_else(|| unrecorded_values(&row.plugin))?,
                 _ => return Err(unrecorded_values(&row.plugin)),
             };
-            state
-                .plugins
-                .insert(row.plugin.clone(), row.entry.namespace(values));
+            let mut namespace = row.entry.namespace(values);
+            if let Some(body) = &row.body {
+                namespace.encoding =
+                    lash_core_store::plugin_state::NamespaceEncoding::recorded(body.clone());
+            } else if let Some(base) = run.base.plugins.get(&row.plugin) {
+                namespace.encoding = base.encoding.clone();
+            }
+            state.plugins.insert(row.plugin.clone(), namespace);
         }
         self.host.retired_plugins.check_state(&state)?;
+        run.bodies = rows
+            .iter()
+            .filter_map(|row| row.body.clone().map(|body| (row.plugin.clone(), body)))
+            .collect();
         run.rows = rows
             .into_iter()
             .map(|row| (row.plugin, row.entry))

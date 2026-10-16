@@ -1,7 +1,5 @@
 //! A run's plugin namespace rows (FIG-5301).
 
-use std::sync::Arc;
-
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::{DomainRefusal, RunValuesWrite, TurnNamespaceWrite, TurnWrite};
 use crate::{DomainWrite, DurableError, DurableStore};
@@ -13,15 +11,15 @@ use lash_sansio::{SessionId, TurnId};
 
 /// A namespace at `generation` holding `value` under `key`: its entry and
 /// its values body.
-fn namespace(generation: u64, value: &str) -> (NamespaceEntry, Arc<[u8]>) {
+fn namespace(generation: u64, value: &str) -> (NamespaceEntry, NamespaceBody) {
     let values = std::collections::BTreeMap::from([("key".to_owned(), value.into())]);
     let body = NamespaceBody::encode(&values);
     let entry = PluginNamespaceState {
         generation,
         ..PluginNamespaceState::default()
     }
-    .entry(body.values);
-    (entry, body.bytes)
+    .entry(body.values.clone());
+    (entry, body)
 }
 
 /// A run's typed namespace writes have one body per current value: Body

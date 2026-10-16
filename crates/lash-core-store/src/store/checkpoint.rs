@@ -457,6 +457,12 @@ pub struct HydratedSessionCheckpoint {
     /// The session's protocol execution state as graph nodes, or none.
     #[serde(skip)]
     pub execution: Option<CheckpointExecution>,
+    /// Keyed namespace nodes submitted with this checkpoint, or its loaded closure.
+    #[serde(skip)]
+    pub namespace_nodes: std::collections::BTreeMap<
+        crate::checkpoint_graph::NodeId,
+        crate::checkpoint_graph::EncodedNode,
+    >,
 }
 
 /// A session checkpoint's execution state: its descriptor page (ADR 0145
@@ -583,6 +589,38 @@ impl HydratedSessionCheckpoint {
         let Some(body) = self.checked_component_body_for_fleet(key, fleet_format)? else {
             return Ok(None);
         };
+        if crate::plugin_state::namespace_component_plugin(key).is_some() {
+            let root_ref = BlobRef::for_content(&body);
+            let root =
+                crate::checkpoint_graph::NodeId::from_hex(root_ref.as_str()).ok_or_else(|| {
+                    StoreError::StoredDataCorrupt {
+                        record_kind: "SessionCheckpoint component",
+                        message: format!("namespace `{key}` has an invalid root"),
+                    }
+                })?;
+            let namespace = crate::plugin_state::NamespaceBody::load(
+                &self.namespace_nodes,
+                root,
+                crate::checkpoint_graph::DecodeLimits::within_total(1 << 32),
+            )
+            .map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "SessionCheckpoint component",
+                message: format!("failed to read `{key}`: {error}"),
+            })?;
+            let map = serde_json::Value::Object(
+                namespace
+                    .snapshot()
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            );
+            return serde_json::from_value(map).map(Some).map_err(|error| {
+                StoreError::StoredDataCorrupt {
+                    record_kind: "SessionCheckpoint component",
+                    message: format!("failed to decode `{key}`: {error}"),
+                }
+            });
+        }
         rmp_serde::from_slice(&body)
             .map(Some)
             .map_err(|error| StoreError::StoredDataCorrupt {

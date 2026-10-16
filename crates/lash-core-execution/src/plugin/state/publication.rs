@@ -608,7 +608,7 @@ impl StateDesk<'_> {
                 });
                 let namespace = candidates.entry(plugin.clone()).or_default();
                 if let Some(values) = reduced {
-                    namespace.values = Arc::new(values);
+                    namespace.replace_values(Arc::new(values));
                 }
                 let resolution = StateResolution {
                     publisher: address.clone(),

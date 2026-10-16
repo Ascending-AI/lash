@@ -14,8 +14,8 @@ mod publication;
 mod run;
 pub use component::ComponentState;
 pub use lash_core_store::plugin_state::{
-    KeyRejection, NamespaceEntry, NamespaceValues, PluginNamespaceState, PluginState,
-    PluginStateError, StateFork,
+    KeyRejection, NamespaceBody, NamespaceEncoding, NamespaceEntry, NamespaceValues,
+    PluginNamespaceState, PluginState, PluginStateError, StateFork,
 };
 pub use lash_core_store::tool_run::{
     FrontierRefusal, FrontierStep, HookCause, HookOccurrence, NamespaceFrontierRefusal,

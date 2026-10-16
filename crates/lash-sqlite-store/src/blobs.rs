@@ -263,6 +263,9 @@ impl SqliteStore {
                         record_kind: "HydratedSessionCheckpoint",
                         message: format!("manifest projection lost component `{key}`"),
                     })?;
+            if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
+                continue;
+            }
             if let HydratedCheckpointComponent::Changed { body, body_ref, .. } = component {
                 Self::insert_artifact_blob_conn_typed_with_ref(
                     conn,
@@ -299,6 +302,7 @@ impl SqliteStore {
         // every component exists, beside the execution's descriptor when
         // the checkpoint holds it.
         let (root, mut nodes) = manifest.to_graph().map_err(graph_store_error)?;
+        nodes.extend(checkpoint.namespace_nodes.clone());
         if let Some(node) = checkpoint
             .execution
             .as_ref()
@@ -377,8 +381,11 @@ impl SqliteStore {
     ) -> Result<std::collections::HashMap<String, std::sync::Arc<[u8]>>, StoreError> {
         let blob_refs = checkpoint
             .components
-            .values()
-            .map(|descriptor| descriptor.blob_ref.as_str().to_string())
+            .iter()
+            .filter(|(key, _)| {
+                lash_core_store::plugin_state::namespace_component_plugin(key).is_none()
+            })
+            .map(|(_, descriptor)| descriptor.blob_ref.as_str().to_string())
             .collect::<std::collections::BTreeSet<_>>();
         let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
         let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
@@ -503,12 +510,22 @@ impl SqliteStore {
         let bodies = Self::checkpoint_component_bodies_conn(conn, &record, chunk_size)?;
         let mut components = std::collections::BTreeMap::new();
         for (key, descriptor) in &record.components {
-            let body = bodies.get(descriptor.blob_ref.as_str()).ok_or_else(|| {
-                StoreError::CheckpointComponentMissing {
+            let graph_body =
+                lash_core_store::checkpoint_graph::NodeId::from_hex(descriptor.blob_ref.as_str())
+                    .and_then(|id| {
+                        lash_core_store::checkpoint_graph::NodeSource::fetch(&closure, &id)
+                    })
+                    .map(|node| std::sync::Arc::<[u8]>::from(node.bytes));
+            let body =
+                if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
+                    graph_body.as_ref()
+                } else {
+                    bodies.get(descriptor.blob_ref.as_str())
+                }
+                .ok_or_else(|| StoreError::CheckpointComponentMissing {
                     key: key.clone(),
                     blob_ref: descriptor.blob_ref.clone(),
-                }
-            })?;
+                })?;
             components.insert(
                 key.clone(),
                 lash_core_execution::HydratedCheckpointComponent::hydrated(
@@ -521,6 +538,28 @@ impl SqliteStore {
             turn_state: record.turn_state,
             components,
             execution,
+            namespace_nodes: record
+                .components
+                .iter()
+                .filter(|(key, _)| {
+                    lash_core_store::plugin_state::namespace_component_plugin(key).is_some()
+                })
+                .map(|(_, descriptor)| {
+                    let root = lash_core_store::checkpoint_graph::NodeId::from_hex(
+                        descriptor.blob_ref.as_str(),
+                    )
+                    .ok_or_else(|| stored_data_corrupt("plugin namespace", "invalid root"))?;
+                    lash_core_store::checkpoint_graph::closure(
+                        &closure,
+                        root,
+                        &lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32),
+                    )
+                    .map_err(graph_store_error)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect(),
         }))
     }
 

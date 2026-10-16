@@ -178,6 +178,7 @@ pub(super) async fn plugin_format_boundary(
                 "count".into(),
                 serde_json::json!(17),
             )])),
+            encoding: Default::default(),
         },
     );
     state.set_plugin_state(Some(snapshot));

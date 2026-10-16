@@ -135,6 +135,7 @@ impl PluginHost {
                                     publication: Default::default(),
                                     fork: declaration.state_fork,
                                     values: Arc::new(values),
+                                    encoding: Default::default(),
                                 })
                             })
                     }

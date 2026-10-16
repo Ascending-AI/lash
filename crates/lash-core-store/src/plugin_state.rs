@@ -207,6 +207,9 @@ pub struct PluginNamespaceState {
     /// What a fork of the owner does with this namespace.
     pub fork: StateFork,
     pub values: NamespaceValues,
+    /// Resident encoding cache; never part of the namespace's stored value.
+    #[serde(skip)]
+    pub encoding: NamespaceEncoding,
 }
 
 /// A namespace's values, shared immutably.
@@ -220,14 +223,29 @@ impl Default for PluginNamespaceState {
             publication: Default::default(),
             fork: StateFork::Copy,
             values: NamespaceValues::default(),
+            encoding: NamespaceEncoding::default(),
         }
     }
 }
 
 impl PluginNamespaceState {
+    /// The persistent keyed graph of these values. Unchanged values reuse
+    /// their encoded nodes; an edit encodes only its value and trie path.
+    #[must_use]
+    pub fn body(&self) -> NamespaceBody {
+        self.encoding.body(&self.values)
+    }
+
     /// The values to change in place: shared values are copied first.
     pub fn values_mut(&mut self) -> &mut BTreeMap<String, Value> {
+        self.encoding = self.encoding.detached();
         std::sync::Arc::make_mut(&mut self.values)
+    }
+
+    /// Replace a map while keeping the preceding keyed encoding available.
+    pub fn replace_values(&mut self, values: NamespaceValues) {
+        self.encoding = self.encoding.detached();
+        self.values = values;
     }
 
     /// The namespace's entry with its values stored at `values`.
@@ -278,6 +296,7 @@ impl NamespaceEntry {
             publication: self.publication.clone(),
             fork: self.fork,
             values,
+            encoding: NamespaceEncoding::default(),
         }
     }
 }
@@ -305,59 +324,8 @@ pub fn namespace_component_plugin(key: &str) -> Option<&str> {
     key.strip_prefix(NAMESPACE_COMPONENT_PREFIX)
 }
 
-/// A namespace's values body: its encoding and content address.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NamespaceBody {
-    pub values: crate::store::BlobRef,
-    pub bytes: std::sync::Arc<[u8]>,
-}
-
-impl NamespaceBody {
-    /// Encode `values`.
-    #[expect(
-        clippy::expect_used,
-        reason = "a map of strings to `serde_json::Value` encodes in MessagePack without a failing case"
-    )]
-    #[must_use]
-    pub fn encode(values: &BTreeMap<String, Value>) -> Self {
-        let bytes: std::sync::Arc<[u8]> = rmp_serde::to_vec_named(values)
-            .expect("namespace values encode")
-            .into();
-        Self {
-            values: crate::store::BlobRef::for_content(&bytes),
-            bytes,
-        }
-    }
-
-    /// Decode the values `bytes` hold, checked against `values`, their
-    /// recorded content address.
-    ///
-    /// # Errors
-    ///
-    /// [`crate::StoreError::StoredDataCorrupt`] when the bytes hash to
-    /// another address or do not decode.
-    pub fn decode(
-        plugin: &str,
-        values: &crate::store::BlobRef,
-        bytes: &[u8],
-    ) -> Result<NamespaceValues, crate::StoreError> {
-        let actual = crate::store::BlobRef::for_content(bytes);
-        if actual != *values {
-            return Err(crate::StoreError::StoredDataCorrupt {
-                record_kind: "plugin namespace body",
-                message: format!(
-                    "plugin `{plugin}`'s values hash to `{actual}` instead of `{values}`"
-                ),
-            });
-        }
-        rmp_serde::from_slice(bytes)
-            .map(std::sync::Arc::new)
-            .map_err(|error| crate::StoreError::StoredDataCorrupt {
-                record_kind: "plugin namespace body",
-                message: format!("plugin `{plugin}`'s values do not decode: {error}"),
-            })
-    }
-}
+mod namespace_map;
+pub use namespace_map::{NamespaceBody, NamespaceEncoding};
 
 /// Apply each namespace's declared fork policy to `checkpoint`, a catalog
 /// fork's copy of its source revision (D-SESSIONLAW): a `copy` namespace
@@ -392,6 +360,9 @@ pub fn fork_checkpoint_plugin_state(
             }
         }
     }
+    // A catalog fork is in the source store: its copied roots already exist.
+    // The hydrated closure is a read view, not a new publication.
+    checkpoint.namespace_nodes.clear();
     if forked == map {
         return Ok(false);
     }
@@ -433,4 +404,89 @@ impl From<FormatRefusal> for crate::runtime_error::RuntimeError {
 impl crate::store::DurableRecord for PluginState {
     const SURFACE: crate::store::SurfaceFormat =
         crate::surface_format!(crate::store::CURRENT_SESSION_STATE_VERSION);
+}
+
+#[cfg(all(test, feature = "perf-witness"))]
+mod keyed_publication_tests {
+    use super::*;
+    use lash_checkpoint_encoder::perf_witness as work;
+    use std::sync::atomic::Ordering;
+
+    /// PLUGIN-KEY-LOCAL-PUBLICATION: encoding and hashing a one-byte edit
+    /// depends on the changed key and index path, never the unchanged payload.
+    #[test]
+    fn plugin_key_local_publication() -> Result<(), Box<dyn std::error::Error>> {
+        let measure = |size| -> Result<_, Box<dyn std::error::Error>> {
+            let values = BTreeMap::from([
+                ("a".to_owned(), Value::String("0".into())),
+                ("z".to_owned(), Value::String("x".repeat(size))),
+            ]);
+            let mut namespace = PluginNamespaceState {
+                values: std::sync::Arc::new(values),
+                ..PluginNamespaceState::default()
+            };
+            let before = namespace.body();
+            namespace
+                .values_mut()
+                .insert("a".into(), Value::String("1".into()));
+            work::reset();
+            work::COLLECTOR_STATE.store(2, Ordering::Relaxed);
+            let after = namespace.body();
+            work::COLLECTOR_STATE.store(0, Ordering::Relaxed);
+            let counts = (
+                work::GRAPH_SERIALIZED_BODY_BYTES.load(Ordering::Relaxed),
+                work::HASHED_BYTES.load(Ordering::Relaxed),
+            );
+            assert!(before.value_address("z").is_some());
+            assert_eq!(before.value_address("z"), after.value_address("z"));
+            let publication = after.publication_after(Some(&before), true);
+            let publication_bytes = publication
+                .published
+                .values()
+                .map(|node| node.bytes.len())
+                .sum::<usize>();
+            let mut installed = before.graph.clone();
+            installed.extend(publication.published.clone());
+            let reopened = NamespaceBody::load(
+                &installed,
+                after.root(),
+                crate::checkpoint_graph::DecodeLimits::within_total(1 << 28),
+            )?;
+            assert_eq!(reopened.snapshot(), namespace.values);
+            assert!(publication.published.len() <= 3);
+            let key = namespace_component_key("counted");
+            let checkpoint = crate::store::HydratedSessionCheckpoint {
+                components: BTreeMap::from([(
+                    key.clone(),
+                    crate::store::HydratedCheckpointComponent::changed(after.bytes.clone()),
+                )]),
+                namespace_nodes: after.graph.clone(),
+                ..Default::default()
+            };
+            assert_eq!(
+                checkpoint.decode_component::<BTreeMap<String, Value>>(&key)?,
+                Some((*namespace.values).clone())
+            );
+            namespace
+                .values_mut()
+                .insert("a".into(), Value::String("0".into()));
+            assert_eq!(namespace.body().values, before.values);
+            namespace.values_mut().clear();
+            let empty = namespace.body();
+            assert_eq!(empty.values, NamespaceBody::encode(&BTreeMap::new()).values);
+            Ok((
+                counts.0,
+                counts.1,
+                publication.published.len(),
+                publication_bytes,
+            ))
+        };
+        let small = measure(1024)?;
+        let large = measure(1024 * 1024)?;
+        eprintln!("PLUGIN-KEY-LOCAL-PUBLICATION: 1KiB={small:?}, 1MiB={large:?}");
+        assert!(large.0 <= small.0 + 1024, "unchanged values were encoded");
+        assert!(large.1 <= small.1 + 1024, "unchanged values were hashed");
+        assert_eq!((small.2, small.3), (large.2, large.3));
+        Ok(())
+    }
 }

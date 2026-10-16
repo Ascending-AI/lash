@@ -336,8 +336,9 @@ async fn checkpoint_component_bodies_tx(
 ) -> Result<std::collections::HashMap<String, std::sync::Arc<[u8]>>, StoreError> {
     let blob_refs = manifest
         .components
-        .values()
-        .map(|descriptor| descriptor.blob_ref.as_str().to_string())
+        .iter()
+        .filter(|(key, _)| lash_core_store::plugin_state::namespace_component_plugin(key).is_none())
+        .map(|(_, descriptor)| descriptor.blob_ref.as_str().to_string())
         .collect::<std::collections::BTreeSet<_>>();
     let mut bodies = std::collections::HashMap::with_capacity(blob_refs.len());
     let blob_refs = blob_refs.iter().map(String::as_str).collect::<Vec<_>>();
@@ -399,6 +400,7 @@ fn checkpoint_components(
     let mut acquisition_order = manifest
         .components
         .iter()
+        .filter(|(key, _)| lash_core_store::plugin_state::namespace_component_plugin(key).is_none())
         .map(|(key, descriptor)| (descriptor.blob_ref.as_str().to_string(), Some(key.clone())))
         .collect::<Vec<_>>();
     acquisition_order.sort();
@@ -412,6 +414,9 @@ fn checkpoint_components(
                     record_kind: "HydratedSessionCheckpoint",
                     message: format!("manifest projection lost component `{key}`"),
                 })?;
+        if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
+            continue;
+        }
         let (stored_ref, body) = match component {
             HydratedCheckpointComponent::Changed { body_ref, body, .. } => (body_ref.clone(), body),
             HydratedCheckpointComponent::Hydrated { body, .. } => {
@@ -443,6 +448,7 @@ fn checkpoint_graph_parts(
     // edges once every component exists, beside the execution's descriptor
     // when the checkpoint holds it: a missing component is refused as one.
     let (root, mut nodes) = manifest.to_graph().map_err(graph_store_error)?;
+    nodes.extend(checkpoint.namespace_nodes.clone());
     if let Some(node) = checkpoint
         .execution
         .as_ref()
@@ -570,11 +576,18 @@ pub(crate) async fn get_checkpoint_tx(
     let bodies = checkpoint_component_bodies_tx(tx, &manifest, chunk_size).await?;
     let mut components = std::collections::BTreeMap::new();
     for (key, descriptor) in &manifest.components {
-        let body = bodies.get(descriptor.blob_ref.as_str()).ok_or_else(|| {
-            StoreError::CheckpointComponentMissing {
-                key: key.clone(),
-                blob_ref: descriptor.blob_ref.clone(),
-            }
+        let graph_body =
+            lash_core_store::checkpoint_graph::NodeId::from_hex(descriptor.blob_ref.as_str())
+                .and_then(|id| lash_core_store::checkpoint_graph::NodeSource::fetch(&closure, &id))
+                .map(|node| std::sync::Arc::<[u8]>::from(node.bytes));
+        let body = if lash_core_store::plugin_state::namespace_component_plugin(key).is_some() {
+            graph_body.as_ref()
+        } else {
+            bodies.get(descriptor.blob_ref.as_str())
+        }
+        .ok_or_else(|| StoreError::CheckpointComponentMissing {
+            key: key.clone(),
+            blob_ref: descriptor.blob_ref.clone(),
         })?;
         components.insert(
             key.clone(),
@@ -588,6 +601,31 @@ pub(crate) async fn get_checkpoint_tx(
         turn_state: manifest.turn_state,
         components,
         execution,
+        namespace_nodes: manifest
+            .components
+            .iter()
+            .filter(|(key, _)| {
+                lash_core_store::plugin_state::namespace_component_plugin(key).is_some()
+            })
+            .map(|(_, descriptor)| {
+                let root = lash_core_store::checkpoint_graph::NodeId::from_hex(
+                    descriptor.blob_ref.as_str(),
+                )
+                .ok_or_else(|| StoreError::StoredDataCorrupt {
+                    record_kind: "plugin namespace",
+                    message: "invalid root".into(),
+                })?;
+                lash_core_store::checkpoint_graph::closure(
+                    &closure,
+                    root,
+                    &lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32),
+                )
+                .map_err(graph_store_error)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect(),
     }))
 }
 

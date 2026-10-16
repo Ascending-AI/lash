@@ -135,6 +135,7 @@ fn plugin_state(format: u32, value: u64) -> PluginState {
                 publication: Default::default(),
                 fork: Default::default(),
                 values: BTreeMap::from([("count".to_owned(), serde_json::json!(value))]).into(),
+                encoding: Default::default(),
             },
         )]),
     }
