@@ -77,48 +77,9 @@ class SharedActionTests(unittest.TestCase):
 
     def test_installs_only_the_repository_pinned_official_client(self) -> None:
         self.assertIn("python3 tools/buck2/bootstrap.py", self.text)
-        self.assertIn("hashFiles('tools/buck2/*pins.json'", self.text)
         self.assertNotIn("client-Cargo.lock", self.text)
         self.assertNotIn("patches/**", self.text)
         self.assertNotIn("bazel", self.text.lower())
-
-    def test_tool_cache_uses_exact_bootstrap_inputs_and_materialized_tools(self) -> None:
-        runs = shared_action()
-        key_script = step(runs, "Resolve Buck2 tool cache key")["run"]
-        key_inputs = re.search(r"hashFiles\(([^)]*)\)", key_script)
-        self.assertIsNotNone(key_inputs)
-        self.assertEqual(
-            {
-                "tools/buck2/*pins.json",
-                "tools/buck2/*lock.json",
-                "tools/buck2/*bootstrap*.py",
-                "tools/buck2/prelude_overlay.py",
-                "tools/buck2/reindeer.toml",
-                "tools/buck2/fixups/**",
-                "third-party/Cargo.toml",
-                "third-party/Cargo.lock",
-            },
-            set(re.findall(r"'([^']+)'", key_inputs.group(1))),
-        )
-        self.assertIn("python_abi=", key_script)
-        self.assertIn("-${python_abi}-${tool_digest}", key_script)
-        restore = step(runs, "Restore pinned Buck2 tools")["with"]
-        expected_paths = {
-            ".buck2/bin",
-            ".buck2/native",
-            ".buck2/prelude",
-            ".buck2/test-runner",
-            "tools/buck2/bin",
-            "tools/buck2/toolchains/rust-files",
-            "vendor",
-        }
-        self.assertEqual(expected_paths, set(restore["path"].splitlines()))
-        self.assertNotIn("restore-keys", restore)
-        self.assertNotIn(".buck2/downloads", restore["path"])
-
-        warm = workflow("cache-warm.yml")["jobs"]["warm-buck2"]
-        save = step(warm, "Save pinned Buck2 tools")["with"]
-        self.assertEqual(expected_paths, set(save["path"].splitlines()))
 
     def test_writes_authenticated_remote_configuration_without_fallback(self) -> None:
         for line in (
@@ -348,93 +309,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("buck2_trusted != 'true'", str(cargo["if"]))
         self.assertIn("cargo clippy --workspace --all-targets", cargo["run"])
 
-    def test_cache_warm_is_the_only_actions_cache_writer_for_buck2_tools(self) -> None:
-        writers = []
-        for path in (ROOT / ".github/workflows").glob("*.yml"):
-            text = path.read_text()
-            if "actions/cache/save@" in text and ".buck2/bin" in text:
-                writers.append(path.name)
-        self.assertEqual(writers, ["cache-warm.yml"])
+    def test_push_static_checks_are_a_separate_visible_job(self) -> None:
         parsed = yaml.load(
-            (ROOT / ".github/workflows/cache-warm.yml").read_text(),
+            (ROOT / ".github/workflows/static-checks.yml").read_text(),
             Loader=yaml.BaseLoader,
         )
-        self.assertEqual({"main"}, set(parsed["on"]["push"]["branches"]))
-        self.assertIn("schedule", parsed["on"])
-        warm = parsed["jobs"]["warm-buck2"]
-        self.assertIn("scripts/hermetic-build.sh clippy", str(warm))
-        self.assertNotIn("scripts/ci/buck2-test.sh", str(warm))
+        self.assertEqual({"push"}, set(parsed["on"]))
+        self.assertEqual(["main"], parsed["on"]["push"]["branches"])
+        self.assertEqual({"static-checks"}, set(parsed["jobs"]))
+        self.assertEqual("ci-static-checks-main", parsed["concurrency"]["group"])
         self.assertEqual("false", parsed["concurrency"]["cancel-in-progress"])
-        configure = step(warm, "Configure Buck2 shared cache")
-        self.assertEqual("cache", configure["id"])
-        save = step(warm, "Save pinned Buck2 tools")
-        self.assertTrue(save["uses"].startswith("actions/cache/save@"))
-        self.assertEqual(
-            "${{ steps.cache.outputs.tool-cache-key }}", save["with"]["key"]
-        )
-        self.assertIn("always()", save["if"])
-        self.assertIn("steps.cache.outcome == 'success'", save["if"])
-        self.assertIn("github.ref == 'refs/heads/main'", save["if"])
-        self.assertIn("steps.cache.outputs.tool-cache-hit != 'true'", save["if"])
-
-    def test_warmer_covers_the_check_graphs_agents_and_ci_request(self) -> None:
-        warm = workflow("cache-warm.yml")["jobs"]["warm-buck2"]
-        run = step(warm, "Warm check actions")["run"]
-        inventory = json.loads(
-            (ROOT / "tools/buck2/target-inventory.json").read_text()
-        )
-        for event in ("push", "schedule", "workflow_dispatch"):
-            with self.subTest(event=event), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                (root / "scripts").mkdir()
-                driver = root / "scripts/hermetic-build.sh"
-                driver.write_text("#!/bin/bash\nprintf '%s\\n' \"$@\" > argv\n")
-                driver.chmod(0o755)
-                result = subprocess.run(
-                    ["bash", "-c", run], cwd=root, capture_output=True, text=True,
-                    env=os.environ | {"GITHUB_EVENT_NAME": event},
-                )
-                self.assertEqual(0, result.returncode, result.stderr)
-                argv = (root / "argv").read_text().splitlines()
-                self.assertEqual("check", argv[0])
-                labels = {arg for arg in argv if arg.startswith("//")}
-                expected = {"//:workspace_check"}
-                if event != "push":
-                    expected.add("//:feature_lane_compile")
-                self.assertEqual(expected, labels)
-                static = workflow("cache-warm.yml")["jobs"]["static-checks"]
-                self.assertEqual("github.event_name == 'push'", static["if"])
-                static_labels = step(static, "Check the feature-lane graph")["run"]
-                owners = int("//:feature_lane_compile" in labels) + int(
-                    event == "push" and "//:feature_lane_compile" in static_labels
-                )
-                self.assertEqual(1, owners)
-        self.assertTrue(inventory["workspace_check_targets"])
-        self.assertTrue(inventory["feature_lane_check_targets"])
-
-    def test_required_checks_outrank_optional_cache_warming(self) -> None:
-        parsed = workflow("cache-warm.yml")
-        for name in ("warm-buck2", "warm-workspace-tests"):
-            warm = parsed["jobs"][name]
-            self.assertEqual("0", warm.get("env", {}).get("KILN_RE_PRIORITY"))
-            for item in warm["steps"]:
-                for jobs in re.findall(r"--jobs (\d+)", item.get("run", "")):
-                    self.assertGreaterEqual(int(jobs), 8)
-                    self.assertLessEqual(int(jobs), 16)
         static = parsed["jobs"]["static-checks"]
-        static_env = parsed.get("env", {}) | static.get("env", {})
-        self.assertGreater(int(static_env.get("KILN_RE_PRIORITY", "0")), 0)
-        self.assertGreater(
-            int(workflow("ci.yml")["env"].get("KILN_RE_PRIORITY", "0")), 0
-        )
-
-    def test_push_static_checks_are_a_separate_visible_job(self) -> None:
-        parsed = workflow("cache-warm.yml")
-        static = parsed["jobs"]["static-checks"]
-        # A sibling of the warm, not a step of it: a red gate fails the
-        # workflow without blocking or cancelling the cache fill.
         self.assertNotIn("needs", static)
-        self.assertNotIn("static-checks", str(parsed["jobs"]["warm-buck2"]))
         self.assertEqual("github.event_name == 'push'", static["if"])
         text = yaml.dump(static)
         for needle in (
@@ -451,34 +337,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", text)
         cleanup = step(static, "Remove client credentials")
         self.assertEqual("always()", cleanup["if"])
-
-    def test_warmer_builds_the_partition_and_worker_binaries_without_tests(self) -> None:
-        warm = workflow("cache-warm.yml")["jobs"]["warm-buck2"]
-        run = step(warm, "Warm test binaries")["run"]
-        inventory = json.loads((ROOT / "tools/buck2/target-inventory.json").read_text())
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "scripts").mkdir()
-            driver = root / "scripts/hermetic-build.sh"
-            driver.write_text("#!/bin/bash\nprintf '%s\\n' \"$@\" > argv\n")
-            driver.chmod(0o755)
-            result = subprocess.run(["bash", "-c", run], cwd=root, capture_output=True, text=True)
-            self.assertEqual(0, result.returncode, result.stderr)
-            argv = (root / "argv").read_text().splitlines()
-        self.assertEqual("build", argv[0])
-        labels = {arg for arg in argv if arg.startswith("//")}
-        expected = {
-            "//:workspace_tests",
-            "//crates/lash:ui_fixtures",
-            "//crates/lash:facade_completeness",
-            "//crates/lash-vm-worker:lash-vm-worker__bin",
-        }
-        self.assertEqual(expected, labels)
-        partition = set(inventory["workspace_test_suite_labels"])
-        self.assertLessEqual(set(inventory["workspace_core_suite_labels"]), partition)
-        self.assertLessEqual(set(inventory["workspace_tail_suite_labels"]), partition)
-        for item in warm["steps"]:
-            self.assertNotRegex(item.get("run", ""), r"hermetic-build\.sh test|buck2-test\.sh")
 
     def test_heavy_suite_cache_keys_features_and_saves_only_main(self) -> None:
         job = self.ci["jobs"]["heavy-tests"]

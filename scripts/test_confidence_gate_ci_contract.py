@@ -2695,13 +2695,13 @@ derive_mutation_jobs() {{
         # this the queue stalls on checks that never report.
         self.assertIn("  merge_group:\n", workflow)
 
-        # Cache warming is not a queue gate: a cache written from a queue ref is
+        # Release cache filling is not a queue gate: a cache written from a queue ref is
         # scoped to that ref and discarded with it, so warming it there would
         # only add the longest job on the board to every queue entry.
         release_cache_workflow = RELEASE_CACHE_WORKFLOW.read_text(encoding="utf-8")
         self.assertNotIn("  linux-release-cache:\n", workflow)
-        # The warmer is manual like every other heavy build: nothing in this
-        # repository runs automatically on a push to main.
+        # The release warmer is manual; it never runs automatically on a
+        # push to main.
         self.assertNotIn("  push:\n", release_cache_workflow)
         self.assertIn("  workflow_dispatch:\n", release_cache_workflow)
         self.assertIn("group: linux-release-cache-main", release_cache_workflow)
@@ -2795,58 +2795,6 @@ derive_mutation_jobs() {{
             with self.subTest(workflow=name):
                 self.assertNotIn("mold", text)
                 self.assertNotIn("RUSTFLAGS", text)
-
-    def test_workspace_test_cache_keeps_the_test_build_key(self) -> None:
-        workflow = WORKFLOW.read_text(encoding="utf-8")
-        workspace_tests = workflow_job_block(workflow, "workspace-tests")
-
-        # Keep the dependency cache used by the former archive producer. It is
-        # smaller than linux-debug and is already keyed for this feature graph.
-        cache_action = (
-            "uses: Swatinem/rust-cache@"
-            "6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2"
-        )
-        self.assertIn(cache_action, workspace_tests)
-        self.assertIn("shared-key: linux-tests", workspace_tests)
-        self.assertIn("cache-targets: false", workspace_tests)
-        self.assertIn("actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workspace_tests)
-        # Restore-only: cache-warm.yml writes both keys on main, and a save
-        # from a pull request's ref is readable by nothing else.
-        self.assertNotIn("actions/cache/save@", workspace_tests)
-        self.assertIn("save-if: false", workspace_tests)
-        warm = yaml.safe_load(
-            (ROOT / ".github" / "workflows" / "cache-warm.yml").read_text(encoding="utf-8")
-        )["jobs"]["warm-workspace-tests"]
-        ci_steps = {
-            step["name"]: step
-            for step in yaml.safe_load(workflow)["jobs"]["workspace-tests"]["steps"]
-        }
-        warm_steps = {step["name"]: step for step in warm["steps"]}
-        restore = ci_steps["Restore workspace test build outputs"]["with"]
-        writer = warm_steps["Restore and save workspace test build outputs"]["with"]
-        for field in ("path", "key", "restore-keys"):
-            self.assertEqual(restore[field], writer[field], field)
-        self.assertEqual(
-            {k: v for k, v in ci_steps["Restore cargo cache"]["with"].items() if k != "save-if"},
-            warm_steps["Restore cargo cache"]["with"],
-        )
-        self.assertIn("workspace-tests-v2-${{ runner.os }}-${{ runner.arch }}", workspace_tests)
-        self.assertIn("rustc -vV", workspace_tests)
-        self.assertIn("outputs.compiler", workspace_tests)
-        self.assertIn("outputs.settings", workspace_tests)
-        self.assertIn("outputs.source", workspace_tests)
-        self.assertIn("ci_workspace_cache.py restore", workspace_tests)
-        self.assertIn("ci_workspace_cache.py snapshot", workspace_tests)
-        self.assertIn("target/workspace-test-cache/source-mtimes.json", workspace_tests)
-        self.assertIn("restore-keys:", workspace_tests)
-        for path in (
-            "target/debug/.fingerprint",
-            "target/debug/build",
-            "target/debug/deps",
-            "target/debug/examples",
-        ):
-            self.assertIn(path, workspace_tests)
-        self.assertNotIn("target/debug/incremental", workspace_tests)
 
     def test_ci_has_no_staging_or_automatic_release_path(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
