@@ -266,13 +266,12 @@ boundary (`crates/lash-core-execution/src/module_artifacts.rs:31-96`,
 
 #### 3.1 `frame_environment`: frame commit, session deletion, fork
 
-A cell publishes under its execution, then acquires its admitted
-frame's edge. At cell end RLM acquires every tagged definition reachable
-from the globals and its complete manifest. The published-module cache is
-keyed by frame and module. Overwriting a global conservatively retains its
-edges until the frame ends. Every definition in the frame's globals thus
-has the frame's protection, the I-frame invariant
-(`crates/lash-protocol-rlm/src/executor/mod.rs:184-194,938-1037`).
+A cell retains its document under its execution and creates no entries or
+process definitions. Its settled named functions live in kind-30 saved
+bundles. A frame acquires only published workflow references its bindings
+name, with their complete manifests; copying an inline FunctionValue adds
+no definition or FunctionValue retention edge. Overwriting a binding to a
+published workflow conservatively retains its edges until the frame ends.
 
 The frame also retains the declaration of every library helper its cells'
 documents list, `function:<id>` (FIG-6481). A cell acquires them under the
@@ -424,15 +423,13 @@ versions; lash has no named definition registry or definition CAS
 `crates/lash-core-execution/src/runtime/process/definition_store.rs:4-25`).
 
 Every reader holds the descriptor and complete manifest under the same
-referrer, and with them the descriptor's siblings: the other definitions
-its engine says the same artifact defines (for Lash VM, every process the
-module exports, a lifted inline process among them). A process starts a
-sibling by value, so publication and acquisition publish each sibling's
-descriptor under the same referrer before the descriptor's own edge commits,
-and a start's cleanup carries them onto its record. Siblings are not in the
-manifest, which is in the id's preimage: they name each other. A host
-therefore publishes a workflow once, and a started process starts its
-siblings after the host's pin is released (FIG-5621). The engine checks the
+referrer. A kernel definition's manifest holds its document and every helper
+declaration it lists. Other entries have no descriptors merely because one
+entry is published: a function passed to a tool crosses inline as a
+self-contained `FunctionValue`, and a child start realizes that value under
+its own `Start(key)`. No sibling descriptor is published, acquired or adopted.
+A process can ship a held template after its original pin is released because
+its document and declarations are retained by the process record. The engine checks the
 manifest and derives the signature before publication or acquisition. Engine-owned entries are prepared first under
 the claim, with a guard where it has one; the descriptor and SQL-owned
 entries commit together. A usable result is exposed only after this closure
@@ -562,21 +559,25 @@ frame share, which commits with the head
 (`crates/lash-core/src/runtime/artifact_cleanup.rs:505-559`,
 `crates/lash-sqlite-store/src/artifact_store.rs:357-377`, §3.1).
 
-### 6. Creating a definition on this contract
+### 6. Functions and workflow publication
 
-`processes.create({ source, dialect })` is a leaf tool. Its attempt lowers
-and links the source against the dispatch catalog and declares
-`PublishDefinition` with the compiled module and descriptor. It publishes
-nothing in the tool body. Realization publishes under the execution's
-referrer and returns the definition value with its derived signature.
-The cell acquires its frame's closure edges before its result is exposed
-(`crates/lash-vm-runtime/src/process_create_tool.rs:1-13,271-321`,
-`crates/lash-core-execution/src/tool_dispatch/intent_executor.rs:621-624`,
-`crates/lash-protocol-rlm/src/executor/mod.rs:184-194`).
+Cell functions are ordinary dialect functions and create no entries or
+process definitions. The cell retains its document once through the document
+funnel. Session bindings keep saved functions in kind-30 bundles at settle;
+the frame acquires no new definition or FunctionValue edge.
 
-Creating accepts no lifetime policy or name. A start acquires another
-referrer and consumes nothing. A host has no frame and uses a pin; a frame
-switch carries the definitions its seed names (§3.1, §3.3, §3.6).
+Functions in tool arguments cross while the VM heap is live, as small kernel
+documents with frozen captures. `processes.start({ definition: value, args })`
+records an inline start declaration. Only after its outcome commits does
+realization publish the document, missing helper declarations and selected
+descriptor under `Start(key)`, then register and adopt their closure into the
+process record. Cancelling an uncommitted cell publishes no definition.
+
+A host starts held values with `HostArtifacts::start_function` and an explicit
+key and launch, or makes a workflow durable with `publish_workflow` under a
+host pin. Only published workflows are exposed as stored references.
+The returned process handle includes its realized `definition_id`; listing
+accepts that id or an inline function whose id is derived without storing it.
 
 ### 7. Acceptance tests
 
@@ -681,11 +682,13 @@ and lapsed-claim bounds are not established by the unit citations above.
 
 #### 7.12 Definition closure
 
-A carried definition id holds its closure, an uncarried definition ends,
-and a host pin survives an uncarried switch
-(`crates/lash/tests/artifact_referrers_evidence.rs`). The former definition
-crash-matrix case is retired. That unit evidence does not establish every
-create, carry and start crash boundary on both stores.
+CELL-NO-PUBLISH and DOC-COST count zero definition publications for unstarted
+cell functions and one document write once helpers are retained. Own/later-cell
+starts keep their signature and captures; cancellation adds no frame definition
+edge (`crates/lash/tests/artifact_referrers_evidence.rs`). START-TEMPLATE ships a
+worker after pin release with no sibling descriptor and a separate child launch
+(`crates/lash/tests/workflow_laws.rs`). START-ONCE covers the inline realization
+crash cuts on both host and tool routes (`tests/workflow_laws/inline_starts.rs`).
 
 #### 7.13 Forks
 

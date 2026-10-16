@@ -25,8 +25,21 @@ use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 
 use crate::done_without_intents;
 
-fn definition_property(description: &str) -> Value {
-    serde_json::json!({ "type": "object", "description": description, "properties": { "id": definition_id_schema(), "signature": {"anyOf": [{"type": "object", "properties": {"signature": {"const": "unknown"}}, "required": ["signature"], "additionalProperties": false}, {"type": "object", "properties": {"signature": {"const": "known"}, "encoding": {}}, "required": ["signature", "encoding"], "additionalProperties": false}]} }, "required": ["id", "signature"], "additionalProperties": false })
+pub(crate) fn function_value_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "$lash_function": {
+                "type": "object",
+                "properties": { "document": { "type": "object" }, "entry": { "type": "string" } },
+                "required": ["document", "entry"],
+                "additionalProperties": false
+            }
+        },
+        "required": ["$lash_function"],
+        "additionalProperties": false,
+        "description": "An async function passed directly; the runtime copies its code and captures inline."
+    })
 }
 
 pub fn definition_id_schema() -> Value {
@@ -38,11 +51,11 @@ pub fn definition_id_schema() -> Value {
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
 pub fn process_start_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw("tool:start_process", "start_process", "Start a durable process by immutable definition or tagged definition ID and return its handle. Pass exactly one of `definition` or `definition_id`.",
+    ToolDefinition::raw("tool:start_process", "start_process", "Start a durable process from an inline function or a published workflow ID and return its handle, including definition_id. Pass exactly one of `definition` or `definition_id`. Function captures are copied when passed to the tool; args key by parameter name.",
         serde_json::json!({
             "type": "object",
             "properties": {
-                "definition": definition_property("The immutable definition returned by create or get."),
+                "definition": function_value_schema(),
                 "definition_id": definition_id_schema(),
                 "args": { "type": "object" },
                 "label": { "type": "string" }
@@ -156,24 +169,6 @@ pub async fn execute_process_start_tool_call(
         Ok(fields) => fields,
         Err(error) => return refuse(error),
     };
-    let target = match (fields.get("definition"), fields.get("definition_id")) {
-        (Some(value), None) => {
-            match serde_json::from_value::<lash_core::ProcessDefinition>(value.clone()) {
-                Ok(definition) => lash_core::ProcessDefinitionTarget::Definition(definition),
-                Err(error) => return refuse(error),
-            }
-        }
-        (None, Some(value)) => match lash_core::ProcessDefinitionId::from_tagged_json(value) {
-            Ok(id) => lash_core::ProcessDefinitionTarget::DefinitionId(id),
-            Err(error) => return refuse(error),
-        },
-        _ => return refuse("exactly one of definition or definition_id is required"),
-    };
-    let run_args = match fields.get("args") {
-        None => serde_json::Map::new(),
-        Some(Value::Object(args)) => args.clone(),
-        Some(_) => return refuse("args must be an object"),
-    };
     // The documented `label` argument: a host-facing name for this run, never
     // part of the process's identity (FIG-3122). Declaring it here is the only
     // way it reaches the row — an engine derives its own label from the
@@ -184,12 +179,38 @@ pub async fn execute_process_start_tool_call(
         Ok(label) => label,
         Err(message) => return refuse(message),
     };
-    // The definition is read and its signature derived by its engine before
-    // any policy runs: the policy sees what will run, not the model's claim.
-    let resolved = match context.resolve_start_target(&target, run_args).await {
-        Ok(resolved) => resolved,
-        Err(lash_core::ResolveTargetError::Refused(message)) => return refuse(message),
-        Err(lash_core::ResolveTargetError::Fault(error)) => return host_failed(error),
+    let run_args = match fields.get("args") {
+        None => serde_json::Map::new(),
+        Some(Value::Object(args)) => args.clone(),
+        Some(_) => return refuse("args must be an object"),
+    };
+    let (resolved, inline) = match (fields.get("definition"), fields.get("definition_id")) {
+        (Some(value), None) => match context
+            .resolve_inline_start(lash_sansio::LASH_VM_ENGINE_KIND, value.clone(), run_args)
+            .await
+        {
+            Ok(inline) => (inline.target.clone(), Some(inline)),
+            Err(lash_core::ResolveTargetError::Refused(message)) => return refuse(message),
+            Err(lash_core::ResolveTargetError::Fault(error)) => return host_failed(error),
+        },
+        (None, Some(value)) => {
+            let id = match lash_core::ProcessDefinitionId::from_tagged_json(value) {
+                Ok(id) => id,
+                Err(error) => return refuse(error),
+            };
+            match context
+                .resolve_start_target(
+                    &lash_core::ProcessDefinitionTarget::DefinitionId(id),
+                    run_args,
+                )
+                .await
+            {
+                Ok(resolved) => (resolved, None),
+                Err(lash_core::ResolveTargetError::Refused(message)) => return refuse(message),
+                Err(lash_core::ResolveTargetError::Fault(error)) => return host_failed(error),
+            }
+        }
+        _ => return refuse("exactly one of definition or definition_id is required"),
     };
     let identity = context.intent_identity(0);
     // The lifetime is the host's policy resolved against this attempt's
@@ -236,18 +257,35 @@ pub async fn execute_process_start_tool_call(
             return host_failed(lash_core::PluginError::attempt_fault(message));
         }
     };
-    let launch = match context.declare_launch(&choice, &resolved).await {
-        Ok(launch) => launch,
-        Err(lash_core::HoldEnvError::Refused(refusal)) => return refuse(refusal),
-        Err(lash_core::HoldEnvError::Fault(error)) => return host_failed(error),
+    let declaration = match inline {
+        Some(inline) => {
+            let launch = match context.declare_inline_launch(&choice, &inline).await {
+                Ok(launch) => launch,
+                Err(lash_core::HoldEnvError::Refused(refusal)) => return refuse(refusal),
+                Err(lash_core::HoldEnvError::Fault(error)) => return host_failed(error),
+            };
+            lash_core::ProcessStartDeclaration::inline(
+                resolved.args.clone(),
+                launch,
+                originator,
+                lifetime,
+            )
+        }
+        None => {
+            let launch = match context.declare_launch(&choice, &resolved).await {
+                Ok(launch) => launch,
+                Err(lash_core::HoldEnvError::Refused(refusal)) => return refuse(refusal),
+                Err(lash_core::HoldEnvError::Fault(error)) => return host_failed(error),
+            };
+            lash_core::ProcessStartDeclaration::definition(
+                Some(resolved.signature.clone()),
+                resolved.args.clone(),
+                launch,
+                originator,
+                lifetime,
+            )
+        }
     };
-    let declaration = lash_core::ProcessStartDeclaration::definition(
-        Some(resolved.signature.clone()),
-        resolved.args.clone(),
-        launch,
-        originator,
-        lifetime,
-    );
     let declaration = match label {
         None => declaration,
         Some(label) => declaration.with_declared_identity(

@@ -619,7 +619,6 @@ pub enum ProcessCommand {
     /// recorded definition instead of writing a second one (ADR 0113 §3.6).
     PublishDefinition {
         draft: crate::ProcessDefinitionDraft,
-        module: Option<crate::DeclaredModuleArtifact>,
     },
     GetDefinition {
         definition_id: crate::ProcessDefinitionId,
@@ -665,7 +664,6 @@ enum ProcessCommandDecode {
     },
     PublishDefinition {
         draft: crate::ProcessDefinitionDraft,
-        module: Option<crate::DeclaredModuleArtifact>,
     },
     GetDefinition {
         definition_id: crate::ProcessDefinitionId,
@@ -725,9 +723,7 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 requester,
                 attribution,
             },
-            ProcessCommandDecode::PublishDefinition { draft, module } => {
-                Self::PublishDefinition { draft, module }
-            }
+            ProcessCommandDecode::PublishDefinition { draft } => Self::PublishDefinition { draft },
             ProcessCommandDecode::GetDefinition { definition_id } => {
                 Self::GetDefinition { definition_id }
             }

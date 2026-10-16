@@ -499,22 +499,32 @@ Lash has no trigger API: the workbench's two sources, mail arrival and cron
 ticks, are its own, kept in `<data-dir>/host-triggers.db` (`src/host_triggers.rs`)
 and built from lash's primitives, each shown once:
 
+An async function passed to a trigger crosses inline with frozen captures.
+Registration records that snapshot in `subscriptions.function_json` before
+publishing it as a workflow under the subscription's stable host pin. Boot
+recovery can finish a pending publication from those bytes; the row's
+`definition_json` names the explicitly published workflow used by deliveries.
+Defining a cell function alone publishes nothing.
+
 - **`call_id` dedup and caller context.** `workbench.register_trigger` is a host
-  tool. It checks the input mapping against the definition with the start-args
-  check (`LashCore::process_definitions().check_args`), then records one
-  subscription keyed by `AttemptContext::call_id()`, so a redriven call
+  tool. It records one subscription keyed by `AttemptContext::call_id()`,
+  publishes the recorded function, and checks the input mapping against the
+  published definition with the start-args check
+  (`LashCore::process_definitions().check_args`), so a redriven call
   registers once, with the caller's session from its owner. Its `source` is
   `{ kind: "mail" }` or `{ kind: "cron", expr, tz? }`; the event is passed in
   the argument `event_arg` names, and `args` fixes the others. Event payloads
   are the host's types: `{ account, title, text }` and `{ fired_at }`.
 - **A host pin with a recoverable lifecycle.** A subscription's row is
-  recorded `pending` with a fresh host pin, the pin takes hold of the
-  definition so it outlives the frame that created it, and only then is the
-  row `pinned`. Only `pinned` rows are listed, ticked and delivered to.
+  recorded `pending` with its inline function and a fresh host pin. The host
+  publishes that snapshot under the pin and validates its input mapping,
+  then marks the row `pinned`. The published workflow outlives the frame
+  that created it. Only `pinned` rows are listed, ticked and delivered to.
   Removal marks the row `deleting`, which stops its dispatch, then releases
   the pin, then deletes the row. The boot recovery finishes either half after
-  a crash: it pins a `pending` row (or removes it if its definition is gone),
-  releases and deletes a `deleting` one, and removes every row whose session
+  a crash: it publishes a `pending` row's recorded snapshot under its pin
+  (or removes the row if publication or validation refuses), releases and
+  deletes a `deleting` one, and removes every row whose session
   is no longer live. A session's delete removes its rows once its close is
   requested, before its tombstone.
 - **`with_host_start_key` dedup.** A source firing records its occurrence and

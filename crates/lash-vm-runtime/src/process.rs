@@ -53,7 +53,6 @@ pub use replay::{
     ProcessReplayRequest, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,
     TaskPath, Unreplayable,
 };
-pub use run::with_definitions;
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};
 pub use workflow::{
     AdmittedWorkflow, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest,
@@ -293,8 +292,8 @@ pub fn entry_signature(signature: &Signature) -> lash_core::ProcessSignature {
     }
 }
 
-/// The definition a function reference to `function` crosses the effect
-/// boundary as: the id and signature of that entry of `document`.
+/// The definition an explicit publication of `function` of `document`
+/// would have: a pure id and signature derivation, with no storage or registry read.
 pub fn definition_of_entry(
     document: &Document,
     identity: DocumentId,
@@ -735,29 +734,15 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
             };
         let definition = KernelProcessDefinition::from_payload(reference.definition.as_json())
             .map_err(|error| unresolvable(error.to_string()))?;
-        let (document, signature) = self
+        let (_, signature) = self
             .entry(&definition)
             .await
             .map_err(|error| lash_core::ProcessDefinitionError::Fault(error.into()))?
             .map_err(unresolvable)?;
-        // Every entry of the document: a process of this definition starts
-        // the others by function reference.
-        let siblings = document
-            .entries
-            .keys()
-            .filter(|entry| **entry != definition.entry)
-            .map(|entry| {
-                definition_draft(&KernelProcessDefinition {
-                    entry: entry.clone(),
-                    ..definition.clone()
-                })
-                .map_err(|error| unresolvable(error.to_string()))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(
-            lash_core::ProcessDefinitionResolution::new(entry_signature(&signature))
-                .with_siblings(siblings),
-        )
+
+        Ok(lash_core::ProcessDefinitionResolution::new(
+            entry_signature(&signature),
+        ))
     }
 }
 

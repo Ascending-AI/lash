@@ -643,11 +643,7 @@ impl Lowerer<'_> {
         exprs.extend(call.arguments.keywords.iter().map(|keyword| &keyword.value));
         let mut operands = Vec::with_capacity(exprs.len());
         for expr in exprs {
-            let value = if effect.as_str() == "processes_start" {
-                self.process_input(expr)?
-            } else {
-                self.expr(expr)?
-            };
+            let value = self.expr(expr)?;
             operands.push(self.pin(value));
         }
         let keyword_values = operands.split_off(positional);

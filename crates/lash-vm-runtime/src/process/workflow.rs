@@ -96,9 +96,6 @@ pub struct AdmittedWorkflow {
     /// The definition's descriptor, which the caller publishes.
     pub draft: lash_core::ProcessDefinitionDraft,
     pub signature: lash_core::ProcessSignature,
-    /// The descriptors of the document's other entries, which a process of
-    /// the definition starts by function reference.
-    pub siblings: Vec<lash_core::ProcessDefinitionDraft>,
     pub document: WorkflowDocument,
 }
 
@@ -225,39 +222,6 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         })
     }
 
-    /// The second document writer, until its module field is deleted
-    /// (FIG-6352 C1c): the bytes are decoded, checked against the reference
-    /// they are named by and against this engine's library, and stored
-    /// through [`super::KernelDocuments::publish`] like every document.
-    async fn retain_module(
-        &self,
-        claim: &lash_core::ReferrerClaim,
-        module: &lash_core::DeclaredModuleArtifact,
-    ) -> Result<(), lash_core::PluginError> {
-        let document = lash_kernel_doc::Document::from_json(&module.bytes).map_err(|error| {
-            unresolvable(format!("the declared module does not decode: {error}"))
-        })?;
-        let document = lash_kernel_doc::IdentifiedDocument::new(document);
-        let identity = document.id();
-        if identity.to_string() != module.module_ref {
-            return Err(unresolvable(format!(
-                "the declared module `{}` is the document `{identity}`",
-                module.module_ref
-            )));
-        }
-        let functions = self.engine.functions.as_ref();
-        lash_kernel_doc::validate_document(&document, functions)
-            .map_err(|error| unresolvable(error.to_string()))?;
-        let declarations = lash_kernel_doc::CheckedDeclarations::required(&document, functions)
-            .map_err(|error| unresolvable(error.to_string()))?;
-        self.engine
-            .documents
-            .publish(claim, &document, &declarations)
-            .await
-            .map(|_| ())
-            .map_err(store_fault)
-    }
-
     async fn environment(
         &self,
         request: lash_core::ProcessDocument,
@@ -347,22 +311,12 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
                 entry: request.entry,
             });
         };
-        let draft_of = |entry: &Name| {
-            definition_draft(&KernelProcessDefinition::of(
-                document.document(),
-                document.identity(),
-                entry.clone(),
-            ))
-            .map_err(|error| unresolvable(error.to_string()))
-        };
-        let draft = draft_of(&request.entry)?;
-        let siblings = document
-            .document()
-            .entries
-            .keys()
-            .filter(|entry| **entry != request.entry)
-            .map(draft_of)
-            .collect::<Result<Vec<_>, _>>()?;
+        let draft = definition_draft(&KernelProcessDefinition::of(
+            document.document(),
+            document.identity(),
+            request.entry.clone(),
+        ))
+        .map_err(|error| unresolvable(error.to_string()))?;
         // Only an admitted document is held, with the declarations it was
         // admitted against.
         let declarations = lash_kernel_doc::CheckedDeclarations::required(
@@ -379,7 +333,6 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
             WorkflowAdmissionOutcome::Admitted(Box::new(AdmittedWorkflow {
                 draft,
                 signature,
-                siblings,
                 document,
             })),
         ))

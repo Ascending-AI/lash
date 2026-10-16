@@ -727,9 +727,9 @@ pub mod plugins {
         LaunchReceipt, ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome,
     };
     pub use lash_core::{
-        ArtifactReferrerPorts, CommandJournalGuard, CommandReplayKey, DeclaredModuleArtifact,
-        DefinitionAcquisition, RecordedKeyFence, ReferrerAcquisition, RefusedWriteRange,
-        ResolvedProcessDefinition, ServedOnlyRange, WeakProcessEngineRegistry,
+        ArtifactReferrerPorts, CommandJournalGuard, CommandReplayKey, DefinitionAcquisition,
+        RecordedKeyFence, ReferrerAcquisition, RefusedWriteRange, ResolvedProcessDefinition,
+        ServedOnlyRange, WeakProcessEngineRegistry,
     };
     pub use lash_core_store::session_identity::FrameNodeIdError;
     pub use lash_core_store::transcript::CellCallLedger;

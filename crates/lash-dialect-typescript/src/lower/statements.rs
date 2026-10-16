@@ -348,20 +348,6 @@ impl Lowerer<'_> {
                 };
                 self.lower_module_entry(name, function)?
             }
-            // A `const` of the cell bound to an `async` arrow names a process.
-            Some(init)
-                if kind == VarKind::Const
-                    && self.in_cell_code()
-                    && matches!(declaration.pattern, ast::Pattern::Ident(..))
-                    && self.process_arrow(init).is_some() =>
-            {
-                let (ast::Pattern::Ident(name, _), Some(function)) =
-                    (&declaration.pattern, self.process_arrow(init))
-                else {
-                    unreachable!("the guard matched a named process arrow");
-                };
-                self.lower_process(Some(name), function)?
-            }
             Some(init) => match &declaration.pattern {
                 ast::Pattern::Ident(name, _) => self.named_expression(init, name)?,
                 _ => self.lower_expr(init)?,

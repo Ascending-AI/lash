@@ -569,15 +569,18 @@ pub(super) fn project_recorded_intent_outcomes(
     }
 }
 
-/// The handle record a realized start answers: the one handle kind, its id,
-/// and the process id beside it. Nothing else of the realized view is copied —
-/// `status` and the rest are facts a holder reads through the process tools.
+/// The handle a realized start answers, including the immutable definition
+/// id when it started a definition. Lifecycle status remains a read.
 fn realized_start_handle(handle: &crate::ProcessHandleView) -> serde_json::Value {
-    serde_json::json!({
+    let mut value = serde_json::json!({
         lash_sansio::handle::HANDLE_FIELD: lash_sansio::handle::HANDLE_KIND,
         "id": handle.id,
         "process_id": handle.process_id,
-    })
+    });
+    if let Some(id) = &handle.definition_id {
+        value["definition_id"] = id.to_tagged_json();
+    }
+    value
 }
 
 fn runtime_failure_outcome(

@@ -244,52 +244,6 @@ pub(crate) fn end_with_bindings(source: &str, bindings: super::pages::Session) -
     }
 }
 
-/// Runs the entry `entry` of `document` with `args` to its end, answering
-/// each tool call and sleep as it is asked. Gives the value it returned.
-pub(crate) fn end_of_entry(
-    document: lash_kernel_doc::Document,
-    entry: &str,
-    args: Vec<Datum>,
-) -> (Vec<String>, Datum) {
-    let text = lash_kernel_doc::print_document(&document);
-    let program = Program {
-        release: super::pages::RELEASE,
-        document: Arc::new(document),
-        library: prepared().clone(),
-    };
-    let start = CellStart {
-        target: Target::Entry(Name::new(entry)),
-        args,
-        session: None,
-        owner: super::pages::OWNER,
-        modes: Default::default(),
-        host: Vec::new(),
-    };
-    let mut machine = super::pages::start(program, BOUNDS, start)
-        .unwrap_or_else(|error| panic!("{error}\n{text}"));
-    let mut console = Console::default();
-    let mut asked = Vec::new();
-    loop {
-        match machine
-            .run(&mut console, u64::MAX)
-            .unwrap_or_else(|error| panic!("{error}\n{text}"))
-        {
-            Step::Slice => unreachable!("the slice is unbounded"),
-            Step::Ended(End::Finished(finished)) => return (asked, finished.result),
-            Step::Ended(other) => panic!("{other:?}\n{text}"),
-            Step::Parked(park) => {
-                for request in &park.requests {
-                    asked.push(label(request));
-                    let (wait, outcome) = answer(request);
-                    machine
-                        .deliver(wait, outcome)
-                        .unwrap_or_else(|error| panic!("{error}"));
-                }
-            }
-        }
-    }
-}
-
 /// Lowers `source` as a first cell and starts a machine on it. Gives the
 /// machine and the document's kernel text.
 fn start(source: &str) -> (KernelMachine, String) {

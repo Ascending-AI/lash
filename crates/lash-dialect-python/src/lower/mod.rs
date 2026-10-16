@@ -187,11 +187,9 @@ pub(crate) struct Lowerer<'a> {
     max_nesting: usize,
     saved: &'a BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
     saved_used: BTreeSet<Name>,
-    saved_startable: BTreeSet<Name>,
     declared: BTreeMap<Name, lash_kernel_doc::Function>,
     /// The notes of each declared function's body.
     declared_notes: BTreeMap<Name, Vec<Note>>,
-    entries: BTreeMap<Name, Signature>,
     /// The entries of a workflow module, as they are lowered; `None` for a
     /// cell.
     module: Option<workflow::Module>,
@@ -259,12 +257,6 @@ pub(crate) fn lower_with_calls(
     let (globals, nonlocals) = scope::rebound(&module.body);
     let rebound: BTreeSet<String> = globals.union(&nonlocals).cloned().collect();
     let mut bindings = scope::bindings(&module.body, None, &rebound, &BTreeSet::new());
-    let saved_startable = cell
-        .functions
-        .keys()
-        .filter(|name| !bindings.locals.contains(name.as_str()) && !rebound.contains(name.as_str()))
-        .cloned()
-        .collect();
     for (name, saved) in cell.functions {
         if !bindings.locals.contains(name.as_str())
             && let Some(signature) = saved::call_signature(saved)
@@ -335,10 +327,8 @@ pub(crate) fn lower_with_calls(
         max_nesting,
         saved: cell.functions,
         saved_used: BTreeSet::new(),
-        saved_startable,
         declared: BTreeMap::new(),
         declared_notes: BTreeMap::new(),
-        entries: BTreeMap::new(),
         module: workflow,
         entry_defs,
         in_entry: false,
@@ -380,7 +370,6 @@ pub(crate) fn lower_with_calls(
     let mut document = Document::new(NumberPolicy::BySpelling, main.stmts);
     document.private_bindings = lowerer.private;
     document.functions = lowerer.declared;
-    document.entries = lowerer.entries;
     if let Some(module) = lowerer.module.take() {
         module
             .assemble(&mut document, &mut lowerer.declared_notes)

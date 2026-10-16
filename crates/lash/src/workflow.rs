@@ -90,9 +90,9 @@
 //! checker admits the document against the environment a process of it
 //! would run under; lash stores the document under its identity, with the
 //! declaration of every library function it lists under that function's
-//! identity, and publishes the descriptor of every entry under the host's
-//! pin, so a process that starts another entry by function reference finds
-//! it. Every later read links the document against those retained
+//! identity, and publishes the selected entry's descriptor under the host's
+//! pin. A function passed to a tool crosses inline as a small document with
+//! frozen captures; a child start realizes its own selected descriptor. Every later read links the document against those retained
 //! declarations, never against the reading build's library. A
 //! [`WorkflowPublication`] names the admitted definition, the entry reference and
 //! the id of the source map published with it, if any. A refused document

@@ -176,6 +176,44 @@ impl Fixture {
             .collect()
     }
 
+    /// Logical artifact publications, even if their last edge is later reclaimed.
+    pub fn record_publications(&self) {
+        let Database::Sqlite(uri) = &self.database else {
+            panic!("SQLite witness")
+        };
+        let connection = rusqlite::Connection::open_with_flags(
+            uri,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )
+        .expect("write witness");
+        connection
+            .execute_batch(
+                "CREATE TABLE law_publications (namespace TEXT NOT NULL, artifact TEXT NOT NULL);
+            CREATE TRIGGER law_publication AFTER INSERT ON artifact_refs
+            BEGIN INSERT INTO law_publications VALUES (NEW.namespace, NEW.artifact_ref); END;",
+            )
+            .expect("publication witness");
+    }
+
+    pub fn publications(&self) -> Vec<(String, String)> {
+        let Database::Sqlite(uri) = &self.database else {
+            panic!("SQLite witness")
+        };
+        let connection = rusqlite::Connection::open_with_flags(
+            uri,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )
+        .expect("read witness");
+        let mut query = connection
+            .prepare("SELECT namespace, artifact FROM law_publications ORDER BY rowid")
+            .expect("witness query");
+        query
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query publications")
+            .map(|row| row.expect("publication"))
+            .collect()
+    }
+
     /// Every kernel-document pointer the store keeps, by reference.
     #[expect(
         clippy::expect_used,

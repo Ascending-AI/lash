@@ -518,7 +518,6 @@ async fn execute_one(
             identity,
             crate::ProcessCommand::PublishDefinition {
                 draft: intent.draft.clone(),
-                module: intent.module.clone(),
             },
         )
         .await

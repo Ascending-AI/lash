@@ -34,7 +34,7 @@ impl Lowerer<'_> {
         Written {
             language: SourceLanguage::TypeScript,
             signature,
-            start: self.process_signature(function).ok(),
+            start: self.start_signature(function).ok(),
             call: None,
         }
     }

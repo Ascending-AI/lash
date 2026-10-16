@@ -28,7 +28,6 @@ use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_RESULT, EFFECT_TIMED_OUT, 
 use lash_vm_runtime::{EffectReads, HostBoundary};
 
 use super::host::{CellArgs, CellHostLedgers, TOOL_CALL_LIMIT, TOOL_FAILED, refused, tool_failed};
-use super::processes::CellEntries;
 
 /// The reads one activation of a cell answers.
 pub(super) struct CellReads {
@@ -41,7 +40,6 @@ pub(super) struct CellReads {
     pub parent_wait: Duration,
     pub ledgers: Arc<Mutex<CellHostLedgers>>,
     pub boundary: HostBoundary,
-    pub entries: Arc<CellEntries>,
     pub limit: lash_core::MaxToolCalls,
     /// The cell, as its observations name it.
     pub cell: String,
@@ -74,12 +72,8 @@ impl CellReads {
         route: &lash_core::ReadRoute,
         args: &[Datum],
     ) -> Result<serde_json::Value, ErrorDatum> {
-        let left = self
-            .entries
-            .leaving_args(args)
-            .map_err(|problem| super::host::ArgsRefusal::NotJson(problem).error(effect))?;
         let args = CellArgs
-            .args(&left)
+            .args(args)
             .map_err(|refusal| refusal.error(effect))?;
         // The protocol's argument projection, as its transform applies it
         // to a recorded call's.

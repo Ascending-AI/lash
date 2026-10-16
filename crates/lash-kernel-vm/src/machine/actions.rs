@@ -92,14 +92,9 @@ impl KernelMachine {
                 ..
             } => {
                 let values = self.atoms(task, exe, args)?;
-                let crosses = host.crosses_functions();
                 let mut copied = Vec::with_capacity(values.len());
                 for value in &values {
-                    copied.push(if crosses {
-                        self.copy_out_tool_arg(value)?
-                    } else {
-                        self.copy_out(value)?
-                    });
+                    copied.push(self.copy_out_tool_arg(value)?);
                 }
                 if self.effect_mode(effect)? == EffectMode::Read {
                     // A read completes here, inside its statement: no wait,
@@ -264,15 +259,10 @@ impl KernelMachine {
                 Ok(self.answered_at(flow, at, args))
             }
             NestedKind::Perform { effect, result, .. } => {
-                let crosses = host.crosses_functions();
                 let mut copied = Vec::with_capacity(count);
                 for at in args..args + count {
                     let value = self.take(at);
-                    copied.push(if crosses {
-                        self.copy_out_tool_arg(&value)?
-                    } else {
-                        self.copy_out(&value)?
-                    });
+                    copied.push(self.copy_out_tool_arg(&value)?);
                 }
                 if self.effect_mode(effect)? == EffectMode::Read {
                     // A read completes here, inside its statement, and the

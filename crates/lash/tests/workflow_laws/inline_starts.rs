@@ -445,8 +445,7 @@ async fn cut_core(
     })
     .into_store_set();
     let defaults = lash::vm::WorkerService::default();
-    let mut config = defaults.config().clone();
-    config.tuning.crosses_functions = true;
+    let config = defaults.config().clone();
     let launch = Arc::new(lash::tools::StaticToolProvider::new(
         launch_definitions(),
         Launch {

@@ -11,7 +11,7 @@
     reason = "backend-parametrized acceptance laws assert each step's result"
 )]
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use lash::direct::LlmOutputPart;
@@ -43,42 +43,6 @@ async fn wait_edges(fixture: &Fixture, predicate: impl Fn(&[Edge]) -> bool) -> V
             std::time::Instant::now() < deadline,
             "the edges never reached the awaited state: {edges:#?}"
         );
-        fixture.settle().await;
-    }
-}
-
-fn frame_artifacts(edges: &[Edge]) -> BTreeSet<&str> {
-    edges
-        .iter()
-        .filter(|edge| edge.kind == "frame_environment")
-        .map(|edge| edge.artifact_ref.as_str())
-        .collect()
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the evidence fixture must fail on a store read error"
-)]
-async fn wait_definition_reclaimed(
-    fixture: &Fixture,
-    id: &lash_core::ProcessDefinitionId,
-    module_ref: &str,
-) {
-    let backend = fixture.backend.clone();
-    loop {
-        let descriptor = backend
-            .definition_store()
-            .get_process_definition(id)
-            .await
-            .expect("read definition reclamation");
-        let module = backend
-            .module_artifacts()
-            .get_module_artifact(module_ref)
-            .await
-            .expect("read module reclamation");
-        if descriptor.is_none() && module.is_none() {
-            return;
-        }
         fixture.settle().await;
     }
 }
@@ -272,384 +236,6 @@ fn rlm_core_in_dialect(
         .expect("RLM core")
 }
 
-async fn cold_reopen_globals_across_turns(backend: Backend) {
-    let fixture = Fixture::new(backend).await;
-    // A reopened core may use either provider handle for the same route.
-    // Both handles therefore draw from the two-turn script in call order.
-    let responses = Arc::new(Mutex::new(VecDeque::from(vec![
-        response("const saved = async () => 7; await control.finish('bound');"),
-        response(
-            "const run = await processes.start({ definition: saved }); await control.finish(await processes.await({ handle: run }));",
-        ),
-    ])));
-    let first_core = rlm_core_with_queue(&fixture, Arc::clone(&responses));
-    let first_session = created_session(&first_core, "artifact-referrers-cold-reopen")
-        .await
-        .open()
-        .await
-        .expect("open first session");
-    let first = first_session
-        .send(TurnInput::text("bind definition"))
-        .output()
-        .await
-        .expect("first turn");
-    assert!(first.is_success());
-    // The turn's own commit retires its execution edge (ADR 0113), so the
-    // finished turn leaves only its frame holding the definition.
-    let settled = fixture.edges().await;
-    assert!(
-        settled.len() == 1 && settled[0].kind == "frame_environment",
-        "the settled first turn holds only its frame's edge: {settled:#?}"
-    );
-    let frame_id = settled[0].id.clone();
-    drop(first_session);
-    drop(first_core);
-
-    let second_core = rlm_core_with_queue(&fixture, Arc::clone(&responses));
-    let second_session = created_session(&second_core, "artifact-referrers-cold-reopen")
-        .await
-        .open()
-        .await
-        .expect("cold reopen");
-    let second = second_session
-        .send(TurnInput::text("use definition"))
-        .output()
-        .await
-        .expect("second turn");
-    assert!(
-        second.is_success(),
-        "a global from the first turn survives cold reopen: {second:?}"
-    );
-    assert!(
-        responses.lock_recover().is_empty(),
-        "each of the two turns consumes one scripted response"
-    );
-    assert_eq!(
-        last_cell_finish(
-            &second_session
-                .durable()
-                .read()
-                .await
-                .expect("committed read")
-                .expect("head")
-        ),
-        Some(serde_json::json!(7))
-    );
-    let after_start = wait_edges(&fixture, |edges| {
-        edges
-            .iter()
-            .any(|edge| edge.kind == "frame_environment" && edge.id == frame_id)
-    })
-    .await;
-    assert_eq!(
-        frame_artifacts(&after_start).len(),
-        1,
-        "both turns use one frame"
-    );
-}
-
-async fn overwrite_retains_old_module_until_frame_end(backend: Backend) {
-    let fixture = Fixture::new(backend).await;
-    let core = rlm_core(
-        &fixture,
-        vec![
-            response(
-                "let holder = new Map(); { const old = async () => 11; holder.set('saved', old); } await control.finish('first');",
-            ),
-            response(
-                "{ const newer = async () => 22; holder.set('saved', newer); } await control.finish('second');",
-            ),
-            response("await control.continue_as({ task: 'new frame' });"),
-            response("await control.finish('new frame');"),
-        ],
-    );
-    let session = created_session(&core, "artifact-referrers-overwrite")
-        .await
-        .open()
-        .await
-        .expect("session");
-    let first_turn = session
-        .send(TurnInput::text("bind first"))
-        .output()
-        .await
-        .expect("first turn");
-    assert!(first_turn.is_success(), "first binding: {first_turn:?}");
-    let first = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 1).await;
-    let old_ref = frame_artifacts(&first)
-        .into_iter()
-        .next()
-        .expect("old module")
-        .to_owned();
-    assert!(
-        session
-            .send(TurnInput::text("overwrite"))
-            .output()
-            .await
-            .expect("second turn")
-            .is_success()
-    );
-    let rebound = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 2).await;
-    assert!(
-        frame_artifacts(&rebound).contains(old_ref.as_str()),
-        "overwrite retains the old frame edge"
-    );
-    assert!(
-        send_through(&session, "switch")
-            .await
-            .expect("switch turn")
-            .is_success()
-    );
-    let after = wait_edges(&fixture, |edges| {
-        !edges.iter().any(|edge| edge.artifact_ref == old_ref)
-    })
-    .await;
-    assert!(
-        !after.iter().any(|edge| edge.artifact_ref == old_ref),
-        "old bytes are reclaimed after frame end"
-    );
-}
-
-async fn continue_as_carries_only_seeded_definition(backend: Backend) {
-    let fixture = Fixture::new(backend).await;
-    let core = rlm_core(
-        &fixture,
-        vec![
-            response("const carried = async () => 11; await control.finish('carried bound');"),
-            response("const dropped = async () => 22; await control.finish('dropped bound');"),
-            response("await control.continue_as({ task: 'use seed', seed: { carried } });"),
-            response(
-                "const run = await processes.start({ definition: carried }); await control.finish(await processes.await({ handle: run }));",
-            ),
-            response(
-                "const run = await processes.start({ definition: carried }); await control.finish(await processes.await({ handle: run }));",
-            ),
-        ],
-    );
-    let session = created_session(&core, "artifact-referrers-carry")
-        .await
-        .open()
-        .await
-        .expect("session");
-    let first_turn = session
-        .send(TurnInput::text("bind carried definition"))
-        .output()
-        .await
-        .expect("first turn");
-    assert!(first_turn.is_success(), "first binding: {first_turn:?}");
-    let carried_before = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 1).await;
-    let carried_ref = frame_artifacts(&carried_before)
-        .into_iter()
-        .next()
-        .expect("carried module")
-        .to_owned();
-    assert!(
-        session
-            .send(TurnInput::text("bind dropped definition"))
-            .output()
-            .await
-            .expect("second turn")
-            .is_success()
-    );
-    let before = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 2).await;
-    let dropped_ref = frame_artifacts(&before)
-        .into_iter()
-        .find(|artifact_ref| *artifact_ref != carried_ref)
-        .expect("second definition has its own module")
-        .to_owned();
-    let old_frame = before
-        .iter()
-        .find(|edge| edge.kind == "frame_environment")
-        .expect("frame edge")
-        .id
-        .clone();
-    let switched = send_through(&session, "carry one")
-        .await
-        .expect("switch turn");
-    assert!(switched.is_success(), "carry switch: {switched:?}");
-    let after = wait_edges(&fixture, |edges| {
-        let frame: Vec<_> = edges
-            .iter()
-            .filter(|edge| edge.kind == "frame_environment")
-            .collect();
-        frame.len() == 1
-            && frame[0].id != old_frame
-            && frame[0].artifact_ref == carried_ref
-            && !edges.iter().any(|edge| edge.artifact_ref == dropped_ref)
-    })
-    .await;
-    assert_eq!(frame_artifacts(&after).len(), 1);
-    assert!(
-        !after.iter().any(|edge| edge.id == old_frame),
-        "the ended frame holds no edge"
-    );
-    let result = session
-        .send(TurnInput::text("run carried definition"))
-        .output()
-        .await
-        .expect("new-frame turn");
-    assert!(result.is_success());
-    assert_eq!(
-        last_cell_finish(
-            &session
-                .durable()
-                .read()
-                .await
-                .expect("committed read")
-                .expect("head")
-        ),
-        Some(serde_json::json!(11))
-    );
-}
-
-/// A context-pressure hook that opens a frame seeded with an RLM seed once
-/// the test hands it the seed's value, and continues otherwise.
-struct SeedingPressureHook {
-    seed: Arc<Mutex<Option<serde_json::Value>>>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::plugin::ContextPressureHook for SeedingPressureHook {
-    fn id(&self) -> &'static str {
-        "artifact-referrers.seeding_pressure"
-    }
-
-    async fn decide(
-        &self,
-        _ctx: &lash_core::plugin::ContextPressureContext<'_>,
-    ) -> Result<lash_core::plugin::ContextPressureDecision, lash_core::plugin::ContextError> {
-        let Some(seed) = self.seed.lock_recover().take() else {
-            return Ok(lash_core::plugin::ContextPressureDecision::Continue);
-        };
-        let seed = lash_protocol_rlm::RlmSeed::from_seed_value(&seed)
-            .map_err(lash_core::plugin::ContextError::Pipeline)?;
-        Ok(lash_core::plugin::ContextPressureDecision::OpenFrame {
-            records: Vec::new(),
-            task: "pressure frame seeded with a definition".to_string(),
-            seed: lash_protocol_rlm::rlm_seed_initial_nodes(
-                seed,
-                lash_core::FleetFormat::current(),
-            ),
-        })
-    }
-}
-
-/// FIG-4134: a context-pressure hook's RLM seed carries its module-backed
-/// values into the frame it opens, exactly as a `continue_as` seed does
-/// (ADR 0113 §3.1). The hook seeds a definition the first frame bound; once
-/// the old frame's cleanup settles, the new frame alone holds the module's
-/// edge, and after a cold reopen the seeded definition still starts.
-async fn a_pressure_seed_carries_its_module_into_the_new_frame(backend: Backend) {
-    let fixture = Fixture::new(backend).await;
-    let session_id = "artifact-referrers-pressure-seed";
-    let run_carried = "const run = await processes.start({ definition: carried }); await control.finish(await processes.await({ handle: run }));";
-    let responses = Arc::new(Mutex::new(VecDeque::from(vec![
-        response("const carried = async () => 13; await control.finish(carried);"),
-        response(run_carried),
-        response(run_carried),
-    ])));
-    let seed = Arc::new(Mutex::new(None));
-    let hook: Arc<dyn lash_core::facade_support::PluginFactory> =
-        Arc::new(lash_core::plugin::StaticPluginFactory::new(
-            lash::plugins::PluginDeclaration::initial("artifact-referrers-seeding-pressure"),
-            lash_core::facade_support::PluginSpec::new().with_context_pressure_hook(
-                100,
-                Arc::new(SeedingPressureHook {
-                    seed: Arc::clone(&seed),
-                }),
-            ),
-        ));
-    let core = rlm_core_with_plugins(&fixture, Arc::clone(&responses), vec![Arc::clone(&hook)]);
-    let session = created_session(&core, session_id)
-        .await
-        .open()
-        .await
-        .expect("session");
-    let bound = session
-        .send(TurnInput::text("bind the definition"))
-        .output()
-        .await
-        .expect("binding turn");
-    assert!(bound.is_success(), "binding: {bound:?}");
-    let definition = last_cell_finish(
-        &session
-            .durable()
-            .read()
-            .await
-            .expect("committed read")
-            .expect("head"),
-    )
-    .expect("the cell finished with the definition");
-    let before = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 1).await;
-    let module_ref = frame_artifacts(&before)
-        .into_iter()
-        .next()
-        .expect("the definition's module")
-        .to_owned();
-    let old_frame = before
-        .iter()
-        .find(|edge| edge.kind == "frame_environment")
-        .expect("frame edge")
-        .id
-        .clone();
-
-    *seed.lock_recover() = Some(serde_json::json!({ "carried": definition }));
-    let seeded = session
-        .send(TurnInput::text("run the seeded definition"))
-        .output()
-        .await
-        .expect("the pressure frame's turn");
-    assert!(seeded.is_success(), "seeded turn: {seeded:?}");
-    assert_eq!(
-        last_cell_finish(
-            &session
-                .durable()
-                .read()
-                .await
-                .expect("committed read")
-                .expect("head")
-        ),
-        Some(serde_json::json!(13))
-    );
-    let after = wait_edges(&fixture, |edges| {
-        let frame: Vec<_> = edges
-            .iter()
-            .filter(|edge| edge.kind == "frame_environment")
-            .collect();
-        frame.len() == 1 && frame[0].id != old_frame && frame[0].artifact_ref == module_ref
-    })
-    .await;
-    assert!(
-        !after.iter().any(|edge| edge.id == old_frame),
-        "the ended frame's cleanup settled"
-    );
-    drop(session);
-    drop(core);
-
-    let reopened = rlm_core_with_plugins(&fixture, responses, vec![hook]);
-    let session = reopened
-        .session(lash::SessionId::parse(session_id).expect("nonblank host identity"))
-        .open()
-        .await
-        .expect("reopen");
-    let result = session
-        .send(TurnInput::text("run it after a reopen"))
-        .output()
-        .await
-        .expect("the reopened turn");
-    assert!(result.is_success(), "reopened turn: {result:?}");
-    assert_eq!(
-        last_cell_finish(
-            &session
-                .durable()
-                .read()
-                .await
-                .expect("committed read")
-                .expect("head")
-        ),
-        Some(serde_json::json!(13))
-    );
-}
-
 async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
     let fixture = Fixture::new(backend).await;
     let core = rlm_core(
@@ -712,440 +298,232 @@ async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
     );
 }
 
-async fn carried_definition_id_retains_the_closure_across_frame_switch(backend: Backend) {
-    let fixture = Fixture::new(backend).await;
-    let core = rlm_core(
-        &fixture,
-        vec![
-            response("const made = async () => 31; await control.finish(made);"),
-            response(
-                "await control.continue_as({ task: 'carry id', seed: { kept_id: made.id } });",
-            ),
-            response("await control.finish(kept_id);"),
-        ],
-    );
-    let session = created_session(&core, "definition-id-carry")
-        .await
-        .open()
-        .await
-        .expect("session");
-    let first = session
-        .send(TurnInput::text("create"))
-        .output()
-        .await
-        .expect("create turn");
-    assert!(first.is_success(), "{first:?}");
-    let id_json = last_cell_finish(
-        &session
-            .durable()
-            .read()
-            .await
-            .expect("committed read")
-            .expect("head"),
-    )
-    .expect("definition output")["id"]
-        .clone();
-    let id = lash_core::ProcessDefinitionId::from_tagged_json(&id_json).expect("id");
-    let before = wait_edges(&fixture, |edges| {
-        edges.len() == 1 && edges[0].kind == "frame_environment"
-    })
-    .await;
-    let old_frame = before[0].id.clone();
-    let module_ref = before[0].artifact_ref.clone();
-    let roots = fixture.backend.clone().session_store_factory();
-    let lash_core::ArtifactReferrer::FrameEnvironment(committed_frame) =
-        lash_core::ArtifactReferrer::decode("frame_environment", &old_frame)
-            .expect("committed frame referrer")
-    else {
-        panic!("frame edge must name a frame")
-    };
-    assert!(
-        roots
-            .artifact_frame_is_retained(&committed_frame)
-            .await
-            .expect("read committed frame roots")
-    );
-    let absent_frame = lash_core::FrameEnvironmentId::new(
-        session.session_id(),
-        lash_core::FrameNodeId::new("never-committed-frame").expect("absent frame id"),
-    );
-    assert!(
-        !roots
-            .artifact_frame_is_retained(&absent_frame)
-            .await
-            .expect("read absent frame roots")
-    );
-    let switched = send_through(&session, "switch").await.expect("switch");
-    assert!(switched.is_success(), "{switched:?}");
-    assert_eq!(
-        last_cell_finish(
-            &session
-                .durable()
-                .read()
-                .await
-                .expect("committed read")
-                .expect("head")
-        ),
-        Some(id_json)
-    );
-    wait_edges(&fixture, |edges| {
-        edges.len() == 1
-            && edges[0].kind == "frame_environment"
-            && edges[0].id != old_frame
-            && edges[0].artifact_ref == module_ref
-    })
-    .await;
-    assert!(
-        core.host_artifacts()
-            .get_definition(&id)
-            .await
-            .expect("definition snapshot")
-            .is_some()
-    );
-    assert!(
-        fixture
-            .backend
-            .module_artifacts()
-            .get_module_artifact(&module_ref)
-            .await
-            .expect("module snapshot")
-            .is_some()
-    );
-}
-
-async fn uncarried_frame_switch_loses_an_uncarried_definition(backend: Backend) {
-    let fixture = Fixture::new(backend).await;
-    let core = rlm_core(
-        &fixture,
-        vec![
-            response("const made = async () => 31; await control.finish(made);"),
-            response("await control.continue_as({ task: 'no carry' });"),
-            response("await control.finish('switched');"),
-        ],
-    );
-    let session = created_session(&core, "definition-id-no-carry")
-        .await
-        .open()
-        .await
-        .expect("session");
-    let first = session
-        .send(TurnInput::text("create"))
-        .output()
-        .await
-        .expect("create");
-    assert!(first.is_success(), "{first:?}");
-    let id = lash_core::ProcessDefinitionId::from_tagged_json(
-        &last_cell_finish(
-            &session
-                .durable()
-                .read()
-                .await
-                .expect("committed read")
-                .expect("head"),
-        )
-        .expect("definition output")["id"],
-    )
-    .expect("id");
-    let before = wait_edges(&fixture, |edges| {
-        edges.len() == 1 && edges[0].kind == "frame_environment"
-    })
-    .await;
-    let module_ref = before[0].artifact_ref.clone();
-    let switched = send_through(&session, "switch").await.expect("switch");
-    assert!(switched.is_success(), "{switched:?}");
-    wait_edges(&fixture, |edges| edges.is_empty()).await;
-    wait_definition_reclaimed(&fixture, &id, &module_ref).await;
-    assert!(
-        core.host_artifacts()
-            .get_definition(&id)
-            .await
-            .expect("definition snapshot")
-            .is_none()
-    );
-    assert!(
-        fixture
-            .backend
-            .module_artifacts()
-            .get_module_artifact(&module_ref)
-            .await
-            .expect("module snapshot")
-            .is_none()
-    );
-}
-
-async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend) {
-    let fixture = Fixture::new(backend).await;
-    let core = rlm_core(
-        &fixture,
-        vec![
-            response("const made = async () => 31; await control.finish(made);"),
-            response("await control.continue_as({ task: 'host keeps id' });"),
-            response("await control.finish('switched');"),
-        ],
-    );
-    let session = created_session(&core, "definition-id-host-pin")
-        .await
-        .open()
-        .await
-        .expect("session");
-    let first = session
-        .send(TurnInput::text("create"))
-        .output()
-        .await
-        .expect("create");
-    assert!(first.is_success(), "{first:?}");
-    let id = lash_core::ProcessDefinitionId::from_tagged_json(
-        &last_cell_finish(
-            &session
-                .durable()
-                .read()
-                .await
-                .expect("committed read")
-                .expect("head"),
-        )
-        .expect("definition output")["id"],
-    )
-    .expect("id");
-    let before = wait_edges(&fixture, |edges| {
-        edges.len() == 1 && edges[0].kind == "frame_environment"
-    })
-    .await;
-    let module_ref = before[0].artifact_ref.clone();
-    let artifacts = core.host_artifacts();
-    let first_pin = lash::process::HostArtifactPin::mint();
-    let last_pin = lash::process::HostArtifactPin::mint();
-    artifacts
-        .pin_definition(&first_pin, &id)
-        .await
-        .expect("first pin");
-    artifacts
-        .pin_definition(&last_pin, &id)
-        .await
-        .expect("last pin");
-    let switched = send_through(&session, "switch").await.expect("switch");
-    assert!(switched.is_success(), "{switched:?}");
-    wait_edges(&fixture, |edges| {
-        edges.len() == 2
-            && edges
-                .iter()
-                .all(|edge| edge.kind == "host_pin" && edge.artifact_ref == module_ref)
-    })
-    .await;
-    assert!(
-        artifacts
-            .get_definition(&id)
-            .await
-            .expect("pinned snapshot")
-            .is_some()
-    );
-    artifacts.release(first_pin).await.expect("release first");
-    wait_edges(&fixture, |edges| {
-        edges.len() == 1 && edges[0].kind == "host_pin"
-    })
-    .await;
-    assert!(
-        artifacts
-            .get_definition(&id)
-            .await
-            .expect("last pin snapshot")
-            .is_some()
-    );
-    artifacts.release(last_pin).await.expect("release last");
-    wait_edges(&fixture, |edges| edges.is_empty()).await;
-    wait_definition_reclaimed(&fixture, &id, &module_ref).await;
-    assert!(
-        artifacts
-            .get_definition(&id)
-            .await
-            .expect("reclaimed snapshot")
-            .is_none()
-    );
-    assert!(
-        fixture
-            .backend
-            .module_artifacts()
-            .get_module_artifact(&module_ref)
-            .await
-            .expect("reclaimed module")
-            .is_none()
-    );
-}
-
-/// The process every case writes: its answer is what a later turn reads
-/// back to prove it ran the cell's document.
-const CREATED_SOURCE: &str = "async () => 40 + 2";
-
-fn create_definition_cell(binding: &str) -> String {
-    format!("const {binding} = {CREATED_SOURCE}; await control.finish('created');")
-}
-
-/// FIG-6361: unrelated split/join code in the defining cell must not
-/// prevent its function from crossing the tool boundary as a definition.
+/// CELL-NO-PUBLISH / DOC-COST: unstarted functions have no definitions.
+/// Once declarations are retained, N functions cost only the cell document.
 #[tokio::test]
-async fn a_cell_joining_a_split_result_creates_its_definition() {
+async fn unstarted_cell_functions_publish_no_definitions_or_extra_declarations() {
     let fixture = Fixture::new(Backend::Sqlite).await;
+    fixture.record_publications();
+    let code = |count: usize| {
+        let definitions = (0..count)
+            .map(|n| format!("const w{n} = async () => {n};"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{definitions} await control.finish('bound');")
+    };
+    let core = rlm_core(&fixture, vec![response(&code(1)), response(&code(8))]);
+    let session = created_session(&core, "no-cell-publications")
+        .await
+        .open()
+        .await
+        .expect("session");
+    assert!(
+        session
+            .send(TurnInput::text("one function"))
+            .output()
+            .await
+            .expect("first turn")
+            .is_success()
+    );
+    let first = fixture.publications();
+    assert!(
+        !first
+            .iter()
+            .any(|(namespace, _)| namespace == "process_definition"),
+        "no function was started: {first:?}"
+    );
+    assert!(
+        session
+            .send(TurnInput::text("eight functions"))
+            .output()
+            .await
+            .expect("next turn")
+            .is_success()
+    );
+    let writes = fixture.publications();
+    assert!(
+        !writes
+            .iter()
+            .any(|(namespace, _)| namespace == "process_definition"),
+        "no definitions: {writes:?}"
+    );
+    let document_writes: Vec<_> = writes[first.len()..]
+        .iter()
+        .filter(|(namespace, _)| namespace == "kernel_document")
+        .collect();
+    assert_eq!(
+        document_writes.len(),
+        1,
+        "only the document is written: {document_writes:?}"
+    );
+    assert!(!document_writes[0].1.starts_with("function:"));
+}
+
+/// Own-cell and later-cell starts keep the same signature and frozen capture.
+/// Both dialects use the ordinary function crossing, with no cell entries.
+#[tokio::test]
+async fn own_and_later_cell_starts_keep_the_signature_and_return_the_capture() {
+    for (dialect, define, start) in [
+        (
+            lash_protocol_rlm::CellDialect::typescript(),
+            "const limit = 3; const w = async (n: number) => limit; const quiet = async () => {};",
+            "const h = await processes.start({ definition: w, args: { n: 1 } });
+const empty = await processes.start({ definition: quiet });
+const byFunction = await processes.list({ definition: w, status: \"any\" });
+const byHandle = await processes.list({ definition_id: h.definition_id, status: \"any\" });
+await control.finish({ h, empty, byFunction, byHandle });",
+        ),
+        (
+            lash_protocol_rlm::CellDialect::python(),
+            "limit = 3\nasync def w(n: int):\n    return limit\nasync def quiet():\n    pass\n",
+            "h = await processes_start({'definition': w, 'args': {'n': 1}})\nempty = await processes_start({'definition': quiet})\nbyFunction = await processes_list({'definition': w, 'status': 'any'})\nbyHandle = await processes_list({'definition_id': h['definition_id'], 'status': 'any'})\nawait control_finish({'h': h, 'empty': empty, 'byFunction': byFunction, 'byHandle': byHandle})",
+        ),
+    ] {
+        let fixture = Fixture::new(Backend::Sqlite).await;
+        let response = |code: String| LlmResponse {
+            parts: vec![LlmOutputPart::Text {
+                text: format!("<{}>\n{code}\n</{}>", dialect.name(), dialect.name()),
+                response_meta: None,
+            }],
+            ..Default::default()
+        };
+        let queue = Arc::new(Mutex::new(VecDeque::from([
+            response(format!("{define}\n{start}")),
+            response(start.to_owned()),
+        ])));
+        let core = rlm_core_in_dialect(
+            &fixture,
+            queue,
+            Vec::new(),
+            lash_core::lifetime::detached,
+            dialect,
+        );
+        let session = created_session(&core, "cell-start-signatures")
+            .await
+            .open()
+            .await
+            .expect("session");
+        let mut signatures = Vec::new();
+        for text in ["start now", "start saved"] {
+            let output = session
+                .send(TurnInput::text(text))
+                .output()
+                .await
+                .expect("turn");
+            assert!(output.is_success(), "{text}: {output:?}");
+            let view = session.durable().read().await.expect("read").expect("head");
+            let answer = last_cell_finish(&view).expect("the returned handle and listings");
+            let handle = &answer["h"];
+            let ids = |name: &str| {
+                answer[name]
+                    .as_array()
+                    .expect("listing")
+                    .iter()
+                    .map(|row| row["process_id"].clone())
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                ids("byFunction"),
+                ids("byHandle"),
+                "a function and its returned id select the same runs"
+            );
+            assert!(ids("byFunction").contains(&handle["process_id"]));
+            let id = lash_core::ProcessDefinitionId::from_tagged_json(&handle["definition_id"])
+                .expect("realized definition id");
+            let definition = core
+                .host_artifacts()
+                .get_definition(&id)
+                .await
+                .expect("definition reads")
+                .expect("the process holds it");
+            signatures.push(definition.signature);
+            let process = lash_core::process_id_from_handle_json(handle).expect("process handle");
+            let end = core
+                .processes()
+                .await_output(&process)
+                .await
+                .expect("process result");
+            let lash_core::ProcessAwaitOutput::Settled { output } = end else {
+                panic!("settled process")
+            };
+            assert!(
+                matches!(&output.outcome, lash::tools::ToolCallOutcome::Success(value) if value.to_json_value() == serde_json::json!(3)),
+                "{output:?}"
+            );
+            let empty = lash_core::process_id_from_handle_json(&answer["empty"])
+                .expect("the no-return function's handle");
+            let empty = core
+                .processes()
+                .await_output(&empty)
+                .await
+                .expect("no-return function result");
+            let lash_core::ProcessAwaitOutput::Settled { output } = empty else {
+                panic!("settled no-return function")
+            };
+            assert!(
+                matches!(&output.outcome, lash::tools::ToolCallOutcome::Success(value) if value.to_json_value().is_null()),
+                "a start without a return normalizes its result to null: {output:?}"
+            );
+        }
+        assert_eq!(
+            signatures[0], signatures[1],
+            "saved starts keep their signature"
+        );
+        core.shutdown().await.expect("stop the node");
+    }
+}
+
+/// START-ONCE's cell boundary: cancellation of an unstarted function adds
+/// neither a descriptor publication nor a definition edge to the frame.
+#[tokio::test]
+async fn a_cancelled_cell_with_unstarted_functions_adds_no_frame_definition_edge() {
+    let fixture = Fixture::new(Backend::Sqlite).await;
+    fixture.record_publications();
     let core = rlm_core(
         &fixture,
-        vec![response(
-            "const w = \"a b\".split(\" \"); console.log(w.join(\"-\")); \
-         const fg = async () => 42; await control.finish(fg);",
-        )],
+        vec![response("const w = async () => 3; await sleep(3600000);")],
     );
-    let session = created_session(&core, "split-join-definition")
+    let session = created_session(&core, "cancel-no-entry")
         .await
         .open()
         .await
         .expect("session");
-    let output = session
-        .send(TurnInput::text("create the definition"))
-        .output()
+    let handle = session
+        .send(TurnInput::text("define and wait"))
         .await
-        .expect("defining turn");
-    assert!(output.is_success(), "the defining turn: {output:?}");
-    let read = session.durable().read().await.expect("read").expect("head");
-    let definition = last_cell_finish(&read).expect("the cell returns its definition");
-    let id: lash::process::ProcessDefinitionId = serde_json::from_value(definition["id"].clone())
-        .expect("the function crossed as a definition");
-    assert!(matches!(
-        core.host_artifacts()
-            .definition_graph(&id)
-            .await
-            .expect("the cell definition resolves for workflow creation"),
-        lash::workflow::WorkflowRead::Inspected(_)
-    ));
-}
-
-/// FIG-3116: the definition of a process a cell wrote is a code mode value like
-/// any other (ADR 0113 §6). The call's realization publishes its module under
-/// the realizing execution, the cell's global holds it in the frame, and a
-/// later turn in the same frame starts it by value after a cold reopen.
-async fn created_definition_survives_cold_reopen_and_starts_by_value(backend: Backend) {
-    let fixture = Fixture::new(backend).await;
-    let responses = Arc::new(Mutex::new(VecDeque::from(vec![
-        response(&create_definition_cell("made")),
-        response(
-            "const run = await processes.start({ definition: made }); await control.finish(await processes.await({ handle: run }));",
-        ),
-    ])));
-    let first_core = rlm_core_with_queue(&fixture, Arc::clone(&responses));
-    let first_session = created_session(&first_core, "processes-create-cold-reopen")
-        .await
-        .open()
-        .await
-        .expect("open first session");
-    let first = first_session
-        .send(TurnInput::text("create definition"))
-        .output()
-        .await
-        .expect("first turn");
-    assert!(first.is_success(), "the defining turn: {first:?}");
-    let created = wait_edges(&fixture, |edges| {
-        edges.len() == 1 && edges[0].kind == "frame_environment"
-    })
-    .await;
-    let module_ref = created[0].artifact_ref.clone();
-    let frame_id = created[0].id.clone();
-    drop(first_session);
-    drop(first_core);
-
-    let second_core = rlm_core_with_queue(&fixture, Arc::clone(&responses));
-    let second_session = created_session(&second_core, "processes-create-cold-reopen")
-        .await
-        .open()
-        .await
-        .expect("cold reopen");
-    let second = second_session
-        .send(TurnInput::text("start created definition"))
-        .output()
-        .await
-        .expect("second turn");
-    assert!(
-        second.is_success(),
-        "a created definition survives cold reopen: {second:?}"
-    );
-    assert!(responses.lock_recover().is_empty());
-    assert_eq!(
-        last_cell_finish(
-            &second_session
-                .durable()
-                .read()
-                .await
-                .expect("committed read")
-                .expect("head")
-        ),
-        Some(serde_json::json!(42))
-    );
-    let after_start = wait_edges(&fixture, |edges| {
-        edges.iter().any(|edge| {
-            edge.kind == "frame_environment"
-                && edge.id == frame_id
-                && edge.artifact_ref == module_ref
-        })
-    })
-    .await;
-    assert_eq!(
-        frame_artifacts(&after_start),
-        BTreeSet::from([module_ref.as_str()]),
-        "the frame holds exactly the created module"
-    );
-}
-
-/// FIG-3116: deleting the session that created a definition ends the frame
-/// that held it, and the relay reclaims the module (ADR 0113 §3.1): nothing
-/// else keeps a created definition alive.
-async fn created_definition_is_reclaimed_after_session_deletion(backend: Backend) {
-    let fixture = Fixture::new(backend).await;
-    let core = rlm_core(&fixture, vec![response(&create_definition_cell("made"))]);
-    let session_id = "processes-create-deletion";
-    let session = created_session(&core, session_id)
-        .await
-        .open()
-        .await
-        .expect("session");
-    let created = session
-        .send(TurnInput::text("create definition"))
-        .output()
-        .await
-        .expect("create turn");
-    assert!(created.is_success(), "the defining turn: {created:?}");
-    let held = wait_edges(&fixture, |edges| {
-        edges.len() == 1 && edges[0].kind == "frame_environment"
-    })
-    .await;
-    let module_ref = held[0].artifact_ref.clone();
-    let modules = fixture.backend.module_artifacts();
-    assert!(
-        modules
-            .get_module_artifact(&module_ref)
-            .await
-            .expect("read created module")
-            .is_some(),
-        "the frame holds the created module"
-    );
-    drop(session);
-
-    let administration = core.session_administration().await;
-    let deletion = LashCore::delete_session(
-        administration
-            .delete_context(session_id)
-            .expect("delete context"),
-    )
-    .await;
-    assert!(
-        matches!(deletion, Ok(lash::SessionDeletion::Requested { .. })),
-        "the delete runs in the call: {deletion:?}"
-    );
-
-    let after = wait_edges(&fixture, |edges| edges.is_empty()).await;
-    assert!(after.is_empty(), "no edge survives the session: {after:?}");
-    while modules
-        .get_module_artifact(&module_ref)
-        .await
-        .expect("read module after deletion")
-        .is_some()
-    {
+        .expect("accepted turn");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while !fixture.publications().iter().any(|(namespace, artifact)| {
+        namespace == "kernel_document" && !artifact.starts_with("function:")
+    }) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the cell document never published"
+        );
         fixture.settle().await;
     }
+    handle.cancel().await.expect("cancel turn");
+    handle.outcome().await.expect("cancelled outcome");
+    lash::testing::quiesce_artifact_cleanup(&core)
+        .await
+        .settle()
+        .await
+        .expect("execution cleanup");
+    assert!(
+        !fixture
+            .publications()
+            .iter()
+            .any(|(namespace, _)| namespace == "process_definition")
+    );
+    assert!(
+        !fixture
+            .edges()
+            .await
+            .iter()
+            .any(|edge| edge.kind == "frame_environment"),
+        "the cancelled cell retained no definition document in the frame"
+    );
+    core.shutdown().await.expect("stop node");
 }
 
 /// A cell whose document lists library helpers: `map` reaches them.
@@ -1432,19 +810,10 @@ macro_rules! tiered {
 
 tiered!(
     wait_edges_waits_for_condition_past_former_deadline,
-    cold_reopen_globals_across_turns,
-    overwrite_retains_old_module_until_frame_end,
     first_turn_continue_as_fences_its_initial_frame,
-    uncarried_frame_switch_loses_an_uncarried_definition,
-    host_pin_keeps_a_definition_across_an_uncarried_switch,
-    created_definition_survives_cold_reopen_and_starts_by_value,
-    created_definition_is_reclaimed_after_session_deletion,
     a_deleted_session_leaves_no_declaration_row,
     a_saved_function_started_as_a_process_finishes_after_its_session_is_deleted,
     a_python_saved_function_process_outlives_its_session,
-    continue_as_carries_only_seeded_definition,
-    carried_definition_id_retains_the_closure_across_frame_switch,
-    a_pressure_seed_carries_its_module_into_the_new_frame,
 );
 
 #[test]

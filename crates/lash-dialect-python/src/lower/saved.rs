@@ -1,14 +1,14 @@
-//! Python's saved call signature and the entry a saved function starts as.
+//! Python's saved call shape and executable start adapter.
 
 use lash_kernel_dialect::{CallParam, CallShape, SavedFunction, Written};
 use lash_kernel_doc::{
-    Action, Atom, Callee, Expr, Function, FunctionRepresentation, Literal, MapEntry, Name, Param,
-    Rhs, Signature, SourceLanguage, StartAdapter, StartConvention, Stmt, Type,
+    FunctionRepresentation, Name, Param, Signature, SourceLanguage, StartAdapter, StartConvention,
+    Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::Ranged;
 
-use super::{Lowerer, Lowering, Note, Operand};
+use super::Lowerer;
 use crate::scope::Ty;
 
 /// A later call needs the parameter names, default slots and coroutine
@@ -69,95 +69,6 @@ impl Lowerer<'_> {
             start: Some(start),
             call: Some(call),
         }
-    }
-
-    /// Evaluate a start's input in Python order, replacing only a saved
-    /// function named in its definition slot with a process entry reference.
-    pub(super) fn process_input(&mut self, expr: &PyExpr) -> Lowering<Operand> {
-        let PyExpr::Dict(dict) = expr else {
-            return self.expr(expr);
-        };
-        let mut entries = Vec::with_capacity(dict.items.len());
-        for item in &dict.items {
-            let Some(key) = &item.key else {
-                return self.expr(expr);
-            };
-            let definition =
-                matches!(key, PyExpr::StringLiteral(text) if text.value.to_str() == "definition");
-            let key = self.expr(key)?;
-            let key = self.pin(key);
-            let saved = match &item.value {
-                PyExpr::Name(name) if definition => {
-                    let name = Name::new(name.id.as_str());
-                    self.saved
-                        .get(&name)
-                        .filter(|saved| call_signature(saved).is_some())
-                        .and_then(|saved| saved.written.as_ref())
-                        .and_then(|written| written.start.clone())
-                        .filter(|_| {
-                            self.saved_startable.contains(&name)
-                                && self
-                                    .variable(name.as_str())
-                                    .is_some_and(|found| found.scope == Some(0))
-                        })
-                        .map(|signature| (name, signature))
-                }
-                _ => None,
-            };
-            let value = match saved {
-                Some((name, signature)) => self.saved_process(&name, signature),
-                None => self.expr(&item.value)?,
-            };
-            let value = self.pin(value);
-            entries.push(MapEntry {
-                key: key.expr,
-                value: value.expr,
-            });
-        }
-        Ok(self.let_rhs(Rhs::Expr(Expr::Map(entries)), Ty::Dict))
-    }
-
-    fn saved_process(&mut self, name: &Name, signature: Signature) -> Operand {
-        let declared = self
-            .saved
-            .get(name)
-            .map_or_else(|| name.clone(), |saved| saved.name.clone());
-        let entry = self.fresh(&format!("{name}_process"));
-        let returned = self.temp();
-        self.saved_used.insert(name.clone());
-        let body = vec![
-            Stmt::Let {
-                name: returned.clone(),
-                value: Rhs::Action(Action::Call {
-                    callee: Callee::Declared(declared),
-                    args: signature
-                        .params
-                        .iter()
-                        .map(|param| Atom::Variable(param.name.clone()))
-                        .collect(),
-                }),
-            },
-            Stmt::Return {
-                value: Expr::Variable(returned),
-            },
-        ];
-        // The entry is the reference's scaffolding: it is located there.
-        self.declared_notes
-            .insert(entry.clone(), Note::covering(&body, self.span));
-        self.declared.insert(
-            entry.clone(),
-            Function {
-                params: signature
-                    .params
-                    .iter()
-                    .map(|param| param.name.clone())
-                    .collect(),
-                body,
-                start: None,
-            },
-        );
-        self.entries.insert(entry.clone(), signature);
-        Operand::literal(Literal::Function(entry), Ty::Unknown)
     }
 }
 

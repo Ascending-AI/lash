@@ -324,7 +324,7 @@ fn process_list_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:list_process_handles",
         "list_process_handles",
-        "List process runs visible to this session, including host-launched runs, with process id, descriptor, optional definition ID, and lifecycle status. Filters are optional; the default returns running runs. Empty arguments select running runs; `definition_id` selects runs of a definition and `status: \"any\"` includes visible run history.",
+        "List process runs visible to this session, including host-launched runs, with process id, descriptor, optional definition ID, and lifecycle status. Filters are optional; the default returns running runs. Empty arguments select running runs; `definition` selects runs of an inline function and `definition_id` selects the ID from a returned handle or published workflow and `status: \"any\"` includes visible run history.",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -335,10 +335,7 @@ fn process_list_tool_definition() -> ToolDefinition {
                     ],
                     "description": "Any-of lifecycle status set. Absence selects running runs; `any` includes every status."
                 },
-                // Deliberately untyped: the value is whatever definition
-                // encoding the engine that started the run stores, and a
-                // Lash VM cell passes the process itself (`on_button`), whose
-                // `Process<...>` type is not assignable to a record.
+                "definition": declarations::function_value_schema(),
                 "definition_id": declarations::definition_id_schema()
             },
             "additionalProperties": false
@@ -490,7 +487,28 @@ pub async fn execute_process_list_tool_call(
     context: &lash_core::AttemptContext<'_>,
     args: &Value,
 ) -> ToolOutcome {
-    let filter = match lash_core::ProcessListFilter::decode(args) {
+    let mut args = args.clone();
+    if let Some(value) = args
+        .as_object_mut()
+        .and_then(|map| map.remove("definition"))
+    {
+        if args.get("definition_id").is_some() {
+            return ToolOutcome::err_fmt("list accepts only one of definition or definition_id");
+        }
+        let inline = match context
+            .resolve_inline_start(
+                lash_sansio::LASH_VM_ENGINE_KIND,
+                value,
+                serde_json::Map::new(),
+            )
+            .await
+        {
+            Ok(inline) => inline,
+            Err(error) => return ToolOutcome::err_fmt(error),
+        };
+        args["definition_id"] = inline.target.definition_id.to_tagged_json();
+    }
+    let filter = match lash_core::ProcessListFilter::decode(&args) {
         Ok(filter) => filter,
         Err(err) => return ToolOutcome::err_fmt(err),
     };

@@ -149,9 +149,6 @@ impl<H: Host> Host for Cancelling<'_, H> {
     fn cancel_requested(&mut self) -> bool {
         self.cancel || self.host.cancel_requested()
     }
-    fn crosses_functions(&self) -> bool {
-        self.host.crosses_functions()
-    }
 }
 
 /// A heap fault as the broker states it: the activation ends as

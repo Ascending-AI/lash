@@ -2,7 +2,7 @@
 //! `K-CLO-004`).
 //!
 //! An effect's arguments are copied out of the run as data. Under the
-//! crossing policy a host selects ([`crate::Host::crosses_functions`]), a
+//! crossing policy for every effect, a
 //! function among them crosses too: a closure, a token holding one, or a
 //! reference to a declared function is cut out of the live heap as a
 //! [`lash_kernel_doc::FunctionValue`] before the surrounding input is

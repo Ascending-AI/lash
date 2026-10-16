@@ -21,16 +21,6 @@
 //! engine edge under the referrer, whose own end severs it; nothing is usable
 //! until the descriptor edge commits.
 //!
-//! The closure also takes in the definition's siblings: the other
-//! definitions its engine says the same artifact defines
-//! ([`ProcessDefinitionResolution::siblings`](super::ProcessDefinitionResolution)),
-//! which a process of the definition starts by value. Publishing or
-//! acquiring a definition publishes each sibling's descriptor under the same
-//! referrer first, so a host publishes one definition and a started process's
-//! record holds everything its artifact can start. A sibling is not in the
-//! manifest: the manifest is in the id's preimage, and siblings name each
-//! other.
-//!
 //! A manifest's kernel document and helper declarations are checkpoint
 //! graph nodes (FIG-6469): each artifact's row roots its Document or
 //! HelperDefinition node, so the referrer's edge to the row retains the
@@ -155,8 +145,7 @@ impl ArtifactReferrerPorts {
     /// The owning engine first checks the manifest and derives the signature
     /// (ADR 0095), so nothing is written for a refused draft. Every manifest
     /// artifact must already be stored: a host publishes its modules under
-    /// the same pin first. The sibling definitions the engine names are
-    /// published under `claim` with it. Publishing equal content again changes nothing;
+    /// the same pin first. Publishing equal content again changes nothing;
     /// different bytes under the id are an immutable-content refusal.
     ///
     /// # Errors
@@ -174,13 +163,6 @@ impl ArtifactReferrerPorts {
         let ended = || ArtifactStoreError::ReferrerEnded {
             referrer: claim.referrer(),
         };
-        // Siblings first: a held descriptor always has its siblings held.
-        for sibling in &resolution.siblings {
-            if self.publish_descriptor(engines, claim, sibling).await? == ReferrerAcquisition::Ended
-            {
-                return Err(ended().into());
-            }
-        }
         if self.publish_descriptor(engines, claim, draft).await? == ReferrerAcquisition::Ended {
             return Err(ended().into());
         }
@@ -215,13 +197,10 @@ impl ArtifactReferrerPorts {
     }
 
     /// Hold the definition `id` names under `claim`: its descriptor and its
-    /// whole manifest, checked by its engine before anything is acquired,
-    /// and the sibling definitions its engine names. A sibling is published,
-    /// not acquired: its descriptor is derived from the artifact the claim
-    /// holds, so it is stored again when its last holder let go.
+    /// whole manifest, checked by its engine before anything is acquired.
     ///
     /// A usable result exists only once the descriptor's own edge commits,
-    /// after every other store's share and every sibling is held. A fence on
+    /// after every other store's share is held. A fence on
     /// the claim's referrer answers [`DefinitionAcquisition::Ended`].
     ///
     /// # Errors
@@ -236,7 +215,7 @@ impl ArtifactReferrerPorts {
         claim: &ReferrerClaim,
         id: &ProcessDefinitionId,
     ) -> Result<DefinitionAcquisition, crate::PluginError> {
-        let Some((resolved, siblings)) = self.resolve_stored_definition(engines, id).await? else {
+        let Some(resolved) = self.resolve_stored_definition(engines, id).await? else {
             return Err(definition_missing(id));
         };
         let (store_set, engine_names) = partition_manifest(&resolved.draft)?;
@@ -244,16 +223,6 @@ impl ArtifactReferrerPorts {
             && self.acquire(engines, claim, &engine_names).await? == ReferrerAcquisition::Ended
         {
             return Ok(DefinitionAcquisition::Ended);
-        }
-        for sibling in &siblings {
-            match self.publish_descriptor(engines, claim, sibling).await {
-                Ok(ReferrerAcquisition::Held) => {}
-                Ok(ReferrerAcquisition::Ended) => return Ok(DefinitionAcquisition::Ended),
-                // Reclaimed after the read, with the artifact the sibling
-                // shares with it.
-                Err(error) if artifact_missing(&error) => return Err(definition_missing(id)),
-                Err(error) => return Err(error),
-            }
         }
         match self
             .definitions()
@@ -301,29 +270,21 @@ impl ArtifactReferrerPorts {
         engines: &ProcessEngineRegistry,
         id: &ProcessDefinitionId,
     ) -> Result<Option<ResolvedProcessDefinition>, crate::PluginError> {
-        Ok(self
-            .resolve_stored_definition(engines, id)
-            .await?
-            .map(|(resolved, _)| resolved))
+        self.resolve_stored_definition(engines, id).await
     }
 
-    /// The definition stored under `id` with the sibling definitions its
-    /// engine names.
+    /// The definition stored under `id`, checked by its engine.
     async fn resolve_stored_definition(
         &self,
         engines: &ProcessEngineRegistry,
         id: &ProcessDefinitionId,
-    ) -> Result<Option<(ResolvedProcessDefinition, Vec<ProcessDefinitionDraft>)>, crate::PluginError>
-    {
+    ) -> Result<Option<ResolvedProcessDefinition>, crate::PluginError> {
         let Some(draft) = self.read_definition_draft(id).await? else {
             return Ok(None);
         };
         let resolution = engines.resolve_definition(&draft).await?;
         let definition = ProcessDefinition::new(draft.id(), resolution.signature);
-        Ok(Some((
-            ResolvedProcessDefinition { draft, definition },
-            resolution.siblings,
-        )))
+        Ok(Some(ResolvedProcessDefinition { draft, definition }))
     }
 }
 
@@ -355,13 +316,6 @@ fn partition_manifest(
         }
     }
     Ok((store_set, engine_names))
-}
-
-fn artifact_missing(error: &crate::PluginError) -> bool {
-    matches!(
-        error,
-        crate::PluginError::Runtime(error) if error.code == crate::RuntimeErrorCode::ArtifactMissing
-    )
 }
 
 fn definition_missing(id: &ProcessDefinitionId) -> crate::PluginError {

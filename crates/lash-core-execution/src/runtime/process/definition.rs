@@ -29,15 +29,18 @@
 //! type DefinitionId = { $lash_definition_id: string };
 //! type ProcessSignature = { signature: "unknown" } | { signature: "known"; encoding: unknown };
 //! type Definition = { id: DefinitionId; signature: ProcessSignature };
-//! type Target = { definition: Definition } | { definition_id: DefinitionId };
-//! processes.create({ source: string, dialect: "typescript" }): Promise<Definition>;
+//! type FunctionValue = { $lash_function: { document: unknown; entry: string } };
+//! type Target = { definition: FunctionValue } | { definition_id: DefinitionId };
 //! processes.start(Target & { args?: Record<string, unknown>; label?: string }): Promise<ProcessHandle>;
 //! processes.get({ definition_id: DefinitionId }): Promise<Definition>;
+//! processes.list({ definition?: FunctionValue; definition_id?: DefinitionId }): Promise<ProcessHandle[]>;
 //! ```
 //!
-//! `DefinitionId` is [`ProcessDefinitionId`], `Definition` is
-//! [`ProcessDefinition`] and `Target` is [`ProcessDefinitionTarget`]; each
-//! refuses unknown fields.
+//! Functions cross inline, with their captures frozen at the call. Only
+//! published workflows are exposed for invocation by stored reference. A
+//! returned handle carries its realized definition id. The host-level
+//! [`ProcessDefinitionTarget`] names a published workflow, with an optional
+//! signature claim; it is not the function-value transport.
 //!
 //! # Host contract
 //!
@@ -384,36 +387,18 @@ impl ProcessEngineRegistry {
         Ok(ProcessDefinition::new(draft.id(), resolution.signature))
     }
 
-    /// What `draft`'s owning engine says of it: its signature and the
-    /// sibling definitions its artifact defines, each a descriptor of the
-    /// same engine with a checked manifest and none of them `draft` itself.
+    /// What `draft`'s owning engine says of it, after checking its manifest.
     ///
     /// # Errors
     ///
-    /// A [`super::ProcessDefinitionError::Refused`] judgment for `draft` or
-    /// a sibling it names, or a typed operational fault.
+    /// A [`super::ProcessDefinitionError::Refused`] judgment for `draft`,
+    /// or a typed operational fault.
     pub async fn resolve_definition(
         &self,
         draft: &ProcessDefinitionDraft,
     ) -> Result<ProcessDefinitionResolution, super::ProcessDefinitionError> {
         self.check_definition_manifest(draft)?;
-        let mut resolution = self.resolve(&draft.unclaimed_reference()).await?;
-        let id = draft.id();
-        resolution.siblings.retain(|sibling| sibling.id() != id);
-        for sibling in &resolution.siblings {
-            if sibling.engine_kind != draft.engine_kind {
-                return Err(ProcessDefinitionRefusal::UnresolvableDefinition {
-                    engine_kind: draft.engine_kind.clone(),
-                    message: format!(
-                        "definition `{id}` names a sibling of engine `{}`",
-                        sibling.engine_kind.as_str()
-                    ),
-                }
-                .into());
-            }
-            self.check_definition_manifest(sibling)?;
-        }
-        Ok(resolution)
+        self.resolve(&draft.unclaimed_reference()).await
     }
 
     /// Refuses a draft whose manifest is not exactly the set of artifacts its

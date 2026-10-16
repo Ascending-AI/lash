@@ -52,21 +52,13 @@ impl lash_core::ToolProvider for Keeps {
     }
 }
 
-/// `workers` with function crossing selected, as C1c's tool contract will
-/// select it for every pool.
-fn crossing(workers: lash_vm_client::service::Service) -> lash_vm_client::service::Service {
-    let mut config = workers.config().clone();
-    config.tuning.crosses_functions = true;
-    lash_vm_client::service::Service::new(config)
-}
-
 fn crossing_services(dialect: &CellDialect) -> super::super::CellServices {
     let workers = if dialect.name() == CellDialect::python().name() {
         python_workers()
     } else {
         lash_vm_client::service::Service::default()
     };
-    cell_services(dialect, crossing(workers))
+    cell_services(dialect, workers)
 }
 
 /// The function value `json` carries, read as every consumer reads one:

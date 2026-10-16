@@ -538,11 +538,6 @@ async fn link_cell(
     let document =
         IdentifiedDocument::decode(&document, lash_kernel_doc::KernelDataLimits::standard())
             .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
-    // A saved function a process of the cell runs crosses into it by
-    // value, with its captures.
-    let (document, source_map) = processes::declare_saved_captures(state, document, source_map)
-        .await
-        .map_err(|error| host_failure(format!("a saved function cannot start: {error}")))?;
     let envelope = CellEnvelope {
         code: CellEnvelope::code_digest(code),
         dialect: state.dialect().to_owned(),
@@ -833,17 +828,11 @@ async fn run_linked_cell(
     if let Some(trace) = &trace {
         trace.started();
     }
-    let entries = Arc::new(processes::CellEntries {
-        document: document.clone(),
-    });
     let published = if runs_on {
         Ok(())
     } else {
         match services.kernel.library() {
-            Ok(functions) => match processes::retain_document(&ctx, &entries, &functions).await {
-                Ok(()) => processes::publish_entries(&ctx, &entries).await,
-                Err(message) => Err(message),
-            },
+            Ok(functions) => processes::retain_document(&ctx, &document, &functions).await,
             Err(refusal) => Err(refusal.to_string()),
         }
     };
@@ -905,12 +894,10 @@ async fn run_linked_cell(
         parent_wait: services.workers.config().tuning.parent_wait,
         ledgers: Arc::clone(&ledgers),
         boundary: boundary.clone(),
-        entries: Arc::clone(&entries),
         limit: ctx.max_tool_calls(),
         cell: "cell".to_owned(),
     });
     let host = CellHost {
-        entries,
         trace: trace.clone(),
         sites: Mutex::new(open_sites),
         ctx: ctx.clone(),
@@ -1031,7 +1018,6 @@ async fn run_linked_cell(
                             .clone()
                             .zip(store.clone())
                             .map(|(pages, store)| pages::HeldRun::new(pages, store)),
-                        host.entries.definitions(),
                     )
                     .await
                     .map_err(|error| error.to_string()),
@@ -1168,7 +1154,7 @@ async fn run_linked_cell(
                 respond(lash_core::CellOutcome::Failed(observation.failure(
                     code,
                     source_map.as_ref().filter(|map| {
-                        map.validate_identified(&host.entries.document, code)
+                        map.validate_identified(&host.envelope.document, code)
                             .is_ok()
                     }),
                     services.channel,

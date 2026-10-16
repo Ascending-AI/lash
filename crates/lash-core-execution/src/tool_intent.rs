@@ -460,8 +460,6 @@ impl StartProcessIntent {
 pub struct PublishDefinitionIntent {
     pub owner: RuntimeOwner,
     pub draft: crate::ProcessDefinitionDraft,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub module: Option<DeclaredModuleArtifact>,
 }
 
 /// Acquire a definition under the realizing execution before returning it.
@@ -470,17 +468,6 @@ pub struct PublishDefinitionIntent {
 pub struct GetDefinitionIntent {
     pub owner: RuntimeOwner,
     pub definition_id: crate::ProcessDefinitionId,
-}
-
-/// A module artifact a declaration carries for realization to publish.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DeclaredModuleArtifact {
-    /// The content-addressed reference the definition value names.
-    pub module_ref: String,
-    /// The module port's bytes for `module_ref`, exactly as its codec wrote
-    /// them. The lash_vm module codec is JSON, so they travel as text and
-    /// publish byte-for-byte.
-    pub bytes: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -755,7 +742,6 @@ mod tests {
                         [],
                     )
                     .expect("draft"),
-                    module: None,
                 }))
             }
         }

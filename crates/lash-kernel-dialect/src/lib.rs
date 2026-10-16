@@ -41,8 +41,7 @@ pub use notes::{Note, site_layers};
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
     FUNCTION_BUNDLE_NODE_KIND, InstalledFunction, Kept, Left, MemberBody, NotSaved, SavedFunction,
-    Token, Unusable, closure_of, declare_captures, function_reference, install, reached_by_entries,
-    save,
+    Token, Unusable, closure_of, function_reference, install, save,
 };
 pub use source::{SourceError, define_functions};
 pub use written::{CallParam, CallShape, Written, closure_site, written_table};

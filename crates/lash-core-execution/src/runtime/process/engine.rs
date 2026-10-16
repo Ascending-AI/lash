@@ -363,16 +363,6 @@ pub trait ProcessDocumentProvider: Send + Sync {
         request: ProcessDocument,
     ) -> Result<ProcessDocument, crate::PluginError>;
 
-    /// Hold `module`, a document a definition's declaration carried, under
-    /// `claim` the way the engine holds every document it admits: decoded,
-    /// checked against the reference it is named by, and stored with what
-    /// it needs to be read. Raw bytes never reach the store unchecked.
-    async fn retain_module(
-        &self,
-        claim: &crate::ReferrerClaim,
-        module: &crate::DeclaredModuleArtifact,
-    ) -> Result<(), crate::PluginError>;
-
     /// What a document of this engine is written, edited and admitted
     /// against, for the processes `request` describes. A host edits a
     /// document against the same environment its publication is admitted

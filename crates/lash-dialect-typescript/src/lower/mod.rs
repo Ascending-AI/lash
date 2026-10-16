@@ -318,7 +318,6 @@ pub(crate) struct Lowerer<'a> {
     /// The notes of each declared function's body.
     declared_notes: BTreeMap<Name, Vec<Note>>,
     /// The declared functions a host may start, with their signatures.
-    entries: BTreeMap<Name, Signature>,
     /// While a process body is lowered: the cell's names, none of which the
     /// body may read.
     lifting: Option<HashSet<String>>,
@@ -422,7 +421,6 @@ pub(crate) fn lower(
         paths: Vec::new(),
         declared: BTreeMap::new(),
         declared_notes: BTreeMap::new(),
-        entries: BTreeMap::new(),
         lifting: None,
         saved: cell.functions,
         saved_used: BTreeSet::new(),
@@ -444,7 +442,6 @@ pub(crate) fn lower(
     let mut document = Document::new(NumberPolicy::Float, main.stmts);
     document.private_bindings = lowerer.private;
     document.functions = lowerer.declared;
-    document.entries = lowerer.entries;
     if let Some(module) = lowerer.module.take() {
         module
             .assemble(&mut document, &mut lowerer.declared_notes)

@@ -17,7 +17,7 @@ use lash_core::{
     CapacityCause, CapacityVerdict, EngineStepAnswer, EngineStepRun, Material, ProcessId,
     SettledOutput,
 };
-use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Integer, Name, Timestamp};
+use lash_kernel_doc::{Datum, Document, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_vm::{Bounds, End, Request, RunError, Target};
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{
@@ -34,7 +34,7 @@ use super::state::{
 };
 use super::{
     EFFECT_ARGUMENTS, EFFECT_UNKNOWN, KernelProcessEngine, KernelProcessFailureCode,
-    KernelRecordedSettings, definition_of_entry, failure,
+    KernelRecordedSettings, failure,
 };
 use crate::{HostBoundary, ProjectionCatalog};
 
@@ -403,7 +403,7 @@ async fn kernel_run(
                         Request::Sleep(sleep) => sleep.wait.0,
                     })
                 })
-                .map(|request| issue(&boundary, &document, &process_input, run.now.0, request))
+                .map(|request| issue(&boundary, run.now.0, request))
                 .collect::<Vec<_>>();
             if let Some(trace) = &trace {
                 for issued in &issued {
@@ -731,13 +731,7 @@ pub(super) fn admission_of(request: &Request) -> (u64, Admission) {
 }
 
 /// Resolves one wait the machine asked for against the host boundary.
-fn issue(
-    boundary: &HostBoundary,
-    document: &Document,
-    process: &KernelProcessInput,
-    now_ms: i64,
-    request: Request,
-) -> Issued {
+fn issue(boundary: &HostBoundary, now_ms: i64, request: Request) -> Issued {
     let (wait, admission) = admission_of(&request);
     let request = match request {
         Request::Sleep(sleep) => {
@@ -760,7 +754,10 @@ fn issue(
     }
     let input = crate::tool_input(
         &request.args,
-        |input| effect_input(document, process, input),
+        |input| {
+            let text = datum_to_json(input).map_err(|error| error.to_string())?;
+            serde_json::from_str(&text).map_err(|error| error.to_string())
+        },
         |count| {
             format!(
                 "the effect `{}` takes one input record, and {count} arguments were passed",
@@ -782,60 +779,6 @@ fn issue(
             message,
         },
     }
-}
-
-/// An effect's input as the tool reads it. A function reference in it
-/// names an entry of the process's own document and crosses the boundary
-/// as that entry's definition, which is what the start effect starts.
-fn effect_input(
-    document: &Document,
-    process: &KernelProcessInput,
-    input: &Datum,
-) -> Result<serde_json::Value, String> {
-    let input = with_definitions(input, &|function| {
-        let definition = definition_of_entry(document, process.document, function)?;
-        datum_from_json(&definition.to_string()).map_err(|error| error.to_string())
-    })?;
-    let text = datum_to_json(&input).map_err(|error| error.to_string())?;
-    serde_json::from_str(&text).map_err(|error| error.to_string())
-}
-
-/// `value` with every function reference replaced by what `definition`
-/// answers for it.
-pub fn with_definitions(
-    value: &Datum,
-    definition: &dyn Fn(&Name) -> Result<Datum, String>,
-) -> Result<Datum, String> {
-    let each = |items: &[Datum]| {
-        items
-            .iter()
-            .map(|item| with_definitions(item, definition))
-            .collect::<Result<Vec<_>, _>>()
-    };
-    Ok(match value {
-        Datum::Function(name) => definition(name)?,
-        Datum::Tuple(items) => Datum::Tuple(each(items)?),
-        Datum::List(items) => Datum::List(each(items)?),
-        Datum::Set(items) => Datum::Set(each(items)?),
-        Datum::Map(entries) => Datum::Map(
-            entries
-                .iter()
-                .map(|(key, value)| {
-                    Ok((
-                        with_definitions(key, definition)?,
-                        with_definitions(value, definition)?,
-                    ))
-                })
-                .collect::<Result<Vec<_>, String>>()?,
-        ),
-        Datum::Record(fields) => Datum::Record(
-            fields
-                .iter()
-                .map(|(name, value)| Ok((name.clone(), with_definitions(value, definition)?)))
-                .collect::<Result<Vec<_>, String>>()?,
-        ),
-        other => other.clone(),
-    })
 }
 
 /// How a run's end becomes the output its awaiter reads.

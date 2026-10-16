@@ -14,8 +14,7 @@ async fn crossing_core() -> lash::LashCore {
             .expect("SQLite stores"),
     );
     let defaults = lash::vm::WorkerService::default();
-    let mut config = defaults.config().clone();
-    config.tuning.crosses_functions = true;
+    let config = defaults.config().clone();
     builder_on_workers(
         stores,
         false,
@@ -86,25 +85,30 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
     )
     .unwrap_or_else(|refusal| panic!("a function value: {refusal}\n{shipped}"));
 
-    let alone = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(value.document.clone()),
-                &value.entry,
-                &environment,
-                None,
-            )
-            .await
-            .expect("the function value's document publishes"),
-    );
     let env_ref = artifacts
         .publish_process_env(&pin, &linking(&environment, &[]))
         .await
         .expect("publish the empty environment");
     let mut args = serde_json::Map::new();
     args.insert("n".to_owned(), serde_json::json!(4));
-    let run = start_with(&core, &env_ref, &alone.definition, "fact", args).await;
+    let settings = core
+        .processes()
+        .engine_defaults(
+            lash::process::LASH_VM_ENGINE_KIND,
+            &value.transport_json().expect("transport"),
+        )
+        .expect("explicit kernel settings");
+    let launch = lash_core::EngineLaunch::new(env_ref, settings);
+    let run = artifacts
+        .start_function(&value, args.clone(), "held-factorial", launch.clone())
+        .await
+        .expect("start held value")
+        .process_id;
+    let retry = artifacts
+        .start_function(&value, args, "held-factorial", launch)
+        .await
+        .expect("exact retry");
+    assert_eq!(run, retry.process_id);
     assert_eq!(
         finished(&core, &run).await,
         serde_json::json!(24),

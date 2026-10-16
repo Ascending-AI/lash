@@ -5,17 +5,18 @@
 //! each piece shows one primitive:
 //!
 //! - `workbench.register_trigger` is a host tool. It checks the input mapping
-//!   against the definition's signature with the start-args check, then
+//!   against the function's signature with the start-args check, then
 //!   records one subscription keyed by the call's `call_id()`, so a redriven
 //!   call registers once, with the caller's session from `owner()`.
 //! - A subscription has one lifecycle, and its row says where it is. It is
 //!   recorded `pending` with a freshly minted host pin, the pin then takes
-//!   hold of the definition, and only then is the row `pinned`. Only a
+//!   publishes the recorded function through `publish_workflow`, and only
+//!   then is the row `pinned`. Only a
 //!   `pinned` row is listed, ticked or delivered to. Removal marks the row
 //!   `deleting`, which stops its dispatch in the same transaction, then
 //!   releases the pin, then deletes the row. Both halves are finished by
-//!   [`HostTriggers::recover`] at boot: a `pending` row is pinned or, if its
-//!   definition is gone, removed; a `deleting` row's pin is released again
+//!   [`HostTriggers::recover`] at boot: a `pending` row publishes its recorded
+//!   inline function or is removed if publication refuses; a `deleting` row's pin is released again
 //!   (a release is idempotent) and the row deleted. So a subscription never
 //!   dispatches a definition nothing holds, and a pin never outlives the row
 //!   that names it.
@@ -67,6 +68,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
+mod registration;
+
 pub(crate) const REGISTER_TRIGGER_TOOL_NAME: &str = "workbench_register_trigger";
 
 /// The originator scope prefix of every process a delivery starts; the rest
@@ -117,8 +120,8 @@ pub(crate) struct CronTick {
 #[serde(deny_unknown_fields)]
 struct TriggerRegistrationInput {
     source: TriggerSource,
-    /// The definition of a process a cell wrote.
-    definition: lash::process::ProcessDefinition,
+    /// The function passed inline by the cell.
+    definition: Value,
     /// The argument the event is passed in.
     event_arg: String,
     /// The definition's other arguments, fixed at registration.
@@ -266,6 +269,8 @@ impl HostTriggers {
                name TEXT,
                source_json TEXT NOT NULL,
                definition_json TEXT NOT NULL,
+               -- The inline snapshot lets pending publication recover after a crash.
+               function_json TEXT NOT NULL,
                event_arg TEXT NOT NULL,
                args_json TEXT NOT NULL,
                -- The host pin that holds the definition once the row is pinned.
@@ -345,103 +350,6 @@ impl HostTriggers {
         Arc::new(TriggerRegistrationProvider {
             triggers: self.clone(),
         })
-    }
-
-    /// Check and record one registration under `call_id`, then take hold of
-    /// its definition. The registration exists once its row is `pinned`.
-    async fn register(
-        &self,
-        call_id: &str,
-        owner: &SessionId,
-        input: TriggerRegistrationInput,
-    ) -> Result<String, String> {
-        if let TriggerSource::Cron { expr, tz } = &input.source {
-            crate::cron::schedule(expr, tz.as_deref())?;
-        }
-        let core = self.core().map_err(|error| error.to_string())?;
-        let mut args = input.args.clone();
-        args.insert(input.event_arg.clone(), input.source.sample_event());
-        core.process_definitions()
-            .check_args(&input.definition, &args, lash::process::ArgsMode::Complete)
-            .await
-            .map_err(|error| format!("the definition could not be checked: {error}"))?
-            .map_err(|refusal| {
-                format!(
-                    "the inputs do not fit the definition ({}): {refusal}",
-                    refusal.code()
-                )
-            })?;
-        let (pin, state) = self
-            .insert_pending(call_id, owner, &input)
-            .map_err(|error| error.to_string())?;
-        match state {
-            // A redriven call whose first run finished.
-            SubscriptionState::Pinned => return Ok(call_id.to_owned()),
-            SubscriptionState::Deleting => {
-                return Err(format!("registration {call_id} is being removed"));
-            }
-            SubscriptionState::Pending => {}
-        }
-        if let Err(error) = core
-            .host_artifacts()
-            .pin_definition(&pin, &input.definition.id)
-            .await
-        {
-            // Nothing holds the definition, so the registration never was:
-            // remove the row and end its pin.
-            self.abandon(call_id).await;
-            return Err(format!("the definition could not be held: {error}"));
-        }
-        if self
-            .mark_pinned(call_id)
-            .map_err(|error| error.to_string())?
-        {
-            Ok(call_id.to_owned())
-        } else {
-            Err(format!(
-                "registration {call_id} was removed while it was made"
-            ))
-        }
-    }
-
-    /// Insert the registration as `pending` unless its call already did, and
-    /// answer the pin and state its row holds.
-    fn insert_pending(
-        &self,
-        call_id: &str,
-        owner: &SessionId,
-        input: &TriggerRegistrationInput,
-    ) -> Result<(lash::process::HostArtifactPin, SubscriptionState), HostTriggerError> {
-        let now_ms = self.now_ms();
-        let connection = self.connection()?;
-        connection.execute(
-            "INSERT INTO subscriptions (
-               id, owner_session, name, source_json, definition_json,
-               event_arg, args_json, pin, created_at_ms, state
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending')
-             ON CONFLICT(id) DO NOTHING",
-            params![
-                call_id,
-                owner.as_str(),
-                input.name,
-                serde_json::to_string(&input.source)?,
-                serde_json::to_string(&input.definition)?,
-                input.event_arg,
-                serde_json::to_string(&input.args)?,
-                lash::process::HostArtifactPin::mint().as_str(),
-                now_ms,
-            ],
-        )?;
-        let (pin, state): (String, String) = connection.query_row(
-            "SELECT pin, state FROM subscriptions WHERE id = ?1",
-            [call_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        Ok((
-            lash::process::HostArtifactPin::try_from(pin)
-                .map_err(|error| HostTriggerError::Pin(error.to_string()))?,
-            subscription_state(&state)?,
-        ))
     }
 
     /// Move `id` from `pending` to `pinned`, and answer whether it is pinned.
@@ -657,11 +565,7 @@ impl HostTriggers {
     pub(crate) async fn recover(&self) -> Result<(), HostTriggerError> {
         let core = self.core()?;
         for (id, pin, definition) in self.in_state(SubscriptionState::Pending)? {
-            match core
-                .host_artifacts()
-                .pin_definition(&pin, &definition.id)
-                .await
-            {
+            match self.publish_registered(&core, &id, &pin, &definition).await {
                 Ok(()) => {
                     self.mark_pinned(&id)?;
                 }
@@ -1159,7 +1063,7 @@ pub(crate) fn register_trigger_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:workbench_register_trigger",
         REGISTER_TRIGGER_TOOL_NAME,
-        "Register a process definition to start on every event of a workbench source: \
+        "Publish an inline function as a workflow and start it on every event of a workbench source: \
          every mail delivered to a connected inbox, or each tick of a cron schedule. \
          The event is passed in `event_arg`; `args` fixes the definition's other arguments.",
         json!({
@@ -1187,7 +1091,7 @@ pub(crate) fn register_trigger_tool_definition() -> ToolDefinition {
                 },
                 "definition": {
                     "type": "object",
-                    "description": "The definition of a process a cell wrote."
+                    "description": "An async function passed directly; its code and captures are copied inline."
                 },
                 "event_arg": { "type": "string" },
                 "args": { "type": "object" },

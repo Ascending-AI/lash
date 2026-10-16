@@ -441,36 +441,6 @@ impl Lowerer<'_> {
         self.invoke("ts.spread", &[parts], Ty::Array)
     }
 
-    /// A plain object whose `at`-th property is a process: the process is
-    /// lifted, and the others are evaluated in source order around it.
-    fn lower_object_with_process(
-        &mut self,
-        names: &[&str],
-        values: &[&ast::Expr],
-        at: usize,
-    ) -> Lowering<Operand> {
-        let mut parts = Vec::with_capacity(names.len());
-        for (index, (field, value)) in names.iter().zip(values).enumerate() {
-            parts.push(self.aside(|this| {
-                match (this.process_arrow(value), this.saved_process(value)) {
-                    (Some(function), _) if index == at => this.lower_process(None, function),
-                    (None, Some(saved)) if index == at => this.lower_saved_process(&saved),
-                    _ => this.named_expression(value, field),
-                }
-            })?);
-        }
-        let values = self.ordered(parts);
-        let entries = names
-            .iter()
-            .zip(values)
-            .map(|(field, value)| RecordEntry {
-                field: (*field).to_string(),
-                value: value.expr,
-            })
-            .collect();
-        Ok(self.inline(Expr::Record(entries), Ty::Object))
-    }
-
     fn lower_object(&mut self, properties: &[ast::ObjectProperty]) -> Lowering<Operand> {
         let mut names: Vec<&str> = Vec::new();
         let plain = properties.iter().all(|property| match property {
@@ -489,18 +459,6 @@ impl Lowerer<'_> {
                     ast::ObjectProperty::Spread(_) => None,
                 })
                 .collect();
-            // A process written inline as an object's `definition`.
-            if let Some(at) = properties.iter().position(|property| {
-                matches!(
-                    property,
-                    ast::ObjectProperty::KeyValue(ast::PropertyKey::Static(name), value)
-                        if name == super::process::DEFINITION_PROPERTY
-                            && (self.process_arrow(value).is_some()
-                                || self.saved_process(value).is_some())
-                )
-            }) {
-                return self.lower_object_with_process(&names, &values, at);
-            }
             let mut parts = Vec::with_capacity(values.len());
             for (name, value) in names.iter().zip(&values) {
                 parts.push(self.aside(|this| this.named_expression(value, name))?);

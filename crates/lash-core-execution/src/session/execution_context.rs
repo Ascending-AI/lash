@@ -3,7 +3,6 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
-mod definition_publication;
 mod held_response;
 pub use held_response::HeldResponse;
 mod observations;

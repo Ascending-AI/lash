@@ -104,8 +104,9 @@ pub(crate) fn typescript_process_prompt(process_surface: bool) -> String {
     if !process_surface {
         return String::new();
     }
-    r#"A process is an `async` arrow the cell never calls: `const review = async (request: string) => { ... };`, or one written inline in a process tool's argument. Its name is the `const` it is bound to, and start arguments key by the arrow's parameter names. Returning from it succeeds; throwing fails.
-A process runs apart from the cell: its body sees its parameters and nothing of the surrounding cell, and a body that names one of the cell's bindings is refused as a non-liftable capture. Pass such a value through the start's `args`.
+    r#"Async functions are ordinary cell code: they may capture cell bindings and be called locally. Passing a function anywhere in a tool input copies its code and current captures inline. A later mutation is invisible to that copy; tasks, handles and cyclic captures cannot cross.
+Start one with `await processes.start({ definition: review, args: { request: "x" } })`, or pass `definition_id` for a published workflow. Start arguments key by parameter name. Returning succeeds; throwing fails. Defining a function publishes nothing.
+The returned handle includes `definition_id`. List runs with `processes.list({ definition: review })` or `processes.list({ definition_id: handle.definition_id })`; the function itself has no definition id property.
 A started handle outlives the turn; Stop cancels only the awaited handle; cancel is a request the child sees at its next step or wake."#
         .to_string()
 }
@@ -252,72 +253,6 @@ An `async` function starts running when it is called, and async callbacks run co
 
 #[cfg(test)]
 mod tests {
-    use crate::dialect::SessionDialect;
-    use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
-
-    #[test]
-    fn the_process_section_follows_the_catalogue_and_teaches_the_argument_convention() {
-        let dialect = SessionDialect::new(
-            crate::dialect::CellDialect::typescript(),
-            crate::dialect::test_dialect_services(),
-        );
-        let render = |catalog: &lash_core::ToolCatalog| {
-            dialect
-                .render_execution_section(
-                    crate::protocol::RlmPromptFeatures::default(),
-                    catalog,
-                    crate::plugin::RlmChannel::Cell,
-                    None,
-                )
-                .expect("render execution section")
-        };
-
-        let without = render(&lash_core::ToolCatalog::from_tool_definitions(Vec::new()));
-        assert!(!without.contains("### Processes"), "{without}");
-
-        let start = lash_core::ToolDefinition::raw(
-            "tool:process-controls/start",
-            "processes_start",
-            "Start a process",
-            serde_json::json!({
-                "type": "object",
-                "properties": { "definition": { "type": "object" } },
-                "required": ["definition"],
-                "additionalProperties": false
-            }),
-            serde_json::json!({
-                "type": "object",
-                "properties": { "id": { "type": "string" } },
-                "required": ["id"],
-                "additionalProperties": false
-            }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(ToolBinding::new(["processes"], "start"));
-        let with = render(&lash_core::ToolCatalog::from_tool_definitions(vec![start]));
-        assert!(with.contains("### Processes"), "{with}");
-        // The handle shape is the tool's own return contract now, not prose.
-        assert!(with.contains("processes.start"), "{with}");
-        assert!(with.contains("id: string"), "{with}");
-        assert!(
-            with.contains("parameter names"),
-            "the keys are the run arrow's parameter names: {with}"
-        );
-        assert!(
-            with.contains("non-liftable capture"),
-            "what a process body may name is prompt-only knowledge: {with}"
-        );
-        // None of the deleted special forms may come back as prose.
-        for retired in [
-            "defineProcess",
-            "registerTrigger",
-            "wake(",
-            "start(p:Process",
-        ] {
-            assert!(!with.contains(retired), "`{retired}` survived: {with}");
-        }
-    }
 
     /// Being a catalog member is being advertised under a path a cell
     /// writes verbatim (FIG-1444): a path with no module, with a word no

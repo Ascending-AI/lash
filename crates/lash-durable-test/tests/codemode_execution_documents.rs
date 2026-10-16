@@ -5,8 +5,8 @@
 //! A turn's cell runs on a served core with a trace sink, and the process
 //! the cell starts runs on that core's node. In both, `ExecutionStarted`
 //! names a document a host reads back by that reference alone, and every
-//! site the run reports is an execution site of that document. A process a
-//! cell wrote is an entry of the cell's own document.
+//! site the run reports is an execution site of that document. Cell functions
+//! cross into a process as a separate document when a start is declared.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 #[path = "support/served.rs"]
@@ -346,66 +346,6 @@ await control.finish(fetched.url);
         lash::workflow::view::derive(retained).expect("the retained cell draws"),
         lash::workflow::view::derive(drawn).expect("the engine's read draws"),
     );
-    world.shutdown().await;
-}
-
-/// A process a cell wrote and started names the cell's own document, by the
-/// entry the arrow lowered to, and reports its calls at that entry's sites.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn a_process_a_cell_wrote_runs_as_an_entry_of_the_cells_document() {
-    let sink = Arc::new(RecordingSink::default());
-    let (world, tools) = reading_world(&sink).await;
-    let output = world
-        .run(
-            "cell-process",
-            served::spec(8),
-            vec![served::cell(
-                r#"
-const worker = async (url: string) => {
-  const fetched = await web.fetch({ url });
-  return fetched.url;
-};
-const handle = await processes.start({ definition: worker, args: { url: "inner" } });
-await control.finish(await processes.await({ handle }));
-"#,
-            )],
-        )
-        .await;
-    served::assert_answered("the cell's process", &output);
-    let records = sink.records();
-    let events = language_events(&records);
-    let starts = execution_starts(&events);
-    let (cell, cell_document) = starts
-        .iter()
-        .find(|(_, reference)| reference.entry == WorkflowDocumentEntry::Main)
-        .expect("the cell started");
-    let (process, process_document) = starts
-        .iter()
-        .find(|(_, reference)| reference.entry != WorkflowDocumentEntry::Main)
-        .expect("the process started");
-    assert_eq!(process_document.document, cell_document.document);
-    let WorkflowDocumentEntry::Entry { function } = &process_document.entry else {
-        panic!("a process enters its document by an entry");
-    };
-    assert_eq!(function.as_str(), "worker");
-    // The process's fetch read the document its own start named.
-    let read = tools.read.lock_recover().clone();
-    let [(reference, document)] = read.as_slice() else {
-        panic!("the process's one fetch read its document: {read:?}");
-    };
-    assert_eq!(&reference, process_document);
-    let document = document
-        .as_ref()
-        .expect("a running process's document is readable");
-    let index = lash::workflow::WorkflowOverlayDocument::of(document);
-    let emitted = emitted_sites(&events, &process.identity);
-    assert!(!emitted.is_empty(), "the process reported its fetch");
-    assert!(emitted.iter().all(|site| index.contains(site)));
-    assert!(
-        !emitted_sites(&events, &cell.identity).is_empty(),
-        "the cell reported its start and await"
-    );
-    assert!(finished(&events, &process.identity) && finished(&events, &cell.identity));
     world.shutdown().await;
 }
 

@@ -199,8 +199,6 @@ pub(super) struct CellHost<'run> {
     pub prints: Arc<Mutex<Vec<Datum>>>,
     /// Shared with the cell's reads, which count against the same limit.
     pub ledgers: Arc<Mutex<CellHostLedgers>>,
-    /// The document the cell's function references name entries of.
-    pub entries: Arc<super::processes::CellEntries>,
     /// The cell's language observation, when a host asked for it.
     pub trace: Option<super::trace::CellTrace>,
     /// The effect identity each open call was performed at: where its
@@ -297,16 +295,13 @@ impl CellHost<'_> {
         })?;
         // The frozen request holds the arguments as they left the cell:
         // data, each function in them already a function value.
-        let left = self
-            .entries
-            .leaving_args(&request.args)
-            .map_err(|problem| ArgsRefusal::NotJson(problem).error(&request.effect))?;
         let args = CellArgs
-            .args(&left)
+            .args(&request.args)
             .map_err(|refusal| refusal.error(&request.effect))?;
         let invocation = self.invocation(request, call, effect.tool.clone(), args);
-        let frozen = FrozenRequest::tool(CellCall::of(&invocation), left, &CellArgs)
-            .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
+        let frozen =
+            FrozenRequest::tool(CellCall::of(&invocation), request.args.clone(), &CellArgs)
+                .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
         Ok((invocation, frozen))
     }
 

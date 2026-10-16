@@ -1216,60 +1216,164 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     }
 }
 
-/// Starting a process is an effect that takes a function reference
-/// (kernel spec §1). A document lists two entries; one publication holds a
-/// definition for each. The supervisor's `&worker` crosses the effect
-/// boundary as the definition of that entry of its own document, the child
-/// runs `worker`, and the supervisor's await of the handle answers the
-/// child's result.
+/// START-TEMPLATE: shipping &worker snapshots its code; the child gets its
+/// own launch, after the original publication pin is gone. A held worker's
+/// effects are absent from the supervisor's called-effects environment.
 #[tokio::test]
 async fn a_process_starts_another_entry_of_its_document_by_function_reference_and_awaits_it() {
-    let core = core().await;
+    struct WorkerLaunch;
+    #[lash::async_trait]
+    impl lash_core::ProcessEnvPolicy for WorkerLaunch {
+        async fn choose(
+            &self,
+            cx: &lash_core::ProcessEnvCx<'_>,
+        ) -> Result<lash_core::ProcessStartChoice, lash_core::ProcessEnvPolicyError> {
+            Ok(lash_core::ProcessStartChoice {
+                fits: Default::default(),
+                env: lash_core::ProcessEnvChoice::New(linking(
+                    &environment(false),
+                    &["tools.echo"],
+                )),
+                engine_settings: cx.engine_defaults()?,
+            })
+        }
+    }
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
+            .await
+            .expect("SQLite"),
+    );
+    let core = builder_with_process_tools(stores.clone(), false, EchoComponent::Installed)
+        .await
+        .process_component(
+            Arc::new(lash::process_controls::ProcessControlsComponent::new(
+                lash_core::lifetime::session_or_starter,
+                Arc::new(WorkerLaunch),
+            )),
+            lash::process_controls::PROCESS_CONTROLS_CONFIG,
+        )
+        .build(node_identity("start-template"))
+        .expect("core");
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
     let checked = artifacts
         .workflow_environment(&environment)
         .await
-        .expect("the environment reads")
-        .expect("the kernel engine reads workflow documents");
-    let mut document =
-        lash::workflow::document::parse_document(SUPERVISOR).expect("the document parses");
-    for effect in ["processes.start", "processes.await"] {
-        let name = lash::workflow::document::EffectName::new(effect).expect("an effect name");
-        let offered = checked
-            .effects()
-            .get(&name)
-            .unwrap_or_else(|| panic!("the host offers `{effect}`"));
-        document.manifest.effects.insert(name, offered.clone());
+        .expect("environment")
+        .expect("kernel environment");
+    let text = SUPERVISOR.replace("entry supervisor", "effect tools.echo(input: Any) -> Any\nentry supervisor")
+        .replace("return [value, \"worked\"]", "let request = {value: value}\n  let echoed = perform tools.echo(request) as Any\n  return [echoed, \"worked\"]")
+        .replace("fn supervisor(value) {", "fn supervisor(value) {\n  do sleep 1000");
+    let mut document = lash::workflow::document::parse_document(&text).expect("document");
+    for effect in ["processes.start", "processes.await", "tools.echo"] {
+        let name = lash::workflow::document::EffectName::new(effect).expect("effect name");
+        document
+            .manifest
+            .effects
+            .insert(name.clone(), checked.effects()[&name].clone());
     }
+    let worker =
+        lash_vm_runtime::definition_of_entry(&document, document.identity(), &Name::new("worker"))
+            .expect("pure workflow id");
+    let worker_id =
+        lash_core::ProcessDefinitionId::from_tagged_json(&worker["id"]).expect("worker id");
     let publication = published(
         artifacts
             .publish_workflow(
                 &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &lash::workflow::document::DocumentBytes::from(document),
                 &Name::new("supervisor"),
                 &environment,
                 None,
             )
             .await
-            .expect("the publication answers"),
+            .expect("publish"),
+    );
+    assert!(
+        artifacts
+            .get_definition(&worker_id)
+            .await
+            .expect("read worker")
+            .is_none(),
+        "publication creates only the selected descriptor"
+    );
+    let supervisor_env = linking(&environment, &["processes.start", "processes.await"]);
+    assert!(
+        !supervisor_env.effects().contains_key(
+            &lash::workflow::document::EffectName::new("tools.echo").expect("effect")
+        )
     );
     let env_ref = artifacts
-        .publish_process_env(
-            &pin,
-            &linking(&environment, &["processes.start", "processes.await"]),
-        )
+        .publish_process_env(&pin, &supervisor_env)
         .await
-        .expect("publish the process environment");
+        .expect("publish launch");
     let mut args = serde_json::Map::new();
     args.insert("value".to_owned(), serde_json::json!("x"));
     let supervisor = start_with(&core, &env_ref, &publication.definition, "supervisor", args).await;
+    let until = timer_park_after(&core, &supervisor, 0).await;
+    artifacts.release(pin).await.expect("release original pin");
+    lash::testing::quiesce_artifact_cleanup(&core)
+        .await
+        .settle()
+        .await
+        .expect("pin cleanup");
+    clock.set(until);
     let ended = finished(&core, &supervisor).await;
     assert!(
         ended.to_string().contains(r#"["x","worked"]"#),
-        "the supervisor returns what its child ended with: {ended}"
+        "the supervisor returns its child's result: {ended}"
     );
+    assert!(
+        artifacts
+            .get_definition(&worker_id)
+            .await
+            .expect("read worker")
+            .is_none(),
+        "starting the extracted child publishes no sibling descriptor"
+    );
+    use lash_core::ProcessQuery as _;
+    let rows = stores
+        .process_registry()
+        .list_processes_page(
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            },
+            std::num::NonZeroUsize::new(10).expect("limit"),
+            None,
+        )
+        .await
+        .expect("processes")
+        .records;
+    let child = rows.iter().find(|row| row.id != supervisor).expect("child");
+    assert_eq!(
+        finished(&core, &child.id).await,
+        serde_json::json!(["x", "worked"])
+    );
+    let WorkflowRead::Inspected(read) = core
+        .processes()
+        .graph(&child.id)
+        .await
+        .expect("child graph")
+    else {
+        panic!("child document")
+    };
+    assert_eq!(
+        read.document
+            .document()
+            .entries
+            .keys()
+            .map(Name::as_str)
+            .collect::<Vec<_>>(),
+        ["run"]
+    );
+    assert!(
+        read.document.document().main.is_empty(),
+        "the shipped document has no cell main"
+    );
+    core.shutdown().await.expect("stop the node");
 }
 
 /// Wait for a new durable timer park, reading only after process-feed events.

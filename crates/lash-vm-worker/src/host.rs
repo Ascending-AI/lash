@@ -241,9 +241,6 @@ pub(crate) struct WireHost {
     /// The statement path since the run's previous frame, as document
     /// ordinals, when the parent records it.
     pub path: wire::OrdinalPath,
-    /// Whether a function among a tool call's arguments crosses as a
-    /// function value, as the pool's tuning selects.
-    pub crosses_functions: bool,
 }
 
 /// Each task's last entered document site since the run's previous frame.
@@ -313,10 +310,6 @@ impl WireHost {
 impl lash_kernel_vm::Host for WireHost {
     fn observes_sites(&self) -> bool {
         self.sites.is_some()
-    }
-
-    fn crosses_functions(&self) -> bool {
-        self.crosses_functions
     }
 
     fn enter_site(&mut self, at: &EffectIdentity) {

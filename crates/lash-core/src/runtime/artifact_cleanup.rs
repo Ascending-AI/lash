@@ -538,36 +538,6 @@ impl ArtifactCleanupRelay {
                         undecodable(format!("stored definition `{definition_id}`: {error}"))
                     })?;
                 names.extend(draft.artifacts().iter().cloned());
-                // Whoever holds a descriptor holds its siblings (§3.6), so
-                // the record takes them from `Start(key)` with it: the
-                // process can start them once every other holder is gone.
-                let resolution = self
-                    .ports
-                    .engines
-                    .resolve_definition(&draft)
-                    .await
-                    .map_err(|refusal| match refusal {
-                        crate::ProcessDefinitionError::Fault(error) => {
-                            retryable("definition siblings")(error)
-                        }
-                        crate::ProcessDefinitionError::Refused(refusal) => {
-                            DeliveryFailure::Refused(
-                                DeliveryError::new(
-                                    RuntimeErrorCode::DefinitionRefused,
-                                    refusal.to_string(),
-                                )
-                                .in_context("definition siblings"),
-                            )
-                        }
-                        error => retryable("definition siblings")(PluginError::from(error)),
-                    })?;
-                for sibling in &resolution.siblings {
-                    names.push(ArtifactName {
-                        store: ArtifactStoreId::ProcessDefinition,
-                        artifact_ref: sibling.id().as_str().to_owned(),
-                    });
-                    names.extend(sibling.artifacts().iter().cloned());
-                }
             }
         }
         if let Some(env_ref) = &retained.env_ref {

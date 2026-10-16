@@ -70,9 +70,6 @@ pub enum DiagnosticCode {
     PrintedSourceNeedsBase,
     AssignConst,
     SavedFunctionUnusable,
-    NonLiftableCapture,
-    ProcessParamTypeUnsupported,
-    ProcessReturnTypeUnsupported,
     MethodUnsupported,
     DateImmutable,
     DeleteNonReferenceUnsupported,
@@ -158,9 +155,6 @@ impl DiagnosticCode {
         Self::PrintedSourceNeedsBase,
         Self::AssignConst,
         Self::SavedFunctionUnusable,
-        Self::NonLiftableCapture,
-        Self::ProcessParamTypeUnsupported,
-        Self::ProcessReturnTypeUnsupported,
         Self::MethodUnsupported,
         Self::DateImmutable,
         Self::DeleteNonReferenceUnsupported,
@@ -276,13 +270,6 @@ impl DiagnosticCode {
             Self::SavedFunctionUnusable => {
                 "define the function again in this cell, using only what this session offers"
             }
-            Self::NonLiftableCapture => "pass the value to the process through its `run` arguments",
-            Self::ProcessParamTypeUnsupported => {
-                "declare the parameter with a durable type: a primitive, an array, an object literal, a union of string literals, or a host data type"
-            }
-            Self::ProcessReturnTypeUnsupported => {
-                "declare the return with a durable type, optionally wrapped in Promise"
-            }
             Self::MethodUnsupported => {
                 "use a method the dialect's standard-library contract lists for this receiver"
             }
@@ -383,7 +370,6 @@ impl DiagnosticCode {
             | Self::DeclareUnsupported
             | Self::MutualRecursionUnsupported
             | Self::SavedFunctionUnusable
-            | Self::NonLiftableCapture
             | Self::DateImmutable
             // Stricter than ECMA-262 exactly where `tsc --strict` rejects
             // the program (ADR 0064, FIG-3651).
@@ -401,8 +387,7 @@ impl DiagnosticCode {
             | Self::SourceTooLarge
             | Self::ReservedIdentifier
             | Self::ShadowsBuiltin
-            | Self::ProcessParamTypeUnsupported
-            | Self::ProcessReturnTypeUnsupported => CodeClassification::AlwaysRefusal,
+ => CodeClassification::AlwaysRefusal,
 
             // Both families, decided per site.
             Self::MethodUnsupported
@@ -496,9 +481,6 @@ impl DiagnosticCode {
             Self::PrintedSourceNeedsBase => "TS_PRINTED_SOURCE_NEEDS_BASE",
             Self::AssignConst => "TS_ASSIGN_CONST",
             Self::SavedFunctionUnusable => "TS_SAVED_FUNCTION_UNUSABLE",
-            Self::NonLiftableCapture => "TS_NON_LIFTABLE_CAPTURE",
-            Self::ProcessParamTypeUnsupported => "TS_PROCESS_PARAM_TYPE_UNSUPPORTED",
-            Self::ProcessReturnTypeUnsupported => "TS_PROCESS_RETURN_TYPE_UNSUPPORTED",
             Self::MethodUnsupported => "TS_METHOD_UNSUPPORTED",
             Self::DateImmutable => "TS_DATE_IMMUTABLE",
             Self::DeleteNonReferenceUnsupported => "TS_DELETE_NON_REFERENCE_UNSUPPORTED",
@@ -973,18 +955,6 @@ mod tests {
             (
                 SavedFunctionUnusable,
                 "function read(value) { return value; } const invoice = read(1); invoice;",
-            ),
-            (
-                NonLiftableCapture,
-                "const job = async (value: number): Promise<number> => { return value; }; job;",
-            ),
-            (
-                ProcessParamTypeUnsupported,
-                "const job = async (n: number, items: number[], row: { total: number }, status: 'open' | 'paid'): Promise<number> => { return n; }; job;",
-            ),
-            (
-                ProcessReturnTypeUnsupported,
-                "const job = async (n: number): Promise<number> => { return n; }; job;",
             ),
             (
                 MethodUnsupported,

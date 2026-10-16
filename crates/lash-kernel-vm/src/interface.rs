@@ -237,14 +237,6 @@ pub trait Host {
     /// A provisional delta before a synchronous host read, when
     /// [`Host::observes_ran`] is true. The next frame carries it.
     fn ran(&mut self, _delta: &crate::RanDelta) {}
-    /// Whether a function among an effect's arguments crosses as a
-    /// [`lash_kernel_doc::FunctionValue`] (`K-EFF-002`, `K-CLO-004`). A host
-    /// that answers `false` keeps the data-only copy-out, where a closure
-    /// raises `not_data`. Hosts select it internally until the tool
-    /// contract that takes function values is active.
-    fn crosses_functions(&self) -> bool {
-        false
-    }
     /// Takes the output of one `print`.
     fn print(&mut self, value: &Datum);
     /// Whether the embedder wants the run cancelled. The machine asks at

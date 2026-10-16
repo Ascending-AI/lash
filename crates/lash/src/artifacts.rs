@@ -160,8 +160,7 @@ impl HostArtifacts {
 
     /// Publish `draft` and hold it under `pin`: its descriptor and every
     /// artifact of its manifest, which the host published under the same pin
-    /// first, and the sibling definitions its engine names (the other
-    /// processes of its module). Answers the definition with the signature
+    /// first. Answers the definition with the signature
     /// its engine derives.
     /// Equal content publishes to the same id and changes nothing; a released
     /// pin, a draft its engine refuses and conflicting bytes under an
@@ -178,7 +177,7 @@ impl HostArtifacts {
     }
 
     /// Hold the definition `id` names under `pin`: its descriptor, its
-    /// whole manifest and its sibling definitions, checked by its engine
+    /// whole manifest, checked by its engine
     /// first. This is how a host keeps
     /// a definition available between starts; the id alone holds nothing. A
     /// definition nothing holds any more is `DefinitionMissing`, and a
@@ -429,9 +428,8 @@ impl HostArtifacts {
 
     /// Validate opaque `document` bytes, admit their entry `entry`, and hold them
     /// under `pin`: the document, the declaration of every library function
-    /// it lists, and the descriptor of every entry it lists. The answer
-    /// names the one `entry` selects; the others are what a process of it
-    /// starts by function reference, so one publication is all a run needs.
+    /// it lists, and the descriptor of the selected entry. Other functions
+    /// cross inline when passed to tools; they have no stored descriptors.
     ///
     /// The checker admits the document against `environment`, the
     /// environment a process of the definition would run under. No source
@@ -513,7 +511,7 @@ impl HostArtifacts {
             None => None,
         };
         // The entry's descriptor joins them, checked by the engine against
-        // the stored document, with the descriptor of every other entry.
+        // the stored document.
         let definition = self
             .definition_ports
             .publish_definition(&self.engines, &claim, &admitted.draft)
@@ -523,6 +521,38 @@ impl HostArtifacts {
             reference: admitted.document.reference().clone(),
             source_map,
         })))
+    }
+
+    /// Start a held function value with explicit arguments, idempotency key
+    /// and launch. Nothing is published until the start is realized. An
+    /// exact retry returns the same process; changed code, captures,
+    /// arguments or launch under the key refuse with `StartKeyConflict`.
+    #[cfg(feature = "codemode")]
+    pub async fn start_function(
+        &self,
+        value: &crate::workflow::document::FunctionValue,
+        args: serde_json::Map<String, serde_json::Value>,
+        start_key: impl AsRef<[u8]>,
+        launch: lash_core::EngineLaunch,
+    ) -> Result<lash_core::ProcessStartReceipt> {
+        let payload = value
+            .transport_json()
+            .map_err(|error| lash_core::PluginError::Invoke(error.to_string()))?;
+        self.core
+            .processes()
+            .start(
+                lash_core::ProcessStartRequest::inline(
+                    lash_vm_runtime::LASH_VM_ENGINE_KIND,
+                    payload,
+                    args,
+                    launch,
+                    lash_core::ProcessOriginator::host(),
+                    lash_core::LifetimeDecision::Detached,
+                )
+                .with_host_start_key(start_key),
+                self.core.effect_host(),
+            )
+            .await
     }
 
     /// The source map a publication stored under `id`, with the source it

@@ -1,22 +1,4 @@
-//! Process literals as entries of the document.
-//!
-//! Where the host offers the process effects, an `async` arrow bound by a
-//! `const` of the cell's own code, or written as the `definition` of an object, is a
-//! process: code a host starts, not a function the cell calls. It lowers to
-//! a declared function, listed among the document's entries under the
-//! signature its annotations state, and its value in the cell is a
-//! reference to that function. The start effect takes the reference.
-//!
-//! A process runs in its own run, so its body sees none of the cell's
-//! bindings: naming one is refused, and the value goes through the start's
-//! arguments instead. The body is the arrow's own closure, called once by
-//! the entry in the entry's task, so an `await` in it is a wait of the
-//! process.
-//!
-//! A workflow module's entries are lowered the same way, under the shared
-//! workflow contract (`lash_kernel_dialect::workflow`): each top-level
-//! async function, by declaration or by `const`, is an entry named as the
-//! source names it, and its body sees none of the module's bindings.
+//! Module entries and awaiting durable process handles.
 
 use std::collections::HashSet;
 
@@ -31,38 +13,13 @@ use super::{BindingKind, Buf, FunctionFrame, Lowerer, Lowering, Operand, Ty};
 use crate::adapter::{self as ast, TypeAnnotation, TypeShape};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
-/// The effects whose presence makes an `async` arrow a process.
-const PROCESS_EFFECTS: &str = "processes.";
-
 /// The effect that waits for a process's end.
 const AWAIT_EFFECT: &str = "processes.await";
 
 /// The field every handle record carries (`lash_sansio::handle`).
 const HANDLE_FIELD: &str = "__handle__";
 
-/// The object property a process is written inline as.
-pub(super) const DEFINITION_PROPERTY: &str = "definition";
-
 impl Lowerer<'_> {
-    /// The arrow `expr` is, if it is one a process is written as and the
-    /// host offers the process effects. A workflow module writes none: its
-    /// entries are its top-level async functions ([`Self::module_entry`]).
-    pub(super) fn process_arrow<'e>(&self, expr: &'e ast::Expr) -> Option<&'e ast::Function> {
-        if self.module.is_some() {
-            return None;
-        }
-        let ast::Expr::Function(function) = expr else {
-            return None;
-        };
-        (function.is_async
-            && function.is_arrow
-            && self
-                .effects
-                .keys()
-                .any(|effect| effect.as_str().starts_with(PROCESS_EFFECTS)))
-        .then_some(function)
-    }
-
     /// The async function a module's top-level `const` binds, if `init` is
     /// one: an entry of the module. A declaration inside a block, a
     /// function or an entry is ordinary code.
@@ -87,17 +44,9 @@ impl Lowerer<'_> {
     /// plain name of a durable type. A module entry's annotations map under
     /// the workflow contract: a default is refused, and so is an annotation
     /// with no kernel type.
-    pub(super) fn process_signature(&self, function: &ast::Function) -> Lowering<Signature> {
+    pub(super) fn start_signature(&self, function: &ast::Function) -> Lowering<Signature> {
         let module = self.module.is_some();
-        let (param_refusal, return_refusal) = if module {
-            let unmappable = DiagnosticCode::Module(ModuleRefusal::UnmappableEntryAnnotation);
-            (unmappable, unmappable)
-        } else {
-            (
-                DiagnosticCode::ProcessParamTypeUnsupported,
-                DiagnosticCode::ProcessReturnTypeUnsupported,
-            )
-        };
+        let unmappable = DiagnosticCode::Module(ModuleRefusal::UnmappableEntryAnnotation);
         let mut params = Vec::with_capacity(function.params.len());
         for param in &function.params {
             let (name, annotation) = match param {
@@ -111,7 +60,7 @@ impl Lowerer<'_> {
                 }
                 _ => {
                     return Err(Diagnostic::new(
-                        DiagnosticCode::ProcessParamTypeUnsupported,
+                        unmappable,
                         "a process parameter is a plain name: start arguments are keyed by it",
                         self.span,
                     ));
@@ -119,7 +68,7 @@ impl Lowerer<'_> {
             };
             params.push(Param {
                 name: Name::new(name.as_str()),
-                ty: durable_type(annotation.as_ref(), param_refusal)?,
+                ty: durable_type(annotation.as_ref(), unmappable)?,
                 // `name?: T` is written as `T` or `undefined`.
                 optional: annotation.as_ref().is_some_and(|annotation| {
                     matches!(&annotation.shape, TypeShape::Union(members)
@@ -128,155 +77,10 @@ impl Lowerer<'_> {
             });
         }
         let result = match function.return_ty.as_ref() {
-            Some(annotation) => durable_type(Some(annotation), return_refusal)?,
+            Some(annotation) => durable_type(Some(annotation), unmappable)?,
             None => Type::Any,
         };
         Ok(Signature { params, result })
-    }
-
-    /// The saved function `expr` names, if it is one a host may start and
-    /// the host offers the process effects.
-    pub(super) fn saved_process(&self, expr: &ast::Expr) -> Option<Name> {
-        let ast::Expr::Ident(name, _) = expr else {
-            return None;
-        };
-        let bound = self
-            .scopes
-            .iter()
-            .any(|scope| scope.bindings.contains_key(name));
-        let name = Name::new(name.as_str());
-        let startable = self
-            .saved
-            .get(&name)
-            .and_then(|saved| saved.written.as_ref())
-            .is_some_and(|written| written.start.is_some());
-        (!bound
-            && startable
-            && self.lifting.is_none()
-            && self
-                .effects
-                .keys()
-                .any(|effect| effect.as_str().starts_with(PROCESS_EFFECTS)))
-        .then_some(name)
-    }
-
-    /// Declares an entry that runs the saved function `name` under the
-    /// signature it is started with, and gives the reference to it. The
-    /// entry calls the function as a cell would, and waits for what it
-    /// returns.
-    pub(super) fn lower_saved_process(&mut self, name: &Name) -> Lowering<Operand> {
-        let Some((declared, Signature { params, result })) =
-            self.saved.get(name).and_then(|saved| {
-                let start = saved.written.as_ref()?.start.clone()?;
-                Some((saved.name.clone(), start))
-            })
-        else {
-            unreachable!("`saved_process` answered for a function a host may start");
-        };
-        let entry = self.fresh(&format!("{name}_process"));
-        let args = self.fresh("args");
-        let returned = self.fresh("returned");
-        let value = self.fresh("value");
-        let wait = self.function("ts.await")?;
-        let same = self.function("same")?;
-        let body = vec![
-            Stmt::Let {
-                name: args.clone(),
-                value: lash_kernel_doc::Rhs::Expr(Expr::List(
-                    params
-                        .iter()
-                        .map(|param| Expr::Variable(param.name.clone()))
-                        .collect(),
-                )),
-            },
-            Stmt::Let {
-                name: returned.clone(),
-                value: lash_kernel_doc::Rhs::Action(Action::Call {
-                    callee: Callee::Declared(declared),
-                    args: vec![Atom::Literal(Literal::Absent), Atom::Variable(args)],
-                }),
-            },
-            Stmt::Let {
-                name: value.clone(),
-                value: lash_kernel_doc::Rhs::Action(Action::Await {
-                    policy: wait,
-                    value: Atom::Variable(returned),
-                }),
-            },
-            // A process that returns nothing ends with null.
-            Stmt::If {
-                condition: Expr::Call {
-                    function: same,
-                    args: vec![
-                        Expr::Variable(value.clone()),
-                        Expr::Literal(Literal::Absent),
-                    ],
-                },
-                then_block: vec![Stmt::Return {
-                    value: Expr::Literal(Literal::Null),
-                }],
-                else_block: Vec::new(),
-            },
-            Stmt::Return {
-                value: Expr::Variable(value),
-            },
-        ];
-        self.saved_used.insert(name.clone());
-        // The entry is the reference's scaffolding: it is located there.
-        self.declared_notes
-            .insert(entry.clone(), super::Note::covering(&body, self.span));
-        self.declared.insert(
-            entry.clone(),
-            lash_kernel_doc::Function {
-                params: params.iter().map(|param| param.name.clone()).collect(),
-                body,
-                start: None,
-            },
-        );
-        self.entries
-            .insert(entry.clone(), Signature { params, result });
-        Ok(Operand {
-            plain: None,
-            expr: Expr::Literal(Literal::Function(entry)),
-            stable: true,
-            ty: Ty::Unknown,
-        })
-    }
-
-    /// Lifts the process `function` to an entry named `name`, or by a
-    /// generated name, and gives the reference to it.
-    pub(super) fn lower_process(
-        &mut self,
-        name: Option<&str>,
-        function: &ast::Function,
-    ) -> Lowering<Operand> {
-        let entry = match name {
-            Some(name)
-                if !self.declared.contains_key(&Name::new(name))
-                    && !self.saved.contains_key(&Name::new(name)) =>
-            {
-                Name::new(name)
-            }
-            _ => self.fresh("process"),
-        };
-        let signature = self.process_signature(function)?;
-        let body = self.lift(&signature.params, function)?;
-        // Lifting changes the unit, not the source ownership of its body.
-        self.declared_notes.insert(entry.clone(), body.notes);
-        self.declared.insert(
-            entry.clone(),
-            lash_kernel_doc::Function {
-                params: signature
-                    .params
-                    .iter()
-                    .map(|param| param.name.clone())
-                    .collect(),
-                body: body.stmts,
-                start: None,
-            },
-        );
-        self.entries.insert(entry.clone(), signature);
-        Ok(reference(entry))
     }
 
     /// Lifts the module entry `function`, bound to `name` at the module's
@@ -288,7 +92,7 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         let entry = Name::new(name);
         let span = self.span;
-        let signature = self.process_signature(function)?;
+        let signature = self.start_signature(function)?;
         let body = self.lift(&signature.params, function)?;
         let function = lash_kernel_doc::Function {
             params: signature
@@ -472,27 +276,19 @@ impl Lowerer<'_> {
         result
     }
 
-    /// The refusal of a process body that names `name`, if `name` is the
-    /// cell's, or of a module entry that names one of the module's.
+    /// A module entry cannot name a binding of its surrounding module.
     pub(super) fn captured(&self, name: &str) -> Option<Diagnostic> {
         self.lifting
             .as_ref()
             .is_some_and(|outer| outer.contains(name))
-            .then(|| match self.module {
-                Some(_) => Diagnostic::new(
+            .then(|| {
+                Diagnostic::new(
                     DiagnosticCode::Module(ModuleRefusal::CapturedModuleBinding),
                     format!(
                         "an entry runs apart from the module and cannot read the module's `{name}`"
                     ),
                     self.span,
-                ),
-                None => Diagnostic::new(
-                    DiagnosticCode::NonLiftableCapture,
-                    format!(
-                        "a process runs apart from the cell and cannot read the cell's `{name}`"
-                    ),
-                    self.span,
-                ),
+                )
             })
     }
 }

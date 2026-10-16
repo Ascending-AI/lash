@@ -933,7 +933,6 @@ impl ToolIntentIngress {
             lash_core::ToolIntent::PublishDefinition(intent) => {
                 lash_core::ProcessCommand::PublishDefinition {
                     draft: intent.draft,
-                    module: intent.module,
                 }
             }
             lash_core::ToolIntent::GetDefinition(intent) => {
