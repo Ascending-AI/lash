@@ -47,46 +47,47 @@ impl Service {
         }
     }
 
-    /// Lower a whole authored TypeScript workflow under the host's source limits.
-    /// Exported source is read back against its base document with
-    /// [`Self::read_exported`] instead.
-    pub async fn import_typescript_workflow(
+    /// Lower a whole authored workflow module in the dialect of `language`,
+    /// under the host's source limits or, without them, the dialect's
+    /// standard policy. Exported source is read back against its base
+    /// document with [`Self::read_exported`] instead.
+    pub async fn import_workflow(
         &self,
+        language: lash_kernel_doc::SourceLanguage,
         source: &str,
         environment: &lash_kernel_dialect::Environment<'_>,
-        max_bytes: usize,
-        max_nesting: usize,
-    ) -> Result<lash_kernel_dialect::Lowered, SourceServiceError> {
+        limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
+    ) -> Result<(Document, lash_kernel_doc::SourceMap), SourceServiceError> {
         let response = self
-            .request_accounted(Request::ImportTypeScriptWorkflow {
+            .request_accounted(Request::ImportWorkflow {
+                language,
                 source: source.to_owned(),
                 effects: environment.effects.clone(),
                 tool_roots: environment.tool_roots.clone(),
                 controls: environment.controls.clone(),
-                max_bytes,
-                max_nesting,
+                limits,
             })
             .await?;
         match response {
             Response::Lowered {
                 document,
                 source_map,
-                written,
                 ..
             } => {
                 let document = std::str::from_utf8(&document)
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
                 let document = Document::from_json(document)
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
-                if let Some(map) = &source_map {
-                    map.validate(&document, source)
-                        .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
-                }
-                Ok(lash_kernel_dialect::Lowered {
-                    document,
-                    source_map,
-                    written,
-                })
+                // A module import answers the map of the source it read.
+                let map = source_map.ok_or_else(|| {
+                    PoolError::payload(
+                        PayloadKind::ServiceResponse,
+                        "a workflow import answered without its source map",
+                    )
+                })?;
+                map.validate(&document, source)
+                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                Ok((document, map))
             }
             other => Err(refused(other)),
         }

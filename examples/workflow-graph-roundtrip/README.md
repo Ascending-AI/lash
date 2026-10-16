@@ -119,22 +119,22 @@ inputs. Node positions are derived, not persistent user layout.
 
 ## Examples and the code pane
 
-Every example is authored TypeScript in `catalog/`, written the way a person
-would write it, and imported at startup through lash's public
-`import_typescript_workflow`, exactly as written: no kernel document is written
-by hand and the host rewrites nothing, so the canvas shows lash's current
-lowering. The **Example** dropdown lists each one once, grouped as apps or
-control-flow examples, with the statement and scope count of its lowering
-(the same counts appear under the canvas caption). Choosing one loads it at
-once. The dialect toggle beside it offers TypeScript; Python is disabled until
-lash has a public Python workflow import (FIG-6380).
+Every example is authored in `catalog/` as TypeScript and as a Python twin,
+written the way a person would write each, and imported at startup through
+lash's public `import_workflow`, exactly as written: no kernel document is
+written by hand and the host rewrites nothing, so the canvas shows lash's
+current lowering of either dialect. The **Example** dropdown lists each one
+once, grouped as apps or control-flow examples, with the statement and scope
+count of its lowering in the chosen dialect (the same counts appear under the
+canvas caption). Choosing one loads it at once. The **TypeScript | Python** toggle
+beside it chooses which twin opens; an example whose Python twin lash refuses
+keeps Python off, and the button's title is lash's refusal.
 
 The code pane is read-only and shows the saved revision as:
 
-- **Source**: the authored TypeScript the workflow was imported from, as
-  imported. Edits do not change it; the pane says when the revision was edited
-  since. It is not linked to the canvas: lash's import returns no map from
-  authored source to the document.
+- **Source**: the authored TypeScript or Python the workflow was imported
+  from, as imported. Edits do not change it; the pane says when the revision
+  was edited since. It is not linked to the canvas yet.
 - **TypeScript**: lash's exact readable printer. Lines are linked through the
   printer's source map.
 - **Kernel**: the kernel document text. The kernel printer starts every
@@ -361,8 +361,8 @@ kiln test //examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_tes
 ```
 
 The instrument discovers every `.ts` and `.py` under `catalog/`, including the
-original four probes in `catalog/probes/`. It uses the real workflow lowerer
-(TypeScript) or cell importer (Python), with the catalog's host effects and the
+original four probes in `catalog/probes/`. It uses each dialect's real module
+lowering (TypeScript and Python alike), with the catalog's host effects and the
 worker's helper library. It counts all document-owned statements, scopes
 (including empty blocks) and actions: module roots, entry adapters, closures and
 cloned bodies count; library helper bodies do not. This includes one module

@@ -33,9 +33,9 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
-pub use catalog::{CatalogGroup, SelectWorkflowRequest, WorkflowCatalogEntry};
+pub use catalog::{CatalogGroup, LoweringSize, SelectWorkflowRequest, WorkflowCatalogEntry};
 pub use contract::{
-    AuthoredSource, CallData, DisplayDelta, DisplayState, EditWorkflowRequest,
+    AuthoredSource, CallData, Dialect, DisplayDelta, DisplayState, EditWorkflowRequest,
     EditWorkflowResponse, EnvironmentView, ErrorBody, ErrorDetail, ErrorResponse,
     OpenWorkflowRequest, RunEvent, RunPath, RunStatus, WorkflowView,
 };
@@ -69,7 +69,7 @@ struct SavedWorkflow {
     entry: Name,
     /// What a run starts, or why lash did not admit the version.
     published: Result<runtime::Published, Arc<runtime::RunError>>,
-    /// The TypeScript the workflow was imported from, if it was.
+    /// The source the workflow was imported from, if it was.
     authored: Option<AuthoredSource>,
 }
 
@@ -77,8 +77,8 @@ struct SavedWorkflow {
 pub(crate) enum Origin {
     /// Opened as a kernel document: it has no authored source.
     Document,
-    /// Imported from this TypeScript.
-    Imported(String),
+    /// Imported from this source.
+    Imported { dialect: Dialect, text: String },
     /// An edit of the saved version: it keeps that version's source.
     Edited,
 }
@@ -212,7 +212,11 @@ impl AppState {
             let version = store.as_ref().map_or(1, |saved| saved.version + 1);
             let authored = match origin {
                 Origin::Document => None,
-                Origin::Imported(text) => Some(AuthoredSource { text, version }),
+                Origin::Imported { dialect, text } => Some(AuthoredSource {
+                    dialect,
+                    text,
+                    version,
+                }),
                 Origin::Edited => store.as_ref().and_then(|saved| saved.authored.clone()),
             };
             let saved = SavedWorkflow {
@@ -289,8 +293,9 @@ async fn select_workflow(
     let environment = state.environment().await?;
     let example = state
         .catalog
-        .get(&request.id)
-        .ok_or_else(|| ErrorResponse::unknown_workflow(&request.id))?;
+        .get(&request.id, request.dialect)
+        .ok_or_else(|| ErrorResponse::unknown_workflow(&request.id))?
+        .map_err(|refusal| ErrorResponse::invalid("dialect", refusal))?;
     let draft = Draft::open(example.document.clone())
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
     let _publishing = state.publishing.lock().await;

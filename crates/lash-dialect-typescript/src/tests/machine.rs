@@ -300,10 +300,16 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
         library,
         effects: &effects,
         controls: super::controls(),
-        bindings: &bindings,
-        functions: &std::collections::BTreeMap::new(),
     };
-    let lowered = crate::lower(source, &environment).unwrap_or_else(|error| panic!("{error}"));
+    let lowered = crate::lower(
+        source,
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+            bindings: &bindings,
+            functions: &std::collections::BTreeMap::new(),
+        }),
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
     let text = lash_kernel_doc::print_document(&lowered.document);
     if let Err(invalid) = lash_kernel_doc::validate_document(&lowered.document, library) {
         panic!("{invalid}\n{text}");

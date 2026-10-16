@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use lash_kernel_dialect::{Environment, Library, Lowered};
+use lash_kernel_dialect::{CellEnvironment, Environment, Library, Lowered, Mode, workflow};
 use lash_kernel_doc::{
     Action, Atom, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float,
     FunctionCatalog, FunctionId, FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs,
@@ -278,7 +278,9 @@ struct FunctionFrame {
 
 pub(crate) struct Lowerer<'a> {
     source: &'a str,
-    workflow: bool,
+    /// The entries of a workflow module, as they are lowered; `None` for a
+    /// cell.
+    module: Option<workflow::Module>,
     library: &'a dyn Library,
     /// The effects the host supplies: a call of one is a tool call.
     effects: &'a BTreeMap<EffectName, Signature>,
@@ -368,43 +370,26 @@ pub(crate) fn lower(
     program: &ast::Program,
     source: &str,
     environment: &Environment<'_>,
+    mode: Mode<'_>,
 ) -> Lowering<Lowered> {
-    lower_program(program, source, environment, false)
-}
-
-pub(crate) fn workflow(
-    program: &ast::Program,
-    source: &str,
-    environment: &Environment<'_>,
-) -> Lowering<Lowered> {
-    lower_program(program, source, environment, true)
-}
-
-fn lower_program(
-    program: &ast::Program,
-    source: &str,
-    environment: &Environment<'_>,
-    workflow: bool,
-) -> Lowering<Lowered> {
+    let (cell, module) = match mode {
+        Mode::Cell(cell) => (cell, None),
+        Mode::Module => (CellEnvironment::first(), Some(workflow::Module::new())),
+    };
     let mut taken: HashSet<String> = source
         .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
         .filter(|word| !word.is_empty())
         .map(str::to_string)
         .collect();
-    taken.extend(
-        environment
-            .bindings
-            .iter()
-            .map(|name| name.as_str().to_string()),
-    );
+    taken.extend(cell.bindings.iter().map(|name| name.as_str().to_string()));
     let mut lowerer = Lowerer {
         source,
-        workflow,
+        module,
         library: environment.library,
         effects: environment.effects,
         controls: environment.controls,
         performed: BTreeMap::new(),
-        session: environment.bindings,
+        session: cell.bindings,
         table: builtins::table(),
         taken,
         next_fresh: HashMap::new(),
@@ -424,7 +409,7 @@ fn lower_program(
         private: BTreeSet::new(),
         facts: Facts::analyse(
             program,
-            environment.bindings,
+            cell.bindings,
             &environment
                 .controls
                 .iter()
@@ -441,7 +426,7 @@ fn lower_program(
         declared_notes: BTreeMap::new(),
         entries: BTreeMap::new(),
         lifting: None,
-        saved: environment.functions,
+        saved: cell.functions,
         saved_used: BTreeSet::new(),
         written: None,
     };
@@ -462,6 +447,11 @@ fn lower_program(
     document.private_bindings = lowerer.private;
     document.functions = lowerer.declared;
     document.entries = lowerer.entries;
+    if let Some(module) = lowerer.module.take() {
+        module
+            .assemble(&mut document, &mut lowerer.declared_notes)
+            .map_err(Diagnostic::module)?;
+    }
     document.manifest.functions = reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
     if !lowerer.saved_used.is_empty() {
@@ -470,7 +460,7 @@ fn lower_program(
         let catalog: &dyn FunctionCatalog = environment.library;
         lash_kernel_dialect::install(
             &mut document,
-            environment.functions,
+            cell.functions,
             &lowerer.saved_used,
             &crate::function_values(),
             environment.effects,

@@ -1,11 +1,13 @@
-//! The example workflows: TypeScript sources imported through lash's
-//! public workflow import exactly as authored. No document is written by hand.
+//! The example workflows: TypeScript and Python twins of each, imported
+//! through lash's one public workflow import exactly as authored. No
+//! document is written by hand.
 
 use lash::LashCore;
 use lash::workflow::document::{Document, FunctionRegistry, Name};
 use lash::workflow::{WorkflowDocument, WorkflowDocumentEntry, WorkflowEnvironment};
 use serde::{Deserialize, Serialize};
 
+use crate::Dialect;
 use crate::runtime::RunError;
 
 /// Which kind of example a workflow is in the picker.
@@ -25,8 +27,22 @@ pub struct WorkflowCatalogEntry {
     pub name: String,
     pub description: String,
     pub group: CatalogGroup,
-    /// How many statements and blocks lash's view of the entry has: the
-    /// size of the document the example lowers to.
+    /// How many statements and blocks lash's view of the TypeScript
+    /// entry has: the size of the document the example lowers to.
+    pub statements: usize,
+    pub scopes: usize,
+    /// The same counts for the Python twin's entry, when lash imports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub python: Option<LoweringSize>,
+    /// Why lash refuses the Python twin, when it does; absent when the
+    /// Python twin opens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub python_refused: Option<String>,
+}
+
+/// How many statements and blocks lash's view of an entry has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoweringSize {
     pub statements: usize,
     pub scopes: usize,
 }
@@ -34,17 +50,20 @@ pub struct WorkflowCatalogEntry {
 #[derive(Clone, Debug, Deserialize)]
 pub struct SelectWorkflowRequest {
     pub id: String,
+    #[serde(default)]
+    pub dialect: Dialect,
 }
 
-/// An example workflow: authored TypeScript, imported as written, and the
-/// entry a run of it starts.
+/// An example workflow: authored TypeScript and its Python twin, each
+/// imported as written, and the entry a run of either starts.
 struct Example {
     id: &'static str,
     name: &'static str,
     description: &'static str,
     group: CatalogGroup,
     entry: &'static str,
-    source: &'static str,
+    typescript: &'static str,
+    python: &'static str,
 }
 
 /// The workflow the example opens with.
@@ -57,7 +76,8 @@ const EXAMPLES: &[Example] = &[
         description: "Search mocked sources, map their evidence into a cited research brief, and display the result.",
         entry: "deep_research",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/deep_research.ts"),
+        typescript: include_str!("../catalog/deep_research.ts"),
+        python: include_str!("../catalog/deep_research.py"),
     },
     Example {
         id: "weekly-kpis",
@@ -65,7 +85,8 @@ const EXAMPLES: &[Example] = &[
         description: "Fetch two mocked reporting periods, compare revenue and activation metrics, and display the report.",
         entry: "weekly_kpis",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/weekly_kpis.ts"),
+        typescript: include_str!("../catalog/weekly_kpis.ts"),
+        python: include_str!("../catalog/weekly_kpis.py"),
     },
     Example {
         id: "blank",
@@ -73,7 +94,8 @@ const EXAMPLES: &[Example] = &[
         description: "An empty starter you build up with edits.",
         entry: "blank",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/blank.ts"),
+        typescript: include_str!("../catalog/blank.ts"),
+        python: include_str!("../catalog/blank.py"),
     },
     Example {
         id: "onboarding",
@@ -81,7 +103,8 @@ const EXAMPLES: &[Example] = &[
         description: "An onboarding flow with a host approval call, a loop and mixed display updates.",
         entry: "onboarding",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/onboarding.ts"),
+        typescript: include_str!("../catalog/onboarding.ts"),
+        python: include_str!("../catalog/onboarding.py"),
     },
     Example {
         id: "summarize-emails",
@@ -89,7 +112,8 @@ const EXAMPLES: &[Example] = &[
         description: "List five recent emails, summarize each one, and show the digest.",
         entry: "summarize_top_emails",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/summarize_top_emails.ts"),
+        typescript: include_str!("../catalog/summarize_top_emails.ts"),
+        python: include_str!("../catalog/summarize_top_emails.py"),
     },
     Example {
         id: "research-nvidia-stock",
@@ -97,7 +121,8 @@ const EXAMPLES: &[Example] = &[
         description: "Research NVIDIA's stock outlook and show a concise mocked briefing.",
         entry: "research_nvidia_stock",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/research_nvidia_stock.ts"),
+        typescript: include_str!("../catalog/research_nvidia_stock.ts"),
+        python: include_str!("../catalog/research_nvidia_stock.py"),
     },
     Example {
         id: "team-standup-digest",
@@ -105,7 +130,8 @@ const EXAMPLES: &[Example] = &[
         description: "Collect Slack and GitHub activity, then present a daily team brief.",
         entry: "team_standup_digest",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/team_standup_digest.ts"),
+        typescript: include_str!("../catalog/team_standup_digest.ts"),
+        python: include_str!("../catalog/team_standup_digest.py"),
     },
     Example {
         id: "traffic-lights",
@@ -113,7 +139,8 @@ const EXAMPLES: &[Example] = &[
         description: "A visual red, amber, and green light sequence repeated twice.",
         entry: "traffic_lights",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/traffic_lights.ts"),
+        typescript: include_str!("../catalog/traffic_lights.ts"),
+        python: include_str!("../catalog/traffic_lights.py"),
     },
     Example {
         id: "branching-approval",
@@ -121,7 +148,8 @@ const EXAMPLES: &[Example] = &[
         description: "An if-heavy approval flow with a visible host approval call and distinct outcomes.",
         entry: "branching_approval",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/branching_approval.ts"),
+        typescript: include_str!("../catalog/branching_approval.ts"),
+        python: include_str!("../catalog/branching_approval.py"),
     },
     Example {
         id: "counter-loop",
@@ -129,7 +157,8 @@ const EXAMPLES: &[Example] = &[
         description: "A while loop followed by a for loop, with progress updates.",
         entry: "counter_loop",
         group: CatalogGroup::App,
-        source: include_str!("../catalog/counter_loop.ts"),
+        typescript: include_str!("../catalog/counter_loop.ts"),
+        python: include_str!("../catalog/counter_loop.py"),
     },
     Example {
         id: "flat",
@@ -137,7 +166,8 @@ const EXAMPLES: &[Example] = &[
         description: "Show a message, list three mock emails and set a status, with no control flow.",
         entry: "demo",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/flat.ts"),
+        typescript: include_str!("../catalog/flat.ts"),
+        python: include_str!("../catalog/flat.py"),
     },
     Example {
         id: "branch",
@@ -145,7 +175,8 @@ const EXAMPLES: &[Example] = &[
         description: "An if/else around two display messages.",
         entry: "demo",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/branch.ts"),
+        typescript: include_str!("../catalog/branch.ts"),
+        python: include_str!("../catalog/branch.py"),
     },
     Example {
         id: "digest",
@@ -153,7 +184,8 @@ const EXAMPLES: &[Example] = &[
         description: "A for-of over an untyped list with an if/else and sleeps, counting what it saw.",
         entry: "digest",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/digest.ts"),
+        typescript: include_str!("../catalog/digest.ts"),
+        python: include_str!("../catalog/digest.py"),
     },
     Example {
         id: "typed",
@@ -161,7 +193,8 @@ const EXAMPLES: &[Example] = &[
         description: "The digest loop with a declared `Topic[]` parameter type.",
         entry: "digest",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/typed.ts"),
+        typescript: include_str!("../catalog/typed.ts"),
+        python: include_str!("../catalog/typed.py"),
     },
     Example {
         id: "inbox",
@@ -169,7 +202,8 @@ const EXAMPLES: &[Example] = &[
         description: "A for-of that shows each item's title, with a sleep per item.",
         entry: "digest",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/inbox.ts"),
+        typescript: include_str!("../catalog/inbox.ts"),
+        python: include_str!("../catalog/inbox.py"),
     },
     Example {
         id: "countdown",
@@ -177,7 +211,8 @@ const EXAMPLES: &[Example] = &[
         description: "A `while (true)` with a counter that breaks after four ticks.",
         entry: "countdown",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/countdown.ts"),
+        typescript: include_str!("../catalog/countdown.ts"),
+        python: include_str!("../catalog/countdown.py"),
     },
     Example {
         id: "nested",
@@ -185,7 +220,8 @@ const EXAMPLES: &[Example] = &[
         description: "A for-of over lists inside a for-of over mock emails.",
         entry: "file_emails",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/nested.ts"),
+        typescript: include_str!("../catalog/nested.ts"),
+        python: include_str!("../catalog/nested.py"),
     },
     Example {
         id: "retry",
@@ -193,7 +229,8 @@ const EXAMPLES: &[Example] = &[
         description: "A web search per limit inside try/catch; the out-of-range limit fails and is caught.",
         entry: "resilient_search",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/retry.ts"),
+        typescript: include_str!("../catalog/retry.ts"),
+        python: include_str!("../catalog/retry.py"),
     },
     Example {
         id: "helper",
@@ -201,7 +238,8 @@ const EXAMPLES: &[Example] = &[
         description: "The loop body calls a helper that summarizes and shows each mock email.",
         entry: "summarize_inbox",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/helper.ts"),
+        typescript: include_str!("../catalog/helper.ts"),
+        python: include_str!("../catalog/helper.py"),
     },
     Example {
         id: "unread",
@@ -209,23 +247,35 @@ const EXAMPLES: &[Example] = &[
         description: "`.filter` the unread mock emails, `.map` them to subjects, then list each one.",
         entry: "unread_subjects",
         group: CatalogGroup::ControlFlow,
-        source: include_str!("../catalog/unread.ts"),
+        typescript: include_str!("../catalog/unread.ts"),
+        python: include_str!("../catalog/unread.py"),
     },
 ];
 
-/// An example ready to open: its listing, the document lash imported its
-/// source as, and that source.
+/// An example ready to open: its listing, and each twin as lash imported
+/// it, or why lash refused the Python one.
 pub(crate) struct CatalogWorkflow {
     pub(crate) listing: WorkflowCatalogEntry,
+    typescript: ImportedTwin,
+    python: Result<ImportedTwin, String>,
+}
+
+/// One dialect's twin of an example: the document lash imported its source
+/// as, the entry a run starts and that source.
+pub(crate) struct ImportedTwin {
     pub(crate) document: Document,
     pub(crate) entry: Name,
+    dialect: Dialect,
     source: &'static str,
 }
 
-impl CatalogWorkflow {
-    /// What opening this example saves the next version as.
+impl ImportedTwin {
+    /// What opening this twin saves the next version as.
     pub(crate) fn origin(&self) -> crate::Origin {
-        crate::Origin::Imported(self.source.to_owned())
+        crate::Origin::Imported {
+            dialect: self.dialect,
+            text: self.source.to_owned(),
+        }
     }
 }
 
@@ -243,30 +293,41 @@ impl Catalog {
     ) -> Result<Self, RunError> {
         let mut workflows = Vec::new();
         for example in EXAMPLES {
-            let document = crate::authoring_http::import(core, example.source)
-                .await
-                .map_err(|refusal| {
-                    RunError::Invalid(format!(
-                        "example `{}`: {} {}",
-                        example.id, refusal.body.error.message, refusal.body.error.details
-                    ))
-                })?;
             let entry = Name::new(example.entry);
-            let view = entry_view(&document, &entry, environment.functions()).map_err(|error| {
-                RunError::Invalid(format!("example `{}` has no view: {error}", example.id))
-            })?;
+            let typescript = import(core, example, Dialect::TypeScript, example.typescript)
+                .await
+                .map_err(RunError::Invalid)?;
+            // A Python twin lash refuses is listed with its refusal: the
+            // twin is authored as written, never edited until it imports.
+            let python = import(core, example, Dialect::Python, example.python).await;
+            let size = |twin: &ImportedTwin| {
+                entry_view(&twin.document, &entry, environment.functions())
+                    .map(|view| LoweringSize {
+                        statements: view.statements.len(),
+                        scopes: view.scopes.len(),
+                    })
+                    .map_err(|error| {
+                        RunError::Invalid(format!(
+                            "example `{}` ({:?}) has no view: {error}",
+                            example.id, twin.dialect
+                        ))
+                    })
+            };
+            let LoweringSize { statements, scopes } = size(&typescript)?;
+            let python_size = python.as_ref().ok().map(size).transpose()?;
             workflows.push(CatalogWorkflow {
                 listing: WorkflowCatalogEntry {
                     id: example.id.to_owned(),
                     name: example.name.to_owned(),
                     description: example.description.to_owned(),
                     group: example.group,
-                    statements: view.statements.len(),
-                    scopes: view.scopes.len(),
+                    statements,
+                    scopes,
+                    python: python_size,
+                    python_refused: python.as_ref().err().cloned(),
                 },
-                document,
-                entry,
-                source: example.source,
+                typescript,
+                python,
             });
         }
         Ok(Self { workflows })
@@ -279,16 +340,46 @@ impl Catalog {
             .collect()
     }
 
-    pub(crate) fn get(&self, id: &str) -> Option<&CatalogWorkflow> {
-        self.workflows
+    /// The twin of example `id` in `dialect`, or why lash refused it.
+    pub(crate) fn get(&self, id: &str, dialect: Dialect) -> Option<Result<&ImportedTwin, &str>> {
+        let workflow = self
+            .workflows
             .iter()
-            .find(|workflow| workflow.listing.id == id)
+            .find(|workflow| workflow.listing.id == id)?;
+        Some(match dialect {
+            Dialect::TypeScript => Ok(&workflow.typescript),
+            Dialect::Python => workflow.python.as_ref().map_err(String::as_str),
+        })
     }
 
-    /// The workflow the example opens with.
-    pub(crate) fn default_workflow(&self) -> Option<&CatalogWorkflow> {
-        self.get(DEFAULT_WORKFLOW)
+    /// The workflow the example opens with: its TypeScript twin.
+    pub(crate) fn default_workflow(&self) -> Option<&ImportedTwin> {
+        self.get(DEFAULT_WORKFLOW, Dialect::TypeScript)
+            .and_then(Result::ok)
     }
+}
+
+/// Imports one twin of `example`, or answers lash's refusal as text.
+async fn import(
+    core: &LashCore,
+    example: &Example,
+    dialect: Dialect,
+    source: &'static str,
+) -> Result<ImportedTwin, String> {
+    let document = crate::authoring_http::import(core, dialect, source)
+        .await
+        .map_err(|refusal| {
+            format!(
+                "example `{}` ({dialect:?}): {} {}",
+                example.id, refusal.body.error.message, refusal.body.error.details
+            )
+        })?;
+    Ok(ImportedTwin {
+        document,
+        entry: Name::new(example.entry),
+        dialect,
+        source,
+    })
 }
 
 /// Lash's view of entry `entry` of `document`.
@@ -429,8 +520,9 @@ mod tests {
 
         let mut saw_statements = false;
         let mut saw_empty_scope = false;
-        for workflow in &catalog.workflows {
-            let id = &workflow.listing.id;
+        for example in &catalog.workflows {
+            let id = &example.listing.id;
+            let workflow = &example.typescript;
             let unit = Unit::Function(workflow.entry.clone());
             let view = entry_view(&workflow.document, &workflow.entry, environment.functions())
                 .expect("the example's view");

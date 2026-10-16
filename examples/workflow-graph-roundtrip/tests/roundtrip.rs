@@ -436,24 +436,11 @@ async fn imported_parameterized_entries_can_run_with_named_inputs() {
     );
 }
 
-/// FIG-6401: every example is authored TypeScript and opens as exactly what
-/// lash's workflow import lowers it to (its view is the size the catalog
-/// lists, and its authored text is kept beside the printer's TypeScript and
-/// map), then runs to its authored result against the mock tools.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn every_example_opens_as_its_imported_source_and_runs_with_the_mocks() {
-    let (base, _) = serve().await;
-    let client = reqwest::Client::new();
-    let catalog = answer(
-        client
-            .get(format!("{base}/workflows"))
-            .send()
-            .await
-            .expect("the catalog"),
-    )
-    .await;
+/// Each example's id, the inputs a run of it is started with and, where it
+/// authors one, the result it returns.
+fn catalog_runs() -> Vec<(&'static str, Value, Option<Value>)> {
     let topic = json!([{"title": "Release notes", "urgent": true}]);
-    let runs = [
+    vec![
         ("deep-research", json!({"topic": "Loops"}), None),
         ("weekly-kpis", json!({"workspace": "Acme Cloud"}), None),
         ("blank", json!({}), Some(Value::Null)),
@@ -482,7 +469,26 @@ async fn every_example_opens_as_its_imported_source_and_runs_with_the_mocks() {
         ("retry", json!({}), Some(json!({"failures": 1}))),
         ("helper", json!({}), None),
         ("unread", json!({}), None),
-    ];
+    ]
+}
+
+/// FIG-6401: every example is authored TypeScript and opens as exactly what
+/// lash's workflow import lowers it to (its view is the size the catalog
+/// lists, and its authored text is kept beside the printer's TypeScript and
+/// map), then runs to its authored result against the mock tools.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_example_opens_as_its_imported_source_and_runs_with_the_mocks() {
+    let (base, _) = serve().await;
+    let client = reqwest::Client::new();
+    let catalog = answer(
+        client
+            .get(format!("{base}/workflows"))
+            .send()
+            .await
+            .expect("the catalog"),
+    )
+    .await;
+    let runs = catalog_runs();
     let entries = catalog.as_array().expect("a list");
     assert_eq!(
         entries
@@ -547,6 +553,84 @@ async fn every_example_opens_as_its_imported_source_and_runs_with_the_mocks() {
             entry["statements"], entry["scopes"]
         );
     }
+}
+
+/// FIG-6380: each example's TypeScript and Python twins import through
+/// lash's one workflow import and, run with the mocks and the same inputs,
+/// make the same tool calls and return the same result. A twin lash
+/// refuses is listed by the catalog with its refusal; the twins are
+/// authored as written and never edited to agree.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn each_example_runs_alike_from_its_typescript_and_python_twins() {
+    let (base, _) = serve().await;
+    let client = reqwest::Client::new();
+    let catalog = answer(
+        client
+            .get(format!("{base}/workflows"))
+            .send()
+            .await
+            .expect("the catalog"),
+    )
+    .await;
+    let refused: Vec<&str> = catalog
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter(|entry| entry["pythonRefused"].is_string())
+        .map(|entry| entry["id"].as_str().expect("an id"))
+        .collect();
+    let mut differ = Vec::new();
+    let mut compared = 0;
+    for (id, inputs, _) in catalog_runs() {
+        if refused.contains(&id) {
+            continue;
+        }
+        compared += 1;
+        let mut observed = Vec::new();
+        for dialect in ["typescript", "python"] {
+            let opened = answer(
+                client
+                    .post(format!("{base}/workflow/select"))
+                    .json(&json!({ "id": id, "dialect": dialect }))
+                    .send()
+                    .await
+                    .expect("select"),
+            )
+            .await;
+            assert_eq!(opened["authored"]["dialect"], dialect, "{id}");
+            assert!(
+                opened["definition"].is_string(),
+                "{id} ({dialect}) is admitted: {}",
+                opened["notAdmitted"]
+            );
+            let events = run(&client, &base, inputs.clone()).await;
+            let last = events.last().expect("the run reports");
+            assert!(
+                last.site.is_none() && last.status == RunStatus::Succeeded,
+                "{id} ({dialect}) runs to its end: {last:?}"
+            );
+            let mut calls: Vec<String> = events
+                .iter()
+                .filter_map(|event| event.call.as_ref())
+                .map(|call| json!({"input": call.input, "output": call.output}).to_string())
+                .collect();
+            calls.sort();
+            observed.push((calls, last.output.clone().unwrap_or_default()));
+        }
+        if observed[0] != observed[1] {
+            differ.push(format!(
+                "{id}: TypeScript {:?}\nPython {:?}",
+                observed[0], observed[1]
+            ));
+        }
+    }
+    println!("{compared} pairs compared; Python twins lash refuses: {refused:?}");
+    assert!(compared > 0, "no example's twins both import");
+    assert!(
+        differ.is_empty(),
+        "the twins differ:\n{}",
+        differ.join("\n")
+    );
 }
 
 /// FIG-6404: a run is observed at `counts`, so the canvas can play it out.

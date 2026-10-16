@@ -48,6 +48,8 @@ const approvals = approvalControl(
 const key = (site) => JSON.stringify([site.unit, site.path ?? []]);
 let workflow,
   examples = [],
+  // The dialect examples open in: each has a TypeScript and a Python twin.
+  dialect = "typescript",
   codeView = "kernel",
   codeLinking,
   calls = new Map(),
@@ -388,18 +390,45 @@ async function loadExample(id) {
   await action(async () => {
     if (operations.length)
       throw Error("Apply or clear pending changes before loading an example.");
-    const next = await call("/workflow/select", { id });
+    if (dialect === "python" && example.pythonRefused) setDialect("typescript");
+    const next = await call("/workflow/select", { id, dialect });
     selected = undefined;
     plan = undefined;
     show(next);
     renderPane();
     fit();
-    report(`Loaded ${example.name}.`);
+    report(`Loaded ${example.name} · ${dialectName(dialect)}.`);
   });
   $("example").value = id;
+  renderDialect();
 }
-// One option per example, grouped, with the size of its lowering.
+const dialectName = (name) => (name === "python" ? "Python" : "TypeScript");
+function setDialect(next) {
+  dialect = next;
+  renderExamples();
+  renderDialect();
+}
+// The toggle shows the dialect examples open in. An example whose Python
+// twin lash refuses keeps Python off, with lash's refusal as its title.
+function renderDialect() {
+  const example = examples.find((entry) => entry.id === $("example").value);
+  for (const name of ["typescript", "python"]) {
+    $(`dialect-${name}`).setAttribute("aria-pressed", String(dialect === name));
+  }
+  const python = $("dialect-python");
+  python.disabled = Boolean(example?.pythonRefused);
+  python.title = example?.pythonRefused ?? "";
+}
+function chooseDialect(next) {
+  if (next === dialect) return;
+  setDialect(next);
+  const id = $("example").value;
+  if (id) loadExample(id);
+}
+// One option per example, grouped, with the size of its lowering in the
+// chosen dialect.
 function renderExamples() {
+  const selected = $("example").value;
   const groups = { app: "Apps", controlFlow: "Control flow" };
   const placeholder = el("option", null, "Choose an example…");
   placeholder.value = "";
@@ -413,10 +442,11 @@ function renderExamples() {
         ...examples
           .filter((example) => example.group === group)
           .map((example) => {
+            const size = dialect === "python" && example.python ? example.python : example;
             const option = el(
               "option",
               null,
-              `${example.name} · ${example.statements} statements · ${example.scopes} scopes`,
+              `${example.name} · ${size.statements} statements · ${size.scopes} scopes`,
             );
             option.value = example.id;
             option.title = example.description;
@@ -426,7 +456,7 @@ function renderExamples() {
       return optgroup;
     }),
   );
-  $("example").value = "";
+  $("example").value = selected;
 }
 for (const button of document.querySelectorAll("[data-tab]"))
   button.onclick = () => {
@@ -2233,7 +2263,7 @@ function codeNote() {
       authored.version === workflow.version
         ? ""
         : ` · edited since (revision ${workflow.version}); shown as imported`;
-    return `Authored TypeScript imported at revision ${authored.version}${edited} · not linked: lash's import keeps no source map`;
+    return `Authored ${dialectName(authored.dialect)} imported at revision ${authored.version}${edited} · not linked`;
   }
   if (codeView === "typescript")
     return workflow.source
@@ -2257,7 +2287,12 @@ function renderCode() {
         : undefined;
   $("code-note").textContent = codeNote();
   $("code-note").title = codeNote();
-  const language = codeView === "kernel" ? "kernel" : "typescript";
+  const language =
+    codeView === "kernel"
+      ? "kernel"
+      : codeView === "source"
+        ? (workflow.authored?.dialect ?? "typescript")
+        : "typescript";
   $("code-view").innerHTML = text
     ? text
         .replace(/\n$/, "")
@@ -2501,6 +2536,8 @@ function setupVisual() {
       (button) => (button.onclick = () => $(button.dataset.close).close()),
     );
   $("example").onchange = () => loadExample($("example").value);
+  $("dialect-typescript").onclick = () => chooseDialect("typescript");
+  $("dialect-python").onclick = () => chooseDialect("python");
   $("add-step").onclick = () => {
     openCatalog(
       activeScope ? appendPosition(workflow, activeScope) : undefined,
@@ -2709,6 +2746,7 @@ await action(async () => {
   show(await call("/workflow"));
   examples = await call("/workflows");
   renderExamples();
+  renderDialect();
   report("");
 });
 

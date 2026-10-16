@@ -89,14 +89,20 @@ impl Runner {
             effects: &effects,
             tool_roots: &BTreeSet::new(),
             controls: &BTreeMap::new(),
-            bindings: &BTreeSet::new(),
-            functions: &BTreeMap::new(),
         };
         let lowered = match case.dialect.as_str() {
-            "typescript" => {
-                lash_dialect_typescript::lower(&case.source, &env).map_err(|e| e.to_string())
-            }
-            "python" => lash_dialect_python::lower(&case.source, &env).map_err(|e| e.to_string()),
+            "typescript" => lash_dialect_typescript::lower(
+                &case.source,
+                &env,
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+            )
+            .map_err(|e| e.to_string()),
+            "python" => lash_dialect_python::lower(
+                &case.source,
+                &env,
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+            )
+            .map_err(|e| e.to_string()),
             _ => return Err("unknown dialect".into()),
         };
         let lowered = match lowered {

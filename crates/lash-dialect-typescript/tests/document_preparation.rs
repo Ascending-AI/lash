@@ -36,8 +36,6 @@ fn an_admitted_baseline_cell_starts_with_at_most_one_thousand_allocations() {
         effects: &effects,
         controls: &controls,
         tool_roots: &tool_roots,
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
     let (_, source) = gate_six::programs()
         .into_iter()
@@ -46,9 +44,13 @@ fn an_admitted_baseline_cell_starts_with_at_most_one_thousand_allocations() {
     let program = Program {
         release: pages::RELEASE,
         document: Arc::new(
-            lash_dialect_typescript::lower(&source, &environment)
-                .unwrap()
-                .document,
+            lash_dialect_typescript::lower(
+                &source,
+                &environment,
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+            )
+            .unwrap()
+            .document,
         ),
         library: PreparedLibrary::new(registry),
     };
@@ -114,16 +116,18 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
         effects: &effects,
         controls: &controls,
         tool_roots: &["processes", "jobs"].into_iter().map(Name::new).collect(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
     for (name, source) in gate_six::programs() {
         let program = Program {
             release: pages::RELEASE,
             document: Arc::new(
-                lash_dialect_typescript::lower(&source, &environment)
-                    .unwrap()
-                    .document,
+                lash_dialect_typescript::lower(
+                    &source,
+                    &environment,
+                    lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+                )
+                .unwrap()
+                .document,
             ),
             library: prepared.clone(),
         };

@@ -67,15 +67,21 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
         effects: &Default::default(),
         tool_roots: &Default::default(),
         controls: &Default::default(),
-        bindings: &Default::default(),
-        functions: &Default::default(),
     };
-    let ts = lash::typescript::lower("const answer = [1, 2].map(x => x + 1);", &environment)
-        .expect("TS origin")
-        .document;
-    let py = lash::python::lower("answer = [1, 2]\nanswer.append(3)\n", &environment)
-        .expect("Python origin")
-        .document;
+    let ts = lash::typescript::lower(
+        "const answer = [1, 2].map(x => x + 1);",
+        &environment,
+        lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
+    )
+    .expect("TS origin")
+    .document;
+    let py = lash::python::lower(
+        "answer = [1, 2]\nanswer.append(3)\n",
+        &environment,
+        lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
+    )
+    .expect("Python origin")
+    .document;
     let mut host = k::parse_document(super::GUARDED).expect("host tree");
     host.private_bindings.insert(k::Name::new("日本語"));
     // Exceed the ordinary cell cap. This is a whole-workflow operation.
@@ -264,10 +270,7 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
         .import_exported_workflow(&printed.source, SourceFormat::TypeScriptV1, &document, &env)
         .await
         .expect("import");
-    let lash::workflow::WorkflowImport::Imported {
-        document: imported, ..
-    } = imported
-    else {
+    let lash::workflow::WorkflowImport::Read { document: imported } = imported else {
         panic!("full identities must bypass name resolution: {imported:?}");
     };
     exact(&document, imported.document());
@@ -290,16 +293,16 @@ fn a_reader_draws_labelled_typescript_and_python_callees_from_shipped_declaratio
         effects: &Default::default(),
         tool_roots: &Default::default(),
         controls: &Default::default(),
-        bindings: &Default::default(),
-        functions: &Default::default(),
     };
-    let typescript = lash::typescript::lower_workflow(
+    let typescript = lash::typescript::lower(
         "export async function digest(items: string[], count: number) { let total = count; for (const item of items) { total = total + item.length; } return total; }",
         &environment,
+        lash::dialect::Mode::Module,
     ).expect("import TypeScript workflow").document;
     let python = lash::python::lower(
         "answer = [1, 2]\nanswer.append(3)\nshown = str(answer)\n",
         &environment,
+        lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
     )
     .expect("lower Python")
     .document;

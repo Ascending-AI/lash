@@ -37,9 +37,8 @@ fn lower_against_control(source: &str) -> Result<Lowered, Diagnostic> {
             effects: &effects,
             controls: &controls,
             tool_roots: &std::collections::BTreeSet::new(),
-            bindings: &BTreeSet::new(),
-            functions: &BTreeMap::new(),
         },
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
     )
 }
 

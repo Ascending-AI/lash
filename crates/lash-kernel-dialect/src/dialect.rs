@@ -7,8 +7,8 @@ use lash_kernel_doc::{Document, EffectName, FunctionDefinition, Name, Signature,
 use crate::diagnostic::Diagnostic;
 use crate::library::Library;
 
-/// What a front end lowers against: everything outside the source that a
-/// name in it may stand for.
+/// What a front end lowers against, in either [`Mode`]: everything outside
+/// the source that a name in it may stand for, apart from a cell's session.
 #[derive(Clone, Copy)]
 pub struct Environment<'a> {
     /// The kernel library and the dialect's own functions, by name.
@@ -25,6 +25,12 @@ pub struct Environment<'a> {
     /// after a control call settles, and a saved function pins what its
     /// effects declared.
     pub controls: &'a BTreeMap<EffectName, BTreeSet<EffectControl>>,
+}
+
+/// What a cell lowers against beyond the [`Environment`]: the session it
+/// continues.
+#[derive(Clone, Copy)]
+pub struct CellEnvironment<'a> {
     /// The session bindings in scope when `main` starts (`K-SES-001`).
     pub bindings: &'a BTreeSet<Name>,
     /// The functions the session holds, by the binding each is called
@@ -34,6 +40,31 @@ pub struct Environment<'a> {
     /// binding is the function's [`crate::SavedFunction::name`], or an
     /// alias of the binding that is.
     pub functions: &'a BTreeMap<Name, crate::SavedFunction>,
+}
+
+impl CellEnvironment<'static> {
+    /// The first cell of a session: no binding and no saved function.
+    #[must_use]
+    pub fn first() -> Self {
+        static BINDINGS: BTreeSet<Name> = BTreeSet::new();
+        static FUNCTIONS: BTreeMap<Name, crate::SavedFunction> = BTreeMap::new();
+        Self {
+            bindings: &BINDINGS,
+            functions: &FUNCTIONS,
+        }
+    }
+}
+
+/// What a source text is to the front end that lowers it.
+#[derive(Clone, Copy)]
+pub enum Mode<'a> {
+    /// A cell of a session: its top-level bindings are the session's, and
+    /// it continues the session in `CellEnvironment`.
+    Cell(CellEnvironment<'a>),
+    /// A workflow module: each top-level async function declaration is an
+    /// entry of the document, assembled by [`crate::workflow::Module`] under
+    /// the one contract every dialect shares. A module continues no session.
+    Module,
 }
 
 /// What a dialect's function value is, which is how a session keeps one
@@ -92,7 +123,12 @@ pub struct Lowered {
 /// hoisted, in the source's evaluation order, every operand the source
 /// evaluates before a statement-position form (`K-STMT-005`).
 pub trait FrontEnd {
-    fn lower(&self, source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic>;
+    fn lower(
+        &self,
+        source: &str,
+        environment: &Environment<'_>,
+        mode: Mode<'_>,
+    ) -> Result<Lowered, Diagnostic>;
 }
 
 /// Writes a document as plain source in the dialect, without compiling or

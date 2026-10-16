@@ -38,7 +38,7 @@ pub const BUILD_IDENTITY: (&str, &str) = (
     env!("KERNEL_PERF_BUILD_PROFILE"),
 );
 
-use lash_kernel_dialect::{Environment, FrontEnd, FunctionValues, Lowered};
+use lash_kernel_dialect::{Environment, FrontEnd, FunctionValues, Lowered, Mode};
 use lash_kernel_doc::Span as SourceSpan;
 
 /// The tag of the token a TypeScript function value is: a tuple of the tag,
@@ -57,57 +57,48 @@ pub fn function_values() -> FunctionValues {
 
 /// Lowers TypeScript source to a kernel document.
 ///
-/// The source is a cell: its top-level `let`, `const`, `var` and function
-/// bindings are the session's (`K-SES-001`), and `environment.bindings`
-/// names those earlier cells left.
-pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
-    lower_with_limits(source, environment, SourceLimits::standard())
+/// In [`Mode::Cell`] the source is a cell: its top-level `let`, `const`,
+/// `var` and function bindings are the session's (`K-SES-001`), and the
+/// cell environment's bindings name those earlier cells left.
+///
+/// In [`Mode::Module`] it is a whole workflow a host imports: every
+/// top-level async function, by declaration (exported or not) or bound by
+/// `const`, is an entry of the document under the shared workflow contract
+/// ([`lash_kernel_dialect::workflow`]), and the rest of the top level is
+/// `main`. Exported source printed from a document is read back with
+/// [`read`] against that document instead. A module runs no effect and
+/// lowers to an unchecked document; a host must admit it before use.
+/// Unlike a cell, a module accepts the printer's reserved kernel surface,
+/// including `finish`.
+pub fn lower(
+    source: &str,
+    environment: &Environment<'_>,
+    mode: Mode<'_>,
+) -> Result<Lowered, Diagnostic> {
+    lower_with_limits(source, environment, mode, SourceLimits::standard())
 }
 
 /// Lower source under the host's byte and nesting admission policy.
 pub fn lower_with_limits(
     source: &str,
     environment: &Environment<'_>,
+    mode: Mode<'_>,
     limits: SourceLimits,
 ) -> Result<Lowered, Diagnostic> {
-    lower::check_binding_names(
-        environment
-            .bindings
-            .iter()
-            .map(lash_kernel_doc::Name::as_str),
-        environment.effects,
-    )?;
-    let program = adapter::parse_with_limits(source, limits)?;
-    lower::lower(&program, source, environment)
-}
-
-/// Lowers a host-authored whole workflow. Exported source printed from a
-/// document is read back with [`read`] against that document instead. Exported async declarations and const-bound async literals
-/// (optionally wrapped in `process(...)`) become document entries even when
-/// the environment offers no process-start tools. This runs no effect and
-/// returns an unchecked document; a host must admit it before use.
-///
-/// Unlike cell lowering, this trusted source entry accepts the printer's
-/// reserved kernel surface, including `finish`.
-pub fn lower_workflow(source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
-    lower_workflow_with_limits(source, environment, SourceLimits::standard())
-}
-
-/// Lower a whole TypeScript workflow under host source admission policy.
-pub fn lower_workflow_with_limits(
-    source: &str,
-    environment: &Environment<'_>,
-    limits: SourceLimits,
-) -> Result<Lowered, Diagnostic> {
-    lower::check_binding_names(
-        environment
-            .bindings
-            .iter()
-            .map(lash_kernel_doc::Name::as_str),
-        environment.effects,
-    )?;
-    let program = adapter::parse_workflow(source, limits)?;
-    lower::workflow(&program, source, environment)
+    match mode {
+        Mode::Cell(cell) => {
+            lower::check_binding_names(
+                cell.bindings.iter().map(lash_kernel_doc::Name::as_str),
+                environment.effects,
+            )?;
+            let program = adapter::parse_with_limits(source, limits)?;
+            lower::lower(&program, source, environment, mode)
+        }
+        Mode::Module => {
+            let program = adapter::parse_workflow(source, limits)?;
+            lower::lower(&program, source, environment, mode)
+        }
+    }
 }
 
 /// Reads `source` as the dialect's syntax and lowers nothing: what a host
@@ -145,20 +136,23 @@ impl Parser {
         }
     }
 
+    /// Lowers as [`lower`] does. A cell reuses the parser thread; a module,
+    /// which a host imports once, is read on a thread of its own.
     pub fn lower(
         &mut self,
         source: &str,
         environment: &Environment<'_>,
+        mode: Mode<'_>,
     ) -> Result<Lowered, Diagnostic> {
+        let Mode::Cell(cell) = mode else {
+            return lower_with_limits(source, environment, mode, self.parser.limits());
+        };
         lower::check_binding_names(
-            environment
-                .bindings
-                .iter()
-                .map(lash_kernel_doc::Name::as_str),
+            cell.bindings.iter().map(lash_kernel_doc::Name::as_str),
             environment.effects,
         )?;
         let program = self.parser.parse(source)?;
-        lower::lower(&program, source, environment)
+        lower::lower(&program, source, environment, mode)
     }
 }
 
@@ -179,7 +173,8 @@ impl FrontEnd for TypeScript {
         &self,
         source: &str,
         environment: &Environment<'_>,
+        mode: Mode<'_>,
     ) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
-        lower_with_limits(source, environment, self.limits).map_err(Into::into)
+        lower_with_limits(source, environment, mode, self.limits).map_err(Into::into)
     }
 }

@@ -91,9 +91,11 @@ fn lower_with(
             library: library(),
             effects,
             controls: controls(),
-            bindings,
-            functions: &std::collections::BTreeMap::new(),
         },
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+            bindings,
+            functions: &BTreeMap::new(),
+        }),
     )
 }
 
@@ -737,9 +739,8 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
                 library: named,
                 effects: &effects,
                 controls: &BTreeMap::new(),
-                bindings: &BTreeSet::new(),
-                functions: &BTreeMap::new(),
             },
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
         )
         .expect("the arithmetic witness lowers");
         let program = Program {

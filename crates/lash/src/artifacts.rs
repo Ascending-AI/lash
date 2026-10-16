@@ -252,25 +252,77 @@ impl HostArtifacts {
         Ok(answer.downcast().ok())
     }
 
-    /// Lower a host-authored TypeScript workflow and admit it against the
-    /// same process environment as [`Self::publish_workflow`]. Exported async
-    /// declarations and const-bound async literals become document entries.
-    /// Source printed from a document is read back with
-    /// [`Self::import_exported_workflow`] instead. The returned reference
-    /// selects `main`, with every entry available for editing and publication.
+    /// Lower a host-authored workflow module in `language` and admit it
+    /// against the same process environment as [`Self::publish_workflow`].
+    /// Every dialect lowers a module under one workflow contract
+    /// ([`crate::dialect::workflow`]): each top-level async function, by
+    /// declaration or by `const` (TypeScript) or `async def` (Python), is an
+    /// entry; an entry captures nothing of the module, its signature is what
+    /// its annotations mean in its dialect, and the contract's refusals
+    /// carry the same codes in every dialect. Source printed from a document
+    /// is read back with [`Self::import_exported_workflow`] instead.
     ///
-    /// The host supplies no dialect internals. This reads the tool catalogue
-    /// and worker function registry, runs no effect and publishes nothing.
-    #[cfg(feature = "typescript")]
-    pub async fn import_typescript_workflow(
+    /// The answer carries the document, its source map and the source, for
+    /// [`Self::publish_workflow`] to keep together; the document reference
+    /// selects `main`, with every entry available for editing and
+    /// publication. Without `limits` the dialect's standard source policy
+    /// applies.
+    ///
+    /// The host supplies no dialect internals and links no parser: the
+    /// worker lowers the source. This reads the tool catalogue and worker
+    /// function registry, runs no effect and publishes nothing.
+    #[cfg(feature = "codemode")]
+    pub async fn import_workflow(
         &self,
+        language: crate::workflow::document::SourceLanguage,
         source: &str,
         environment: &ProcessEnv,
+        limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<crate::workflow::WorkflowImport> {
-        self.import_typescript_workflow_with_limits(
+        use crate::workflow::{
+            WorkflowAdmissionRefusal, WorkflowImport, WorkflowImportUnsupported,
+        };
+        let (catalog, boundary, checked) = match self.import_context(environment).await? {
+            Ok(context) => context,
+            Err(refused) => return Ok(refused),
+        };
+        let library = match lash_kernel_dialect::NamedLibrary::from_registry(checked.functions()) {
+            Ok(library) => library,
+            Err(refusal) => {
+                return Ok(WorkflowImport::Unsupported(
+                    WorkflowImportUnsupported::LibraryUnavailable(refusal),
+                ));
+            }
+        };
+        let mut tool_roots = std::collections::BTreeSet::new();
+        for tool in &catalog.tools {
+            let binding = match lash_vm_runtime::required_tool_executable(&tool.manifest) {
+                Ok(binding) => binding,
+                Err(error) => {
+                    return Ok(WorkflowImport::Admission(
+                        WorkflowAdmissionRefusal::Boundary {
+                            message: error.to_string(),
+                        },
+                    ));
+                }
+            };
+            if let Some(root) = binding.module_path.first() {
+                tool_roots.insert(lash_kernel_doc::Name::new(root));
+            }
+        }
+        let dialect = lash_kernel_dialect::Environment {
+            library: &library,
+            effects: checked.effects(),
+            tool_roots: &tool_roots,
+            controls: &boundary.controls(),
+        };
+        crate::workflow::import::import(
+            checked.worker_service(),
+            language,
             source,
-            environment,
-            crate::typescript::SourceLimits::standard(),
+            &dialect,
+            &checked.checker(),
+            limits,
         )
         .await
     }
@@ -281,10 +333,11 @@ impl HostArtifacts {
     /// code; the manifest, entries, private bindings, helper identities and
     /// name renames are the base document's, so an unchanged source reads
     /// back as `base` itself, with its identity. A construct the reader has
-    /// no exact inverse for is a typed refusal naming it.
+    /// no exact inverse for is a typed refusal naming it. The admitted
+    /// document is answered as [`WorkflowImport::Read`](crate::workflow::WorkflowImport::Read).
     ///
     /// This reads the tool catalogue, runs no effect and publishes nothing.
-    #[cfg(feature = "typescript")]
+    #[cfg(feature = "codemode")]
     pub async fn import_exported_workflow(
         &self,
         source: &str,
@@ -302,9 +355,9 @@ impl HostArtifacts {
             .await
         {
             Ok(document) => document,
-            Err(error) => return crate::workflow::typescript::source_refusal(error),
+            Err(error) => return crate::workflow::import::source_refusal(error),
         };
-        Ok(crate::workflow::typescript::admit(
+        Ok(crate::workflow::import::admit_read(
             document,
             &checked.checker(),
         ))
@@ -313,7 +366,7 @@ impl HostArtifacts {
     /// What importing a workflow source admits against: the process tool
     /// catalogue, its host boundary and the checked environment, or the
     /// answer that refuses the import before any source is read.
-    #[cfg(feature = "typescript")]
+    #[cfg(feature = "codemode")]
     async fn import_context(
         &self,
         environment: &ProcessEnv,
@@ -359,63 +412,6 @@ impl HostArtifacts {
             )));
         };
         Ok(Ok((catalog, boundary, checked)))
-    }
-
-    /// Import a TypeScript workflow under the host's validated source policy.
-    #[cfg(feature = "typescript")]
-    pub async fn import_typescript_workflow_with_limits(
-        &self,
-        source: &str,
-        environment: &ProcessEnv,
-        limits: crate::typescript::SourceLimits,
-    ) -> Result<crate::workflow::WorkflowImport> {
-        use crate::workflow::{
-            WorkflowAdmissionRefusal, WorkflowImport, WorkflowImportUnsupported,
-        };
-        let (catalog, boundary, checked) = match self.import_context(environment).await? {
-            Ok(context) => context,
-            Err(refused) => return Ok(refused),
-        };
-        let library = match lash_kernel_dialect::NamedLibrary::from_registry(checked.functions()) {
-            Ok(library) => library,
-            Err(refusal) => {
-                return Ok(WorkflowImport::Unsupported(
-                    WorkflowImportUnsupported::LibraryUnavailable(refusal),
-                ));
-            }
-        };
-        let mut tool_roots = std::collections::BTreeSet::new();
-        for tool in &catalog.tools {
-            let binding = match lash_vm_runtime::required_tool_executable(&tool.manifest) {
-                Ok(binding) => binding,
-                Err(error) => {
-                    return Ok(WorkflowImport::Admission(
-                        WorkflowAdmissionRefusal::Boundary {
-                            message: error.to_string(),
-                        },
-                    ));
-                }
-            };
-            if let Some(root) = binding.module_path.first() {
-                tool_roots.insert(lash_kernel_doc::Name::new(root));
-            }
-        }
-        let dialect = lash_kernel_dialect::Environment {
-            library: &library,
-            effects: checked.effects(),
-            tool_roots: &tool_roots,
-            controls: &boundary.controls(),
-            bindings: &std::collections::BTreeSet::new(),
-            functions: &std::collections::BTreeMap::new(),
-        };
-        crate::workflow::typescript::import(
-            checked.worker_service(),
-            source,
-            &dialect,
-            &checked.checker(),
-            limits,
-        )
-        .await
     }
 
     /// Admit `document` as the definition of its entry `entry`, and hold it

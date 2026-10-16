@@ -22,6 +22,7 @@ mod notes;
 pub mod readability;
 mod saved;
 mod source;
+pub mod workflow;
 mod written;
 
 #[cfg(test)]
@@ -29,7 +30,8 @@ mod tests;
 
 pub use diagnostic::{Diagnostic, DiagnosticKind};
 pub use dialect::{
-    EffectControl, Environment, FrontEnd, FunctionValues, Lowered, Package, Printer,
+    CellEnvironment, EffectControl, Environment, FrontEnd, FunctionValues, Lowered, Mode, Package,
+    Printer,
 };
 /// The persistent heap saved functions are written to and read from.
 pub use lash_kernel_state::{WaitId, paged};

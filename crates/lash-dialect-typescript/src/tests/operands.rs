@@ -56,10 +56,14 @@ fn native_expression_depth_respects_the_document_limit() {
         library: super::library(),
         effects: &Default::default(),
         controls: &Default::default(),
-        bindings: &Default::default(),
-        functions: &Default::default(),
     };
-    let lowered = crate::lower::lower(&program, "", &environment).unwrap();
+    let lowered = crate::lower::lower(
+        &program,
+        "",
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+    )
+    .unwrap();
     lash_kernel_doc::validate_document(&lowered.document, super::library()).unwrap();
 }
 

@@ -32,6 +32,10 @@ impl Parser {
         self
     }
 
+    pub(crate) fn limits(&self) -> SourceLimits {
+        self.limits
+    }
+
     pub(crate) fn parse(&mut self, source: &str) -> Result<Program, Diagnostic> {
         guard_source_size(source, self.limits)?;
         guard_source_nesting(source, self.limits.max_nesting())?;

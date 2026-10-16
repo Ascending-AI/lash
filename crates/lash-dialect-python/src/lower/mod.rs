@@ -13,6 +13,7 @@
 //! before its assignment runs.
 
 mod calls;
+mod entries;
 mod expressions;
 mod format;
 mod lazy;
@@ -24,7 +25,9 @@ mod statements;
 use lash_kernel_doc::Span;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use lash_kernel_dialect::{Diagnostic, Environment, Library, Lowered};
+use lash_kernel_dialect::{
+    CellEnvironment, Diagnostic, Environment, Library, Lowered, Mode, workflow,
+};
 use lash_kernel_doc::{
     Action, Atom, Callee, Catch, Closure, Document, EffectName, Expr, FunctionCatalog, FunctionId,
     FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Signature, Stmt, TryStmt,
@@ -179,6 +182,17 @@ pub(crate) struct Lowerer<'a> {
     /// The notes of each declared function's body.
     declared_notes: BTreeMap<Name, Vec<Note>>,
     entries: BTreeMap<Name, Signature>,
+    /// The entries of a workflow module, as they are lowered; `None` for a
+    /// cell.
+    module: Option<workflow::Module>,
+    /// The module's entry declarations: its top-level `async def`s.
+    entry_defs: HashSet<TextRange>,
+    /// Whether an entry's body is being lowered, where no name of the
+    /// module resolves.
+    in_entry: bool,
+    /// The first module name an entry's body named, with where, which the
+    /// entry is refused for.
+    captured: std::cell::RefCell<Option<(String, Option<Span>)>>,
 }
 
 /// No module or restored session binding may mask the dialect's built-ins,
@@ -216,29 +230,34 @@ pub(crate) fn lower(
     module: &ast::ModModule,
     source: &str,
     environment: &Environment<'_>,
+    mode: Mode<'_>,
     max_nesting: usize,
 ) -> Lowering<Lowered> {
+    let (cell, workflow) = match mode {
+        Mode::Cell(cell) => (cell, None),
+        Mode::Module => (CellEnvironment::first(), Some(workflow::Module::new())),
+    };
+    let entry_defs = if workflow.is_some() {
+        entries::declarations(&module.body)
+    } else {
+        HashSet::new()
+    };
     let mut taken: HashSet<String> = source
         .split(|c: char| !(c.is_alphanumeric() || c == '_'))
         .filter(|word| !word.is_empty())
         .map(str::to_string)
         .collect();
-    taken.extend(
-        environment
-            .bindings
-            .iter()
-            .map(|name| name.as_str().to_string()),
-    );
+    taken.extend(cell.bindings.iter().map(|name| name.as_str().to_string()));
     let (globals, nonlocals) = scope::rebound(&module.body);
     let rebound: BTreeSet<String> = globals.union(&nonlocals).cloned().collect();
     let mut bindings = scope::bindings(&module.body, None, &rebound, &BTreeSet::new());
-    let saved_startable = environment
+    let saved_startable = cell
         .functions
         .keys()
         .filter(|name| !bindings.locals.contains(name.as_str()) && !rebound.contains(name.as_str()))
         .cloned()
         .collect();
-    for (name, saved) in environment.functions {
+    for (name, saved) in cell.functions {
         if !bindings.locals.contains(name.as_str())
             && let Some(signature) = saved::call_signature(saved)
         {
@@ -265,20 +284,17 @@ pub(crate) fn lower(
     let declared: Vec<String> = bindings
         .locals
         .iter()
-        .filter(|name| !environment.bindings.contains(&Name::new(name.as_str())))
+        .filter(|name| !cell.bindings.contains(&Name::new(name.as_str())))
         .cloned()
         .collect();
-    bindings.locals.extend(
-        environment
-            .bindings
-            .iter()
-            .map(|name| name.as_str().to_string()),
-    );
+    bindings
+        .locals
+        .extend(cell.bindings.iter().map(|name| name.as_str().to_string()));
     let mut excluded = rebound.clone();
-    excluded.extend(environment.bindings.iter().map(ToString::to_string));
+    excluded.extend(cell.bindings.iter().map(ToString::to_string));
     // A saved function may write module bindings from an earlier cell.
     // Its body is outside this local analysis.
-    if !environment.functions.is_empty() {
+    if !cell.functions.is_empty() {
         excluded.extend(bindings.locals.iter().cloned());
     }
     let integer_locals = scope::integer_locals(&module.body, &bindings, &excluded, true);
@@ -308,12 +324,16 @@ pub(crate) fn lower(
         span: None,
         nesting: 0,
         max_nesting,
-        saved: environment.functions,
+        saved: cell.functions,
         saved_used: BTreeSet::new(),
         saved_startable,
         declared: BTreeMap::new(),
         declared_notes: BTreeMap::new(),
         entries: BTreeMap::new(),
+        module: workflow,
+        entry_defs,
+        in_entry: false,
+        captured: std::cell::RefCell::new(None),
     };
     lowerer.declare_classes(&module.body)?;
     for name in &declared {
@@ -351,13 +371,18 @@ pub(crate) fn lower(
     document.private_bindings = lowerer.private;
     document.functions = lowerer.declared;
     document.entries = lowerer.entries;
+    if let Some(module) = lowerer.module.take() {
+        module
+            .assemble(&mut document, &mut lowerer.declared_notes)
+            .map_err(workflow::ModuleError::into_diagnostic)?;
+    }
     document.manifest.functions = reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
     if !lowerer.saved_used.is_empty() {
         let catalog: &dyn FunctionCatalog = environment.library;
         lash_kernel_dialect::install(
             &mut document,
-            environment.functions,
+            cell.functions,
             &lowerer.saved_used,
             &lash_kernel_dialect::FunctionValues::Bare,
             environment.effects,
@@ -481,6 +506,16 @@ impl Lowerer<'_> {
                 break;
             }
             index -= 1;
+        }
+        if index == 0 && self.in_entry {
+            // An entry runs apart from its module: a module name is
+            // captured, which the entry is refused for.
+            if self.scopes[0].bindings.locals.contains(id) {
+                self.captured
+                    .borrow_mut()
+                    .get_or_insert_with(|| (id.to_owned(), self.span));
+            }
+            return None;
         }
         self.scopes[index]
             .bindings

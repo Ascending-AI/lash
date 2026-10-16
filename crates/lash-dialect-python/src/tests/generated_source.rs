@@ -184,8 +184,6 @@ fn smith_and_dialect_batches_reconstruct_without_installed_helpers() {
         effects: &BTreeMap::new(),
         controls: &BTreeMap::new(),
         tool_roots: &BTreeSet::new(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
     let ts_batch = [
         "const x = [1,2]; console.log(x[0] + 3);",
@@ -194,9 +192,13 @@ fn smith_and_dialect_batches_reconstruct_without_installed_helpers() {
         "const f = (x) => x + 1; console.log(f(2));",
     ];
     for source in ts_batch {
-        let doc = lash_dialect_typescript::lower_workflow(source, &env)
-            .unwrap()
-            .document;
+        let doc = lash_dialect_typescript::lower(
+            source,
+            &env,
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+        )
+        .unwrap()
+        .document;
         roundtrip(&doc, false);
     }
     eprintln!(

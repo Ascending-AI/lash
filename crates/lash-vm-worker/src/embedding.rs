@@ -27,7 +27,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
-use lash_kernel_dialect::{Diagnostic, Environment, Lowered, NamedLibrary, Package};
+use lash_kernel_dialect::{Diagnostic, Environment, Lowered, Mode, NamedLibrary, Package};
 use lash_kernel_doc::{FunctionId, FunctionRegistry, ValidatedFunctions};
 use lash_kernel_vm::PreparedLibrary;
 use lash_vm_client::graph::ReleaseGraph;
@@ -222,9 +222,9 @@ impl Embedding {
         Ok(prepared.get_or_init(|| PreparedLibrary::new(Arc::clone(registry))))
     }
 
-    /// Lowers `source` as the installed dialect `dialect` does for a cell:
-    /// against `environment`'s library, offered effects and namespace roots,
-    /// session bindings and saved functions.
+    /// Lowers `source` as the installed dialect `dialect` does in `mode`:
+    /// against `environment`'s library, offered effects and namespace
+    /// roots, and, for a cell, its session bindings and saved functions.
     /// `None` when no such dialect is installed.
     ///
     /// A host calls it to learn whether text it shows or stores lowers,
@@ -234,9 +234,10 @@ impl Embedding {
         dialect: &str,
         source: &str,
         environment: &Environment<'_>,
+        mode: Mode<'_>,
     ) -> Option<Result<Lowered, Diagnostic>> {
         let package = self.dialects.get(dialect)?;
-        Some(package.front_end.lower(source, environment))
+        Some(package.front_end.lower(source, environment, mode))
     }
 }
 
@@ -494,7 +495,7 @@ pub fn python_with_limits(limits: lash_dialect_python::SourceLimits) -> Dialect 
 mod typescript {
     use std::sync::Mutex;
 
-    use lash_kernel_dialect::{Diagnostic, Environment, Lowered};
+    use lash_kernel_dialect::{Diagnostic, Environment, Lowered, Mode};
 
     /// The TypeScript front end on one reused parser thread, whose stack
     /// the parent's working policy sizes.
@@ -533,11 +534,12 @@ mod typescript {
             &self,
             source: &str,
             environment: &Environment<'_>,
+            mode: Mode<'_>,
         ) -> Result<Lowered, Diagnostic> {
             self.parser
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .lower(source, environment)
+                .lower(source, environment, mode)
                 .map_err(Into::into)
         }
     }
@@ -903,9 +905,11 @@ pub(crate) mod tests {
                         effects: &effects,
                         tool_roots: &tool_roots,
                         controls: &controls,
+                    },
+                    Mode::Cell(lash_kernel_dialect::CellEnvironment {
                         bindings: &bindings,
                         functions: &functions,
-                    },
+                    }),
                 )
                 .expect("the TypeScript dialect is installed")
                 .unwrap_or_else(|diagnostic| panic!("{cell} does not lower: {diagnostic:?}"));
@@ -931,11 +935,14 @@ pub(crate) mod tests {
             effects: &BTreeMap::new(),
             controls: &BTreeMap::new(),
             tool_roots: &BTreeSet::new(),
-            bindings: &BTreeSet::new(),
-            functions: &BTreeMap::new(),
         };
         embedding
-            .lower(lash_vm_releases::TYPESCRIPT, &source, &environment)
+            .lower(
+                lash_vm_releases::TYPESCRIPT,
+                &source,
+                &environment,
+                Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+            )
             .unwrap()
             .unwrap();
         let mut invalid = tuning;
@@ -952,11 +959,14 @@ pub(crate) mod tests {
             effects: &BTreeMap::new(),
             controls: &BTreeMap::new(),
             tool_roots: &BTreeSet::new(),
-            bindings: &BTreeSet::new(),
-            functions: &BTreeMap::new(),
         };
         embedding
-            .lower(lash_vm_releases::PYTHON, &python_source, &environment)
+            .lower(
+                lash_vm_releases::PYTHON,
+                &python_source,
+                &environment,
+                Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+            )
             .unwrap()
             .unwrap();
     }

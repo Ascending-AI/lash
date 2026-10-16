@@ -1003,6 +1003,9 @@ impl Lowerer<'_> {
                 "remove them; the function takes any value",
             ));
         }
+        if self.entry_defs.contains(&def.range) {
+            return self.module_entry(def);
+        }
         let name = def.name.id.as_str();
         let defaults = self.defaults(&def.parameters)?;
         // The body runs only once the name is bound.

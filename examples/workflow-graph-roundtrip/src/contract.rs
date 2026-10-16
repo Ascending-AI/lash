@@ -49,19 +49,41 @@ pub struct WorkflowView {
     pub source_map: Option<SourceMap>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_unavailable: Option<String>,
-    /// The TypeScript this workflow was imported from; absent for a
-    /// workflow opened as a kernel document.
+    /// The source this workflow was imported from; absent for a workflow
+    /// opened as a kernel document.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authored: Option<AuthoredSource>,
 }
 
-/// Authored TypeScript and the version importing it saved. Later versions
-/// are edits of the imported document; the text is not changed by them.
+/// Authored source, the dialect it is written in, and the version
+/// importing it saved. Later versions are edits of the imported document;
+/// the text is not changed by them.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthoredSource {
+    pub dialect: Dialect,
     pub text: String,
     pub version: u64,
+}
+
+/// A dialect a workflow is authored in. Both import through lash's one
+/// workflow import under one entry contract.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Dialect {
+    #[default]
+    TypeScript,
+    Python,
+}
+
+impl Dialect {
+    /// Lash's name for the language.
+    pub fn language(self) -> lash::workflow::document::SourceLanguage {
+        match self {
+            Self::TypeScript => lash::workflow::document::SourceLanguage::TypeScript,
+            Self::Python => lash::workflow::document::SourceLanguage::Python,
+        }
+    }
 }
 
 /// What this host offers a workflow document.

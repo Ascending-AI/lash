@@ -131,14 +131,18 @@
 //! # Source
 //!
 //! No part of reading, editing or publishing prints or parses a language.
-//! With the `typescript` feature,
-//! [`HostArtifacts::import_typescript_workflow`](crate::process::HostArtifacts::import_typescript_workflow)
-//! lowers whole workflow source and admits it against the same environment as
-//! publication. [`WorkflowImport`] distinguishes front-end diagnostics with
-//! source spans, admission refusals and typed unsupported reasons. Import
-//! writes no artifact and runs no effect. Exported async declarations and
-//! const-bound async literals, including `process(async (...) => ...)`, become
-//! entries.
+//! [`HostArtifacts::import_workflow`](crate::process::HostArtifacts::import_workflow)
+//! lowers a whole workflow module, TypeScript or Python, in the worker and
+//! admits it against the same environment as publication. Both dialects
+//! implement one contract ([`crate::dialect::workflow`]): every top-level
+//! async function, by declaration or by `const` (TypeScript) or `async def`
+//! (Python), exported or not, is an entry, and one declared inside a block is
+//! ordinary code. An entry captures nothing of the module; its signature is
+//! what its annotations mean in its dialect, with no defaults; and the
+//! contract's refusals carry the same codes in both. [`WorkflowImport`]
+//! distinguishes the imported document with its source map and source,
+//! front-end diagnostics with source spans, admission refusals and typed
+//! unsupported reasons. Import writes no artifact and runs no effect.
 //!
 //! With the matching `typescript` or `python` feature,
 //! `lash::typescript::print(document, options)` or `lash::python::print`
@@ -155,10 +159,10 @@
 //! and `read_exported` operations in a worker. Read documents still require
 //! normal admission before execution; maps are never stored automatically.
 
-#[cfg(feature = "typescript")]
-pub(crate) mod typescript;
-#[cfg(feature = "typescript")]
-pub use typescript::{
+#[cfg(feature = "codemode")]
+pub(crate) mod import;
+#[cfg(feature = "codemode")]
+pub use import::{
     WorkflowImport, WorkflowImportUnsupported, WorkflowSourceDiagnostic,
     WorkflowSourceDiagnosticKind,
 };

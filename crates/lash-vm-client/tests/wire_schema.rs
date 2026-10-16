@@ -99,6 +99,7 @@ fn check_snapshot(testing: bool) {
         include_str!("../../lash-kernel-dialect/src/imperative.rs"),
         include_str!("../../lash-kernel-doc/src/source_map.rs"),
         include_str!("../../lash-kernel-dialect/src/diagnostic.rs"),
+        include_str!("../../lash-kernel-dialect/src/workflow.rs"),
     ] {
         for declaration in declarations(source, testing) {
             schema.push_str(&declaration);

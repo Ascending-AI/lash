@@ -11,7 +11,7 @@
 //! the gate's programs and the generated documents.
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use arbitrary::{Arbitrary, Unstructured};
 use lash_kernel_conformance::smith::{Smith, compare};
@@ -200,14 +200,16 @@ fn the_prepared_step_structure_is_the_one_the_frame_shows() {
         effects: &effects,
         tool_roots: &tool_roots,
         controls: super::controls(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
     let mut programs = 0;
     let mut gate = 0;
     for (name, source) in gate_six::programs() {
-        let lowered = crate::lower(&source, &environment)
-            .unwrap_or_else(|diagnostic| panic!("{name}: {diagnostic}"));
+        let lowered = crate::lower(
+            &source,
+            &environment,
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+        )
+        .unwrap_or_else(|diagnostic| panic!("{name}: {diagnostic}"));
         let program = Program {
             release: super::pages::RELEASE,
             document: std::sync::Arc::new(lowered.document),

@@ -449,8 +449,6 @@ fn main() -> Result<(), String> {
         effects: &effects,
         tool_roots: &tool_roots,
         controls: &controls,
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
     if matches!(mode, Mode::Time) {
         println!(
@@ -460,13 +458,21 @@ fn main() -> Result<(), String> {
     for (name, source) in &programs {
         let name = name.as_str();
         let lowered = match if name.ends_with(".py") {
-            lash_dialect_python::lower(source, &environment)
-                .map(|lowered| lowered.document)
-                .map_err(|error| format!("{error:?}"))
+            lash_dialect_python::lower(
+                source,
+                &environment,
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+            )
+            .map(|lowered| lowered.document)
+            .map_err(|error| format!("{error:?}"))
         } else {
-            lash_dialect_typescript::lower(source, &environment)
-                .map(|lowered| lowered.document)
-                .map_err(|error| format!("{error:?}"))
+            lash_dialect_typescript::lower(
+                source,
+                &environment,
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+            )
+            .map(|lowered| lowered.document)
+            .map_err(|error| format!("{error:?}"))
         } {
             Ok(lowered) => lowered,
             Err(diagnostic) => {

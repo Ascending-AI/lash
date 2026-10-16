@@ -165,7 +165,7 @@ complete `PrintedSource`. The facade exposes `lash::typescript::read` and
 `lash::python::read`; their results are unadmitted Documents.
 `HostArtifacts::import_exported_workflow(source, format, base, environment)`
 reads and admits in one step, against the same environment as publication.
-`HostArtifacts::import_typescript_workflow` is authored lowering only.
+`HostArtifacts::import_workflow` is authored module lowering only, in either dialect.
 Authored TypeScript and Python lowering refuse unresolved printed helper names
 (`helper_*`), renamed bindings (`kernel_name_*`) and the `declared`
 namespace (also `k` attribute and method references in Python) as

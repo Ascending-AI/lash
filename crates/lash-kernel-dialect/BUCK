@@ -56,6 +56,7 @@ filegroup(
     srcs = [
         "src/imperative.rs",
         "src/diagnostic.rs",
+        "src/workflow.rs",
     ],
     copy = False,
     visibility = ["PUBLIC"],

@@ -111,13 +111,15 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
         .unwrap()
         .source;
     let bindings = BTreeSet::new();
+    let cell = lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+        bindings: &bindings,
+        functions: &BTreeMap::new(),
+    });
     let environment = Environment {
         library,
         effects: &document.manifest.effects,
         controls: &BTreeMap::new(),
         tool_roots: &std::collections::BTreeSet::new(),
-        bindings: &bindings,
-        functions: &std::collections::BTreeMap::new(),
     };
     let lowered = crate::read(&source, document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
@@ -145,11 +147,14 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
     let mut parser = crate::Parser::default();
     assert_eq!(
         parser
-            .lower(&source, &environment)
+            .lower(&source, &environment, cell)
             .map(|lowered| lowered.document),
-        crate::lower(&source, &environment).map(|lowered| lowered.document),
+        crate::lower(&source, &environment, cell).map(|lowered| lowered.document),
     );
-    assert!(crate::lower(&source, &environment).is_err(), "{source}");
+    assert!(
+        crate::lower(&source, &environment, cell).is_err(),
+        "{source}"
+    );
 }
 
 #[test]

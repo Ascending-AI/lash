@@ -10,7 +10,7 @@ use lash::workflow::document::{Correspondence, Document, Name};
 use lash::workflow::edit::{Draft, Transaction};
 use serde::{Deserialize, Serialize};
 
-use crate::{AppState, ErrorResponse, Origin, WorkflowView, runtime};
+use crate::{AppState, Dialect, ErrorResponse, Origin, WorkflowView, runtime};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,6 +18,8 @@ pub(crate) struct SourceRequest {
     version: u64,
     source: String,
     entry: Name,
+    #[serde(default)]
+    dialect: Dialect,
 }
 
 pub(crate) async fn import_source(
@@ -27,7 +29,7 @@ pub(crate) async fn import_source(
     let _publishing = state.publishing.lock().await;
     let current = state.current();
     check_version(request.version, current.version)?;
-    let document = import(&state.core, &request.source).await?;
+    let document = import(&state.core, request.dialect, &request.source).await?;
     if !document.entries.contains_key(&request.entry) {
         return Err(ErrorResponse::invalid(
             "entry",
@@ -37,29 +39,42 @@ pub(crate) async fn import_source(
     let draft = Draft::open(document).map_err(|error| ErrorResponse::invalid("document", error))?;
     let checked = state.environment().await?;
     let (saved, _) = state
-        .install(draft, request.entry, Origin::Imported(request.source))
+        .install(
+            draft,
+            request.entry,
+            Origin::Imported {
+                dialect: request.dialect,
+                text: request.source,
+            },
+        )
         .await;
     Ok(Json(saved.view(checked.functions())))
 }
 
-/// Lowers authored TypeScript through lash's workflow import and admits it
-/// against the run environment, as written: the host rewrites nothing.
-pub(crate) async fn import(core: &lash::LashCore, source: &str) -> Result<Document, ErrorResponse> {
+/// Lowers authored source in `dialect` through lash's workflow import and
+/// admits it against the run environment, as written: the host rewrites
+/// nothing.
+pub(crate) async fn import(
+    core: &lash::LashCore,
+    dialect: Dialect,
+    source: &str,
+) -> Result<Document, ErrorResponse> {
     let environment =
         runtime::environment().map_err(|error| ErrorResponse::invalid("environment", error))?;
     let imported = core
         .host_artifacts()
-        .import_typescript_workflow(source, &environment)
+        .import_workflow(dialect.language(), source, &environment, None)
         .await
         .map_err(|error| ErrorResponse::invalid("source_import", error))?;
     match imported {
-        WorkflowImport::Imported { document } => Ok(document.document().clone()),
+        WorkflowImport::Imported { document, .. } => Ok(document.document().clone()),
         WorkflowImport::Refused(diagnostics) => Err(ErrorResponse::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "source_refused",
-            "TypeScript import was refused; the current document is unchanged",
+            "the import was refused; the current document is unchanged",
             serde_json::json!({"diagnostics": diagnostics.iter().map(|diagnostic| {
                 serde_json::json!({
+                    "code": diagnostic.code,
                     "message": diagnostic.message,
                     "span": diagnostic.span.map(|span| serde_json::json!({"start":span.start,"end":span.end})),
                 })

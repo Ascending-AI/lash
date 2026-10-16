@@ -332,8 +332,9 @@ impl lash_kernel_dialect::FrontEnd for Unmapped {
         &self,
         source: &str,
         environment: &lash_kernel_dialect::Environment<'_>,
+        mode: lash_kernel_dialect::Mode<'_>,
     ) -> Result<lash_kernel_dialect::Lowered, lash_kernel_dialect::Diagnostic> {
-        let mut lowered = self.0.lower(source, environment)?;
+        let mut lowered = self.0.lower(source, environment, mode)?;
         lowered.source_map = None;
         Ok(lowered)
     }

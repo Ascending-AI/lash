@@ -671,7 +671,7 @@ targets = ["wire_schema"]
 compile_data = ["//crates/lash-kernel-dialect:source_wire_declarations", "//crates/lash-kernel-doc:source_wire_declarations"]
 
 [filegroups.lash-kernel-dialect]
-source_wire_declarations = { srcs = ["src/imperative.rs", "src/diagnostic.rs"] }
+source_wire_declarations = { srcs = ["src/imperative.rs", "src/diagnostic.rs", "src/workflow.rs"] }
 
 [filegroups.lash-kernel-doc]
 source_wire_declarations = { srcs = ["src/source_map.rs"] }

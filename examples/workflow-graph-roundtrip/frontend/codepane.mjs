@@ -142,6 +142,11 @@ const KEYWORDS = {
       " ",
     ),
   ),
+  python: new Set(
+    "and as async await break class continue def elif else except False finally for from if import in is lambda None not or pass raise return True try while with".split(
+      " ",
+    ),
+  ),
   kernel: new Set(
     "absent as break catch continue do effect else entry fail false finally finish fn for if in invoke join kernel let main null numbers perform print private remove return set sleep spawn throw true try use while yield".split(
       " ",

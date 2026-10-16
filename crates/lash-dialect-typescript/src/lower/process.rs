@@ -12,6 +12,11 @@
 //! arguments instead. The body is the arrow's own closure, called once by
 //! the entry in the entry's task, so an `await` in it is a wait of the
 //! process.
+//!
+//! A workflow module's entries are lowered the same way, under the shared
+//! workflow contract (`lash_kernel_dialect::workflow`): each top-level
+//! async function, by declaration or by `const`, is an entry named as the
+//! source names it, and its body sees none of the module's bindings.
 
 use std::collections::HashSet;
 
@@ -19,6 +24,8 @@ use lash_kernel_doc::{
     Action, Atom, Callee, EffectName, Expr, Literal, Name, Param, RecordType, RecordTypeField,
     Signature, Stmt, Type,
 };
+
+use lash_kernel_dialect::workflow::{self, ModuleRefusal};
 
 use super::{BindingKind, Buf, FunctionFrame, Lowerer, Lowering, Operand, Ty};
 use crate::adapter::{self as ast, TypeAnnotation, TypeShape};
@@ -38,33 +45,36 @@ pub(super) const DEFINITION_PROPERTY: &str = "definition";
 
 impl Lowerer<'_> {
     /// The arrow `expr` is, if it is one a process is written as and the
-    /// host offers the process effects.
+    /// host offers the process effects. A workflow module writes none: its
+    /// entries are its top-level async functions ([`Self::module_entry`]).
     pub(super) fn process_arrow<'e>(&self, expr: &'e ast::Expr) -> Option<&'e ast::Function> {
-        let expr = if self.workflow {
-            match expr {
-                ast::Expr::Call { callee, args, .. } if matches!(callee.as_ref(), ast::Expr::Ident(name, _) if name == "process") =>
-                {
-                    let [ast::CallArg::Value(function)] = args.as_slice() else {
-                        return None;
-                    };
-                    function
-                }
-                other => other,
-            }
-        } else {
-            expr
-        };
+        if self.module.is_some() {
+            return None;
+        }
         let ast::Expr::Function(function) = expr else {
             return None;
         };
         (function.is_async
-            && (function.is_arrow || self.workflow)
-            && (self.workflow
-                || self
-                    .effects
-                    .keys()
-                    .any(|effect| effect.as_str().starts_with(PROCESS_EFFECTS))))
+            && function.is_arrow
+            && self
+                .effects
+                .keys()
+                .any(|effect| effect.as_str().starts_with(PROCESS_EFFECTS)))
         .then_some(function)
+    }
+
+    /// The async function a module's top-level `const` binds, if `init` is
+    /// one: an entry of the module. A declaration inside a block, a
+    /// function or an entry is ordinary code.
+    pub(super) fn module_entry<'e>(&self, init: &'e ast::Expr) -> Option<&'e ast::Function> {
+        let ast::Expr::Function(function) = init else {
+            return None;
+        };
+        (self.module.is_some()
+            && function.is_async
+            && self.in_cell_code()
+            && self.scopes.len() == 1)
+            .then_some(function)
     }
 
     /// Whether lowering stands in the cell's own code, outside every
@@ -74,23 +84,42 @@ impl Lowerer<'_> {
     }
 
     /// The signature a host starts `function` under: each parameter a
-    /// plain name of a durable type.
+    /// plain name of a durable type. A module entry's annotations map under
+    /// the workflow contract: a default is refused, and so is an annotation
+    /// with no kernel type.
     pub(super) fn process_signature(&self, function: &ast::Function) -> Lowering<Signature> {
+        let module = self.module.is_some();
+        let (param_refusal, return_refusal) = if module {
+            let unmappable = DiagnosticCode::Module(ModuleRefusal::UnmappableEntryAnnotation);
+            (unmappable, unmappable)
+        } else {
+            (
+                DiagnosticCode::ProcessParamTypeUnsupported,
+                DiagnosticCode::ProcessReturnTypeUnsupported,
+            )
+        };
         let mut params = Vec::with_capacity(function.params.len());
         for param in &function.params {
-            let ast::Pattern::Ident(name, annotation) = param else {
-                return Err(Diagnostic::new(
-                    DiagnosticCode::ProcessParamTypeUnsupported,
-                    "a process parameter is a plain name: start arguments are keyed by it",
-                    self.span,
-                ));
+            let (name, annotation) = match param {
+                ast::Pattern::Ident(name, annotation) => (name, annotation),
+                ast::Pattern::Assign { .. } if module => {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::Module(ModuleRefusal::EntryDefault),
+                        "an entry's parameter has no default: a start passes every argument",
+                        self.span,
+                    ));
+                }
+                _ => {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::ProcessParamTypeUnsupported,
+                        "a process parameter is a plain name: start arguments are keyed by it",
+                        self.span,
+                    ));
+                }
             };
             params.push(Param {
                 name: Name::new(name.as_str()),
-                ty: durable_type(
-                    annotation.as_ref(),
-                    DiagnosticCode::ProcessParamTypeUnsupported,
-                )?,
+                ty: durable_type(annotation.as_ref(), param_refusal)?,
                 // `name?: T` is written as `T` or `undefined`.
                 optional: annotation.as_ref().is_some_and(|annotation| {
                     matches!(&annotation.shape, TypeShape::Union(members)
@@ -99,10 +128,7 @@ impl Lowerer<'_> {
             });
         }
         let result = match function.return_ty.as_ref() {
-            Some(annotation) => durable_type(
-                Some(annotation),
-                DiagnosticCode::ProcessReturnTypeUnsupported,
-            )?,
+            Some(annotation) => durable_type(Some(annotation), return_refusal)?,
             None => Type::Any,
         };
         Ok(Signature { params, result })
@@ -232,9 +258,64 @@ impl Lowerer<'_> {
             }
             _ => self.fresh("process"),
         };
-        let Signature { params, result } = self.process_signature(function)?;
+        let signature = self.process_signature(function)?;
+        let body = self.lift(&signature.params, function)?;
+        // Lifting changes the unit, not the source ownership of its body.
+        self.declared_notes.insert(entry.clone(), body.notes);
+        self.declared.insert(
+            entry.clone(),
+            lash_kernel_doc::Function {
+                params: signature
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect(),
+                body: body.stmts,
+            },
+        );
+        self.entries.insert(entry.clone(), signature);
+        Ok(reference(entry))
+    }
 
-        // The body is lowered with none of the cell in scope.
+    /// Lifts the module entry `function`, bound to `name` at the module's
+    /// top level, into the module, and gives the reference to it.
+    pub(super) fn lower_module_entry(
+        &mut self,
+        name: &str,
+        function: &ast::Function,
+    ) -> Lowering<Operand> {
+        let entry = Name::new(name);
+        let span = self.span;
+        let signature = self.process_signature(function)?;
+        let body = self.lift(&signature.params, function)?;
+        let function = lash_kernel_doc::Function {
+            params: signature
+                .params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect(),
+            body: body.stmts,
+        };
+        // Only a module's lowering finds an entry (`module_entry`).
+        if let Some(module) = self.module.as_mut() {
+            module
+                .add(workflow::Entry {
+                    name: entry.clone(),
+                    span,
+                    function,
+                    signature,
+                    notes: body.notes,
+                })
+                .map_err(Diagnostic::module)?;
+        }
+        Ok(reference(entry))
+    }
+
+    /// The body of an entry that runs `function` under `params`: the
+    /// function's own closure, made with none of the cell or module in
+    /// scope, called once with the entry's arguments; a process that returns
+    /// nothing ends with null.
+    fn lift(&mut self, params: &[Param], function: &ast::Function) -> Lowering<Buf> {
         let outer: HashSet<String> = self
             .scopes
             .iter()
@@ -267,7 +348,7 @@ impl Lowerer<'_> {
         self.lifting = Some(outer);
         let body = self.scoped_block(|lowerer| {
             let mut passed = Vec::with_capacity(params.len());
-            for param in &params {
+            for param in params {
                 let kernel = lowerer.declare(param.name.as_str(), BindingKind::Local);
                 debug_assert_eq!(kernel, param.name, "an entry's parameter keeps its name");
                 passed.push(Expr::Variable(kernel));
@@ -307,25 +388,7 @@ impl Lowerer<'_> {
         self.narrowed = narrowed;
         self.functions = frames;
         self.scopes = scopes;
-        let body = body?;
-        // Lifting changes the unit, not the source ownership of its body.
-        self.declared_notes.insert(entry.clone(), body.notes);
-
-        self.declared.insert(
-            entry.clone(),
-            lash_kernel_doc::Function {
-                params: params.iter().map(|param| param.name.clone()).collect(),
-                body: body.stmts,
-            },
-        );
-        self.entries
-            .insert(entry.clone(), Signature { params, result });
-        Ok(Operand {
-            plain: None,
-            expr: Expr::Literal(Literal::Function(entry)),
-            stable: true,
-            ty: Ty::Unknown,
-        })
+        body
     }
 
     /// What `await` gives for `awaited`, the settled value: a process
@@ -407,20 +470,37 @@ impl Lowerer<'_> {
     }
 
     /// The refusal of a process body that names `name`, if `name` is the
-    /// cell's.
+    /// cell's, or of a module entry that names one of the module's.
     pub(super) fn captured(&self, name: &str) -> Option<Diagnostic> {
         self.lifting
             .as_ref()
             .is_some_and(|outer| outer.contains(name))
-            .then(|| {
-                Diagnostic::new(
+            .then(|| match self.module {
+                Some(_) => Diagnostic::new(
+                    DiagnosticCode::Module(ModuleRefusal::CapturedModuleBinding),
+                    format!(
+                        "an entry runs apart from the module and cannot read the module's `{name}`"
+                    ),
+                    self.span,
+                ),
+                None => Diagnostic::new(
                     DiagnosticCode::NonLiftableCapture,
                     format!(
                         "a process runs apart from the cell and cannot read the cell's `{name}`"
                     ),
                     self.span,
-                )
+                ),
             })
+    }
+}
+
+/// The value a reference to the declared function `entry` is.
+fn reference(entry: Name) -> Operand {
+    Operand {
+        plain: None,
+        expr: Expr::Literal(Literal::Function(entry)),
+        stable: true,
+        ty: Ty::Unknown,
     }
 }
 

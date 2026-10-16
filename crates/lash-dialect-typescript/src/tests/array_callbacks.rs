@@ -219,11 +219,13 @@ fn lowered(kernel: &Kernel, source: &str) -> Program {
         library: &kernel.library,
         effects: &super::machine::effects(),
         controls: super::controls(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
-    let lowered =
-        crate::lower(source, &environment).unwrap_or_else(|error| panic!("{error}\n{source}"));
+    let lowered = crate::lower(
+        source,
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+    )
+    .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Program {
         release: super::pages::RELEASE,
         document: Arc::new(lowered.document),

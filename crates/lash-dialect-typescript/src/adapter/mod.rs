@@ -486,6 +486,11 @@ fn parse_from_goal(
         type_parameters: adapter.type_parameters.take(),
         assigned: adapter.assigned.take(),
     };
+    if workflow {
+        // Two entries of one name break the workflow contract before they
+        // break JavaScript's redeclaration rule.
+        workflow::entries_once(&program)?;
+    }
     declarations::check(&program)?;
     Ok(program)
 }

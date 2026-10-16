@@ -31,7 +31,7 @@ pub use lash_kernel_dialect::{
 pub use package::define_helpers;
 pub use printer::print;
 
-use lash_kernel_dialect::{Diagnostic, Environment, FrontEnd, Lowered, Package};
+use lash_kernel_dialect::{Diagnostic, Environment, FrontEnd, Lowered, Mode, Package};
 use lash_kernel_doc::Span;
 
 /// The name annotations record a document's dialect under.
@@ -75,26 +75,37 @@ impl Default for SourceLimits {
 
 /// Lowers Python source to a kernel document.
 ///
-/// The source is a cell: the names it binds at its top level are the
-/// session's (`K-SES-001`), and `environment.bindings` names those earlier
-/// cells left. A cell may `await` at its top level.
-pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
-    lower_with_limits(source, environment, SourceLimits::standard())
+/// In [`Mode::Cell`] the source is a cell: the names it binds at its top
+/// level are the session's (`K-SES-001`), and the cell environment's
+/// bindings name those earlier cells left. A cell may `await` at its top
+/// level.
+///
+/// In [`Mode::Module`] it is a whole workflow a host imports: every
+/// top-level `async def` is an entry of the document under the shared
+/// workflow contract ([`lash_kernel_dialect::workflow`]), and the rest of
+/// the top level is `main`. A module runs no effect and lowers to an
+/// unchecked document; a host must admit it before use.
+pub fn lower(
+    source: &str,
+    environment: &Environment<'_>,
+    mode: Mode<'_>,
+) -> Result<Lowered, Diagnostic> {
+    lower_with_limits(source, environment, mode, SourceLimits::standard())
 }
 /// Lower under deployment source admission limits.
 pub fn lower_with_limits(
     source: &str,
     environment: &Environment<'_>,
+    mode: Mode<'_>,
     limits: SourceLimits,
 ) -> Result<Lowered, Diagnostic> {
-    lower::check_binding_names(
-        environment
-            .bindings
-            .iter()
-            .map(lash_kernel_doc::Name::as_str),
-        environment.effects,
-        environment.tool_roots,
-    )?;
+    if let Mode::Cell(cell) = mode {
+        lower::check_binding_names(
+            cell.bindings.iter().map(lash_kernel_doc::Name::as_str),
+            environment.effects,
+            environment.tool_roots,
+        )?;
+    }
     let max_bytes = limits.max_bytes;
     if source.len() > max_bytes {
         return Err(diagnostics::unplaced(
@@ -112,7 +123,13 @@ pub fn lower_with_limits(
         kind: Code::Syntax.kind(),
         repairs: Vec::new(),
     })?;
-    lower::lower(parsed.syntax(), source, environment, limits.max_nesting)
+    lower::lower(
+        parsed.syntax(),
+        source,
+        environment,
+        mode,
+        limits.max_nesting,
+    )
 }
 
 /// The Python front end, as a dialect package holds it.
@@ -122,8 +139,13 @@ pub struct Python {
 }
 
 impl FrontEnd for Python {
-    fn lower(&self, source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
-        lower_with_limits(source, environment, self.limits)
+    fn lower(
+        &self,
+        source: &str,
+        environment: &Environment<'_>,
+        mode: Mode<'_>,
+    ) -> Result<Lowered, Diagnostic> {
+        lower_with_limits(source, environment, mode, self.limits)
     }
 }
 

@@ -1,7 +1,6 @@
 //! JavaScript array laws: sparse slots, length snapshots, live iteration and
 //! callbacks run on the real kernel library, never a native stand-in.
 
-use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, NamedLibrary};
@@ -66,11 +65,13 @@ fn drive(source: &str, expected: &[Vec<Datum>]) -> End {
         library: &kernel.library,
         effects: &super::machine::effects(),
         controls: super::controls(),
-        bindings: &BTreeSet::new(),
-        functions: &std::collections::BTreeMap::new(),
     };
-    let lowered =
-        crate::lower(source, &environment).unwrap_or_else(|error| panic!("{error}\n{source}"));
+    let lowered = crate::lower(
+        source,
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+    )
+    .unwrap_or_else(|error| panic!("{error}\n{source}"));
     drive_document(lowered.document, expected, source)
 }
 

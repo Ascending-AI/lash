@@ -1266,36 +1266,44 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
     let effects = Default::default();
     let roots = Default::default();
     let controls = Default::default();
-    let bindings = Default::default();
-    let functions = Default::default();
     let environment = lash_kernel_dialect::Environment {
         library: embedding.library(),
         effects: &effects,
         tool_roots: &roots,
         controls: &controls,
-        bindings: &bindings,
-        functions: &functions,
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("runtime");
+    let typescript = lash_kernel_doc::SourceLanguage::TypeScript;
+    let limits = |max_bytes| {
+        Some(lash_kernel_dialect::workflow::WorkflowSourceLimits {
+            max_bytes,
+            max_nesting: 28,
+        })
+    };
     runtime.block_on(async {
         let source = "export async function digest(inbox: string) { return inbox; }";
-        let lowered = workers
-            .import_typescript_workflow(source, &environment, 1024, 28)
+        let (document, _) = workers
+            .import_workflow(typescript, source, &environment, limits(1024))
             .await
             .expect("workflow import");
-        assert!(lowered.document.entries.contains_key(&Name::new("digest")));
+        assert!(document.entries.contains_key(&Name::new("digest")));
         let refused = workers
-            .import_typescript_workflow(source, &environment, 1, 28)
+            .import_workflow(typescript, source, &environment, limits(1))
             .await;
         assert!(matches!(
             refused,
             Err(service::SourceServiceError::Dialect(_))
         ));
         let malformed = workers
-            .import_typescript_workflow("export const broken = ;", &environment, 1024, 28)
+            .import_workflow(
+                typescript,
+                "export const broken = ;",
+                &environment,
+                limits(1024),
+            )
             .await;
         let Err(service::SourceServiceError::Dialect(refusal)) = malformed else {
             panic!("syntax is refused");

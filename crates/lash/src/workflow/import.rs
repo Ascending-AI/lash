@@ -1,5 +1,8 @@
-//! Whole source import: lowering followed by admission, without publication.
+//! Whole workflow import in any installed dialect: lowering under the
+//! shared workflow contract, then admission, without publication.
 use lash_kernel_dialect::Environment;
+use lash_kernel_dialect::workflow::WorkflowSourceLimits;
+use lash_kernel_doc::{SourceLanguage, SourceMap};
 
 use super::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentEntry};
 
@@ -7,13 +10,25 @@ pub use lash_kernel_dialect::{
     Diagnostic as WorkflowSourceDiagnostic, DiagnosticKind as WorkflowSourceDiagnosticKind,
 };
 
-/// The outcome of importing host-authored TypeScript against a workflow environment.
+/// The outcome of importing a host-authored workflow module against a
+/// workflow environment.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum WorkflowImport {
-    /// The source lowered and its document was admitted. Nothing was published.
-    /// The reference selects `main`; all process entries remain in the document.
-    Imported { document: WorkflowDocument },
+    /// The source lowered and its document was admitted. Nothing was
+    /// published. The reference selects `main`; every entry remains in the
+    /// document. `source_map` maps the document to `source`, the text it
+    /// was lowered from; publish both with the document to keep them.
+    Imported {
+        document: WorkflowDocument,
+        source_map: SourceMap,
+        source: String,
+    },
+    /// Exported source read back against the document it was printed from
+    /// ([`HostArtifacts::import_exported_workflow`](crate::process::HostArtifacts::import_exported_workflow))
+    /// and admitted. Nothing was published. Reading back makes no map:
+    /// printing the document answers one with its text.
+    Read { document: WorkflowDocument },
     /// The front end refused the source, with its original byte spans.
     Refused(Vec<WorkflowSourceDiagnostic>),
     /// The lowered document cannot run against the supplied environment.
@@ -22,7 +37,7 @@ pub enum WorkflowImport {
     Unsupported(WorkflowImportUnsupported),
 }
 
-/// Why whole TypeScript workflow import is unavailable.
+/// Why whole workflow import is unavailable.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WorkflowImportUnsupported {
@@ -36,19 +51,28 @@ pub enum WorkflowImportUnsupported {
 
 pub(crate) async fn import(
     workers: &lash_vm_client::service::Service,
+    language: SourceLanguage,
     source: &str,
     dialect: &Environment<'_>,
     checker: &lash_kernel_check::Environment<'_>,
-    limits: lash_dialect_typescript::SourceLimits,
+    limits: Option<WorkflowSourceLimits>,
 ) -> crate::Result<WorkflowImport> {
-    let lowered = match workers
-        .import_typescript_workflow(source, dialect, limits.max_bytes(), limits.max_nesting())
+    let (document, source_map) = match workers
+        .import_workflow(language, source, dialect, limits)
         .await
     {
-        Ok(lowered) => lowered,
+        Ok(imported) => imported,
         Err(error) => return source_refusal(error),
     };
-    Ok(admit(lowered.document, checker))
+    let document = match WorkflowDocument::admit(document, WorkflowDocumentEntry::Main, checker) {
+        Ok(document) => document,
+        Err(refusal) => return Ok(WorkflowImport::Admission(refusal)),
+    };
+    Ok(WorkflowImport::Imported {
+        document,
+        source_map,
+        source: source.to_owned(),
+    })
 }
 
 pub(crate) fn source_refusal(
@@ -77,7 +101,8 @@ pub(crate) fn source_refusal(
     }
 }
 
-pub(crate) fn admit(
+/// Admits exported source read back against its base.
+pub(crate) fn admit_read(
     document: lash_kernel_doc::Document,
     checker: &lash_kernel_check::Environment<'_>,
 ) -> WorkflowImport {
@@ -85,5 +110,5 @@ pub(crate) fn admit(
         Ok(document) => document,
         Err(refusal) => return WorkflowImport::Admission(refusal),
     };
-    WorkflowImport::Imported { document }
+    WorkflowImport::Read { document }
 }

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
-use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
+use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, NamedLibrary};
 use lash_kernel_doc::{EffectName, Signature, parse_document, print_document, validate_document};
 
 use crate::Diagnostic;
@@ -19,6 +19,7 @@ mod hot_helpers;
 mod json;
 mod language;
 mod machine;
+mod module;
 mod numeric_helpers;
 mod operands;
 mod package;
@@ -103,10 +104,15 @@ fn lower_against(
         library: library(),
         effects,
         controls: controls(),
-        bindings: &bindings,
-        functions: &std::collections::BTreeMap::new(),
     };
-    let lowered = crate::lower(source, &environment)?;
+    let lowered = crate::lower(
+        source,
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+            bindings: &bindings,
+            functions: &std::collections::BTreeMap::new(),
+        }),
+    )?;
     if let Err(invalid) = validate_document(&lowered.document, library()) {
         panic!("{invalid}\n{}", print_document(&lowered.document));
     }
@@ -162,20 +168,21 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
         library: library(),
         effects: &BTreeMap::new(),
         controls: &BTreeMap::new(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
-    assert!(crate::lower(&source, &environment).is_err());
+    let cell = Mode::Cell(CellEnvironment::first());
+    assert!(crate::lower(&source, &environment, cell).is_err());
     let limits = crate::SourceLimits::new(source.len(), crate::MAX_SOURCE_NESTING_DEPTH).unwrap();
-    crate::lower_with_limits(&source, &environment, limits).unwrap();
-    assert!(crate::lower_workflow(&source, &environment).is_err());
-    crate::lower_workflow_with_limits(&source, &environment, limits).unwrap();
+    crate::lower_with_limits(&source, &environment, cell, limits).unwrap();
+    let module = format!("{source}\nexport async function main() {{ return null; }}");
+    assert!(crate::lower(&module, &environment, Mode::Module).is_err());
+    let limits = crate::SourceLimits::new(module.len(), crate::MAX_SOURCE_NESTING_DEPTH).unwrap();
+    crate::lower_with_limits(&module, &environment, Mode::Module, limits).unwrap();
     crate::Parser::default()
         .with_limits(limits)
-        .lower(&source, &environment)
+        .lower(&source, &environment, cell)
         .unwrap();
     let limits = crate::SourceLimits::new(source.len(), 1).unwrap();
     let diagnostic =
-        crate::lower_with_limits("const x = ((1));", &environment, limits).unwrap_err();
+        crate::lower_with_limits("const x = ((1));", &environment, cell, limits).unwrap_err();
     assert!(diagnostic.message.contains("1-level"), "{diagnostic}");
 }

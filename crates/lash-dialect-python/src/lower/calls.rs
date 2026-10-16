@@ -214,19 +214,32 @@ impl Lowerer<'_> {
         )
     }
 
-    /// The tool a call names, if it names one.
+    /// The tool a call names, if it names one: by its one name, or, for a
+    /// tool whose name has namespaces (a workflow's `display.show_message`),
+    /// by that dotted path from a root that is no variable.
     pub(super) fn effect(&self, call: &ast::ExprCall) -> Option<(EffectName, Signature)> {
-        let PyExpr::Name(name) = call.func.as_ref() else {
-            return None;
-        };
-        let id = name.id.as_str();
-        if self.variable(id).is_some() {
-            return None;
-        }
+        let path = self.tool_path(call.func.as_ref())?;
         self.effects
             .iter()
-            .find(|(effect, _)| effect.as_str() == id)
+            .find(|(effect, _)| effect.as_str() == path)
             .map(|(effect, signature)| (effect.clone(), signature.clone()))
+    }
+
+    /// `expr` as a dotted name whose root names no variable.
+    fn tool_path(&self, expr: &PyExpr) -> Option<String> {
+        match expr {
+            PyExpr::Name(name) => {
+                let id = name.id.as_str();
+                self.variable(id).is_none().then(|| id.to_owned())
+            }
+            PyExpr::Attribute(attribute) => {
+                let mut path = self.tool_path(&attribute.value)?;
+                path.push('.');
+                path.push_str(attribute.attr.id.as_str());
+                Some(path)
+            }
+            _ => None,
+        }
     }
 
     /// Refuses `*args` and `**kwargs` at a call.
@@ -286,44 +299,14 @@ impl Lowerer<'_> {
         if let Some(function) = self.asyncio_function(call) {
             return self.asyncio(function, call, awaited);
         }
+        if let Some((effect, signature)) = self.effect(call) {
+            return self.tool_call(&effect, &signature, call, awaited);
+        }
         match call.func.as_ref() {
             PyExpr::Name(name) => {
                 let id = name.id.as_str();
                 if self.variable(id).is_some() {
                     return self.call_function(call, awaited);
-                }
-                if let Some((effect, signature)) = self.effect(call) {
-                    if !awaited {
-                        return Err(diagnostics::with_repair(
-                            Code::CoroutineNotAwaited,
-                            format!("the tool `{id}` is called without `await`"),
-                            call.range(),
-                            format!(
-                                "write `await {}`, or `asyncio.create_task({})` to run it beside this code",
-                                self.text(call.range()),
-                                self.text(call.range())
-                            ),
-                        ));
-                    }
-                    let control = self.controls.contains_key(&effect);
-                    if control && !self.in_module() {
-                        return Err(self.control_placement(&effect, call));
-                    }
-                    let action = self.perform(&effect, &signature, call)?;
-                    let result = self.let_rhs(Rhs::Action(action), Ty::Unknown);
-                    if control {
-                        // The call settled, so the turn is over: nothing
-                        // after it runs (`K-FORM-019`). The host reads the
-                        // control from the settled call, never from this
-                        // value.
-                        self.emit(Stmt::Finish {
-                            value: Expr::Literal(Literal::Null),
-                        });
-                        return Ok(result);
-                    }
-                    // The reply reads as `json.loads` gives it: an object
-                    // is a dict.
-                    return self.invoke("py.reply", &[result], Ty::Unknown);
                 }
                 if SUPPORTED.contains(&id) {
                     return self.builtin(id, call);
@@ -355,6 +338,45 @@ impl Lowerer<'_> {
             PyExpr::Attribute(attribute) => self.method(attribute, call),
             _ => self.call_function(call, awaited),
         }
+    }
+
+    /// A call of the tool `effect`, which a cell awaits.
+    fn tool_call(
+        &mut self,
+        effect: &EffectName,
+        signature: &Signature,
+        call: &ast::ExprCall,
+        awaited: bool,
+    ) -> Lowering<Operand> {
+        if !awaited {
+            return Err(diagnostics::with_repair(
+                Code::CoroutineNotAwaited,
+                format!("the tool `{effect}` is called without `await`"),
+                call.range(),
+                format!(
+                    "write `await {}`, or `asyncio.create_task({})` to run it beside this code",
+                    self.text(call.range()),
+                    self.text(call.range())
+                ),
+            ));
+        }
+        let control = self.controls.contains_key(effect);
+        if control && !self.in_module() {
+            return Err(self.control_placement(effect, call));
+        }
+        let action = self.perform(effect, signature, call)?;
+        let result = self.let_rhs(Rhs::Action(action), Ty::Unknown);
+        if control {
+            // The call settled, so the turn is over: nothing after it runs
+            // (`K-FORM-019`). The host reads the control from the settled
+            // call, never from this value.
+            self.emit(Stmt::Finish {
+                value: Expr::Literal(Literal::Null),
+            });
+            return Ok(result);
+        }
+        // The reply reads as `json.loads` gives it: an object is a dict.
+        self.invoke("py.reply", &[result], Ty::Unknown)
     }
 
     /// Evaluates the callee and the arguments of a call of a Python
@@ -624,6 +646,7 @@ impl Lowerer<'_> {
                     None => Some("py.await"),
                 }
             }
+            PyExpr::Attribute(_) if self.effect(call).is_some() => None,
             PyExpr::Attribute(_) => match self.asyncio_function(call) {
                 Some("sleep" | "gather") => None,
                 _ => Some("py.await"),

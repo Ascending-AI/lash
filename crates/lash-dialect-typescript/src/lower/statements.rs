@@ -334,6 +334,20 @@ impl Lowerer<'_> {
 
     fn lower_declaration(&mut self, kind: VarKind, declaration: &ast::Var) -> Lowering<()> {
         let value = match &declaration.init {
+            // A module's top-level `const` bound to an async function is
+            // one of its entries.
+            Some(init)
+                if kind == VarKind::Const
+                    && matches!(declaration.pattern, ast::Pattern::Ident(..))
+                    && self.module_entry(init).is_some() =>
+            {
+                let (ast::Pattern::Ident(name, _), Some(function)) =
+                    (&declaration.pattern, self.module_entry(init))
+                else {
+                    unreachable!("the guard matched a module entry");
+                };
+                self.lower_module_entry(name, function)?
+            }
             // A `const` of the cell bound to an `async` arrow names a process.
             Some(init)
                 if kind == VarKind::Const

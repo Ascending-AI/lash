@@ -202,9 +202,11 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
                 effects: &effects,
                 controls: &std::collections::BTreeMap::new(),
                 tool_roots: &std::collections::BTreeSet::new(),
+            },
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
                 bindings: &bindings,
                 functions: &std::collections::BTreeMap::new(),
-            },
+            }),
         ) {
             let code = format!("{:?}", error.code);
             if code.contains("UnknownBinding") || code.contains("MethodUnsupported") {

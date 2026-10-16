@@ -164,6 +164,7 @@
   },
   "examples/workflow-graph-roundtrip": {
     "compile_data": [
+      "catalog/*.py",
       "catalog/*.ts"
     ]
   },

@@ -56,16 +56,15 @@ fn unmapped(lowered: &Lowered) -> BTreeMap<String, String> {
 fn every_entry_body_statement_and_action_is_mapped() {
     let source = "export async function grüße(name: string): Promise<string> {\n  const said = await echo(`héllo ${name}`);\n  if (said === \"ß\") {\n    return \"ok\";\n  }\n  return said;\n}\nconst twice = async (n: number): Promise<number> => {\n  const helper = async (m: number) => m * 2;\n  return await helper(n);\n};\n";
     let effects = super::machine::effects();
-    let lowered = crate::lower_workflow(
+    let lowered = crate::lower(
         source,
         &lash_kernel_dialect::Environment {
             library: super::library(),
             effects: &effects,
             controls: super::controls(),
             tool_roots: &BTreeSet::new(),
-            bindings: &BTreeSet::new(),
-            functions: &BTreeMap::new(),
         },
+        lash_kernel_dialect::Mode::Module,
     )
     .unwrap();
     assert_eq!(lowered.document.entries.len(), 2);

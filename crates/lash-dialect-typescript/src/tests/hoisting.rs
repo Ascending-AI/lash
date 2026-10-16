@@ -111,14 +111,19 @@ fn restored_session_bindings_cannot_mask_builtins() {
         let effects = std::collections::BTreeMap::new();
         let environment = lash_kernel_dialect::Environment {
             library: super::library(),
-            bindings: &bindings,
             effects: &effects,
             controls: &BTreeMap::new(),
             tool_roots: &std::collections::BTreeSet::new(),
-            functions: &BTreeMap::new(),
         };
         let error = crate::Parser::default()
-            .lower("1;", &environment)
+            .lower(
+                "1;",
+                &environment,
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+                    bindings: &bindings,
+                    functions: &BTreeMap::new(),
+                }),
+            )
             .expect_err("the worker's reusable parser also checks restored names");
         assert_eq!(error.code.as_str(), "TS_SHADOWS_BUILTIN");
     }

@@ -447,16 +447,39 @@ A document can have no TypeScript spelling. The printer then answers a
 diagnostic, and the document stays readable, editable, publishable and
 runnable.
 
-`HostArtifacts::import_typescript_workflow(source, &environment).await` takes
-whole workflow source and the `ProcessEnv` you pass to
-`workflow_environment` and `publish_workflow`. Lash builds the dialect
-environment from the tools that environment admits from the process
-components it names, and the worker's function registry,
-lowers the source, and admits the document. It runs no effect and publishes
-nothing. Exported async declarations and const-bound async literals (including
-`export const digest = process(async (inbox: string) => { return inbox; });`)
-become entries without requiring process-start tools. The imported reference
-selects `main`; select an entry when publishing the document.
+`HostArtifacts::import_workflow(language, source, &environment, limits).await`
+takes a whole workflow module in TypeScript or Python
+(`SourceLanguage::TypeScript` or `SourceLanguage::Python`) and the
+`ProcessEnv` you pass to `workflow_environment` and `publish_workflow`. Lash
+builds the dialect environment from the tools that environment admits from
+the process components it names, and the worker's function registry; the
+worker lowers the source, and lash admits the document. It runs no effect,
+publishes nothing and links no parser into your process. `limits`
+(`lash::dialect::workflow::WorkflowSourceLimits`) narrows the dialect's source
+policy; `None` keeps its standard one.
+
+Both dialects implement one workflow contract (`lash::dialect::workflow`):
+
+- Every top-level async function is an entry: in TypeScript an
+  `async function` declaration, exported or not, or a `const` bound to an
+  async arrow or function expression; in Python an `async def`. A function
+  declared inside a block (an `if`, a loop, a function) is ordinary code of
+  the module, and the rest of the top level is `main`. Entries need no
+  process-start tools.
+- An entry captures nothing of the module: reading a top-level value, a
+  top-level helper or another entry is refused. Pass values as parameters
+  and define helpers inside the entry's body.
+- An entry's signature is what its annotations mean in its dialect
+  (TypeScript `string[]` is a list of text; Python `dict[str, int]` is a map
+  of text to integers); an annotation with no kernel type is refused, and so
+  is a parameter default.
+- Refusals of these rules carry the same code in both dialects:
+  `WORKFLOW_DUPLICATE_ENTRY`, `WORKFLOW_EMPTY_MODULE`,
+  `WORKFLOW_CAPTURED_MODULE_BINDING`, `WORKFLOW_UNMAPPABLE_ENTRY_ANNOTATION`
+  and `WORKFLOW_ENTRY_DEFAULT`. Syntax errors keep each dialect's own codes.
+
+The imported reference selects `main`; select an entry when publishing the
+document.
 
 Printed source reads back through
 `HostArtifacts::import_exported_workflow(source, format, &base, &environment)`,
@@ -465,11 +488,17 @@ only code; the manifest, entries, helper identities and renames come from
 `base`, and the result is admitted against `environment`. An edit the reader
 has no exact inverse for is a typed refusal naming the construct.
 
-`WorkflowImport::Imported { document }` carries the admitted workflow. `Refused(diagnostics)` carries front-end
+`WorkflowImport::Imported { document, source_map, source }` carries the
+admitted workflow, the map from its sites to the source and that source:
+pass both to `publish_workflow` to keep them. Exported source read back with
+`import_exported_workflow` answers `WorkflowImport::Read { document }`, with
+no map of its own. `Refused(diagnostics)` carries front-end
 diagnostics with byte spans, `Admission(WorkflowAdmissionRefusal)` names a
 checker or catalogue refusal, and `Unsupported(WorkflowImportUnsupported)`
-names a missing kernel workflow engine or an unusable named library. These types live under
-`lash::workflow`. The call requires the `typescript` feature.
+names a missing kernel workflow engine, a dialect the worker does not install,
+or an unusable named library. These types live under `lash::workflow`. Both
+calls require only the `codemode` feature; the worker must install the
+dialect (`dialect-typescript`, `dialect-python`).
 
 "Open in source" is a convenience and must never be the only way your host
 can change a workflow.

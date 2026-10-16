@@ -170,11 +170,14 @@ fn the_workbench_tutorials_lower_in_each_dialect() {
                 effects: &effects,
                 tool_roots: &Default::default(),
                 controls: &controls,
-                bindings: &Default::default(),
-                functions: &Default::default(),
             };
             embedding
-                .lower(&name, program, &environment)
+                .lower(
+                    &name,
+                    program,
+                    &environment,
+                    lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
+                )
                 .expect("the Workbench installs the dialect")
         };
         let programs = prompt_programs(dialect);

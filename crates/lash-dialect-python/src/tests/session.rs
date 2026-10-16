@@ -165,9 +165,11 @@ fn restored_session_bindings_cannot_mask_builtins() {
                 effects: &BTreeMap::new(),
                 controls: &BTreeMap::new(),
                 tool_roots: &std::collections::BTreeSet::new(),
-                bindings: &bindings,
-                functions: &std::collections::BTreeMap::new(),
             },
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+                bindings: &bindings,
+                functions: &BTreeMap::new(),
+            }),
         )
         .expect_err("reject an old reserved binding");
         assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
@@ -199,15 +201,18 @@ fn tool_namespace_roots_are_not_guessed_from_underscores() {
         effects: &effects,
         tool_roots: &roots,
         controls: &BTreeMap::new(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
     for name in ["team_ops", "team_ops_lookup"] {
         for source in [
             format!("{name} = 1"),
             format!("class {name}(Exception):\n    pass"),
         ] {
-            let error = crate::lower(&source, &environment).expect_err("reserved catalog name");
+            let error = crate::lower(
+                &source,
+                &environment,
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+            )
+            .expect_err("reserved catalog name");
             assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
             assert!(
                 error
@@ -219,16 +224,21 @@ fn tool_namespace_roots_are_not_guessed_from_underscores() {
         let bindings = BTreeSet::from([Name::new(name)]);
         let error = crate::lower(
             "1",
-            &Environment {
+            &environment,
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
                 bindings: &bindings,
-                ..environment
-            },
+                functions: &BTreeMap::new(),
+            }),
         )
         .expect_err("restored names obey the same reservation");
         assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
     }
-    crate::lower("team = 1\nteam_ops_ = 2", &environment)
-        .expect("neither an inferred prefix nor the suggested repair is reserved");
+    crate::lower(
+        "team = 1\nteam_ops_ = 2",
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+    )
+    .expect("neither an inferred prefix nor the suggested repair is reserved");
 }
 
 /// FIG-5824: control remains reserved without any offered control tools.

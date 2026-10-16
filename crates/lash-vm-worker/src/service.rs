@@ -1,8 +1,9 @@
 //! The pure work a parent asks of a worker: lowering source to a kernel
 //! document and printing a document as source. Both read guest-controlled
 //! input, so both run here, in the worker's crash domain.
-use lash_kernel_dialect::{Diagnostic, DiagnosticKind};
-use lash_kernel_doc::Document;
+use lash_kernel_dialect::workflow::WorkflowSourceLimits;
+use lash_kernel_dialect::{Diagnostic, DiagnosticKind, Mode};
+use lash_kernel_doc::{Document, SourceLanguage};
 use lash_vm_client::PoolError;
 use lash_vm_client::service::{DialectRefusal, Request, Response};
 use lash_vm_protocol::{Detail, EncodedPayload, PayloadKind, RunInput, RunRefusal};
@@ -36,12 +37,14 @@ pub(crate) fn perform(
                     effects: &effects,
                     tool_roots: &tool_roots,
                     controls: &controls,
+                },
+                Mode::Cell(lash_kernel_dialect::CellEnvironment {
                     bindings: &bindings,
                     functions: &functions
                         .into_iter()
                         .map(|(name, function)| (name, function.into_saved()))
                         .collect(),
-                },
+                }),
             ) {
                 None => Response::UnknownDialect { dialect },
                 Some(Ok(lowered)) => Response::Lowered {
@@ -57,62 +60,32 @@ pub(crate) fn perform(
                 Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
             },
         },
-        Request::ImportTypeScriptWorkflow {
+        Request::ImportWorkflow {
+            language,
             source,
             effects,
             tool_roots,
             controls,
-            max_bytes,
-            max_nesting,
+            limits,
         } => {
-            #[cfg(feature = "dialect-typescript")]
-            {
-                if !embedding.installs("typescript") {
-                    Response::UnknownDialect {
-                        dialect: "typescript".into(),
-                    }
-                } else {
-                    let lowered =
-                        lash_dialect_typescript::SourceLimits::new(max_bytes, max_nesting)
-                            .and_then(|limits| {
-                                lash_dialect_typescript::lower_workflow_with_limits(
-                                    &source,
-                                    &lash_kernel_dialect::Environment {
-                                        library: embedding.library(),
-                                        effects: &effects,
-                                        tool_roots: &tool_roots,
-                                        controls: &controls,
-                                        bindings: &Default::default(),
-                                        functions: &Default::default(),
-                                    },
-                                    limits,
-                                )
-                            });
-                    match lowered {
-                        Ok(lowered) => Response::Lowered {
-                            document: encoded(lowered.document.to_json())?,
-                            source_map: lowered.source_map,
-                            written: lowered.written,
-                            function_values: None,
-                            reads: Default::default(),
-                        },
-                        Err(diagnostic) => Response::DialectRefused(refusal(diagnostic.into())),
-                    }
-                }
-            }
-            #[cfg(not(feature = "dialect-typescript"))]
-            {
-                let _ = (
-                    source,
-                    effects,
-                    tool_roots,
-                    controls,
-                    max_bytes,
-                    max_nesting,
-                );
-                Response::UnknownDialect {
-                    dialect: "typescript".into(),
-                }
+            let environment = lash_kernel_dialect::Environment {
+                library: embedding.library(),
+                effects: &effects,
+                tool_roots: &tool_roots,
+                controls: &controls,
+            };
+            match import_module(embedding, language, &source, &environment, limits) {
+                None => Response::UnknownDialect {
+                    dialect: dialect_name(language).into(),
+                },
+                Some(Ok(lowered)) => Response::Lowered {
+                    document: encoded(lowered.document.to_json())?,
+                    source_map: lowered.source_map,
+                    written: lowered.written,
+                    function_values: None,
+                    reads: Default::default(),
+                },
+                Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
             }
         }
         Request::Print {
@@ -161,6 +134,93 @@ pub(crate) fn perform(
 /// Those of `reads` the cell `document`'s `main` calls or spawns; none
 /// when its linked effects cannot be certified, so every effect it performs
 /// stays recorded.
+/// The installed dialect's name for source in `language`.
+fn dialect_name(language: SourceLanguage) -> &'static str {
+    match language {
+        SourceLanguage::TypeScript => lash_vm_releases::TYPESCRIPT,
+        SourceLanguage::Python => lash_vm_releases::PYTHON,
+    }
+}
+
+/// Lowers a workflow module in `language` under `limits`, or the dialect's
+/// standard policy; `None` when the worker does not install that dialect.
+fn import_module(
+    embedding: &Embedding,
+    language: SourceLanguage,
+    source: &str,
+    environment: &lash_kernel_dialect::Environment<'_>,
+    limits: Option<WorkflowSourceLimits>,
+) -> Option<Result<lash_kernel_dialect::Lowered, Diagnostic>> {
+    if !embedding.installs(dialect_name(language)) {
+        return None;
+    }
+    match language {
+        SourceLanguage::TypeScript => typescript_module(source, environment, limits),
+        SourceLanguage::Python => python_module(source, environment, limits),
+    }
+}
+
+#[cfg(feature = "dialect-typescript")]
+fn typescript_module(
+    source: &str,
+    environment: &lash_kernel_dialect::Environment<'_>,
+    limits: Option<WorkflowSourceLimits>,
+) -> Option<Result<lash_kernel_dialect::Lowered, Diagnostic>> {
+    let limits = match limits {
+        None => Ok(lash_dialect_typescript::SourceLimits::standard()),
+        Some(limits) => {
+            lash_dialect_typescript::SourceLimits::new(limits.max_bytes, limits.max_nesting)
+        }
+    };
+    Some(
+        limits
+            .and_then(|limits| {
+                lash_dialect_typescript::lower_with_limits(
+                    source,
+                    environment,
+                    Mode::Module,
+                    limits,
+                )
+            })
+            .map_err(Into::into),
+    )
+}
+
+#[cfg(not(feature = "dialect-typescript"))]
+fn typescript_module(
+    _: &str,
+    _: &lash_kernel_dialect::Environment<'_>,
+    _: Option<WorkflowSourceLimits>,
+) -> Option<Result<lash_kernel_dialect::Lowered, Diagnostic>> {
+    None
+}
+
+#[cfg(feature = "dialect-python")]
+fn python_module(
+    source: &str,
+    environment: &lash_kernel_dialect::Environment<'_>,
+    limits: Option<WorkflowSourceLimits>,
+) -> Option<Result<lash_kernel_dialect::Lowered, Diagnostic>> {
+    let limits = match limits {
+        None => Ok(lash_dialect_python::SourceLimits::standard()),
+        Some(limits) => {
+            lash_dialect_python::SourceLimits::new(limits.max_bytes, limits.max_nesting)
+        }
+    };
+    Some(limits.and_then(|limits| {
+        lash_dialect_python::lower_with_limits(source, environment, Mode::Module, limits)
+    }))
+}
+
+#[cfg(not(feature = "dialect-python"))]
+fn python_module(
+    _: &str,
+    _: &lash_kernel_dialect::Environment<'_>,
+    _: Option<WorkflowSourceLimits>,
+) -> Option<Result<lash_kernel_dialect::Lowered, Diagnostic>> {
+    None
+}
+
 fn reached(
     document: &Document,
     library: &dyn lash_kernel_doc::FunctionCatalog,

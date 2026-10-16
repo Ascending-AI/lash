@@ -380,10 +380,15 @@ fn lower(source: &str) -> Result<Lowered, lash_dialect_typescript::Diagnostic> {
         library: library(),
         effects: &effects,
         controls: finish_control(),
-        bindings: &bindings,
-        functions: &std::collections::BTreeMap::new(),
     };
-    lash_dialect_typescript::lower(source, &environment)
+    lash_dialect_typescript::lower(
+        source,
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+            bindings: &bindings,
+            functions: &std::collections::BTreeMap::new(),
+        }),
+    )
 }
 
 /// Lowers and runs one vendored test, `test/...`.
@@ -574,10 +579,15 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
         library: library(),
         effects: &effects,
         controls: finish_control(),
-        bindings: &bindings,
-        functions: &std::collections::BTreeMap::new(),
     };
-    let Ok(original) = lash_dialect_typescript::lower(&source, &environment) else {
+    let Ok(original) = lash_dialect_typescript::lower(
+        &source,
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+            bindings: &bindings,
+            functions: &std::collections::BTreeMap::new(),
+        }),
+    ) else {
         return false;
     };
     let printed = lash_dialect_typescript::print(&original.document, Default::default())

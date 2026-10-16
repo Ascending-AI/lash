@@ -2,6 +2,7 @@ use lash_kernel_doc::Span as SourceSpan;
 use std::fmt;
 
 pub use lash_kernel_dialect::DiagnosticKind;
+use lash_kernel_dialect::workflow::{ModuleError, ModuleRefusal};
 
 /// Stable names for every TypeScript dialect rejection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,10 +83,15 @@ pub enum DiagnosticCode {
     UnsupportedExpression,
     InvalidAst,
     LinkError,
+    /// A rule of the workflow contract every dialect shares, under the
+    /// shared code ([`lash_kernel_dialect::workflow`]).
+    Module(ModuleRefusal),
 }
 
 impl DiagnosticCode {
-    /// Every diagnostic code the dialect can emit.
+    /// Every diagnostic code the dialect can emit under its own `TS_` name.
+    /// A module import also emits the workflow contract's shared codes, as
+    /// [`Self::Module`] of each of [`ModuleRefusal::ALL`].
     ///
     /// The prompt the model reads names codes in prose, and prose cannot be
     /// type-checked: FIG-1306 shipped `TS_FOR_OF_ITERATOR_UNSUPPORTED`, a code
@@ -311,6 +317,7 @@ impl DiagnosticCode {
             Self::ShadowsBuiltin => {
                 "rename the binding and its references, preserving the built-in name"
             }
+            Self::Module(refusal) => refusal.repair(),
             _ => return None,
         })
     }
@@ -419,12 +426,18 @@ impl DiagnosticCode {
             | Self::InvalidAst
             | Self::ControlCallPlacement
             | Self::LinkError => CodeClassification::AlwaysDefect,
+
+            Self::Module(refusal) => match refusal.kind() {
+                DiagnosticKind::Refusal => CodeClassification::AlwaysRefusal,
+                DiagnosticKind::ProgramDefect => CodeClassification::AlwaysDefect,
+            },
         }
     }
 
     /// The stable machine-readable diagnostic name.
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Module(refusal) => refusal.code(),
             Self::GeneratedSourceFormat => "TS_GENERATED_SOURCE_FORMAT",
             Self::GeneratedSourceBytes => "TS_GENERATED_SOURCE_BYTES",
             Self::GeneratedSourceDepth => "TS_GENERATED_SOURCE_DEPTH",
@@ -576,6 +589,15 @@ impl Diagnostic {
             code.as_str()
         );
         Self::classified(code, message, span, DiagnosticKind::ProgramDefect)
+    }
+
+    /// The workflow contract's refusal of a module, under its shared code.
+    pub(crate) fn module(error: ModuleError) -> Self {
+        Self::new(
+            DiagnosticCode::Module(error.refusal),
+            error.message,
+            error.span,
+        )
     }
 
     /// Whether the dialect refused the construct, as opposed to reporting a

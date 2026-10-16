@@ -6,7 +6,7 @@ use lash_sansio::SessionId;
 #[non_exhaustive]
 pub enum EmbedError {
     /// A workflow source operation failed in the registered worker service.
-    #[cfg(feature = "typescript")]
+    #[cfg(feature = "codemode")]
     #[error(transparent)]
     WorkflowSource(lash_vm_client::service::SourceServiceError),
 
@@ -479,11 +479,11 @@ impl EmbedError {
     /// [`TurnIssue::retryable`](crate::turn::TurnIssue) instead.
     pub fn is_retryable(&self) -> bool {
         match self {
-            #[cfg(feature = "typescript")]
+            #[cfg(feature = "codemode")]
             Self::WorkflowSource(lash_vm_client::service::SourceServiceError::Worker(error)) => {
                 error.clone().into_runtime_error().is_retryable()
             }
-            #[cfg(feature = "typescript")]
+            #[cfg(feature = "codemode")]
             Self::WorkflowSource(_) => false,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => false,
@@ -576,11 +576,11 @@ impl EmbedError {
     ///   structured causes.
     pub fn is_terminal(&self) -> bool {
         match self {
-            #[cfg(feature = "typescript")]
+            #[cfg(feature = "codemode")]
             Self::WorkflowSource(lash_vm_client::service::SourceServiceError::Worker(error)) => {
                 error.clone().into_runtime_error().is_terminal()
             }
-            #[cfg(feature = "typescript")]
+            #[cfg(feature = "codemode")]
             Self::WorkflowSource(_) => true,
             #[cfg(feature = "codemode")]
             Self::ProcessRender(_) => true,

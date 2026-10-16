@@ -146,10 +146,16 @@ fn a_missing_helper_is_named() {
         effects: &effects,
         controls: &std::collections::BTreeMap::new(),
         tool_roots: &std::collections::BTreeSet::new(),
-        bindings: &bindings,
-        functions: &std::collections::BTreeMap::new(),
     };
-    let diagnostic = crate::lower("print(1)\n", &environment).expect_err("an empty library");
+    let diagnostic = crate::lower(
+        "print(1)\n",
+        &environment,
+        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+            bindings: &bindings,
+            functions: &std::collections::BTreeMap::new(),
+        }),
+    )
+    .expect_err("an empty library");
     assert_eq!(diagnostic.code, Code::LibraryMissing.as_str());
     assert!(diagnostic.message.contains("py.show"), "{diagnostic}");
 }
@@ -457,10 +463,9 @@ fn a_host_source_policy_allows_a_larger_python_cell() {
         library: machine::library(),
         effects: &BTreeMap::new(),
         controls: &BTreeMap::new(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
-    assert!(crate::lower(&source, &environment).is_err());
+    let cell = lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first());
+    assert!(crate::lower(&source, &environment, cell).is_err());
     let limits = crate::SourceLimits::new(source.len(), 96).unwrap();
-    crate::lower_with_limits(&source, &environment, limits).unwrap();
+    crate::lower_with_limits(&source, &environment, cell, limits).unwrap();
 }

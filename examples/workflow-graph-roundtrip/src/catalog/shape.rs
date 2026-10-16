@@ -8,7 +8,7 @@ mod source;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use lash_kernel_dialect::{Environment, Lowered};
+use lash_kernel_dialect::{Environment, Lowered, Mode};
 use lash_kernel_doc::{Node, Site, Span, Unit};
 
 #[derive(Debug)]
@@ -103,7 +103,10 @@ fn measure(path: String, text: String, lowered: Lowered, authors: Vec<Span>) -> 
     }
 }
 
-fn measurements() -> Vec<Measurement> {
+/// Every catalog workflow's measurement, and the Python twins lash refuses,
+/// each by its path and its refusal's code. A TypeScript example lash
+/// refuses stops the instrument.
+fn measurements() -> (Vec<Measurement>, Vec<(String, String)>) {
     let embedding = lash_vm_worker::Embedder::kernel()
         .expect("kernel embedding")
         .dialect(lash_vm_worker::typescript(&Default::default()))
@@ -129,48 +132,48 @@ fn measurements() -> Vec<Measurement> {
         effects: &effects,
         tool_roots: &tool_roots,
         controls: &controls,
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("catalog");
     let mut paths = Vec::new();
     corpus(&root, &mut paths);
     paths.sort();
     assert!(!paths.is_empty(), "SHAPE corpus is empty");
-    paths
-        .into_iter()
-        .map(|path| {
-            let name = path
-                .strip_prefix(&root)
-                .expect("catalog relative path")
-                .to_str()
-                .expect("UTF-8 path")
-                .to_owned();
-            let text = std::fs::read_to_string(&path).expect("workflow source");
-            let (lowered, authors) = if path.extension().is_some_and(|ext| ext == "ts") {
-                (
-                    lash_dialect_typescript::lower_workflow(&text, &environment)
-                        .map_err(|error| error.to_string()),
-                    source::typescript(&text),
-                )
-            } else {
-                (
-                    lash_dialect_python::lower(&text, &environment)
-                        .map_err(|error| error.to_string()),
-                    source::python(&text),
-                )
-            };
-            let lowered = lowered.unwrap_or_else(|error| panic!("{name}: {error}"));
-            measure(name, text, lowered, authors)
-        })
-        .collect()
+    let mut measured = Vec::new();
+    let mut refused = Vec::new();
+    for path in paths {
+        let name = path
+            .strip_prefix(&root)
+            .expect("catalog relative path")
+            .to_str()
+            .expect("UTF-8 path")
+            .to_owned();
+        let text = std::fs::read_to_string(&path).expect("workflow source");
+        if path.extension().is_some_and(|ext| ext == "ts") {
+            let lowered = lash_dialect_typescript::lower(&text, &environment, Mode::Module)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let authors = source::typescript(&text);
+            measured.push(measure(name, text, lowered, authors));
+        } else {
+            match lash_dialect_python::lower(&text, &environment, Mode::Module) {
+                Ok(lowered) => {
+                    let authors = source::python(&text);
+                    measured.push(measure(name, text, lowered, authors));
+                }
+                Err(diagnostic) => {
+                    println!("{name} is refused: {diagnostic}");
+                    refused.push((name, diagnostic.code));
+                }
+            }
+        }
+    }
+    (measured, refused)
 }
 
 /// FIG-6411 / SHAPE. Run with `--nocapture` to print the human table and
 /// replacement ratchet rows; no recorder or alternate lowering path exists.
 #[test]
 fn every_catalog_and_probe_workflow_stays_within_its_shape_ratchet() {
-    let measured = measurements();
+    let (measured, refused) = measurements();
     println!(
         "workflow | statements scopes actions author max overhead | ratio | worst author statement"
     );
@@ -208,8 +211,10 @@ fn every_catalog_and_probe_workflow_stays_within_its_shape_ratchet() {
             row.path
         );
     }
-    println!("\nRatchet rows (statements scopes actions author max overhead):");
-    let actual = measured
+    println!(
+        "\nRatchet rows (statements scopes actions author max overhead, or the refused twin's code):"
+    );
+    let mut actual = measured
         .iter()
         .map(|row| {
             format!(
@@ -222,7 +227,13 @@ fn every_catalog_and_probe_workflow_stays_within_its_shape_ratchet() {
                     .join(" ")
             )
         })
+        .chain(
+            refused
+                .iter()
+                .map(|(path, code)| format!("{path} refused {code}")),
+        )
         .collect::<Vec<_>>();
+    actual.sort();
     for row in &actual {
         println!("{row}");
     }

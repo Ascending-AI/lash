@@ -1,4 +1,6 @@
 //! Whole-workflow declarations read through the ordinary bounded adapter.
+use lash_kernel_dialect::workflow::ModuleRefusal;
+
 use super::*;
 
 pub(crate) fn parse(source: &str, limits: SourceLimits) -> Result<Program, Diagnostic> {
@@ -11,7 +13,48 @@ pub(crate) fn parse(source: &str, limits: SourceLimits) -> Result<Program, Diagn
     Ok(program)
 }
 
-/// A top-level async declaration is a named process, using the same literal
+/// Refuses a module that declares two entries of one name, at the second,
+/// under the workflow contract's shared code.
+pub(super) fn entries_once(program: &Program) -> Result<(), Diagnostic> {
+    let mut seen = std::collections::BTreeSet::new();
+    for statement in &program.statements {
+        let (span, inner) = match statement {
+            Stmt::Spanned(span, inner) => (Some(*span), inner.as_ref()),
+            other => (None, other),
+        };
+        let names: Vec<&str> = match inner {
+            Stmt::Function { name, function } if function.is_async => vec![name.as_str()],
+            Stmt::Var {
+                kind: VarKind::Const,
+                declarations,
+            } => declarations
+                .iter()
+                .filter_map(
+                    |declaration| match (&declaration.pattern, &declaration.init) {
+                        (Pattern::Ident(name, _), Some(Expr::Function(function)))
+                            if function.is_async =>
+                        {
+                            Some(name.as_str())
+                        }
+                        _ => None,
+                    },
+                )
+                .collect(),
+            _ => Vec::new(),
+        };
+        for name in names {
+            if !seen.insert(name) {
+                return Err(Diagnostic::module(ModuleRefusal::DuplicateEntry.at(
+                    format!("the module declares more than one entry named `{name}`"),
+                    span,
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A top-level async declaration is an entry, using the same literal
 /// lowering as a const-bound async function. Keep its labels and byte spans.
 fn declaration(statement: &mut Stmt) {
     match statement {

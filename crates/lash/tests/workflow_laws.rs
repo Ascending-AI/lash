@@ -1507,27 +1507,36 @@ async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_r
 }
 
 /// FIG-6215: a multithreaded host can await workflow import in a Send future.
-#[cfg(feature = "typescript")]
 #[test]
-fn typescript_import_with_limits_future_is_send() {
+fn workflow_import_future_is_send() {
     fn assert_send<T: Send>(_: T) {}
 
     let _: fn(&lash::process::HostArtifacts, &lash::process::ProcessEnv) =
         |artifacts, environment| {
-            assert_send(artifacts.import_typescript_workflow_with_limits(
-                "export async function main() { return null; }",
+            assert_send(artifacts.import_workflow(
+                lash::workflow::document::SourceLanguage::Python,
+                "async def main():\n    return None\n",
                 environment,
-                lash::typescript::SourceLimits::standard(),
+                Some(lash::dialect::workflow::WorkflowSourceLimits {
+                    max_bytes: 1024,
+                    max_nesting: 16,
+                }),
             ));
         };
 }
 
-/// FIG-6009: whole-workflow syntax lowers to entries without process tools,
-/// while a front-end defect preserves its byte span at the host boundary.
-#[cfg(feature = "typescript")]
+/// MODULE-CONTRACT (FIG-6380): TypeScript and Python modules import through
+/// one host call under one contract. Twin sources declare the same entries,
+/// at the top level only and with no process tools offered, and break each
+/// rule with the same refusal code; a successful import answers its source
+/// map, and a front-end defect keeps its byte span. TypeScript's
+/// `process(...)` wrapper, which main imported as an entry, is not workflow
+/// syntax.
 #[tokio::test]
-async fn typescript_import_reports_front_end_errors_with_source_spans() {
+async fn typescript_and_python_modules_share_one_entry_contract() {
+    use lash::dialect::workflow::ModuleRefusal;
     use lash::workflow::WorkflowImport;
+    use lash::workflow::document::SourceLanguage;
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
             .await
@@ -1536,49 +1545,126 @@ async fn typescript_import_reports_front_end_errors_with_source_spans() {
     let core = core_with_process_tools(stores, "import", false, EchoComponent::Installed).await;
     let artifacts = core.host_artifacts();
     let environment = environment(false);
-    let checked = artifacts
-        .workflow_environment(&environment)
-        .await
-        .expect("environment reads")
-        .expect("workflow engine installed");
-    assert!(
-        !checked
-            .effects()
-            .keys()
-            .any(|effect| effect.as_str().starts_with("processes."))
-    );
-    for source in [
-        "export const digest = process(async (inbox: string) => { return inbox; });",
-        "export const digest = async (inbox: string) => { return inbox; };",
-        "export async function digest(inbox: string) { return inbox; }",
-    ] {
-        let WorkflowImport::Imported { document } = artifacts
-            .import_typescript_workflow(source, &environment)
-            .await
-            .expect("import answers")
+    let import = |language, source: &'static str| {
+        let artifacts = artifacts.clone();
+        let environment = environment.clone();
+        async move {
+            artifacts
+                .import_workflow(language, source, &environment, None)
+                .await
+                .expect("import answers")
+        }
+    };
+    let entries = |imported: WorkflowImport, source: &str| {
+        let WorkflowImport::Imported {
+            document,
+            source_map,
+            source: text,
+        } = imported
         else {
-            panic!("the process source imports: {source}");
+            panic!("the module imports: {imported:?}\n{source}");
         };
-        assert!(
-            document
-                .document()
-                .entries
-                .contains_key(&Name::new("digest"))
+        assert_eq!(text, source);
+        source_map
+            .validate(document.document(), &text)
+            .expect("the import maps its source");
+        document
+            .document()
+            .entries
+            .keys()
+            .map(|name| name.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let code = |imported: WorkflowImport, source: &str| match imported {
+        WorkflowImport::Refused(diagnostics) => diagnostics[0].code.clone(),
+        other => panic!("the module is refused: {other:?}\n{source}"),
+    };
+
+    let typescript = "export async function first(inbox: string) { return inbox; }\nconst second = async (n: number) => n * 2;\nif (second) {\n  async function inBlock() { return 1; }\n}\n";
+    let python = "async def first(inbox: str):\n    return inbox\n\n\nasync def second(n: int):\n    return n * 2\n\n\nif True:\n    async def in_block():\n        return 1\n";
+    assert_eq!(
+        entries(
+            import(SourceLanguage::TypeScript, typescript).await,
+            typescript
+        ),
+        ["first", "second"]
+    );
+    assert_eq!(
+        entries(import(SourceLanguage::Python, python).await, python),
+        ["first", "second"]
+    );
+
+    for (typescript, python, refusal) in [
+        (
+            "export async function a() { return 1; }\nexport async function a() { return 2; }",
+            "async def a():\n    return 1\n\n\nasync def a():\n    return 2\n",
+            ModuleRefusal::DuplicateEntry,
+        ),
+        (
+            "if (true) {\n  const a = async () => 1;\n}\n",
+            "if True:\n    async def a():\n        return 1\n",
+            ModuleRefusal::EmptyModule,
+        ),
+        (
+            "const limit = 3;\nexport async function a() { return limit; }",
+            "limit = 3\n\n\nasync def a():\n    return limit\n",
+            ModuleRefusal::CapturedModuleBinding,
+        ),
+        (
+            "function helper() { return 1; }\nexport async function a() { return helper(); }",
+            "def helper():\n    return 1\n\n\nasync def a():\n    return helper()\n",
+            ModuleRefusal::CapturedModuleBinding,
+        ),
+        (
+            "export async function b() { return 1; }\nexport async function a() { return await b(); }",
+            "async def b():\n    return 1\n\n\nasync def a():\n    return await b()\n",
+            ModuleRefusal::CapturedModuleBinding,
+        ),
+        (
+            "export async function a(f: () => number) { return 1; }",
+            "async def a(f: Callable[[], int]):\n    return 1\n",
+            ModuleRefusal::UnmappableEntryAnnotation,
+        ),
+        (
+            "export async function a(limit: number = 3) { return limit; }",
+            "async def a(limit: int = 3):\n    return limit\n",
+            ModuleRefusal::EntryDefault,
+        ),
+    ] {
+        assert_eq!(
+            code(
+                import(SourceLanguage::TypeScript, typescript).await,
+                typescript
+            ),
+            refusal.code(),
+            "{typescript}"
+        );
+        assert_eq!(
+            code(import(SourceLanguage::Python, python).await, python),
+            refusal.code(),
+            "{python}"
         );
     }
-    let source = "export const broken = ;";
-    let WorkflowImport::Refused(diagnostics) = artifacts
-        .import_typescript_workflow(source, &environment)
-        .await
-        .expect("import answers")
-    else {
-        panic!("a syntax error is refused");
-    };
-    let span = diagnostics[0].span.expect("the syntax error has a span");
-    assert!(
-        span.start < span.end && span.end <= source.len(),
-        "{span:?}"
+
+    let wrapped = "export const digest = process(async (inbox: string) => inbox);";
+    assert_eq!(
+        code(import(SourceLanguage::TypeScript, wrapped).await, wrapped),
+        "TS_UNKNOWN_BINDING"
     );
+
+    for (language, source) in [
+        (SourceLanguage::TypeScript, "export const broken = ;"),
+        (SourceLanguage::Python, "async def broken(:\n    return 1\n"),
+    ] {
+        let WorkflowImport::Refused(diagnostics) = import(language, source).await else {
+            panic!("a syntax error is refused: {source}");
+        };
+        let span = diagnostics[0].span.expect("the syntax error has a span");
+        assert!(
+            span.start <= span.end && span.end <= source.len(),
+            "{span:?}"
+        );
+    }
     core.shutdown().await.expect("the node stops");
 }
 

@@ -40,14 +40,16 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
         reads: BTreeSet<EffectName>,
     },
-    /// Lower host-authored whole TypeScript workflows in the worker.
-    ImportTypeScriptWorkflow {
+    /// Lower a host-authored workflow module in the worker, in the dialect
+    /// of `language`, under the shared workflow contract. Without `limits`
+    /// the dialect's standard source policy applies.
+    ImportWorkflow {
+        language: lash_kernel_doc::SourceLanguage,
         source: String,
         effects: BTreeMap<EffectName, Signature>,
         tool_roots: BTreeSet<Name>,
         controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
-        max_bytes: usize,
-        max_nesting: usize,
+        limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
     /// Print `document` (its JSON encoding) in the selected generated format.
     Print {
@@ -586,7 +588,7 @@ pub mod runtime_ops {
             self.record_worker(
                 match &request {
                     Request::Lower { .. } => WorkerPath::Lower,
-                    Request::ImportTypeScriptWorkflow { .. } => WorkerPath::ImportWorkflow,
+                    Request::ImportWorkflow { .. } => WorkerPath::ImportWorkflow,
                     Request::Print { .. } => WorkerPath::Print,
                     Request::Read { .. } => WorkerPath::Read,
                 },

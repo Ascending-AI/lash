@@ -219,10 +219,14 @@ async fn an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_cor
         .await
         .expect("the environment reads")
         .expect("the kernel engine reads workflow documents");
-    let WorkflowImport::Imported { document: imported } = artifacts
-        .import_typescript_workflow(
+    let WorkflowImport::Imported {
+        document: imported, ..
+    } = artifacts
+        .import_workflow(
+            lash::workflow::document::SourceLanguage::TypeScript,
             "export async function digest(items: string[]) { const out = items.map((item) => item); return out; }",
             &environment,
+            None,
         )
         .await
         .expect("the import answers")
@@ -300,8 +304,13 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
         let artifacts = artifacts.clone();
         let environment = environment.clone();
         async move {
-            let WorkflowImport::Imported { document } = artifacts
-                .import_typescript_workflow(source, &environment)
+            let WorkflowImport::Imported { document, .. } = artifacts
+                .import_workflow(
+                    lash::workflow::document::SourceLanguage::TypeScript,
+                    source,
+                    &environment,
+                    None,
+                )
                 .await
                 .expect("the import answers")
             else {

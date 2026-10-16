@@ -155,14 +155,17 @@ fn smith_64_fixed_inputs_and_python_lowered_documents_reconstruct_without_helper
         effects: &BTreeMap::new(),
         controls: &BTreeMap::new(),
         tool_roots: &BTreeSet::new(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
     for source in [
         "x = [1, 2]\nprint(x[0] + 3)",
         "def twice(x):\n    return x + x\nprint(twice(4))",
     ] {
-        let lowered = lash_dialect_python::lower(source, &environment).unwrap();
+        let lowered = lash_dialect_python::lower(
+            source,
+            &environment,
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+        )
+        .unwrap();
         roundtrip(&lowered.document, false);
     }
     eprintln!("generated source: smith_seeds=64 python_documents=2");
@@ -1348,17 +1351,17 @@ fn authored_import_of_printed_source_needs_its_base() {
         effects: &BTreeMap::new(),
         controls: &BTreeMap::new(),
         tool_roots: &BTreeSet::new(),
-        bindings: &BTreeSet::new(),
-        functions: &BTreeMap::new(),
     };
-    let document = crate::lower_workflow(
+    let module = lash_kernel_dialect::Mode::Module;
+    let document = crate::lower(
         "export async function digest(inbox: string) { return inbox; }",
         &environment,
+        module,
     )
     .unwrap()
     .document;
     let printed = crate::print(&document, Default::default()).unwrap();
-    let refusal = crate::lower_workflow(&printed.source, &environment).unwrap_err();
+    let refusal = crate::lower(&printed.source, &environment, module).unwrap_err();
     assert_eq!(
         refusal.code,
         crate::DiagnosticCode::PrintedSourceNeedsBase,
@@ -1378,24 +1381,26 @@ fn authored_import_of_printed_source_needs_its_base() {
         "const f = declared.digest;",
         "kernel_name_1;",
     ] {
-        let refusal = crate::lower_workflow(source, &environment).unwrap_err();
+        let refusal = crate::lower(source, &environment, module).unwrap_err();
         assert_eq!(
             refusal.code,
             crate::DiagnosticCode::PrintedSourceNeedsBase,
             "{source}: {refusal}"
         );
     }
-    crate::lower_workflow(
-        "function helper_list_len(x) { return x; } const declared = {digest: 1}; const kernel_name_1 = 1; helper_list_len([declared.digest, kernel_name_1]);",
+    crate::lower(
+        "function helper_list_len(x) { return x; } const declared = {digest: 1}; const kernel_name_1 = 1; helper_list_len([declared.digest, kernel_name_1]); export async function main() { return null; }",
         &environment,
+        module,
     ).expect("authored bindings with printer spellings still resolve");
-    crate::lower_workflow(
-        "const text = 'helper_list_len declared.digest';",
+    crate::lower(
+        "const text = 'helper_list_len declared.digest'; export async function main() { return null; }",
         &environment,
+        module,
     )
     .expect("quoted data is not a printed reference");
     assert_eq!(
-        crate::lower_workflow("missing;", &environment)
+        crate::lower("missing;", &environment, module)
             .unwrap_err()
             .code,
         crate::DiagnosticCode::UnknownBinding

@@ -18,19 +18,24 @@ own serialized shapes and pass through unchanged (snake_case).
 | `POST` | `/workflow/select` | `{ id }`: save an example's imported document as the next version; its `WorkflowView` |
 | `POST` | `/workflow` | `{ document, entry }`: save a kernel document as the next version; its `WorkflowView` |
 | `POST` | `/workflow/edits` | `{ version, edits }`: apply one edit transaction and publish; `{ workflow, correspondence }` |
-| `POST` | `/workflow/source` | `{ version, source, entry }`: import and admit source before replacing the current document |
+| `POST` | `/workflow/source` | `{ version, source, entry, dialect? }`: import and admit source (`typescript` by default, or `python`) before replacing the current document |
 | `POST` | `/workflow/plan` | `{ version, operations }`: preview Lash authoring operations without publishing; `{ version, transaction, preview, correspondence }` |
 | `POST` | `/run` | `{ version?, inputs? }`: start a run with named input values; its `text/event-stream` |
 | `POST` | `/approvals/{key}` | `{ approved }`: resolve a parked approval |
 | `GET` | `/healthz` | `{ "service": "workflow-graph-roundtrip", "status": "ok" }` |
 | `GET` | `/` and `/{path}` | Files from `frontend/` |
 
-Every example is authored TypeScript in `catalog/`, imported once at startup
-through `HostArtifacts::import_typescript_workflow`, exactly as written. A
-catalog entry's `group` is `app` or `controlFlow`; `statements` and `scopes`
-count the statements and blocks of lash's view of its entry, the size of what
-the import lowered it to. An example lash refuses to import stops the host at
-startup.
+Every example is authored twice in `catalog/`, as TypeScript (`<name>.ts`)
+and as its Python twin (`<name>.py`), and both are imported once at startup
+through `HostArtifacts::import_workflow`, exactly as written. A catalog
+entry's `group` is `app` or `controlFlow`; `statements` and `scopes` count the
+statements and blocks of lash's view of its TypeScript entry, the size of what
+the import lowered it to; `python`, when present, holds the same
+`{ statements, scopes }` for the Python twin. `pythonRefused`, when present,
+is lash's refusal of the Python twin, which then cannot be opened. A TypeScript example lash
+refuses to import stops the host at startup. `POST /workflow/select` takes
+`{ id, dialect? }`, `typescript` by default; a revision's `authored` names the
+`dialect` of its text.
 
 An error is `{ "error": { code, message, details } }`. An unknown catalog id
 is HTTP 404 `unknown_workflow`; a stale `version` is HTTP 409

@@ -206,9 +206,8 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName, root: Option<&str>)
                 effects: &effects,
                 tool_roots: &tool_roots,
                 controls: &BTreeMap::new(),
-                bindings: &BTreeSet::new(),
-                functions: &BTreeMap::new(),
             },
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
         )
         .expect("the dialect is installed")
         .unwrap_or_else(|diagnostic| panic!("the {dialect} cell lowers: {diagnostic:?}"));

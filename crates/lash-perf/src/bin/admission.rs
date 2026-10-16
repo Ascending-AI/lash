@@ -126,11 +126,17 @@ fn main() -> Result<()> {
         effects: &effects,
         tool_roots: &roots,
         controls: &controls,
-        bindings: &bindings,
-        functions: &functions,
     };
     let lowered = embedding
-        .lower("typescript", &source, &environment)
+        .lower(
+            "typescript",
+            &source,
+            &environment,
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
+                bindings: &bindings,
+                functions: &functions,
+            }),
+        )
         .context("TypeScript is installed")?
         .map_err(|error| anyhow::anyhow!("{error:?}"))?;
     let document = &lowered.document;
