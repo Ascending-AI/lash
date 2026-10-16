@@ -134,17 +134,22 @@ async fn every_retained_parked_image_resumes_to_its_recorded_result() {
     }
 }
 
-/// Run locally on the build being retained; append, never regenerate old bytes.
+/// Run locally on the build being retained. Append a full set, or refresh only
+/// LASH_IMAGE_NAME under the pre-cut recording policy.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "appends a new retained parked-run image set"]
 async fn record_current_parked_image_set() {
     let build = std::env::var("LASH_IMAGE_BUILD").expect("name the recording build commit");
+    let selected = std::env::var("LASH_IMAGE_NAME").ok();
     let mut records = Vec::new();
     for (name, source) in [
         ("loop-closures-aliases", LOOP),
         ("task-join", JOIN),
         ("suspending-cleanup", CLEANUP),
     ] {
+        if selected.as_deref().is_some_and(|selected| selected != name) {
+            continue;
+        }
         let (_dir, path) = kernel_images::record(source).await;
         let mut image = images::capture(&path, name, "kernel", source);
         image.expected = kernel_images::resume(&image.image()).await;
@@ -160,11 +165,23 @@ async fn record_current_parked_image_set() {
             false,
         ),
     ] {
+        if selected.as_deref().is_some_and(|selected| selected != name) {
+            continue;
+        }
         let (_dir, path) = session_images::record(Protocol::ImageCell(source, python)).await;
         let mut image = images::capture(&path, name, kind, source);
         let stored = Box::leak(Box::new(image.image()));
         image.expected = session_images::resume(stored, Protocol::ImageCell(source, python)).await;
         records.push(image);
+    }
+    if selected.is_some() {
+        assert_eq!(
+            records.len(),
+            1,
+            "select one of the six retained image names"
+        );
+        images::rerecord(&build, records.pop().unwrap());
+        return;
     }
     images::append(images::ImageSet {
         build,

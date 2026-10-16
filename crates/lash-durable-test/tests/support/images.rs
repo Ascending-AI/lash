@@ -89,11 +89,12 @@ pub async fn open(
 /// replays to the same content.
 pub fn regenerate(path: &Path, name: &str) {
     assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-    let out = std::path::PathBuf::from(
-        std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("regeneration workspace"),
-    )
-    .join("crates/lash-durable-test/tests/fixtures/formats")
-    .join(name);
+    regenerate_at(&recording_root(), path, name);
+}
+
+pub fn regenerate_at(root: &Path, path: &Path, name: &str) {
+    component(name);
+    let out = root.join(name);
     std::fs::create_dir_all(&out).expect("the fixture directory exists");
     let wal = std::fs::read(path.with_extension("db-wal")).unwrap_or_default();
     let db = std::fs::read(path).expect("the store's database reads");
@@ -118,7 +119,7 @@ fn deflate(bytes: &[u8]) -> Vec<u8> {
 }
 
 /// The retained archive uses the same gzip store images as the 1.0 recorder.
-/// Base64 keeps every image and its oracle together in one compile-time input.
+/// Base64 keeps each image and its oracle together in its own archive file.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageSet {
@@ -141,10 +142,69 @@ pub struct RetainedImage {
 
 pub fn retained() -> &'static [ImageSet] {
     static CORPUS: std::sync::OnceLock<Vec<ImageSet>> = std::sync::OnceLock::new();
-    CORPUS.get_or_init(|| {
-        serde_json::from_str(include_str!("../fixtures/formats/corpus.json"))
-            .expect("the retained image corpus decodes")
-    })
+    CORPUS
+        .get_or_init(|| load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formats")))
+}
+
+fn entries(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .expect("the retained archive directory reads")
+        .map(|entry| entry.expect("an archive entry reads").path())
+        .collect();
+    paths.sort();
+    paths
+}
+
+pub fn load(root: &Path) -> Vec<ImageSet> {
+    let mut sets = Vec::new();
+    for build in entries(&root.join("corpus")) {
+        let mut grouped: Option<ImageSet> = None;
+        for path in entries(&build) {
+            let mut entry = read_entry(&path);
+            assert_eq!(path, image_path(root, &entry.build, &entry.images[0].name));
+            if let Some(set) = &mut grouped {
+                assert_eq!(set.build, entry.build);
+                assert_eq!(set.kernel_semantics, entry.kernel_semantics);
+                assert_eq!(set.helper_releases, entry.helper_releases);
+                set.images.append(&mut entry.images);
+            } else {
+                grouped = Some(entry);
+            }
+        }
+        sets.push(grouped.expect("a retained build has images"));
+    }
+    sets
+}
+
+fn read_entry(path: &Path) -> ImageSet {
+    let entry: ImageSet =
+        serde_json::from_slice(&std::fs::read(path).expect("the retained image file reads"))
+            .expect("the retained image entry decodes");
+    assert_eq!(entry.images.len(), 1, "each archive file owns one image");
+    entry
+}
+
+fn component(name: &str) {
+    assert!(
+        !name.is_empty()
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
+        "an image path component is a name, not a path: {name}"
+    );
+}
+
+fn image_path(root: &Path, build: &str, name: &str) -> std::path::PathBuf {
+    component(build);
+    component(name);
+    root.join("corpus").join(build).join(format!("{name}.json"))
+}
+
+fn recording_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(
+        std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("the recording workspace"),
+    )
+    .join("crates/lash-durable-test/tests/fixtures/formats")
 }
 
 impl RetainedImage {
@@ -180,18 +240,57 @@ pub fn capture(path: &Path, name: &str, kind: &str, source: &str) -> RetainedIma
 /// Append a complete build's witnesses. Existing records are never replaced.
 pub fn append(set: ImageSet) {
     assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-    let path = std::path::PathBuf::from(
-        std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("the recording workspace"),
-    )
-    .join("crates/lash-durable-test/tests/fixtures/formats/corpus.json");
-    let mut sets: Vec<ImageSet> = serde_json::from_slice(&std::fs::read(&path).unwrap())
-        .expect("the existing archive decodes");
+    let root = recording_root();
     assert!(
-        !sets.iter().any(|old| old.build == set.build),
+        !root.join("corpus").join(&set.build).exists(),
         "this build already has retained witnesses"
     );
+    append_at(&root, set);
+}
+
+pub fn append_at(root: &Path, set: ImageSet) {
+    use std::io::Write as _;
     assert!(!set.images.is_empty());
-    sets.push(set);
-    std::fs::write(path, serde_json::to_string_pretty(&sets).unwrap() + "\n")
-        .expect("the new image set appends");
+    for image in set.images {
+        let path = image_path(root, &set.build, &image.name);
+        let entry = ImageSet {
+            build: set.build.clone(),
+            kernel_semantics: set.kernel_semantics,
+            helper_releases: set.helper_releases.clone(),
+            images: vec![image],
+        };
+        std::fs::create_dir_all(path.parent().unwrap()).expect("the build directory exists");
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .expect("a new retained image never replaces an existing witness");
+        file.write_all((serde_json::to_string_pretty(&entry).unwrap() + "\n").as_bytes())
+            .expect("the image entry appends");
+    }
+}
+
+/// Before the cut, refresh exactly one authorized image, keeping its oracle
+/// and recording metadata. Sealed witnesses must never use this recorder.
+pub fn rerecord(build: &str, image: RetainedImage) {
+    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+    rerecord_at(&recording_root(), build, image);
+}
+
+pub fn rerecord_at(root: &Path, build: &str, image: RetainedImage) {
+    let path = image_path(root, build, &image.name);
+    let mut entry = read_entry(&path);
+    assert_eq!(entry.build, build);
+    let old = &mut entry.images[0];
+    assert_eq!(old.name, image.name);
+    assert_eq!(old.kind, image.kind);
+    assert_eq!(old.source, image.source);
+    assert_eq!(
+        old.expected, image.expected,
+        "a refresh keeps the recorded result"
+    );
+    old.db_gzip_base64 = image.db_gzip_base64;
+    old.wal_gzip_base64 = image.wal_gzip_base64;
+    std::fs::write(path, serde_json::to_string_pretty(&entry).unwrap() + "\n")
+        .expect("only the selected image is refreshed");
 }

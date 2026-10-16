@@ -5,28 +5,19 @@ original recording build is `95bc17cfa86757844c2aea97bfbc8243206f39a1`, kernel s
 1, helper release 1.0. Re-recordings authorized before the cut are
 listed below; otherwise keep their database and WAL bytes unchanged.
 
-`corpus.json` is an archive of realistic images, grouped by the
-full recording build commit. Each set names its kernel semantics version and
-its exact helper release identity catalogue (including both dialects). Each
-image names its shape, dialect, source and recorded result. Its database and
-WAL are separately gzipped, exactly as in the existing `support/images.rs`
-recorder, then base64 encoded to keep bytes and oracle in one compile-time
-input. SQLite's committed checkpoint graph holds the pinned helper manifest
-and native fingerprints; the catalogue records all held function identities.
+`corpus/<full-build-commit>/<image-name>.json` holds exactly one retained
+image, with its build's kernel semantics and exact helper release identity
+catalogue (including both dialects). Its single corpus entry names the shape,
+dialect, source and recorded result. Its own database and WAL are separately
+gzipped, exactly as in `support/images.rs`, then base64 encoded alongside the
+oracle. No database is shared between corpus images. SQLite's committed
+checkpoint graph holds the pinned helper manifest and native fingerprints;
+the catalogue records all held function identities.
 
-The first set was recorded on main
-`4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1`. It includes:
-
-- A process mid-loop, retaining a live closure over a mutable counter and two
-  aliases of a mutable list; it resumes to `[6, 3, 6]`.
-- A process waiting in a task join, whose child sleeps; it returns
-  `"joined child"`.
-- A process suspended inside `finally`, carrying a pending return and its
-  mutable result; cleanup changes the result to `["cleanup completed"]`.
-- TypeScript and Python session cells parked on a pending `Once` tool call,
-  with its committed outcome awaiting consumption.
-- A TypeScript cell retaining a declared-read answer across its pending write.
-  The reader ran once before the save and never runs during resume.
+The decode-and-resume laws discover every file in `corpus/` and group entries
+by build, checking that their metadata agrees. The files are the index: do not
+maintain an image list or add README rows when recording or refreshing images.
+The first set was recorded on main `4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1`.
 
 The session oracles retain the complete committed history, including tool
 answers, cell output and the model's final answer. Resume uses a fresh node
@@ -198,8 +189,21 @@ kiln test //crates/lash-durable-test:vertical_crash_proof__test \
 ```
 
 The recorder verifies every fresh image on a cold deployment before appending
-the complete set. It refuses a duplicate build instead of replacing it. Commit
-the appended archive with the semantic/helper/native change and run:
+its own file. A new set refuses an existing build instead of replacing it.
+For an authorized pre-cut refresh, use the same command with the retained
+build's full id in `LASH_IMAGE_BUILD` and one additional selection:
+
+```sh
+  --test_env=LASH_IMAGE_NAME=pending-tool-python
+```
+
+Selection happens before recording: only that image is generated, verified and
+written. Its source, kind, expected result and build metadata must stay equal;
+only its database and WAL payloads are replaced. The baseline recorders likewise
+write only their own `lashvm/` or `session/` database and WAL. Never run a full
+set into a temporary build and copy its bytes back for a single-image refresh.
+Commit only the selected image's files; record provenance in the commit body,
+without editing this README. Run:
 
 ```sh
 kiln test //crates/lash-durable-test:vertical_crash_proof__test \

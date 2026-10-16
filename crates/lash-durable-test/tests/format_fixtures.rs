@@ -272,3 +272,120 @@ async fn every_drain_format_is_in_an_actor_format_set() {
     }
     assert_eq!(checked, 5, "the drain formats this build declares");
 }
+
+/// FIG-6474: every witness owns its archive file, so another recorder cannot
+/// rewrite it as part of a shared corpus.
+#[test]
+fn a_retained_image_owns_its_archive_file() {
+    let root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formats/corpus");
+    for set in images::retained() {
+        for image in &set.images {
+            let path = root.join(&set.build).join(format!("{}.json", image.name));
+            assert!(
+                path.is_file(),
+                "{} has no independent archive file",
+                path.display()
+            );
+        }
+    }
+}
+
+/// FIG-6474: both corpus and baseline recorders may write only the selected
+/// witness's files.
+#[test]
+fn a_recorder_writes_only_its_selected_image() {
+    fn snapshot(
+        root: &std::path::Path,
+    ) -> std::collections::BTreeMap<std::path::PathBuf, (Vec<u8>, std::time::SystemTime)> {
+        let mut files = std::collections::BTreeMap::new();
+        for entry in std::fs::read_dir(root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                for (name, value) in snapshot(&path) {
+                    files.insert(
+                        std::path::Path::new(path.file_name().unwrap()).join(name),
+                        value,
+                    );
+                }
+            } else {
+                files.insert(
+                    path.file_name().unwrap().into(),
+                    (
+                        std::fs::read(&path).unwrap(),
+                        std::fs::metadata(&path).unwrap().modified().unwrap(),
+                    ),
+                );
+            }
+        }
+        files
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    // Start with every retained entry, so the write-set includes other shapes
+    // in the same build and a different build's witnesses.
+    for set in images::retained() {
+        let bytes = serde_json::to_vec(set).unwrap();
+        images::append_at(root, serde_json::from_slice(&bytes).unwrap());
+        let mut other: images::ImageSet = serde_json::from_slice(&bytes).unwrap();
+        other.build = format!("other-{}", set.build);
+        images::append_at(root, other);
+    }
+    for image in [
+        &images::SESSION,
+        &images::LASH_VM,
+        &images::PRE_HEAP_SESSION,
+        &images::PRE_HEAP_LASH_VM,
+    ] {
+        let out = root.join(image.name.as_ref());
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("db.gz"), &image.db).unwrap();
+        std::fs::write(out.join("db-wal.gz"), &image.wal).unwrap();
+    }
+    for set in images::retained() {
+        for image in &set.images {
+            let before = snapshot(root);
+            let mut replacement: images::RetainedImage =
+                serde_json::from_slice(&serde_json::to_vec(image).unwrap()).unwrap();
+            // A changed payload makes an omitted selected write observable too.
+            replacement.db_gzip_base64 = set
+                .images
+                .iter()
+                .find(|other| other.name != image.name)
+                .unwrap()
+                .db_gzip_base64
+                .clone();
+            images::rerecord_at(root, &set.build, replacement);
+            let mut after = snapshot(root);
+            let selected = std::path::PathBuf::from("corpus")
+                .join(&set.build)
+                .join(format!("{}.json", image.name));
+            assert_ne!(before[&selected].0, after[&selected].0);
+            after.insert(selected.clone(), before[&selected].clone());
+            assert_eq!(
+                before, after,
+                "refreshing {} touched another witness",
+                image.name
+            );
+        }
+    }
+    let store = tempfile::tempdir().unwrap();
+    let path = images::database_path(store.path());
+    std::fs::write(&path, b"new database bytes").unwrap();
+    std::fs::write(path.with_extension("db-wal"), b"new WAL bytes").unwrap();
+    for image in images::BASELINE {
+        let before = snapshot(root);
+        images::regenerate_at(root, &path, image.name.as_ref());
+        let mut after = snapshot(root);
+        for file in ["db.gz", "db-wal.gz"] {
+            let selected = std::path::PathBuf::from(image.name.as_ref()).join(file);
+            assert_ne!(before[&selected].0, after[&selected].0);
+            after.insert(selected.clone(), before[&selected].clone());
+        }
+        assert_eq!(
+            before, after,
+            "recording {} touched another witness",
+            image.name
+        );
+    }
+}
