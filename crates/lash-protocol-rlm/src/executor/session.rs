@@ -499,6 +499,29 @@ impl CodeModeExecutionState {
         self.view.functions.clone().unwrap_or_default()
     }
 
+    /// The captures each of `functions`, saved functions of the session,
+    /// froze, copied out as data.
+    pub(super) async fn saved_captures(
+        &mut self,
+        functions: BTreeSet<Name>,
+    ) -> Result<BTreeMap<Name, BTreeMap<Name, Datum>>, PageAccessError> {
+        let Some(session) = self.current.session else {
+            return Ok(BTreeMap::new());
+        };
+        self.pages
+            .read(move |source| {
+                let mut editor = SessionEditor::open(Some(&session), source)?;
+                let mut captures = BTreeMap::new();
+                for function in functions {
+                    if let Some(frozen) = editor.captures(&function)? {
+                        captures.insert(function, frozen);
+                    }
+                }
+                Ok(captures)
+            })
+            .await
+    }
+
     async fn load_functions(&mut self) -> Result<(), PageAccessError> {
         if self.view.functions.is_some() {
             return Ok(());
@@ -598,37 +621,55 @@ impl CodeModeExecutionState {
     /// Takes the carry a finished cell sealed into the turn's spool: the
     /// session's next version, under a descriptor staged beside it. Reads
     /// only the pages of the bindings and saved functions the cell
-    /// changed.
+    /// changed. A binding the cell left holding one of its processes is
+    /// bound to that process's definition from `definitions`, by entry:
+    /// what a later cell starts it by.
     pub(super) async fn stage_cell(
         &mut self,
         carry: SessionRoot,
         not_carried: Vec<(Name, String)>,
         run: Option<super::pages::HeldRun>,
+        definitions: BTreeMap<Name, Datum>,
     ) -> Result<CellChanges, PageAccessError> {
         if let Some(run) = run {
             self.pages.hold(run);
         }
-        self.stage_carry(carry, not_carried).await
+        self.stage_carry(carry, not_carried, definitions).await
     }
 
     async fn stage_carry(
         &mut self,
         carry: SessionRoot,
         not_carried: Vec<(Name, String)>,
+        definitions: BTreeMap<Name, Datum>,
     ) -> Result<CellChanges, PageAccessError> {
         let spool = self.turn_spool()?;
         let (old_bindings, old_functions) = match &self.current.session {
             Some(session) => (session.bindings, session.functions),
             None => (KeyedRoot::Empty, KeyedRoot::Empty),
         };
-        let (bindings, functions) = self
+        let (bindings, functions, carry) = self
             .pages
             .read(move |source| {
-                let editor = SessionEditor::open(Some(&carry), source)?;
-                Ok((
-                    editor.changed(&old_bindings, &carry.bindings)?,
-                    editor.changed_functions(&old_functions, &carry.functions)?,
-                ))
+                let mut editor = SessionEditor::open(Some(&carry), source)?;
+                let bindings = editor.changed(&old_bindings, &carry.bindings)?;
+                let functions = editor.changed_functions(&old_functions, &carry.functions)?;
+                if !definitions.is_empty() {
+                    for (name, (_, bound)) in &bindings {
+                        if *bound
+                            && let Some(entry) = editor.function_reference(name)?
+                            && let Some(definition) = definitions.get(&entry)
+                        {
+                            editor.set(name, definition)?;
+                        }
+                    }
+                }
+                let carry = if editor.edited() {
+                    editor.seal()?
+                } else {
+                    carry
+                };
+                Ok((bindings, functions, carry))
             })
             .await?;
         let cells = self.current.cells.saturating_add(1);

@@ -179,6 +179,62 @@ impl SessionEditor {
         }))
     }
 
+    /// The declared function the binding `name` refers to, when its value
+    /// is a bare function reference: nothing else is copied out.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn function_reference(&mut self, name: &Name) -> Result<Option<Name>, HeapFault> {
+        let Some(record) = self.bindings.get(&metadata_key(name), &self.heap.access)? else {
+            return Ok(None);
+        };
+        let value = match record.value {
+            BoundRecord::Value(value) => value,
+            BoundRecord::Shared(id) => self.heap.variable_get(id)?,
+        };
+        if !matches!(value, Value::Function(_)) {
+            return Ok(None);
+        }
+        match crate::data::copy_out(&self.heap, &value) {
+            Ok(Datum::Function(function)) => Ok(Some(function)),
+            Ok(_) | Err(crate::data::CopyError::Raised(_)) => Ok(None),
+            Err(crate::data::CopyError::Heap(fault)) => Err(fault),
+        }
+    }
+
+    /// The captures the saved function `function` froze, each copied out
+    /// as data; none for a function the session does not hold.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults, and a capture that is no data.
+    pub fn captures(
+        &mut self,
+        function: &Name,
+    ) -> Result<Option<BTreeMap<Name, Datum>>, HeapFault> {
+        let Some(record) = Tree::<FunctionRecord>::of_keyed(&self.functions)
+            .get(&metadata_key(function), &self.heap.access)?
+        else {
+            return Ok(None);
+        };
+        let mut captures = BTreeMap::new();
+        for (name, frozen) in &record.captures {
+            let value = self.heap.instantiate(frozen).map_err(write_fault)?;
+            let datum = match crate::data::copy_out(&self.heap, &value) {
+                Ok(datum) => datum,
+                Err(crate::data::CopyError::Heap(fault)) => return Err(fault),
+                Err(crate::data::CopyError::Raised(_)) => {
+                    return Err(HeapFault::Malformed(format!(
+                        "saved function `{function}`'s capture `{name}` is no data"
+                    )));
+                }
+            };
+            captures.insert(name.clone(), datum);
+        }
+        Ok(Some(captures))
+    }
+
     /// Binds `name` to `value`, declared at `main` of no cell.
     ///
     /// # Errors

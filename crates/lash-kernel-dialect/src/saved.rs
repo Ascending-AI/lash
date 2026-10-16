@@ -1245,6 +1245,113 @@ pub fn install(
     Ok(declarations)
 }
 
+/// The saved functions among `saved` that a process of one of
+/// `document`'s entries runs: each one an entry calls or names, and each
+/// one those call or name in turn. A process has no session, so these
+/// cross into it by value ([`declare_captures`]).
+#[must_use]
+pub fn reached_by_entries(document: &Document, saved: &BTreeSet<Name>) -> BTreeSet<Name> {
+    let mut reached = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    let mut pending: Vec<Name> = document.entries.keys().cloned().collect();
+    while let Some(name) = pending.pop() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let Some(code) = document.functions.get(&name) else {
+            continue;
+        };
+        if saved.contains(&name) {
+            reached.insert(name);
+        }
+        let mut reads = Reads::default();
+        reads.block(&code.body, &mut code.params.clone());
+        pending.extend(reads.declared);
+    }
+    reached
+}
+
+/// Declares each saved function of `captures` in `document` with its
+/// captures bound to their constants ahead of its body, so the function
+/// runs with nothing of the session that froze them: what a process,
+/// which starts with no session, runs it with. A call still gets fresh
+/// values, as it does from the frozen captures.
+///
+/// # Errors
+///
+/// [`Unusable::Missing`] for a function the document does not declare, and
+/// [`Unusable::Capture`] for a capture with no constant.
+pub fn declare_captures(
+    document: &mut Document,
+    captures: &BTreeMap<Name, BTreeMap<Name, lash_kernel_doc::Datum>>,
+) -> Result<(), Unusable> {
+    for (function, frozen) in captures {
+        let code = document
+            .functions
+            .get_mut(function)
+            .ok_or_else(|| Unusable::Missing {
+                function: function.clone(),
+                needs: function.clone(),
+            })?;
+        let mut body = Vec::with_capacity(frozen.len() + code.body.len());
+        for (capture, datum) in frozen {
+            let value = constant(datum).ok_or_else(|| Unusable::Capture {
+                function: function.clone(),
+                capture: capture.clone(),
+            })?;
+            body.push(Stmt::Let {
+                name: capture.clone(),
+                value: Rhs::Expr(value),
+            });
+        }
+        body.append(&mut code.body);
+        code.body = body;
+    }
+    Ok(())
+}
+
+/// The constant a frozen capture is written as.
+fn constant(datum: &lash_kernel_doc::Datum) -> Option<Expr> {
+    use lash_kernel_doc::{Datum, MapEntry, RecordEntry};
+    let each = |items: &[Datum]| items.iter().map(constant).collect::<Option<Vec<_>>>();
+    Some(match datum {
+        Datum::Null => Expr::Literal(Literal::Null),
+        Datum::Absent => Expr::Literal(Literal::Absent),
+        Datum::Bool(flag) => Expr::Literal(Literal::Bool(*flag)),
+        Datum::Int(integer) => Expr::Literal(Literal::Int(integer.clone())),
+        Datum::Float(float) => Expr::Literal(Literal::Float(*float)),
+        Datum::Text(text) => Expr::Literal(Literal::Text(text.clone())),
+        Datum::Bytes(bytes) => Expr::Literal(Literal::Bytes(bytes.clone())),
+        Datum::Function(name) => Expr::Literal(Literal::Function(name.clone())),
+        Datum::Tuple(items) => Expr::Tuple(each(items)?),
+        Datum::List(items) => Expr::List(each(items)?),
+        Datum::Set(items) => Expr::Set(each(items)?),
+        Datum::Map(entries) => Expr::Map(
+            entries
+                .iter()
+                .map(|(key, value)| {
+                    Some(MapEntry {
+                        key: constant(key)?,
+                        value: constant(value)?,
+                    })
+                })
+                .collect::<Option<_>>()?,
+        ),
+        Datum::Record(fields) => Expr::Record(
+            fields
+                .iter()
+                .map(|(field, value)| {
+                    Some(RecordEntry {
+                        field: field.clone(),
+                        value: constant(value)?,
+                    })
+                })
+                .collect::<Option<_>>()?,
+        ),
+        Datum::Number(_) | Datum::Timestamp(_) | Datum::Error(_) | Datum::Handle(_) => return None,
+    })
+}
+
 fn native_write(error: NativeError) -> HeapWriteError {
     match error {
         NativeError::Heap(e) => HeapWriteError::Fault(e),

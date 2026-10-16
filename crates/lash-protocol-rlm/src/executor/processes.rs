@@ -5,13 +5,18 @@
 //! over the cell's document, under the cell's execution, and held by the
 //! frame so a later cell can start it (ADR 0113 §3.1). In the cell a
 //! process is a function reference; where it leaves the cell (a tool's
-//! input, the cell's answer) it is that entry's definition, which is data.
-//! A function a later cell starts is the session's saved function, which
-//! that cell declares under an entry of its own.
+//! input, a session binding, the cell's answer) it is that entry's
+//! definition, which is data. A function a later cell starts is the
+//! session's saved function, which that cell declares under an entry of
+//! its own, with its captures as constants: a process has no session.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::RuntimeExecutionContext;
-use lash_kernel_doc::{Datum, Document, DocumentId};
+use lash_kernel_doc::{Datum, Document, DocumentId, Name, SourceMap};
 use lash_vm_runtime::{KernelProcessDefinition, definition_draft, definition_of_entry};
+
+use super::session::CodeModeExecutionState;
 
 /// The document a cell's function references name entries of.
 pub(super) struct CellEntries {
@@ -36,6 +41,78 @@ impl CellEntries {
                 .map_err(|error| error.to_string())
         })
     }
+
+    /// Each entry's definition, as a session binding that held the entry
+    /// holds it once the cell ends.
+    pub(super) fn definitions(&self) -> BTreeMap<Name, Datum> {
+        self.document
+            .entries
+            .keys()
+            .filter_map(|entry| {
+                let definition = definition_of_entry(&self.document, self.identity, entry).ok()?;
+                let datum =
+                    lash_vm_broker::kernel::datum_from_json(&definition.to_string()).ok()?;
+                Some((entry.clone(), datum))
+            })
+            .collect()
+    }
+}
+
+/// The cell's document `document` (its JSON) with every saved function a
+/// process of one of its entries runs declared with its captures as
+/// constants, read from the session's pages, and `source_map` locating
+/// that document: a process starts with no session, so a saved function
+/// crosses into it by value. Both as given when no entry runs one that
+/// captures.
+///
+/// # Errors
+///
+/// The session's pages' faults, or a capture with no constant, as text.
+pub(super) async fn declare_saved_captures(
+    state: &mut CodeModeExecutionState,
+    document: String,
+    mut source_map: Option<SourceMap>,
+) -> Result<(String, Option<SourceMap>), String> {
+    // A document that is not one is refused where the cell reads it.
+    let Ok(mut lowered) = Document::from_json(&document) else {
+        return Ok((document, source_map));
+    };
+    if lowered.entries.is_empty() {
+        return Ok((document, source_map));
+    }
+    let saved: BTreeSet<Name> = state
+        .lowering_functions()
+        .into_keys()
+        .filter(|name| lowered.functions.contains_key(name))
+        .collect();
+    let mut declared = BTreeSet::new();
+    let mut changed = false;
+    // A capture that names another saved function reaches it too.
+    loop {
+        let reached: BTreeSet<Name> = lash_kernel_dialect::reached_by_entries(&lowered, &saved)
+            .difference(&declared)
+            .cloned()
+            .collect();
+        if reached.is_empty() {
+            break;
+        }
+        declared.extend(reached.iter().cloned());
+        let captures = state
+            .saved_captures(reached)
+            .await
+            .map_err(|error| error.to_string())?;
+        changed |= captures.values().any(|captured| !captured.is_empty());
+        lash_kernel_dialect::declare_captures(&mut lowered, &captures)
+            .map_err(|error| error.to_string())?;
+    }
+    if !changed {
+        return Ok((document, source_map));
+    }
+    if let Some(map) = &mut source_map {
+        map.document = lowered.identity().map_err(|error| error.to_string())?;
+    }
+    let document = lowered.to_json().map_err(|error| error.to_string())?;
+    Ok((document, source_map))
 }
 
 /// Stores the cell's document under the cell's execution, so the document

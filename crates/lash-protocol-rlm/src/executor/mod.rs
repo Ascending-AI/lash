@@ -477,10 +477,16 @@ async fn link_cell(
         String::from_utf8(bytes)
             .map_err(|error| host_failure(format!("the worker's {what} is not text: {error}")))
     };
+    // A saved function a process of the cell runs crosses into it by
+    // value, with its captures.
+    let (document, source_map) =
+        processes::declare_saved_captures(state, text(document, "document")?, source_map)
+            .await
+            .map_err(|error| host_failure(format!("a saved function cannot start: {error}")))?;
     let envelope = CellEnvelope {
         code: CellEnvelope::code_digest(code),
         dialect: state.dialect().to_owned(),
-        document: text(document, "document")?,
+        document,
         source_map,
         written,
         function_values,
@@ -976,6 +982,7 @@ async fn run_linked_cell(
                             .clone()
                             .zip(store.clone())
                             .map(|(pages, store)| pages::HeldRun::new(pages, store)),
+                        host.entries.definitions(),
                     )
                     .await
                     .map_err(|error| error.to_string()),
