@@ -234,18 +234,13 @@ struct LibraryCall {
     args: Tree<Value>,
 }
 
-/// The vectors of a frame that has ended, kept for the next frame.
-#[derive(Debug, Default)]
-struct FrameStorage {
-    control: Vec<Control>,
-    slots: frames::Slots,
-}
-
-/// Storage the machine reuses from call to call, so that a call allocates
-/// nothing of its own.
-#[derive(Debug, Default)]
+/// Activation storage and immutable entry references belong to this page
+/// access, rather than the executable shared by independent machines.
+#[derive(Default)]
 struct Storage {
-    frames: Vec<FrameStorage>,
+    #[expect(clippy::vec_box, reason = "reuse the frame allocation across calls")]
+    frames: Vec<Box<Frame>>,
+    entry_sites: Vec<Option<lash_kernel_state::paged::SiteRef>>,
     #[cfg(test)]
     binding_canonicalizations: usize,
     #[cfg(test)]
@@ -253,6 +248,10 @@ struct Storage {
     /// Values moved into or out of a register or a frame slot.
     #[cfg(test)]
     value_moves: usize,
+    #[cfg(test)]
+    activation_records: Vec<CodeId>,
+    #[cfg(test)]
+    activation_sites: Vec<CodeId>,
 }
 
 struct Frame {

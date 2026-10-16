@@ -8,8 +8,8 @@ use lash_kernel_exec::LocalRef;
 use super::ops::Reg;
 use super::stream::{Ran, Running, unbound};
 use super::{
-    Completion, Control, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt, KernelMachine,
-    LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
+    Completion, Control, Eval, Frame, Halt, Incoming, Interrupt, KernelMachine, LibraryCall,
+    SlotState, TaskState, TryPhase, bound, fault, raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
 use crate::data::{copy_out, deep_size, magnitude, nested_size, size};
@@ -401,13 +401,22 @@ impl KernelMachine {
             .map_err(|halt| halt.in_function(&exe.lib(lib).definition.name))
     }
 
-    /// Keeps an ended frame's vectors for the next frame.
+    /// Drop all guest holdings before retaining the activation's storage.
     fn recycle(&mut self, mut frame: Box<Frame>) {
-        let mut control = std::mem::take(&mut frame.control);
-        let mut slots = std::mem::take(&mut frame.slots);
-        control.clear();
-        slots.clear();
-        self.storage.frames.push(FrameStorage { control, slots });
+        frame.control.clear();
+        frame.slots.clear();
+        frame.record.bindings = super::Tree::new(false);
+        frame.record.loops = super::Tree::new(true);
+        frame.record.finally = super::Tree::new(true);
+        frame.record.iterated = super::Tree::new(true);
+        frame.record.departing = super::Tree::new(true);
+        frame.record.arguments = None;
+        frame.record.pending = None;
+        frame.awaiting = None;
+        frame.nested = None;
+        frame.library = None;
+        frame.published = None;
+        self.storage.frames.push(frame);
     }
 
     fn call_units_tree(
@@ -527,29 +536,51 @@ impl KernelMachine {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
         self.reserve_held(super::FRAME_BYTES)?;
-        let FrameStorage {
-            mut control,
-            mut slots,
-        } = self.storage.frames.pop().unwrap_or_default();
-        slots.fresh(code.slots_by_at.len());
-        control.push(Control::Block {
+        // SiteRef contains page-access-local trees. Prepare each body's
+        // immutable entry once here, after the same admission checks as a
+        // cold call; sharing it across machines would share their page port.
+        let at = code_id.0 as usize;
+        if self.storage.entry_sites.len() <= at {
+            self.storage.entry_sites.resize_with(at + 1, || None);
+        }
+        if self.storage.entry_sites[at].is_none() {
+            let entry =
+                lash_kernel_state::paged::SiteRef::new(&code.site.child(0), self.heap.pages())?;
+            #[cfg(test)]
+            self.storage.activation_sites.push(code_id);
+            self.storage.entry_sites[at] = Some(entry);
+        }
+        let entry = self.storage.entry_sites[at]
+            .as_ref()
+            .ok_or_else(|| fault("a prepared body has no entry site"))?
+            .clone();
+        let mut frame = match self.storage.frames.pop() {
+            Some(mut frame) => {
+                frame.code = code_id;
+                frame.record.statement = entry;
+                frame
+            }
+            None => {
+                #[cfg(test)]
+                self.storage.activation_records.push(code_id);
+                Box::new(Frame {
+                    code: code_id,
+                    slots: super::frames::Slots::default(),
+                    record: FrameRecord::fresh(entry),
+                    access: self.heap.pages().clone(),
+                    exe: Arc::clone(&self.exe),
+                    control: Vec::new(),
+                    awaiting: None,
+                    nested: None,
+                    library: None,
+                    published: None,
+                })
+            }
+        };
+        frame.slots.fresh(code.slots_by_at.len());
+        frame.control.push(Control::Block {
             block: code.body,
             next: 0,
-        });
-        let mut frame = Box::new(Frame {
-            code: code_id,
-            slots,
-            record: FrameRecord::fresh(lash_kernel_state::paged::SiteRef::new(
-                &code.site.child(0),
-                self.heap.pages(),
-            )?),
-            access: self.heap.pages().clone(),
-            exe: Arc::clone(&self.exe),
-            control,
-            awaiting: None,
-            nested: None,
-            library: None,
-            published: None,
         });
         if let Some(lib) = library {
             let mut args = super::Tree::new(true);

@@ -1128,6 +1128,32 @@ mod laws {
         );
     }
 
+    /// FIG-6567: after the first activation of a body, calls reuse their
+    /// records and prepared entry sites; mutable arguments still change.
+    #[test]
+    fn warm_calls_materialize_no_records_or_entry_sites() {
+        let mut source = String::from("fn echo(x) { return x } main {");
+        for index in 0..64 {
+            source.push_str(&format!("let v{index} = call echo({index}.5) "));
+        }
+        source.push_str("return v63 }");
+        let mut embedder = Embedder::new(&source);
+        use crate::Machine;
+        assert!(matches!(
+            Machine::run(&mut embedder.machine, &mut embedder.world, u64::MAX).unwrap(),
+            crate::Step::Ended(crate::End::Finished(_))
+        ));
+        assert_eq!(embedder.machine.storage.activation_records.len(), 2);
+        assert_eq!(embedder.machine.storage.activation_sites.len(), 2);
+        for (kind, builds) in [
+            ("records", &embedder.machine.storage.activation_records),
+            ("entry sites", &embedder.machine.storage.activation_sites),
+        ] {
+            let bodies: std::collections::BTreeSet<_> = builds.iter().collect();
+            assert_eq!(builds.len() - bodies.len(), 0, "warm calls built {kind}");
+        }
+    }
+
     /// FIG-6502: a value is a small handle, so a guest call moves few bytes.
     /// Each call of `echo` moves its argument through registers into the
     /// callee's slot, reads it back to return it, and binds the result in
