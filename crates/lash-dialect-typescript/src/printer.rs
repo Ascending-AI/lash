@@ -217,6 +217,11 @@ impl Renderer<'_> {
     fn expr(&mut self, expr: &k::Expr) {
         self.node(k::Node::Expr(expr), None);
     }
+    fn expr_at(&mut self, expr: &k::Expr, index: u32) {
+        self.out.begin_child(index);
+        self.expression(expr);
+        self.out.end_node();
+    }
     fn block(&mut self, block: &k::Block) {
         self.node(k::Node::Block(block), None);
     }
@@ -675,9 +680,9 @@ impl Renderer<'_> {
                 self.out.write("((");
                 self.name(name);
                 self.out.write(") => (");
-                self.expr(body);
+                self.expr_at(body, 1);
                 self.out.write("))(");
-                self.expr(value);
+                self.expr_at(value, 0);
                 self.out.write(")");
             }
             k::Expr::Read(read) => {

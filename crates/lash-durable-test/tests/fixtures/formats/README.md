@@ -195,3 +195,14 @@ with a missing helper node. On the tree rebased onto `origin/main`, its existing
 session recorder refreshed exactly that image in place under the pre-cut rule.
 Its program, expected result and set metadata are unchanged; both baseline
 images and the other five corpus images retain their bytes.
+
+FIG-6429 repairs the retained corpus after FIG-6306 added
+`turn_phases.tool_calls` to the 1.0 baseline. The actor-open query references
+that column even for a kernel process, so all six corpus images lacked the
+schema needed to resume. The existing corpus recorder re-recorded exactly
+`loop-closures-aliases`, `task-join`, `suspending-cleanup`,
+`pending-tool-typescript`, `pending-tool-python` and `saved-declared-read`
+on a tree rebased onto `fc61ecc700cbb32b1eddc3f8e7b4425091cc178a`, plus this
+change. Their programs, every expected result, set metadata, helper catalogue
+and versions are unchanged. Both baseline images already have the column
+and retain their bytes. No runtime compatibility path or migration was added.

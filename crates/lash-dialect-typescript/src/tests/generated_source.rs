@@ -262,6 +262,38 @@ fn try_handler_presence_and_empty_bodies_reconstruct_exactly() {
     }
 }
 
+/// G-SOURCE-MAP: scoped expressions keep document child indices even though
+/// TypeScript writes the function body before its argument.
+#[test]
+fn scoped_expression_maps_keep_value_and_body_sites_in_document_order() {
+    let document = k::parse_document(
+        r#"kernel 1
+numbers float
+main { finish let(value = ["λ"], if(true, value, [null])) }
+"#,
+    )
+    .unwrap();
+    let off = roundtrip(&document, false);
+    let on = roundtrip(&document, true);
+    assert_eq!(off.source, on.source);
+    let map = on.source_map.unwrap();
+    map.validate(&document, &on.source).unwrap();
+    for (path, expected) in [
+        (vec![0, 0, 0], r#"["λ"]"#),
+        (vec![0, 0, 0, 0], r#""λ""#),
+        (vec![0, 0, 1], "(true ? value : [null])"),
+        (vec![0, 0, 1, 0], "true"),
+        (vec![0, 0, 1, 1], "value"),
+        (vec![0, 0, 1, 2], "[null]"),
+    ] {
+        let site = k::Site::new(k::Unit::Main, path);
+        let mapped = map.sites.iter().find(|entry| entry.site == site).unwrap();
+        assert_eq!(mapped.ranges.len(), 1, "{site}");
+        let span = mapped.ranges[0];
+        assert_eq!(&on.source[span.start..span.end], expected, "{site}");
+    }
+}
+
 #[test]
 fn maps_cover_real_sites_in_final_utf8_and_never_change_text() {
     let document = inventory_document();

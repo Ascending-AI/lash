@@ -362,6 +362,14 @@ impl SourceWriter {
             }
         }
     }
+    /// Begin a child by its document index when source syntax writes children
+    /// in a different order from the document's tree traversal.
+    pub fn begin_child(&mut self, index: u32) {
+        if let Some(parent) = self.frames.as_mut().and_then(|frames| frames.last_mut()) {
+            parent.child = index;
+        }
+        self.begin_node(None);
+    }
     pub fn end_node(&mut self) {
         if let Some(frames) = &mut self.frames {
             let Some(frame) = frames.pop() else {
