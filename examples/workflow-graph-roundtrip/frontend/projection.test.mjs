@@ -1,18 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  actionOf,
   startPosition,
   appendPosition,
   recordInput,
   conditionValue,
 } from "./projection.mjs";
-import { buildDataflow } from "./dataflow.mjs";
+import { buildDataflow, planInputEdit } from "./dataflow.mjs";
 const site = (path) => ({ unit: { function: "demo" }, path });
-const row = (path, block, statement) => ({
+// A statement as lash's view lists it; `action` is its own action's view,
+// at the statement's first child.
+const row = (path, block, statement, action) => ({
   site: site(path),
   block: site(block),
   statement,
+  actions: action ? [site([...path, 0])] : [],
+  action,
 });
 const text = (value) => ({ literal: { text: value } });
 const input = (name) => ({
@@ -20,6 +23,11 @@ const input = (name) => ({
     name,
     value: { expr: { record: [{ field: "text", value: text("original") }] } },
   },
+});
+const show = (args) => ({
+  kind: "perform",
+  callee: { effect: "display.show_message" },
+  args,
 });
 const message = (name) => ({
   do: {
@@ -32,23 +40,24 @@ const message = (name) => ({
     },
   },
 });
-function workflow(statements, body) {
+const shown = (name) => show([{ name: "input", expression: { variable: name } }]);
+function workflow(statements, body, expressions = []) {
   return {
     view: {
       statements,
       dataflow: {
         bindings: [],
-        expressions: [],
+        expressions,
         parameters: [],
         returns: [],
         assignments: [],
         actions: statements
-          .filter((s) => actionOf(s))
+          .filter((s) => s.action)
           .map((s) => ({
-            site: site([...s.site.path, 0]),
+            ...s.action,
+            site: s.actions[0],
             statement: s.site,
             block: s.block,
-            args: [],
             available: [],
             result_type: "any",
           })),
@@ -70,7 +79,7 @@ test("an unused closure is not executed or chosen as the entry insertion scope",
   };
   const rows = [
     row([0], [], declaration),
-    row([0, 0, 0, 0], [0, 0, 0], hidden),
+    row([0, 0, 0, 0], [0, 0, 0], hidden, shown("input")),
     row([1], [], { return: { value: { literal: "null" } } }),
   ];
   const w = workflow(rows, [declaration, rows[2].statement]);
@@ -87,20 +96,29 @@ test("an unused closure is not executed or chosen as the entry insertion scope",
 
 test("a library call is opaque regardless of its display name", () => {
   const source = row([0], [], input("source"));
-  const conversion = row([1], [], {
-    let: {
-      name: "converted",
-      value: {
-        action: {
-          call: {
-            callee: { library: "opaque" },
-            args: [{ variable: "source" }],
+  const conversion = row(
+    [1],
+    [],
+    {
+      let: {
+        name: "converted",
+        value: {
+          action: {
+            call: {
+              callee: { library: "opaque" },
+              args: [{ variable: "source" }],
+            },
           },
         },
       },
     },
-  });
-  const effect = row([2], [], message("converted"));
+    {
+      kind: "call",
+      callee: { library: { id: "opaque", name: "ts.boundary" } },
+      args: [{ expression: { variable: "source" } }],
+    },
+  );
+  const effect = row([2], [], message("converted"), shown("converted"));
   const w = workflow([source, conversion, effect]);
   w.document.manifest = { functions: { opaque: "ts.boundary" } };
   assert.equal(recordInput(w, effect), undefined);
@@ -114,27 +132,46 @@ test("a library call is opaque regardless of its display name", () => {
   assert.equal(recordInput(w, effect), undefined);
 });
 
-test("field editing does not capture outer, shared or reassigned bindings", () => {
-  const source = row([0], [], input("input"));
-  const inner = row([1, 0, 0, 0], [1, 0, 0], message("input"));
-  assert.equal(recordInput(workflow([source, inner]), inner), undefined);
-  const effect = row([1], [], message("input"));
-  assert.equal(
-    recordInput(workflow([source, effect]), effect).statement,
-    source,
+test("an effect's record argument is written in place and edits field by field or whole", () => {
+  const argument = site([0, 0, 0]);
+  const field = site([0, 0, 0, 0]);
+  const record = { record: [{ field: "text", value: text("original") }] };
+  const effect = row(
+    [0],
+    [],
+    {
+      let: {
+        name: "step",
+        value: {
+          expr: {
+            act: {
+              kind: { perform: { effect: "display.show_message", result: "null" } },
+              args: [record],
+            },
+          },
+        },
+      },
+    },
+    show([{ name: "input", expression: record, site: argument }]),
   );
-  const shared = row([2], [], message("input"));
-  assert.equal(
-    recordInput(workflow([source, effect, shared]), effect),
-    undefined,
+  const expressions = [
+    { site: argument, expression: record, references: [], available: [] },
+    { site: field, expression: text("original"), references: [], available: [] },
+  ];
+  const w = workflow([effect], undefined, expressions);
+  assert.deepEqual(recordInput(w, effect), { site: argument, record: record.record });
+  const [node] = buildDataflow(w, site([])).nodes;
+  assert.equal(node.kind, "action");
+  assert.deepEqual(
+    node.inputs.map((port) => [port.name, port.target]),
+    [["text", { expression: field }]],
   );
-  const write = row([1], [], {
-    assign: { place: { variable: "input" }, value: { expr: { record: [] } } },
-  });
-  assert.equal(
-    recordInput(workflow([source, write, shared]), shared),
-    undefined,
-  );
+  const changed = { record: [{ field: "text", value: text("edited") }] };
+  assert.deepEqual(planInputEdit(w, node.wholeInputs[0], changed), [
+    { set_argument: { action: effect.actions[0], index: 0, argument: changed } },
+  ]);
+  const bound = row([1], [], message("input"), shown("input"));
+  assert.equal(recordInput(workflow([bound]), bound), undefined);
   const branch = row([2, 0, 0, 0], [2, 0, 0], {
     if: { condition: { variable: "enabled" }, then_block: [] },
   });
@@ -156,7 +193,7 @@ test("empty scopes are insertable and global additions precede a terminal statem
     },
   });
   const terminal = row([1], [], { return: { value: { literal: "null" } } });
-  const unreachable = row([2], [], message("input"));
+  const unreachable = row([2], [], message("input"), shown("input"));
   const w = workflow([branch, terminal, unreachable]);
   assert.deepEqual(appendPosition(w, site([])), {
     block: site([]),
@@ -172,7 +209,7 @@ test("empty scopes are insertable and global additions precede a terminal statem
 test("break and continue end their scope without throwing or appending unreachable actions", () => {
   for (const kind of ["break", "continue"]) {
     const end = row([0, 1, 0], [0, 1], kind);
-    const hidden = row([0, 1, 1], [0, 1], message("input"));
+    const hidden = row([0, 1, 1], [0, 1], message("input"), shown("input"));
     const w = workflow([end, hidden]);
     assert.deepEqual(
       buildDataflow(w, site([0, 1])).nodes.map((node) => node.s),

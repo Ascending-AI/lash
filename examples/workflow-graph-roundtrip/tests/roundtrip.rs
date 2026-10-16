@@ -184,16 +184,54 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     .await;
     assert_eq!(unchanged["identity"], opened["identity"]);
 
-    // The host previews public authoring operations, then submits their
+    // A direct edit saves and publishes a new version, and the TypeScript
+    // lens follows it.
+    let replaced = answer(
+        client
+            .post(format!("{base}/workflow/edits"))
+            .json(&json!({"version": opened["version"], "edits": [
+                {"replace_expression": {
+                    "expression": literal,
+                    "with": {"literal": {"text": "Edited as a kernel document"}},
+                }},
+            ]}))
+            .send()
+            .await
+            .expect("edits"),
+    )
+    .await;
+    let edited = &replaced["workflow"];
+    assert!(
+        edited["version"] == opened["version"].as_u64().expect("a version") + 1
+            && edited["definition"].is_string()
+            && edited["definition"] != opened["definition"]
+            && edited["identity"] != opened["identity"],
+        "the edit saved and published a new version: {edited}"
+    );
+    assert!(
+        edited["source"]
+            .as_str()
+            .is_some_and(|source| source.contains("Edited as a kernel document")),
+        "the lens follows the edit"
+    );
+    let survivors = replaced["correspondence"]["entries"]
+        .as_array()
+        .expect("survivors");
+    assert!(
+        survivors
+            .iter()
+            .filter(|survivor| survivor["edited"] == true)
+            .map(|survivor| &survivor["from"])
+            .eq([&literal]),
+        "the correspondence marks the replaced literal alone as edited"
+    );
+
+    // The host previews a public authoring operation, then submits its
     // ordinary transaction through the same edit/admission route.
     let planned = answer(
         client
             .post(format!("{base}/workflow/plan"))
-            .json(&json!({"version": opened["version"], "operations": [
-                {"edit": {"replace_expression": {
-                    "expression": literal,
-                    "with": {"literal": {"text": "Edited as a kernel document"}},
-                }}},
+            .json(&json!({"version": edited["version"], "operations": [
                 {"insert_effect": {
                     "at": {"block": bound["block"], "before": bound["site"]},
                     "effect": "display.show_message",
@@ -215,41 +253,55 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
             .expect("get after preview"),
     )
     .await;
-    assert_eq!(still_saved["identity"], opened["identity"]);
-    assert_eq!(still_saved["version"], opened["version"]);
-    let edited = answer(
+    assert_eq!(still_saved["identity"], edited["identity"]);
+    assert_eq!(still_saved["version"], edited["version"]);
+    let inserted = answer(
         client
             .post(format!("{base}/workflow/edits"))
-            .json(&json!({"version": opened["version"], "edits": planned["transaction"]["edits"]}))
+            .json(&json!({"version": edited["version"], "edits": planned["transaction"]["edits"]}))
             .send()
             .await
             .expect("edits"),
     )
     .await;
-    let workflow = &edited["workflow"];
+    let workflow = &inserted["workflow"];
     assert!(
-        workflow["version"] == opened["version"].as_u64().expect("a version") + 1
+        workflow["version"] == edited["version"].as_u64().expect("a version") + 1
             && workflow["definition"].is_string()
-            && workflow["definition"] != opened["definition"]
-            && workflow["identity"] != opened["identity"],
-        "the edit saved and published a new version: {workflow}"
+            && workflow["identity"] != edited["identity"],
+        "the insertion saved and published a new version: {workflow}"
     );
-    assert!(
-        workflow["source"]
-            .as_str()
-            .is_some_and(|source| source.contains("Edited as a kernel document")),
-        "the lens follows the edit"
-    );
-    let survivors = edited["correspondence"]["entries"]
+    // The inserted step is one statement whose effect takes the record in
+    // place, as the argument of its nested `perform`.
+    let step = workflow["view"]["statements"]
         .as_array()
-        .expect("survivors");
+        .expect("statements")
+        .iter()
+        .find(|statement| statement["statement"]["let"]["name"] == "extra_message")
+        .expect("the inserted step");
+    assert_eq!(
+        step["statement"]["let"]["value"]["expr"]["act"]["args"][0]["record"][0]["value"]["literal"]
+            ["text"],
+        "Added through public authoring",
+        "the record is the effect's argument: {step}"
+    );
+    let action = workflow["view"]["dataflow"]["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .find(|action| action["statement"] == step["site"])
+        .expect("the inserted step's action");
+    assert_eq!(step["actions"], json!([action["site"]]));
     assert!(
-        survivors
-            .iter()
-            .filter(|survivor| survivor["edited"] == true)
-            .map(|survivor| &survivor["from"])
-            .eq([&literal]),
-        "the correspondence marks the replaced literal alone as edited"
+        action["args"][0]["expression"]["record"].is_array()
+            && action["args"][0]["site"].is_object(),
+        "the view lists the record argument with its site: {action}"
+    );
+    // The TypeScript printer has no spelling yet for an action nested in an
+    // expression (FIG-6472), so the lens says so instead of showing code.
+    assert!(
+        workflow["source"].is_null() && workflow["sourceUnavailable"].is_string(),
+        "the lens reports the nested action it cannot spell: {workflow}"
     );
 
     let events = run(&client, &base, json!({})).await;

@@ -32,8 +32,8 @@ reuse the existing nested encodings and reject unknown structural fields.
 Lash publishes its JSON Schema and TypeScript declarations; hosts embed
 `Vec<Operation>` in their own transport, revision and authentication envelope.
 The expanded `Transaction` is the exact edit record to save and replay against
-its base and admission context. Re-planning operations later is a new plan,
-since generated temporary names are not part of the operation contract.
+its base and admission context. Each operation plans to one edit, with no
+generated temporaries (FIG-6461): a computed effect input stays an argument.
 
 Other core types carry no wire-stability promise; a host may serialize them
 when its own contract permits it.

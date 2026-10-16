@@ -360,7 +360,7 @@ fn a_host_with_no_dialect_changes_an_argument_inserts_a_statement_and_replaces_a
         Edit::SetArgument {
             action: main(&[1, 0]),
             index: 0,
-            argument: Atom::Literal(Literal::Text("https://b".to_string())),
+            argument: Expr::Literal(Literal::Text("https://b".to_string())),
         },
         Edit::InsertStatement {
             at: before(main(&[3])),
@@ -599,7 +599,7 @@ fn cases(library: &Library) -> Vec<Case> {
             Edit::SetArgument {
                 action: main(&[4, 0]),
                 index: 0,
-                argument: Atom::Literal(Literal::Text("v".to_string())),
+                argument: Expr::Literal(Literal::Text("v".to_string())),
             },
             vec![],
             &[main(&[4, 0])],
@@ -1054,7 +1054,7 @@ fn a_transaction_applies_whole_against_its_base_or_not_at_all() {
         vec![Edit::SetArgument {
             action: main(&[4, 0]),
             index: 1,
-            argument: Atom::Literal(Literal::Null),
+            argument: Expr::Literal(Literal::Null),
         }],
         &environment,
     );
@@ -1609,5 +1609,186 @@ main {
             Datum::Int(9.into()),
             Datum::Int(1.into())
         ])
+    );
+}
+
+/// `K-EDIT-004`, `K-FORM-001`: setting an argument writes any expression.
+/// A computed argument of a `let`'s action nests the action as the whole
+/// right-hand side, an argument that leaves such a right-hand side all
+/// variables and literals makes it the statement's action again, and a
+/// nested action's argument is set in place. Each action survives, edited;
+/// the argument it had does not. A `do`'s action takes only a variable or a
+/// literal, and the refusal names its form.
+#[test]
+fn setting_an_argument_writes_any_expression_in_the_one_spelling_text_reads() {
+    let library = library();
+    let environment = environment(&library);
+    let mut draft = open(
+        r#"kernel 1
+numbers float
+effect fetch(url: Text) -> Any
+effect notify(text: Text) -> Any
+
+main {
+  let url = "https://a"
+  let page = perform fetch(url) as Any
+  let shown = perform notify(if(true, "x", "y")) as Any
+  let pair = [perform fetch(url) as Any, 1]
+  do perform notify(url) as Any
+  finish [page, shown, pair]
+}
+"#,
+    );
+    let computed = Expr::If {
+        cond: Box::new(Expr::Literal(Literal::Bool(true))),
+        then: Box::new(text("b")),
+        r#else: Box::new(text("c")),
+    };
+    let refusal = refused(
+        &mut draft,
+        vec![Edit::SetArgument {
+            action: main(&[4, 0]),
+            index: 0,
+            argument: computed.clone(),
+        }],
+        &environment,
+    );
+    assert_eq!(
+        refusal.diagnostics[0].kind,
+        EditDiagnosticKind::ArgumentNotAtom {
+            form: lash_kernel_doc::StatementForm::Perform
+        }
+    );
+    let refusal = refused(
+        &mut draft,
+        vec![Edit::SetArgument {
+            action: main(&[5, 0]),
+            index: 0,
+            argument: text("x"),
+        }],
+        &environment,
+    );
+    assert_eq!(
+        refusal.diagnostics[0].kind,
+        EditDiagnosticKind::WrongNode {
+            expected: NodeClass::Action,
+            found: NodeClass::Expression,
+        }
+    );
+
+    let applied = draft
+        .apply(
+            &transaction(
+                &draft,
+                vec![
+                    Edit::SetArgument {
+                        action: main(&[1, 0]),
+                        index: 0,
+                        argument: computed,
+                    },
+                    Edit::SetArgument {
+                        action: main(&[2, 0]),
+                        index: 0,
+                        argument: Expr::Variable(name("url")),
+                    },
+                    Edit::SetArgument {
+                        action: main(&[3, 0, 0]),
+                        index: 0,
+                        argument: text("c"),
+                    },
+                ],
+            ),
+            &environment,
+        )
+        .unwrap();
+    let expected = document(
+        r#"kernel 1
+numbers float
+effect fetch(url: Text) -> Any
+effect notify(text: Text) -> Any
+
+main {
+  let url = "https://a"
+  let page = perform fetch(if(true, "b", "c")) as Any
+  let shown = perform notify(url) as Any
+  let pair = [perform fetch("c") as Any, 1]
+  do perform notify(url) as Any
+  finish [page, shown, pair]
+}
+"#,
+    );
+    assert_eq!(draft.document(), &expected);
+    assert_eq!(applied.admitted.identity, expected.identity());
+    let fate = |site: Site| {
+        applied
+            .correspondence
+            .survivor(&site)
+            .map(|survivor| (survivor.to.clone(), survivor.edited))
+    };
+    assert_eq!(fate(main(&[1, 0])), Some((main(&[1, 0]), true)));
+    assert_eq!(fate(main(&[2, 0])), Some((main(&[2, 0]), true)));
+    assert_eq!(fate(main(&[2, 0, 0])), None);
+    assert_eq!(fate(main(&[3, 0])), Some((main(&[3, 0]), false)));
+    assert_eq!(fate(main(&[3, 0, 0])), Some((main(&[3, 0, 0]), true)));
+    assert_eq!(fate(main(&[3, 0, 0, 0])), None);
+    assert_eq!(fate(main(&[3, 0, 1])), Some((main(&[3, 0, 1]), false)));
+}
+
+/// `K-EDIT-007`, `K-EDIT-008`, `K-EDIT-009`: a rename and an adoption
+/// reach the callee of an action nested in an expression as they reach a
+/// statement's: the closure a nested `apply` calls, the function a nested
+/// `call` or `spawn` names, the library function a nested `invoke` names.
+#[test]
+fn renames_and_adoption_reach_the_callees_of_nested_actions() {
+    let library = library();
+    let environment = environment(&library);
+    let source = |closure: &str, function: &str, neg: FunctionId| {
+        format!(
+            r#"kernel 1
+numbers float
+use num.neg = @{neg}
+
+fn {function}(value) {{
+  return value
+}}
+
+main {{
+  let {closure} = fn(v) {{
+    return v
+  }}
+  let a = [apply {closure}(1), call {function}(2), spawn call {function}(3)]
+  let b = [invoke num.neg(1)]
+  finish [a, b]
+}}
+"#
+        )
+    };
+    let mut draft = open(&source("f", "wrap", library.neg));
+    draft
+        .apply(
+            &transaction(
+                &draft,
+                vec![
+                    Edit::RenameVariable {
+                        declared_at: main(&[0]),
+                        name: name("f"),
+                        to: name("g"),
+                    },
+                    Edit::RenameFunction {
+                        from: name("wrap"),
+                        to: name("wrapped"),
+                    },
+                    Edit::ReplaceFunctionIdentity {
+                        from: library.neg,
+                        to: library.corrected,
+                    },
+                ],
+            ),
+            &environment,
+        )
+        .unwrap();
+    assert_eq!(
+        draft.document(),
+        &document(&source("g", "wrapped", library.corrected))
     );
 }

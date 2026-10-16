@@ -313,7 +313,7 @@ main {
                     Edit::SetArgument {
                         action: main(&[1, 0]),
                         index: 0,
-                        argument: k::Atom::Literal(k::Literal::Text("https://b".into())),
+                        argument: k::Expr::Literal(k::Literal::Text("https://b".into())),
                     },
                     Edit::InsertStatement {
                         at: Position::before(main(&[3])).unwrap(),

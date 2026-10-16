@@ -7,8 +7,8 @@
 use std::collections::BTreeSet;
 
 use lash_kernel_doc::{
-    Action, Atom, Block, Catch, DocumentId, EffectName, Expr, Function, FunctionId, Name,
-    NumberPolicy, Signature, Site, Stmt,
+    Action, Block, Catch, DocumentId, EffectName, Expr, Function, FunctionId, Name, NumberPolicy,
+    Signature, Site, Stmt,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -108,13 +108,21 @@ pub enum Edit {
         action: Site,
         with: Action,
     },
-    /// Replaces one argument of an action, counted from 0 in the order the
-    /// action writes them. A `sleep`, `join`, `join` of a list and `cancel`
-    /// have the one argument.
+    /// Replaces one argument of an action, a statement's own or one nested
+    /// in an expression, counted from 0 in the order the action writes them.
+    /// A `sleep`, `join`, `join` of a list and `cancel` have the one
+    /// argument. The action survives; the argument it had does not.
+    ///
+    /// A computed argument of a `let`'s or an assignment's own action makes
+    /// the right-hand side that action nested as an expression, and an
+    /// argument that leaves a nested whole right-hand side all variables
+    /// and literals makes it the statement's action again: the one spelling
+    /// kernel text reads (`K-FORM-001`). A `do`'s action, a `join` and a
+    /// `cancel` take only a variable or a literal.
     SetArgument {
         action: Site,
         index: u32,
-        argument: Atom,
+        argument: Expr,
     },
     /// Replaces the condition of an `if` or a `while`.
     SetCondition {

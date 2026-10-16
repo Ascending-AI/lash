@@ -8,9 +8,13 @@ const key = (site) => JSON.stringify([site.unit, site.path]);
 // `do display`, which never ran.
 const loop = { site: site(0) };
 const choice = { site: site(0, 0, 0) };
-const urgent = { site: site(0, 0, 0, 0, 0), action: site(0, 0, 0, 0, 0, 0) };
-const later = { site: site(0, 0, 0, 1, 0), action: site(0, 0, 0, 1, 0, 0) };
-const display = { site: site(1), action: site(1, 0) };
+const urgent = { site: site(0, 0, 0, 0, 0), actions: [site(0, 0, 0, 0, 0, 0)] };
+const later = { site: site(0, 0, 0, 1, 0), actions: [site(0, 0, 0, 1, 0, 0)] };
+const display = { site: site(1), actions: [site(1, 0)] };
+// `let shown = perform show(perform fetch() as Any) as Any`: the fetch is
+// nested in the show's argument and runs first.
+const fetched = site(2, 0, 0);
+const shown = { site: site(2), actions: [fetched, site(2, 0)] };
 const view = {
   scopes: [
     { block: site(0, 0), kind: "for", statement: site(0) },
@@ -41,23 +45,32 @@ const live = (fields = {}) => ({
   ...fields,
 });
 
-test("a node is active, waiting or failed by its site's status, else done once it ran", () => {
-  const statuses = new Map([[key(urgent.action), "started"]]);
+test("a node is active, waiting or failed by its actions' statuses, else done once it ran", () => {
+  const statuses = new Map([[key(urgent.actions[0]), "started"]]);
   assert.deepEqual(nodeState(urgent, live({ statuses })), {
     state: "active",
     runs: 2,
     error: undefined,
   });
-  statuses.set(key(urgent.action), "waiting");
+  statuses.set(key(urgent.actions[0]), "waiting");
   assert.equal(nodeState(urgent, live({ statuses })).state, "waiting");
-  const errors = new Map([[key(urgent.action), "mock failure"]]);
-  statuses.set(key(urgent.action), "failed");
+  const errors = new Map([[key(urgent.actions[0]), "mock failure"]]);
+  statuses.set(key(urgent.actions[0]), "failed");
   assert.deepEqual(nodeState(urgent, live({ statuses, errors })), {
     state: "failed",
     runs: 2,
     error: "mock failure",
   });
   assert.equal(nodeState(choice, live()).state, "done", "counted runs mean done");
+  // A nested action is part of its statement's node.
+  statuses.set(key(fetched), "waiting");
+  assert.equal(nodeState(shown, live({ statuses })).state, "waiting");
+  statuses.set(key(fetched), "succeeded");
+  statuses.set(key(shown.actions[1]), "started");
+  assert.equal(nodeState(shown, live({ statuses })).state, "active");
+  errors.set(key(fetched), "fetch failed");
+  statuses.set(key(fetched), "failed");
+  assert.equal(nodeState(shown, live({ statuses, errors })).error, "fetch failed");
 });
 
 test("a node that did not run is dimmed only once the run has ended", () => {

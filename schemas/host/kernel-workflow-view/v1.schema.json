@@ -315,7 +315,7 @@
               "type": "null"
             }
           ],
-          "description": "What an assignment of the action's result writes."
+          "description": "What an assignment of the action's result writes, when the action\nis its whole right-hand side."
         },
         "kind": {
           "$ref": "#/$defs/SiteKind"
@@ -346,9 +346,6 @@
       "additionalProperties": false,
       "description": "One argument of an action.",
       "properties": {
-        "atom": {
-          "$ref": "#/$defs/Atom"
-        },
         "binding": {
           "description": "The binding a variable argument reads.",
           "format": "uint",
@@ -357,6 +354,10 @@
             "integer",
             "null"
           ]
+        },
+        "expression": {
+          "$ref": "#/$defs/Expr",
+          "description": "The argument as the document writes it. A statement's own action\nwrites a variable or a literal."
         },
         "name": {
           "anyOf": [
@@ -369,6 +370,17 @@
           ],
           "description": "The parameter or builtin operand the kernel names here."
         },
+        "site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Site"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The argument's node, for an action nested in an expression: the\nexpression an edit replaces. A statement's own action writes its\narguments in place, with no node of their own."
+        },
         "type": {
           "$ref": "#/$defs/Type",
           "description": "That parameter's type; `any` for an untyped declared parameter or\nwhen no signature names one."
@@ -376,7 +388,7 @@
       },
       "required": [
         "type",
-        "atom"
+        "expression"
       ],
       "type": "object"
     },
@@ -656,7 +668,7 @@
       "description": "What a variable is and where values flow in the entry.",
       "properties": {
         "actions": {
-          "description": "Every action of the entry, in document order.",
+          "description": "Every action of the entry, a statement's own and each one nested in\nan expression, in document order.",
           "items": {
             "$ref": "#/$defs/ActionView"
           },
@@ -730,7 +742,18 @@
         },
         "statement": {
           "$ref": "#/$defs/Site",
-          "description": "The statement whose right-hand side it is: where its task stands\nwhile it waits."
+          "description": "The statement it is part of: where its task stands while it waits."
+        },
+        "within": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Site"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The innermost action it is an argument of, when it is nested in\none: in `call f(perform g() as Any)`, the call."
         }
       },
       "required": [
@@ -1649,16 +1672,12 @@
       "additionalProperties": false,
       "description": "One statement of the entry.",
       "properties": {
-        "action": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Site"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The site of the statement's action, when it has one: where a run\nreports it."
+        "actions": {
+          "description": "The sites of the statement's actions, its own and those nested in\nits expressions, in the order a run issues them: an action's\narguments before it, left to right (`K-EVAL-001`). A run reports\neach at its site. A closure's actions are its body's statements'.",
+          "items": {
+            "$ref": "#/$defs/Site"
+          },
+          "type": "array"
         },
         "block": {
           "$ref": "#/$defs/Site",
@@ -1689,7 +1708,8 @@
         "site",
         "statement",
         "block",
-        "depth"
+        "depth",
+        "actions"
       ],
       "type": "object"
     },

@@ -39,8 +39,8 @@ use lash_kernel_check::{
     NodeKind, Reference, StmtNode, WorkflowDocument,
 };
 use lash_kernel_doc::{
-    Action, Atom, Callee, Document, EffectName, Expr, FunctionDeclarations, FunctionId,
-    FunctionName, Name, Node, Param, Place, Site, Stmt, Type, Unit,
+    ActExpr, ActKind, Action, Atom, Callee, Document, EffectName, Expr, FunctionDeclarations,
+    FunctionId, FunctionName, Name, Node, Param, Place, Site, Stmt, Type, Unit,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -100,10 +100,11 @@ pub struct StatementView {
     pub block: Site,
     /// How many statements enclose this one inside the entry's body.
     pub depth: usize,
-    /// The site of the statement's action, when it has one: where a run
-    /// reports it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub action: Option<Site>,
+    /// The sites of the statement's actions, its own and those nested in
+    /// its expressions, in the order a run issues them: an action's
+    /// arguments before it, left to right (`K-EVAL-001`). A run reports
+    /// each at its site. A closure's actions are its body's statements'.
+    pub actions: Vec<Site>,
 }
 
 /// One block of the entry and what opens it.
@@ -154,7 +155,8 @@ pub struct Dataflow {
     pub bindings: Vec<BindingView>,
     /// Every expression of the entry, in document order.
     pub expressions: Vec<ExpressionView>,
-    /// Every action of the entry, in document order.
+    /// Every action of the entry, a statement's own and each one nested in
+    /// an expression, in document order.
     pub actions: Vec<ActionView>,
     /// The entry's parameters, by binding id.
     pub parameters: Vec<usize>,
@@ -236,7 +238,8 @@ pub struct ActionView {
     pub kind: SiteKind,
     pub statement: Site,
     pub block: Site,
-    /// What an assignment of the action's result writes.
+    /// What an assignment of the action's result writes, when the action
+    /// is its whole right-hand side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub destination: Option<Place>,
     /// The statically named target of a call, spawn or perform.
@@ -271,7 +274,14 @@ pub struct ArgumentView {
     /// when no signature names one.
     #[serde(rename = "type")]
     pub ty: Type,
-    pub atom: Atom,
+    /// The argument as the document writes it. A statement's own action
+    /// writes a variable or a literal.
+    pub expression: Expr,
+    /// The argument's node, for an action nested in an expression: the
+    /// expression an edit replaces. A statement's own action writes its
+    /// arguments in place, with no node of their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<Site>,
     /// The binding a variable argument reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<usize>,
@@ -308,9 +318,12 @@ pub struct AssignmentView {
 pub struct ExecutionSiteView {
     /// The action's site.
     pub site: Site,
-    /// The statement whose right-hand side it is: where its task stands
-    /// while it waits.
+    /// The statement it is part of: where its task stands while it waits.
     pub statement: Site,
+    /// The innermost action it is an argument of, when it is nested in
+    /// one: in `call f(perform g() as Any)`, the call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub within: Option<Site>,
     pub kind: SiteKind,
     /// The loops enclosing it inside its own function body, outermost
     /// first.
@@ -457,6 +470,7 @@ fn execution_site(site: &lash_kernel_check::ExecutionSite) -> ExecutionSiteView 
     ExecutionSiteView {
         site: site.site.clone(),
         statement: site.statement.clone(),
+        within: site.within.clone(),
         kind: match site.kind {
             Graph::Call => SiteKind::Call,
             Graph::Perform => SiteKind::Perform,
@@ -548,7 +562,12 @@ impl<'a> Walk<'a> {
                 };
             }
             (NodeKind::Action(action), Node::Action(written)) => {
-                self.action(node, action, written, at)?;
+                self.action(
+                    node,
+                    Derived::Statement(action),
+                    Written::Statement(written),
+                    at,
+                )?;
             }
             (NodeKind::Expr(expression), Node::Expr(written)) => {
                 self.view.dataflow.expressions.push(ExpressionView {
@@ -584,8 +603,13 @@ impl<'a> Walk<'a> {
                     | ExprNode::Let { .. }
                     | ExprNode::Clock
                     | ExprNode::Random
-                    | ExprNode::Read { .. }
-                    | ExprNode::Act { .. } => {}
+                    | ExprNode::Read { .. } => {}
+                    ExprNode::Act { kind, args } => {
+                        let Expr::Act(act) = written else {
+                            return Err(mismatch(node));
+                        };
+                        self.action(node, Derived::Nested(kind, args), Written::Nested(act), at)?;
+                    }
                 }
             }
             (
@@ -625,12 +649,7 @@ impl<'a> Walk<'a> {
             statement: written.clone(),
             block: at.block.clone(),
             depth: at.depth,
-            action: node
-                .children()
-                .into_iter()
-                .map(|child| graph.node(child))
-                .find(|child| matches!(child.kind, NodeKind::Action(_)))
-                .map(|child| child.site.clone()),
+            actions: issued(graph, node),
         });
         match statement {
             StmtNode::If {
@@ -690,108 +709,138 @@ impl<'a> Walk<'a> {
     fn action(
         &mut self,
         node: &GraphNode,
-        derived: &ActionNode,
-        written: &Action,
+        derived: Derived<'_>,
+        written: Written<'_>,
         at: &Context,
     ) -> Result<(), ViewError> {
         let statement = at.statement.clone().ok_or_else(|| mismatch(node))?;
-        let signature = match written {
-            Action::Perform { effect, .. } => self.document.manifest.effects.get(effect),
-            _ => None,
+        let (callee, effect) = match written {
+            Written::Statement(Action::Call { callee, .. } | Action::Spawn { callee, .. })
+            | Written::Nested(ActExpr {
+                kind: ActKind::Call(callee) | ActKind::Spawn(callee),
+                ..
+            }) => (Some(callee), None),
+            Written::Statement(Action::Perform { effect, .. })
+            | Written::Nested(ActExpr {
+                kind: ActKind::Perform { effect, .. },
+                ..
+            }) => (None, Some(effect)),
+            Written::Statement(_) | Written::Nested(_) => (None, None),
         };
-        let (callee, params) = match written {
-            Action::Call { callee, .. } | Action::Spawn { callee, .. } => match callee {
-                Callee::Library(function) => {
-                    let definition =
-                        self.functions
+        let signature = effect.and_then(|effect| self.document.manifest.effects.get(effect));
+        let (callee, params) = match (callee, effect) {
+            (Some(Callee::Library(function)), _) => {
+                let definition =
+                    self.functions
+                        .get(function)
+                        .ok_or(ViewError::MissingFunction {
+                            function: *function,
+                        })?;
+                (
+                    Some(CalleeView::Library {
+                        id: *function,
+                        name: self
+                            .document
+                            .manifest
+                            .functions
                             .get(function)
-                            .ok_or(ViewError::MissingFunction {
-                                function: *function,
-                            })?;
-                    (
-                        Some(CalleeView::Library {
-                            id: *function,
-                            name: self
-                                .document
-                                .manifest
-                                .functions
-                                .get(function)
-                                .cloned()
-                                .ok_or_else(|| mismatch(node))?,
-                        }),
-                        definition.signature.params.clone(),
-                    )
-                }
-                Callee::Declared(name) => {
-                    let function = self
-                        .document
-                        .functions
-                        .get(name)
-                        .ok_or_else(|| mismatch(node))?;
-                    let params = self.document.entries.get(name).map_or_else(
-                        || {
-                            function
-                                .params
-                                .iter()
-                                .map(|name| Param {
-                                    name: name.clone(),
-                                    ty: Type::Any,
-                                    optional: false,
-                                })
-                                .collect()
-                        },
-                        |signature| signature.params.clone(),
-                    );
-                    (Some(CalleeView::Declared(name.clone())), params)
-                }
-                Callee::Value(_) => (None, Vec::new()),
-            },
-            Action::Perform { effect, .. } => (
+                            .cloned()
+                            .ok_or_else(|| mismatch(node))?,
+                    }),
+                    definition.signature.params.clone(),
+                )
+            }
+            (Some(Callee::Declared(name)), _) => {
+                let function = self
+                    .document
+                    .functions
+                    .get(name)
+                    .ok_or_else(|| mismatch(node))?;
+                let params = self.document.entries.get(name).map_or_else(
+                    || {
+                        function
+                            .params
+                            .iter()
+                            .map(|name| Param {
+                                name: name.clone(),
+                                ty: Type::Any,
+                                optional: false,
+                            })
+                            .collect()
+                    },
+                    |signature| signature.params.clone(),
+                );
+                (Some(CalleeView::Declared(name.clone())), params)
+            }
+            (Some(Callee::Value(_)), _) => (None, Vec::new()),
+            (None, Some(effect)) => (
                 Some(CalleeView::Effect(effect.clone())),
                 signature.map_or_else(Vec::new, |signature| signature.params.clone()),
             ),
-            Action::Sleep { .. }
-            | Action::Join { .. }
-            | Action::JoinMany { .. }
-            | Action::Cancel { .. }
-            | Action::Yield => (None, Vec::new()),
+            (None, None) => (None, Vec::new()),
         };
-        let args = written_atoms(written)
+        // The operand a builtin action names its one argument.
+        let operand = match written {
+            Written::Statement(Action::Sleep { .. })
+            | Written::Nested(ActExpr {
+                kind: ActKind::Sleep,
+                ..
+            }) => Some("duration"),
+            Written::Statement(Action::Join { .. } | Action::Cancel { .. }) => Some("task"),
+            Written::Statement(Action::JoinMany { .. }) => Some("tasks"),
+            Written::Statement(_) | Written::Nested(_) => None,
+        };
+        let arguments: Vec<(Expr, Option<Site>, Option<usize>)> = match (written, derived) {
+            (Written::Statement(written), Derived::Statement(derived)) => written_atoms(written)
+                .into_iter()
+                .zip(atoms(derived))
+                .map(|(atom, derived)| {
+                    let expression = match atom {
+                        Atom::Variable(name) => Expr::Variable(name.clone()),
+                        Atom::Literal(literal) => Expr::Literal(literal.clone()),
+                    };
+                    let binding = match derived {
+                        AtomNode::Variable(Reference::Binding(id)) => Some(id.index()),
+                        AtomNode::Variable(Reference::Session(_)) | AtomNode::Literal(_) => None,
+                    };
+                    (expression, None, binding)
+                })
+                .collect(),
+            (Written::Nested(written), Derived::Nested(_, args)) => written
+                .args
+                .iter()
+                .zip(args)
+                .map(|(expression, id)| {
+                    let arg = self.graph.node(*id);
+                    let binding = match arg.kind {
+                        NodeKind::Expr(ExprNode::Variable(Reference::Binding(id))) => {
+                            Some(id.index())
+                        }
+                        _ => None,
+                    };
+                    (expression.clone(), Some(arg.site.clone()), binding)
+                })
+                .collect(),
+            (Written::Statement(_) | Written::Nested(_), _) => return Err(mismatch(node)),
+        };
+        let args = arguments
             .into_iter()
-            .zip(atoms(derived))
             .enumerate()
-            .map(|(index, (atom, derived))| {
+            .map(|(index, (expression, site, binding))| {
                 let param = params.get(index);
                 ArgumentView {
                     name: param
                         .map(|param| param.name.clone())
-                        .or_else(|| match written {
-                            Action::Sleep { .. } => Some(Name::new("duration")),
-                            Action::Join { .. } | Action::Cancel { .. } => Some(Name::new("task")),
-                            Action::JoinMany { .. } => Some(Name::new("tasks")),
-                            Action::Call { .. }
-                            | Action::Spawn { .. }
-                            | Action::Perform { .. }
-                            | Action::Yield => None,
-                        }),
+                        .or_else(|| operand.map(Name::new)),
                     ty: param.map_or(Type::Any, |param| param.ty.clone()),
-                    atom: atom.clone(),
-                    binding: match derived {
-                        AtomNode::Variable(Reference::Binding(id)) => Some(id.index()),
-                        AtomNode::Variable(Reference::Session(_)) | AtomNode::Literal(_) => None,
-                    },
+                    expression,
+                    site,
+                    binding,
                 }
             })
             .collect();
-        let result_type = match derived {
-            ActionNode::Perform {
-                result: Type::Any, ..
-            } => signature.map_or(Type::Any, |signature| signature.result.clone()),
-            _ => node.facet.clone().unwrap_or(Type::Any),
-        };
-        self.view.dataflow.actions.push(ActionView {
-            site: node.site.clone(),
-            kind: match derived {
+        let kind = match derived {
+            Derived::Statement(action) => match action {
                 ActionNode::Call { .. } => SiteKind::Call,
                 ActionNode::Perform { .. } => SiteKind::Perform,
                 ActionNode::Sleep { .. } => SiteKind::Sleep,
@@ -801,6 +850,28 @@ impl<'a> Walk<'a> {
                 ActionNode::Spawn { .. } => SiteKind::Spawn,
                 ActionNode::Cancel { .. } => SiteKind::Cancel,
             },
+            Derived::Nested(kind, _) => match kind {
+                ActNode::Call(_) => SiteKind::Call,
+                ActNode::Perform { .. } => SiteKind::Perform,
+                ActNode::Sleep => SiteKind::Sleep,
+                ActNode::Spawn(_) => SiteKind::Spawn,
+            },
+        };
+        let result_type = match derived {
+            Derived::Statement(ActionNode::Perform {
+                result: Type::Any, ..
+            })
+            | Derived::Nested(
+                ActNode::Perform {
+                    result: Type::Any, ..
+                },
+                _,
+            ) => signature.map_or(Type::Any, |signature| signature.result.clone()),
+            _ => node.facet.clone().unwrap_or(Type::Any),
+        };
+        self.view.dataflow.actions.push(ActionView {
+            site: node.site.clone(),
+            kind,
             statement,
             block: at.block.clone(),
             destination: at.assigns.clone(),
@@ -811,6 +882,48 @@ impl<'a> Walk<'a> {
         });
         Ok(())
     }
+}
+
+/// An action as the checker derived it.
+#[derive(Clone, Copy)]
+enum Derived<'a> {
+    Statement(&'a ActionNode),
+    Nested(&'a ActNode, &'a [NodeId]),
+}
+
+/// An action as the document writes it.
+#[derive(Clone, Copy)]
+enum Written<'a> {
+    Statement(&'a Action),
+    Nested(&'a ActExpr),
+}
+
+/// The sites of the actions a statement issues, in the order it issues
+/// them: each action after its arguments, children left to right. The
+/// blocks it holds are statements of their own.
+fn issued(graph: &Graph, statement: &GraphNode) -> Vec<Site> {
+    fn walk(graph: &Graph, node: &GraphNode, out: &mut Vec<Site>) {
+        for child in node.children() {
+            let child = graph.node(child);
+            if !matches!(child.kind, NodeKind::Block(_)) {
+                walk(graph, child, out);
+            }
+        }
+        if matches!(
+            node.kind,
+            NodeKind::Action(_) | NodeKind::Expr(ExprNode::Act { .. })
+        ) {
+            out.push(node.site.clone());
+        }
+    }
+    let mut out = Vec::new();
+    for child in statement.children() {
+        let child = graph.node(child);
+        if !matches!(child.kind, NodeKind::Block(_)) {
+            walk(graph, child, &mut out);
+        }
+    }
+    out
 }
 
 /// The bindings a node names itself, not through its children. The target

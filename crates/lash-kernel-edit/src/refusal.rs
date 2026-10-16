@@ -3,7 +3,7 @@
 use std::fmt;
 
 use lash_kernel_check::{Refusal, RefusalReason};
-use lash_kernel_doc::{DocumentId, FunctionId, InvalidReason, Name, Site};
+use lash_kernel_doc::{DocumentId, FunctionId, InvalidReason, Name, Site, StatementForm};
 
 use crate::tree::NodeClass;
 
@@ -87,6 +87,14 @@ pub enum EditDiagnosticKind {
     NotATry,
     #[error("the action has {arguments} argument(s); there is none at {index}")]
     NoSuchArgument { index: u32, arguments: u32 },
+    /// A computed argument of an action that has no expression spelling
+    /// where it stands: the action of a `do`, a `join` or a `cancel`. Bind
+    /// the value with a `let` first.
+    #[error(
+        "this `{}` takes a variable or a literal as its argument; bind the value with a `let` first",
+        .form.keyword()
+    )]
+    ArgumentNotAtom { form: StatementForm },
     #[error("the node declares no variable `{name}`")]
     NoSuchBinding { name: Name },
     /// The new name would change which declaration some use resolves to.
@@ -128,6 +136,7 @@ impl EditDiagnosticKind {
             Self::NoCondition => "no_condition",
             Self::NotATry => "not_a_try",
             Self::NoSuchArgument { .. } => "no_such_argument",
+            Self::ArgumentNotAtom { .. } => "argument_not_atom",
             Self::NoSuchBinding { .. } => "no_such_binding",
             Self::RenameCollides { .. } => "rename_collides",
             Self::FunctionExists { .. } => "function_exists",

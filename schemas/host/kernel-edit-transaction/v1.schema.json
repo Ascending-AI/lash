@@ -579,7 +579,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Replaces one argument of an action, counted from 0 in the order the\naction writes them. A `sleep`, `join`, `join` of a list and `cancel`\nhave the one argument.",
+          "description": "Replaces one argument of an action, a statement's own or one nested\nin an expression, counted from 0 in the order the action writes them.\nA `sleep`, `join`, `join` of a list and `cancel` have the one\nargument. The action survives; the argument it had does not.\n\nA computed argument of a `let`'s or an assignment's own action makes\nthe right-hand side that action nested as an expression, and an\nargument that leaves a nested whole right-hand side all variables\nand literals makes it the statement's action again: the one spelling\nkernel text reads (`K-FORM-001`). A `do`'s action, a `join` and a\n`cancel` take only a variable or a literal.",
           "properties": {
             "set_argument": {
               "additionalProperties": false,
@@ -588,7 +588,7 @@
                   "$ref": "#/$defs/Site"
                 },
                 "argument": {
-                  "$ref": "#/$defs/Atom"
+                  "$ref": "#/$defs/Expr"
                 },
                 "index": {
                   "format": "uint32",

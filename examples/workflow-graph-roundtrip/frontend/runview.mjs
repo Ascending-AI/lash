@@ -36,8 +36,9 @@ export function replayAt(steps, index) {
 
 // What `statement`'s node shows of `run`: its state (active, waiting,
 // failed, incomplete, done or skipped; undefined while it has not run, or
-// when nothing observed it) and how often it ran. `run` holds the site
-// statuses and errors by action site, the counts, whether the run ended,
+// when nothing observed it) and how often it ran, read from the statuses
+// of every action it issues. `run` holds the site statuses and errors by
+// action site, the counts, whether the run ended,
 // and, while the path is being replayed, the replay step.
 export function nodeState(statement, run) {
   const site = siteKey(statement.site);
@@ -54,8 +55,16 @@ export function nodeState(statement, run) {
             : undefined;
     return { state, runs };
   }
-  const action = statement.action && siteKey(statement.action);
-  const status = action && run.statuses.get(action);
+  // A statement's state is its most telling action's: a failure, then a
+  // wait, then one under way.
+  const actions = (statement.actions ?? []).map(siteKey);
+  const statuses = actions.map((action) => run.statuses.get(action));
+  const status = ["failed", "waiting", "started", "incomplete", "succeeded"].find(
+    (candidate) => statuses.includes(candidate),
+  );
+  const error = actions
+    .map((action) => run.errors.get(action))
+    .find((error) => error !== undefined);
   const state =
     status === "failed"
       ? "failed"
@@ -70,7 +79,7 @@ export function nodeState(statement, run) {
               : run.ended && total === 0
                 ? "skipped"
                 : undefined;
-  return { state, runs: total, error: action && run.errors.get(action) };
+  return { state, runs: total, error };
 }
 
 // Which arms of the `if` at `site` the run took, by scope kind (`then`,

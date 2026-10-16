@@ -102,11 +102,16 @@ for an entry): each declaration is checked against the identity it is
 listed under before anything is derived, so an import draws before it is
 published and a corrupt declaration is a typed refusal, never a view.
 It holds the entry's `statements` (each with its site, kernel statement,
-block, depth, document ordinal and action site), its `scopes` (every block with its ordinal and depth,
+block, depth, document ordinal and `actions`: the sites of its own action and
+of every action nested in its expressions, in the order a run issues them),
+its `scopes` (every block with its ordinal and depth,
 typed by what opens it: `entry`, `closure`, `then`, `else`, `for`, `while`,
-`try`, `catch`, `finally`), its `dataflow` (bindings, expressions, actions
-with their arguments, lexical availability, parameters, returns and
-assignments) and every `execution_sites` entry with its typed `kind`. The
+`try`, `catch`, `finally`), its `dataflow` (bindings, expressions, every
+action, nested ones included, with its kind, callee and arguments as written,
+lexical availability, parameters, returns and assignments) and every
+`execution_sites` entry with its typed `kind` and, for a nested action, the
+action it is an argument of (`within`). A host draws a statement as one node
+and its actions as parts of it, never as extra statements. The
 projection matches every kernel statement and expression kind, so a new kind
 reaches every host through this one read.
 
@@ -245,7 +250,7 @@ the edit or the site they are about.
 | Which statements a block holds, and their order | `InsertStatement`, `CloneStatement`, `RemoveStatement`, `MoveStatement` |
 | A whole statement | `ReplaceStatement` |
 | Any expression, at any depth | `ReplaceExpression` |
-| An action, or one of its arguments | `ReplaceAction`, `SetArgument` |
+| A statement's action, or an argument of any action, nested ones included | `ReplaceAction`, `SetArgument` (any expression) |
 | A condition, a `try`'s clauses | `SetCondition`, `SetCatch`, `SetFinally` |
 | The name of a variable everywhere it resolves | `RenameVariable` |
 | Declared functions | `InsertFunction`, `ReplaceFunction`, `RemoveFunction`, `RenameFunction` |

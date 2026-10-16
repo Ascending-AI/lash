@@ -14,6 +14,7 @@ import {
 } from "./dataflow.mjs";
 import {
   actionOf,
+  effectOf,
   recordInput as canonicalRecordInput,
   literal,
   startPosition as scopeStart,
@@ -58,7 +59,6 @@ let workflow,
   connecting,
   finalOutput,
   observationGap = false,
-  expandedValues = new Map(),
   // The selected item and whether its inspector is open (selection.mjs),
   // and the statement it shows, which Advanced edits.
   focus = NOTHING,
@@ -157,14 +157,6 @@ function show(next, correspondence) {
   const old = selected?.site;
   const previousScope = activeScope;
   const sameEntry = workflow?.entry === next.entry;
-  const retainedExpanded = new Map();
-  for (const site of expandedValues.values()) {
-    const mapped = correspondence?.entries?.find(
-      (entry) => key(entry.from) === key(site),
-    )?.to;
-    if (mapped) retainedExpanded.set(key(mapped), mapped);
-  }
-  expandedValues = retainedExpanded;
   workflow = next;
   if (!sameEntry || !correspondence) runInputs = initialInputs(next);
   connecting = undefined;
@@ -333,7 +325,7 @@ $("effect").onchange = () => {
 $("input-mode").onchange = () => {
   $("input-help").textContent =
     $("input-mode").value === "json"
-      ? "Records and lists are expanded by the authoring helper."
+      ? "Records and lists are written in place as the step's argument."
       : 'One canonical Expr, e.g. {"variable":"customer"}. Names resolve in the target scope.';
 };
 $("placement").onchange = () => {
@@ -491,7 +483,7 @@ const elapsed = () => Math.round(performance.now() - runStarted);
 function statementAt(site) {
   const statements = viewOf(workflow).statements;
   return (
-    statements.find((s) => s.action && key(s.action) === key(site)) ??
+    statements.find((s) => s.actions.some((a) => key(a) === key(site))) ??
     statements.find((s) => key(s.site) === key(site))
   );
 }
@@ -511,7 +503,7 @@ function traceStatus(event) {
       site,
       item: statement && key(statement.site),
       title: statement ? summary(statement.statement) : "Step",
-      tool: (statement && actionOf(statement)?.perform?.effect) ?? "",
+      tool: (statement && effectOf(workflow, statement)) ?? "",
     };
     traceRows.push(row);
   }
@@ -621,7 +613,7 @@ function scrub(position) {
 // Short internal steps (library calls, yields) are not followed.
 function follow(site, status) {
   const statement = statementAt(site);
-  if (statement && (status === "waiting" || actionOf(statement)?.perform))
+  if (statement && (status === "waiting" || effectOf(workflow, statement)))
     revealStatement(statement);
 }
 async function run() {
@@ -690,7 +682,7 @@ async function run() {
       occurrences.set(event.callId, event);
       calls.set(site, occurrences);
       traceCall(event);
-      if (selected?.action && key(selected.action) === site)
+      if (selected?.actions?.some((a) => key(a) === site))
         renderCallData(selected);
     }
     if (!event.site && !event.reset && !event.callOnly) {
@@ -916,10 +908,10 @@ function renderScopes() {
   );
 }
 function model(s) {
-  const perform = actionOf(s)?.perform;
-  if (perform) {
-    const info = catalog[perform.effect] ?? {
-      name: perform.effect,
+  const effect = effectOf(workflow, s);
+  if (effect) {
+    const info = catalog[effect] ?? {
+      name: effect,
       app: "Action",
       icon: "message",
     };
@@ -942,9 +934,9 @@ function model(s) {
       title: "If · Choose a path",
       subtitle: "True or false",
     };
-  const action = actionOf(s);
   const kind =
-    typeof action === "string" ? action : Object.keys(action ?? s.statement)[0];
+    actionOf(workflow, s)?.kind ??
+    (typeof s.statement === "string" ? s.statement : Object.keys(s.statement)[0]);
   const names = {
     call: "Call function",
     spawn: "Start task",
@@ -967,11 +959,7 @@ function model(s) {
   };
 }
 function project() {
-  dataView = buildDataflow(
-    workflow,
-    activeScope,
-    new Set(expandedValues.keys()),
-  );
+  dataView = buildDataflow(workflow, activeScope);
   function decorate(nodes) {
     return nodes.map((node) => {
       const details = model(node.s);
@@ -1055,7 +1043,9 @@ const itemOf = (node) => (node.s ? key(node.s.site) : `node:${node.kind}`);
 // with, or the workflow's return value on its Return or Finish node.
 function runResult(node, shown) {
   if (shown.state === "failed" && shown.error) return shown.error;
-  const occurrences = node.s?.action && calls.get(key(node.s.action));
+  const occurrences = (node.s?.actions ?? [])
+    .map((site) => calls.get(key(site)))
+    .findLast(Boolean);
   const last = occurrences && [...occurrences.values()].at(-1);
   if (last?.call) return chip(last.call.output);
   if (node.kind === "output" && node.workflowOutput && finalOutput !== undefined)
@@ -1550,9 +1540,10 @@ function renderCallData(statement) {
   const container = $("call-data");
   if (!container) return;
   container.replaceChildren(el("h3", null, "Execution data"));
-  const records = [
-    ...(calls.get(key(statement.action ?? statement.site))?.values() ?? []),
-  ];
+  const sites = statement.actions?.length ? statement.actions : [statement.site];
+  const records = sites.flatMap((site) => [
+    ...(calls.get(key(site))?.values() ?? []),
+  ]);
   if (!records.length) {
     container.append(
       el(
@@ -1916,10 +1907,6 @@ function openPort(node, port) {
       const binding = name.value.trim();
       const changes = planConstantPromotion(workflow, port, read(), binding);
       await applyVisual(changes.map((edit) => ({ edit })));
-      const created = viewOf(workflow).dataflow.bindings.find(
-        (item) => item.name === binding,
-      );
-      if (created) expandedValues.set(key(created.site), created.site);
       renderCanvas();
       report(`Created ${binding}`);
     });
@@ -2084,23 +2071,6 @@ function openNode(node) {
           "This returns to the enclosing function’s caller. Its result is not the workflow invocation result.",
         ),
       );
-    const foldedBindings = [...dataView.hidden]
-      .map((id) => dataView.bindings.get(id))
-      .filter((binding) =>
-        node.inputs.some(
-          (port) =>
-            port.context && key(port.context.statement) === key(binding.site),
-        ),
-      );
-    for (const binding of foldedBindings) {
-      const expand = el("button", null, `Show ${binding.name} as a node`);
-      expand.onclick = () => {
-        expandedValues.set(key(binding.site), binding.site);
-        $("node-panel").hidden = true;
-        renderCanvas();
-      };
-      container.append(expand);
-    }
     if (node.binding) {
       const label = el("label", null, "Output name");
       label.htmlFor = "output-name";
@@ -2132,7 +2102,7 @@ function openNode(node) {
           ),
         );
     }
-    if (node.s?.action) {
+    if (node.s?.actions?.length) {
       const data = el("section", "call-data");
       data.id = "call-data";
       container.append(data);

@@ -1,8 +1,4 @@
 export const siteKey = (site) => JSON.stringify([site.unit, site.path ?? []]);
-export function actionOf(s) {
-  const v = s.statement;
-  return v.let?.value?.action ?? v.assign?.value?.action ?? v.do?.action;
-}
 // Lash's view is absent when the document does not link; it then has nothing.
 const NO_VIEW = {
   statements: [],
@@ -18,6 +14,22 @@ const NO_VIEW = {
   execution_sites: [],
 };
 export const viewOf = (workflow) => workflow.view ?? NO_VIEW;
+// The actions a statement issues, as lash's view lists them: its own and
+// those nested in its expressions, in issue order, each with its kind,
+// callee and arguments.
+export function actionsOf(workflow, s) {
+  const actions = viewOf(workflow).dataflow.actions;
+  return (s.actions ?? [])
+    .map((site) => actions.find((a) => siteKey(a.site) === siteKey(site)))
+    .filter(Boolean);
+}
+// The action a statement's node shows: the last one it issues.
+export const actionOf = (workflow, s) => actionsOf(workflow, s).at(-1);
+// The effect a statement's node performs, if its action is a `perform`.
+export function effectOf(workflow, s) {
+  const action = actionOf(workflow, s);
+  return action?.kind === "perform" ? action.callee?.effect : undefined;
+}
 export function statementsIn(workflow, block) {
   return viewOf(workflow).statements.filter(
     (s) => siteKey(s.block) === siteKey(block),
@@ -25,7 +37,7 @@ export function statementsIn(workflow, block) {
 }
 // How this host words a statement in its list. Lash's view carries no wording.
 function valueSummary(rhs) {
-  const action = rhs?.action;
+  const action = rhs?.action ?? rhs?.expr?.act?.kind;
   if (!action) return "a value";
   if (action.perform) return `perform ${action.perform.effect}`;
   const kind = typeof action === "string" ? action : Object.keys(action)[0];
@@ -77,10 +89,14 @@ export function simpleBinding(workflow, s, value) {
   if (references(workflow.document, value.variable) !== 1) return;
   return previous;
 }
+// The record an effect step takes as its first argument, written in place
+// as the argument, with the site an edit replaces it at.
 export function recordInput(workflow, s) {
-  const binding = simpleBinding(workflow, s, actionOf(s)?.perform?.args?.[0]);
-  const record = binding?.statement.let.value.expr?.record;
-  return record ? { statement: binding, record } : undefined;
+  const action = actionOf(workflow, s);
+  if (action?.kind !== "perform") return;
+  const argument = action.args[0];
+  const record = argument?.expression?.record;
+  return record && argument.site ? { site: argument.site, record } : undefined;
 }
 export function literal(value) {
   if (value?.literal && typeof value.literal === "object")

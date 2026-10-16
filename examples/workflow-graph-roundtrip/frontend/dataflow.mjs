@@ -1,4 +1,4 @@
-import { siteKey, statementsIn, viewOf } from "./projection.mjs";
+import { actionOf, siteKey, statementsIn, viewOf } from "./projection.mjs";
 
 export function typeName(type) {
   if (!type) return "Any";
@@ -82,44 +82,14 @@ export function expressionName(expr) {
 export function fieldsOf(type) {
   return type?.record?.fields ?? [];
 }
-export function buildDataflow(workflow, block, expanded = new Set()) {
+export function buildDataflow(workflow, block) {
   const view = viewOf(workflow);
   const data = view.dataflow;
   const bindings = new Map(data.bindings.map((b) => [b.id, b]));
   const expressions = new Map(
     data.expressions.map((e) => [siteKey(e.site), e]),
   );
-  const actions = new Map(data.actions.map((a) => [siteKey(a.statement), a]));
   const rows = new Map(view.statements.map((s) => [siteKey(s.site), s]));
-  const hidden = new Set();
-  const folded = new Map();
-  for (const action of data.actions) {
-    action.args.forEach((arg, index) => {
-      const binding = bindings.get(arg.binding);
-      const value =
-        binding?.value_site && expressions.get(siteKey(binding.value_site));
-      const siblings = statementsIn(workflow, action.block);
-      const previous =
-        siblings[
-          siblings.findIndex(
-            (s) => siteKey(s.site) === siteKey(action.statement),
-          ) - 1
-        ];
-      if (
-        binding &&
-        !expanded.has(siteKey(binding.site)) &&
-        !binding.assigned &&
-        !binding.captured &&
-        binding.uses.length === 1 &&
-        value?.expression?.record &&
-        previous &&
-        siteKey(previous.site) === siteKey(binding.site)
-      ) {
-        hidden.add(binding.id);
-        folded.set(`${siteKey(action.site)}:${index}`, value);
-      }
-    });
-  }
   function expressionPort(name, type, expr) {
     return {
       id: siteKey(expr.site),
@@ -177,8 +147,7 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
       const binding = data.bindings.find(
         (b) => b.kind === "let" && siteKey(b.site) === siteKey(s.site),
       );
-      if (binding && hidden.has(binding.id)) continue;
-      const action = actions.get(siteKey(s.site));
+      const action = actionOf(workflow, s);
       const returned = data.returns.find(
         (r) => siteKey(r.statement) === siteKey(s.site),
       );
@@ -193,26 +162,28 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
         kind = "action";
         inputs = action.args.flatMap((arg, index) => {
           const name = arg.name ?? `argument${index + 1}`;
-          const record = folded.get(`${siteKey(action.site)}:${index}`);
-          if (record) {
-            if (record.expression.record.length)
-              wholeInputs.push(expressionPort(name, arg.type, record));
-            return recordPorts(record, arg.type);
-          }
           const targetBinding = bindings.get(arg.binding);
-          // Arguments are atoms. The helper materializes a computed replacement.
-          return [
-            {
-              id: `${siteKey(action.site)}:${index}`,
-              name,
-              type: arg.type,
-              expression: arg.atom,
-              target: { action: action.site, index },
-              context: { statement: s.site, block: s.block },
-              references: targetBinding ? [targetBinding.id] : [],
-              available: action.available ?? [],
-            },
-          ];
+          // A whole argument is set on its action, which takes any
+          // expression; a record written in place also edits field by field.
+          const whole = {
+            id: `${siteKey(action.site)}:${index}`,
+            name,
+            type: arg.type,
+            expression: arg.expression,
+            target: { action: action.site, index },
+            context: { statement: s.site, block: s.block },
+            references: targetBinding ? [targetBinding.id] : [],
+            available: action.available ?? [],
+          };
+          const record = arg.site && expressions.get(siteKey(arg.site));
+          if (!record?.expression.record) return [whole];
+          if (record.expression.record.length)
+            wholeInputs.push({
+              ...whole,
+              references: record.references,
+              available: record.available,
+            });
+          return recordPorts(record, arg.type);
         });
         outputs = outputPorts(binding, action.result_type);
         if (!binding)
@@ -345,7 +316,6 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
     nodes,
     bindings,
     expressions,
-    hidden,
     parameters,
     outputPorts,
     rows,
@@ -355,7 +325,7 @@ export function buildDataflow(workflow, block, expanded = new Set()) {
 export function sourceOptions(view, port) {
   return (port.available ?? []).flatMap((id) => {
     const binding = view.bindings.get(id);
-    if (!binding || view.hidden.has(id)) return [];
+    if (!binding) return [];
     return view.outputPorts(binding).map((output) => ({
       ...output,
       label: `${binding.name}${output.path.length ? "." + output.path.join(".") : ""} · ${typeName(output.type)}${binding.assigned ? " · variable" : ""}`,
@@ -417,54 +387,28 @@ export function availableName(workflow, base = "value") {
   while (names.has(name)) name = base + "_" + index++;
   return name;
 }
-function inputSteps(workflow, port, value) {
+// One edit: an expression is replaced where it stands, and an action's
+// argument is set to any expression in place, with no temporary. Lash
+// refuses a computed argument for a `do`, `join` or `cancel` action.
+export function planInputEdit(workflow, port, value) {
   if (port.target.expression)
     return [
       {
-        direct: {
-          replace_expression: {
-            expression: port.target.expression,
-            with: value,
-          },
+        replace_expression: {
+          expression: port.target.expression,
+          with: value,
         },
       },
     ];
-  if (value.variable || value.literal !== undefined)
-    return [
-      {
-        direct: {
-          set_argument: {
-            action: port.target.action,
-            index: port.target.index,
-            argument: value,
-          },
-        },
-      },
-    ];
-  const name = availableName(workflow, "input_value");
   return [
     {
-      direct: {
-        insert_statement: {
-          at: { block: port.context.block, before: port.context.statement },
-          statement: { let: { name, value: { expr: value } } },
-        },
-      },
-    },
-    {
-      direct: {
-        set_argument: {
-          action: port.target.action,
-          index: port.target.index,
-          argument: { variable: name },
-        },
+      set_argument: {
+        action: port.target.action,
+        index: port.target.index,
+        argument: value,
       },
     },
   ];
-}
-
-export function planInputEdit(workflow, port, value) {
-  return inputSteps(workflow, port, value).map((step) => step.direct);
 }
 
 export function planConstantPromotion(workflow, port, value, name) {

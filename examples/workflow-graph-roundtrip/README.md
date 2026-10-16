@@ -210,9 +210,9 @@ ordinary canonical edits and adds no kernel or dialect behavior.
 `Operation::InsertEffect`
 accepts a base-document position, effect name, expression arguments, result
 type and explicit result binding. `Operation::Edit` accepts any existing `Edit`.
-Computed arguments become visible bindings before the effect statement.
-Generated temporary names avoid names throughout the base and complete batch.
-The planner performs no I/O, publication, admission or runtime execution.
+It inserts one statement, `let <binding> = perform <effect>(<args>)`; a
+computed argument stays an argument, in a `perform` nested as the whole
+right-hand side. The planner performs no I/O, publication, admission or runtime execution.
 
 ```rust
 use lash::workflow::authoring::{Operation, plan};
@@ -239,14 +239,12 @@ publication policy. Lash owns the serialized operation data: `edit` and
 fields refused. The example sends `{ version, operations: Operation[] }`
 directly to `/workflow/plan`. Its JSON Schema and generated TypeScript types are
 in `schemas/host/kernel-authoring-operation/`. Save the expanded `Transaction`
-for exact edit replay against its base and admission context; re-planning an
-operation batch later is a new plan because temporary names are not part of the
-contract. Host layout and presentation do not belong in the authoring API.
+for exact edit replay against its base and admission context. Host layout and
+presentation do not belong in the authoring API.
 
-Admission diagnostics index the flattened canonical edits, including generated
-argument bindings. Temporary-name spelling is an implementation detail. Name
-reservation covers the batch supplied to `plan`; if a host later changes the
-returned transaction, it owns the effects of those additional edits.
+Each operation plans to one edit, so admission diagnostics index the operations
+in order. If a host later changes the returned transaction, it owns the effects
+of those additional edits.
 
 All edit targets are sites in the transaction's base document. Original nodes
 remain targetable after preceding insertions in the same batch. A newly inserted

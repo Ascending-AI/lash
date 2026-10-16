@@ -127,10 +127,9 @@ The adapter calls `plan` before admitting the transaction against a cloned
 draft. It returns the canonical transaction and preview without changing the
 saved version. Send the returned edits to `/workflow/edits` to save against that
 same version. Save the expanded `Transaction` for exact edit replay against its
-base and admission context. Re-planning operations later is a new plan because
-generated temporary names are not part of the operation contract.
-Planning refusals are HTTP 422 `plan_refused`, with diagnostic indices into the
-expanded canonical edits.
+base and admission context. Each operation plans to one edit, and a computed
+effect input stays an argument of a nested `perform`. Planning refusals are
+HTTP 422 `plan_refused`, with diagnostic indices into the planned edits.
 
 ## Running
 

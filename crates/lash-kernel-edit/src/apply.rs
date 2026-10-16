@@ -9,12 +9,12 @@ use lash_kernel_doc::{Correspondence, Survivor};
 use std::collections::BTreeMap;
 
 use lash_kernel_check::{
-    ActionNode, Admitted, AtomNode, BindingId, BindingKind, CalleeNode, Environment, ExprNode,
-    Graph, NodeKind, PlaceNode, Reference, StmtNode, admit, derive, requirements,
+    ActNode, ActionNode, Admitted, AtomNode, BindingId, BindingKind, CalleeNode, Environment,
+    ExprNode, Graph, NodeKind, PlaceNode, Reference, StmtNode, admit, derive, requirements,
 };
 use lash_kernel_doc::{
-    Action, Atom, Block, Callee, Document, DocumentId, Expr, FunctionCatalog, FunctionId, Literal,
-    Name, Node, Place, Site, Stmt, Unit,
+    ActExpr, ActKind, Action, Atom, Block, Callee, Document, DocumentId, Expr, FunctionCatalog,
+    FunctionId, Literal, Member, Name, Node, Place, Rhs, Site, StatementForm, Stmt, Unit,
 };
 
 use crate::edit::{Edit, Position};
@@ -84,6 +84,71 @@ fn arguments(action: &mut Action) -> Vec<&mut Atom> {
     }
 }
 
+/// The form a refusal names an action by.
+fn form(action: &Action) -> StatementForm {
+    match action {
+        Action::Call { .. } => StatementForm::Call,
+        Action::Perform { .. } => StatementForm::Perform,
+        Action::Sleep { .. } => StatementForm::Sleep,
+        Action::Join { .. } | Action::JoinMany { .. } => StatementForm::Join,
+        Action::Yield => StatementForm::Yield,
+        Action::Spawn { .. } => StatementForm::Spawn,
+        Action::Cancel { .. } => StatementForm::Cancel,
+    }
+}
+
+/// A statement's action spelled as a nested action, its atoms
+/// expressions, when the form has a nested spelling.
+fn nested(action: &Action) -> Option<ActExpr> {
+    let expr = |atom: &Atom| match atom {
+        Atom::Variable(name) => Expr::Variable(name.clone()),
+        Atom::Literal(literal) => Expr::Literal(literal.clone()),
+    };
+    let (kind, args) = match action {
+        Action::Call { callee, args } => (ActKind::Call(callee.clone()), args.iter().collect()),
+        Action::Spawn { callee, args } => (ActKind::Spawn(callee.clone()), args.iter().collect()),
+        Action::Perform {
+            effect,
+            args,
+            result,
+        } => (
+            ActKind::Perform {
+                effect: effect.clone(),
+                result: result.clone(),
+            },
+            args.iter().collect(),
+        ),
+        Action::Sleep { duration } => (ActKind::Sleep, vec![duration]),
+        Action::Join { .. } | Action::JoinMany { .. } | Action::Yield | Action::Cancel { .. } => {
+            return None;
+        }
+    };
+    Some(ActExpr {
+        kind,
+        args: args.into_iter().map(expr).collect::<Vec<_>>(),
+    })
+}
+
+/// The right-hand side of the `let` or assignment whose right-hand side is
+/// the node at `site`.
+fn rhs_at<'a>(document: &'a mut Document, site: &Site) -> Option<&'a mut Rhs> {
+    let (index, parent) = site.path.split_last()?;
+    let parent = Site::new(site.unit.clone(), parent);
+    let (place, value) = match node(document, &parent)? {
+        NodeMut::Stmt(Stmt::Let { value, .. }) => (None, value),
+        NodeMut::Stmt(Stmt::Assign { place, value }) => (Some(&*place), value),
+        _ => return None,
+    };
+    // The right-hand side is the statement's last child, after the place's
+    // target and index (`K-ID-004`).
+    let at = match place {
+        None | Some(Place::Variable(_)) => 0,
+        Some(Place::Member(Member::Field { .. })) => 1,
+        Some(Place::Member(Member::Index { .. })) => 2,
+    };
+    (*index == at).then_some(value)
+}
+
 /// Whether a derived node itself declares or names the variable `binding`.
 fn names(kind: &NodeKind, binding: BindingId) -> bool {
     let is = |reference: &Reference| *reference == Reference::Binding(binding);
@@ -130,6 +195,10 @@ fn names(kind: &NodeKind, binding: BindingId) -> bool {
                 binding: declared, ..
             } => *declared == binding,
             ExprNode::Closure { params, .. } => params.contains(&binding),
+            ExprNode::Act {
+                kind: ActNode::Call(called) | ActNode::Spawn(called),
+                ..
+            } => callee(called),
             _ => false,
         },
     }
@@ -173,6 +242,13 @@ fn rename_own(node: &mut NodeMut<'_>, from: &Name, to: &Name) {
         NodeMut::Expr(expr) => match expr {
             Expr::Variable(name) | Expr::Let { name, .. } => rename(name),
             Expr::Closure(closure) => closure.params.iter_mut().for_each(rename),
+            Expr::Act(act) => {
+                if let ActKind::Call(Callee::Value(name)) | ActKind::Spawn(Callee::Value(name)) =
+                    &mut act.kind
+                {
+                    rename(name);
+                }
+            }
             _ => {}
         },
     }
@@ -384,29 +460,7 @@ impl Working {
                 action,
                 index,
                 argument,
-            } => {
-                let site = self.locate_as(action, NodeClass::Action)?;
-                self.write(&site, |node| {
-                    let NodeMut::Action(node) = node else {
-                        return Ok(());
-                    };
-                    let mut arguments = arguments(node);
-                    let count = u32::try_from(arguments.len()).unwrap_or(u32::MAX);
-                    match arguments.get_mut(*index as usize) {
-                        Some(slot) => {
-                            **slot = argument.clone();
-                            Ok(())
-                        }
-                        None => Err(at(
-                            action,
-                            EditDiagnosticKind::NoSuchArgument {
-                                index: *index,
-                                arguments: count,
-                            },
-                        )),
-                    }
-                })?;
-            }
+            } => self.set_argument(action, *index, argument)?,
             Edit::SetCondition {
                 statement,
                 condition,
@@ -525,6 +579,94 @@ impl Working {
             Edit::SetNumberPolicy { numbers } => self.document.manifest.numbers = *numbers,
             Edit::ReplaceFunctionIdentity { from, to } => self.adopt(*from, *to)?,
         }
+        Ok(())
+    }
+
+    /// [`Edit::SetArgument`] of the action that was at `base`, a
+    /// statement's own or one nested in an expression. The argument's node
+    /// is new and the action is edited; a right-hand side changes between
+    /// the statement's action and a nested one as its arguments require.
+    fn set_argument(&mut self, base: &Site, index: u32, argument: &Expr) -> Result<(), Fault> {
+        let site = self.locate(base)?;
+        let slot = usize::try_from(index).unwrap_or(usize::MAX);
+        let missing = |arguments: usize| {
+            at(
+                base,
+                EditDiagnosticKind::NoSuchArgument {
+                    index,
+                    arguments: u32::try_from(arguments).unwrap_or(u32::MAX),
+                },
+            )
+        };
+        let atom = match argument {
+            Expr::Variable(name) => Some(Atom::Variable(name.clone())),
+            Expr::Literal(literal) => Some(Atom::Literal(literal.clone())),
+            _ => None,
+        };
+        let rhs = match node(&mut self.document, &site) {
+            Some(NodeMut::Action(action)) => {
+                let form = form(action);
+                let count = arguments(action).len();
+                if slot >= count {
+                    return Err(missing(count));
+                }
+                if let Some(atom) = atom {
+                    if let Some(written) = arguments(action).into_iter().nth(slot) {
+                        *written = atom;
+                    }
+                    self.shadow(&site).edited = true;
+                    return Ok(());
+                }
+                let Some(mut act) = nested(action) else {
+                    return Err(at(base, EditDiagnosticKind::ArgumentNotAtom { form }));
+                };
+                act.args[slot] = argument.clone();
+                let Some(rhs) = rhs_at(&mut self.document, &site) else {
+                    return Err(at(base, EditDiagnosticKind::ArgumentNotAtom { form }));
+                };
+                *rhs = Rhs::Expr(Expr::Act(Box::new(act)));
+                rhs
+            }
+            Some(NodeMut::Expr(Expr::Act(act))) => {
+                let count = act.args.len();
+                let Some(written) = act.args.get_mut(slot) else {
+                    return Err(missing(count));
+                };
+                *written = argument.clone();
+                let action = act.as_action();
+                let shadow = self.shadow(&site);
+                shadow.edited = true;
+                shadow.children[slot] = Shadow::fresh(Node::Expr(argument));
+                match (action, rhs_at(&mut self.document, &site)) {
+                    (Some(action), Some(rhs)) => {
+                        *rhs = Rhs::Action(action);
+                        rhs
+                    }
+                    _ => return Ok(()),
+                }
+            }
+            Some(found) => {
+                return Err(at(
+                    base,
+                    EditDiagnosticKind::WrongNode {
+                        expected: NodeClass::Action,
+                        found: found.class(),
+                    },
+                ));
+            }
+            None => return Err(at(base, EditDiagnosticKind::NoSuchNode)),
+        };
+        let written = match rhs {
+            Rhs::Expr(expr) => Node::Expr(expr),
+            Rhs::Action(action) => Node::Action(action),
+        };
+        let Some(shadow) = shadow(&mut self.shadows, &site) else {
+            unreachable!("every node of the document has a shadow");
+        };
+        // The right-hand side survives; its arguments are nodes only while
+        // it is nested, and an atom it had was none.
+        shadow.edited = true;
+        shadow.children = written.children().into_iter().map(Shadow::fresh).collect();
         Ok(())
     }
 
@@ -698,6 +840,15 @@ impl Working {
         };
         self.rewrite(&mut |node| match node {
             NodeMut::Expr(Expr::Literal(literal)) => reference(literal),
+            NodeMut::Expr(Expr::Act(act)) => match &mut act.kind {
+                ActKind::Call(Callee::Declared(name)) | ActKind::Spawn(Callee::Declared(name))
+                    if name == from =>
+                {
+                    *name = to.clone();
+                    true
+                }
+                _ => false,
+            },
             NodeMut::Action(action) => {
                 let mut changed = false;
                 if let Action::Call { callee, .. } | Action::Spawn { callee, .. } = &mut **action
@@ -723,6 +874,11 @@ impl Working {
         let changed = self.rewrite(&mut |node| {
             let function = match node {
                 NodeMut::Expr(Expr::Call { function, .. }) => function,
+                NodeMut::Expr(Expr::Act(act)) => match &mut act.kind {
+                    ActKind::Call(Callee::Library(function))
+                    | ActKind::Spawn(Callee::Library(function)) => function,
+                    _ => return false,
+                },
                 NodeMut::Action(
                     Action::Call {
                         callee: Callee::Library(function),

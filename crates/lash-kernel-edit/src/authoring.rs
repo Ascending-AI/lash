@@ -7,28 +7,22 @@
 //! Every position addresses the base document, including direct edits between
 //! helpers. Generated statements become targetable by site after admission,
 //! in the next transaction. Within this batch, later helpers can refer to an
-//! earlier helper's explicitly named output with [`Expr::Variable`]. Generated
-//! temporaries are ordinary visible statements, with no persistent grouping.
-
-use std::collections::BTreeSet;
+//! earlier helper's explicitly named output with [`Expr::Variable`]. An
+//! operation writes one statement per operation: computed inputs stay where
+//! the author wrote them, as arguments of a nested action (`K-EVAL-008`).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{Draft, Edit, Position, Transaction};
-use lash_kernel_doc::{
-    Action, Atom, Callee, Document, EffectName, Expr, Function, Literal, Name, Node, Place, Rhs,
-    Stmt, Type,
-};
+use lash_kernel_doc::{ActExpr, ActKind, EffectName, Expr, Name, Rhs, Stmt, Type};
 
 /// One host authoring operation, lowered by [`plan`] to canonical edits.
 ///
 /// Lash owns this operation data and its serialized representation. Hosts own
 /// their transport, revision and authentication envelope, embedding batches as
 /// `Vec<Operation>`. Save the expanded [`Transaction`] as the exact edit record
-/// to replay against its base and admission context. Re-planning operations
-/// later is a new plan, not a replay: generated temporary names are not part of
-/// the operation contract.
+/// to replay against its base and admission context.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -36,7 +30,7 @@ pub enum Operation {
     /// The complete existing edit vocabulary, with base-document targets.
     #[serde(rename = "edit")]
     Edit(Edit),
-    /// Insert a named effect result. Computed inputs become preceding `let`s.
+    /// Insert a named effect result, its inputs written as its arguments.
     ///
     /// `binding` is the caller's name, preserved verbatim. Ordinary admission
     /// decides whether the name, scope, effect and result type are valid.
@@ -46,7 +40,7 @@ pub enum Operation {
         at: Position,
         /// The effect to perform, checked against the admission environment.
         effect: EffectName,
-        /// Arguments in evaluation order. Computed expressions become `let`s.
+        /// Arguments in evaluation order, any expressions.
         args: Vec<Expr>,
         /// The result type stated by the canonical `perform` action.
         result: Type,
@@ -57,46 +51,25 @@ pub enum Operation {
 
 /// Build one transaction without executing effects or changing the draft.
 ///
-/// Temporary names avoid every variable or function name declared or read in
-/// the base document and the entire batch, including later direct edits.
-/// Reservation is conservative across scopes. User names and references are
-/// never rewritten. Literal and variable inputs need no temporary; computed
-/// inputs are bound in argument order immediately before their effect.
-///
-/// The complete iterator is collected before names are reserved. Operations
-/// lower in their supplied order; the same draft and operations produce the
-/// same transaction. Generated-name spelling is not part of this contract.
-/// Name reservation covers this supplied batch; callers own any additional
-/// edits they append to or change in the returned transaction.
+/// Operations lower in their supplied order, each to one edit; the same
+/// draft and operations produce the same transaction. An effect inserts one
+/// `let` of the caller's name whose right-hand side performs the effect on
+/// the given arguments: the statement's action when every argument is a
+/// variable or a literal, else that action nested as the whole right-hand
+/// side, its computed arguments in place.
 ///
 /// All targets address the base document. A later operation can reference an
 /// earlier effect's named output when lexical scope permits, but newly inserted
 /// statements have targetable sites only after applying this transaction.
 /// Planning performs no admission: [`Draft::apply`] checks targets, scope and
 /// types once for the complete transaction and refuses it without mutation.
-/// Its diagnostic indices name the expanded canonical edits, including any
-/// generated argument bindings, rather than the input operations.
+/// Its diagnostic indices name the edits, one per operation.
 #[must_use]
 pub fn plan(draft: &Draft, operations: impl IntoIterator<Item = Operation>) -> Transaction {
-    let operations: Vec<_> = operations.into_iter().collect();
-    let mut names = Names::default();
-    names.document(draft.document());
-    for operation in &operations {
-        match operation {
-            Operation::Edit(edit) => names.edit(edit),
-            Operation::InsertEffect { args, binding, .. } => {
-                names.reserve(binding);
-                for arg in args {
-                    names.node(Node::Expr(arg));
-                }
-            }
-        }
-    }
-
-    let mut edits = Vec::new();
-    for operation in operations {
-        match operation {
-            Operation::Edit(edit) => edits.push(edit),
+    let edits = operations
+        .into_iter()
+        .map(|operation| match operation {
+            Operation::Edit(edit) => edit,
             Operation::InsertEffect {
                 at,
                 effect,
@@ -104,217 +77,26 @@ pub fn plan(draft: &Draft, operations: impl IntoIterator<Item = Operation>) -> T
                 result,
                 binding,
             } => {
-                let args = args
-                    .into_iter()
-                    .map(|arg| match arg {
-                        Expr::Variable(name) => Atom::Variable(name),
-                        Expr::Literal(value) => Atom::Literal(value),
-                        expression => {
-                            let name = names.fresh();
-                            edits.push(Edit::InsertStatement {
-                                at: at.clone(),
-                                statement: Stmt::Let {
-                                    name: name.clone(),
-                                    value: Rhs::Expr(expression),
-                                },
-                            });
-                            Atom::Variable(name)
-                        }
-                    })
-                    .collect();
-                edits.push(Edit::InsertStatement {
+                let act = ActExpr {
+                    kind: ActKind::Perform { effect, result },
+                    args,
+                };
+                Edit::InsertStatement {
                     at,
                     statement: Stmt::Let {
                         name: binding,
-                        value: Rhs::Action(Action::Perform {
-                            effect,
-                            args,
-                            result,
-                        }),
+                        value: match act.as_action() {
+                            Some(action) => Rhs::Action(action),
+                            None => Rhs::Expr(Expr::Act(Box::new(act))),
+                        },
                     },
-                });
+                }
             }
-        }
-    }
+        })
+        .collect();
     Transaction {
         base: draft.identity(),
         edits,
-    }
-}
-
-#[derive(Default)]
-struct Names {
-    reserved: BTreeSet<Name>,
-    next: usize,
-}
-
-impl Names {
-    fn reserve(&mut self, name: &Name) {
-        self.reserved.insert(name.clone());
-    }
-
-    fn fresh(&mut self) -> Name {
-        loop {
-            let name = Name::new(format!("__authoring_arg_{}", self.next));
-            self.next += 1;
-            if self.reserved.insert(name.clone()) {
-                return name;
-            }
-        }
-    }
-
-    fn document(&mut self, document: &Document) {
-        self.reserved.extend(document.private_bindings.clone());
-        self.reserved.extend(document.entries.keys().cloned());
-        for (name, function) in &document.functions {
-            self.reserve(name);
-            self.function(function);
-        }
-        self.node(Node::Block(&document.main));
-    }
-
-    fn function(&mut self, function: &Function) {
-        self.reserved.extend(function.params.iter().cloned());
-        self.node(Node::Block(&function.body));
-    }
-
-    fn atom(&mut self, atom: &Atom) {
-        match atom {
-            Atom::Variable(name) | Atom::Literal(Literal::Function(name)) => {
-                self.reserve(name);
-            }
-            Atom::Literal(_) => {}
-        }
-    }
-
-    fn action(&mut self, action: &Action) {
-        match action {
-            Action::Call { callee, args } | Action::Spawn { callee, args } => {
-                match callee {
-                    Callee::Declared(name) | Callee::Value(name) => self.reserve(name),
-                    Callee::Library(_) => {}
-                }
-                for arg in args {
-                    self.atom(arg);
-                }
-            }
-            Action::Perform { args, .. } => {
-                for arg in args {
-                    self.atom(arg);
-                }
-            }
-            Action::Sleep { duration: arg }
-            | Action::Join { task: arg }
-            | Action::JoinMany { tasks: arg, .. }
-            | Action::Cancel { task: arg } => self.atom(arg),
-            Action::Yield => {}
-        }
-    }
-
-    fn node(&mut self, root: Node<'_>) {
-        let mut pending = vec![root];
-        while let Some(node) = pending.pop() {
-            match node {
-                Node::Block(_) => {}
-                Node::Action(action) => self.action(action),
-                Node::Stmt(statement) => match statement {
-                    Stmt::Let { name, .. }
-                    | Stmt::For { binding: name, .. }
-                    | Stmt::Assign {
-                        place: Place::Variable(name),
-                        ..
-                    } => self.reserve(name),
-                    Stmt::Try(scope) => {
-                        if let Some(catch) = &scope.catch {
-                            self.reserve(&catch.binding);
-                        }
-                    }
-                    Stmt::Assign { .. }
-                    | Stmt::Remove { .. }
-                    | Stmt::Do { .. }
-                    | Stmt::If { .. }
-                    | Stmt::While { .. }
-                    | Stmt::Break
-                    | Stmt::Continue
-                    | Stmt::Return { .. }
-                    | Stmt::Throw { .. }
-                    | Stmt::Print { .. }
-                    | Stmt::Finish { .. }
-                    | Stmt::Fail { .. } => {}
-                },
-                Node::Expr(expression) => match expression {
-                    Expr::Variable(name)
-                    | Expr::Let { name, .. }
-                    | Expr::Literal(Literal::Function(name)) => {
-                        self.reserve(name);
-                    }
-                    Expr::Closure(closure) => {
-                        self.reserved.extend(closure.params.iter().cloned());
-                    }
-                    Expr::Literal(_)
-                    | Expr::Tuple(_)
-                    | Expr::List(_)
-                    | Expr::Map(_)
-                    | Expr::Set(_)
-                    | Expr::Record(_)
-                    | Expr::Member(_)
-                    | Expr::Call { .. }
-                    | Expr::If { .. }
-                    | Expr::Clock
-                    | Expr::Random
-                    | Expr::Read(_)
-                    | Expr::Act(_) => {}
-                },
-            }
-            pending.extend(node.children());
-        }
-    }
-
-    fn edit(&mut self, edit: &Edit) {
-        match edit {
-            Edit::InsertStatement { statement, .. }
-            | Edit::ReplaceStatement {
-                with: statement, ..
-            } => self.node(Node::Stmt(statement)),
-            Edit::ReplaceExpression { with, .. }
-            | Edit::SetCondition {
-                condition: with, ..
-            } => self.node(Node::Expr(with)),
-            Edit::ReplaceAction { with, .. } => self.action(with),
-            Edit::SetArgument { argument, .. } => self.atom(argument),
-            Edit::SetCatch { catch, .. } => {
-                if let Some(catch) = catch {
-                    self.reserve(&catch.binding);
-                    self.node(Node::Block(&catch.body));
-                }
-            }
-            Edit::SetFinally { finally, .. } => {
-                if let Some(finally) = finally {
-                    self.node(Node::Block(finally));
-                }
-            }
-            Edit::RenameVariable { name, to, .. }
-            | Edit::RenameFunction { from: name, to }
-            | Edit::RenameEntry { from: name, to } => {
-                self.reserve(name);
-                self.reserve(to);
-            }
-            Edit::InsertFunction { name, function } | Edit::ReplaceFunction { name, function } => {
-                self.reserve(name);
-                self.function(function);
-            }
-            Edit::SetPrivateBindings { names } => self.reserved.extend(names.iter().cloned()),
-            Edit::RemoveFunction { name }
-            | Edit::InsertEntry { function: name, .. }
-            | Edit::RemoveEntry { function: name }
-            | Edit::SetEntrySignature { function: name, .. } => self.reserve(name),
-            Edit::RemoveStatement { .. }
-            | Edit::MoveStatement { .. }
-            | Edit::CloneStatement { .. }
-            | Edit::SetEffectSignature { .. }
-            | Edit::SetNumberPolicy { .. }
-            | Edit::ReplaceFunctionIdentity { .. } => {}
-        }
     }
 }
 
@@ -322,7 +104,8 @@ impl Names {
 mod tests {
     use lash_kernel_check::Environment;
     use lash_kernel_doc::{
-        DocumentId, FunctionRegistry, NumberPolicy, Param, Signature, Site, Unit,
+        Action, Atom, Document, DocumentId, FunctionRegistry, Literal, NumberPolicy, Param,
+        Signature, Site, Unit,
     };
 
     use super::*;
@@ -467,26 +250,28 @@ mod tests {
         // The clone is new: only the original print survives from the base.
         assert_eq!(
             applied.correspondence.successor(&print),
-            Some(&Site::new(Unit::Main, [3]))
+            Some(&Site::new(Unit::Main, [2]))
         );
         assert_eq!(
             applied
                 .correspondence
-                .predecessor(&Site::new(Unit::Main, [4])),
+                .predecessor(&Site::new(Unit::Main, [3])),
             None
         );
     }
 
-    /// K-EDIT-001/002: helpers preserve base anchors and commit as one batch.
-    /// Fresh temporaries must not capture a name supplied anywhere in it.
+    /// K-EVAL-008: an inserted effect is one statement. A computed input
+    /// stays the argument the host wrote, in a nested `perform` that is the
+    /// whole right-hand side; inputs that are all variables and literals
+    /// make the statement's own action. No temporary is written.
     #[test]
-    fn mixed_helpers_reserve_the_whole_batch_and_refuse_atomically() {
+    fn an_inserted_effect_keeps_computed_inputs_as_its_arguments() {
         let mut draft = Draft::open(Document::new(
             NumberPolicy::Float,
             vec![
-                binding("__authoring_arg_0"),
+                binding("input"),
                 Stmt::Print {
-                    value: variable("__authoring_arg_0"),
+                    value: variable("input"),
                 },
             ],
         ))
@@ -507,92 +292,54 @@ mod tests {
         );
         let anchor = Site::new(Unit::Main, [1]);
         let at = Position::before(anchor.clone()).unwrap();
-        let steps = vec![
-            Operation::InsertEffect {
-                at: at.clone(),
-                effect: effect.clone(),
-                args: vec![Expr::List(vec![variable("__authoring_arg_0")])],
-                result: Type::Any,
-                binding: Name::new("first"),
-            },
-            Operation::Edit(Edit::InsertStatement {
-                at: at.clone(),
-                statement: binding("__authoring_arg_1"),
-            }),
-            Operation::InsertEffect {
-                at: at.clone(),
-                effect,
-                args: vec![Expr::List(vec![
-                    variable("first"),
-                    variable("__authoring_arg_1"),
-                ])],
-                result: Type::Any,
-                binding: Name::new("__authoring_arg_2"),
-            },
-            Operation::Edit(Edit::InsertStatement {
-                at: at.clone(),
-                statement: binding("__authoring_arg_3"),
-            }),
-        ];
-        let transaction = plan(&draft, steps.clone());
-        let original = draft.document().clone();
-        let mut invalid = steps;
-        invalid.push(Operation::Edit(Edit::InsertStatement {
-            at,
-            statement: Stmt::Print {
-                value: variable("missing_session_binding"),
-            },
-        }));
-        let refused = plan(&draft, invalid);
-        assert!(draft.apply(&refused, &environment).is_err());
-        assert_eq!(draft.document(), &original);
-
-        let applied = draft.apply(&transaction, &environment).unwrap();
-        let names: Vec<_> = draft
-            .document()
-            .main
-            .iter()
-            .filter_map(|statement| match statement {
-                Stmt::Let { name, .. } => Some(name.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            names,
+        let computed = Expr::List(vec![variable("input")]);
+        let transaction = plan(
+            &draft,
             [
-                "__authoring_arg_0",
-                "__authoring_arg_4",
-                "first",
-                "__authoring_arg_1",
-                "__authoring_arg_5",
-                "__authoring_arg_2",
-                "__authoring_arg_3",
+                Operation::InsertEffect {
+                    at: at.clone(),
+                    effect: effect.clone(),
+                    args: vec![computed.clone()],
+                    result: Type::Any,
+                    binding: Name::new("first"),
+                },
+                Operation::InsertEffect {
+                    at,
+                    effect: effect.clone(),
+                    args: vec![variable("first")],
+                    result: Type::Any,
+                    binding: Name::new("second"),
+                },
+            ],
+        );
+        assert_eq!(transaction.edits.len(), 2);
+        let applied = draft.apply(&transaction, &environment).unwrap();
+        assert_eq!(
+            draft.document().main[1..3],
+            [
+                Stmt::Let {
+                    name: Name::new("first"),
+                    value: Rhs::Expr(Expr::Act(Box::new(ActExpr {
+                        kind: ActKind::Perform {
+                            effect: effect.clone(),
+                            result: Type::Any,
+                        },
+                        args: vec![computed],
+                    }))),
+                },
+                Stmt::Let {
+                    name: Name::new("second"),
+                    value: Rhs::Action(Action::Perform {
+                        effect,
+                        args: vec![Atom::Variable(Name::new("first"))],
+                        result: Type::Any,
+                    }),
+                },
             ]
         );
         assert_eq!(
-            draft.document().main[4],
-            Stmt::Let {
-                name: Name::new("__authoring_arg_5"),
-                value: Rhs::Expr(Expr::List(vec![
-                    variable("first"),
-                    variable("__authoring_arg_1"),
-                ])),
-            }
-        );
-        assert_eq!(
-            draft.document().main[5],
-            Stmt::Let {
-                name: Name::new("__authoring_arg_2"),
-                value: Rhs::Action(Action::Perform {
-                    effect: EffectName::new("mock.collect").unwrap(),
-                    args: vec![Atom::Variable(Name::new("__authoring_arg_5"))],
-                    result: Type::Any,
-                }),
-            }
-        );
-        assert_eq!(
             applied.correspondence.successor(&anchor),
-            Some(&Site::new(Unit::Main, [7]))
+            Some(&Site::new(Unit::Main, [3]))
         );
     }
 }

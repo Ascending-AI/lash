@@ -7,16 +7,14 @@
  * Lash owns this operation data and its serialized representation. Hosts own
  * their transport, revision and authentication envelope, embedding batches as
  * `Vec<Operation>`. Save the expanded [`Transaction`] as the exact edit record
- * to replay against its base and admission context. Re-planning operations
- * later is a new plan, not a replay: generated temporary names are not part of
- * the operation contract.
+ * to replay against its base and admission context.
  */
 export type Operation = ({
   "edit": Edit;
 } | {
   "insert_effect": {
     /**
-     * Arguments in evaluation order. Computed expressions become `let`s.
+     * Arguments in evaluation order, any expressions.
      */
     "args": Array<Expr>;
     /**
@@ -181,7 +179,7 @@ export type Edit = ({
 } | {
   "set_argument": {
     "action": Site;
-    "argument": Atom;
+    "argument": Expr;
     "index": number;
   };
 } | {

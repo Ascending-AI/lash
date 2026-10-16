@@ -9,7 +9,7 @@ use lash_kernel_edit::authoring::{Operation, plan};
 use lash_kernel_edit::{Draft, Position};
 use serde_json::Value;
 
-use crate::{BindingKind, ScopeKind, SiteKind, WorkflowView, derive};
+use crate::{BindingKind, CalleeView, ScopeKind, SiteKind, WorkflowView, derive};
 
 fn checked(document: &Document, entry: &str, functions: &dyn FunctionCatalog) -> WorkflowDocument {
     WorkflowDocument::derive(
@@ -88,12 +88,12 @@ main {
 
 const PINNED_VIEW: &str = r#"dataflow:
   actions:
-    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"to","type":"text"}],"available":[0],"block":{"unit":{"function":"notify"}},"callee":{"effect":"mail.send"},"kind":"perform","result_type":"bool","site":{"path":[0,0],"unit":{"function":"notify"}},"statement":{"path":[0],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"variable":"line"},"binding":2,"name":"line","type":"text"}],"available":[2,1,0],"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"callee":{"effect":"log.write"},"kind":"perform","result_type":"any","site":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[1,1,0,1,0],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"items","type":"text"},{"atom":{"literal":{"int":"2"}},"name":"count","type":"int"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"library":{"id":"90af90dfaae324d219d00df2ed2b76cf6a1be3489240512eb3e5c0f14e3b115d","name":"text.pad"}},"kind":"call","result_type":"text","site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"kind":"call","result_type":"any","site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"variable":"to"},"binding":0,"name":"value","type":"any"},{"atom":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"kind":"spawn","result_type":{"task":"any"},"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
-    {"args":[{"atom":{"literal":{"int":"10"}},"name":"duration","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"kind":"sleep","result_type":"any","site":{"path":[6,0],"unit":{"function":"notify"}},"statement":{"path":[6],"unit":{"function":"notify"}}}
+    {"args":[{"binding":0,"expression":{"variable":"to"},"name":"to","type":"text"}],"available":[0],"block":{"unit":{"function":"notify"}},"callee":{"effect":"mail.send"},"kind":"perform","result_type":"bool","site":{"path":[0,0],"unit":{"function":"notify"}},"statement":{"path":[0],"unit":{"function":"notify"}}}
+    {"args":[{"binding":2,"expression":{"variable":"line"},"name":"line","type":"text"}],"available":[2,1,0],"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"callee":{"effect":"log.write"},"kind":"perform","result_type":"any","site":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"statement":{"path":[1,1,0,1,0],"unit":{"function":"notify"}}}
+    {"args":[{"binding":0,"expression":{"variable":"to"},"name":"items","type":"text"},{"expression":{"literal":{"int":"2"}},"name":"count","type":"int"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"library":{"id":"90af90dfaae324d219d00df2ed2b76cf6a1be3489240512eb3e5c0f14e3b115d","name":"text.pad"}},"kind":"call","result_type":"text","site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}}
+    {"args":[{"binding":0,"expression":{"variable":"to"},"name":"value","type":"any"},{"expression":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"kind":"call","result_type":"any","site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}}
+    {"args":[{"binding":0,"expression":{"variable":"to"},"name":"value","type":"any"},{"expression":{"literal":{"int":"2"}},"name":"copies","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"callee":{"declared":"wrap"},"kind":"spawn","result_type":{"task":"any"},"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}
+    {"args":[{"expression":{"literal":{"int":"10"}},"name":"duration","type":"any"}],"available":[1,0],"block":{"unit":{"function":"notify"}},"kind":"sleep","result_type":"any","site":{"path":[6,0],"unit":{"function":"notify"}},"statement":{"path":[6],"unit":{"function":"notify"}}}
   assignments: []
   bindings:
     {"assigned":false,"block":{"unit":{"function":"notify"}},"captured":false,"id":0,"kind":"param","name":"to","site":{"unit":{"function":"notify"}},"type":"any","uses":[{"site":{"path":[0,0],"unit":{"function":"notify"}},"statement":{"path":[0],"unit":{"function":"notify"}}},{"site":{"path":[3,0],"unit":{"function":"notify"}},"statement":{"path":[3],"unit":{"function":"notify"}}},{"site":{"path":[4,0],"unit":{"function":"notify"}},"statement":{"path":[4],"unit":{"function":"notify"}}},{"site":{"path":[5,0],"unit":{"function":"notify"}},"statement":{"path":[5],"unit":{"function":"notify"}}}]}
@@ -125,17 +125,17 @@ scopes:
   {"block":{"path":[2,0],"unit":{"function":"notify"}},"depth":1,"kind":"try","ordinal":11,"statement":{"path":[2],"unit":{"function":"notify"}}}
   {"block":{"path":[2,1],"unit":{"function":"notify"}},"depth":1,"kind":"catch","ordinal":13,"statement":{"path":[2],"unit":{"function":"notify"}}}
 statements:
-  {"action":{"path":[0,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":3,"site":{"path":[0],"unit":{"function":"notify"}},"statement":{"let":{"name":"sent","value":{"action":{"perform":{"args":[{"variable":"to"}],"effect":"mail.send","result":"any"}}}}}}
-  {"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":4,"site":{"path":[1],"unit":{"function":"notify"}},"statement":{"if":{"condition":{"variable":"sent"},"then_block":[{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}]}}}
-  {"block":{"path":[1,1],"unit":{"function":"notify"}},"depth":1,"ordinal":6,"site":{"path":[1,1,0],"unit":{"function":"notify"}},"statement":{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}}
-  {"action":{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}},"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"depth":2,"ordinal":8,"site":{"path":[1,1,0,1,0],"unit":{"function":"notify"}},"statement":{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}}
-  {"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":10,"site":{"path":[2],"unit":{"function":"notify"}},"statement":{"try":{"body":[{"return":{"value":{"variable":"sent"}}}],"catch":{"binding":"e","body":[{"fail":{"value":{"variable":"e"}}}]}}}}
-  {"block":{"path":[2,0],"unit":{"function":"notify"}},"depth":1,"ordinal":12,"site":{"path":[2,0,0],"unit":{"function":"notify"}},"statement":{"return":{"value":{"variable":"sent"}}}}
-  {"block":{"path":[2,1],"unit":{"function":"notify"}},"depth":1,"ordinal":14,"site":{"path":[2,1,0],"unit":{"function":"notify"}},"statement":{"fail":{"value":{"variable":"e"}}}}
-  {"action":{"path":[3,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":15,"site":{"path":[3],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"library":"90af90dfaae324d219d00df2ed2b76cf6a1be3489240512eb3e5c0f14e3b115d"}}}}}}
-  {"action":{"path":[4,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":16,"site":{"path":[4],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
-  {"action":{"path":[5,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":17,"site":{"path":[5],"unit":{"function":"notify"}},"statement":{"do":{"action":{"spawn":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
-  {"action":{"path":[6,0],"unit":{"function":"notify"}},"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":18,"site":{"path":[6],"unit":{"function":"notify"}},"statement":{"do":{"action":{"sleep":{"duration":{"literal":{"int":"10"}}}}}}}
+  {"actions":[{"path":[0,0],"unit":{"function":"notify"}}],"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":3,"site":{"path":[0],"unit":{"function":"notify"}},"statement":{"let":{"name":"sent","value":{"action":{"perform":{"args":[{"variable":"to"}],"effect":"mail.send","result":"any"}}}}}}
+  {"actions":[],"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":4,"site":{"path":[1],"unit":{"function":"notify"}},"statement":{"if":{"condition":{"variable":"sent"},"then_block":[{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}]}}}
+  {"actions":[],"block":{"path":[1,1],"unit":{"function":"notify"}},"depth":1,"ordinal":6,"site":{"path":[1,1,0],"unit":{"function":"notify"}},"statement":{"for":{"binding":"line","body":[{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}],"iterable":{"list":[{"literal":{"text":"a"}}]}}}}
+  {"actions":[{"path":[1,1,0,1,0,0],"unit":{"function":"notify"}}],"block":{"path":[1,1,0,1],"unit":{"function":"notify"}},"depth":2,"ordinal":8,"site":{"path":[1,1,0,1,0],"unit":{"function":"notify"}},"statement":{"do":{"action":{"perform":{"args":[{"variable":"line"}],"effect":"log.write","result":"any"}}}}}
+  {"actions":[],"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":10,"site":{"path":[2],"unit":{"function":"notify"}},"statement":{"try":{"body":[{"return":{"value":{"variable":"sent"}}}],"catch":{"binding":"e","body":[{"fail":{"value":{"variable":"e"}}}]}}}}
+  {"actions":[],"block":{"path":[2,0],"unit":{"function":"notify"}},"depth":1,"ordinal":12,"site":{"path":[2,0,0],"unit":{"function":"notify"}},"statement":{"return":{"value":{"variable":"sent"}}}}
+  {"actions":[],"block":{"path":[2,1],"unit":{"function":"notify"}},"depth":1,"ordinal":14,"site":{"path":[2,1,0],"unit":{"function":"notify"}},"statement":{"fail":{"value":{"variable":"e"}}}}
+  {"actions":[{"path":[3,0],"unit":{"function":"notify"}}],"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":15,"site":{"path":[3],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"library":"90af90dfaae324d219d00df2ed2b76cf6a1be3489240512eb3e5c0f14e3b115d"}}}}}}
+  {"actions":[{"path":[4,0],"unit":{"function":"notify"}}],"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":16,"site":{"path":[4],"unit":{"function":"notify"}},"statement":{"do":{"action":{"call":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
+  {"actions":[{"path":[5,0],"unit":{"function":"notify"}}],"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":17,"site":{"path":[5],"unit":{"function":"notify"}},"statement":{"do":{"action":{"spawn":{"args":[{"variable":"to"},{"literal":{"int":"2"}}],"callee":{"declared":"wrap"}}}}}}
+  {"actions":[{"path":[6,0],"unit":{"function":"notify"}}],"block":{"unit":{"function":"notify"}},"depth":0,"ordinal":18,"site":{"path":[6],"unit":{"function":"notify"}},"statement":{"do":{"action":{"sleep":{"duration":{"literal":{"int":"10"}}}}}}}
 "#;
 
 /// The serialized view of one workflow with a branch, a loop, a try and
@@ -407,7 +407,7 @@ main {
         .iter()
         .find(|statement| statement.site == inserted)
         .expect("the inserted statement is listed");
-    assert_eq!(statement.action, Some(inserted.child(0)));
+    assert_eq!(statement.actions, [inserted.child(0)]);
     assert!(matches!(&statement.statement, Stmt::Let { name, .. } if name.as_str() == "copied"));
     assert!(
         view.dataflow
@@ -459,7 +459,7 @@ main { finish null }
         .find(|statement| statement.site == effect)
         .expect("the closure's effect statement is listed");
     assert_eq!((&listed.block, listed.depth), (&body, 1));
-    assert_eq!(listed.action, Some(effect.child(0)));
+    assert_eq!(listed.actions, [effect.child(0)]);
     assert!(
         view.execution_sites
             .iter()
@@ -891,4 +891,169 @@ main { finish null }
             .references,
         vec![binding.id]
     );
+}
+
+const NESTED: &str = r#"kernel 1
+numbers float
+effect mail.send(to: Text, message: Any) -> Bool
+effect log.write(line: Any) -> Any
+entry notify(to: Text) -> Any
+
+fn notify(to) {
+  let sent = perform mail.send(to, {subject: "hi", text: perform log.write(to) as Any}) as Any
+  let pair = [call wrap(perform log.write("a") as Any), spawn call wrap(1)]
+  let task = fn() {
+    let inner = perform log.write("closure") as Any
+    return inner
+  }
+  return [sent, pair]
+}
+
+fn wrap(value) {
+  return value
+}
+
+main {
+  finish null
+}
+"#;
+
+/// VIEW-NESTED (`K-SITE-002`, `K-EDIT-004`): a statement is one node whose
+/// actions, nested ones included, are listed in the order a run issues
+/// them, each with its kind and callee, its arguments as written and the
+/// innermost action it is an argument of. A closure's actions are its own
+/// statements'. Replacing an action's argument expression re-derives the
+/// action with the new argument and survives as the same action, and the
+/// inverse edit gives back the document it started from. The view is read
+/// from the document and its declarations alone: there is no source to
+/// read.
+#[test]
+fn the_view_lists_nested_actions_in_issue_order_and_their_arguments_edit_in_place() {
+    use lash_kernel_edit::{Edit, Transaction};
+
+    let document = parse_document(NESTED).expect("a nested-action workflow");
+    let view = view_of(&document, "notify");
+    let at = |path: &[u32]| site("notify", path);
+    let listed = |view: &WorkflowView, path: &[u32]| {
+        view.statements
+            .iter()
+            .find(|statement| statement.site == at(path))
+            .expect("the statement is listed")
+            .actions
+            .clone()
+    };
+    assert_eq!(listed(&view, &[0]), [at(&[0, 0, 1, 1]), at(&[0, 0])]);
+    assert_eq!(
+        listed(&view, &[1]),
+        [at(&[1, 0, 0, 0]), at(&[1, 0, 0]), at(&[1, 0, 1])]
+    );
+    assert_eq!(listed(&view, &[2]), []);
+    assert_eq!(listed(&view, &[2, 0, 0, 0]), [at(&[2, 0, 0, 0, 0])]);
+    let issued: Vec<Site> = view
+        .statements
+        .iter()
+        .flat_map(|s| s.actions.clone())
+        .collect();
+    let actions: Vec<Site> = view
+        .dataflow
+        .actions
+        .iter()
+        .map(|a| a.site.clone())
+        .collect();
+    assert_eq!(
+        issued.iter().collect::<std::collections::BTreeSet<_>>(),
+        actions.iter().collect::<std::collections::BTreeSet<_>>(),
+        "every listed action has its dataflow entry"
+    );
+
+    let action = |view: &WorkflowView, path: &[u32]| {
+        view.dataflow
+            .actions
+            .iter()
+            .find(|action| action.site == at(path))
+            .expect("the action is in the dataflow")
+            .clone()
+    };
+    let send = action(&view, &[0, 0]);
+    assert_eq!(
+        (send.kind, send.callee.clone(), send.statement.clone()),
+        (
+            SiteKind::Perform,
+            Some(CalleeView::Effect(EffectName::new("mail.send").unwrap())),
+            at(&[0])
+        )
+    );
+    assert_eq!(send.result_type, Type::Bool);
+    assert_eq!(
+        send.args
+            .iter()
+            .map(|arg| (arg.name.clone(), arg.site.clone(), arg.binding))
+            .collect::<Vec<_>>(),
+        [
+            (Some(Name::new("to")), Some(at(&[0, 0, 0])), Some(0)),
+            (Some(Name::new("message")), Some(at(&[0, 0, 1])), None),
+        ]
+    );
+    assert!(matches!(send.args[1].expression, Expr::Record(_)));
+    let wrap = action(&view, &[1, 0, 0]);
+    assert_eq!(
+        (wrap.kind, wrap.callee, wrap.args[0].name.clone()),
+        (
+            SiteKind::Call,
+            Some(CalleeView::Declared(Name::new("wrap"))),
+            Some(Name::new("value"))
+        )
+    );
+    assert_eq!(action(&view, &[1, 0, 1]).kind, SiteKind::Spawn);
+    let within = |path: &[u32]| {
+        view.execution_sites
+            .iter()
+            .find(|site| site.site == at(path))
+            .expect("an execution site")
+            .within
+            .clone()
+    };
+    assert_eq!(within(&[0, 0]), None);
+    assert_eq!(within(&[0, 0, 1, 1]), Some(at(&[0, 0])));
+    assert_eq!(within(&[1, 0, 0, 0]), Some(at(&[1, 0, 0])));
+    assert_eq!(within(&[1, 0, 1]), None);
+
+    let mut draft = Draft::open(document.clone()).expect("draft");
+    let functions = FunctionRegistry::default();
+    let mut environment = Environment::new(&functions);
+    environment.effects = document.manifest.effects.clone();
+    let subject = at(&[0, 0, 1, 0]);
+    let replace = |draft: &Draft, with: &str| Transaction {
+        base: draft.identity(),
+        edits: vec![Edit::ReplaceExpression {
+            expression: subject.clone(),
+            with: Expr::Literal(Literal::Text(with.into())),
+        }],
+    };
+    let applied = draft
+        .apply(&replace(&draft, "hello"), &environment)
+        .expect("the argument is replaced");
+    let survivor = |path: &[u32]| {
+        applied
+            .correspondence
+            .survivor(&at(path))
+            .map(|survivor| (survivor.to.clone(), survivor.edited))
+    };
+    assert_eq!(survivor(&[0, 0]), Some((at(&[0, 0]), false)));
+    assert_eq!(survivor(&[0, 0, 1, 0]), Some((at(&[0, 0, 1, 0]), true)));
+    let edited = view_of(draft.document(), "notify");
+    assert_eq!(listed(&edited, &[0]), listed(&view, &[0]));
+    let Expr::Record(entries) = &action(&edited, &[0, 0]).args[1].expression else {
+        panic!("the argument is still a record");
+    };
+    assert_eq!(
+        entries[0].value,
+        Expr::Literal(Literal::Text("hello".into()))
+    );
+    draft
+        .apply(&replace(&draft, "hi"), &environment)
+        .expect("the inverse edit applies");
+    assert_eq!(draft.document(), &document);
+    assert_eq!(draft.identity(), document.identity());
+    assert_eq!(view_of(draft.document(), "notify"), view);
 }

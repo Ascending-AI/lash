@@ -100,7 +100,8 @@ export type ActionView = {
    */
   "callee"?: (CalleeView | null);
   /**
-   * What an assignment of the action's result writes.
+   * What an assignment of the action's result writes, when the action
+   * is its whole right-hand side.
    */
   "destination"?: (Place | null);
   "kind": SiteKind;
@@ -116,15 +117,25 @@ export type ActionView = {
  * One argument of an action.
  */
 export type ArgumentView = {
-  "atom": Atom;
   /**
    * The binding a variable argument reads.
    */
   "binding"?: (number | null);
   /**
+   * The argument as the document writes it. A statement's own action
+   * writes a variable or a literal.
+   */
+  "expression": Expr;
+  /**
    * The parameter or builtin operand the kernel names here.
    */
   "name"?: (Name | null);
+  /**
+   * The argument's node, for an action nested in an expression: the
+   * expression an edit replaces. A statement's own action writes its
+   * arguments in place, with no node of their own.
+   */
+  "site"?: (Site | null);
   /**
    * That parameter's type; `any` for an untyped declared parameter or
    * when no signature names one.
@@ -247,7 +258,8 @@ export type Closure = {
  */
 export type Dataflow = {
   /**
-   * Every action of the entry, in document order.
+   * Every action of the entry, a statement's own and each one nested in
+   * an expression, in document order.
    */
   "actions": Array<ActionView>;
   /**
@@ -287,10 +299,14 @@ export type ExecutionSiteView = {
    */
   "site": Site;
   /**
-   * The statement whose right-hand side it is: where its task stands
-   * while it waits.
+   * The statement it is part of: where its task stands while it waits.
    */
   "statement": Site;
+  /**
+   * The innermost action it is an argument of, when it is nested in
+   * one: in `call f(perform g() as Any)`, the call.
+   */
+  "within"?: (Site | null);
 };
 
 /**
@@ -585,10 +601,12 @@ export type StatementCoverage = {
  */
 export type StatementView = {
   /**
-   * The site of the statement's action, when it has one: where a run
-   * reports it.
+   * The sites of the statement's actions, its own and those nested in
+   * its expressions, in the order a run issues them: an action's
+   * arguments before it, left to right (`K-EVAL-001`). A run reports
+   * each at its site. A closure's actions are its body's statements'.
    */
-  "action"?: (Site | null);
+  "actions": Array<Site>;
   /**
    * The block the statement is in.
    */
