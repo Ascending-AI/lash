@@ -7,13 +7,14 @@
 //! the action and its roles are found by site in the statement's resume
 //! entries under this layout, and the phase must agree with the action's
 //! kind and with how the task comes to the frame.
-use super::loops::{Guard, Header, TextCursor};
+use super::loops::{Guard, Header};
 use super::{Completion, Control, Cursor, Frame, LibraryCall, SlotState, TryPhase};
 use crate::compile::{Executable, Form, LibId, NestedKind, StmtId};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_exec::ActIx;
 use lash_kernel_state::paged::directory::ordinal_key;
+use lash_kernel_state::paged::payload::TextCursor;
 use lash_kernel_state::paged::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{
     BindingRecord, BoundRecord, CursorKind, CursorRecord, EnteredRecord, FinallyRecord,
@@ -917,7 +918,7 @@ fn cursor_record(cursor: &Cursor, guard: Option<&Guard>) -> Option<CursorRecord>
         Cursor::List(_, at) => (CursorKind::List, *at as u64),
         Cursor::Tuple(_, at) => (CursorKind::Tuple, *at as u64),
         Cursor::Map(_, at) | Cursor::Set(_, at) => (CursorKind::Table, table(at)),
-        Cursor::Text(text) => (CursorKind::Text, text.index),
+        Cursor::Text(text) => (CursorKind::Text, text.position()),
         Cursor::Driver(_) => (CursorKind::Driver, 0),
     };
     Some(CursorRecord {
@@ -970,20 +971,7 @@ fn saved_for(
                     Cursor::Set(id, (position != u64::MAX).then_some(TableCursor(position)))
                 }
                 (CursorKind::Text, Value::Text(text)) if position <= text.summary.chars => {
-                    // A text held in the activation is walked by byte
-                    // offset; a paged one by index.
-                    let offset = match &text.body {
-                        lash_kernel_doc::heap::Payload::Resident(body) => body
-                            .char_indices()
-                            .nth(position as usize)
-                            .map_or(body.len(), |(at, _)| at),
-                        lash_kernel_doc::heap::Payload::Paged(_) => 0,
-                    };
-                    Cursor::Text(Box::new(TextCursor {
-                        text,
-                        index: position,
-                        offset,
-                    }))
+                    Cursor::Text(Box::new(TextCursor::new(text, position)))
                 }
                 (CursorKind::Driver, driver) if position == 0 => Cursor::Driver(Box::new(driver)),
                 _ => return Err(malformed("a for cursor has another kind or extent")),

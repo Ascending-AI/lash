@@ -136,14 +136,15 @@ fn exhaustion_checks_then_runs_else_and_break_skips_it() {
     );
 }
 
-/// A text is walked by code point; `continue` reaches the header, `break`
+/// A paged text is walked by code point across cold reopens; `continue`
+/// reaches the header, `break`
 /// leaves past the `else`, and a `while` runs its own `else` when its
 /// condition fails.
 #[test]
 fn a_text_walks_code_points_and_loops_take_continue_break_and_else() {
     const SOURCE: &str = "main { let out = []\n\
         let i = 0\n\
-        for c in \"a\u{e9}\u{1f600}zq\" via (open proto.open) {\n\
+        for c in \"a\u{e9}\u{1f600}zqxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" via (open proto.open) {\n\
           set i = num.add(i, 1)\n\
           if num.lt(i, 2) { continue }\n\
           let echoed = perform echo(c) as Any\n\

@@ -1500,3 +1500,127 @@ fn empty_statement_releases_do_not_publish_census_deltas() {
     assert_eq!(heap.certificate(), before);
     assert_eq!(RELEASE_DELTA_CALLS.with(std::cell::Cell::get), 1);
 }
+
+/// PAGED-TEXT-CURSOR-LINEAR: decode each visited leaf once, borrow its image,
+/// and scan linear bytes; reopening inside a leaf repeats only that leaf.
+#[test]
+fn paged_text_cursor_linear() {
+    for (mixed, parts) in [(false, 10), (true, 10), (false, 36), (true, 36)] {
+        let input: String = (0..parts)
+            .map(|i| {
+                let c = char::from(b'A' + i);
+                if mixed {
+                    format!("{c}é😀").repeat(600)
+                } else {
+                    c.to_string().repeat(4096)
+                }
+            })
+            .collect();
+        for parked in [false, true] {
+            let (mut heap, pages) = fresh();
+            let text = heap.text(&input).unwrap();
+            let leaves = pages
+                .borrow()
+                .pages
+                .values()
+                .filter(|p| p.kind == PageKind::PAYLOAD_LEAF)
+                .count();
+            assert!(leaves >= 8);
+            payload::cursor_work::WORK.with_borrow_mut(|work| *work = Default::default());
+            let mut cursor = payload::TextCursor::new(text.clone(), 0);
+            for (i, expected) in input.chars().enumerate() {
+                if parked && i == 71 {
+                    heap.access.clear();
+                    cursor = payload::TextCursor::new(text.clone(), i as u64);
+                }
+                assert_eq!(cursor.next(&heap).unwrap(), Some(expected));
+                assert_eq!(cursor.position(), i as u64 + 1);
+            }
+            assert_eq!(cursor.next(&heap).unwrap(), None);
+            payload::cursor_work::WORK.with_borrow(|work| {
+                let decoded: u64 = work.leaves.values().sum();
+                assert_eq!(decoded, leaves as u64 + u64::from(parked), "{work:?}");
+                assert!(work.leaves.values().all(|n| *n <= 1 + u64::from(parked)));
+                assert_eq!(work.copied, 0, "leaf bytes are borrowed");
+                eprintln!("PAGED-TEXT-CURSOR-LINEAR mixed={mixed} parked={parked} bytes={} leaves={leaves} decodes={decoded} copied={} scanned={}", input.len(), work.copied, work.scanned);
+                assert!(work.scanned <= 3 * input.len() + 4096, "{work:?}");
+            });
+        }
+    }
+}
+
+/// D-IMM/K-ITER-005: stopping inside a leaf demands no following leaf;
+/// the last scalar demands the next leaf before it can be returned.
+#[test]
+fn paged_text_cursor_preserves_boundary_fault_order() {
+    let (mut heap, pages) = fresh();
+    use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
+    let mut text = heap.text(&format!("{}é😀", "A".repeat(4096))).unwrap();
+    let missing = pages
+        .borrow()
+        .pages
+        .values()
+        .find(|p| {
+            p.kind == PageKind::PAYLOAD_LEAF && !p.tokens.windows(4096).any(|b| b == [b'A'; 4096])
+        })
+        .unwrap()
+        .page
+        .id;
+    let first = pages
+        .borrow()
+        .pages
+        .values()
+        .find(|p| {
+            p.kind == PageKind::PAYLOAD_LEAF && p.tokens.windows(4096).any(|b| b == [b'A'; 4096])
+        })
+        .unwrap()
+        .page;
+    let last = pages.borrow().pages[&missing].page;
+    let empty = PageRef {
+        id: PageId([255; 32]),
+        grant: PageGrant::NONE,
+    };
+    let mut out = TokenWriter::new();
+    out.seq(3);
+    for (summary, page) in [
+        (
+            lash_kernel_doc::heap_values::text_summary(&"A".repeat(4096)),
+            first,
+        ),
+        (
+            TextSummary {
+                utf8_bytes: 0,
+                chars: 0,
+                utf16_units: 0,
+            },
+            empty,
+        ),
+        (lash_kernel_doc::heap_values::text_summary("é😀"), last),
+    ] {
+        out.seq(2);
+        summary.encode(&mut out);
+        page.encode(&mut out);
+    }
+    // Rank selection skips zero-extent links without demanding their pages.
+    // Advancing the retained frontier must make the same demand decision.
+    text.body = Payload::paged(
+        heap.access
+            .seal(
+                PageKind::PAYLOAD_INDEX,
+                out.into_bytes(),
+                vec![first, empty, last],
+            )
+            .unwrap(),
+    );
+    pages.borrow_mut().pages.remove(&missing);
+    let mut cursor = payload::TextCursor::new(text.clone(), 0);
+    for _ in 0..4095 {
+        assert_eq!(cursor.next(&heap).unwrap(), Some('A'));
+    }
+    assert!(matches!(cursor.next(&heap), Err(HeapFault::Missing { page }) if page == missing));
+    assert_eq!(cursor.position(), 4095);
+    // A cold reconstruction at the boundary reports the same failure.
+    heap.access.clear();
+    let mut cursor = payload::TextCursor::new(text, 4095);
+    assert!(matches!(cursor.next(&heap), Err(HeapFault::Missing { page }) if page == missing));
+}

@@ -17,7 +17,7 @@ use lash_kernel_doc::heap_values::{integer_digits, text_summary};
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Part {
     summary: TextSummary,
     page: PageRef,
@@ -112,6 +112,212 @@ fn add(parts: impl Iterator<Item = TextSummary>) -> Result<TextSummary, HeapFaul
     }
     Ok(sum)
 }
+#[cfg(test)]
+pub(super) mod cursor_work {
+    use super::*;
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+    #[derive(Default, Debug)]
+    pub struct Work {
+        pub leaves: BTreeMap<PageId, u64>,
+        pub copied: usize,
+        pub scanned: usize,
+    }
+    thread_local! { pub static WORK: RefCell<Work> = RefCell::default(); }
+}
+
+/// A transient text walk with one validated leaf and a fanout-bounded frontier
+/// per index level. Checkpoints retain only [`Self::text`] and [`Self::position`].
+#[derive(Clone, Debug)]
+pub struct TextCursor {
+    text: TextRef,
+    index: u64,
+    offset: Option<usize>,
+    walk: Option<TextWalk>,
+}
+impl TextCursor {
+    /// Reconstruct lazily from the persisted scalar position, without reading pages.
+    pub fn new(text: TextRef, index: u64) -> Self {
+        Self {
+            text,
+            index,
+            offset: None,
+            walk: None,
+        }
+    }
+    /// The descriptor retained by the loop's holdings and checkpoint.
+    pub fn text(&self) -> &TextRef {
+        &self.text
+    }
+    /// The next scalar's ordinal, independent of page layout and residency.
+    pub fn position(&self) -> u64 {
+        self.index
+    }
+    /// Return one scalar, preserving the boundary lookahead of text rank selection.
+    pub fn next(&mut self, heap: &PagedHeap) -> Result<Option<char>, HeapFault> {
+        if self.index >= self.text.summary.chars {
+            return Ok(None);
+        }
+        let point = match &self.text.body {
+            Payload::Resident(body) => {
+                let offset = *self.offset.get_or_insert_with(|| {
+                    body.char_indices()
+                        .nth(self.index as usize)
+                        .map_or(body.len(), |(at, _)| at)
+                });
+                let point = body
+                    .get(offset..)
+                    .and_then(|rest| rest.chars().next())
+                    .ok_or_else(|| {
+                        HeapFault::Malformed("a text cursor stands off a code point".into())
+                    })?;
+                self.offset = Some(offset + point.len_utf8());
+                point
+            }
+            Payload::Paged(page) => {
+                let walk = match &mut self.walk {
+                    Some(walk) => walk,
+                    empty => empty.insert(TextWalk::open(
+                        &heap.access,
+                        **page,
+                        self.text.summary,
+                        self.index,
+                    )?),
+                };
+                let point = walk.point()?;
+                walk.offset += point.len_utf8();
+                // Previously offset(index + 1) validated the following leaf before
+                // returning the current leaf's last scalar. Do not delay that fault.
+                if walk.offset == walk.leaf.bytes().len()
+                    && self.index + 1 < self.text.summary.chars
+                {
+                    walk.advance(&heap.access)?;
+                }
+                point
+            }
+        };
+        self.index += 1;
+        Ok(Some(point))
+    }
+}
+
+#[derive(Clone, Debug)]
+struct TextWalk {
+    leaf: Leaf,
+    offset: usize,
+    path: Vec<std::vec::IntoIter<Part>>,
+}
+impl TextWalk {
+    fn open(
+        access: &Access<'_>,
+        page: PageRef,
+        summary: TextSummary,
+        mut index: u64,
+    ) -> Result<Self, HeapFault> {
+        let mut part = Part { page, summary };
+        let mut path = Vec::new();
+        loop {
+            match read(access, &part, true)? {
+                Node::Leaf(leaf) => {
+                    let text = std::str::from_utf8(leaf.bytes())
+                        .map_err(|e| HeapFault::Malformed(e.to_string()))?;
+                    let offset = text
+                        .char_indices()
+                        .inspect(|(_, c)| {
+                            #[cfg(test)]
+                            cursor_work::WORK.with_borrow_mut(|work| work.scanned += c.len_utf8());
+                            #[cfg(not(test))]
+                            let _ = c;
+                        })
+                        .nth(index as usize)
+                        .map(|(at, _)| at)
+                        .ok_or_else(|| HeapFault::Malformed("text rank mismatch".into()))?;
+                    return Ok(Self { leaf, offset, path });
+                }
+                Node::Index(children) => {
+                    let mut children = children.into_iter();
+                    part = loop {
+                        let child = children.next().ok_or_else(|| {
+                            HeapFault::Malformed("text index summary mismatch".into())
+                        })?;
+                        if index < child.summary.chars {
+                            break child;
+                        }
+                        index -= child.summary.chars;
+                    };
+                    path.push(children);
+                }
+            }
+        }
+    }
+    fn point(&self) -> Result<char, HeapFault> {
+        let bytes = self.leaf.bytes();
+        let first = *bytes
+            .get(self.offset)
+            .ok_or_else(|| HeapFault::Malformed("text rank mismatch".into()))?;
+        let width = if first < 0x80 {
+            1
+        } else if first < 0xe0 {
+            2
+        } else if first < 0xf0 {
+            3
+        } else {
+            4
+        };
+        // The leaf was validated once. Decode only this scalar, never the suffix.
+        let point = bytes
+            .get(self.offset..self.offset + width)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .and_then(|text| text.chars().next())
+            .ok_or_else(|| HeapFault::Malformed("text rank mismatch".into()))?;
+        #[cfg(test)]
+        cursor_work::WORK.with_borrow_mut(|work| work.scanned += width);
+        Ok(point)
+    }
+    fn advance(&mut self, access: &Access<'_>) -> Result<(), HeapFault> {
+        let mut part = loop {
+            let children = self
+                .path
+                .last_mut()
+                .ok_or_else(|| HeapFault::Malformed("text index summary mismatch".into()))?;
+            if let Some(child) = children.find(|child| child.summary.chars != 0) {
+                break child;
+            }
+            self.path.pop();
+        };
+        loop {
+            match read(access, &part, true)? {
+                Node::Leaf(leaf) => {
+                    self.leaf = leaf;
+                    self.offset = 0;
+                    return Ok(());
+                }
+                Node::Index(children) => {
+                    let mut children = children.into_iter();
+                    part = children
+                        .find(|child| child.summary.chars != 0)
+                        .ok_or_else(|| {
+                            HeapFault::Malformed("text index summary mismatch".into())
+                        })?;
+                    self.path.push(children);
+                }
+            }
+        }
+    }
+}
+
+// The payload range borrows the immutable token image; no leaf-sized allocation.
+#[derive(Clone, Debug)]
+struct Leaf {
+    tokens: Arc<[u8]>,
+    range: Range<usize>,
+}
+impl Leaf {
+    fn bytes(&self) -> &[u8] {
+        &self.tokens[self.range.clone()]
+    }
+}
+
 fn read(access: &Access<'_>, part: &Part, text: bool) -> Result<Node, HeapFault> {
     let answer = access.read(part.page)?;
     let bad = |reason: String| HeapFault::Corrupt {
@@ -129,17 +335,33 @@ fn read(access: &Access<'_>, part: &Part, text: bool) -> Result<Node, HeapFault>
             input.text().map_err(|e| bad(e.to_string()))?.as_bytes()
         } else {
             input.bytes().map_err(|e| bad(e.to_string()))?
-        }
-        .to_vec();
+        };
+        let end = input.position();
+        let start = end - bytes.len();
+        #[cfg(test)]
+        cursor_work::WORK.with_borrow_mut(|work| {
+            *work.leaves.entry(part.page.id).or_default() += 1;
+            work.scanned += bytes.len();
+        });
         input.finish().map_err(|e| bad(e.to_string()))?;
         if bytes.is_empty()
             || bytes.len() > PAYLOAD_LEAF_BYTES as usize
             || declared != part.summary
-            || summary(&bytes, text)? != declared
+            || summary(bytes, text)? != declared
         {
             return Err(bad("payload leaf summary mismatch".into()));
         }
-        Ok(Node::Leaf(bytes))
+        #[cfg(test)]
+        let backing = Arc::clone(&answer.tokens);
+        let leaf = Leaf {
+            tokens: answer.tokens,
+            range: start..end,
+        };
+        #[cfg(test)]
+        if !Arc::ptr_eq(&leaf.tokens, &backing) {
+            cursor_work::WORK.with_borrow_mut(|work| work.copied += leaf.bytes().len());
+        }
+        Ok(Node::Leaf(leaf))
     } else if answer.kind == PageKind::PAYLOAD_INDEX {
         let mut children: Vec<Part> =
             decode_body(&answer.tokens).map_err(|e| bad(e.to_string()))?;
@@ -158,7 +380,7 @@ fn read(access: &Access<'_>, part: &Part, text: bool) -> Result<Node, HeapFault>
     }
 }
 enum Node {
-    Leaf(Vec<u8>),
+    Leaf(Leaf),
     Index(Vec<Part>),
 }
 pub fn visit(
@@ -180,8 +402,9 @@ pub fn visit(
             return Ok(ControlFlow::Continue(()));
         }
         match read(access, part, text)? {
-            Node::Leaf(bytes) => {
-                let slice = bytes
+            Node::Leaf(leaf) => {
+                let slice = leaf
+                    .bytes()
                     .get(range.start as usize..range.end as usize)
                     .ok_or_else(|| HeapFault::Malformed("payload range outside leaf".into()))?;
                 if text {
@@ -239,9 +462,9 @@ pub fn offset(
     let mut offset = 0;
     loop {
         match read(access, &part, true)? {
-            Node::Leaf(bytes) => {
-                let text =
-                    std::str::from_utf8(&bytes).map_err(|e| HeapFault::Malformed(e.to_string()))?;
+            Node::Leaf(leaf) => {
+                let text = std::str::from_utf8(leaf.bytes())
+                    .map_err(|e| HeapFault::Malformed(e.to_string()))?;
                 return text
                     .char_indices()
                     .nth(index as usize)

@@ -9,8 +9,9 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::heap::{Payload, TextRef, TupleRef};
+use lash_kernel_doc::heap::TupleRef;
 use lash_kernel_doc::{EntityId, NativeHeap, TaskId, Value};
+use lash_kernel_state::paged::payload::TextCursor;
 use lash_kernel_state::paged::{SemanticHeap, TableCursor};
 use num_traits::ToPrimitive;
 
@@ -36,15 +37,6 @@ pub(super) enum Cursor {
     Driver(Box<Value>),
 }
 
-/// A text, the index of its next code point and, for a text held in the
-/// activation, that code point's byte offset.
-#[derive(Clone, Debug)]
-pub(super) struct TextCursor {
-    pub(super) text: TextRef,
-    pub(super) index: u64,
-    pub(super) offset: usize,
-}
-
 impl Cursor {
     /// What the loop walks, which the frame holds.
     pub(super) fn walked(&self) -> Option<Value> {
@@ -54,7 +46,7 @@ impl Cursor {
             Self::Tuple(tuple, _) => Value::Tuple(Arc::clone(tuple)),
             Self::Map(id, _) => Value::Map(*id),
             Self::Set(id, _) => Value::Set(*id),
-            Self::Text(cursor) => Value::Text(cursor.text.clone()),
+            Self::Text(cursor) => Value::Text(cursor.text().clone()),
             Self::Driver(driver) => (**driver).clone(),
         })
     }
@@ -67,11 +59,7 @@ impl Cursor {
             Value::Tuple(tuple) => Self::Tuple(tuple, 0),
             Value::Map(id) => Self::Map(id, None),
             Value::Set(id) => Self::Set(id, None),
-            Value::Text(text_value) if text => Self::Text(Box::new(TextCursor {
-                text: text_value,
-                index: 0,
-                offset: 0,
-            })),
+            Value::Text(text_value) if text => Self::Text(Box::new(TextCursor::new(text_value, 0))),
             other => return Err(Box::new(other)),
         })
     }
@@ -117,41 +105,6 @@ fn via_of(exe: &Executable, stmt: StmtId) -> Option<Via> {
     match &exe.stmt(stmt).form {
         Form::For { via, .. } => *via,
         _ => None,
-    }
-}
-
-/// The code point of `text` at `index`, its byte offset `offset` when the
-/// text is held in the activation; and the offset after it.
-fn code_point(
-    heap: &lash_kernel_state::paged::PagedHeap,
-    text: &TextRef,
-    index: u64,
-    offset: usize,
-) -> Result<(Value, usize), Halt> {
-    match &text.body {
-        Payload::Resident(body) => {
-            let point = body
-                .get(offset..)
-                .and_then(|rest| rest.chars().next())
-                .ok_or_else(|| fault("a text cursor stands off a code point"))?;
-            let mut buffer = [0; 4];
-            Ok((
-                Value::text(&*point.encode_utf8(&mut buffer)),
-                offset + point.len_utf8(),
-            ))
-        }
-        Payload::Paged(_) => {
-            let start = heap.text_offset(text, index)?;
-            let end = heap.text_offset(text, index + 1)?;
-            let mut point = String::new();
-            heap.payload_visit(&Value::Text(text.clone()), start..end, &mut |chunk| {
-                if let lash_kernel_doc::heap::Chunk::Text(chunk) = chunk {
-                    point.push_str(chunk);
-                }
-                std::ops::ControlFlow::Continue(())
-            })?;
-            Ok((Value::text(point.as_str()), 0))
-        }
     }
 }
 
@@ -367,17 +320,10 @@ impl KernelMachine {
                             key
                         })
                     }
-                    Cursor::Text(cursor) => {
-                        if cursor.index < cursor.text.summary.chars {
-                            let (point, after) =
-                                code_point(&self.heap, &cursor.text, cursor.index, cursor.offset)?;
-                            cursor.index += 1;
-                            cursor.offset = after;
-                            Some(point)
-                        } else {
-                            None
-                        }
-                    }
+                    Cursor::Text(cursor) => cursor.next(&self.heap)?.map(|point| {
+                        let mut buffer = [0; 4];
+                        Value::text(&*point.encode_utf8(&mut buffer))
+                    }),
                     Cursor::Driver(driver) => {
                         let driver = (**driver).clone();
                         *header = Header::Pull;
