@@ -240,26 +240,49 @@ pub fn effect_path_of(manifest: &crate::ToolManifest) -> Option<String> {
     Some(format!("{}.{operation}", binding.module_path.join(".")))
 }
 
-/// The effect path a process performs the fixed `call_dynamic` endpoint
+/// The effect path a process performs the `call_dynamic` endpoint
 /// under (P6, R9).
 pub const CALL_DYNAMIC_EFFECT: &str = "lash.call_dynamic";
 
-/// How long one resolution of a `call_dynamic` call may take.
-const CALL_DYNAMIC_RESOLUTION: std::time::Duration = std::time::Duration::from_secs(60);
+/// The host's execution and retry contract for dynamic discovery, recorded
+/// in the process environment before its first resolution. Resolution and
+/// the matched tool have independent bounds. As with ordinary tool bounds,
+/// there is no runtime-selected ceiling; enclosing deadlines still clip it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeferredResolutionPolicy {
+    pub execution: std::time::Duration,
+    pub execution_policy: lash_sansio::ExecutionPolicy,
+}
 
-/// The fixed, lash-owned `call_dynamic` endpoint: a known signature that
+impl Default for DeferredResolutionPolicy {
+    /// Sixty seconds, with three repeatable attempts and exponential backoff
+    /// from 100 ms up to 1,000 ms.
+    fn default() -> Self {
+        Self {
+            execution: std::time::Duration::from_secs(60),
+            execution_policy: lash_sansio::ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::MIN.saturating_add(2),
+                100,
+                1_000,
+            ),
+        }
+    }
+}
+
+/// The runtime-owned `call_dynamic` signature under `policy`: an endpoint that
 /// takes the call path to resolve and the target's arguments
 /// ([`DynamicCall`]) and answers whatever the target answers. No provider
 /// advertises it; an env links it to its deferred provider
 /// ([`LinkKind::Dynamic`]). A call of it is two committed steps: its
 /// resolution, whose committed outcome is the [`DeferredMatch`], then the
-/// call of the matched tool. The resolution is effect-free until it
-/// commits, so it repeats.
+/// call of the matched tool. Discovery is effect-free; its admitted policy
+/// controls retries and recovery.
 #[expect(
     clippy::expect_used,
     reason = "the endpoint's schemas are fixed literals the schema admission accepts"
 )]
-pub fn call_dynamic_endpoint() -> ToolDefinition {
+pub fn call_dynamic_endpoint(policy: DeferredResolutionPolicy) -> ToolDefinition {
     use lash_sansio::ToolDefinitionBindingExt as _;
     ToolDefinition::raw(
         "lash:call_dynamic",
@@ -278,12 +301,8 @@ pub fn call_dynamic_endpoint() -> ToolDefinition {
     )
     .expect("the call_dynamic endpoint's schemas admit")
     .with_tool_binding(lash_sansio::ToolBinding::new(["lash"], "call_dynamic"))
-    .with_execution(CALL_DYNAMIC_RESOLUTION)
-    .with_execution_policy(lash_sansio::ExecutionPolicy::repeatable(
-        std::num::NonZeroU32::MIN.saturating_add(2),
-        100,
-        1_000,
-    ))
+    .with_execution(policy.execution)
+    .with_execution_policy(policy.execution_policy)
 }
 
 /// The input of a `call_dynamic` call: the call path to resolve, and the
@@ -302,9 +321,9 @@ pub struct DynamicCall {
 pub enum LinkKind {
     /// An ordinary tool: one the link's provider advertises.
     Tool,
-    /// The fixed `call_dynamic` endpoint of the env's deferred provider: a
+    /// The `call_dynamic` endpoint and its recorded resolution policy: a
     /// call it makes is resolved once, then runs on the recorded match.
-    Dynamic,
+    Dynamic(DeferredResolutionPolicy),
     /// A tool the declaring cell's deferred provider resolved, as its
     /// committed match recorded it: served from this retained definition
     /// and binding by the link's provider, which need not advertise it, and
@@ -343,12 +362,23 @@ impl EffectLink {
 
     /// The link of the `call_dynamic` endpoint to the deferred provider an
     /// env component declares as `deferred`.
-    pub fn dynamic(deferred: ProviderKey) -> Self {
+    pub fn dynamic(deferred: ProviderKey, policy: DeferredResolutionPolicy) -> Self {
         Self {
             provider: deferred,
-            surface: ProcessSurface::of(&call_dynamic_endpoint()),
-            kind: LinkKind::Dynamic,
+            surface: ProcessSurface::of(&call_dynamic_endpoint(policy)),
+            kind: LinkKind::Dynamic(policy),
         }
+    }
+
+    /// The resolution endpoint under the policy this link recorded. Only
+    /// a dynamic link retaining the endpoint's dispatch surface serves it;
+    /// no current provider policy participates in this check.
+    pub fn dynamic_endpoint(&self) -> Option<ToolDefinition> {
+        let LinkKind::Dynamic(policy) = self.kind else {
+            return None;
+        };
+        let endpoint = call_dynamic_endpoint(policy);
+        (self.surface == ProcessSurface::of(&endpoint)).then_some(endpoint)
     }
 
     /// The link of the tool a committed deferred match resolved to
@@ -373,7 +403,7 @@ impl EffectLink {
     pub fn resolution(&self) -> Option<&ResolvedLink> {
         match &self.kind {
             LinkKind::Resolved(resolved) => Some(resolved),
-            LinkKind::Tool | LinkKind::Dynamic => None,
+            LinkKind::Tool | LinkKind::Dynamic(_) => None,
         }
     }
 }

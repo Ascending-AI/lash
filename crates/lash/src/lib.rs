@@ -526,8 +526,9 @@ pub mod tools {
     /// call path, committed once, with the [`ExecutionBinding`] that routes a
     /// resolved tool's calls.
     pub use lash_core::{
-        DeferredMatch, DeferredOutcome, DeferredResolveContext, DeferredToolProvider,
-        ExecutionBinding, ExecutionBindingUnreadable,
+        DeferredMatch, DeferredOutcome, DeferredResolutionPolicy, DeferredResolveContext,
+        DeferredToolProvider, DeferredToolProviderRegistration, ExecutionBinding,
+        ExecutionBindingUnreadable,
     };
     /// Turn flow control constructed by tool implementors; attach it with
     /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].

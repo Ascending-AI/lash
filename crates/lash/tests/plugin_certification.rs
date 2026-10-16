@@ -360,7 +360,9 @@ async fn supplied_but_unexercised_resolver_is_distinct_from_no_scenario() {
         PluginDeclaration::initial("unexercised-resolver"),
         PluginSpec::new().with_deferred_provider(
             lash::tool_provider_key!("deferred"),
-            Arc::new(Resolver(Arc::clone(&resolutions))),
+            lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver(Arc::clone(
+                &resolutions,
+            )))),
         ),
     ));
     let absent = certify_plugin(factory.clone()).await.unwrap();
@@ -546,7 +548,9 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
         PluginDeclaration::initial("resolver"),
         PluginSpec::new().with_deferred_provider(
             lash::tool_provider_key!("deferred"),
-            Arc::new(Resolver(Arc::clone(&resolved))),
+            lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver(Arc::clone(
+                &resolved,
+            )))),
         ),
     ));
     let unavailable = certify_plugin(factory.clone()).await.unwrap();
@@ -733,11 +737,11 @@ mod deferred_laws {
             PluginDeclaration::initial("resolver"),
             PluginSpec::new().with_deferred_provider(
                 lash::tool_provider_key!("deferred"),
-                Arc::new(Resolver {
+                lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver {
                     empty,
                     resolutions,
                     definition: definition("remote:send_email", "send_email")?,
-                }),
+                })),
             ),
         )))
     }

@@ -871,7 +871,7 @@ impl CellTurn {
                             lash::plugins::PluginDeclaration::initial("granting"),
                             lash::plugins::PluginSpec::new().with_deferred_provider(
                                 lash::tool_provider_key!("deferred"),
-                                deferred,
+                                lash::tools::DeferredToolProviderRegistration::new(deferred),
                             ),
                         )))
                     }

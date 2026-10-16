@@ -712,7 +712,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
         binder: impl Fn(
             &T,
             &PluginStateView,
-        ) -> Result<Arc<dyn crate::DeferredToolProvider>, PluginError>
+        ) -> Result<crate::DeferredToolProviderRegistration, PluginError>
         + Send
         + Sync
         + 'static,
@@ -733,7 +733,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
         binder: impl Fn(
             &T,
             &PluginStateView,
-        ) -> Result<Arc<dyn crate::DeferredToolProvider>, PluginError>
+        ) -> Result<crate::DeferredToolProviderRegistration, PluginError>
         + Send
         + Sync
         + 'static,

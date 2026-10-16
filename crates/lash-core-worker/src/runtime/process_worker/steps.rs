@@ -159,7 +159,7 @@ impl DurableProcessWorker {
         let call = lash_core_execution::sansio::PendingToolCall {
             call_id: execution.call().clone(),
             provider_call_id: None,
-            tool_name: lash_core::call_dynamic_endpoint().manifest.name,
+            tool_name: "call_dynamic".to_owned(),
             args: input.clone(),
             replay: None,
         };
@@ -192,7 +192,7 @@ impl DurableProcessWorker {
                 format!("the call path `{path}` could not be resolved here: {error}"),
                 crate::ToolFailureCause::LinkedToolMissing {
                     effect: lash_core::CALL_DYNAMIC_EFFECT.to_owned(),
-                    tool: lash_core::call_dynamic_endpoint().manifest.id,
+                    tool: execution.draft().tool().clone(),
                 },
             ),
         }

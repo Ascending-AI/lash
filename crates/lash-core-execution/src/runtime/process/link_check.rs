@@ -60,9 +60,8 @@ pub fn check_links(
     for (effect, expected) in performed {
         let link = &env.effects()[effect];
         let at_endpoint = effect.as_str() == crate::CALL_DYNAMIC_EFFECT;
-        let endpoint = link.kind == LinkKind::Dynamic
-            && link.surface == crate::ProcessSurface::of(&crate::call_dynamic_endpoint());
-        if (link.kind == LinkKind::Dynamic) != at_endpoint || (at_endpoint && !endpoint) {
+        let dynamic = matches!(link.kind, LinkKind::Dynamic(_));
+        if dynamic != at_endpoint || (at_endpoint && link.dynamic_endpoint().is_none()) {
             return Err(ProcessEnvRefusal::EffectUnfit {
                 effect: effect.to_string(),
                 tool: link.tool().to_string(),

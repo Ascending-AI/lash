@@ -478,13 +478,15 @@ fn tool_failure_for_projection(failure: &ToolFailure) -> serde_json::Value {
     }
     projected
 }
-pub use deferred_provider::{DeferredResolveContext, DeferredToolProvider};
+pub use deferred_provider::{
+    DeferredResolveContext, DeferredToolProvider, DeferredToolProviderRegistration,
+};
 pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
 pub use lash_core_store::tool_surface::{
-    CALL_DYNAMIC_EFFECT, DeferredMatch, DeferredOutcome, DynamicCall, EffectLink, ExecutionBinding,
-    ExecutionBindingUnreadable, LinkKind, ProcessSurface, ProviderKey, RecordedSurface,
-    ResolvedLink, SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal,
-    call_dynamic_endpoint,
+    CALL_DYNAMIC_EFFECT, DeferredMatch, DeferredOutcome, DeferredResolutionPolicy, DynamicCall,
+    EffectLink, ExecutionBinding, ExecutionBindingUnreadable, LinkKind, ProcessSurface,
+    ProviderKey, RecordedSurface, ResolvedLink, SurfaceCollision, SurfaceDuplicateTool,
+    SurfaceEntry, SurfaceRefusal, call_dynamic_endpoint,
 };
 pub use lash_kernel_doc::EffectName;
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};

@@ -119,7 +119,9 @@ impl lash::tools::DeferredToolProvider for GrantFetch {
 pub fn grant_fetch() -> Arc<dyn lash::plugins::PluginFactory> {
     Arc::new(lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial("grant-fetch"),
-        lash::plugins::PluginSpec::new()
-            .with_deferred_provider(lash::tool_provider_key!("deferred"), Arc::new(GrantFetch)),
+        lash::plugins::PluginSpec::new().with_deferred_provider(
+            lash::tool_provider_key!("deferred"),
+            lash::tools::DeferredToolProviderRegistration::new(Arc::new(GrantFetch)),
+        ),
     ))
 }

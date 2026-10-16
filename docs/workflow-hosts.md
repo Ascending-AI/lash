@@ -221,11 +221,19 @@ local task lowers to a guarded `processes.await`, so an entry that awaits a
 handle it was handed performs `processes.await` even when its source never
 names it, and its environment must link it.
 
-A call whose target is known only at run time goes through the fixed
+A call whose target is known only at run time goes through the runtime-owned
 `call_dynamic` endpoint: the code performs `lash.call_dynamic` with
 `{path, args}`, and the environment links it to the deferred provider one of
-its components declares, with `ProcessEnvBuilder::link_dynamic(key)`. Such a
-call is two committed steps (FIG-6120). The first resolves `path` through
+its components declares. Register the provider with
+`DeferredToolProviderRegistration::new(provider)` and select its resolution
+contract with `with_resolution_policy(DeferredResolutionPolicy { execution,
+execution_policy })`. The documented default is 60 seconds and three
+repeatable attempts, with exponential backoff from 100 to 1,000 ms. Use that
+registration's `dynamic_link(key)` in `ProcessEnvBuilder::link` at
+`CALL_DYNAMIC_EFFECT`. The link seals this policy into the environment;
+reopen, redrive and takeover use it rather than the receiving registration's
+policy. The resolution bound is clipped by the enclosing deadline as usual.
+Such a call is two committed steps (FIG-6120). The first resolves `path` through
 the deferred provider and commits its decision. The commit that consumes a
 resolved decision admits the call of the matched tool with `args`, under the
 tool's own policy, bound and call id. A crash between the two resumes the

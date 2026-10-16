@@ -401,7 +401,7 @@ impl Producers {
                     lash::plugins::PluginDeclaration::initial("granted-leaves"),
                     lash::plugins::PluginSpec::new().with_deferred_provider(
                         lash::tool_provider_key!("deferred"),
-                        Arc::new(GrantedLeaves),
+                        lash::tools::DeferredToolProviderRegistration::new(Arc::new(GrantedLeaves)),
                     ),
                 )))
             } else {

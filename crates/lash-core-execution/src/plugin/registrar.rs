@@ -322,7 +322,7 @@ impl ToolRegistrations<'_> {
     pub fn deferred(
         self,
         key: ToolProviderKey,
-        provider: Arc<dyn crate::DeferredToolProvider>,
+        registration: crate::DeferredToolProviderRegistration,
     ) -> Result<(), PluginError> {
         let identity = ToolProviderHandle::new(self.reg.registry, self.reg.owner.clone(), key);
         if let Some(existing) = &self.reg.contributions.deferred_provider {
@@ -332,6 +332,7 @@ impl ToolRegistrations<'_> {
                 existing.identity
             )));
         }
+        let provider = registration.provider;
         self.reg
             .add_tool_provider(key, Arc::clone(&provider) as Arc<dyn ToolProvider>)?;
         self.reg.contributions.deferred_provider = Some(RegisteredProvider {

@@ -162,7 +162,11 @@ impl WorkbenchSessionPlugin {
 
         reg.tools().deferred(
             crate::deferred_tools::DEFERRED_PROVIDER_KEY,
-            move |this, _state| Ok(this.deferred_tools.deferred_provider()),
+            move |this, _state| {
+                Ok(lash::tools::DeferredToolProviderRegistration::new(
+                    this.deferred_tools.deferred_provider(),
+                ))
+            },
         )?;
 
         reg.tools().provider(

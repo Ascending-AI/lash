@@ -14,6 +14,39 @@ use async_trait::async_trait;
 use crate::plugin::OwnerConfigView;
 use crate::{DeferredOutcome, ToolProvider};
 
+/// A deferred provider's typed host registration. Its resolution policy
+/// produces the dynamic link sealed into each new process environment;
+/// takeover serves that recorded link even when this registration changes.
+#[derive(Clone)]
+pub struct DeferredToolProviderRegistration {
+    pub(crate) provider: std::sync::Arc<dyn DeferredToolProvider>,
+    resolution_policy: crate::DeferredResolutionPolicy,
+}
+
+impl DeferredToolProviderRegistration {
+    /// Register with the documented 60-second, three-attempt default.
+    pub fn new(provider: std::sync::Arc<dyn DeferredToolProvider>) -> Self {
+        Self {
+            provider,
+            resolution_policy: crate::DeferredResolutionPolicy::default(),
+        }
+    }
+
+    /// Select the contract new process environments record for discovery.
+    #[must_use]
+    pub fn with_resolution_policy(mut self, policy: crate::DeferredResolutionPolicy) -> Self {
+        self.resolution_policy = policy;
+        self
+    }
+
+    /// Link this registration's resolver under `provider`, with its policy
+    /// captured at environment creation. Pass this to `ProcessEnvBuilder::link`
+    /// at `CALL_DYNAMIC_EFFECT`; later registrations cannot change it.
+    pub fn dynamic_link(&self, provider: crate::ProviderKey) -> crate::EffectLink {
+        crate::EffectLink::dynamic(provider, self.resolution_policy)
+    }
+}
+
 /// Who one deferred resolution resolves for: the execution whose call paths
 /// are resolved, the logical Run it belongs to, the capability refs that
 /// Run's recorded shape names, and the configuration it runs under.

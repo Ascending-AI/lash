@@ -923,13 +923,13 @@ mod tests {
             PluginDeclaration::initial("resolver"),
             PluginSpec::new().with_deferred_provider(
                 lash::tool_provider_key!("deferred"),
-                Arc::new(Resolver {
+                crate::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver {
                     empty,
                     resolutions,
                     definition: definition("remote:send_email", "send_email")?,
                     workflow: definition("remote:workflows_create", "workflows_create")?
                         .with_tool_binding(ToolBinding::new(["workflows"], "create")),
-                }),
+                })),
             ),
         )))
     }

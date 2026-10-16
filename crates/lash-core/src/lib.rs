@@ -456,12 +456,12 @@ pub use attachments::{
 pub use lash_core_execution::NextRun;
 pub use lash_core_execution::turn_stop_from_tool_control;
 pub use lash_core_execution::{
-    CALL_DYNAMIC_EFFECT, DeferredMatch, DeferredOutcome, DeferredResolveContext,
-    DeferredToolProvider, DynamicCall, EffectLink, EffectName, ExecutionBinding,
-    ExecutionBindingUnreadable, LinkKind, ObligationToken, PerformedEffects, ProcessSurface,
-    ProviderKey, RecordedSurface, RegistryKind, ResolvedLink, SurfaceCollision,
-    SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, SurfaceTools, ToolSurfaceDrift,
-    ToolSurfaceDriftKind, call_dynamic_endpoint, effect_path_of,
+    CALL_DYNAMIC_EFFECT, DeferredMatch, DeferredOutcome, DeferredResolutionPolicy,
+    DeferredResolveContext, DeferredToolProvider, DeferredToolProviderRegistration, DynamicCall,
+    EffectLink, EffectName, ExecutionBinding, ExecutionBindingUnreadable, LinkKind,
+    ObligationToken, PerformedEffects, ProcessSurface, ProviderKey, RecordedSurface, RegistryKind,
+    ResolvedLink, SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal,
+    SurfaceTools, ToolSurfaceDrift, ToolSurfaceDriftKind, call_dynamic_endpoint, effect_path_of,
 };
 pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;
 pub use lash_sansio::llm::types::{

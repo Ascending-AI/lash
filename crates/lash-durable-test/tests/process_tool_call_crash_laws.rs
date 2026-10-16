@@ -99,7 +99,7 @@ fn probe_definition() -> lash_core::ToolDefinition {
         object,
     )
     .expect("the probe's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
+    .with_execution(std::time::Duration::from_secs(30))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], PROBE))
     // A call a kill interrupted runs again at its ordinal: the raced calls
     // stay in flight across the kill, so the race is still held when the
@@ -760,7 +760,7 @@ fn dynamic_target(name: &str) -> lash_core::ToolDefinition {
         object,
     )
     .expect("the target's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
+    .with_execution(std::time::Duration::from_secs(30))
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
@@ -893,6 +893,7 @@ main {
 /// A deployment whose host starts one kernel process running `document`'s
 /// `dynamic()` under an env that links only `call_dynamic`.
 struct DynamicCalls {
+    custom_policy: bool,
     dialect: Dialect,
     postgres_url: Option<String>,
     document: &'static str,
@@ -911,6 +912,7 @@ impl DynamicCalls {
             dialect,
             postgres_url,
             document,
+            custom_policy: false,
             seen: Arc::default(),
             backend: Mutex::default(),
             clock: Mutex::default(),
@@ -919,6 +921,28 @@ impl DynamicCalls {
             tripwire: Arc::default(),
             keep: Mutex::default(),
         }
+    }
+
+    fn policy(&self) -> lash_core::DeferredResolutionPolicy {
+        if self.custom_policy {
+            lash_core::DeferredResolutionPolicy {
+                execution: Duration::from_secs(120),
+                execution_policy: lash_core::ExecutionPolicy::repeatable(
+                    std::num::NonZeroU32::new(5).unwrap(),
+                    17,
+                    71,
+                ),
+            }
+        } else {
+            lash_core::DeferredResolutionPolicy::default()
+        }
+    }
+
+    fn registration(&self) -> lash::tools::DeferredToolProviderRegistration {
+        lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver {
+            seen: Arc::clone(&self.seen),
+        }))
+        .with_resolution_policy(self.policy())
     }
 
     fn backend(&self) -> lash::Backend {
@@ -935,9 +959,6 @@ impl DynamicCalls {
             .lock_recover()
             .clone()
             .expect("the database is built first");
-        let resolver = Arc::new(Resolver {
-            seen: Arc::clone(&self.seen),
-        });
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
@@ -959,7 +980,7 @@ impl DynamicCalls {
                             ),
                             lash::plugins::PluginSpec::new().with_deferred_provider(
                                 lash::tool_provider_key!("deferred"),
-                                resolver,
+                                self.registration(),
                             ),
                         )
                         .as_component(DYNAMIC_COMPONENT.format())
@@ -1023,7 +1044,12 @@ impl DynamicCalls {
         .expect("the input encodes");
         let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(LIMIT))
             .component(DYNAMIC_COMPONENT, &())
-            .link_dynamic(DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")))
+            .link(
+                lash::workflow::document::EffectName::new(lash_core::CALL_DYNAMIC_EFFECT).unwrap(),
+                self.registration().dynamic_link(
+                    DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")),
+                ),
+            )
             .build()
             .map_err(|refusal| format!("the env builds: {refusal}"))?;
         let env_ref = core
@@ -1100,6 +1126,49 @@ impl DynamicCalls {
         };
         let actor = ActorKey::process(process.id.as_str()).unwrap();
         violations.extend(self.resolved_once(&trace, &actor));
+        if self.custom_policy {
+            use lash_core_execution::runtime::actor::round::{self, PinnedWaits, PolicyView};
+            let facts = nodes
+                .database()
+                .run_facts(&lash_durable::domain::OwnerKey::Process(process.id.clone()))
+                .await
+                .expect("the process's admitted contracts read");
+            let folded = round::fold(&facts, &PolicyView::default(), &PinnedWaits::default())
+                .expect("the recorded contracts fold after takeover");
+            let mut resolution_seen = false;
+            let mut target_seen = false;
+            for (id, _) in folded.recoveries() {
+                let execution = folded.admitted(id).expect("every recovery is admitted");
+                let draft = execution.draft();
+                let (bound, policy) = match draft.tool().as_str() {
+                    "lash:call_dynamic" => {
+                        resolution_seen = true;
+                        (self.policy().execution, self.policy().execution_policy)
+                    }
+                    "tool:dyn_first" | "tool:dyn_second" => {
+                        target_seen = true;
+                        let target = dynamic_target("dyn_first");
+                        (
+                            target.manifest.bounds().execution,
+                            target.manifest.execution_policy,
+                        )
+                    }
+                    _ => continue,
+                };
+                if draft.limit().max_slice != bound || draft.policy() != policy {
+                    violations.push(format!(
+                        "{} admitted {:?} / {:?}, expected {bound:?} / {policy:?}",
+                        draft.tool(),
+                        draft.limit(),
+                        draft.policy()
+                    ));
+                }
+            }
+            if !resolution_seen || !target_seen {
+                violations
+                    .push("both the resolver and its distinct target must be admitted".into());
+            }
+        }
         let answer = match process.outcome() {
             Some(lash_core::ProcessAwaitOutput::Settled { output }) if output.is_success() => {
                 output.value_for_projection()
@@ -1244,7 +1313,7 @@ impl Scenario for DynamicCalls {
 
 /// The matrix of `document`'s process on `tier`: every write of its passes
 /// and step outcomes cut under every fault, recovered on the other node.
-async fn dynamic_matrix(tier: Tier, document: &'static str) {
+async fn dynamic_matrix(tier: Tier, document: &'static str, custom_policy: bool) {
     let (dialect, postgres_url) = match tier {
         Tier::SqliteMemory => (Dialect::SqliteMemory, None),
         Tier::SqliteFile => (Dialect::SqliteFile, None),
@@ -1268,7 +1337,11 @@ async fn dynamic_matrix(tier: Tier, document: &'static str) {
             Fault::CommitThenAbort,
         ])
         .horizon(Duration::from_secs(600))
-        .run_test(|| DynamicCalls::new(dialect, postgres_url.clone(), document))
+        .run_test(|| {
+            let mut calls = DynamicCalls::new(dialect, postgres_url.clone(), document);
+            calls.custom_policy = custom_policy;
+            calls
+        })
         .await;
     eprintln!("{dialect:?}: {} cells", report.cells.len());
     report.assert_held();
@@ -1287,7 +1360,7 @@ async fn dynamic_matrix(tier: Tier, document: &'static str) {
 /// id, and the resolver, which names another target every time it is asked
 /// again, never runs once the resolution committed.
 async fn a_dynamic_call_resumes_its_matched_target_and_never_resolves_again(tier: Tier) {
-    dynamic_matrix(tier, RESOLVING).await;
+    dynamic_matrix(tier, RESOLVING, false).await;
 }
 
 /// A refused path and a path no tool answers are each a durable decision
@@ -1295,13 +1368,20 @@ async fn a_dynamic_call_resumes_its_matched_target_and_never_resolves_again(tier
 /// a crash after a decision committed never resolves its path again.
 /// FIG-6590: its 1 KiB host explanation survives each commit and reopen verbatim.
 async fn a_refused_or_unavailable_dynamic_call_is_decided_once_and_caught_typed(tier: Tier) {
-    dynamic_matrix(tier, DECIDING).await;
+    dynamic_matrix(tier, DECIDING, false).await;
+}
+
+/// RESOLVER-RECORDED-POLICY: a host's 120-second resolution contract
+/// survives environment admission and takeover, separately from its target.
+async fn a_dynamic_resolution_retains_its_host_policy_across_takeover(tier: Tier) {
+    dynamic_matrix(tier, RESOLVING, true).await;
 }
 
 tiered_laws!(
     current_thread:
     tool_call_limit_counts_what_a_process_holds_across_a_worker_kill,
     an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a_crash,
+    a_dynamic_resolution_retains_its_host_policy_across_takeover,
     a_dynamic_call_resumes_its_matched_target_and_never_resolves_again,
     a_refused_or_unavailable_dynamic_call_is_decided_once_and_caught_typed,
 );

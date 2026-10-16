@@ -445,7 +445,9 @@ fn inbox_core(backend: &lash::Backend, inbox: &Arc<Inbox>) -> lash::LashCoreBuil
         lash::plugins::PluginDeclaration::initial("resolver"),
         lash::plugins::PluginSpec::new().with_deferred_provider(
             lash::tool_provider_key!("deferred"),
-            Arc::new(Resolver(Arc::clone(inbox))),
+            lash::tools::DeferredToolProviderRegistration::new(Arc::new(Resolver(Arc::clone(
+                inbox,
+            )))),
         ),
     )))
     .process_component(component(INBOX, ONE), INBOX)

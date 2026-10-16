@@ -978,16 +978,15 @@ impl ProcessComposition {
             tool: link.tool().clone(),
             kind,
         };
-        let dynamic = link.kind == crate::LinkKind::Dynamic;
+        let dynamic = matches!(link.kind, crate::LinkKind::Dynamic(_));
         if dynamic != (effect.as_str() == crate::CALL_DYNAMIC_EFFECT)
-            || (dynamic
-                && link.surface != crate::ProcessSurface::of(&crate::call_dynamic_endpoint()))
+            || (dynamic && link.dynamic_endpoint().is_none())
         {
             return drifted(crate::ToolSurfaceDriftKind::Changed);
         }
         // The `call_dynamic` endpoint is no provider's advertisement: it is
         // served wherever the deferred provider it links is registered.
-        if link.kind == crate::LinkKind::Dynamic {
+        if let Some(endpoint) = link.dynamic_endpoint() {
             if self.registry.deferred_provider(&link.provider).is_none() {
                 return drifted(crate::ToolSurfaceDriftKind::Missing);
             }
@@ -996,7 +995,7 @@ impl ProcessComposition {
                 .tool_run_binding(link.tool(), Some(&link.provider))
             {
                 Ok(binding) => StepLink::Served {
-                    manifest: Box::new(crate::call_dynamic_endpoint().manifest),
+                    manifest: Box::new(endpoint.manifest),
                     binding: Box::new(binding),
                 },
                 Err(_) => drifted(crate::ToolSurfaceDriftKind::Missing),
@@ -1017,7 +1016,7 @@ impl ProcessComposition {
                 }
                 resolved.definition.clone()
             }
-            crate::LinkKind::Tool | crate::LinkKind::Dynamic => {
+            crate::LinkKind::Tool | crate::LinkKind::Dynamic(_) => {
                 let Some(definition) = self.registry.served(&link.provider, link.tool(), &config)
                 else {
                     return drifted(crate::ToolSurfaceDriftKind::Missing);
@@ -1119,10 +1118,7 @@ impl ProcessComposition {
                 &lash_kernel_doc::EffectName::new(crate::CALL_DYNAMIC_EFFECT)
                     .map_err(|error| PluginError::Registration(error.to_string()))?,
             )
-            .filter(|link| {
-                link.kind == crate::LinkKind::Dynamic
-                    && link.surface == crate::ProcessSurface::of(&crate::call_dynamic_endpoint())
-            })
+            .filter(|link| link.dynamic_endpoint().is_some())
             .ok_or_else(|| {
                 PluginError::Registration("the process env links no call_dynamic endpoint".into())
             })?;

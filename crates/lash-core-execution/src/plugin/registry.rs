@@ -146,12 +146,12 @@ impl PluginSpec {
     pub fn with_deferred_provider(
         mut self,
         key: super::ToolProviderKey,
-        provider: Arc<dyn crate::DeferredToolProvider>,
+        registration: crate::DeferredToolProviderRegistration,
     ) -> Self {
         let result = self
             .registrations
             .tools()
-            .record_deferred(key, move |_, _| Ok(Arc::clone(&provider)));
+            .record_deferred(key, move |_, _| Ok(registration.clone()));
         self.admit(result);
         self
     }
