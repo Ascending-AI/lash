@@ -363,8 +363,8 @@ impl ProcessLocalExecution {
                 ))
             }
         };
-        if let (Ok((outcome, realization)), Some(observer)) = (&outcome, outcome_observer) {
-            observer(outcome, *realization);
+        if let (Ok((_, realization)), Some(observer)) = (&outcome, outcome_observer) {
+            observer(*realization);
         }
         outcome.map(|(outcome, _)| outcome)
     }

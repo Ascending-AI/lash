@@ -332,16 +332,19 @@ fn published(publish: WorkflowPublish) -> WorkflowPublication {
     }
 }
 
-fn publication_document(publication: &WorkflowPublication) -> lash::workflow::WorkflowDocument {
-    lash::workflow::WorkflowDocument::derive(
-        publication
-            .document
-            .to_document()
-            .expect("explicit typed read"),
-        publication.reference.entry.clone(),
-        lash::vm::standard_functions().expect("library").as_ref(),
-    )
-    .expect("publication view")
+async fn publication_document(
+    core: &lash::LashCore,
+    publication: &WorkflowPublication,
+) -> lash::workflow::WorkflowDocument {
+    let lash::workflow::WorkflowDocumentRead::Read(read) = core
+        .host_artifacts()
+        .execution_document(&publication.reference)
+        .await
+        .expect("read published document")
+    else {
+        panic!("the publication pin retains the document");
+    };
+    read.document
 }
 
 // The kernel-text example in `lash::workflow::document`'s module docs is
@@ -700,10 +703,8 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
             .await
             .expect("the publication answers"),
     );
-    assert_eq!(
-        &first.document.to_document().expect("explicit typed read"),
-        &document
-    );
+    let first_document = publication_document(&core, &first).await;
+    assert_eq!(first_document.document(), &document);
     assert_eq!(
         first.reference.entry,
         WorkflowDocumentEntry::Entry {
@@ -719,10 +720,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
         panic!("a published workflow has a document");
     };
     assert_eq!(inspection.definition, first.definition);
-    assert_eq!(
-        inspection.document.document(),
-        &first.document.to_document().expect("read bytes")
-    );
+    assert_eq!(inspection.document.document(), first_document.document());
 
     // The view names the one wait of the body inside both loops.
     let graph = inspection.document.graph();
@@ -755,7 +753,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
             &checked.checker(),
         )
         .expect("the edit applies");
-    assert_ne!(applied.admitted.identity, first.document.id());
+    assert_ne!(applied.admitted.identity, first.reference.document);
     let second = published(
         artifacts
             .publish_workflow(
@@ -769,7 +767,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
             .expect("the publication answers"),
     );
     assert_ne!(second.definition.id, first.definition.id);
-    assert_eq!(second.document.id(), applied.admitted.identity);
+    assert_eq!(second.reference.document, applied.admitted.identity);
     let survivor = applied
         .correspondence
         .survivor(&sleep.site)
@@ -795,10 +793,7 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     else {
         panic!("a kernel process has a document");
     };
-    assert_eq!(
-        kept_read.document.document(),
-        &first.document.to_document().expect("read bytes")
-    );
+    assert_eq!(kept_read.document.document(), first_document.document());
     assert_eq!(kept_read.definition, first.definition);
 }
 
@@ -842,7 +837,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
             .await
             .expect("publication"),
     );
-    let publication_view = publication_document(&publication);
+    let publication_view = publication_document(&core, &publication).await;
     let sites = publication_view.graph().execution_sites();
     let sleep = sites
         .iter()
@@ -1016,7 +1011,7 @@ main { finish null }
             .await
             .expect("publication"),
     );
-    let publication_view = publication_document(&publication);
+    let publication_view = publication_document(&core, &publication).await;
     let [call] = publication_view.graph().execution_sites() else {
         panic!("one call site");
     };
@@ -1123,7 +1118,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
             .await
             .expect("the publication answers"),
     );
-    let publication_view = publication_document(&publication);
+    let publication_view = publication_document(&core, &publication).await;
     let performs: Vec<_> = publication_view
         .graph()
         .execution_sites()
@@ -1153,7 +1148,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
 
     let mut overlay = WorkflowExecutionOverlayAccumulator::default();
     overlay.set_document(lash::workflow::WorkflowOverlayDocument::of(
-        &publication_document(&publication),
+        &publication_document(&core, &publication).await,
     ));
     loop {
         let item = tokio::time::timeout(std::time::Duration::from_secs(60), feed.next())
@@ -1402,7 +1397,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     else {
         panic!("a kernel process has a document");
     };
-    assert_eq!(read.document.identity(), publication.document.id());
+    assert_eq!(read.document.identity(), publication.reference.document);
 }
 
 /// SQLite file stores under a test clock, opened anew by each node of a

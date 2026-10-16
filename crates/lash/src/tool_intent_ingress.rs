@@ -1012,7 +1012,7 @@ impl ToolIntentIngress {
             std::sync::Arc::new(std::sync::Mutex::new(None::<lash_core::StoreRealization>));
         let outcome_observer: lash_core::ProcessOutcomeObserver = {
             let store_realization = std::sync::Arc::clone(&store_realization);
-            std::sync::Arc::new(move |_, realization| {
+            std::sync::Arc::new(move |realization| {
                 *store_realization.lock_recover() = Some(realization);
             })
         };

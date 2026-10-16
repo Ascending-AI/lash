@@ -72,12 +72,12 @@ struct WaitControls {
 /// This is public for **effect-host implementors** and
 /// **conformance-suite embedders** that must model a host crash in that exact
 /// interval.
-/// The observer also receives the store's realization verdict for the command:
+/// Panicking here models a crash before the outcome is recorded.
+/// The observer receives only the store's realization verdict for the command:
 /// whether the durable write landed on this call or coalesced onto a fact the
 /// store already held under the same durable key (FIG-3070). Commands that
 /// carry no durable identity report [`StoreRealization::Realized`].
-pub type ProcessOutcomeObserver =
-    Arc<dyn Fn(&ProcessEffectOutcome, crate::StoreRealization) + Send + Sync + 'static>;
+pub type ProcessOutcomeObserver = Arc<dyn Fn(crate::StoreRealization) + Send + Sync + 'static>;
 
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,

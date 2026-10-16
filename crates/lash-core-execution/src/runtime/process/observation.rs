@@ -135,6 +135,7 @@ pub struct ObservedProcessChange {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(remote = "Self", tag = "kind", rename_all = "snake_case")]
 pub enum ObservedProcessChangeKind {
+    /// A requested, convergent query stays rich under rule A.
     Upsert {
         #[serde(serialize_with = "super::durable_serde::serialize")]
         process: Box<ObservedProcess>,

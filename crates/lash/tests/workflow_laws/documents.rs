@@ -481,7 +481,7 @@ async fn a_host_runs_opaque_document_bytes_without_json() {
             .await
             .expect("publish bytes"),
     );
-    assert_eq!(publication.document, bytes);
+    assert_eq!(publication.reference.document, bytes.id());
     let env_ref = artifacts
         .publish_process_env(&pin, &linking(&env, &[]))
         .await
@@ -500,6 +500,57 @@ async fn a_host_runs_opaque_document_bytes_without_json() {
     );
     let work = document_work::take();
     assert_eq!((work.json_encodes, work.json_decodes), (0, 0));
+    core.shutdown().await.expect("shutdown");
+}
+
+/// Rule A (FIG-6563): publication acknowledges admission and its read address;
+/// the live publication pin retains the document for an explicit read.
+#[tokio::test]
+async fn a_publication_acknowledges_admission_and_reads_its_pinned_document() {
+    let core = super::core().await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let document = lash::workflow::document::parse_document(
+        "kernel 1\nnumbers float\nentry answer() -> Any\nfn answer() { return 42 }\nmain { finish null }\n",
+    )
+    .expect("document");
+    let lash::workflow::WorkflowPublication {
+        definition,
+        reference,
+        source_map,
+    } = published(
+        artifacts
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &Name::new("answer"),
+                &environment(false),
+                None,
+            )
+            .await
+            .expect("publish"),
+    );
+    let WorkflowDocumentRead::Read(read) = artifacts
+        .execution_document(&reference)
+        .await
+        .expect("read publication")
+    else {
+        panic!("the publication pin retains its document");
+    };
+    assert_eq!(read.document.document(), &document);
+    assert_eq!(read.document.reference(), &reference);
+    assert_eq!(
+        artifacts
+            .get_definition(&definition.id)
+            .await
+            .expect("definition"),
+        Some(definition)
+    );
+    assert_eq!(source_map, None);
+    artifacts
+        .release(pin)
+        .await
+        .expect("release publication pin");
     core.shutdown().await.expect("shutdown");
 }
 

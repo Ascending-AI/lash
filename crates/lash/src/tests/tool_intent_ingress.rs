@@ -481,6 +481,71 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
     Ok(())
 }
 
+/// FIG-3070: a start committed before its submission outcome is retained
+/// reports the store's coalescing verdict when ingress realizes it again.
+#[tokio::test]
+async fn a_store_coalesced_start_reports_replayed_through_ingress() -> Result<()> {
+    let backend = sqlite_memory_store_backend().await;
+    let (core, registry) = ingress_engine_core(backend.clone()).await?;
+    let scope = lash_core::ExecutionScope::turn(SESSION, SCOPE);
+    let ingress = core.tool_intents(SessionId::from(SESSION), scope.clone())?;
+    let key = ingress.key("store-coalesced-start", 0).expect("key");
+    let intent = engine_start_intent(INGRESS_ENGINE_KIND, serde_json::json!({"program": "known"}));
+    let lash_core::ToolIntent::StartProcess(start) = &intent else {
+        panic!("start intent");
+    };
+    // Model the crash interval: the start exists, but ingress has no recorded
+    // submission outcome to answer without invoking its local executor.
+    let request = start.into_request(key.identity());
+    let env_store = backend.process_env_store();
+    let starter = scope.journal_identity().expect("valid turn scope");
+    let started = lash_core::runtime::register_process_start(
+        &lash_core::runtime::ProcessStartStores {
+            tracing: Some(&core.env.core.tracing),
+            registry: registry.as_ref(),
+            env_store: Some(&env_store),
+            engines: &core.host_process_engines,
+            session_catalog: Some(core.store_factory.as_ref()),
+            session_turn_admission: None,
+            executor: "coalesced ingress law",
+            starter: &starter,
+        },
+        request.into_registration(),
+        &[],
+    )
+    .await
+    .map_err(lash_core::PluginError::from)?;
+    assert_eq!(started.realization(), lash_core::StoreRealization::Realized);
+    let coalesced = ingress.submit(key, intent).await;
+    assert!(
+        matches!(
+            &coalesced,
+            crate::tools::ToolIntentIngressOutcome::Admitted { replayed: true, .. }
+        ),
+        "the local observer must report the store's verdict: {coalesced:?}"
+    );
+    assert_eq!(started_process_id(&coalesced), started.record.id);
+    assert_eq!(registered_process_count(&registry).await?, 1);
+    let fresh = ingress
+        .submit(
+            ingress.key("fresh-start", 0).expect("fresh key"),
+            engine_start_intent(INGRESS_ENGINE_KIND, serde_json::json!({"program": "known"})),
+        )
+        .await;
+    assert!(
+        matches!(
+            fresh,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                replayed: false,
+                ..
+            }
+        ),
+        "a fresh start must realize: {fresh:?}"
+    );
+    core.shutdown().await?;
+    Ok(())
+}
+
 /// FIG-1838: host ingress and session-owned recorded-intent execution admit an
 /// equivalent start to one identity: it never changes with the route used to
 /// start it.

@@ -94,7 +94,7 @@
 //! pin, so a process that starts another entry by function reference finds
 //! it. Every later read links the document against those retained
 //! declarations, never against the reading build's library. A
-//! [`WorkflowPublication`] names the definition, opaque bytes, the entry reference and
+//! [`WorkflowPublication`] names the admitted definition, the entry reference and
 //! the id of the source map published with it, if any. A refused document
 //! ([`WorkflowAdmissionRefusal`]) or map publishes nothing.
 //!
@@ -326,12 +326,11 @@ pub struct WorkflowInspection {
 /// A workflow published as a definition.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkflowPublication {
-    /// The content-derived id and the signature of the entry.
+    /// The content-derived id and the signature derived by admission.
     pub definition: ProcessDefinition,
-    /// The opaque document to retain or publish again.
-    pub document: document::DocumentBytes,
     /// The selected entry, independent of the opaque body.
     pub reference: WorkflowDocumentRef,
+    /// Lash stores no definition-to-map association, so publication supplies this id.
     /// The id of the source map published with it, when one was: the host
     /// keeps it beside the definition id, and reads the map and its source
     /// back with

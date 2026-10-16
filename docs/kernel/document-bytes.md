@@ -3,8 +3,9 @@
 `lash::workflow::document::DocumentBytes` is the default host retention and
 execution form. `HostArtifacts::import_workflow` and
 `import_exported_workflow` return it; `publish_workflow` accepts it and
-`WorkflowPublication` returns it with a separate `WorkflowDocumentRef` selecting
-the entry. Starting a published definition uses its id, already held by Lash.
+`WorkflowPublication` returns the admission and a `WorkflowDocumentRef` selecting
+the entry. Read the published document with `HostArtifacts::execution_document(reference)`
+while its publication pin is alive; the acknowledgment carries no document body. Starting a published definition uses its id, already held by Lash.
 A host that only keeps and runs documents never needs their typed tree or JSON.
 
 Keep all three parts together: `grammar_version()`, the Lash-issued `id()`,

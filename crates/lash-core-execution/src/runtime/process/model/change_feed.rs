@@ -54,6 +54,11 @@ pub struct ProcessChange {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProcessChangeKind {
-    Upsert { record: Box<ProcessRecord> },
-    Deleted { tombstone: ProcessTombstone },
+    /// A requested, convergent query stays rich under rule A.
+    Upsert {
+        record: Box<ProcessRecord>,
+    },
+    Deleted {
+        tombstone: ProcessTombstone,
+    },
 }

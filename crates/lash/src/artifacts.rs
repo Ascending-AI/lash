@@ -521,7 +521,6 @@ impl HostArtifacts {
         Ok(WorkflowPublish::Published(Box::new(WorkflowPublication {
             definition,
             reference: admitted.document.reference().clone(),
-            document: document.clone(),
             source_map,
         })))
     }

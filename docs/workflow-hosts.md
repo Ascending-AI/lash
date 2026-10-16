@@ -325,9 +325,9 @@ match core
 {
     WorkflowPublish::Published(publication) => {
         let definition = publication.definition;   // id and signature: what a run starts
-        let bytes = publication.document;          // opaque DocumentBytes to retain
         let reference = publication.reference;    // document id and selected entry
         let map = publication.source_map;          // Some(SourceMapId): keep it beside the id
+        let document = core.host_artifacts().execution_document(&reference).await?; // read under the live pin
     }
     WorkflowPublish::Refused(refusal) => { /* why admission refused it */ }
     WorkflowPublish::SourceMapRefused(refusal) => { /* the map is not this document's or source's */ }

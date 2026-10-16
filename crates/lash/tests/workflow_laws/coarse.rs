@@ -482,7 +482,7 @@ async fn launch(
         .unwrap()
         .observing(lash::process::Observe::Counts)
         .into_engine_settings();
-    let document = super::publication_document(&publication);
+    let document = super::publication_document(core, &publication).await;
     let process = core
         .processes()
         .start(
