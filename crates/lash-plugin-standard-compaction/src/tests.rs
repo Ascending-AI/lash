@@ -443,10 +443,13 @@ fn standard_compaction_policy_at_compaction_pressure_only_omits_old_attachments(
         .expect("the policy decides");
     assert_eq!(
         omissions,
-        [HistoryPartId {
-            message: "u1".into(),
-            part: 0,
-        }]
+        [(
+            HistoryPartId {
+                message: "u1".into(),
+                part: 0,
+            },
+            OMITTED_ATTACHMENT_PLACEHOLDER.to_owned()
+        )]
         .into_iter()
         .collect()
     );
@@ -462,10 +465,7 @@ fn standard_compaction_policy_at_compaction_pressure_only_omits_old_attachments(
         ["u1", "a1", "u2", "u3"],
         "the view keeps every message"
     );
-    assert_eq!(
-        view[0].parts[0].content(),
-        lash_core::plugin::OMITTED_ATTACHMENT_PLACEHOLDER
-    );
+    assert_eq!(view[0].parts[0].content(), OMITTED_ATTACHMENT_PLACEHOLDER);
     assert!(
         messages[0].parts[0].attachment().is_some(),
         "the history keeps it"

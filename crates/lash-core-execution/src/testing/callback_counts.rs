@@ -236,7 +236,7 @@ impl AttachmentOmissionPolicy for CountedOmissions {
         &self,
         ctx: &AttachmentOmissionContext,
         history: &[crate::Message],
-    ) -> Result<std::collections::BTreeSet<HistoryPartId>, PluginError> {
+    ) -> Result<crate::plugin::AttachmentOmissions, PluginError> {
         self.counts.entered(&self.callback);
         self.inner.omissions(ctx, history)
     }

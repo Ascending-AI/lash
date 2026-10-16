@@ -190,8 +190,7 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
                         for block in message.blocks.iter() {
                             if let LlmContentBlock::ToolResult { content, .. } = block {
                                 observed_tool_results.lock().await.push(
-                                    lash_core::facade_support::tool_result_text(content)
-                                        .into_owned(),
+                                    lash_llm_transport::tool_result_text(content).into_owned(),
                                 );
                             }
                         }

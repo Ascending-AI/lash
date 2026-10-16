@@ -245,7 +245,7 @@ pub(super) fn projection_test_config(
         protocol_driver: Arc::new(crate::protocol::RlmDriver::new(
             crate::dialect::CellDialect::typescript(),
         )),
-        projector: Arc::new(lash_core::sansio::ChatContextProjector),
+        projector: Arc::new(lash_core::sansio::ChatContextProjector::default()),
         model: lash_sansio::llm_profile::LlmProfileConfig::new(
             lash_sansio::llm_profile::RecordedLlmProfile::mint(
                 lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),

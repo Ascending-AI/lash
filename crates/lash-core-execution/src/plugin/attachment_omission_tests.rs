@@ -114,6 +114,7 @@ fn shape(messages: &[Message]) -> Vec<MessageShape> {
 
 #[test]
 fn omission_changes_neither_stored_history_nor_tool_pairing() {
+    const PLACEHOLDER: &str = "policy omission";
     let stored = history();
     let mut view = stored.clone();
     let omissions = [
@@ -125,6 +126,7 @@ fn omission_changes_neither_stored_history_nor_tool_pairing() {
         named("missing", 0),
     ]
     .into_iter()
+    .map(|id| (id, PLACEHOLDER.to_owned()))
     .collect();
 
     assert_eq!(apply_attachment_omissions(&mut view, &omissions), 2);
@@ -140,14 +142,14 @@ fn omission_changes_neither_stored_history_nor_tool_pairing() {
         "the view keeps every message and pairing"
     );
     assert!(view[0].parts[1].attachment().is_none());
-    assert_eq!(view[0].parts[1].content(), OMITTED_ATTACHMENT_PLACEHOLDER);
+    assert_eq!(view[0].parts[1].content(), PLACEHOLDER);
     assert_eq!(view[0].parts[0].content(), "see this");
     assert_eq!(
         view[2].parts[0].tool_result_content(),
         Some(
             &[
                 ModelToolReturnPart::text("before"),
-                ModelToolReturnPart::text(OMITTED_ATTACHMENT_PLACEHOLDER),
+                ModelToolReturnPart::text(PLACEHOLDER),
                 ModelToolReturnPart::text("after"),
             ][..]
         )
@@ -161,5 +163,26 @@ fn omission_changes_neither_stored_history_nor_tool_pairing() {
         encoded(&view[3..]),
         encoded(&stored[3..]),
         "a named text part is unchanged"
+    );
+}
+
+#[test]
+fn omission_uses_policy_text_and_preserves_record_order() {
+    let stored = history();
+    let mut view = stored.clone();
+    let omissions = [named("u1", 1), named("t1", 0)]
+        .into_iter()
+        .map(|id| (id, "mode-owned omission".to_owned()))
+        .collect();
+    assert_eq!(apply_attachment_omissions(&mut view, &omissions), 2);
+    assert_eq!(view[0].parts[1].content(), "mode-owned omission");
+    assert_eq!(shape(&view), shape(&stored));
+    assert_eq!(
+        view.iter().map(|m| &m.id).collect::<Vec<_>>(),
+        stored.iter().map(|m| &m.id).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        stored[0].parts[1].attachment().map(|a| &a.reference),
+        Some(&image("u1"))
     );
 }

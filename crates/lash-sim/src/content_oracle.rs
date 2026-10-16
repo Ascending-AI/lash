@@ -100,7 +100,7 @@ impl ToolResultContent {
         Self {
             call_id: call_id.to_string(),
             tool_name: tool_name.to_string(),
-            content: lash_core::facade_support::tool_result_text(
+            content: lash_llm_transport::tool_result_text(
                 &BuiltinToolOutputRenderer
                     .tool_output(
                         &lash_core::ToolCallOutput::success(value.clone()),
@@ -498,7 +498,7 @@ pub async fn reopen_session(
                         .cloned()
                         .unwrap_or_default(),
                     tool_name: part_str(part, "tool_name"),
-                    content: lash_sansio::tool_result_text(&blocks).into_owned(),
+                    content: lash_llm_transport::tool_result_text(&blocks).into_owned(),
                 });
             }
         }

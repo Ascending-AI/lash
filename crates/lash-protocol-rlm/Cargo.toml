@@ -59,6 +59,7 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
+lash-llm-transport = { workspace = true }
 lash-vm-client = { workspace = true, features = ["testing"] }
 # A testing client is paired with a testing worker, which the runtime links.
 # The laws run TypeScript and Python sessions, so their build holds both

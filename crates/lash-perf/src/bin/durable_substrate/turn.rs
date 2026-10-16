@@ -335,7 +335,7 @@ fn machine_config(session: &SessionId, run: &TurnId, driver: &Arc<Protocol>) -> 
     TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: Arc::clone(driver) as _,
-        projector: Arc::new(ChatContextProjector),
+        projector: Arc::new(ChatContextProjector::default()),
         model: lash_sansio::llm_profile::LlmProfileConfig::new(
             lash_sansio::llm_profile::RecordedLlmProfile::mint(
                 lash_sansio::llm_profile::LlmProfileKey::new("bench-model"),

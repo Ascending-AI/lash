@@ -242,21 +242,21 @@ impl MessageSequence {
         self.materialized = Arc::default();
     }
 
-    pub(crate) fn render_prompt(&self) -> RenderedPrompt {
+    pub(crate) fn render_prompt(&self, policy: &HistoryPresentation) -> RenderedPrompt {
         let SequenceMode::Layered { base, delta } = &self.mode else {
-            return render_prompt(self.as_slice());
+            return policy.render(self.as_slice());
         };
         if base.is_empty() {
-            return render_prompt(delta.as_slice());
+            return policy.render(delta.as_slice());
         }
         let mut rendered = match &self.base_rendered {
             Some(cache) => RenderedPrompt {
-                messages: cache.rendered(base.as_slice()).to_vec(),
+                messages: cache.rendered(base.as_slice(), policy).to_vec(),
             },
-            None => render_prompt(base.as_slice()),
+            None => policy.render(base.as_slice()),
         };
         if !delta.is_empty() {
-            append_structured_prompt_tail(delta, base.as_slice(), |message| {
+            append_structured_prompt_tail(delta, base.as_slice(), policy, |message| {
                 rendered.messages.push(message);
             });
         }

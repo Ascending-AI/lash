@@ -560,7 +560,7 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
     lash_core::TurnMachineConfig {
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
-        projector: Arc::new(lash_core::sansio::ChatContextProjector),
+        projector: Arc::new(lash_core::sansio::ChatContextProjector::default()),
         model: lash_sansio::llm_profile::LlmProfileConfig::new(
             lash_sansio::llm_profile::RecordedLlmProfile::mint(
                 lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),

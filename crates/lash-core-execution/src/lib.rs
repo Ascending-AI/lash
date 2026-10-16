@@ -367,7 +367,6 @@ pub mod facade_support {
     pub use lash_sansio::TurnOutcome;
     pub use lash_sansio::append_assistant_text_part;
     pub use lash_sansio::build_tool_catalog;
-    pub use lash_sansio::head_tail_truncate;
     pub use lash_sansio::normalized_response_parts;
     pub use lash_sansio::reasoning_part;
     pub use lash_sansio::resolve_schema;

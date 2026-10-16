@@ -211,10 +211,14 @@ pub fn finish_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> T
 pub(crate) fn finish_tool_definition_for(
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> ToolDefinition {
-    let mut definition = lash_core::finish_tool(FINISH_TOOL_NAME, lash_core::JsonSchema::any());
-    definition.manifest.description = format!(
+    let definition_description = format!(
         "End the turn with `value` as its answer. Nothing after the call runs: make it the last thing the {cell_noun} does, once all its other work has finished. It returns nothing.",
         cell_noun = vocabulary.cell_noun
+    );
+    let definition = lash_core::finish_tool(
+        FINISH_TOOL_NAME,
+        definition_description,
+        lash_core::JsonSchema::any(),
     );
     definition
         .with_examples(vec![vocabulary.finish_call.into()])

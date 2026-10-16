@@ -28,7 +28,7 @@ impl<M: TurnProtocol> TurnDriverConfig<M> {
     pub fn chat(protocol: Arc<dyn ProtocolDriverHandle<M>>) -> Self {
         Self {
             protocol,
-            projector: Arc::new(ChatContextProjector),
+            projector: Arc::new(ChatContextProjector::default()),
         }
     }
 }

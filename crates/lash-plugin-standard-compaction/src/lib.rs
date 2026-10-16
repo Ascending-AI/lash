@@ -972,8 +972,11 @@ impl ContextPressureHook for StandardCompactionPressureHook {
     }
 }
 
+/// The standard compactor's text for an attachment omitted from older context.
+pub const OMITTED_ATTACHMENT_PLACEHOLDER: &str = "[Attachment omitted from older context]";
+
 /// Old-attachment pruning: the one ephemeral policy, an attachment-omission
-/// history policy (ADR 0133). It names attachments; it writes nothing.
+/// history policy (ADR 0133). It names attachments and supplies their replacement text.
 struct StandardCompactionAttachmentPolicy(StandardCompactionConfig);
 
 impl AttachmentOmissionPolicy for StandardCompactionAttachmentPolicy {
@@ -985,7 +988,7 @@ impl AttachmentOmissionPolicy for StandardCompactionAttachmentPolicy {
         &self,
         ctx: &AttachmentOmissionContext,
         history: &[Message],
-    ) -> Result<std::collections::BTreeSet<HistoryPartId>, PluginError> {
+    ) -> Result<lash_core::plugin::AttachmentOmissions, PluginError> {
         let Some(pressure) =
             ContextPressure::derive(ctx.prompt_usage.as_ref(), ctx.max_context_tokens)
         else {
@@ -1005,7 +1008,10 @@ impl AttachmentOmissionPolicy for StandardCompactionAttachmentPolicy {
                 },
             );
         }
-        Ok(omissions)
+        Ok(omissions
+            .into_iter()
+            .map(|part| (part, OMITTED_ATTACHMENT_PLACEHOLDER.to_owned()))
+            .collect())
     }
 }
 

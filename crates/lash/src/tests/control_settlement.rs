@@ -15,6 +15,7 @@ use lash_core::facade_support::{TurnFinish, TurnOutcome};
 fn answer_tool(value_schema: serde_json::Value) -> lash_core::ToolDefinition {
     lash_core::finish_tool(
         "answer",
+        "End the turn with this call's input as its answer. It returns nothing, and nothing after the call runs: call it once every other piece of work has finished.",
         lash_core::JsonSchema::admit(value_schema).expect("valid value schema"),
     )
     .with_tool_binding(lash_core::ToolBinding::new(["answer"], "submit"))

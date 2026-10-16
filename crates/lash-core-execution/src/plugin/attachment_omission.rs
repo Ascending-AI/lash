@@ -3,18 +3,18 @@
 //!
 //! A policy names attachment parts of the projected history by their
 //! existing identity. Core replaces each named attachment with
-//! [`OMITTED_ATTACHMENT_PLACEHOLDER`] in the request's view and nothing
-//! else: a policy cannot add text, change a role, drop or reorder a
+//! the policy's replacement text in the request's view and nothing
+//! else: a policy can choose that replacement text but cannot change a role, drop or reorder a
 //! message, or touch a part that carries no attachment. The stored history
 //! is never changed, and every tool call keeps its result.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use super::{PluginError, PluginTraceEmitter, SessionReadView};
 use crate::{Message, Part, PartKind, SessionId};
 
-/// The text an omitted attachment's slot carries in the request.
-pub const OMITTED_ATTACHMENT_PLACEHOLDER: &str = "[Attachment omitted from older context]";
+/// Part identities and plugin-authored replacement text, applied in history order.
+pub type AttachmentOmissions = BTreeMap<HistoryPartId, String>;
 
 /// One part of the projected history, by the id of its message and its
 /// index within that message.
@@ -40,7 +40,7 @@ pub struct AttachmentOmissionContext {
 }
 
 /// Decides which attachments of a turn's projected history its model
-/// request omits. It returns decisions only.
+/// request omits. It returns identities and their replacement text.
 pub trait AttachmentOmissionPolicy: Send + Sync {
     fn id(&self) -> &'static str;
 
@@ -53,7 +53,7 @@ pub trait AttachmentOmissionPolicy: Send + Sync {
         &self,
         ctx: &AttachmentOmissionContext,
         history: &[Message],
-    ) -> Result<BTreeSet<HistoryPartId>, PluginError>;
+    ) -> Result<AttachmentOmissions, PluginError>;
 }
 
 /// Replace `part`'s attachments with `placeholder`: an attachment part keeps
@@ -88,7 +88,7 @@ pub fn omit_part_attachments(part: &mut Part, placeholder: &str) -> bool {
 /// parts whose attachments were omitted.
 pub fn apply_attachment_omissions(
     messages: &mut [Message],
-    omissions: &BTreeSet<HistoryPartId>,
+    omissions: &AttachmentOmissions,
 ) -> usize {
     if omissions.is_empty() {
         return 0;
@@ -97,16 +97,16 @@ pub fn apply_attachment_omissions(
     for message in messages {
         let named = omissions
             .iter()
-            .filter(|id| id.message == message.id)
-            .map(|id| id.part)
+            .filter(|(id, _)| id.message == message.id)
+            .map(|(id, text)| (id.part, text))
             .collect::<Vec<_>>();
         if named.is_empty() {
             continue;
         }
         let parts = std::sync::Arc::make_mut(&mut message.parts);
-        for index in named {
+        for (index, placeholder) in named {
             if let Some(part) = parts.get_mut(index) {
-                omitted += usize::from(omit_part_attachments(part, OMITTED_ATTACHMENT_PLACEHOLDER));
+                omitted += usize::from(omit_part_attachments(part, placeholder));
             }
         }
     }

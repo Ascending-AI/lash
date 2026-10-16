@@ -33,7 +33,7 @@ pub fn finish_tool_id(name: &str) -> crate::ToolId {
 
 /// A finish tool named `name`: its call ends the turn with its whole input
 /// as the turn's value, so its input and its value are both `value_schema`.
-/// It returns nothing. Its body reads its argument and nothing else, so a
+/// The caller owns its description. It returns nothing. Its body reads its argument and nothing else, so a
 /// call a crash cut off runs again on the owner that resumes it; a value
 /// its schema refuses is never run again.
 #[must_use]
@@ -41,12 +41,16 @@ pub fn finish_tool_id(name: &str) -> crate::ToolId {
     clippy::expect_used,
     reason = "an admitted schema is an admitted input schema"
 )]
-pub fn finish_tool(name: impl Into<String>, value_schema: JsonSchema) -> ToolDefinition {
+pub fn finish_tool(
+    name: impl Into<String>,
+    description: impl Into<String>,
+    value_schema: JsonSchema,
+) -> ToolDefinition {
     let name = name.into();
     ToolDefinition::control(
         finish_tool_id(&name),
         name,
-        "End the turn with this call's input as its answer. It returns nothing, and nothing after the call runs: call it once every other piece of work has finished.",
+        description,
         value_schema.as_value().clone(),
         TurnControls::finish(value_schema),
     )

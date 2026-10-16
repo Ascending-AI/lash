@@ -58,7 +58,7 @@ async fn a_host_executed_tool_publishes_progress_without_any_durable_tool_live_f
                 if let lash_core::llm::types::LlmContentBlock::ToolResult { content, .. } = block {
                     observed
                         .lock_recover()
-                        .push(lash_core::facade_support::tool_result_text(content).into_owned());
+                        .push(lash_llm_transport::tool_result_text(content).into_owned());
                 }
             }
             async move {

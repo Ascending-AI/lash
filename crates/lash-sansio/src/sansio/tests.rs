@@ -31,7 +31,7 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
     TurnMachineConfig {
         model_tool_calls: crate::ModelToolCalls::fixture(),
         protocol_driver,
-        projector: Arc::new(ChatContextProjector),
+        projector: Arc::new(ChatContextProjector::default()),
         model: crate::llm_profile::LlmProfileConfig::new(
             crate::llm_profile::RecordedLlmProfile::mint(
                 crate::llm_profile::LlmProfileKey::new("request-fixture"),

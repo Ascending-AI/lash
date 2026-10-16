@@ -75,8 +75,8 @@ impl AttachmentOmissionPolicy for Owner {
         &self,
         _: &AttachmentOmissionContext,
         _: &[crate::Message],
-    ) -> Result<BTreeSet<HistoryPartId>, PluginError> {
-        Ok(BTreeSet::new())
+    ) -> Result<crate::plugin::AttachmentOmissions, PluginError> {
+        Ok(Default::default())
     }
 }
 impl PromptSectionSource for Owner {

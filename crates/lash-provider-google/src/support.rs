@@ -27,6 +27,7 @@ pub(crate) use lash_llm_transport::normalize::{
 };
 pub(crate) use lash_llm_transport::streaming::{SseStreamBounds, drive_sse_response};
 pub(crate) use lash_llm_transport::timeouts::response_start_timeout;
+pub(crate) use lash_llm_transport::tool_result_text;
 pub(crate) use lash_llm_transport::util::{
     emit_provider_request_trace, emit_provider_trace, parse_i64,
 };
@@ -36,7 +37,7 @@ pub(crate) use lash_llm_transport::{
     reserved_generation_paths, validate_extra_headers,
 };
 pub(crate) use lash_llm_transport::{TokenGate, TokenLease, rejected_before_output};
-pub(crate) use lash_sansio::{ModelToolReturnPart, tool_result_text};
+pub(crate) use lash_sansio::ModelToolReturnPart;
 
 pub(crate) use crate::config::*;
 

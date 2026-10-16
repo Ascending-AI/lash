@@ -1,9 +1,8 @@
 use crate::responses_shared as shared;
 use crate::support::*;
-use lash_core::facade_support::{
-    ModelToolReturnPart, SchemaResolutionRequest, resolve_schema, tool_result_text,
-};
+use lash_core::facade_support::{ModelToolReturnPart, SchemaResolutionRequest, resolve_schema};
 use lash_core::llm::types::ExecutionEvidenceMergeError;
+use lash_llm_transport::tool_result_text;
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::borrow::Cow;
 

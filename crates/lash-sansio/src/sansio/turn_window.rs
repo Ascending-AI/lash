@@ -125,16 +125,21 @@ impl<E: Clone> TurnWindow<E> {
     /// How many of `rendered`'s leading model messages are the window's own
     /// render.
     pub(super) fn shared_render(&self, rendered: &[LlmMessage]) -> usize {
-        self.render()
-            .iter()
-            .zip(rendered)
-            .take_while(|(window, message)| window == message)
-            .count()
+        self.rendered.shared_prefix(rendered).unwrap_or_else(|| {
+            self.render(&crate::session_model::message::HistoryPresentation::verbatim())
+                .iter()
+                .zip(rendered)
+                .take_while(|(window, message)| window == message)
+                .count()
+        })
     }
 
     /// The window's messages, rendered as a model prompt.
-    pub(super) fn render(&self) -> &AppendVec<LlmMessage> {
-        self.rendered.rendered(self.messages.as_slice())
+    pub(super) fn render(
+        &self,
+        policy: &crate::session_model::message::HistoryPresentation,
+    ) -> AppendVec<LlmMessage> {
+        self.rendered.rendered(self.messages.as_slice(), policy)
     }
 
     pub(super) fn render_cache(&self) -> Arc<BaseRenderCache> {

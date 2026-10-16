@@ -596,7 +596,7 @@ pub(super) fn message_contains(message: &lash_core::llm::types::LlmMessage, need
     message.blocks.iter().any(|block| match block {
         LlmContentBlock::Text { text, .. } => text.contains(needle),
         LlmContentBlock::ToolResult { content, .. } => {
-            lash_core::facade_support::tool_result_text(content).contains(needle)
+            lash_llm_transport::tool_result_text(content).contains(needle)
         }
         LlmContentBlock::ToolCall {
             tool_name,
@@ -615,7 +615,7 @@ pub(super) fn request_text(request: &LlmRequest) -> String {
             match block {
                 LlmContentBlock::Text { text, .. } => out.push_str(text),
                 LlmContentBlock::ToolResult { content, .. } => {
-                    out.push_str(&lash_core::facade_support::tool_result_text(content));
+                    out.push_str(&lash_llm_transport::tool_result_text(content));
                 }
                 LlmContentBlock::ToolCall {
                     tool_name,

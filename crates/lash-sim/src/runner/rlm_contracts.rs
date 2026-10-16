@@ -666,7 +666,7 @@ fn rlm_contract_config_with_turn_options(
     Ok(lash_core::TurnMachineConfig {
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
-        projector: Arc::new(lash_core::sansio::ChatContextProjector),
+        projector: Arc::new(lash_core::sansio::ChatContextProjector::default()),
         model: lash_sansio::llm_profile::LlmProfileConfig::new(
             lash_sansio::llm_profile::RecordedLlmProfile::mint(
                 lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),

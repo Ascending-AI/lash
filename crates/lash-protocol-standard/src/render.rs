@@ -884,7 +884,7 @@ mod tests {
         ))
         .with_projection_value(channels);
         let rendered = builtin_tool_output(&output, &ToolRenderParams::default());
-        let text = lash_core::facade_support::tool_result_text(&rendered.body);
+        let text = crate::history::tool_result_text(&rendered.body);
         assert!(text.contains("engineering"), "{text}");
         assert!(text.contains("Build the product"), "{text}");
         assert!(!text.contains("[Object]"), "{text}");

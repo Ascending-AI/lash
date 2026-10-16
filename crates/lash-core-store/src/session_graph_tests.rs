@@ -1329,10 +1329,10 @@ fn an_extended_render_cache_equals_a_fresh_render_of_the_frame() {
             &format!("answer {turn}"),
         ));
         let read = graph.read_model();
-        let rendered = read
-            .prompt_render_cache
-            .rendered(read.messages.as_slice())
-            .clone();
+        let rendered = read.prompt_render_cache.rendered(
+            read.messages.as_slice(),
+            &lash_sansio::session_model::message::HistoryPresentation::verbatim(),
+        );
         assert_eq!(
             rendered.as_slice(),
             lash_sansio::session_model::render_prompt(read.messages.as_slice())

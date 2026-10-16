@@ -1271,36 +1271,6 @@ impl crate::llm::types::LlmContentBlock {
     }
 }
 
-/// One tool result's ordered content as a single string, for readers that
-/// cannot interleave attachments with text: each block on its own line, and
-/// each attachment replaced by an `[Attachment N]` marker (1-based, in content
-/// order) so the reader still sees where it sat. Adapters that move the
-/// attachments elsewhere send them in the same order the markers number.
-pub fn tool_result_text(content: &[ModelToolReturnPart]) -> std::borrow::Cow<'_, str> {
-    match content {
-        [] => std::borrow::Cow::Borrowed(""),
-        [ModelToolReturnPart::Text { text }] => std::borrow::Cow::Borrowed(text),
-        [ModelToolReturnPart::Retained(retained)] => std::borrow::Cow::Borrowed(&retained.witness),
-        _ => {
-            let mut attachments = 0usize;
-            let lines: Vec<std::borrow::Cow<'_, str>> = content
-                .iter()
-                .map(|block| match block {
-                    ModelToolReturnPart::Text { text } => std::borrow::Cow::Borrowed(text.as_str()),
-                    ModelToolReturnPart::Retained(retained) => {
-                        std::borrow::Cow::Borrowed(retained.witness.as_str())
-                    }
-                    ModelToolReturnPart::Attachment(_) => {
-                        attachments += 1;
-                        std::borrow::Cow::Owned(format!("[Attachment {attachments}]"))
-                    }
-                })
-                .collect();
-            std::borrow::Cow::Owned(lines.join("\n"))
-        }
-    }
-}
-
 fn push_text_part(parts: &mut Vec<ModelToolReturnPart>, text: impl Into<String>) {
     let text = text.into();
     if text.is_empty() {

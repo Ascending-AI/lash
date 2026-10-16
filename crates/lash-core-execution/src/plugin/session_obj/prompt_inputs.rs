@@ -1,12 +1,12 @@
 //! What the session gives a prompt cut and a turn's request history: the
 //! committed plugin namespaces and the attachments the request omits.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use lash_sansio::sync::MutexExt;
 
 use super::super::prompt::CommittedPluginNamespace;
-use super::super::{AttachmentOmissionContext, HistoryPartId};
+use super::super::{AttachmentOmissionContext, AttachmentOmissions};
 use super::*;
 
 impl PluginSession {
@@ -17,18 +17,21 @@ impl PluginSession {
 
     /// The attachments of `history` the turn's request omits: the union of
     /// every registered attachment-omission policy's decisions (ADR 0133).
+    /// The first decision in contribution order supplies text for a repeated part.
     pub fn attachment_omissions(
         &self,
         ctx: &AttachmentOmissionContext,
         history: &[crate::Message],
-    ) -> Result<BTreeSet<HistoryPartId>, ContextError> {
-        let mut omissions = BTreeSet::new();
+    ) -> Result<AttachmentOmissions, ContextError> {
+        let mut omissions = AttachmentOmissions::new();
         for (_, registered) in &self
             .capabilities()
             .contributions
             .attachment_omission_policies
         {
-            omissions.extend(registered.hook.omissions(ctx, history)?);
+            for (part, text) in registered.hook.omissions(ctx, history)? {
+                omissions.entry(part).or_insert(text);
+            }
         }
         Ok(omissions)
     }

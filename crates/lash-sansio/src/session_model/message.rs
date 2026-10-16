@@ -6,7 +6,7 @@ use crate::llm::types::{
     LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay, ProviderReplayMeta,
     ResponseTextMeta,
 };
-use crate::tool_output::{ModelToolReturnPart, tool_result_text};
+use crate::tool_output::ModelToolReturnPart;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
@@ -688,11 +688,11 @@ impl Part {
 
     /// Human-readable or tool-facing text; attachments may carry the
     /// placeholder text rendered when the blob is elided. A tool result
-    /// renders its blocks through [`tool_result_text`], so its attachments
-    /// read as numbered markers in place.
+    /// joins its visible text blocks, leaving its attachments typed; attachments
+    /// have no textual substitute in this accessor.
     pub fn content(&self) -> Cow<'_, str> {
         match self {
-            Self::ToolResult { content, .. } => tool_result_text(content),
+            Self::ToolResult { content, .. } => tool_result_visible_text(content),
             _ => Cow::Borrowed(self.text_content().unwrap_or_default()),
         }
     }
@@ -972,22 +972,6 @@ impl Part {
             reasoning_meta,
         }
     }
-
-    pub(crate) fn render(&self) -> String {
-        if let Self::Attachment {
-            attachment,
-            content,
-            ..
-        } = self
-        {
-            return if attachment.is_some() || content.trim().is_empty() {
-                "[Attachment]".to_string()
-            } else {
-                content.clone()
-            };
-        }
-        self.content().into_owned()
-    }
 }
 
 impl Message {
@@ -1002,79 +986,12 @@ impl Message {
     }
 }
 
-fn render_part_for_chat(role: MessageRole, part: &Part) -> String {
-    let rendered = part.render();
-    match role {
-        MessageRole::System => match part.kind() {
-            PartKind::Code => rendered,
-            PartKind::Output => format!("<output>\n{}\n</output>", rendered),
-            PartKind::Error => format!("<error>\n{}\n</error>", rendered),
-            PartKind::Text
-            | PartKind::Attachment
-            | PartKind::Prose
-            | PartKind::ToolCall
-            | PartKind::ToolResult
-            | PartKind::Reasoning => rendered,
-        },
-        MessageRole::Assistant => match part.kind() {
-            PartKind::Code => rendered,
-            PartKind::ToolCall => render_assistant_tool_call(part, &rendered),
-            PartKind::Prose | PartKind::Text | PartKind::Attachment | PartKind::ToolResult => {
-                rendered
-            }
-            PartKind::Reasoning => rendered,
-            _ => rendered,
-        },
-        MessageRole::User | MessageRole::Event => rendered,
-    }
-}
-
-fn render_assistant_tool_call(part: &Part, rendered: &str) -> String {
-    let tool_name = part.tool_name().unwrap_or("tool");
-    let trimmed = rendered.trim();
-    if trimmed.is_empty() || trimmed == "{}" {
-        format!("{tool_name}()")
-    } else {
-        format!("{tool_name}({trimmed})")
-    }
-}
-
 fn attachment_from_part(part: &Part) -> Option<AttachmentRef> {
     if !matches!(part.kind(), PartKind::Attachment) {
         return None;
     }
     let attachment = part.attachment()?;
     Some(attachment.reference.clone())
-}
-
-fn render_message_for_transcript(msg: &Message, attachments: &mut Vec<AttachmentRef>) -> String {
-    let mut out = Vec::new();
-    for part in msg.parts.iter() {
-        // Reasoning items are display-only from the transcript's point of
-        // view — they are never replayed as flat text. Provider adapters use
-        // structured replay metadata when they can re-emit reasoning.
-        if matches!(part.kind(), PartKind::Reasoning) {
-            continue;
-        }
-        if let Some(attachment) = attachment_from_part(part) {
-            attachments.push(attachment);
-            out.push("[Attachment]".to_string());
-            continue;
-        }
-        if let Some(content) = part.tool_result_content() {
-            attachments.extend(
-                content
-                    .iter()
-                    .filter_map(ModelToolReturnPart::attachment)
-                    .cloned(),
-            );
-        }
-        let rendered = render_part_for_chat(msg.role, part);
-        if !rendered.trim().is_empty() {
-            out.push(rendered);
-        }
-    }
-    out.join("\n\n")
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1093,6 +1010,63 @@ impl RenderedPrompt {
     }
 }
 
+/// Mode-owned history text. Core supplies each record in source order and
+/// retains structured tool calls, results, reasoning and attachment references.
+/// A policy must be pure; capture its complete immutable parameters at creation.
+#[derive(Clone)]
+pub struct HistoryPresentation(Arc<HistoryPartRenderer>);
+
+type HistoryPartRenderer = dyn Fn(MessageRole, &Part) -> String + Send + Sync;
+
+impl std::fmt::Debug for HistoryPresentation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HistoryPresentation")
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for HistoryPresentation {
+    fn default() -> Self {
+        Self::verbatim()
+    }
+}
+
+impl HistoryPresentation {
+    pub fn new(render: impl Fn(MessageRole, &Part) -> String + Send + Sync + 'static) -> Self {
+        Self(Arc::new(render))
+    }
+
+    /// Structural projection for drivers that send record text verbatim.
+    pub fn verbatim() -> Self {
+        static POLICY: OnceLock<HistoryPresentation> = OnceLock::new();
+        POLICY
+            .get_or_init(|| Self::new(|_, part| part.content().into_owned()))
+            .clone()
+    }
+
+    pub fn render(&self, messages: &[Message]) -> RenderedPrompt {
+        let mut rendered = RenderedPrompt::default();
+        append_structured_prompt_tail(messages, &[], self, |message| {
+            rendered.messages.push(message)
+        });
+        rendered
+    }
+}
+
+fn tool_result_visible_text(content: &[ModelToolReturnPart]) -> Cow<'_, str> {
+    match content {
+        [] => Cow::Borrowed(""),
+        [part] => Cow::Borrowed(part.visible_text().unwrap_or_default()),
+        _ => Cow::Owned(
+            content
+                .iter()
+                .filter_map(ModelToolReturnPart::visible_text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ),
+    }
+}
+
 /// Memoized render of a `MessageSequence`'s `base`. Shared across the
 /// per-iteration `MessageSequence` instances that wrap the same base
 /// (typically the `SessionGraphCache`'s projected messages) so the
@@ -1106,7 +1080,7 @@ impl RenderedPrompt {
 /// (FIG-4059).
 #[derive(Debug, Default)]
 pub struct BaseRenderCache {
-    rendered: OnceLock<AppendVec<LlmMessage>>,
+    rendered: std::sync::Mutex<Vec<(HistoryPresentation, AppendVec<LlmMessage>)>>,
     /// The cache of the base this one's base extends, with that base's
     /// length. Taken by the first render, so a chain of caches never
     /// outlives it.
@@ -1124,46 +1098,62 @@ impl BaseRenderCache {
     #[must_use]
     pub fn extending(previous: Arc<BaseRenderCache>, prefix_len: usize) -> Self {
         Self {
-            rendered: OnceLock::new(),
+            rendered: std::sync::Mutex::new(Vec::new()),
             extends: std::sync::Mutex::new(Some((previous, prefix_len))),
         }
     }
 
     /// The render of `base`, the messages this cache was made for.
-    pub fn rendered(&self, base: &[Message]) -> &AppendVec<LlmMessage> {
-        self.rendered.get_or_init(|| {
-            let extends = self
-                .extends
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .take();
-            let prefix = extends.and_then(|(previous, prefix_len)| {
-                let rendered = previous.rendered.get()?.clone();
-                (prefix_len <= base.len()).then_some((rendered, prefix_len))
+    /// Longest recorded projection prefix matching a request, across policy identities.
+    pub(crate) fn shared_prefix(&self, rendered: &[LlmMessage]) -> Option<usize> {
+        self.rendered
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .map(|(_, cached)| {
+                cached
+                    .iter()
+                    .zip(rendered)
+                    .take_while(|(a, b)| a == b)
+                    .count()
+            })
+            .max()
+    }
+
+    pub fn rendered(
+        &self,
+        base: &[Message],
+        policy: &HistoryPresentation,
+    ) -> AppendVec<LlmMessage> {
+        let mut cached = self.rendered.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((_, rendered)) = cached
+            .iter()
+            .find(|(previous_policy, _)| Arc::ptr_eq(&previous_policy.0, &policy.0))
+        {
+            return rendered.clone();
+        }
+        let prefix = self
+            .extends
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .and_then(|(previous, prefix_len)| {
+                let cached = previous.rendered.lock().unwrap_or_else(|p| p.into_inner());
+                let (previous_policy, rendered) = cached
+                    .iter()
+                    .find(|(previous_policy, _)| Arc::ptr_eq(&previous_policy.0, &policy.0))?;
+                (prefix_len <= base.len() && Arc::ptr_eq(&previous_policy.0, &policy.0))
+                    .then(|| (rendered.clone(), prefix_len))
             });
-            match prefix {
-                Some((mut rendered, prefix_len)) => {
-                    append_structured_prompt_after(&mut rendered, base, prefix_len);
-                    rendered
-                }
-                None => {
-                    let mut rendered = AppendVec::new();
-                    append_structured_prompt_after(&mut rendered, base, 0);
-                    rendered
-                }
-            }
-        })
+        let (mut rendered, start) = prefix.unwrap_or_else(|| (AppendVec::new(), 0));
+        append_structured_prompt_after(&mut rendered, base, start, policy);
+        cached.push((policy.clone(), rendered.clone()));
+        rendered
     }
 }
 
 mod sequence;
 pub use sequence::{MessageSequence, MessageSequenceIter};
-
-#[derive(Clone, Debug, Default)]
-struct TranscriptTurn {
-    user: Vec<String>,
-    assistant: Vec<String>,
-}
 
 pub fn render_prompt(msgs: &[Message]) -> RenderedPrompt {
     let mut rendered = RenderedPrompt::default();
@@ -1237,86 +1227,6 @@ pub(crate) fn prompt_resume_safe_len<'a>(messages: impl IntoIterator<Item = &'a 
     safe
 }
 
-pub fn render_transcript_prompt(msgs: &[Message]) -> RenderedPrompt {
-    let mut attachments = Vec::new();
-    let mut turns = Vec::new();
-    let mut current = TranscriptTurn::default();
-    let mut has_current = false;
-
-    for msg in msgs {
-        let text = render_message_for_transcript(msg, &mut attachments);
-        let has_text = !text.trim().is_empty();
-        match msg.role {
-            MessageRole::User | MessageRole::Event => {
-                if has_current && (!current.user.is_empty() || !current.assistant.is_empty()) {
-                    turns.push(current);
-                    current = TranscriptTurn::default();
-                }
-                if has_text {
-                    current
-                        .user
-                        .push(if matches!(msg.role, MessageRole::Event) {
-                            format!("Event:\n{text}")
-                        } else {
-                            text
-                        });
-                }
-                has_current = true;
-            }
-            MessageRole::Assistant | MessageRole::System => {
-                if !has_current {
-                    has_current = true;
-                }
-                if has_text {
-                    current.assistant.push(text);
-                }
-            }
-        }
-    }
-
-    if has_current && (!current.user.is_empty() || !current.assistant.is_empty()) {
-        turns.push(current);
-    }
-
-    let mut text = String::new();
-    text.push_str(
-        "History:\nThis is a chronological transcript. `Assistant` refers to Lash, and you are continuing the same session.\n\n",
-    );
-    for (idx, turn) in turns.iter().enumerate() {
-        text.push_str(&format!("=== Turn {} ===\n", idx + 1));
-        text.push_str("User:\n");
-        if turn.user.is_empty() {
-            text.push_str("[No user content recorded]\n");
-        } else {
-            text.push_str(&turn.user.join("\n\n"));
-            text.push('\n');
-        }
-        text.push('\n');
-        text.push_str("Assistant (Lash, continuing this transcript):\n");
-        let is_current_pending_turn = idx + 1 == turns.len() && turn.assistant.is_empty();
-        if turn.assistant.is_empty() && !is_current_pending_turn {
-            text.push_str("[No assistant content recorded]\n");
-        } else if !turn.assistant.is_empty() {
-            text.push_str(&turn.assistant.join("\n\n"));
-            text.push('\n');
-        }
-        text.push('\n');
-    }
-    text.push_str(
-        "Continue from the latest turn as Lash.\nIf the task is complete, provide the final answer.\nOtherwise produce the next valid step for this runtime.",
-    );
-
-    let mut message = LlmMessage::text(LlmRole::User, text);
-    Arc::make_mut(&mut message.blocks).extend(attachments.into_iter().map(|source| {
-        LlmContentBlock::Attachment {
-            reference: Box::new(source),
-        }
-    }));
-    RenderedPrompt {
-        messages: vec![message],
-    }
-}
-
 pub fn append_rendered_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
     append_structured_prompt(rendered, msgs)
 }
@@ -1329,7 +1239,9 @@ fn render_structured_prompt(msgs: &[Message]) -> RenderedPrompt {
 }
 
 fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
-    append_structured_prompt_tail(msgs, &[], |message| rendered.messages.push(message));
+    append_structured_prompt_tail(msgs, &[], &HistoryPresentation::verbatim(), |message| {
+        rendered.messages.push(message)
+    });
 }
 
 /// Renders `msgs[start..]` onto `rendered`, the render of `msgs[..start]`.
@@ -1342,14 +1254,18 @@ fn append_structured_prompt_after(
     rendered: &mut AppendVec<LlmMessage>,
     msgs: &[Message],
     start: usize,
+    policy: &HistoryPresentation,
 ) {
     let appended = &msgs[start..];
-    append_structured_prompt_tail(appended, &msgs[..start], |message| rendered.push(message));
+    append_structured_prompt_tail(appended, &msgs[..start], policy, |message| {
+        rendered.push(message)
+    });
 }
 
 fn append_structured_prompt_tail(
     appended: &[Message],
     prefix: &[Message],
+    policy: &HistoryPresentation,
     mut push: impl FnMut(LlmMessage),
 ) {
     let provider_call_ids = appended
@@ -1358,7 +1274,7 @@ fn append_structured_prompt_tail(
         .filter_map(|part| Some((part.call_id()?, part.provider_call_id()?)))
         .collect::<std::collections::HashMap<_, _>>();
     for msg in appended {
-        if let Some(projected) = render_structured_message(msg, |call_id| {
+        if let Some(projected) = render_structured_message(msg, policy, |call_id| {
             provider_call_ids
                 .get(call_id)
                 .copied()
@@ -1383,6 +1299,7 @@ fn append_structured_prompt_tail(
 /// result pairs with.
 fn render_structured_message(
     msg: &Message,
+    policy: &HistoryPresentation,
     provider_call_id: impl Fn(&ToolCallId) -> Option<String>,
 ) -> Option<LlmMessage> {
     let mut blocks: Vec<LlmContentBlock> = Vec::new();
@@ -1434,17 +1351,9 @@ fn render_structured_message(
                     continue;
                 }
 
-                let mut text = render_part_for_chat(msg.role, part);
+                let text = (policy.0)(msg.role, part);
                 if text.trim().is_empty() {
                     continue;
-                }
-
-                if matches!(msg.role, MessageRole::System | MessageRole::Event) {
-                    text = if matches!(msg.role, MessageRole::Event) {
-                        format!("Runtime event:\n{text}")
-                    } else {
-                        format!("Runtime note:\n{text}")
-                    };
                 }
 
                 blocks.push(LlmContentBlock::Text {

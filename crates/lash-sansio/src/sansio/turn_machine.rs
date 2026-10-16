@@ -568,7 +568,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
         let (decided_completions, stored_completions) =
             content.sequence(&checkpoint.decided_completions)?;
-        let (state, request) = checkpoint.state.restore(&content, window.as_ref())?;
+        let (state, request) = checkpoint.state.restore(
+            &content,
+            window.as_ref(),
+            &config.projector.history_presentation(),
+        )?;
         let mut ledger = ContentLedger::default();
         ledger.restored(StoredChains {
             messages: stored_messages,

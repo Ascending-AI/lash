@@ -191,6 +191,7 @@ impl<M: TurnProtocol> CheckpointState<M> {
         self,
         content: &TurnCheckpointContent,
         window: Option<&TurnWindow<M::Event>>,
+        policy: &crate::session_model::message::HistoryPresentation,
     ) -> Result<(MachineState<M>, Option<StoredRequest>), TurnCheckpointRestoreError> {
         let mut stored = None;
         let state = match self {
@@ -211,6 +212,7 @@ impl<M: TurnProtocol> CheckpointState<M> {
                             rendered_from_window,
                             content,
                             window,
+                            policy,
                         )?;
                         let work = PendingWork::Llm {
                             request: Arc::clone(&request.request),

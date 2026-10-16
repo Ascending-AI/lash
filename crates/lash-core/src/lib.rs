@@ -406,12 +406,10 @@ pub mod facade_support {
     pub use lash_sansio::TurnOutcome;
     pub use lash_sansio::append_assistant_text_part;
     pub use lash_sansio::build_tool_catalog;
-    pub use lash_sansio::head_tail_truncate;
     pub use lash_sansio::normalized_response_parts;
     pub use lash_sansio::reasoning_part;
     pub use lash_sansio::resolve_schema;
     pub use lash_sansio::shared_parts;
-    pub use lash_sansio::tool_result_text;
     pub use lash_sansio::visible_response_text_from_parts;
     pub use lash_sansio::{PluginStage, TurnErrorCause, TurnErrorCode, TurnStop};
     pub use lash_trace::TraceBranchSelection;

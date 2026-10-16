@@ -149,7 +149,7 @@ pub use tool_output::{
     ModelToolReturn, ModelToolReturnPart, NextRun, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureCause, ToolFailureClass,
     ToolFailureSource, ToolIntentIdentity, ToolIntentKind, ToolValue, ToolView, ToolViewBlock,
-    ToolViewMeta, TurnControl, format_tool_output_content, tool_result_text,
+    ToolViewMeta, TurnControl, format_tool_output_content,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{
@@ -163,28 +163,5 @@ pub use workflow_site::effect_identity_fixture;
 pub use workflow_site::{EffectIdentity, LoopIteration, Site, SpawnIdentity, TaskIdentity, Unit};
 mod execution_node_kind;
 pub use execution_node_kind::ExecutionNodeKind;
-
-pub fn head_tail_truncate(value: &str, max_chars: usize) -> (String, usize) {
-    let raw_len = value.chars().count();
-    if max_chars == 0 || raw_len <= max_chars {
-        return (value.to_string(), raw_len);
-    }
-    let head_len = max_chars / 2;
-    let tail_len = max_chars.saturating_sub(head_len);
-    let head = value.chars().take(head_len).collect::<String>();
-    let tail = value
-        .chars()
-        .rev()
-        .take(tail_len)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    let omitted = raw_len.saturating_sub(head_len + tail_len);
-    (
-        format!("{head}\n\n... ({omitted} characters omitted) ...\n\n{tail}"),
-        raw_len,
-    )
-}
 
 pub mod trace_carrier;

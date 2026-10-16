@@ -16,7 +16,9 @@ fn prepared_prompt_rendering_does_not_clone_retained_history() {
     let mut reused = Vec::new();
     for depth in [8, 512] {
         let window = window(depth);
-        let expected = window.render().clone();
+        let expected = window
+            .render(&crate::session_model::message::HistoryPresentation::verbatim())
+            .clone();
         // TurnPrelude::restore rebuilds this base/delta shape. Its base
         // is shared, but its render cache is not the live window's cache.
         let mut prepared = MessageSequence::from_base(window.messages().clone());
@@ -30,7 +32,9 @@ fn prepared_prompt_rendering_does_not_clone_retained_history() {
         );
         let measurement = render_allocations::Measurement::start();
         machine.adopt_prepared_messages(prepared);
-        let rendered = machine.prompt_message_sequence().render_prompt();
+        let rendered = machine
+            .prompt_message_sequence()
+            .render_prompt(&crate::session_model::message::HistoryPresentation::verbatim());
         measurements.push(measurement.finish());
 
         assert_eq!(rendered.messages.len(), depth + 1);
@@ -881,4 +885,48 @@ fn a_narrowed_prompt_view_stores_only_where_it_differs() {
         0,
         "a phase that adds nothing encodes nothing"
     );
+}
+
+/// RECORDED-REQUEST: a fresh owner reconstructs the same mode-authored
+/// history prefix, without changing committed records or their order.
+#[test]
+fn a_mode_history_policy_reconstructs_the_recorded_request_prefix() {
+    let committed = window(3);
+    let policy = crate::session_model::message::HistoryPresentation::new(|_, part| {
+        format!("mode history: {}", part.content())
+    });
+    let config = || {
+        let mut config = test_config(Arc::new(ToolBatchDriver));
+        config.projector = Arc::new(ChatContextProjector {
+            history: policy.clone(),
+        });
+        config
+    };
+    let mut machine = TurnMachine::in_window(
+        config(),
+        committed.clone(),
+        committed.then(vec![user_message("next")]),
+        Vec::new(),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let (_, request) = find_llm_call(&effects).expect("the recorded model request");
+    let saved = machine.checkpoint();
+    let mut restored = TurnMachine::restore_from_checkpoint(
+        config(),
+        roundtrip_checkpoint(saved.clone()),
+        Some(window(3)),
+    )
+    .expect("the mode's history reconstructs on a fresh owner");
+    let replayed = drain_effects(&mut restored);
+    let (_, replayed) = find_llm_call(&replayed).expect("the redelivered model request");
+    assert_eq!(
+        serde_json::to_value(replayed).unwrap(),
+        serde_json::to_value(request).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(restored.messages().as_slice()).unwrap(),
+        serde_json::to_value(machine.messages().as_slice()).unwrap()
+    );
+    assert_eq!(encode(&restored.checkpoint()), encode(&saved));
 }

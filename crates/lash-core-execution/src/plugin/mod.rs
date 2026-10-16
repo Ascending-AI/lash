@@ -84,8 +84,8 @@ pub use actions::{
     ProcessReadService, SessionParam, SessionReadService,
 };
 pub use attachment_omission::{
-    AttachmentOmissionContext, AttachmentOmissionPolicy, HistoryPartId,
-    OMITTED_ATTACHMENT_PLACEHOLDER, apply_attachment_omissions, omit_part_attachments,
+    AttachmentOmissionContext, AttachmentOmissionPolicy, AttachmentOmissions, HistoryPartId,
+    apply_attachment_omissions, omit_part_attachments,
 };
 pub use config::{
     AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,

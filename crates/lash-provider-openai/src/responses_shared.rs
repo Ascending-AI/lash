@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 
 use crate::schema::{classify_openai_error, sse_error_event_retry_verdict};
-use lash_core::facade_support::{ModelToolReturnPart, tool_result_text};
+use lash_core::facade_support::ModelToolReturnPart;
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::llm::types::{
     ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest, LlmResponse,
@@ -39,6 +39,7 @@ use lash_core::{
     facade_support::SchemaPurpose, facade_support::SchemaResolutionError,
     facade_support::SchemaResolutionRequest, facade_support::resolve_schema,
 };
+use lash_llm_transport::tool_result_text;
 use lash_llm_transport::{
     frame_sse_payload, merge_usage,
     openai_terminal_reason_from_response_value as terminal_reason_from_response_value,

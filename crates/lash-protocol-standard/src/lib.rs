@@ -50,6 +50,7 @@ mod round;
 mod tool_presentation;
 pub use prompt::section_keys;
 use tool_presentation::tool_presentation_refused;
+pub mod history;
 pub mod render;
 pub use batch::BatchResultRow;
 pub use render::{
@@ -863,10 +864,15 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
             BatchSugar::Disabled => catalog_specs,
         };
         TurnDriverPreamble {
-            config: TurnDriverConfig::chat(Arc::new(StandardDriver {
-                discovery: self.config.discovery.is_some(),
-                batch: self.config.batch,
-            })),
+            config: TurnDriverConfig {
+                protocol: Arc::new(StandardDriver {
+                    discovery: self.config.discovery.is_some(),
+                    batch: self.config.batch,
+                }),
+                projector: Arc::new(lash_core::sansio::ChatContextProjector {
+                    history: history::presentation(),
+                }),
+            },
             tool_specs,
             tool_names,
             writer_formats: input.writer_formats,

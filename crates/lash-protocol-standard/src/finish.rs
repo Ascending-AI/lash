@@ -24,11 +24,11 @@ pub(crate) fn finish_tool_provider(
     if termination.prose_ends_turn() {
         return lash_core::FinishToolProvider::new([]);
     }
-    let mut definition = lash_core::finish_tool(
+    let definition = lash_core::finish_tool(
         FINISH_TOOL_NAME,
+        "End the turn with this call's arguments, whole, as its answer. Call it on its own once every other call has returned; it returns nothing. A prose reply does not end this turn.",
         lash_core::JsonSchema::admit(serde_json::json!({ "type": "object" }))
             .expect("a fixed object schema is admitted"),
     );
-    definition.manifest.description = "End the turn with this call's arguments, whole, as its answer. Call it on its own once every other call has returned; it returns nothing. A prose reply does not end this turn.".to_owned();
     lash_core::FinishToolProvider::new([definition])
 }

@@ -937,6 +937,12 @@ pub struct ProjectorContext<'a, M: TurnProtocol = UnitTurnProtocol> {
 /// recorded inputs and must reach the same decision. Interior mutability in
 /// an implementor is a contract violation.
 pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
+    /// Pure history policy used to reconstruct a checkpoint's shared window prefix.
+    /// Projectors that send verbatim record text need no authored wording.
+    fn history_presentation(&self) -> crate::session_model::message::HistoryPresentation {
+        crate::session_model::message::HistoryPresentation::verbatim()
+    }
+
     /// Whether projection ends in a dedicated, uncached User prefix for the
     /// call's CurrentContext sections. Ordinary conversation messages never
     /// count as that prefix.
@@ -951,14 +957,20 @@ pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ChatContextProjector;
+pub struct ChatContextProjector {
+    pub history: crate::session_model::message::HistoryPresentation,
+}
 
 impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
+    fn history_presentation(&self) -> crate::session_model::message::HistoryPresentation {
+        self.history.clone()
+    }
+
     fn project(
         &self,
         ctx: ProjectorContext<'_, M>,
     ) -> Result<Arc<LlmRequest>, crate::StoredDataCorruption> {
-        let messages = ctx.messages.render_prompt().messages;
+        let messages = ctx.messages.render_prompt(&self.history).messages;
 
         Ok(Arc::new(LlmRequest {
             instructions: None,

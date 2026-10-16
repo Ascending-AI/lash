@@ -47,7 +47,7 @@ fn a_result_appended_to_cached_history_keeps_its_original_provider_correlation()
     };
     let cache = Arc::new(BaseRenderCache::new());
     let mut sequence = MessageSequence::from_base(vec![call].into()).with_base_render_cache(cache);
-    sequence.render_prompt();
+    sequence.render_prompt(&crate::session_model::message::HistoryPresentation::verbatim());
     sequence.push(Message {
         id: "result".into(),
         role: MessageRole::User,
@@ -60,7 +60,8 @@ fn a_result_appended_to_cached_history_keeps_its_original_provider_correlation()
         origin: None,
         reply_marker: None,
     });
-    let rendered = sequence.render_prompt();
+    let rendered =
+        sequence.render_prompt(&crate::session_model::message::HistoryPresentation::verbatim());
     assert_eq!(
         rendered.messages,
         render_prompt(sequence.as_slice()).messages
@@ -147,40 +148,6 @@ fn attachment_part(bytes: &[u8]) -> Part {
             reference: test_attachment_ref(bytes.len() as u64),
         }),
     )
-}
-
-#[test]
-fn render_transcript_prompt_orders_turns_oldest_first() {
-    let msgs = vec![
-        Message {
-            id: "m0".to_string(),
-            role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "first")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-        Message {
-            id: "m1".to_string(),
-            role: MessageRole::Assistant,
-            parts: vec![part(PartKind::Prose, "reply one")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-        Message {
-            id: "m2".to_string(),
-            role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "second")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-    ];
-
-    let rendered = render_transcript_prompt(&msgs);
-    let text = block_text(&rendered.messages[0], 0);
-
-    assert!(text.contains("=== Turn 1 ===\nUser:\nfirst"));
-    assert!(text.contains("Assistant (Lash, continuing this transcript):\nreply one"));
-    assert!(text.contains("=== Turn 2 ===\nUser:\nsecond"));
 }
 
 fn block_text(msg: &LlmMessage, idx: usize) -> &str {
@@ -283,7 +250,7 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
     let rendered = render_structured_prompt(&msgs);
     assert_eq!(rendered.messages.len(), 4);
     assert_eq!(rendered.messages[0].role, LlmRole::System);
-    assert_eq!(block_text(&rendered.messages[0], 0), "Runtime note:\nnote");
+    assert_eq!(block_text(&rendered.messages[0], 0), "note");
     // User message has text + image blocks bundled together.
     assert_eq!(rendered.messages[1].role, LlmRole::User);
     assert!(matches!(
@@ -358,103 +325,6 @@ fn render_structured_prompt_preserves_empty_tool_results() {
         }
         other => panic!("expected ToolResult, got {other:?}"),
     }
-}
-
-#[test]
-fn render_transcript_prompt_collects_attachments() {
-    let msgs = vec![Message {
-        id: "m0".to_string(),
-        role: MessageRole::User,
-        parts: vec![attachment_part(&[9, 8, 7])].into(),
-        origin: None,
-        reply_marker: None,
-    }];
-
-    let rendered = render_transcript_prompt(&msgs);
-    let text = block_text(&rendered.messages[0], 0);
-    assert!(text.contains("[Attachment]"));
-    assert_eq!(rendered.attachments().count(), 1);
-}
-
-#[test]
-fn render_transcript_prompt_omits_missing_assistant_placeholder_for_current_turn() {
-    let msgs = vec![
-        Message {
-            id: "m0".to_string(),
-            role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "first")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-        Message {
-            id: "m1".to_string(),
-            role: MessageRole::Assistant,
-            parts: vec![part(PartKind::Prose, "reply one")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-        Message {
-            id: "m2".to_string(),
-            role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "second")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-    ];
-
-    let rendered = render_transcript_prompt(&msgs);
-    let text = block_text(&rendered.messages[0], 0);
-
-    assert!(text.contains("=== Turn 2 ===\nUser:\nsecond"));
-    assert!(!text.contains("=== Turn 2 ===\nUser:\nsecond\n\nAssistant (Lash, continuing this transcript):\n[No assistant content recorded]"));
-}
-
-#[test]
-fn render_transcript_prompt_preserves_tool_name_for_assistant_tool_calls() {
-    let msgs = vec![
-        Message {
-            id: "m0".to_string(),
-            role: MessageRole::User,
-            parts: vec![part(PartKind::Text, "what time is it")].into(),
-            origin: None,
-            reply_marker: None,
-        },
-        Message {
-            id: "m1".to_string(),
-            role: MessageRole::Assistant,
-            parts: vec![Part::tool_call(
-                "m1.p0".to_string(),
-                r#"{"timezone":"UTC"}"#.to_string(),
-                crate::ToolCallId::fixture("tc1"),
-                "tc1".to_string(),
-                "get_time".to_string(),
-                None,
-            )]
-            .into(),
-            origin: None,
-            reply_marker: None,
-        },
-    ];
-
-    let rendered = render_transcript_prompt(&msgs);
-    let text = block_text(&rendered.messages[0], 0);
-
-    assert!(text.contains(r#"get_time({"timezone":"UTC"})"#));
-}
-
-#[test]
-fn render_transcript_prompt_omits_runtime_notes_section() {
-    let msgs = vec![Message {
-        id: "m0".to_string(),
-        role: MessageRole::User,
-        parts: vec![part(PartKind::Text, "hi")].into(),
-        origin: None,
-        reply_marker: None,
-    }];
-
-    let rendered = render_transcript_prompt(&msgs);
-    let text = block_text(&rendered.messages[0], 0);
-    assert!(!text.contains("Runtime Notes:"));
 }
 
 #[test]

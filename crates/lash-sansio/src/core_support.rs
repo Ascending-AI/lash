@@ -494,17 +494,6 @@ mod retired_identity_tests {
     }
 }
 
-/// Internal cross-crate display rendering; not an integrator classification API.
-pub trait PartCoreSupport {
-    fn render(&self) -> String;
-}
-#[doc(hidden)]
-impl PartCoreSupport for crate::Part {
-    fn render(&self) -> String {
-        crate::Part::render(self)
-    }
-}
-
 /// Fold the non-exhaustive host classification inside its owning crate.
 #[doc(hidden)]
 pub fn fold_part_kind<T>(kind: crate::PartKind, variants: [T; 9]) -> T {

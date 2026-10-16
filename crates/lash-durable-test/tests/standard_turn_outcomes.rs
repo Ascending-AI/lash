@@ -882,7 +882,7 @@ fn request_text(request: &LlmRequest) -> String {
         .filter_map(|block| match block {
             LlmContentBlock::Text { text, .. } => Some(text.to_string()),
             LlmContentBlock::ToolResult { content, .. } => {
-                Some(lash_core::facade_support::tool_result_text(content).into_owned())
+                Some(lash_llm_transport::tool_result_text(content).into_owned())
             }
             _ => None,
         })

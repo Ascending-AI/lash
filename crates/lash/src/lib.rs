@@ -183,6 +183,7 @@ pub mod config {
 /// [`STANDARD_RUN_OPTIONS`](standard::STANDARD_RUN_OPTIONS)
 /// ([`SendBuilder::options`](crate::SendBuilder::options), FIG-6021).
 pub mod standard {
+    pub use lash_protocol_standard::history;
     pub use lash_protocol_standard::{
         STANDARD_PROTOCOL_PLUGIN_ID, STANDARD_RUN_OPTIONS, SetStandardRender, StandardConfigOwner,
         StandardConfigRefusal, StandardRecordedBehaviour, StandardRecordedConfig,
@@ -834,10 +835,9 @@ pub mod plugins {
     };
     /// The attachment-omission history policy (ADR 0133): a plugin names the
     /// attachments of a turn's projected history its request omits, and core
-    /// omits them with one placeholder. It cannot add text or touch history.
+    /// substitutes the plugin-authored placeholder. Stored history stays unchanged.
     pub use lash_core::plugin::{
-        AttachmentOmissionContext, AttachmentOmissionPolicy, HistoryPartId,
-        OMITTED_ATTACHMENT_PLACEHOLDER,
+        AttachmentOmissionContext, AttachmentOmissionPolicy, AttachmentOmissions, HistoryPartId,
     };
     /// The registration groups [`PluginRegistrar`]'s accessors return
     /// (`reg.tools()`, `reg.session()`, ...), nameable so a helper can take
@@ -997,7 +997,7 @@ pub mod plugins {
         facade_support::PluginLifecycleEvent, facade_support::SessionConfigChangedContext,
     };
     pub use lash_plugin_standard_compaction::{
-        StandardCompactionConfig, StandardCompactionPluginFactory,
+        OMITTED_ATTACHMENT_PLACEHOLDER, StandardCompactionConfig, StandardCompactionPluginFactory,
     };
     pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};
     /// Default chat projector installed by [`TurnDriverConfig::chat`].
@@ -1011,10 +1011,12 @@ pub mod plugins {
     pub use lash_sansio::ProtocolDriverHandle;
     /// Model-facing tool declaration carried by [`TurnDriverPreamble::tool_specs`].
     pub use lash_sansio::llm::types::LlmToolSpec;
+    pub use lash_sansio::session_model::message::HistoryPresentation;
 }
 
 /// Protocol message and content types.
 pub mod messages {
+    pub use lash_sansio::session_model::message::RenderedPrompt;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_sansio::ModelToolReturnPart;
 

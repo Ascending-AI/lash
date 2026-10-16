@@ -572,13 +572,12 @@ impl AppState {
 #[expect(clippy::expect_used, reason = "a fixed string schema is admitted")]
 pub(crate) fn chat_reply_tool() -> lash::tools::ToolDefinition {
     use lash::tools::ToolDefinitionBindingExt as _;
-    let mut tool = lash::tools::finish_tool(
+    let tool = lash::tools::finish_tool(
         "reply",
+        "Reply to the user with this text and end the turn. It returns nothing.",
         lash::schema::JsonSchema::admit(json!({ "type": "string" }))
             .expect("a string schema is admitted"),
     );
-    tool.manifest.description =
-        "Reply to the user with this text and end the turn. It returns nothing.".to_owned();
     tool.with_tool_binding(lash::tools::ToolBinding::new(["chat"], "reply"))
 }
 

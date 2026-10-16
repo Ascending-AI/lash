@@ -12,7 +12,7 @@ pub use lash_sansio::session_model::{
     Namespace, NoProgressBudget, Part, PartKind, ProtocolEvent, RuntimeOutputCuts,
     SessionStreamEvent, StreamMessageKind, TokenUsageOverflow, ToolCallLimitExceeded,
     ToolCallLimitScope, TurnBudget, TurnFailureCode, TurnFailureKind, make_error_envelope,
-    make_error_event, reassign_part_ids, render_prompt, render_transcript_prompt, shared_parts,
+    make_error_event, reassign_part_ids, render_prompt, shared_parts,
 };
 
 pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;

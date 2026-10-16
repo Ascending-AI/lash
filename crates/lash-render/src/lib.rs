@@ -778,3 +778,54 @@ fn finish_char_cut(
     }
     rendered
 }
+
+/// Flat default presentation of ordered visible text and attachment slots.
+/// `None` denotes an attachment; numbering is one-based in content order.
+pub fn tool_result_text<'a>(parts: impl IntoIterator<Item = Option<&'a str>>) -> Cow<'a, str> {
+    let mut parts = parts.into_iter().peekable();
+    let Some(first) = parts.next() else {
+        return Cow::Borrowed("");
+    };
+    if let Some(text) = first
+        && parts.peek().is_none()
+    {
+        return Cow::Borrowed(text);
+    }
+    let mut attachments = 0usize;
+    let lines = std::iter::once(first)
+        .chain(parts)
+        .map(|part| match part {
+            Some(text) => Cow::Borrowed(text),
+            None => {
+                attachments += 1;
+                Cow::Owned(format!("[Attachment {attachments}]"))
+            }
+        })
+        .collect::<Vec<_>>();
+    Cow::Owned(lines.join("\n"))
+}
+
+#[cfg(test)]
+mod tool_result_tests {
+    use super::tool_result_text;
+
+    #[test]
+    fn flattened_tool_results_preserve_attachment_positions_and_numbering() {
+        assert_eq!(
+            tool_result_text([
+                Some("before"),
+                None,
+                Some("retained witness"),
+                None,
+                Some("after")
+            ]),
+            "before\n[Attachment 1]\nretained witness\n[Attachment 2]\nafter"
+        );
+        assert_eq!(tool_result_text([None]), "[Attachment 1]");
+        assert_eq!(tool_result_text([]), "");
+        assert!(matches!(
+            tool_result_text([Some("text")]),
+            std::borrow::Cow::Borrowed("text")
+        ));
+    }
+}

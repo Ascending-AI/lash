@@ -128,3 +128,26 @@ pub use rlm_support::format_budget_suffix;
 mod prompt_contract_tests;
 
 pub use projection::recorded_extraction_decisions;
+
+fn head_tail_truncate(value: &str, max_chars: usize) -> (String, usize) {
+    let raw_len = value.chars().count();
+    if max_chars == 0 || raw_len <= max_chars {
+        return (value.to_string(), raw_len);
+    }
+    let head_len = max_chars / 2;
+    let tail_len = max_chars.saturating_sub(head_len);
+    let head = value.chars().take(head_len).collect::<String>();
+    let tail = value
+        .chars()
+        .rev()
+        .take(tail_len)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    let omitted = raw_len.saturating_sub(head_len + tail_len);
+    (
+        format!("{head}\n\n... ({omitted} characters omitted) ...\n\n{tail}"),
+        raw_len,
+    )
+}

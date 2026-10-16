@@ -427,8 +427,7 @@ fn message_text(
     attachments: &[RlmAttachmentRef],
     max_output_chars: usize,
 ) -> String {
-    let (preview, raw_len) =
-        lash_core::facade_support::head_tail_truncate(content, max_output_chars);
+    let (preview, raw_len) = crate::head_tail_truncate(content, max_output_chars);
     let mut out = preview.to_string();
     if raw_len > max_output_chars {
         let _ = write!(

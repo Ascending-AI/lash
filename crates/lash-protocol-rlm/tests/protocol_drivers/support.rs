@@ -79,7 +79,7 @@ pub(crate) fn test_config_with_protocol_turn_options(
     TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
-        projector: Arc::new(ChatContextProjector),
+        projector: Arc::new(ChatContextProjector::default()),
         model: lash_sansio::llm_profile::LlmProfileConfig::new(
             lash_sansio::llm_profile::RecordedLlmProfile::mint(
                 lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),

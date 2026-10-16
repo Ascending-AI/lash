@@ -126,6 +126,7 @@ impl StoredRequest {
         rendered_from_window: usize,
         content: &TurnCheckpointContent,
         window: Option<&TurnWindow<E>>,
+        policy: &crate::session_model::message::HistoryPresentation,
     ) -> Result<Self, TurnCheckpointRestoreError> {
         let mut request: LlmRequest = content.value(frame)?;
         if !request.messages.is_empty() {
@@ -136,7 +137,7 @@ impl StoredRequest {
         let (own, chain) = content.sequence::<LlmMessage>(messages)?;
         if rendered_from_window > 0 {
             let render = window
-                .map(TurnWindow::render)
+                .map(|window| window.render(policy))
                 .ok_or_else(|| outside_window("a model request starts with the window's render"))?;
             request.messages = render
                 .as_slice()
