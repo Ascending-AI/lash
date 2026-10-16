@@ -1041,7 +1041,8 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
     turn_deadline_ms BIGINT,
     written_epoch BIGINT NOT NULL,
     model_calls BIGINT NOT NULL DEFAULT 0,
-    tool_calls BIGINT NOT NULL DEFAULT 0 CHECK (tool_calls >= 0),
+    tool_calls BIGINT NOT NULL DEFAULT 0 CONSTRAINT lash_turn_phases_tool_calls_check
+        CHECK (tool_calls >= 0),
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_turn_phases_arg CHECK ((phase IN ('model', 'tools')) = (phase_arg IS NOT NULL)),
     CONSTRAINT ck_turn_phases_checkpoint CHECK ((phase = 'admitted') = (checkpoint_ref IS NULL)),

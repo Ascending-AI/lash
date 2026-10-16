@@ -6168,6 +6168,15 @@
     },
     {
       "properties": {
+        "inference_calls": {
+          "description": "Model calls admitted by this turn, including failed calls; absent\nwhen the terminal owner cannot recover that fact.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "input": {
           "description": "Admitted input messages, captured by the terminal owner from durable input.",
           "items": {
@@ -6182,6 +6191,15 @@
         },
         "outcome": {
           "$ref": "#/$defs/TraceTurnOutcome"
+        },
+        "tool_calls": {
+          "description": "Tool calls admitted by the turn and its cells, including failures.\nThe terminal owner reads the stored count plus acknowledged appends;\nabsent only for a record with no known execution counts.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "type": {
           "const": "turn_completed",
