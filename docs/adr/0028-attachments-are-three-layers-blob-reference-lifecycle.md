@@ -6,9 +6,9 @@ Attachments have three owners. Hosts supply flat blob storage, Lash tracks durab
 
 ## Blob storage
 
-`AttachmentStore` exposes `put`, `get`, `delete`, `head`, `list` and a persistence descriptor. Delivering a ref to a provider request (`deliver`, `invalidate_delivery`) is ADR 0135 §3. It has no session namespace or session ownership. Identical bytes share one digest and physical blob. The S3 store uses `blake3/<prefix>/<digest>`. Missing reads return typed `NotFound`; list and head support reclamation.
+`AttachmentStore` exposes `put`, `get`, `delete`, `head`, `list` and a persistence descriptor. Delivering a ref to a provider request (`deliver`, `invalidate_delivery`) is ADR 0135 §3. It has no session namespace or session ownership. Identical bytes share one digest and physical blob. The S3 store uses `<prefix>/blake3/<first two digest characters>/<digest>`. Missing reads return typed `NotFound`; list and head support reclamation.
 
-SQLite stores bytes in its catalog; S3 stores bytes as objects. Puts refresh the backend freshness signal even on deduplication, so delete-time freshness checks observe recent writes.
+SQLite stores bytes in its catalog; S3 stores bytes as objects. Puts refresh the backend freshness signal even on deduplication, so delete-time freshness checks observe recent writes. SQLite restamps the row; S3 uploads a body once and refreshes a held one by writing its zero-byte `<digest>.fresh` marker, re-checking the body afterwards so a delete in between gets a fresh upload. S3 list and head report the later of body and marker LastModified, and delete removes the marker before the body (FIG-6602).
 
 ## Reference tracking
 

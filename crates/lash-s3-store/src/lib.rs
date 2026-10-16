@@ -24,7 +24,7 @@ use object_store::aws::AmazonS3Builder;
 use object_store::list::{PaginatedListOptions, PaginatedListStore};
 use object_store::path::Path;
 use object_store::signer::{Method, Signer};
-use object_store::{ObjectStore, ObjectStoreExt};
+use object_store::{ObjectStore, ObjectStoreExt, PutPayload};
 use std::sync::Arc;
 use url::Url;
 
@@ -115,8 +115,15 @@ impl S3AttachmentStoreBuilder {
     }
 }
 
+/// Suffix of a content object's freshness marker: a zero-byte object whose
+/// LastModified records the latest put of content already held (FIG-6602).
+/// It sorts directly after its content key, so a key-ordered listing yields
+/// each content id's body and marker together.
+const FRESHNESS_SUFFIX: &str = ".fresh";
+
 /// The object-key layout an [`S3AttachmentStore`] writes under: flat,
-/// content-addressed keys beneath an optional prefix. A host that presigns
+/// content-addressed keys beneath an optional prefix, each content object
+/// optionally followed by its zero-byte freshness marker. A host that presigns
 /// or reads objects directly shares the layout through this type instead of
 /// building a store's client (FIG-6044).
 #[derive(Clone, Debug)]
@@ -154,6 +161,12 @@ impl S3AttachmentKeys {
         path.push('/');
         path.push_str(hash);
         Path::parse(path).map_err(|err| terminal_backend_error("path", err))
+    }
+
+    /// The freshness marker beside `id`'s blob: `<content key>.fresh`.
+    fn freshness_path(&self, id: &AttachmentId) -> Result<Path, AttachmentStoreError> {
+        Path::parse(format!("{}{FRESHNESS_SUFFIX}", self.content_path(id)?))
+            .map_err(|err| terminal_backend_error("path", err))
     }
 
     /// Key prefix under which all content-addressed blobs live.
@@ -256,6 +269,24 @@ impl S3AttachmentStore {
         self.keys.content_prefix()
     }
 
+    /// The freshness of the object at `path` if it exists.
+    async fn stat(&self, path: &Path) -> Result<Option<Option<u64>>, AttachmentStoreError> {
+        match self.store.head(path).await {
+            Ok(meta) => Ok(Some(epoch_ms(&meta))),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(err) => Err(backend_error("head", err)),
+        }
+    }
+
+    /// Whether the content object at `path` holds `byte_len` bytes.
+    async fn holds(&self, path: &Path, byte_len: u64) -> Result<bool, AttachmentStoreError> {
+        match self.store.head(path).await {
+            Ok(meta) => Ok(meta.size == byte_len),
+            Err(object_store::Error::NotFound { .. }) => Ok(false),
+            Err(err) => Err(backend_error("head", err)),
+        }
+    }
+
     #[cfg(any(test, feature = "testing"))]
     pub async fn raw_blobs_for_testing(
         &self,
@@ -269,6 +300,9 @@ impl S3AttachmentStore {
             .map_err(|err| backend_error("list", err))?;
         let mut rows = Vec::with_capacity(metas.len());
         for meta in metas {
+            if meta.location.as_ref().ends_with(FRESHNESS_SUFFIX) {
+                continue;
+            }
             let segment = meta.location.parts().next_back().ok_or_else(|| {
                 AttachmentStoreError::Contract(
                     "stored attachment key has no final path component".into(),
@@ -342,7 +376,27 @@ impl AttachmentStore for S3AttachmentStore {
             meta.type_metadata,
             meta.label,
         );
-        put_at_path(&*self.store, self.content_path(&meta.id)?, bytes, meta).await
+        let content_path = self.content_path(&meta.id)?;
+        // Content already held is immutable: refresh its freshness marker,
+        // the signal GC's grace window and delete-time re-check read, instead
+        // of uploading the body again. A delete that lands between the check
+        // and the refresh is seen by the second check, which uploads again;
+        // a delete after it is the same window an overwrite left open.
+        if self.holds(&content_path, meta.byte_len).await? {
+            self.store
+                .put(&self.keys.freshness_path(&meta.id)?, PutPayload::new())
+                .await
+                .map_err(|err| backend_error("put", err))?;
+            if self.holds(&content_path, meta.byte_len).await? {
+                return Ok(meta);
+            }
+        }
+        // An absent object, or one of the wrong length, gets the body.
+        self.store
+            .put(&content_path, bytes.into())
+            .await
+            .map_err(|err| backend_error("put", err))?;
+        Ok(meta)
     }
 
     async fn get(
@@ -423,20 +477,25 @@ impl AttachmentStore for S3AttachmentStore {
         })
     }
 
+    /// Removes the marker before the body: an interrupted delete leaves the
+    /// body, which a later sweep finds stale and reclaims, never a marker
+    /// standing for bytes that are gone.
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
+        delete_at_path(&*self.store, self.keys.freshness_path(id)?).await?;
         delete_at_path(&*self.store, self.content_path(id)?).await
     }
 
+    /// A blob exists while its body does; its freshness is the later of the
+    /// body's and its marker's.
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
-        let content_path = self.content_path(id)?;
-        match self.store.head(&content_path).await {
-            Ok(meta) => Ok(Some(StoredBlobRef {
-                id: id.clone(),
-                last_modified_epoch_ms: u64::try_from(meta.last_modified.timestamp_millis()).ok(),
-            })),
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(err) => Err(backend_error("head", err)),
-        }
+        let Some(body) = self.stat(&self.content_path(id)?).await? else {
+            return Ok(None);
+        };
+        let marker = self.stat(&self.keys.freshness_path(id)?).await?.flatten();
+        Ok(Some(StoredBlobRef {
+            id: id.clone(),
+            last_modified_epoch_ms: body.max(marker),
+        }))
     }
 
     async fn list_page(
@@ -445,7 +504,8 @@ impl AttachmentStore for S3AttachmentStore {
         limit: std::num::NonZeroU32,
     ) -> Result<AttachmentBlobPage, AttachmentStoreError> {
         let prefix = self.content_prefix()?;
-        let offset = after.map(|id| self.content_path(id)).transpose()?;
+        // The cursor's marker belongs to the cursor's blob: start after it.
+        let offset = after.map(|id| self.keys.freshness_path(id)).transpose()?;
         if let Some(pages) = &self.pages {
             // Ask the backend for only this page, including a one-object probe.
             let max_keys = (limit.get() as usize).min(1000);
@@ -465,13 +525,18 @@ impl AttachmentStore for S3AttachmentStore {
                     "object store exceeded the requested blob page".into(),
                 ));
             }
-            let mut blobs = page
+            let truncated = page.page_token.is_some();
+            let mut objects = page
                 .result
                 .objects
                 .into_iter()
-                .map(blob_ref)
+                .map(listed_object)
                 .collect::<Result<Vec<_>, _>>()?;
-            blobs.sort_by(|a, b| a.id.cmp(&b.id));
+            objects.sort_by(|a, b| (&a.id, a.marker).cmp(&(&b.id, b.marker)));
+            // A body that ends a truncated page may have its marker first on
+            // the next one, which this page's cursor skips: read it here.
+            let split = truncated && objects.last().is_some_and(|object| !object.marker);
+            let mut blobs = merge_listed(objects);
             let mut previous = after;
             for blob in &blobs {
                 if previous.is_some_and(|previous| &blob.id <= previous) {
@@ -481,7 +546,14 @@ impl AttachmentStore for S3AttachmentStore {
                 }
                 previous = Some(&blob.id);
             }
-            let next = if page.page_token.is_some() {
+            if split && let Some(last) = blobs.last_mut() {
+                let marker = self
+                    .stat(&self.keys.freshness_path(&last.id)?)
+                    .await?
+                    .flatten();
+                last.last_modified_epoch_ms = last.last_modified_epoch_ms.max(marker);
+            }
+            let next = if truncated {
                 Some(
                     blobs
                         .last()
@@ -504,23 +576,31 @@ impl AttachmentStore for S3AttachmentStore {
         };
         // ObjectStore does not promise ordering. Keep only the smallest `limit`
         // ids in memory while streaming metadata; never collect the namespace.
+        // A body and its marker arrive in either order and merge under one id.
         let mut selected = std::collections::BTreeMap::new();
         while let Some(meta) = stream
             .try_next()
             .await
             .map_err(|err| backend_error("list", err))?
         {
-            let blob = blob_ref(meta)?;
-            if after.is_some_and(|after| &blob.id <= after) {
+            let object = listed_object(meta)?;
+            if after.is_some_and(|after| &object.id <= after) {
                 continue;
             }
-            selected.insert(blob.id.clone(), blob);
+            let freshness = selected.entry(object.id).or_insert(None);
+            *freshness = (*freshness).max(object.last_modified_epoch_ms);
             if selected.len() > limit.get() as usize {
                 selected.pop_last();
             }
         }
         Ok(AttachmentBlobPage::from_ordered(
-            selected.into_values().collect(),
+            selected
+                .into_iter()
+                .map(|(id, last_modified_epoch_ms)| StoredBlobRef {
+                    id,
+                    last_modified_epoch_ms,
+                })
+                .collect(),
             limit,
         ))
     }
@@ -533,43 +613,66 @@ impl AttachmentStore for S3AttachmentStore {
             .try_collect()
             .await
             .map_err(|err| backend_error("list", err))?;
-        metas.into_iter().map(blob_ref).collect()
+        let mut objects = metas
+            .into_iter()
+            .map(listed_object)
+            .collect::<Result<Vec<_>, _>>()?;
+        objects.sort_by(|a, b| (&a.id, a.marker).cmp(&(&b.id, b.marker)));
+        Ok(merge_listed(objects))
     }
 }
 
-fn blob_ref(meta: object_store::ObjectMeta) -> Result<StoredBlobRef, AttachmentStoreError> {
+/// One listed key: a content body or its freshness marker.
+struct ListedObject {
+    id: AttachmentId,
+    marker: bool,
+    last_modified_epoch_ms: Option<u64>,
+}
+
+fn listed_object(meta: object_store::ObjectMeta) -> Result<ListedObject, AttachmentStoreError> {
     let segment = meta.location.parts().next_back().ok_or_else(|| {
         AttachmentStoreError::Contract("stored attachment key has no final path component".into())
     })?;
-    let id = AttachmentId::parse(segment.as_ref()).map_err(|err| {
+    let (name, marker) = match segment.as_ref().strip_suffix(FRESHNESS_SUFFIX) {
+        Some(name) => (name, true),
+        None => (segment.as_ref(), false),
+    };
+    let id = AttachmentId::parse(name).map_err(|err| {
         AttachmentStoreError::Contract(format!(
             "stored attachment key `{}` is not a valid id: {err}",
             segment.as_ref()
         ))
     })?;
-    Ok(StoredBlobRef {
+    Ok(ListedObject {
         id,
-        last_modified_epoch_ms: u64::try_from(meta.last_modified.timestamp_millis()).ok(),
+        marker,
+        last_modified_epoch_ms: epoch_ms(&meta),
     })
 }
 
-async fn put_at_path(
-    store: &dyn ObjectStore,
-    content_path: Path,
-    bytes: Vec<u8>,
-    meta: AttachmentRef,
-) -> Result<AttachmentRef, AttachmentStoreError> {
-    let reference = meta.clone();
-    // Unconditional PUT even on a dedup hit: overwriting identical content
-    // refreshes the object's LastModified, which is the freshness signal GC's
-    // grace window and delete-time re-check rely on (Fix C). Do not short-circuit
-    // on an existing object.
-    store
-        .put(&content_path, bytes.into())
-        .await
-        .map_err(|err| backend_error("put", err))?;
+/// One blob per content id of id-ordered objects, at its freshest. A marker
+/// whose body a racing delete removed lists as a blob its `head` reports
+/// absent, as any blob deleted between a listing and its re-check is.
+fn merge_listed(objects: Vec<ListedObject>) -> Vec<StoredBlobRef> {
+    let mut blobs: Vec<StoredBlobRef> = Vec::with_capacity(objects.len());
+    for object in objects {
+        match blobs.last_mut() {
+            Some(last) if last.id == object.id => {
+                last.last_modified_epoch_ms = last
+                    .last_modified_epoch_ms
+                    .max(object.last_modified_epoch_ms);
+            }
+            _ => blobs.push(StoredBlobRef {
+                id: object.id,
+                last_modified_epoch_ms: object.last_modified_epoch_ms,
+            }),
+        }
+    }
+    blobs
+}
 
-    Ok(reference)
+fn epoch_ms(meta: &object_store::ObjectMeta) -> Option<u64> {
+    u64::try_from(meta.last_modified.timestamp_millis()).ok()
 }
 
 async fn get_at_path(
@@ -1314,3 +1417,6 @@ mod redaction_tests {
 
 #[cfg(test)]
 mod delivery_tests;
+
+#[cfg(test)]
+mod refresh_tests;
