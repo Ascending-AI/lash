@@ -176,6 +176,146 @@ old live-session handles out of the reopen: they retain the old runtime's
 capabilities. The timeout is a scenario liveness aid, not isolation of fully
 trusted plugin code.
 
+## Tracing an extension
+
+Every callback lash runs for a plugin is handed an `ExtensionTrace`: a tool
+body through `call.context.trace()`, a hook through its context's `trace`
+field, a plugin operation through its context's `trace()`. Lash binds it
+from the callback's registration, so every span it opens carries the
+registered `plugin_id` and `lash.plugin.callback`; nothing the plugin
+passes can change them. The slot table says where each callback's spans go:
+
+| Callback | Spans are children of |
+|---|---|
+| Tool provider body, tool hooks | the call's `execute_tool` span |
+| Turn hooks (`before_turn`, `after_turn`, `checkpoint`, compaction, context pressure) | the turn's span |
+| Code executor | the running cell's span |
+| Plugin operation | the producer span of the host call that ran it |
+| `tool_reads` and other decision-only readers | nothing: `is_recording()` is false |
+
+```rust
+async fn execute(&self, call: lash::ToolCall<'_>) -> lash::ToolAttemptOutcome {
+    let trace = call.context.trace();
+    let mut span = trace.span("index.lookup");
+    span.attr("index.shard", 3_i64)
+        .content("query", || call.args["query"].clone());
+    let hits = span.trace().instrument(self.lookup(&call.args)).await;
+    span.trace().event("index.hit", |attrs| {
+        attrs.set("index.hits", hits.len() as i64);
+    });
+    span.end();
+    // ...
+}
+```
+
+- **Lifetime.** A span ends at `end()`, at `fail(error_type)` plus `end()`,
+  or when its handle drops (`lash.span.ended_by = "drop"`). The callback's
+  exit revokes the capability: spans still open are closed `body_exit`, or
+  `cancelled` or `panic` when the body was dropped or panicked, and a later
+  `end()` from a task the body spawned emits nothing and is counted
+  `Late`. Record what matters before the body returns.
+- **Replay.** Spans are emitted only by a body that really runs. A body the
+  journal serves emits none; a body that runs again after a crash emits its
+  spans again, as distinct spans. Protocol bodies running behind a shift's
+  journal frontier hold their spans until a step body really runs.
+- **Bounds.** `TraceLimits` bounds the spans one body opens, the bytes its
+  names, keys, values and events charge, and the records a span may hold
+  for its children (`publication_hold`); under hold pressure the span is
+  ended early (`hold_pressure`) and no model call's record is dropped.
+  `remaining()` reads the budget left, and `omissions()` what was refused,
+  each refusal counted with its typed `TraceOmission`; the body's exit
+  records one `body_omissions` diagnostic when anything was refused.
+- **Content.** `content(key, || value)` runs its builder only when the
+  host captures the `extension` category and the span records. Attributes
+  are not content: never put prompts, documents or secrets in them.
+- **Policy.** When the host turns `Extension` (or `Point`) off, or a capture
+  selector skips them for the call, the handles are no-ops and no builder
+  runs; a model call made under a skipped span is skipped with it.
+- **Nesting libraries.** `instrument(fut)` polls `fut` with the position as
+  the ambient context, and `in_scope(f)` runs `f` under it: OpenTelemetry
+  instrumentation (an HTTP client, a database driver) and `tracing` spans
+  exported through `tracing-opentelemetry` at its default
+  `context_activation` nest under the span, and a direct model completion
+  made inside nests its `chat` span there. Lash runs every callback under
+  its capability's position already; use `instrument` for work under a span
+  of your own and for every task the body spawns. These third-party spans
+  are the host SDK's: lash's content policy does not reach them, and a body
+  that runs again emits them again. With the `otel-trace` feature,
+  `ExtensionTraceOtelExt::otel_context()` hands a library that takes an
+  explicit context the position's.
+- **The tool span.** A tool body annotates its own `execute_tool` span with
+  `call.context.tool_span().set(key, value)`, through the same bounded
+  writer, for the `mcp.*`, `jsonrpc.*`, `rpc.*`, `network.*` and `server.*`
+  namespaces and the `gen_ai.tool.type` and `error.type` defaults; other
+  keys are refused `DisallowedKey`. `call.context.tool_span_context()` is
+  that span's W3C context, equal to the exported span's, wherever the body
+  is in its own spans: the parent for OpenTelemetry work the body starts
+  itself, with no record sink.
+- **Joining tool-live.** `call_address()` is the `CallAddress` the call's
+  tool-live publisher is bound to; it equals the span's
+  `gen_ai.tool.call.id` call. Hooks have none.
+- **Propagation.** `position()` is the W3C context of the position, equal to
+  the exported span's, for an outbound carrier: a queue message, an HTTP
+  header. `as_parent()` is the anchored container, for work lash admits on
+  the plugin's behalf.
+
+The MCP plugin propagates for you: each `tools/call` sends the tool span's
+`traceparent` and `tracestate` in `params._meta`, beside `lash.dev/*`, and
+annotates the tool span with `mcp.method.name`, `network.transport`,
+`jsonrpc.request.id` and, for an `isError` result, `error.type =
+tool_error`. A server whose operators must not see the trace is configured
+`trace_propagation: off` (`McpTracePropagation::Off`); its tool span is
+still exported.
+
+### Propagating to a model gateway
+
+Lash injects no trace context into provider requests. A provider's request
+runs with its `chat` span as the current OpenTelemetry context, so a host
+that wants its gateway to join the trace wraps the provider's transport:
+
+```rust
+use std::sync::Arc;
+use std::time::Duration;
+use lash::provider::LlmTransportError;
+use lash_llm_transport::{HttpHeaderValue, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
+use opentelemetry::global;
+use opentelemetry::propagation::Injector;
+
+struct Headers<'a>(&'a mut Vec<(String, HttpHeaderValue)>);
+
+impl Injector for Headers<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        self.0.push((key.to_owned(), HttpHeaderValue::new(value)));
+    }
+}
+
+#[derive(Debug)]
+struct Propagating(Arc<dyn LlmHttpTransport>);
+
+#[async_trait::async_trait]
+impl LlmHttpTransport for Propagating {
+    async fn send(
+        &self,
+        mut request: LlmHttpRequest,
+        timeout: Option<Duration>,
+    ) -> Result<LlmHttpResponse, LlmTransportError> {
+        // The current context is the provider request's `chat` span.
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject(&mut Headers(&mut request.headers));
+        });
+        self.0.send(request, timeout).await
+    }
+}
+```
+
+Pass the wrapper to the provider's transport constructor:
+`with_transport` on `OpenAiCompatibleProvider`, `OpenAiProvider`,
+`AnthropicProvider` and `GoogleOAuthProvider` (whose `with_client` wraps a
+client in the same transport), or `with_http_transport` on
+`CodexProvider`. Codex's WebSocket path opens one cached connection
+outside the transport and carries no per-request header; a host that needs
+per-request propagation there pins `force_sse_transport()`.
+
 ## Retiring a process component
 
 A process component can stop being installed while sealed process envs still

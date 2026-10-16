@@ -43,7 +43,8 @@ impl ProductionToolHandlers<'_> {
         let record = match dispatch
             .composition
             .check_tool_args(
-                &context(&dispatch, &prepared),
+                &context(&dispatch, &prepared)
+                    .with_trace(self.context.tool_hook_trace(&prepared.call.call_id)),
                 &Arc::new(
                     prepared
                         .original_args
@@ -164,7 +165,8 @@ impl ProductionToolHandlers<'_> {
         let original = captured.original.unwrap_or_else(|| captured.output.clone());
         let (original, _) = ToolResultCandidate::split(original);
         let (candidate, _) = ToolResultCandidate::split(captured.output);
-        let mut hook = context(&dispatch, &prepared);
+        let mut hook = context(&dispatch, &prepared)
+            .with_trace(self.context.tool_hook_trace(&prepared.call.call_id));
         hook.check_phase = captured.check_phase.unwrap_or_else(|| {
             crate::plugin::ControlPhaseDeadline::new(
                 dispatch.clock.as_ref(),

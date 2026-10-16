@@ -193,6 +193,7 @@ impl LashRuntime {
             traces: services.trace_emitter(),
             scoped_effect_controller: controller.clone(),
             direct_completions: services.direct_completion_client(controller.clone(), None),
+            trace: self.hook_trace(controller),
         };
         let compaction = match plugin_session.compact_context(&ctx).await {
             Ok(Some(compaction)) => compaction,

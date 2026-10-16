@@ -268,7 +268,6 @@ impl OtelTelemetry {
         if position.kind != TraceSpanKind::ModelAttempt {
             content_attributes::attributes(record, &mut attributes);
         }
-        let definition = projection.span.definition();
         let mut name = projection.name();
         let (contributions, mut omissions) = match producer {
             Some(contributed) => contributed,
@@ -286,6 +285,7 @@ impl OtelTelemetry {
                     policy: &self.policy,
                 };
                 let mut writer = TraceAttributeWriter::new(position.kind, &self.policy.limits);
+                contributed(record, &mut writer);
                 if position.kind != TraceSpanKind::ModelAttempt {
                     for (key, value) in &record.content.references {
                         let _ = writer.set(key.clone(), value.clone());
@@ -308,7 +308,8 @@ impl OtelTelemetry {
             name = custom.into_owned();
         }
         let builder = SpanBuilder::from_name(name)
-            .with_kind(definition.kind)
+            .with_kind(projection.kind())
+            .with_events(extension_events(projection.extension))
             .with_start_time(position.started_at.to_system_time())
             .with_attributes(attributes)
             .with_links(links);
@@ -326,6 +327,83 @@ impl OtelTelemetry {
         let end = position.ended_at.unwrap_or(record.timestamp);
         span.end_with_timestamp(end.to_system_time());
     }
+}
+
+/// Writes what a body contributed to the span `record` publishes through
+/// the span's writer, in the order the body admitted it: a tool body's
+/// annotations of its own tool span, or an extension span's attributes and
+/// captured content. The body's writer admitted each against the same
+/// budget, so the span's writer admits the same set.
+fn contributed(record: &TraceRecord, writer: &mut TraceAttributeWriter) {
+    match &record.event {
+        TraceEvent::ToolCallCompleted {
+            span_attributes, ..
+        } => {
+            for attribute in &span_attributes.0 {
+                let _ = match registry::RefinableKey::of_key(&attribute.key) {
+                    Some(key) => writer.replace(key, attribute.value.clone()),
+                    None => writer.set(attribute.key.clone(), attribute.value.clone()),
+                };
+            }
+        }
+        TraceEvent::ExtensionSpan(span) => {
+            for attribute in &span.attributes {
+                let _ = writer.set(attribute.key.clone(), attribute.value.clone());
+            }
+            let captured = record
+                .content
+                .captured
+                .contains(&crate::ContentCategory::Extension);
+            for entry in span.content.iter().filter(|_| captured) {
+                let path = format!("extension.{}", entry.key);
+                if record
+                    .content
+                    .omitted
+                    .iter()
+                    .chain(&record.content.oversize)
+                    .any(|omitted| *omitted == path)
+                {
+                    continue;
+                }
+                let _ = writer.set(
+                    entry.key.clone(),
+                    crate::TraceValue::Str(std::borrow::Cow::Owned(entry.value.to_string())),
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+/// An extension span's events, at their own times.
+fn extension_events(
+    extension: Option<&crate::ExtensionSpanRecord>,
+) -> Vec<opentelemetry::trace::Event> {
+    extension
+        .map(|extension| {
+            extension
+                .events
+                .iter()
+                .map(|event| {
+                    opentelemetry::trace::Event::new(
+                        event.name.clone(),
+                        TraceTimestamp::from_unix_ms(event.at_ms).to_system_time(),
+                        event
+                            .attributes
+                            .iter()
+                            .map(|attribute| {
+                                KeyValue::new(
+                                    attribute.key.clone(),
+                                    enrich::otel_value(attribute.value.clone()),
+                                )
+                            })
+                            .collect(),
+                        0,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Builds a span from every sampled record that publishes one. An unsampled
@@ -353,6 +431,34 @@ impl TraceSink for OtelTelemetry {
             self.export_model_attempts(record, position);
         }
         Ok(())
+    }
+}
+
+/// Third-party OpenTelemetry instrumentation inside an extension body runs
+/// with the body's position as its remote parent: a `reqwest` or `tonic`
+/// client, a plugin-owned span, or a `tracing` span through
+/// `tracing-opentelemetry` at its default `context_activation`.
+impl crate::AmbientContext for OtelTelemetry {
+    fn for_position(&self, position: &TraceCarrier) -> Arc<dyn crate::AmbientScope> {
+        Arc::new(OtelAmbient(otel_context(Some(position))))
+    }
+}
+
+/// The OpenTelemetry context whose remote parent is `position`, or the
+/// empty context when there is none.
+pub fn otel_context(position: Option<&TraceCarrier>) -> Context {
+    position
+        .and_then(span_context)
+        .map_or_else(Context::new, |span| {
+            Context::new().with_remote_span_context(span)
+        })
+}
+
+struct OtelAmbient(Context);
+
+impl crate::AmbientScope for OtelAmbient {
+    fn enter(&self) -> crate::AmbientGuard {
+        crate::AmbientGuard::new(self.0.clone().attach())
     }
 }
 
@@ -605,6 +711,7 @@ struct Projection<'a> {
     process: Option<&'a str>,
     attempt: Option<&'a crate::TraceModelAttempt>,
     usage: Option<Result<LlmUsage, TokenUsageOverflow>>,
+    extension: Option<&'a crate::ExtensionSpanRecord>,
 }
 impl<'a> Projection<'a> {
     fn for_record(record: &'a TraceRecord, position: &TracePosition) -> Option<Self> {
@@ -615,8 +722,13 @@ impl<'a> Projection<'a> {
             process: None,
             attempt: None,
             usage: None,
+            extension: None,
         };
         match (position.kind, &record.event) {
+            (TraceSpanKind::Extension | TraceSpanKind::Point, TraceEvent::ExtensionSpan(span)) => {
+                projection.span = DomainSpan::Extension;
+                projection.extension = Some(span);
+            }
             (TraceSpanKind::Producer, TraceEvent::ProducerSettled { producer: kind, .. }) => {
                 projection.span = producer(*kind);
             }
@@ -669,6 +781,9 @@ impl<'a> Projection<'a> {
         Some(projection)
     }
     fn name(&self) -> String {
+        if let Some(extension) = self.extension {
+            return extension.name.clone();
+        }
         let default = self.span.definition().name;
         let suffix = match self.span {
             DomainSpan::Model => self.model,
@@ -704,9 +819,24 @@ impl<'a> Projection<'a> {
             _ => record.event.is_failed(),
         }
     }
+    /// The SDK kind of the span: an extension span's own, else its type's.
+    fn kind(&self) -> SpanKind {
+        match self.extension.map(|extension| extension.kind) {
+            Some(crate::ExtensionSpanKind::Internal) => SpanKind::Internal,
+            Some(crate::ExtensionSpanKind::Client) => SpanKind::Client,
+            Some(crate::ExtensionSpanKind::Producer) => SpanKind::Producer,
+            Some(crate::ExtensionSpanKind::Consumer) => SpanKind::Consumer,
+            None => self.span.definition().kind,
+        }
+    }
+
     fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
         if let Some(attempt) = self.attempt {
             model::attempt_attributes(&attempt.attempt, out);
+            return;
+        }
+        if let Some(extension) = self.extension {
+            extension_attributes(extension, out);
             return;
         }
         if let Some(operation) = self.operation() {
@@ -908,6 +1038,38 @@ impl<'a> Projection<'a> {
         }
     }
 }
+/// An extension span's lash attributes: the callback it was bound from, how
+/// it ended, and its operation preset's semconv keys. What the plugin
+/// contributed is written through the span's writer at export.
+fn extension_attributes(extension: &crate::ExtensionSpanRecord, out: &mut Vec<KeyValue>) {
+    out.push(A::PluginId.value(extension.plugin_id.clone()));
+    out.push(A::PluginCallback.value(extension.callback.clone()));
+    if extension.point {
+        out.push(A::SpanPoint.value(true));
+    }
+    if let Some(ended_by) = extension.ended_by {
+        out.push(A::SpanEndedBy.value(ended_by.as_str()));
+    }
+    if let Some(operation) = &extension.operation {
+        out.push(A::OperationName.value(operation.name()));
+        match operation {
+            crate::ExtensionOperation::Embeddings {
+                provider,
+                request_model,
+            } => {
+                out.push(A::GenAiProviderName.value(provider.clone()));
+                out.push(A::RequestModel.value(request_model.clone()));
+            }
+            crate::ExtensionOperation::Retrieval { data_source_id } => {
+                out.push(A::DataSourceId.value(data_source_id.clone()));
+            }
+        }
+    }
+    if let Some(error_type) = &extension.error_type {
+        out.push(A::ErrorType.value(error_type.clone()));
+    }
+}
+
 /// A code cell's own attributes (§4.5): a cell is a function tool named by
 /// its language, keyed by its graph key, with its outcome and, once it
 /// answered, the number of tool calls it made.

@@ -29,5 +29,6 @@ pub fn tool_hook_context(
         ),
         clock: std::sync::Arc::new(crate::SystemClock),
         sessions: std::sync::Arc::new(MockSessionManager::default()),
+        trace: Default::default(),
     }
 }

@@ -453,6 +453,8 @@ mod trace_emission;
 #[cfg(feature = "otel-trace")]
 mod trace_enrichment;
 #[cfg(feature = "otel-trace")]
+mod trace_extension;
+#[cfg(feature = "otel-trace")]
 mod trace_nesting;
 #[cfg(feature = "otel-trace")]
 mod trace_parentage;

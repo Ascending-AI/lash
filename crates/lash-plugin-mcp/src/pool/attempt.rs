@@ -95,18 +95,41 @@ impl McpConnectionPool {
         }
         let mut params = CallToolRequestParams::new(native_name);
         params.arguments = arguments;
-        params.meta = Some(rmcp::model::RequestMetaObject::from(
-            serde_json::Map::from_iter([
-                (
-                    "lash.dev/tool-call-id".into(),
-                    Value::String(context.call_id().to_string()),
-                ),
-                (
-                    "lash.dev/tool-attempt".into(),
-                    Value::from(context.attempt_number()),
-                ),
-            ]),
-        ));
+        let mut meta = serde_json::Map::from_iter([
+            (
+                "lash.dev/tool-call-id".into(),
+                Value::String(context.call_id().to_string()),
+            ),
+            (
+                "lash.dev/tool-attempt".into(),
+                Value::from(context.attempt_number()),
+            ),
+        ]);
+        // The server continues the trace of this attempt's tool span, under
+        // its policy (§3.10).
+        if entry.config.trace_propagation == crate::config::McpTracePropagation::W3c
+            && let Some(position) = context.trace().position()
+        {
+            meta.insert("traceparent".into(), Value::String(position.traceparent()));
+            if !position.tracestate().is_empty() {
+                meta.insert(
+                    "tracestate".into(),
+                    Value::String(position.tracestate().as_str().to_owned()),
+                );
+            }
+        }
+        params.meta = Some(rmcp::model::RequestMetaObject::from(meta));
+        // The MCP client annotates the outer tool span instead of opening
+        // its own (semconv MCP): the method and the transport.
+        let tool_span = context.tool_span();
+        let _ = tool_span.set("mcp.method.name", "tools/call");
+        let _ = tool_span.set(
+            "network.transport",
+            match &entry.config.transport {
+                crate::config::McpTransport::Stdio(_) => "pipe",
+                crate::config::McpTransport::StreamableHttp(_) => "tcp",
+            },
+        );
         let cancellation = context
             .cancellation_token()
             .map(tokio_util::sync::CancellationToken::child_token)
@@ -147,6 +170,7 @@ impl McpConnectionPool {
                 let response = match sent {
                     Ok(handle) => {
                         let request_id = handle.id.clone();
+                        let _ = tool_span.set("jsonrpc.request.id", request_id.to_string());
                         let response = handle.await_response();
                         tokio::pin!(response);
                         if let Some(token) = context.cancellation_token() {
@@ -209,6 +233,9 @@ impl McpConnectionPool {
         match response {
             Ok(ServerResult::CallToolResult(result)) => {
                 entry.record_call_success(service_generation);
+                if result.is_error == Some(true) {
+                    let _ = tool_span.set("error.type", "tool_error");
+                }
                 tool_result_from_rmcp(result, context).await
             }
             Ok(_) => McpCallFailure::UnexpectedResponse.into(),

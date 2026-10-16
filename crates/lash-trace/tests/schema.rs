@@ -410,6 +410,7 @@ fn event_samples() -> Vec<TraceEvent> {
             duration_ms: 3,
             issuing_node_id: None,
             attempts: None,
+            span_attributes: Default::default(),
         },
         TraceEvent::ExecCodeStarted {
             language: "python".to_string(),
@@ -475,9 +476,48 @@ fn event_samples() -> Vec<TraceEvent> {
                 done_reason: TraceTurnCompletionReason::AssistantMessage,
             },
         },
-        TraceEvent::Custom {
-            name: "x.event".to_string(),
-            payload: json!({ "ok": true }),
+        TraceEvent::ExtensionSpan(lash_trace::ExtensionSpanRecord {
+            plugin_id: "plugin".into(),
+            callback: "tool_provider:x".into(),
+            name: "x.span".into(),
+            kind: lash_trace::ExtensionSpanKind::Client,
+            operation: Some(lash_trace::ExtensionOperation::Retrieval {
+                data_source_id: "docs".into(),
+            }),
+            started_at_ms: 1,
+            ended_at_ms: 2,
+            point: false,
+            error_type: Some("timeout".into()),
+            ended_by: Some(lash_trace::ExtensionSpanEnd::BodyExit),
+            attributes: vec![lash_trace::ExtensionAttribute {
+                key: "x.count".into(),
+                value: lash_trace::TraceValue::Int(3),
+            }],
+            events: vec![lash_trace::ExtensionSpanEvent {
+                name: "x.event".into(),
+                at_ms: 2,
+                attributes: Vec::new(),
+            }],
+            content: vec![lash_trace::ExtensionContent {
+                key: "x.content".into(),
+                value: json!({ "ok": true }),
+            }],
+        }),
+        TraceEvent::BodyOmissions(lash_trace::TraceOmissionDiagnostic {
+            site: lash_trace::TraceOmissionSite::Body {
+                owner: "plugin".into(),
+                key: "tool_provider:x".into(),
+                at: None,
+                call: None,
+                attempt: Some(1),
+            },
+            counts: lash_trace::TraceOmissionCounts::default(),
+        }),
+        TraceEvent::ContextPressure {
+            plugin_id: "plugin".into(),
+            hook_id: "pressure".into(),
+            task: "compact".into(),
+            frame_node_id: "frame".into(),
         },
     ]
 }
@@ -1096,6 +1136,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             duration_ms: 3,
             issuing_node_id: None,
             attempts: failed_tool_attempt(),
+            span_attributes: Default::default(),
         },
         TraceEvent::ExecCodeCompleted {
             trailing_discarded: 0,

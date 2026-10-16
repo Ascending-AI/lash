@@ -121,6 +121,7 @@ pub fn emit_tool_call_completed(
                 duration_ms,
                 issuing_node_id: issuing_node_id.map(str::to_string),
                 attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
+                span_attributes: Default::default(),
             },
         )
     });

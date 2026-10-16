@@ -4,7 +4,7 @@ error[E0609]: no field `session_lifecycle` on type `&TurnHookContext`
 4 |     let _ = &ctx.session_lifecycle;
   |                  ^^^^^^^^^^^^^^^^^ unknown field
   |
-  = note: available fields are: `session_id`, `plugin_config`, `state`, `sessions`, `turn_context`
+  = note: available fields are: `session_id`, `plugin_config`, `state`, `sessions`, `turn_context`, `trace`
 
 error[E0609]: no field `session_graph` on type `&TurnHookContext`
  --> tests/ui/turn_hooks_hold_only_session_reads.rs:5:18
@@ -12,7 +12,7 @@ error[E0609]: no field `session_graph` on type `&TurnHookContext`
 5 |     let _ = &ctx.session_graph;
   |                  ^^^^^^^^^^^^^ unknown field
   |
-  = note: available fields are: `session_id`, `plugin_config`, `state`, `sessions`, `turn_context`
+  = note: available fields are: `session_id`, `plugin_config`, `state`, `sessions`, `turn_context`, `trace`
 
 error[E0609]: no field `session_lifecycle` on type `&TurnResultHookContext`
  --> tests/ui/turn_hooks_hold_only_session_reads.rs:8:18
@@ -20,7 +20,7 @@ error[E0609]: no field `session_lifecycle` on type `&TurnResultHookContext`
 8 |     let _ = &ctx.session_lifecycle;
   |                  ^^^^^^^^^^^^^^^^^ unknown field
   |
-  = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `turn`, `sessions`
+  = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `turn`, `sessions`, `trace`
 
 error[E0609]: no field `session_graph` on type `&TurnResultHookContext`
  --> tests/ui/turn_hooks_hold_only_session_reads.rs:9:18
@@ -28,7 +28,7 @@ error[E0609]: no field `session_graph` on type `&TurnResultHookContext`
 9 |     let _ = &ctx.session_graph;
   |                  ^^^^^^^^^^^^^ unknown field
   |
-  = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `turn`, `sessions`
+  = note: available fields are: `writer_formats`, `session_id`, `plugin_config`, `turn`, `sessions`, `trace`
 
 error[E0609]: no field `session_lifecycle` on type `&CheckpointHookContext`
   --> tests/ui/turn_hooks_hold_only_session_reads.rs:12:18
@@ -36,7 +36,7 @@ error[E0609]: no field `session_lifecycle` on type `&CheckpointHookContext`
 12 |     let _ = &ctx.session_lifecycle;
    |                  ^^^^^^^^^^^^^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `checkpoint`, `state`, `sessions`
+   = note: available fields are: `session_id`, `plugin_config`, `checkpoint`, `state`, `sessions`, `trace`
 
 error[E0609]: no field `session_graph` on type `&CheckpointHookContext`
   --> tests/ui/turn_hooks_hold_only_session_reads.rs:13:18
@@ -44,4 +44,4 @@ error[E0609]: no field `session_graph` on type `&CheckpointHookContext`
 13 |     let _ = &ctx.session_graph;
    |                  ^^^^^^^^^^^^^ unknown field
    |
-   = note: available fields are: `session_id`, `plugin_config`, `checkpoint`, `state`, `sessions`
+   = note: available fields are: `session_id`, `plugin_config`, `checkpoint`, `state`, `sessions`, `trace`

@@ -771,6 +771,7 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
                 duration_ms: 55,
                 issuing_node_id: None,
                 attempts: None,
+                span_attributes: Default::default(),
             },
             "execute_tool unfamiliar-tool",
             1000,
@@ -1185,6 +1186,7 @@ fn failure_attributes_preserve_typed_classes() {
         duration_ms: 1,
         issuing_node_id: None,
         attempts: Some(attempts),
+        span_attributes: Default::default(),
     };
     let attempts = vec![
         crate::TraceRetryAttempt {
@@ -2196,6 +2198,7 @@ fn content_attributes_are_whole_schema_valid_json() {
         duration_ms: 1,
         issuing_node_id: None,
         attempts: None,
+        span_attributes: Default::default(),
     };
     let turn = derived(&producer(), &scope_id());
     let captured = captured_record(

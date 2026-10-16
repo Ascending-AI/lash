@@ -171,9 +171,9 @@ async fn a_delete_that_lands_between_admission_and_claim_refuses_the_send() {
 /// The position of the first trace named `name` among `trace`'s records.
 fn trace_position(trace: &RecordingTrace, name: &str) -> Option<usize> {
     let name = format!("agent_workbench.{name}");
-    trace.records().iter().position(|record| {
-        matches!(&record.event, TraceEvent::Custom { name: recorded, .. } if *recorded == name)
-    })
+    trace.records().iter().position(
+        |record| matches!(&record.event, TraceEvent::ExtensionSpan(span) if span.name == name),
+    )
 }
 
 /// Deleting a session whose turn awaits a real process cancels that turn

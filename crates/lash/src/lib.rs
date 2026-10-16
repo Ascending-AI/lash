@@ -675,7 +675,7 @@ pub mod plugins {
         ContributionKind, ContributionReadiness, ExecutionComposition, ExecutionState,
         InstalledInventory, InventoryScope, MaterializedInventoryReader, PluginRecipe,
         PluginRecipeFactory, PreflightIssue, ProcessRecipe, Proposal, RequiredPort, Requirements,
-        RetiredConfigObservers, ServiceKind, ToolProviderKey, ToolProviderKeyError,
+        RetiredConfigObservers, ServiceKind, ToolProviderKey, ToolProviderKeyError, TraceScopeOf,
         WeakMaterializedInventoryReader,
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
@@ -897,6 +897,12 @@ pub mod plugins {
         MaterialRefusal, MaterialRetentionError, MaterialRole, OperationRun, RetainedBundle,
         RunInputKind,
     };
+    /// The extension tracing capability every traced plugin body is handed
+    /// (`ctx.trace`, `AttemptContext::trace()`), the spans it opens, and a
+    /// tool body's annotations of its own tool span.
+    pub use lash_core::trace::{
+        ExtensionSpan, ExtensionTrace, ToolSpanAttributes, TraceInstrumented,
+    };
     /// A session's recorded plugin configuration and the owner contract that
     /// creates and changes it (FIG-4379): each installed plugin registers the
     /// owner of its namespace and the typed config commands that change it,
@@ -952,6 +958,7 @@ pub mod plugins {
         facade_support::ToolCatalogContribution, facade_support::TurnHookContext,
         facade_support::TurnResultHookContext,
     };
+    pub use lash_core::{SpanAttributes, SpanSpec};
     /// Lifecycle observation: what a `reg.lifecycle().on_event(..)` hook receives
     /// when a turn is finalized, a session is restored, or its configuration
     /// changes, and the contexts each event carries.

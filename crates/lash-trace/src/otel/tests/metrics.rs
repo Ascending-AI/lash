@@ -281,6 +281,7 @@ pub(super) fn emit_remaining_metrics(adapter: &OtelTelemetry) {
                 duration_ms: 1,
                 issuing_node_id: None,
                 attempts: None,
+                span_attributes: Default::default(),
             },
         ),
         (

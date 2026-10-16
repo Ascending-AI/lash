@@ -8,7 +8,7 @@ use super::registries::{
 };
 use super::*;
 pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
-pub use lash_core_store::tool_run::CallbackSlot;
+pub use lash_core_store::tool_run::{CallbackSlot, TraceScopeOf};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

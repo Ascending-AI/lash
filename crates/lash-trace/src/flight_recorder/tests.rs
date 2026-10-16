@@ -88,6 +88,7 @@ fn tool(outcome: TraceToolCallOutcome, duration_ms: u64) -> TraceEvent {
         duration_ms,
         issuing_node_id: None,
         attempts: None,
+        span_attributes: Default::default(),
     }
 }
 
@@ -223,10 +224,27 @@ fn minimum_interval_suppresses_triggers_without_losing_recent_context() {
 fn snapshots_never_contain_payload_even_with_full_content() {
     let (sink, snapshots, _) = recorder(FlightRecorderSettings::default());
     let events = [
-        TraceEvent::Custom {
+        TraceEvent::ExtensionSpan(crate::ExtensionSpanRecord {
+            plugin_id: "plugin".into(),
+            callback: "tool_provider:secret".into(),
             name: "PAYLOAD_SECRET".into(),
-            payload: json!("PAYLOAD_SECRET"),
-        },
+            kind: crate::ExtensionSpanKind::Internal,
+            operation: None,
+            started_at_ms: 1,
+            ended_at_ms: 2,
+            point: false,
+            error_type: None,
+            ended_by: Some(crate::ExtensionSpanEnd::End),
+            attributes: vec![crate::ExtensionAttribute {
+                key: "secret".into(),
+                value: crate::TraceValue::from("PAYLOAD_SECRET"),
+            }],
+            events: Vec::new(),
+            content: vec![crate::ExtensionContent {
+                key: "secret".into(),
+                value: json!("PAYLOAD_SECRET"),
+            }],
+        }),
         TraceEvent::ProtocolStep {
             plugin_id: "plugin".into(),
             payload: json!("PAYLOAD_SECRET"),

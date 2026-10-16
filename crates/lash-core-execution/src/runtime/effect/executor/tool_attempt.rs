@@ -12,6 +12,10 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
         matches!(command, RuntimeEffectCommand::ToolAttempt { .. })
     }
 
+    fn bind_live_step(&mut self, live: Arc<crate::trace::LiveStep>) {
+        self.tool_context.live = Some(live);
+    }
+
     async fn execute(
         self: Box<Self>,
         envelope: RuntimeEffectEnvelope,

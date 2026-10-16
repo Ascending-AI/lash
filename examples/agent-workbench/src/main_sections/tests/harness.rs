@@ -612,12 +612,13 @@ impl RecordingTrace {
             .lock_recover()
             .iter()
             .filter_map(|record| match &record.event {
-                TraceEvent::Custom {
-                    name: recorded,
-                    payload,
-                } if *recorded == name => {
-                    Some((record.context.session_id.clone(), payload.clone()))
-                }
+                TraceEvent::ExtensionSpan(span) if span.name == name => Some((
+                    record.context.session_id.clone(),
+                    span.content
+                        .first()
+                        .map(|content| content.value.clone())
+                        .unwrap_or_default(),
+                )),
                 _ => None,
             })
             .collect()

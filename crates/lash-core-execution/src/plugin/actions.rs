@@ -241,11 +241,17 @@ pub struct PluginQueryContext {
     pub session_id: Option<SessionId>,
     pub sessions: Arc<dyn SessionReadService>,
     pub processes: Arc<dyn ProcessReadService>,
+    /// Where the operation stands in the trace: under the producer span of
+    /// the host call that admitted it; untraced for a query.
+    pub(crate) trace: crate::trace::ExtensionTrace,
 }
 #[derive(Clone)]
 pub struct PluginCommandContext {
     pub session_id: Option<SessionId>,
     pub bindings: Arc<ServiceBindings>,
+    /// Where the operation stands in the trace: under the producer span of
+    /// the host call that admitted it; untraced for a query.
+    pub(crate) trace: crate::trace::ExtensionTrace,
 }
 #[derive(Clone)]
 pub struct PluginTaskContext {
@@ -253,7 +259,25 @@ pub struct PluginTaskContext {
     pub bindings: Arc<ServiceBindings>,
     pub scoped_effect_controller: crate::ActorContext,
     pub cancellation_token: tokio_util::sync::CancellationToken,
+    /// Where the operation stands in the trace: under the producer span of
+    /// the host call that admitted it; untraced for a query.
+    pub(crate) trace: crate::trace::ExtensionTrace,
 }
+
+macro_rules! operation_trace {
+    ($($context:ty),+) => {$(
+        impl $context {
+            /// Where this operation stands in the trace: under the producer
+            /// span of the host call that admitted it, bound from the
+            /// operation's registration and revoked when it returns.
+            pub fn trace(&self) -> crate::trace::ExtensionTrace {
+                self.trace.clone()
+            }
+        }
+    )+};
+}
+
+operation_trace!(PluginQueryContext, PluginCommandContext, PluginTaskContext);
 
 #[async_trait::async_trait]
 pub trait SessionReadService: crate::core_internal::RuntimeService + Send + Sync {
@@ -463,6 +487,10 @@ impl RegisteredPluginOperation {
 
     pub(crate) fn plugin_id(&self) -> &str {
         &self.identity.owner
+    }
+
+    pub(crate) fn identity(&self) -> &super::PluginCallbackIdentity {
+        &self.identity
     }
 
     pub(crate) fn failure_origin(&self) -> PluginFailureOrigin {

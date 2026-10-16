@@ -55,10 +55,7 @@ fn a_failing_sink_does_not_rob_later_sinks_in_a_tee() {
 
     let append = tee.append(&fixture_record(
         TraceContext::default().for_session("root"),
-        TraceEvent::Custom {
-            name: "test.event".to_string(),
-            payload: serde_json::json!({"ok": true}),
-        },
+        TraceEvent::CompactionCompleted { summary_nodes: 1 },
     ));
 
     assert!(
@@ -69,7 +66,10 @@ fn a_failing_sink_does_not_rob_later_sinks_in_a_tee() {
     assert!(
         matches!(
             recording.records().as_slice(),
-            [TraceRecord { event: TraceEvent::Custom { name, .. }, .. }] if name == "test.event"
+            [TraceRecord {
+                event: TraceEvent::CompactionCompleted { summary_nodes: 1 },
+                ..
+            }]
         ),
         "the later sink still received the record"
     );
@@ -90,6 +90,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             duration_ms: 1,
             issuing_node_id: None,
             attempts: None,
+            span_attributes: Default::default(),
         }
     }
 

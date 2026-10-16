@@ -238,36 +238,39 @@ pub(crate) struct RecoveryTraceTrigger {
 }
 
 pub(crate) fn emit_recovery_trace(
-    traces: &lash_core::plugin::PluginTraceEmitter,
-    trace_context: lash_core::TraceContext,
-    event_name: &str,
+    trace: &lash_core::trace::ExtensionTrace,
+    event_name: &'static str,
     trigger: Option<&RecoveryTraceTrigger>,
     outcome: Option<&str>,
 ) {
-    let mut payload = serde_json::json!({});
-    if let Some(trigger) = trigger {
-        payload["trigger"] = serde_json::json!("persisted_context_overflow");
-        payload["history_messages"] = serde_json::json!(trigger.history_messages);
-        payload["attempts"] = serde_json::json!(trigger.attempts);
-        payload["oversized_elided_parts"] = serde_json::json!(trigger.oversized_elided_parts);
-    }
-    if let Some(outcome) = outcome {
-        payload["outcome"] = serde_json::json!(outcome);
-    }
-    traces.emit(
-        trace_context,
-        lash_core::TraceEvent::Custom {
-            name: event_name.to_string(),
-            payload,
-        },
-    );
+    // A point under the hook's own position: the turn it decides for.
+    trace.event(event_name, |attributes| {
+        if let Some(trigger) = trigger {
+            attributes
+                .set("compaction.trigger", "persisted_context_overflow")
+                .set(
+                    "compaction.history_messages",
+                    i64::try_from(trigger.history_messages).unwrap_or(i64::MAX),
+                )
+                .set(
+                    "compaction.attempts",
+                    i64::try_from(trigger.attempts).unwrap_or(i64::MAX),
+                )
+                .set(
+                    "compaction.oversized_elided_parts",
+                    i64::try_from(trigger.oversized_elided_parts).unwrap_or(i64::MAX),
+                );
+        }
+        if let Some(outcome) = outcome {
+            attributes.set("compaction.outcome", outcome.to_owned());
+        }
+    });
 }
 
 /// A settled failed attempt: its `Failed` record and, at the cap, the
 /// `Exhausted` record that closes the recovery with no frame.
 fn recovery_failure_decision(
-    traces: &lash_core::plugin::PluginTraceEmitter,
-    trace_context: lash_core::TraceContext,
+    trace: &lash_core::trace::ExtensionTrace,
     attempt_no: usize,
     cause: RecoveryFailureCause,
     schema_version: u32,
@@ -280,8 +283,7 @@ fn recovery_failure_decision(
         format!("failed:{cause:?}")
     };
     emit_recovery_trace(
-        traces,
-        trace_context,
+        trace,
         TRACE_OVERFLOW_RECOVERY_OUTCOME,
         None,
         Some(outcome.as_str()),
@@ -315,11 +317,9 @@ pub(crate) async fn overflow_recovery_decision(
     state: OverflowRecoveryState,
     config: &StandardCompactionConfig,
 ) -> Result<ContextPressureDecision, ContextError> {
-    let trace_context = lash_core::TraceContext::default().for_session(ctx.session_id.clone());
     if state.exhausted(config) {
         emit_recovery_trace(
-            &ctx.traces,
-            trace_context,
+            &ctx.trace,
             TRACE_OVERFLOW_RECOVERY_OUTCOME,
             None,
             Some("exhausted:recoverable_failure"),
@@ -340,8 +340,7 @@ pub(crate) async fn overflow_recovery_decision(
         oversized_elided_parts: 0,
     };
     emit_recovery_trace(
-        &ctx.traces,
-        trace_context.clone(),
+        &ctx.trace,
         TRACE_OVERFLOW_RECOVERY_TRIGGER,
         Some(&trigger),
         None,
@@ -349,8 +348,7 @@ pub(crate) async fn overflow_recovery_decision(
 
     if summary_prefix.is_empty() {
         return recovery_failure_decision(
-            &ctx.traces,
-            trace_context,
+            &ctx.trace,
             attempt_no,
             RecoveryFailureCause::NothingToSummarize,
             ctx.writer_formats.writer_version(
@@ -390,8 +388,7 @@ pub(crate) async fn overflow_recovery_decision(
     let request_tokens = projected_tokens.saturating_add(config.approx_token_count(&prompt_text));
     if request_tokens > summarizer_budget_tokens {
         return recovery_failure_decision(
-            &ctx.traces,
-            trace_context,
+            &ctx.trace,
             attempt_no,
             RecoveryFailureCause::RequestExceedsWindow,
             ctx.writer_formats.writer_version(
@@ -420,8 +417,7 @@ pub(crate) async fn overflow_recovery_decision(
         Ok(Some(summary)) => summary,
         Ok(None) => {
             return recovery_failure_decision(
-                &ctx.traces,
-                trace_context,
+                &ctx.trace,
                 attempt_no,
                 RecoveryFailureCause::EmptySummary,
                 ctx.writer_formats.writer_version(
@@ -434,8 +430,7 @@ pub(crate) async fn overflow_recovery_decision(
         Err(error) if error.aborts_invocation() => return Err(error),
         Err(error) => {
             return recovery_failure_decision(
-                &ctx.traces,
-                trace_context,
+                &ctx.trace,
                 attempt_no,
                 RecoveryFailureCause::SummarizerRefused {
                     code: error
@@ -452,8 +447,7 @@ pub(crate) async fn overflow_recovery_decision(
     };
 
     emit_recovery_trace(
-        &ctx.traces,
-        trace_context,
+        &ctx.trace,
         TRACE_OVERFLOW_RECOVERY_OUTCOME,
         None,
         Some("completed"),

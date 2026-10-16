@@ -349,6 +349,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             sessions: Arc::new(Sessions),
             turn_context: Default::default(),
             plugin_config: Default::default(),
+            trace: Default::default(),
         })
         .await
         .unwrap();

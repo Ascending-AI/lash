@@ -1,4 +1,6 @@
-//! Tokio task helpers that preserve the caller's tracing context.
+//! Tokio task helpers that preserve the caller's tracing context and its
+//! trace position: a task spawned while an extension body's position is
+//! entered polls under that position too.
 
 use std::future::Future;
 
@@ -23,5 +25,12 @@ where
 {
     #[cfg(feature = "perf-witness")]
     sizes::record("task.spawn", &future);
-    tokio::spawn(future.instrument(tracing::Span::current()))
+    // Lash's frame is the innermost wrapper: it enters after the `tracing`
+    // span, so the host's current context during each poll is the position.
+    match lash_trace::AmbientFrame::current() {
+        Some(frame) => tokio::spawn(
+            lash_trace::Framed::new(future, frame).instrument(tracing::Span::current()),
+        ),
+        None => tokio::spawn(future.instrument(tracing::Span::current())),
+    }
 }

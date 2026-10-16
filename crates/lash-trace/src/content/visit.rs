@@ -337,6 +337,7 @@ impl TraceEvent {
                 name: _,
                 duration_ms: _,
                 issuing_node_id: _,
+                span_attributes: _,
             } => {
                 json(C::ToolArguments, "tool_arguments", args, f);
                 match &mut output.outcome {
@@ -514,7 +515,23 @@ impl TraceEvent {
                 messages(input, C::InputMessages, "input_messages", f);
                 messages(output, C::OutputMessages, "output_messages", f);
             }
-            Self::Custom { payload, name: _ } => json(C::Extension, "extension", payload, f),
+            Self::ExtensionSpan(span) => {
+                for entry in &mut span.content {
+                    json(
+                        C::Extension,
+                        format!("extension.{}", entry.key),
+                        &mut entry.value,
+                        f,
+                    );
+                }
+            }
+            Self::ContextPressure {
+                task,
+                plugin_id: _,
+                hook_id: _,
+                frame_node_id: _,
+            } => text(C::Extension, "extension.task", task, f),
+            Self::BodyOmissions(_) => {}
             Self::TurnStarted { metadata: _ }
             | Self::PromptBuilt {
                 prompt_hash: _,

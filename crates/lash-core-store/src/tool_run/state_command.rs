@@ -32,9 +32,9 @@ use crate::plugin_state::{
 use crate::store::plugin_writers::PluginCallbackIdentity;
 
 /// Generates [`CallbackSlot`] from one table, so a slot cannot exist
-/// without its key prefix and its state authority.
+/// without its key prefix, its state authority and its tracing scope.
 macro_rules! callback_slots {
-    ($($(#[$doc:meta])* $variant:ident => $prefix:literal, $authority:ident;)+) => {
+    ($($(#[$doc:meta])* $variant:ident => $prefix:literal, $authority:ident, $trace:ident;)+) => {
         /// Every callback slot the plugin registrar names, by the key prefix
         /// of its [`PluginCallbackIdentity`] (FIG-4854).
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -61,8 +61,37 @@ macro_rules! callback_slots {
                     $(Self::$variant => StateAuthority::$authority,)+
                 }
             }
+
+            /// Where the slot's callbacks stand in the trace: the span their
+            /// tracing capability is bound at, or none.
+            #[must_use]
+            pub const fn trace_scope(self) -> TraceScopeOf {
+                match self {
+                    $(Self::$variant => TraceScopeOf::$trace,)+
+                }
+            }
         }
     };
+}
+
+/// Where a slot's callbacks stand in the trace, and so whether they get a
+/// tracing capability and under which span. A column of the slot table: a
+/// new slot cannot exist without a tracing decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TraceScopeOf {
+    /// The `execute_tool` span of one admitted attempt; the body knows its
+    /// call address.
+    Attempt,
+    /// The `execute_tool` span of a call, before or after its attempts.
+    Call,
+    /// The turn's `invoke_agent` span.
+    Turn,
+    /// The code cell's span while a cell runs, else the turn's.
+    Executing,
+    /// The `lash.plugin.invoke` producer of a host call.
+    Producer,
+    /// Pure, read-only or decision-only: no capability.
+    Untraced,
 }
 
 /// What a callback may do to plugin state.
@@ -75,38 +104,38 @@ pub enum StateAuthority {
 }
 
 callback_slots! {
-    ToolProvider => "tool_provider", DecisionOnly;
+    ToolProvider => "tool_provider", DecisionOnly, Attempt;
     /// A tool provider's reader: what answers its `Read` tools' calls in a
     /// code cell, owed while a cell's read plan names the provider.
-    ToolReads => "tool_reads", DecisionOnly;
-    ToolCatalog => "tool_catalog", DecisionOnly;
-    BeforeTurn => "before_turn", Commands;
+    ToolReads => "tool_reads", DecisionOnly, Untraced;
+    ToolCatalog => "tool_catalog", DecisionOnly, Untraced;
+    BeforeTurn => "before_turn", Commands, Turn;
     /// Argument transforms, chained before provider preparation.
-    ToolArgsTransform => "tool_args_transform", DecisionOnly;
+    ToolArgsTransform => "tool_args_transform", DecisionOnly, Call;
     /// Before-checks over the immutable prepared call.
-    ToolArgsCheck => "tool_args_check", DecisionOnly;
+    ToolArgsCheck => "tool_args_check", DecisionOnly, Call;
     /// Result transforms, chained over the original and preceding candidate.
-    ToolResultTransform => "tool_result_transform", DecisionOnly;
+    ToolResultTransform => "tool_result_transform", DecisionOnly, Call;
     /// The after-tool result check, on the Run's sequential path.
-    ToolResultCheck => "tool_result_check", Commands;
-    AfterTurn => "after_turn", Commands;
-    Checkpoint => "checkpoint", Commands;
-    AssistantStream => "assistant_stream", DecisionOnly;
-    AssistantResponse => "assistant_response", DecisionOnly;
-    AssistantStreamFinished => "assistant_stream_finished", DecisionOnly;
-    PresentationStep => "presentation_step", DecisionOnly;
-    PresentationPresenter => "presentation_presenter", DecisionOnly;
-    RuntimeEvent => "runtime_event", DecisionOnly;
-    Operation => "operation", DecisionOnly;
+    ToolResultCheck => "tool_result_check", Commands, Call;
+    AfterTurn => "after_turn", Commands, Turn;
+    Checkpoint => "checkpoint", Commands, Turn;
+    AssistantStream => "assistant_stream", DecisionOnly, Turn;
+    AssistantResponse => "assistant_response", DecisionOnly, Turn;
+    AssistantStreamFinished => "assistant_stream_finished", DecisionOnly, Turn;
+    PresentationStep => "presentation_step", DecisionOnly, Untraced;
+    PresentationPresenter => "presentation_presenter", DecisionOnly, Untraced;
+    RuntimeEvent => "runtime_event", DecisionOnly, Untraced;
+    Operation => "operation", DecisionOnly, Producer;
     /// Attachment-omission history policies (ADR 0133).
-    AttachmentOmission => "attachment_omission", DecisionOnly;
-    ContextCompactor => "context_compactor", DecisionOnly;
-    ContextPressure => "context_pressure", DecisionOnly;
-    ProtocolSession => "protocol_session", DecisionOnly;
-    ProtocolDriver => "protocol_driver", DecisionOnly;
-    CodeExecutor => "code_executor", DecisionOnly;
-    AssistantProseProjector => "assistant_prose_projector", DecisionOnly;
-    CellFailureFeedback => "cell_failure_feedback", DecisionOnly;
+    AttachmentOmission => "attachment_omission", DecisionOnly, Untraced;
+    ContextCompactor => "context_compactor", DecisionOnly, Turn;
+    ContextPressure => "context_pressure", DecisionOnly, Turn;
+    ProtocolSession => "protocol_session", DecisionOnly, Executing;
+    ProtocolDriver => "protocol_driver", DecisionOnly, Executing;
+    CodeExecutor => "code_executor", DecisionOnly, Executing;
+    AssistantProseProjector => "assistant_prose_projector", DecisionOnly, Untraced;
+    CellFailureFeedback => "cell_failure_feedback", DecisionOnly, Untraced;
 }
 
 impl CallbackSlot {

@@ -336,6 +336,17 @@ impl LashRuntime {
             )));
         };
         let plugins = Arc::clone(session.plugins());
+        // The operation stands under the producer span of the host call that
+        // admitted its command.
+        let trace = parent
+            .clone()
+            .map_or_else(crate::trace::ExtensionTrace::untraced, |parent| {
+                crate::trace::ExtensionTrace::at_producer(
+                    &self.host.core.tracing,
+                    parent,
+                    lash_trace::TraceContext::default().for_session(session_id.clone()),
+                )
+            });
         let ran = match task {
             None => {
                 plugins
@@ -345,6 +356,7 @@ impl LashRuntime {
                         Some(session_id.clone()),
                         true,
                         services.bindings(),
+                        trace,
                     )
                     .await
             }
@@ -360,6 +372,7 @@ impl LashRuntime {
                     services.bindings(),
                     operation_controller.clone(),
                     stop.clone(),
+                    trace,
                 );
                 let ran = run_until_returned(
                     task,

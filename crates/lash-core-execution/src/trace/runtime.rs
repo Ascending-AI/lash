@@ -49,6 +49,9 @@ struct TraceRuntimeParts {
     composition: crate::CompositionCacheLimits,
     omissions: Arc<lash_trace::TraceOmissionLedger>,
     compositions: Arc<super::composition::CompositionMemory>,
+    /// The host's ambient context: what third-party instrumentation inside
+    /// an extension body sees as current. None without an adapter.
+    ambient: Option<Arc<dyn lash_trace::AmbientContext>>,
 }
 
 impl TraceRuntime {
@@ -72,8 +75,27 @@ impl TraceRuntime {
                 composition: crate::CompositionCacheLimits::standard(),
                 omissions,
                 compositions: Arc::default(),
+                ambient: None,
             }),
         }
+    }
+
+    /// Installs the host's ambient context: the exporter's, so third-party
+    /// instrumentation inside an extension body nests under its position.
+    #[must_use]
+    pub fn with_ambient(mut self, ambient: Arc<dyn lash_trace::AmbientContext>) -> Self {
+        Arc::make_mut(&mut self.parts).ambient = Some(ambient);
+        self
+    }
+
+    /// Whether `other` is this same runtime.
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.parts, &other.parts)
+    }
+
+    /// The host's ambient context, when an adapter installed one.
+    pub(crate) fn ambient(&self) -> Option<&Arc<dyn lash_trace::AmbientContext>> {
+        self.parts.ambient.as_ref()
     }
 
     /// The runtime's injected metric instruments: no-op handles unless the
@@ -445,6 +467,7 @@ impl TraceRuntime {
             silenced: false,
             narrowing: None,
             selector_failed: false,
+            gate: None,
         }
     }
 }
@@ -535,8 +558,24 @@ impl TraceEmitter {
         at_ms: u64,
         record: impl FnOnce() -> (TraceContext, TraceEvent),
     ) {
+        if let Some(record) = self.prepare(permit, position, identity, at_ms, record) {
+            self.append(&record);
+        }
+    }
+
+    /// The record [`emit`](Self::emit) would hand the sinks, built, selected
+    /// and hooked, without appending it: for a record a publication hold
+    /// keeps until its parent publishes. `None` when nothing is built.
+    pub(crate) fn prepare(
+        &self,
+        permit: Option<&EmissionPermit>,
+        position: Option<TracePosition>,
+        identity: impl FnOnce() -> TraceRecordIdentity,
+        at_ms: u64,
+        record: impl FnOnce() -> (TraceContext, TraceEvent),
+    ) -> Option<TraceRecord> {
         if permit.is_none() || !self.has_external_observers() {
-            return;
+            return None;
         }
         let (context, event) = record();
         match TraceRecord::identified(
@@ -578,7 +617,7 @@ impl TraceEmitter {
                         }
                     }
                     if !narrow.builds(kind) {
-                        return;
+                        return None;
                     }
                     policy.content = narrow.content();
                 }
@@ -610,9 +649,12 @@ impl TraceEmitter {
                     },
                     &record.omissions,
                 );
-                self.append(&record);
+                Some(record)
             }
-            Err(error) => tracing::warn!(%error, "failed to derive a trace record identity"),
+            Err(error) => {
+                tracing::warn!(%error, "failed to derive a trace record identity");
+                None
+            }
         }
     }
 
@@ -1023,6 +1065,9 @@ pub struct TraceStanding {
     silenced: bool,
     narrowing: Option<Arc<lash_trace::TraceNarrowing>>,
     selector_failed: bool,
+    /// Inside an open extension span: the closing records of the leaves
+    /// opened here are held in that span's hold until it publishes (P3).
+    gate: Option<extension::HoldGate>,
 }
 
 /// The span a standing's records name instead of its scope's: a model call,
@@ -1140,6 +1185,7 @@ impl TraceStanding {
             silenced: false,
             narrowing: None,
             selector_failed: false,
+            gate: None,
         }
     }
 
@@ -1154,6 +1200,7 @@ impl TraceStanding {
             silenced: self.silenced,
             narrowing: self.narrowing.clone(),
             selector_failed: self.selector_failed,
+            gate: self.gate.clone(),
         }
     }
 
@@ -1284,6 +1331,7 @@ impl TraceStanding {
             silenced: false,
             narrowing: self.narrowing.clone(),
             selector_failed: self.selector_failed,
+            gate: self.gate.clone(),
         };
         standing.observe_as(SpanRole::Opens, None, record);
         OpenSpan {
@@ -1319,7 +1367,125 @@ impl TraceStanding {
             silenced: self.silenced || !self.runtime.parts.detail.builds(kind),
             narrowing: self.narrowing.clone(),
             selector_failed: self.selector_failed,
+            gate: None,
         })
+    }
+
+    /// Whether a `kind` span opened here would be built: something observes,
+    /// the detail policy builds the kind, and neither this standing's
+    /// narrowing nor an enclosing skipped span turned it off.
+    pub(crate) fn builds(&self, kind: TraceSpanKind) -> bool {
+        !self.silenced
+            && self.runtime.is_observed()
+            && self.runtime.parts.detail.builds(kind)
+            && self
+                .narrowing
+                .as_deref()
+                .is_none_or(|narrowing| narrowing.builds(kind))
+    }
+
+    /// The standing of code inside the open extension span `span` (whose
+    /// parent is `parent`), opened at `started_at_ms`: its leaves are the
+    /// span's children, and their closing records are held by `gate` until
+    /// the span publishes.
+    pub(crate) fn in_extension(
+        &self,
+        span: TraceCarrier,
+        parent: TraceCarrier,
+        started_at_ms: u64,
+        gate: extension::HoldGate,
+    ) -> Self {
+        Self {
+            leaf: Some(Arc::new(LeafSpan {
+                span,
+                parent,
+                kind: TraceSpanKind::Extension,
+                started_at_ms,
+            })),
+            gate: Some(gate),
+            ..self.clone()
+        }
+    }
+
+    /// The standing of code inside the `kind` container `span` under this
+    /// standing's container: a span another owner derives and closes, which
+    /// the work opened here takes as its parent.
+    pub(crate) fn within(&self, span: TraceCarrier, kind: TraceSpanKind) -> Self {
+        let parent = self.container().cloned().unwrap_or_else(|| span.clone());
+        Self {
+            leaf: Some(Arc::new(LeafSpan {
+                span,
+                parent,
+                kind,
+                started_at_ms: self.runtime.parts.clock.timestamp_ms(),
+            })),
+            ..self.clone()
+        }
+    }
+
+    /// A random span id for a leaf opened here, from the deployment's id
+    /// source.
+    pub(crate) fn leaf_span_id(&self) -> lash_trace::W3cSpanId {
+        self.runtime.parts.identity.leaf_span_id()
+    }
+
+    /// Emits the one whole record of a span at `position` through this
+    /// standing's right, and hands the built record to `deliver` instead of
+    /// appending it: a hold may keep it until its parent publishes. A shift
+    /// behind its journal frontier holds the record with its own
+    /// observations: released when a step body runs, dropped when the
+    /// journal answers one (§7.4 rule 5).
+    pub(crate) fn emit_whole(
+        &self,
+        position: TracePosition,
+        context: TraceContext,
+        event: TraceEvent,
+        deliver: impl FnOnce(TraceRecord, &TraceEmitter) + Send + 'static,
+    ) {
+        if !self.runtime.is_observed() {
+            return;
+        }
+        let at_ms = position.ended_at.map_or_else(
+            || self.runtime.parts.clock.timestamp_ms(),
+            TraceTimestamp::unix_ms,
+        );
+        let emit = {
+            let standing = self.clone();
+            move |permit: &EmissionPermit, attempt: TraceAttemptId, ordinal: u64| {
+                let identity = match standing.scope.as_deref() {
+                    Some(scope) => TraceRecordIdentity::Live {
+                        scope: scope.scope.clone(),
+                        attempt,
+                        ordinal,
+                    },
+                    None => TraceRecordIdentity::UnscopedLive { attempt, ordinal },
+                };
+                let emitter = standing.emitter();
+                if let Some(record) = emitter.prepare(
+                    Some(permit),
+                    Some(position),
+                    || identity,
+                    at_ms,
+                    || (context, event),
+                ) {
+                    deliver(record, &emitter);
+                }
+            }
+        };
+        match &self.right {
+            EmissionRight::Body(live) => {
+                emit(live.permit(), live.attempt.clone(), live.next_ordinal());
+            }
+            EmissionRight::Shift { frontier, .. } if frontier.is_crossed() => {
+                let permit = EmissionPermit::live_execution(frontier.inner.attempt.clone());
+                emit(
+                    &permit,
+                    frontier.inner.attempt.clone(),
+                    frontier.inner.next_ordinal.fetch_add(1, Ordering::Relaxed),
+                );
+            }
+            EmissionRight::Shift { frontier, .. } => frontier.observe(Box::new(emit)),
+        }
     }
 
     fn observe_as(
@@ -1403,6 +1569,22 @@ impl TraceStanding {
             },
             None => TraceRecordIdentity::UnscopedLive { attempt, ordinal },
         };
+        let emitter = self.emitter();
+        match &self.gate {
+            // A leaf inside an open extension span publishes after it.
+            Some(gate) if role.publishes() => {
+                if let Some(record) =
+                    emitter.prepare(Some(permit), position, || identity, at_ms, record)
+                {
+                    gate.release(record, &emitter);
+                }
+            }
+            _ => emitter.emit(Some(permit), position, || identity, at_ms, record),
+        }
+    }
+
+    /// The emitter as this standing sees it: under its selected narrowing.
+    fn emitter(&self) -> TraceEmitter {
         let mut emitter = self.runtime.parts.emitter.clone();
         if self.narrowing.is_some() {
             emitter.policy.content = self.content();
@@ -1410,7 +1592,26 @@ impl TraceStanding {
             emitter.selected = true;
             emitter.selector_failed = self.selector_failed;
         }
-        emitter.emit(Some(permit), position, || identity, at_ms, record);
+        emitter
+    }
+
+    /// `future`, polled under this code's position as the ambient context:
+    /// an instrumented library it runs, such as a provider's HTTP client or
+    /// a host transport that propagates the current context, takes this
+    /// span as its parent (§7.7). Without an adapter's context, or a
+    /// position, its polls attach nothing.
+    pub fn ambient<F: std::future::Future>(
+        &self,
+        future: F,
+    ) -> impl std::future::Future<Output = F::Output> + use<F> {
+        let scope = self
+            .container()
+            .zip(self.runtime.ambient())
+            .map(|(position, ambient)| ambient.for_position(position));
+        lash_trace::Framed::new(
+            future,
+            lash_trace::AmbientFrame::new(scope, std::sync::Arc::new(())),
+        )
     }
 
     /// The live permit of the body this standing is in, and none for shift
@@ -1489,6 +1690,10 @@ impl TraceStanding {
 #[path = "model_span.rs"]
 mod model_span;
 pub use model_span::OpenSpan;
+
+#[path = "extension/mod.rs"]
+pub(crate) mod extension;
+pub use extension::{ExtensionSpan, ExtensionTrace, ToolSpanAttributes, TraceInstrumented};
 
 /// The scope of a call under its admitted logical owner, issued under
 /// `parent`, its issuing container (the cell it was called from, else its

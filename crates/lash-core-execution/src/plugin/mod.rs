@@ -137,7 +137,7 @@ pub use recipe::{
     PluginRecipe, PluginRecipeFactory, PluginRegistrar, PreflightIssue, ProcessRecipe,
     ProtocolRegistrations, RegistryKind, RequiredPort, Requirements, ServiceKind,
     SessionRegistrations, ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations,
-    ToolResultRegistrations, TurnRegistrations,
+    ToolResultRegistrations, TraceScopeOf, TurnRegistrations,
 };
 pub(crate) use registrar::{BoundRegistrar, PluginContributions, RegisteredHook};
 pub use registry::{
@@ -789,6 +789,7 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
             session_id: None,
             sessions: Arc::new(NoopSessionManager),
             processes: Arc::new(NoopSessionManager),
+            trace: crate::trace::ExtensionTrace::untraced(),
         })
     }
 

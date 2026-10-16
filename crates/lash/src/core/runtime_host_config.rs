@@ -90,9 +90,12 @@ impl LashCoreBuilder {
             trace_policy = telemetry.policy().clone();
             let metrics = telemetry.metrics().clone();
             let adapter = Arc::new(telemetry);
+            // The exporter is also the ambient context instrumented libraries
+            // in an extension body see, so their spans nest at its position.
             core.tracing = core
                 .tracing
                 .with_identity(adapter.clone())
+                .with_ambient(adapter.clone())
                 .with_trace_sink(adapter)
                 .with_metrics(metrics);
         }

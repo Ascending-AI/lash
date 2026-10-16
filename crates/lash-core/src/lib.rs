@@ -544,6 +544,11 @@ pub use lash_trace::otel::{
     LashTracerProvider, OtelOptions, OtelTelemetry, SpanEnricher, SpanEnrichment, SpanView,
 };
 pub use lash_trace::{
+    AmbientContext, AmbientGuard, AmbientScope, AttrKey, ExtensionAttribute, ExtensionContent,
+    ExtensionOperation, ExtensionSpanEnd, ExtensionSpanEvent, ExtensionSpanKind,
+    ExtensionSpanRecord, SpanAttributes, SpanSpec, ToolSpanAnnotations, TraceValue,
+};
+pub use lash_trace::{
     ContentPolicy, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
     InvalidTraceLinks, LashIdentity, ProducerKind, ProducerOutcome, ProducerSpan, ProducerSpec,
     ProductObservationSink, SpanKey, SpanRole, TraceAttemptId, TraceAttemptLink, TraceCall,

@@ -114,8 +114,6 @@ pub const GENERATED_FINAL_VALUE_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.generated-final-value-semantic-channel.v1");
 pub const FRAME_SWITCH_SEED_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.frame-switch-seed.v1");
-pub const LOGICAL_TURN_ADMISSION_EXACTLY_ONCE_ORACLE: crate::trace::OracleId<'static> =
-    crate::trace::OracleId::real("sim.oracle.logical-turn-admission-exactly-once.v1");
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameSwitchSeedObservation {
@@ -147,7 +145,6 @@ use contract_facts::*;
 use frame_switch::*;
 pub use frame_switch::{
     frame_switch_seeds, generated_final_value_semantic_channel, generated_suspend_resume,
-    logical_turn_admissions_settle_exactly_once,
 };
 pub use live_provider::{
     GENERATED_WORKLOAD_BATTERY_ORACLE, LIVE_PROVIDER_FAILURE_COVERAGE_ORACLE,

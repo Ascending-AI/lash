@@ -528,6 +528,7 @@ async fn connect_tolerates_unreachable_server() {
                 env: BTreeMap::new(),
                 cwd: None,
             }),
+            trace_propagation: Default::default(),
         },
     );
 
@@ -672,6 +673,7 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
             ]),
             cwd: None,
         }),
+        trace_propagation: Default::default(),
     };
     let pool = McpConnectionPool::connect(BTreeMap::from([("Docs".to_string(), config())]))
         .await
@@ -780,6 +782,7 @@ async fn eager_connects_start_in_parallel() {
             ]),
             cwd: None,
         }),
+        trace_propagation: Default::default(),
     };
     let pool = McpConnectionPool::connect(BTreeMap::from([
         ("alpha".to_string(), config(&alpha_marker, &bravo_marker)),
@@ -864,6 +867,7 @@ async fn mcp_law_catalog_miss_is_an_invalid_request() {
                 ]),
                 cwd: None,
             }),
+            trace_propagation: Default::default(),
         },
     )]))
     .await
@@ -1016,6 +1020,7 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
                 ]),
                 cwd: None,
             }),
+            trace_propagation: Default::default(),
         },
     )]))
     .await
@@ -1147,6 +1152,7 @@ async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
             env,
             cwd: None,
         }),
+        trace_propagation: Default::default(),
     };
     let common_env = || {
         BTreeMap::from([
@@ -1286,6 +1292,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
                 ]),
                 cwd: None,
             }),
+            trace_propagation: Default::default(),
         },
     )]);
     let pool = McpConnectionPool::connect(servers)
@@ -1419,6 +1426,7 @@ async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
                 ]),
                 cwd: None,
             }),
+            trace_propagation: Default::default(),
         },
     )]);
     let pool = McpConnectionPool::connect(servers)
@@ -1521,6 +1529,7 @@ async fn pool_reconnects_after_transport_death() {
                 env,
                 cwd: None,
             }),
+            trace_propagation: Default::default(),
         },
     );
 
@@ -1606,6 +1615,7 @@ async fn discovery_hang_surfaces_startup_timeout() {
             env,
             cwd: None,
         }),
+        trace_propagation: Default::default(),
     };
 
     let entry = McpEntry::new("hangs".to_string(), config, McpHostServices::default());
@@ -1694,6 +1704,7 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
                 env,
                 cwd: None,
             }),
+            trace_propagation: Default::default(),
         },
     );
 
@@ -1756,6 +1767,7 @@ async fn oversized_stdio_message_disconnects_with_typed_cause() {
                 ]),
                 cwd: None,
             }),
+            trace_propagation: Default::default(),
         },
     )]))
     .await

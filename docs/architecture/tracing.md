@@ -52,34 +52,41 @@ responses a host's own calls return keep their contracts.
 `DirectLlmClient` is its own telemetry path with the same default
 (`with_telemetry_content`).
 
-### Plugin custom payloads and host filtering
+### Extension spans and host filtering
 
-The policy covers built-in telemetry. A `custom` payload is plugin-authored
-(or host-authored) output: Lash does not inspect or classify its fields. A
-plugin must honour the policy for content it puts in custom payloads. Its
-factory reads `PluginSessionContext::telemetry_content()` before building
-content, for example with `ctx.telemetry_content().capture(|| text.to_owned())`.
-The accessor reads the receiving host's current `TraceRuntime` policy. This
-deployment privacy setting is not recorded session configuration: reopening a
-session under a host that turned content off must expose `Omitted`, even if
-the session was created with capture on.
+The policy covers extension spans too. A plugin records through the
+capability lash binds for the callback it runs (`ExtensionTrace`; see
+[the plugin guide](../plugins.md#tracing-an-extension)): spans and points
+whose names, attributes and events are bounded by `TraceLimits`, and whose
+content values go through `ExtensionSpan::content(key, || value)`. A content
+builder runs only when the `extension` category is captured, the selector
+kept it and the span records, so a plugin never inspects the policy itself;
+`ExtensionTrace::content_policy()` reads it for content a plugin builds
+elsewhere. Each span is one `extension_span` record, emitted whole when it
+ends, attributed to the registered `plugin_id` and `lash.plugin.callback`
+of the callback that opened it, and positioned under the span that callback
+ran in. There is no free-form plugin payload record.
 
 The host has the final say at its trace exporter. Wrap the export sink and
 install the wrapper with `LashCoreBuilder::trace_sink(...)`. The wrapper can
-drop custom records or clone and redact their payloads before forwarding to
-the inner sink. For example, a host that exports no custom records can use:
+drop extension records, or clone and redact them, before forwarding to the
+inner sink. For example, a host that exports no spans of one plugin can use:
 
 ```rust
 use std::sync::Arc;
 use lash::tracing::{TraceEvent, TraceRecord, TraceSink, TraceSinkError};
 
-struct FilterCustom {
+struct DropPlugin {
+    plugin_id: &'static str,
     inner: Arc<dyn TraceSink>,
 }
 
-impl TraceSink for FilterCustom {
+impl TraceSink for DropPlugin {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        if matches!(&record.event, TraceEvent::Custom { .. }) {
+        if matches!(
+            &record.event,
+            TraceEvent::ExtensionSpan(span) if span.plugin_id == self.plugin_id
+        ) {
             return Ok(());
         }
         self.inner.append(record)
@@ -91,13 +98,21 @@ impl TraceSink for FilterCustom {
 }
 
 // `builder` and `exporter` are the host's core builder and export sink.
-let builder = builder.trace_sink(Arc::new(FilterCustom { inner: exporter }));
+let builder = builder.trace_sink(Arc::new(DropPlugin {
+    plugin_id: "my_plugin",
+    inner: exporter,
+}));
 ```
 
-Place the wrapper before any sink fan-out whose exporters require this
-filtering. It governs the sinks it wraps; a separately installed telemetry
-adapter or sink retains its own export policy. Lash ships no custom-payload
-filter or presentation policy.
+A dropped extension span orphans the spans opened under it, so a filter
+that drops one should drop its descendants, or skip the kinds instead:
+`TraceExportPolicy` skipping `Extension` (with `Point`, `Model` and
+`ModelAttempt`, which it can parent) keeps every record in the sinks and
+exports none of them, and a `CaptureSelector` that skips the same kinds for
+a call builds none of them. Place the wrapper before any sink fan-out whose
+exporters require this filtering. It governs the sinks it wraps; a
+separately installed telemetry adapter or sink retains its own export
+policy.
 
 ### Writing records to a file
 

@@ -124,6 +124,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             tool_requests: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
             recorded_grants: Arc::default(),
+            extension_trace: crate::trace::ExtensionTrace::untraced(),
             parent_invocation: None,
             turn_phase_probe: None,
             cancellation_token: None,

@@ -37,6 +37,7 @@ pub(super) fn hook_context(
         ),
         clock: Arc::clone(&context.clock),
         sessions: Arc::clone(&context.sessions),
+        trace: crate::trace::ExtensionTrace::untraced(),
     }
 }
 

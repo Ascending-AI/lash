@@ -254,7 +254,7 @@ impl TraceSink for TurnAdmissionGate {
     ) -> std::result::Result<(), lash::tracing::TraceSinkError> {
         if matches!(
             &record.event,
-            TraceEvent::Custom { name, .. } if name == self.event_name
+            TraceEvent::ExtensionSpan(span) if span.name == self.event_name
         ) {
             let _ = self.entered.send(());
             let (released, condition) = &*self.release;
@@ -328,8 +328,8 @@ impl TraceSink for PanickingTurnAdmissionTrace {
     ) -> std::result::Result<(), lash::tracing::TraceSinkError> {
         if matches!(
             &record.event,
-            TraceEvent::Custom { name, .. }
-                if name == "agent_workbench.api.turn.admission_committed"
+            TraceEvent::ExtensionSpan(span)
+                if span.name == "agent_workbench.api.turn.admission_committed"
         ) {
             panic!("injected turn-admission panic");
         }

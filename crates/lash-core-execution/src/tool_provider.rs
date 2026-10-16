@@ -247,9 +247,38 @@ pub struct AttemptContext<'run> {
     /// the attempt's execution claim: the only ones a launch the attempt
     /// declares may name (D10).
     held_launches: Arc<Mutex<Vec<crate::ProcessEnvRef>>>,
+    /// Where the body stands in the trace: under the attempt's tool span,
+    /// bound from the provider the call routes to and revoked when the body
+    /// exits.
+    trace: crate::trace::ExtensionTrace,
 }
 
 impl<'run> AttemptContext<'run> {
+    /// Where this attempt's body stands in the trace: under its tool span.
+    /// Spans and points opened here are replay-safe: a body the journal
+    /// serves never runs, and one that runs holds the attempt's right.
+    pub fn trace(&self) -> &crate::trace::ExtensionTrace {
+        &self.trace
+    }
+
+    /// The annotations of this attempt's own tool span (§7.4 rule 2).
+    pub fn tool_span(&self) -> crate::trace::ToolSpanAttributes {
+        self.trace.tool_span()
+    }
+
+    /// The W3C context (trace id, span id, flags, tracestate) of this
+    /// attempt's own `execute_tool` span, equal to the context the exporter
+    /// gives that span: the parent for OpenTelemetry work the body starts
+    /// itself, with no record sink. `None` when the call is untraced.
+    pub fn tool_span_context(&self) -> Option<lash_trace::TraceCarrier> {
+        self.trace.tool_span_context()
+    }
+
+    pub(crate) fn with_trace(mut self, trace: crate::trace::ExtensionTrace) -> Self {
+        self.trace = trace;
+        self
+    }
+
     /// The spec the running turn's recorded shape resolved, read from the
     /// run's recorded preparation and never rebuilt from live config
     /// (FIG-6021). A tool that switches the agent frame passes it back to
@@ -397,6 +426,7 @@ impl<'run> AttemptContext<'run> {
                 .and_then(crate::RuntimeExecutionContext::resolved_run)
                 .cloned(),
             held_launches: Arc::default(),
+            trace: crate::trace::ExtensionTrace::untraced(),
         }
     }
 
@@ -725,6 +755,13 @@ pub(crate) struct ToolContext<'run> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) facts: crate::plugin::ExecutionFacts,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
+    /// The live step of the recorded attempt this context's body runs in:
+    /// bound by the engine's step wrapper when the body really runs, never
+    /// when the journal serves it.
+    pub(crate) live: Option<Arc<crate::trace::LiveStep>>,
+    /// The registered provider the call's admitted binding resolved to:
+    /// what its body's capability is bound from.
+    pub(crate) executable: Option<crate::plugin::PluginCallbackIdentity>,
 }
 
 #[derive(Clone)]
@@ -867,6 +904,8 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: self.parent_invocation,
             facts: self.facts,
             child_execution_trace_hook: self.child_execution_trace_hook,
+            live: None,
+            executable: None,
         }
     }
 }
@@ -935,6 +974,8 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             facts: self.facts.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
+            live: self.live.clone(),
+            executable: self.executable.clone(),
         })
     }
 
@@ -1030,6 +1071,16 @@ impl<'run> ToolContext<'run> {
     pub(crate) fn with_attempt(mut self, attempt_number: u32, max_attempts: u32) -> Self {
         self.attempt_number = attempt_number.max(1);
         self.max_attempts = max_attempts.max(1);
+        self
+    }
+
+    /// Names the registered provider the call's admitted binding resolved
+    /// to.
+    pub(crate) fn with_executable(
+        mut self,
+        identity: crate::plugin::PluginCallbackIdentity,
+    ) -> Self {
+        self.executable = Some(identity);
         self
     }
 

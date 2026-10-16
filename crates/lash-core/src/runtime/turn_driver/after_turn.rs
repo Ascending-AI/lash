@@ -110,6 +110,7 @@ impl RuntimeTurnDriver<'static> {
             plugin_config: plugins.admitted_plugin_config(),
             turn: Arc::new(turn.report()),
             sessions,
+            trace: crate::trace::ExtensionTrace::seed(self.trace.clone(), self.trace_context(0)),
         };
         let address = crate::EffectAddress::new(
             self.scoped_effect_controller.execution_scope().clone(),

@@ -34,6 +34,7 @@ pub async fn ingress_plugin_callbacks_publish_state_that_survives_a_checkpoint(
         state: crate::SessionReadView::from_runtime_state(&state, policy, Default::default()),
         sessions: Arc::new(crate::testing::MockSessionManager::default()),
         turn_context: Default::default(),
+        trace: Default::default(),
     };
     let callbacks = Arc::clone(&plugins);
     let recorded = crate::plugin::record_plugin_callbacks(
@@ -154,6 +155,7 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
             sessions: runtime.session_read_service().unwrap(),
             turn_context: crate::TurnContext::default(),
             plugin_config: Default::default(),
+            trace: Default::default(),
         },
     ))
     .await

@@ -211,6 +211,9 @@ pub struct RuntimeExecutionContext<'run> {
     /// captures an effect the run's surface does not offer from. Empty
     /// outside a cell.
     recorded_grants: RecordedGrants,
+    /// Where the protocol or code-executor body this context runs stands in
+    /// the trace ([`trace`](Self::trace)): bound by the wrapper that runs it.
+    extension_trace: crate::trace::ExtensionTrace,
 }
 
 /// The grants a cell's committed deferred matches recorded, keyed by the
@@ -516,6 +519,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             tool_requests: Arc::clone(&self.tool_requests),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
             recorded_grants: Arc::clone(&self.recorded_grants),
+            extension_trace: self.extension_trace.clone(),
         })
     }
 

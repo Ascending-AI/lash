@@ -798,6 +798,240 @@
         }
       ]
     },
+    "ExtensionAttribute": {
+      "additionalProperties": false,
+      "description": "One contributed attribute, as the bounded writer admitted it.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/TraceValue"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ExtensionContent": {
+      "additionalProperties": false,
+      "description": "One content value an extension built under the `extension` category.",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ExtensionOperation": {
+      "description": "The GenAI operation a typed [`SpanSpec`] preset declares. Lash sets its\nsemconv attributes; a plugin cannot set them through `attr`.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "`embeddings {gen_ai.request.model}`.",
+          "properties": {
+            "operation": {
+              "const": "embeddings",
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "request_model": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "provider",
+            "request_model"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`retrieval {gen_ai.data_source.id}`.",
+          "properties": {
+            "data_source_id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "retrieval",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "data_source_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ExtensionSpanEnd": {
+      "description": "Why an extension span ended.",
+      "oneOf": [
+        {
+          "const": "end",
+          "description": "The plugin called `end`.",
+          "type": "string"
+        },
+        {
+          "const": "drop",
+          "description": "The handle was dropped.",
+          "type": "string"
+        },
+        {
+          "const": "body_exit",
+          "description": "The body returned with the span still open.",
+          "type": "string"
+        },
+        {
+          "const": "cancelled",
+          "description": "The body future was dropped with the span still open.",
+          "type": "string"
+        },
+        {
+          "const": "panic",
+          "description": "The body unwound with the span still open.",
+          "type": "string"
+        },
+        {
+          "const": "hold_pressure",
+          "description": "The body's publication hold was full: lash finalized the span early so\nthe records held under it could publish.",
+          "type": "string"
+        }
+      ]
+    },
+    "ExtensionSpanEvent": {
+      "additionalProperties": false,
+      "description": "One event an extension recorded on its span.",
+      "properties": {
+        "at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "attributes": {
+          "items": {
+            "$ref": "#/$defs/ExtensionAttribute"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "at_ms"
+      ],
+      "type": "object"
+    },
+    "ExtensionSpanKind": {
+      "description": "The OpenTelemetry kind of an extension span.",
+      "enum": [
+        "internal",
+        "client",
+        "producer",
+        "consumer"
+      ],
+      "type": "string"
+    },
+    "ExtensionSpanRecord": {
+      "description": "The one record of an extension span (or point): emitted when it ends,\nwhole, with everything it buffered.\n\n`plugin_id` and `callback` are the registered callback the span's\ncapability was bound from, never a value the plugin supplied.",
+      "properties": {
+        "attributes": {
+          "items": {
+            "$ref": "#/$defs/ExtensionAttribute"
+          },
+          "type": "array"
+        },
+        "callback": {
+          "type": "string"
+        },
+        "contents": {
+          "description": "Serialized as `contents`: the record envelope's `content` is its\ncontent marks, and the record flattens this one beside them.",
+          "items": {
+            "$ref": "#/$defs/ExtensionContent"
+          },
+          "type": "array"
+        },
+        "ended_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ended_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtensionSpanEnd"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`None` for a point."
+        },
+        "error_type": {
+          "description": "Set when the plugin called `fail`: the span's `error.type`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/ExtensionSpanEvent"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/ExtensionSpanKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExtensionOperation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "point": {
+          "description": "A zero-duration point recorded with no open span.",
+          "type": "boolean"
+        },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "plugin_id",
+        "callback",
+        "name",
+        "kind",
+        "started_at_ms",
+        "ended_at_ms"
+      ],
+      "type": "object"
+    },
     "FailureCode": {
       "type": "string"
     },
@@ -2244,6 +2478,13 @@
         "publish_definition"
       ],
       "type": "string"
+    },
+    "ToolSpanAnnotations": {
+      "description": "The attributes a tool body set on its own `execute_tool` span, through\nits bounded writer. Held in memory with the attempt that set them and\nstamped by the span's closer; never persisted.",
+      "items": {
+        "$ref": "#/$defs/ExtensionAttribute"
+      },
+      "type": "array"
     },
     "TraceAgentFrameSwitch": {
       "properties": {
@@ -3836,6 +4077,187 @@
         }
       },
       "type": "object"
+    },
+    "TraceOmissionDiagnostic": {
+      "description": "One body's or one record's omissions with the address they happened at.\nBounded whatever the body did: one site and one fixed counter array.",
+      "properties": {
+        "counts": {
+          "$ref": "#/$defs/TraceOmissionCounts"
+        },
+        "site": {
+          "$ref": "#/$defs/TraceOmissionSite"
+        }
+      },
+      "required": [
+        "site",
+        "counts"
+      ],
+      "type": "object"
+    },
+    "TraceOmissionSite": {
+      "description": "Where an omission happened: a stable lash address, never a host value.\nTwo bodies or two records never share one.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "An extension body or a tool body's annotations: the registered\ncallback it was bound from, the span its capability was bound at,\nand the admitted attempt it ran for.",
+          "properties": {
+            "at": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/W3cSpanId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "attempt": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "call": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "key": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            },
+            "site": {
+              "const": "body",
+              "type": "string"
+            }
+          },
+          "required": [
+            "site",
+            "owner",
+            "key"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One record's content-hook references or selector failure.",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/TraceSpanKind"
+            },
+            "record": {
+              "type": "string"
+            },
+            "site": {
+              "const": "record",
+              "type": "string"
+            },
+            "span": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/W3cSpanId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "site",
+            "kind",
+            "record"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One exported span's enrichment, or a producer's sampler attributes.",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/TraceSpanKind"
+            },
+            "site": {
+              "const": "span",
+              "type": "string"
+            },
+            "span": {
+              "$ref": "#/$defs/W3cSpanId"
+            }
+          },
+          "required": [
+            "site",
+            "kind",
+            "span"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Observations a shift held behind its journal frontier.",
+          "properties": {
+            "scope": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TraceScopeId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "site": {
+              "const": "shift",
+              "type": "string"
+            }
+          },
+          "required": [
+            "site"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Links over the limit at a scope's admission or close.",
+          "properties": {
+            "scope": {
+              "$ref": "#/$defs/TraceScopeId"
+            },
+            "site": {
+              "const": "admission",
+              "type": "string"
+            }
+          },
+          "required": [
+            "site",
+            "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Records an unanchored cell shed under hold pressure.",
+          "properties": {
+            "graph_key": {
+              "type": "string"
+            },
+            "site": {
+              "const": "cell",
+              "type": "string"
+            }
+          },
+          "required": [
+            "site",
+            "graph_key"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TracePosition": {
       "additionalProperties": false,
@@ -5829,6 +6251,10 @@
             "null"
           ]
         },
+        "span_attributes": {
+          "$ref": "#/$defs/ToolSpanAnnotations",
+          "description": "What the body of the attempt that settled the call set on its own\ntool span: in memory only, stamped by the span's closer."
+        },
         "type": {
           "const": "tool_call_completed",
           "type": "string"
@@ -6343,20 +6769,59 @@
       "type": "object"
     },
     {
+      "$ref": "#/$defs/ExtensionSpanRecord",
+      "description": "An extension span or point ended: its one whole record, with what\nit buffered. Its position names the span and its parent.",
       "properties": {
-        "name": {
+        "type": {
+          "const": "extension_span",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "$ref": "#/$defs/TraceOmissionDiagnostic",
+      "description": "What one extension body's contributions lost, with the body's\naddress: emitted once when the body exits, only when not empty.",
+      "properties": {
+        "type": {
+          "const": "body_omissions",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A context-pressure hook's decision opened a compaction frame for the\nturn. `task` is the frame's model-facing task.",
+      "properties": {
+        "frame_node_id": {
           "type": "string"
         },
-        "payload": true,
+        "hook_id": {
+          "type": "string"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
         "type": {
-          "const": "custom",
+          "const": "context_pressure",
           "type": "string"
         }
       },
       "required": [
         "type",
-        "name",
-        "payload"
+        "plugin_id",
+        "hook_id",
+        "task",
+        "frame_node_id"
       ],
       "type": "object"
     }

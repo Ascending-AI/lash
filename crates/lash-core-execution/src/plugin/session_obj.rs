@@ -34,6 +34,34 @@ impl ProposesState for AfterTurnContributions {
 /// Run a sequential turn callback slot in recorded registration order. Each
 /// callback's state commands go to the recorded body running it, attributed
 /// to the callback; its other contributions return in order.
+/// A hook context that carries its hook's trace capability: the seed a
+/// host builds it with, and each registered hook's own once bound.
+pub(crate) trait TracedHookContext: Clone {
+    fn hook_trace(&self) -> &crate::trace::ExtensionTrace;
+    #[must_use]
+    fn with_hook_trace(self, trace: crate::trace::ExtensionTrace) -> Self;
+}
+
+macro_rules! traced_hook_context {
+    ($($context:ty),+ $(,)?) => {$(
+        impl TracedHookContext for $context {
+            fn hook_trace(&self) -> &crate::trace::ExtensionTrace {
+                &self.trace
+            }
+
+            fn with_hook_trace(self, trace: crate::trace::ExtensionTrace) -> Self {
+                Self { trace, ..self }
+            }
+        }
+    )+};
+}
+
+traced_hook_context!(
+    TurnHookContext,
+    TurnResultHookContext,
+    CheckpointHookContext
+);
+
 async fn collect_owned_async<C, O, H, F>(
     session: &PluginSession,
     hooks: &[RegisteredHook<H>],
@@ -43,7 +71,7 @@ async fn collect_owned_async<C, O, H, F>(
     invoke: F,
 ) -> Result<Vec<PluginOwned<O>>, PluginError>
 where
-    C: Clone + Send + Sync,
+    C: TracedHookContext + Send + Sync,
     O: ProposesState + Send,
     H: Sync,
     F: Fn(&H, C) -> PluginFuture<O> + Send + Sync,
@@ -62,7 +90,11 @@ where
         }
         let result = deadline
             .run(clock.as_ref(), &registered.identity, || {
-                invoke(&registered.hook, ctx.clone())
+                crate::trace::extension::run_bound(
+                    ctx.hook_trace(),
+                    &registered.identity,
+                    |trace| invoke(&registered.hook, ctx.clone().with_hook_trace(trace)),
+                )
             })
             .await;
         if let Some(probe) = phase_probe {
@@ -125,16 +157,22 @@ impl PluginOperationInvocation {
             }
         }
     }
-    fn into_context(self, session_id: Option<SessionId>) -> PluginOperationContext {
+    fn into_context(
+        self,
+        session_id: Option<SessionId>,
+        trace: crate::trace::ExtensionTrace,
+    ) -> PluginOperationContext {
         match self {
             Self::Query { bindings } => PluginOperationContext::Query(PluginQueryContext {
                 session_id,
                 sessions: bindings.clone(),
                 processes: bindings,
+                trace,
             }),
             Self::Command { bindings } => PluginOperationContext::Command(PluginCommandContext {
                 session_id,
                 bindings,
+                trace,
             }),
             Self::Task {
                 bindings,
@@ -145,6 +183,7 @@ impl PluginOperationInvocation {
                 bindings,
                 scoped_effect_controller,
                 cancellation_token,
+                trace,
             }),
         }
     }
@@ -626,6 +665,19 @@ impl PluginSession {
             .hook
     }
 
+    /// The registration of the session's code executor: what the cell
+    /// body's trace capability is bound from.
+    #[doc(hidden)]
+    pub fn code_executor_identity(
+        &self,
+    ) -> Option<crate::store::plugin_writers::PluginCallbackIdentity> {
+        self.capabilities()
+            .contributions
+            .code_executor
+            .as_ref()
+            .map(|entry| entry.identity.clone())
+    }
+
     pub fn code_executor(&self) -> Option<Arc<dyn CodeExecutorPlugin>> {
         self.capabilities()
             .contributions
@@ -740,7 +792,18 @@ impl PluginSession {
             if let Some(probe) = phase_probe.as_ref() {
                 probe.begin_named(&phase_name);
             }
-            let result = registered.hook.decide(ctx).await;
+            let result = crate::trace::extension::run_bound(
+                &ctx.trace,
+                &registered.identity,
+                |trace| async move {
+                    let bound = ContextPressureContext {
+                        trace,
+                        ..ctx.clone()
+                    };
+                    registered.hook.decide(&bound).await
+                },
+            )
+            .await;
             if let Some(probe) = phase_probe.as_ref() {
                 probe.end_named(&phase_name);
             }
@@ -766,7 +829,19 @@ impl PluginSession {
         ctx: &CompactionContext<'_>,
     ) -> Result<Option<ContextCompaction>, ContextError> {
         for (_, registered) in &self.capabilities().contributions.context_compactors {
-            if let Some(compaction) = registered.hook.compact(ctx).await?
+            let compaction = crate::trace::extension::run_bound(
+                &ctx.trace,
+                &registered.identity,
+                |trace| async move {
+                    let bound = CompactionContext {
+                        trace,
+                        ..ctx.clone()
+                    };
+                    registered.hook.compact(&bound).await
+                },
+            )
+            .await;
+            if let Some(compaction) = compaction?
                 && !compaction.is_empty()
             {
                 return Ok(Some(compaction));
@@ -1210,6 +1285,7 @@ impl PluginSession {
         session_id: Option<SessionId>,
         default_to_current_session: bool,
         invocation: PluginOperationInvocation,
+        trace: crate::trace::ExtensionTrace,
     ) -> Result<(String, ErasedPluginOperationOutcome), PluginOperationInvokeError> {
         self.host
             .preflight_services(invocation.bindings())
@@ -1233,13 +1309,14 @@ impl PluginSession {
             session_id,
             default_to_current_session,
         )?;
-        let outcome = operation
-            .invoke(invocation.into_context(effective_session), args)
-            .await
-            .map_err(|mut failure| {
-                failure.origin = Some(operation.failure_origin());
-                PluginOperationInvokeError::Failed(Box::new(failure))
-            })?;
+        let outcome = crate::trace::extension::run_bound(&trace, operation.identity(), |trace| {
+            operation.invoke(invocation.into_context(effective_session, trace), args)
+        })
+        .await
+        .map_err(|mut failure| {
+            failure.origin = Some(operation.failure_origin());
+            PluginOperationInvokeError::Failed(Box::new(failure))
+        })?;
         Ok((operation.plugin_id().to_string(), outcome))
     }
 
@@ -1258,6 +1335,7 @@ impl PluginSession {
                 session_id,
                 default_to_current_session,
                 PluginOperationInvocation::Query { bindings },
+                crate::trace::ExtensionTrace::untraced(),
             )
             .await?;
         Ok((plugin_id, outcome.output))
@@ -1270,6 +1348,7 @@ impl PluginSession {
         session_id: Option<SessionId>,
         default_to_current_session: bool,
         bindings: Arc<ServiceBindings>,
+        trace: crate::trace::ExtensionTrace,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
     {
         let (plugin_id, outcome) = self
@@ -1279,6 +1358,7 @@ impl PluginSession {
                 session_id,
                 default_to_current_session,
                 PluginOperationInvocation::Command { bindings },
+                trace,
             )
             .await?;
         Ok((
@@ -1304,6 +1384,7 @@ impl PluginSession {
         bindings: Arc<ServiceBindings>,
         scoped_effect_controller: crate::ActorContext,
         cancellation_token: tokio_util::sync::CancellationToken,
+        trace: crate::trace::ExtensionTrace,
     ) -> Result<(String, PluginOperationOutcome<serde_json::Value>), PluginOperationInvokeError>
     {
         let (plugin_id, outcome) = self
@@ -1317,6 +1398,7 @@ impl PluginSession {
                     scoped_effect_controller,
                     cancellation_token,
                 },
+                trace,
             )
             .await?;
         Ok((

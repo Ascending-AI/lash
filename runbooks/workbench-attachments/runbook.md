@@ -146,10 +146,11 @@ From the matching trace turn, save the `llm_call_started` record as
 `02-provider-request.json`. Require one request attachment with a durable attachment ref and MIME
 `image/png`, and require the request's rendered attachment descriptor to contain the upload
 id as its `reference`. Save the matching upload record as `02-upload-trace.json` — it is a
-`type: "custom"` record with `name: "agent_workbench.api.attachment.uploaded"`, and its
-payload fields are `attachment_id` / `byte_len` / `mime` / `name` — and require its id, MIME,
-and byte length to match the source. The host's `attachment_acceptance` snapshot this runbook
-spends four paragraphs on is observable on the sibling `custom` record
+`type: "extension_span"` point (`point: true`, `plugin_id: "agent_workbench"`) with
+`name: "agent_workbench.api.attachment.uploaded"`, and its payload is the `contents` entry
+keyed `payload`, whose fields are `attachment_id` / `byte_len` / `mime` / `name` — and require
+its id, MIME, and byte length to match the source. The host's `attachment_acceptance` snapshot
+this runbook spends four paragraphs on is observable on the sibling point
 `agent_workbench.api.turn.request`; save it too if the acceptance contract is in question.
 Save the `provider_event` (direction `request`) record with the same `llm_call_id` as `02-provider-wire.json`;
 its fields are nested under `event` (`raw_len`, `raw_sha256`,

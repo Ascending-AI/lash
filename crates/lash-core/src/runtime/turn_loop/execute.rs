@@ -20,6 +20,28 @@ pub(super) struct TurnPreambleContext<'preamble, 'run> {
 }
 
 impl LashRuntime {
+    /// The position this turn's hooks run at: the turn's span, under the
+    /// turn's own standing. A durable turn is never replayed, so what its
+    /// hooks observe is this owner's own work.
+    pub(in crate::runtime) fn hook_trace(
+        &self,
+        controller: &crate::ActorContext,
+    ) -> crate::trace::ExtensionTrace {
+        let context =
+            lash_trace::TraceContext::default().for_session(self.state.session_id.clone());
+        let context = match controller.turn_id() {
+            Some(turn_id) => context.for_turn(turn_id),
+            None => context,
+        };
+        crate::trace::ExtensionTrace::seed(
+            self.host
+                .core
+                .tracing
+                .unreplayed(controller.trace_scope().cloned()),
+            context,
+        )
+    }
+
     /// Run the fresh turn's before-turn callbacks as one step and answer
     /// their decisions, their state commands published.
     pub(super) async fn prepare_turn_preamble(
@@ -48,6 +70,7 @@ impl LashRuntime {
                 ),
                 sessions: manager.read_service(),
                 turn_context: turn_context.clone(),
+                trace: self.hook_trace(scoped_effect_controller),
             };
             let callbacks = Arc::clone(plugins);
             let probe = self.turn_phase_probe.clone();

@@ -169,6 +169,7 @@ impl LashRuntime {
                 scoped_effect_controller.clone(),
                 Some(turn_phase_id(trace_turn_id, "context-pressure")),
             ),
+            trace: self.hook_trace(scoped_effect_controller),
         };
         let decided = plugin_session
             .decide_context_pressure(&ctx, self.turn_phase_probe.clone())
@@ -264,10 +265,8 @@ impl LashRuntime {
         // redrive finds the head in the new frame and opens nothing.
         let tracing = &self.host.core.tracing;
         if tracing.is_observed() {
-            // The task is model-facing text; the rest is the frame's identity.
-            let task = tracing
-                .content()
-                .capture(lash_trace::ContentCategory::Extension, || Some(task));
+            // The task is model-facing text: the emitter's content policy
+            // keeps it only under the `extension` category.
             tracing
                 .unreplayed(committing.trace_scope().cloned())
                 .observe(|| {
@@ -275,14 +274,11 @@ impl LashRuntime {
                         lash_trace::TraceContext::default()
                             .for_session(self.state.session_id.clone())
                             .for_turn(write.turn_id.clone()),
-                        lash_trace::TraceEvent::Custom {
-                            name: "context_pressure.frame_opened".to_string(),
-                            payload: serde_json::json!({
-                                "hook": write.hook_id,
-                                "plugin": write.plugin_id,
-                                "task": task,
-                                "frame_node_id": frame_node_id,
-                            }),
+                        lash_trace::TraceEvent::ContextPressure {
+                            plugin_id: write.plugin_id.to_owned(),
+                            hook_id: write.hook_id.to_owned(),
+                            task,
+                            frame_node_id: frame_node_id.to_string(),
                         },
                     )
                 });

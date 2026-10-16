@@ -41,6 +41,10 @@ struct Inner {
     stops_in: fn(&TurnCancelRequest) -> bool,
     /// Fired once the turn's cancel stopped the cell at its first save.
     stopped: CancellationToken,
+    /// The account of the trace records the cell holds until the response
+    /// commits (§3.8 P5): one per cell execution, shared with the code
+    /// executor body that runs the cell.
+    trace_hold: std::sync::OnceLock<crate::trace::SharedHold>,
 }
 
 struct State {
@@ -83,6 +87,7 @@ impl HeldResponse {
                 stops_at,
                 stops_in,
                 stopped: CancellationToken::new(),
+                trace_hold: std::sync::OnceLock::new(),
             }),
         }
     }
@@ -164,6 +169,73 @@ impl HeldResponse {
     /// Resolves once the turn's cancel stopped the cell at its first save.
     pub async fn stopped(&self) {
         self.inner.stopped.cancelled().await;
+    }
+
+    /// The cell's trace hold account, bounded by `cap`: the first caller's
+    /// bound holds for the cell.
+    pub(crate) fn trace_hold(&self, cap: lash_trace::PublicationHold) -> crate::trace::SharedHold {
+        self.inner
+            .trace_hold
+            .get_or_init(|| crate::trace::SharedHold::new(cap))
+            .clone()
+    }
+
+    /// Holds trace records until a commit holds the response, charging
+    /// `cost` to `account` first: `false`, holding nothing, when the charge
+    /// would pass the account's cap. Publishes now when a commit holds the
+    /// response already.
+    pub(crate) fn hold_trace(
+        &self,
+        account: &crate::trace::SharedHold,
+        cost: Option<u64>,
+        publish: Box<dyn FnOnce() + Send>,
+    ) -> bool {
+        {
+            let mut state = self.inner.state.lock_recover();
+            if state.committed.is_none() {
+                if let Some(cost) = cost
+                    && !account.admit(cost)
+                {
+                    return false;
+                }
+                state.deferred.push(publish);
+                return true;
+            }
+        }
+        publish();
+        true
+    }
+
+    /// Holds one of lash's own live trace hints about the cell (its opening
+    /// record, an event of it) until a commit holds the response, charged
+    /// to the cell's account under `runtime`'s bound: a hint past the cap is
+    /// shed and counted at the cell's address.
+    #[doc(hidden)]
+    pub fn hold_trace_hint(
+        &self,
+        runtime: &crate::trace::TraceRuntime,
+        graph_key: Option<&str>,
+        publish: Box<dyn FnOnce() + Send>,
+    ) {
+        let account = self.trace_hold(runtime.limits().publication_hold());
+        let cost = crate::trace::HOLD_ENTRY_BYTES;
+        let refund = account.clone();
+        let held = self.hold_trace(
+            &account,
+            Some(cost),
+            Box::new(move || {
+                publish();
+                refund.refund(1, cost);
+            }),
+        );
+        if !held {
+            runtime.omissions().record_one(
+                &lash_trace::TraceOmissionSite::Cell {
+                    graph_key: graph_key.unwrap_or_default().to_owned(),
+                },
+                lash_trace::TraceOmission::PublicationHold,
+            );
+        }
     }
 
     /// Publish what `publish` publishes once a commit holds the response:

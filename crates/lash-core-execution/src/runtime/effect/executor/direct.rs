@@ -17,11 +17,17 @@ impl LocalDirectEffectRunner {
         let llm_call_id = uuid::Uuid::new_v4().to_string();
         request.scope.llm_call_id = Some(llm_call_id.clone());
         // The request is this body's own work: its records are made here,
-        // under the body's live step.
+        // under the body's live step. Made from an extension body, the call
+        // is the child of the position it was made at (§7.2).
         let traced = self
             .live
             .as_ref()
-            .map(|live| self.tracing.effect_body(live))
+            .map(
+                |live| match crate::trace::extension::ambient_standing(&self.tracing) {
+                    Some(standing) => standing.in_body(live),
+                    None => self.tracing.effect_body(live),
+                },
+            )
             .filter(crate::trace::TraceStanding::is_observed)
             .map(|standing| {
                 let context = super::super::direct_trace_context(
@@ -150,7 +156,9 @@ impl LocalDirectEffectRunner {
             || sideband.clone(),
             |(call, context, _)| call.provider_attempts(sideband.clone(), context.clone()),
         );
-        match lash_core_llm::core_internal::complete_prepared(
+        // The provider polls under the call's span (§7.7).
+        let ambient = traced.map(|(call, _, _)| call.standing().clone());
+        let completion = lash_core_llm::core_internal::complete_prepared(
             &mut provider,
             context,
             &self.template,
@@ -160,9 +168,12 @@ impl LocalDirectEffectRunner {
             self.tracing.metrics(),
             traced.and_then(|(call, _, _)| call.standing().body_permit()),
             self.bounds.clone(),
-        )
-        .await
-        {
+        );
+        let completed = match ambient {
+            Some(ambient) => ambient.ambient(completion).await,
+            None => completion.await,
+        };
+        match completed {
             Ok(completion) => (Ok(completion.response), Some(completion.call_record)),
             Err(failure) => (
                 Err(llm_call_error_from_transport(failure.error)),

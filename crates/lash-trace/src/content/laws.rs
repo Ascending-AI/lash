@@ -30,6 +30,7 @@ fn tool(value: Value) -> TraceEvent {
         duration_ms: 1,
         issuing_node_id: None,
         attempts: None,
+        span_attributes: Default::default(),
     }
 }
 

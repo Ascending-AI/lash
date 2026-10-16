@@ -371,6 +371,7 @@ fn configs(trace: &std::path::Path, scenario: &str) -> BTreeMap<String, McpServe
             diagnostics: Default::default(),
             data_limits: Default::default(),
             shutdown_policy: Default::default(),
+            trace_propagation: Default::default(),
         },
     )])
 }

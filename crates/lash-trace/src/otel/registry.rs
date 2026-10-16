@@ -78,6 +78,8 @@ const NONE: TraceSpanKindSet = TraceSpanKindSet::EMPTY;
 const DOMAIN: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Process, K::ToolIntent]);
 const MODEL: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Model]);
 const ATTEMPT: TraceSpanKindSet = TraceSpanKindSet::of(&[K::ModelAttempt]);
+/// Extension spans and points.
+const EXTENSION: TraceSpanKindSet = TraceSpanKindSet::of(&[K::Extension, K::Point]);
 
 macro_rules! attributes {
     (
@@ -117,6 +119,9 @@ macro_rules! attributes {
         #[non_exhaustive]
         pub enum RefinableKey { $($rid),+ }
         impl RefinableKey {
+            /// Every refinable key, in table order.
+            pub const ALL: &[Self] = &[$(Self::$rid),+];
+
             /// The registry attribute the key replaces.
             pub(crate) const fn attribute(self) -> AttributeKey {
                 match self { $(Self::$rid => AttributeKey::$rid),+ }
@@ -145,8 +150,13 @@ attributes! {
         TurnId => ("lash.turn.id", String, EVERY),
         AttemptInvocationId => ("lash.attempt.invocation_id", String, EVERY),
         OperationName => ("gen_ai.operation.name", String,
-            TraceSpanKindSet::of(&[K::Agent, K::Model, K::Tool, K::Cell, K::Workflow])),
-        RequestModel => ("gen_ai.request.model", String, MODEL),
+            TraceSpanKindSet::of(&[K::Agent, K::Model, K::Tool, K::Cell, K::Workflow, K::Extension])),
+        RequestModel => ("gen_ai.request.model", String, MODEL.with(K::Extension)),
+        DataSourceId => ("gen_ai.data_source.id", String, TraceSpanKindSet::of(&[K::Extension])),
+        PluginId => ("lash.plugin.id", String, EXTENSION),
+        PluginCallback => ("lash.plugin.callback", String, EXTENSION),
+        SpanEndedBy => ("lash.span.ended_by", String, TraceSpanKindSet::of(&[K::Extension])),
+        SpanPoint => ("lash.span.point", Boolean, TraceSpanKindSet::of(&[K::Point])),
         ResponseModel => ("gen_ai.response.model", String, TraceSpanKindSet::of(&[K::Model])),
         ToolName => ("gen_ai.tool.name", String,
             TraceSpanKindSet::of(&[K::Tool, K::Cell, K::Process, K::ToolIntent])),
@@ -222,8 +232,18 @@ attributes! {
     }
     refinable: {
         ToolType => ("gen_ai.tool.type", String, TraceSpanKindSet::of(&[K::Tool, K::Cell])),
-        GenAiProviderName => ("gen_ai.provider.name", String, MODEL),
+        GenAiProviderName => ("gen_ai.provider.name", String, MODEL.with(K::Extension)),
         ErrorType => ("error.type", String, EVERY),
+    }
+}
+
+impl RefinableKey {
+    /// The refinable key named `key`, if the registry declares one.
+    pub fn of_key(key: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|refinable| refinable.key() == key)
     }
 }
 
@@ -286,6 +306,7 @@ spans! {
     Process => ("lash.process", Internal, Transition, None),
     Workflow => ("invoke_workflow", Internal, Transition, Some("gen_ai.invoke_workflow.internal")),
     ExecCode => ("execute_tool", Internal, Transition, Some("gen_ai.execute_tool.internal")),
+    Extension => ("lash.extension", Internal, Live, None),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

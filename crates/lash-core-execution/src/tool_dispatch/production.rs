@@ -362,7 +362,8 @@ impl<'run> ProductionToolHandlers<'run> {
         }
         let dispatch = self.dispatch(&prepared.input);
         let view = crate::plugin::PreparedCallReadView::new(prepared.call.clone());
-        let mut hook = hooks::context(&dispatch, &prepared);
+        let mut hook = hooks::context(&dispatch, &prepared)
+            .with_trace(self.context.tool_hook_trace(&prepared.call.call_id));
         hook.check_phase = crate::plugin::ControlPhaseDeadline::new(
             dispatch.clock.as_ref(),
             "tool_result",
@@ -551,7 +552,8 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             &input.definition.manifest.id,
             &call.tool_name,
             input.definition.manifest.argument_projection.clone(),
-        );
+        )
+        .with_trace(self.context.tool_hook_trace(&call.call_id));
         let mut failure = None;
         match dispatch
             .composition
@@ -684,7 +686,9 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .enclosing_process(enclosing_process.clone())
             .build()
             .with_attempt_dispatch(dispatch.clone(), invocation);
-        context = context.with_prepared_payload(prepared.call.prepared_payload.clone());
+        context = context
+            .with_prepared_payload(prepared.call.prepared_payload.clone())
+            .with_executable(prepared.input.binding.executable.clone());
         context.install_completion_key(self.completion_key.clone());
         let completion_context = context.clone();
         if let Some(grant) = &prepared.input.grant {

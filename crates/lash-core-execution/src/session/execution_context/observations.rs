@@ -222,6 +222,61 @@ impl RuntimeExecutionContext<'_> {
         })
     }
 
+    /// Where the protocol or code-executor body this context runs stands in
+    /// the trace: the cell's span while a cell runs, else the turn's. Spans
+    /// opened behind the journal frontier of a shift wait for it, and are
+    /// dropped when the journal serves the step (§7.4 rule 5).
+    pub fn trace(&self) -> crate::trace::ExtensionTrace {
+        self.extension_trace.clone()
+    }
+
+    /// Runs `run` as the body of the registered `callback` (a code executor,
+    /// or a protocol plugin) over this context: bound from the registration,
+    /// positioned at the cell's span (else the turn's), polled under it, and
+    /// revoked when `run` exits however it exits.
+    #[doc(hidden)]
+    pub async fn run_executing<F, Fut>(
+        self,
+        callback: Option<&crate::store::plugin_writers::PluginCallbackIdentity>,
+        run: F,
+    ) -> Fut::Output
+    where
+        F: FnOnce(Self) -> Fut,
+        Fut: std::future::Future,
+    {
+        let seed = self.executing_seed();
+        let (trace, body) = match callback {
+            Some(callback) => seed.for_callback(callback),
+            None => (
+                crate::trace::ExtensionTrace::untraced(),
+                crate::trace::BodyTrace::untraced(),
+            ),
+        };
+        let mut context = self;
+        context.extension_trace = trace.clone();
+        body.guard(trace.instrument(run(context))).await
+    }
+
+    /// The position an executing body of this context binds from: its
+    /// standing, at its container.
+    fn executing_seed(&self) -> crate::trace::ExtensionTrace {
+        let (Some(tracing), Some(standing)) = (&self.tracing, self.trace_standing()) else {
+            return crate::trace::ExtensionTrace::untraced();
+        };
+        let Some(container) = &tracing.container else {
+            return crate::trace::ExtensionTrace::seed(standing, tracing.scope_context.clone());
+        };
+        let standing =
+            standing.within(container.carrier().clone(), lash_trace::TraceSpanKind::Cell);
+        let mut spec = crate::trace::BodySpec::at(standing, tracing.scope_context.clone());
+        spec.anchor = Some(container.clone());
+        spec.cell = self
+            .held_response()
+            .cloned()
+            .zip(self.code_block_graph_key());
+        crate::trace::ExtensionTrace::seed_from(spec)
+    }
+
     /// Places this context at `standing` for a fixture: the right to emit is
     /// the standing's, whatever controller the context issues steps through.
     /// A context given no tracing handle takes the standing's runtime and

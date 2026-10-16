@@ -45,9 +45,20 @@ pub struct ToolHookContext {
     pub(crate) check_phase: super::ControlPhaseDeadline,
     pub(crate) clock: Arc<dyn crate::Clock>,
     pub(crate) sessions: Arc<dyn SessionStateService>,
+    /// Where this hook stands in the trace: under the call's tool span,
+    /// bound from the registered hook that runs and revoked when it returns.
+    pub trace: crate::trace::ExtensionTrace,
 }
 
 impl ToolHookContext {
+    /// This context with `trace` as the hook's capability.
+    pub(crate) fn with_trace(&self, trace: crate::trace::ExtensionTrace) -> Self {
+        Self {
+            trace,
+            ..self.clone()
+        }
+    }
+
     /// A snapshot of the session the call runs in; a process runtime has
     /// none and is refused.
     pub async fn session_snapshot(&self) -> Result<SessionSnapshot, PluginError> {

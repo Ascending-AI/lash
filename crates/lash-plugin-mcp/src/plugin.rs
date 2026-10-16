@@ -587,6 +587,7 @@ mod tests {
                     ]),
                     cwd: None,
                 }),
+                trace_propagation: Default::default(),
             },
         )]);
         let factory = McpPluginFactory::new(servers)

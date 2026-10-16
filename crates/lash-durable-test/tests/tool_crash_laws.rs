@@ -513,6 +513,10 @@ impl lash_core::ToolProvider for Probe {
             .entry(label.clone())
             .or_default()
             .push(call.context.call_id().clone());
+        // One span per real execution of the body (L2's extension half).
+        let mut span = call.context.trace().span(PROBE);
+        span.attr("probe.label", label.clone());
+        span.end();
         ToolOutcome::ok(serde_json::json!({ "label": label })).into()
     }
 }
@@ -1108,6 +1112,9 @@ impl Crash {
             let tools = self.turn != Turn::Plain;
             let cells = self.turn == Turn::CellTrace;
             violations.extend(self.losses.laws(&self.telemetry, cut, tools, cells));
+            if !self.turn.code() {
+                violations.extend(self.probe_span_laws());
+            }
         }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
@@ -1116,6 +1123,53 @@ impl Crash {
             violations.push(format!("body entries: {entries:?}"));
             if let Some(last) = self.scripts.requests(INPUT).last() {
                 violations.push(format!("last request: {last}"));
+            }
+        }
+        violations
+    }
+
+    /// L2's extension half, on a traced turn of native calls: every real
+    /// execution of a probe body published its span once, with an id of
+    /// its own, so a re-run body's spans count its executions. (A cell's
+    /// body records wait for its model response, which a cut may lose.)
+    fn probe_span_laws(&self) -> Vec<String> {
+        let mut spans: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for record in self.telemetry.published() {
+            let lash_core::TraceEvent::ExtensionSpan(span) = &record.event else {
+                continue;
+            };
+            if span.name != PROBE {
+                continue;
+            }
+            let label = span
+                .attributes
+                .iter()
+                .find(|attribute| attribute.key == "probe.label")
+                .and_then(|attribute| match &attribute.value {
+                    lash_core::TraceValue::Str(label) => Some(label.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let id = record
+                .position
+                .as_ref()
+                .map(|position| format!("{:?}", position.span.span_id()))
+                .unwrap_or_default();
+            spans.entry(label.into_owned()).or_default().push(id);
+        }
+        let mut violations = Vec::new();
+        let entries = self.world.entries();
+        for label in entries.keys().chain(spans.keys()).collect::<BTreeSet<_>>() {
+            let executions = entries.get(label).map_or(0, Vec::len);
+            let published = spans.get(label).cloned().unwrap_or_default();
+            if published.len() != executions {
+                violations.push(format!(
+                    "call `{label}` ran {executions} times and published {} probe spans",
+                    published.len()
+                ));
+            }
+            if published.iter().collect::<BTreeSet<_>>().len() != published.len() {
+                violations.push(format!("call `{label}`'s probe spans share an id"));
             }
         }
         violations

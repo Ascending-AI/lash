@@ -73,11 +73,52 @@ async fn execute_once_with_authority<'run>(
 ) -> crate::ToolAttemptOutcome {
     match build_attempt_context(&tool_context, authority.manifest()).await {
         Ok(attempt_context) => {
+            let (trace, body) = attempt_trace(&tool_context, authority);
+            let attempt_context = attempt_context.with_trace(trace);
             let _completion_fence = attempt_context.live().fence();
-            execute_attempt_body(context, authority, prepared, &attempt_context).await
+            execute_attempt_body(context, authority, prepared, &attempt_context, body).await
         }
         Err(result) => result.into(),
     }
+}
+
+/// The capability of one attempt body and its guard: under the call's tool
+/// span when this execution traced the call's start, else untraced. It is
+/// bound here from the granted provider, or the registered provider the
+/// call's admitted binding resolved to; else by the route that resolves
+/// it.
+fn attempt_trace(
+    tool_context: &ToolContext<'_>,
+    authority: &AttemptAuthority<'_>,
+) -> (crate::trace::ExtensionTrace, crate::trace::BodyTrace) {
+    let spec = tool_context
+        .runtime_execution_context
+        .as_ref()
+        .and_then(|runtime| {
+            runtime.tool_body_spec(
+                crate::CallAddress {
+                    owner: tool_context.owner.clone(),
+                    call_id: tool_context.call_id.clone(),
+                    attempt: tool_context.attempt_number,
+                },
+                tool_context.live.as_ref(),
+            )
+        });
+    let Some(spec) = spec else {
+        return (
+            crate::trace::ExtensionTrace::untraced(),
+            crate::trace::BodyTrace::untraced(),
+        );
+    };
+    let (trace, body) = spec.bind();
+    let provider = match authority {
+        AttemptAuthority::Granted(grant) => Some(grant.provider.callback_identity()),
+        AttemptAuthority::Catalog { .. } => tool_context.executable.clone(),
+    };
+    if let Some(callback) = provider.as_ref().and_then(crate::trace::BoundCallback::of) {
+        body.bind(callback);
+    }
+    (trace, body)
 }
 
 async fn execute_attempt_body(
@@ -85,21 +126,25 @@ async fn execute_attempt_body(
     authority: &AttemptAuthority<'_>,
     prepared: &PreparedToolCall,
     attempt_context: &crate::AttemptContext<'_>,
+    body: crate::trace::BodyTrace,
 ) -> crate::ToolAttemptOutcome {
-    let outcome = std::panic::AssertUnwindSafe(async {
-        context
-            .tools
-            .execute(crate::ToolCall::new(
-                authority.manifest(),
-                authority.contract(),
-                &prepared.args,
-                attempt_context,
-            ))
-            .await
-    })
-    .catch_unwind()
-    .await
-    .unwrap_or_else(|payload| tool_panicked(prepared, payload).into());
+    // The body polls under its position, so instrumented libraries in it
+    // nest under its tool span; its exit, however it exits, revokes it.
+    let outcome =
+        std::panic::AssertUnwindSafe(body.guard(attempt_context.trace().instrument(async {
+            context
+                .tools
+                .execute(crate::ToolCall::new(
+                    authority.manifest(),
+                    authority.contract(),
+                    &prepared.args,
+                    attempt_context,
+                ))
+                .await
+        })))
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|payload| tool_panicked(prepared, payload).into());
     match unheld_launch(&outcome, attempt_context) {
         Some(env_ref) => launch_not_held(&env_ref).into(),
         None => outcome,

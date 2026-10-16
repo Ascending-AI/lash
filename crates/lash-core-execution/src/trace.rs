@@ -37,8 +37,12 @@ mod boundary;
 pub use boundary::TraceBoundaryReceipt;
 mod composition;
 mod runtime;
+pub(crate) use runtime::extension;
+pub(crate) use runtime::extension::HOLD_ENTRY_BYTES;
+pub(crate) use runtime::extension::{BodySpec, BodyTrace, BoundCallback, SharedHold};
 pub use runtime::{
-    JournalFrontier, LiveStep, OpenSpan, StepIssue, TraceEmitter, TraceRuntime, TraceStanding,
+    ExtensionSpan, ExtensionTrace, JournalFrontier, LiveStep, OpenSpan, StepIssue,
+    ToolSpanAttributes, TraceEmitter, TraceInstrumented, TraceRuntime, TraceStanding,
     tool_trace_scope,
 };
 

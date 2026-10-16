@@ -396,6 +396,24 @@ fn diagnostics_off(policy: &McpDiagnosticsPolicy) -> bool {
     *policy == McpDiagnosticsPolicy::default()
 }
 
+/// Whether a call to one MCP server carries the caller's trace context in
+/// its request `_meta` (§3.10): W3C `traceparent` and `tracestate`, equal to
+/// the context the call's `execute_tool` span is exported with. `Off` sends
+/// only lash's own `lash.dev/*` keys; the span is exported either way.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum McpTracePropagation {
+    #[default]
+    W3c,
+    Off,
+}
+
+impl McpTracePropagation {
+    fn is_w3c(&self) -> bool {
+        *self == Self::W3c
+    }
+}
+
 /// Connection configuration for one MCP server. Shared policy fields live on
 /// the struct once; `transport` carries the `transport` tag plus the fields
 /// that transport understands. Diagnostics are an opt-in nested policy.
@@ -423,6 +441,9 @@ pub struct McpServerConfig {
         skip_serializing_if = "crate::events::McpServerEvents::is_disabled"
     )]
     pub events: crate::events::McpServerEvents,
+    /// Whether this server's calls carry the caller's trace context.
+    #[serde(default, skip_serializing_if = "McpTracePropagation::is_w3c")]
+    pub trace_propagation: McpTracePropagation,
 }
 
 /// Wire transport for one MCP server, selected by the `transport` tag.
@@ -531,6 +552,7 @@ impl McpServerConfig {
             shutdown_policy: McpShutdownPolicy::default(),
             transport,
             events: crate::events::McpServerEvents::Disabled,
+            trace_propagation: McpTracePropagation::W3c,
         }
     }
 

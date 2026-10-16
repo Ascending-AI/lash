@@ -240,7 +240,14 @@ impl LashRuntime {
         };
         let (plugin_id, outcome) = session
             .plugins()
-            .run_plugin_command(name, args, session_id, true, manager.bindings())
+            .run_plugin_command(
+                name,
+                args,
+                session_id,
+                true,
+                manager.bindings(),
+                crate::trace::ExtensionTrace::untraced(),
+            )
             .await?;
         let events = self.apply_storeless_plugin_operation_effects(
             &plugin_id,

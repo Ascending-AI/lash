@@ -156,8 +156,8 @@ impl TraceSink for DeleteGate {
     ) -> std::result::Result<(), lash::tracing::TraceSinkError> {
         if matches!(
             &record.event,
-            TraceEvent::Custom { name, .. }
-                if name == "agent_workbench.api.session.delete.turns_cancelled"
+            TraceEvent::ExtensionSpan(span)
+                if span.name == "agent_workbench.api.session.delete.turns_cancelled"
         ) {
             let _ = self.entered.send(());
             let (released, condition) = &*self.release;

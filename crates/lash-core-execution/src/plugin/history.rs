@@ -63,6 +63,9 @@ pub struct CompactionContext<'run> {
     /// composes the session's compaction sections over an empty tool offer
     /// and is admitted under the compaction's own execution (ADR 0133 §8).
     pub direct_completions: crate::DirectCompletionClient<'run>,
+    /// Where this hook stands in the trace: under the turn's span, bound
+    /// from the registered hook that runs and revoked when it returns.
+    pub trace: crate::trace::ExtensionTrace,
 }
 
 /// Context passed to a [`ContextPressureHook`].
@@ -91,6 +94,9 @@ pub struct ContextPressureContext<'run> {
     /// A summarizer call through it is made for the compaction purpose, as
     /// [`CompactionContext::direct_completions`] says.
     pub direct_completions: crate::DirectCompletionClient<'run>,
+    /// Where this hook stands in the trace: under the turn's span, bound
+    /// from the registered hook that runs and revoked when it returns.
+    pub trace: crate::trace::ExtensionTrace,
 }
 
 /// What a [`ContextPressureHook`] decided for the turn being prepared.

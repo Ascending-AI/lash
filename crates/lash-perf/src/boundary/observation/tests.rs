@@ -141,7 +141,7 @@ async fn trace_sink_receipts_carry_the_same_records_under_either_content_policy(
 async fn trace_sink_custom_receipt_counts_each_custom_record() {
     let receipt = receipt(Case::TraceSinkCustom, 2, 4).await;
     assert_eq!(receipt.counters["custom_records"], 2);
-    assert_eq!(receipt.counters["records_by_kind"]["custom"], 2);
+    assert_eq!(receipt.counters["records_by_kind"]["extension_span"], 2);
     assert_eq!(receipt.counters["custom_payload_bytes"], 4096);
 }
 

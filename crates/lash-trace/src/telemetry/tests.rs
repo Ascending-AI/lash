@@ -369,10 +369,7 @@ fn record_identity_is_stable_per_fact_and_distinct_per_attempt() {
     );
 
     let at = crate::TraceTimestamp::from_unix_ms(1_700_000_000_000);
-    let event = || crate::TraceEvent::Custom {
-        name: "test.event".to_string(),
-        payload: json!({}),
-    };
+    let event = || crate::TraceEvent::CompactionCompleted { summary_nodes: 0 };
     let first =
         crate::TraceRecord::identified(&terminal(0), crate::TraceContext::default(), event(), at)
             .unwrap();

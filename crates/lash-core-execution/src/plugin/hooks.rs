@@ -241,6 +241,9 @@ pub struct TurnHookContext {
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionReadService>,
     pub turn_context: crate::TurnContext,
+    /// Where this hook stands in the trace: under the turn's span, bound
+    /// from the registered hook that runs and revoked when it returns.
+    pub trace: crate::trace::ExtensionTrace,
 }
 
 #[derive(Clone)]
@@ -329,6 +332,9 @@ pub struct TurnResultHookContext {
     pub plugin_config: super::AdmittedPluginConfig,
     pub turn: Arc<TurnHookReport>,
     pub sessions: Arc<dyn SessionReadService>,
+    /// Where this hook stands in the trace: under the turn's span, bound
+    /// from the registered hook that runs and revoked when it returns.
+    pub trace: crate::trace::ExtensionTrace,
 }
 
 #[derive(Clone)]
@@ -342,6 +348,9 @@ pub struct CheckpointHookContext {
     pub checkpoint: CheckpointKind,
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionReadService>,
+    /// Where this hook stands in the trace: under the turn's span, bound
+    /// from the registered hook that runs and revoked when it returns.
+    pub trace: crate::trace::ExtensionTrace,
 }
 
 #[derive(Clone)]

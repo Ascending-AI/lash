@@ -286,7 +286,12 @@ impl RuntimeTurnDriver<'_> {
             .and_then(|call| call.carrier().cloned().map(Arc::new));
         let deliveries: Arc<dyn crate::provider::SlotDeliveries> =
             self.host.core.durability.attachment_store.clone();
-        let mut llm_task = crate::task::spawn(async move {
+        // The provider polls under the call's span, so a host transport that
+        // propagates the current context names it.
+        let ambient = call
+            .as_ref()
+            .map_or_else(|| self.trace.clone(), |call| call.standing().clone());
+        let mut llm_task = crate::task::spawn(ambient.ambient(async move {
             crate::provider::complete_prepared(
                 &mut call_provider,
                 context,
@@ -299,7 +304,7 @@ impl RuntimeTurnDriver<'_> {
                 bounds,
             )
             .await
-        });
+        }));
         let mut llm_task_abort = AbortOnDrop::new(llm_task.abort_handle());
 
         let mut text_streamed = false;

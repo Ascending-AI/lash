@@ -50,6 +50,7 @@ mod content;
 mod content_block;
 mod domain;
 mod event;
+mod extension;
 mod flight_recorder;
 mod language_execution;
 mod language_execution_failure;
@@ -74,6 +75,12 @@ pub use domain::{
     TraceRuntimeStreamPayload,
 };
 pub use event::{TraceEvent, TraceEventKind};
+pub use extension::{
+    AmbientContext, AmbientFrame, AmbientGuard, AmbientScope, ExtensionAttribute, ExtensionContent,
+    ExtensionOperation, ExtensionSpanEnd, ExtensionSpanEvent, ExtensionSpanKind,
+    ExtensionSpanRecord, FrameGuard, Framed, SpanAttributes, SpanSpec, ToolSpanAnnotations,
+    tool_span_key_allowed,
+};
 pub use flight_recorder::{
     FlightRecorderOutcome, FlightRecorderRecord, FlightRecorderSettings, FlightRecorderSink,
     FlightRecorderSnapshot,
@@ -128,9 +135,9 @@ pub use workflow_overlay::{
 ///   unknown fields.
 /// - Renaming a field, removing a field, or changing the meaning of an existing
 ///   field is a breaking change and **does** bump this version.
-/// - The free-form [`TraceEvent::Custom`] and [`TraceEvent::ProtocolStep`]
-///   payloads are opaque `serde_json::Value`; adding to or reshaping the data
-///   inside them never forces a bump.
+/// - The free-form [`TraceEvent::ProtocolStep`] payload is an opaque
+///   `serde_json::Value`; adding to or reshaping the data inside it never
+///   forces a bump.
 ///
 /// Version 5 adds the `composition_changed` event.
 /// Version 6 adds the `provider_replay_dropped` event with typed minting and
@@ -227,7 +234,9 @@ pub use workflow_overlay::{
 /// same wire form, renames `attachment_degraded`'s own `position` to
 /// `attachment_position`, adds `producer_settled` and the `discarded` tool
 /// outcome, and drops the context's `run_id`, `metadata` and
-/// `parent_graph_node_id`.
+/// `parent_graph_node_id`. FIG-6304 deletes `custom`, adds the
+/// `extension_span`, `body_omissions` and `context_pressure` events, and
+/// adds `tool_call_completed`'s `span_attributes`.
 ///
 /// version_guard(
 ///     shapes(

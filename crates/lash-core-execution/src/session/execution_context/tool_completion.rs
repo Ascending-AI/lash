@@ -7,6 +7,19 @@ use lash_sansio::sync::MutexExt;
 pub(crate) struct TracedToolCall {
     scope: lash_trace::DurableTraceScope,
     context: lash_trace::TraceContext,
+    /// What the attempt that ran last annotated the span with, in memory
+    /// only: the closer stamps it (§7.4 rule 2).
+    annotations: std::sync::Arc<std::sync::Mutex<lash_trace::ToolSpanAnnotations>>,
+}
+
+impl TracedToolCall {
+    fn new(scope: lash_trace::DurableTraceScope, context: lash_trace::TraceContext) -> Self {
+        Self {
+            scope,
+            context,
+            annotations: std::sync::Arc::default(),
+        }
+    }
 }
 
 /// What a call's start trace names.
@@ -107,7 +120,7 @@ impl RuntimeExecutionContext<'_> {
         });
         self.tool_requests
             .lock_recover()
-            .insert(start.call_id.clone(), TracedToolCall { scope, context });
+            .insert(start.call_id.clone(), TracedToolCall::new(scope, context));
     }
 
     /// Trace the rest of `call_id`, whose start the owner that admitted it
@@ -124,7 +137,7 @@ impl RuntimeExecutionContext<'_> {
         let context = tracing.scope_context.clone().for_call(call_id.clone());
         self.tool_requests
             .lock_recover()
-            .insert(call_id.clone(), TracedToolCall { scope, context });
+            .insert(call_id.clone(), TracedToolCall::new(scope, context));
     }
 
     /// Close the span of a call whose start this execution traced, at
@@ -140,8 +153,11 @@ impl RuntimeExecutionContext<'_> {
         let Some(tracing) = &self.tracing else {
             return;
         };
-        let Some(TracedToolCall { scope, context }) =
-            self.tool_requests.lock_recover().remove(&record.call_id)
+        let Some(TracedToolCall {
+            scope,
+            context,
+            annotations,
+        }) = self.tool_requests.lock_recover().remove(&record.call_id)
         else {
             return;
         };
@@ -167,8 +183,79 @@ impl RuntimeExecutionContext<'_> {
                     duration_ms,
                     issuing_node_id: issuing_node,
                     attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
+                    span_attributes: std::mem::take(&mut *annotations.lock_recover()),
                 },
             )
         });
+    }
+
+    /// The position the tool hooks of `call_id` run at: the call's tool
+    /// span, from the scope its start traced, else the scope its admission
+    /// will select. They run with the shift that issues the call's steps,
+    /// so what they observe behind the journal frontier waits for it.
+    pub(crate) fn tool_hook_trace(
+        &self,
+        call_id: &crate::ToolCallId,
+    ) -> crate::trace::ExtensionTrace {
+        let Some(tracing) = &self.tracing else {
+            return crate::trace::ExtensionTrace::untraced();
+        };
+        let traced = self.tool_requests.lock_recover().get(call_id).cloned();
+        let (scope, context) = match traced {
+            Some(traced) => (traced.scope, traced.context),
+            None => {
+                let Ok(Some(scope)) =
+                    self.tool_trace_scope(call_id, self.dispatch.clock.timestamp_ms())
+                else {
+                    return crate::trace::ExtensionTrace::untraced();
+                };
+                (
+                    scope,
+                    tracing.scope_context.clone().for_call(call_id.clone()),
+                )
+            }
+        };
+        let standing = self
+            .coordination_standing(tracing)
+            .under(scope)
+            .selected(lash_trace::TraceSpanKind::Tool, &context.ids());
+        crate::trace::ExtensionTrace::seed(standing, context)
+    }
+
+    /// What one attempt body of `call` binds its capability from: the
+    /// call's tool span, entered in the attempt's live step, or as its own
+    /// live attempt when the round runs the body natively. `None` for a
+    /// call whose start this execution did not trace.
+    pub(crate) fn tool_body_spec(
+        &self,
+        call: crate::CallAddress,
+        live: Option<&std::sync::Arc<crate::trace::LiveStep>>,
+    ) -> Option<crate::trace::BodySpec> {
+        let tracing = self.tracing.as_ref()?;
+        let TracedToolCall {
+            scope,
+            context,
+            annotations,
+        } = self
+            .tool_requests
+            .lock_recover()
+            .get(&call.call_id)?
+            .clone();
+        // A body a recorded step runs is that step's live attempt; one the
+        // round runs natively is no journal's, so each run is its own.
+        let standing = self.coordination_standing(tracing).under(scope);
+        let standing = match live {
+            Some(live) => standing.in_body(live),
+            None => standing,
+        }
+        .selected(lash_trace::TraceSpanKind::Tool, &context.ids());
+        let mut spec = crate::trace::BodySpec::at(standing, context);
+        spec.call = Some(call);
+        spec.tool_span = Some(annotations);
+        spec.cell = self
+            .held_response()
+            .cloned()
+            .zip(self.code_block_graph_key());
+        Some(spec)
     }
 }

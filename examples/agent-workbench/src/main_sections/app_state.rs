@@ -452,18 +452,35 @@ pub(crate) fn emit_workbench_trace(
     let context = session_id
         .map(|session_id| TraceContext::default().for_session(session_id))
         .unwrap_or_default();
+    let at = lash::tracing::TraceTimestamp::from_system_time(std::time::SystemTime::now())
+        .unwrap_or(lash::tracing::TraceTimestamp::from_unix_ms(0));
     let record = TraceRecord::identified(
         &lash::tracing::TraceRecordIdentity::UnscopedLive {
             attempt: lash::tracing::TraceAttemptId::new(uuid::Uuid::new_v4().to_string()),
             ordinal: 0,
         },
         context,
-        TraceEvent::Custom {
+        // The workbench's own activity: a point of the app, its payload
+        // the point's one content value.
+        TraceEvent::ExtensionSpan(lash::tracing::ExtensionSpanRecord {
+            plugin_id: "agent_workbench".to_string(),
+            callback: "app".to_string(),
             name: format!("agent_workbench.{name}"),
-            payload,
-        },
-        lash::tracing::TraceTimestamp::from_system_time(std::time::SystemTime::now())
-            .unwrap_or(lash::tracing::TraceTimestamp::from_unix_ms(0)),
+            kind: lash::tracing::ExtensionSpanKind::Internal,
+            operation: None,
+            started_at_ms: at.unix_ms(),
+            ended_at_ms: at.unix_ms(),
+            point: true,
+            error_type: None,
+            ended_by: None,
+            attributes: Vec::new(),
+            events: Vec::new(),
+            content: vec![lash::tracing::ExtensionContent {
+                key: "payload".to_string(),
+                value: payload,
+            }],
+        }),
+        at,
     );
     let record = match record {
         Ok(record) => record,

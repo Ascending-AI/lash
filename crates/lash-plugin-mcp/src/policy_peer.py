@@ -47,6 +47,9 @@ def run_call(message, index):
     token = message.get('params', {}).get('_meta', {}).get('progressToken')
     if behavior == 'success':
         result(request_id)
+    elif behavior == 'tool_error':
+        send({'jsonrpc': '2.0', 'id': request_id,
+              'result': {'content': [{'type': 'text', 'text': 'failed'}], 'isError': True}})
     elif behavior == 'rpc_invalid_params':
         send({'jsonrpc': '2.0', 'id': request_id, 'error': {
             'code': -32602, 'message': 'bad field', 'data': {'field': 'query', 'expected': 'string'}}})

@@ -19,6 +19,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `lash.process` | Internal | Transition | — |
 | `invoke_workflow` | Internal | Transition | gen_ai.invoke_workflow.internal |
 | `execute_tool` | Internal | Transition | gen_ai.execute_tool.internal |
+| `lash.extension` | Internal | Live | — |
 
 | Attribute | Type | Mutability | Set on |
 |---|---|---|---|
@@ -37,8 +38,13 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `lash.session.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
 | `lash.turn.id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
 | `lash.attempt.invocation_id` | String | Provenance | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
-| `gen_ai.operation.name` | String | Provenance | agent, model, tool, cell, workflow |
-| `gen_ai.request.model` | String | Provenance | model |
+| `gen_ai.operation.name` | String | Provenance | agent, model, tool, cell, workflow, extension |
+| `gen_ai.request.model` | String | Provenance | model, extension |
+| `gen_ai.data_source.id` | String | Provenance | extension |
+| `lash.plugin.id` | String | Provenance | extension, point |
+| `lash.plugin.callback` | String | Provenance | extension, point |
+| `lash.span.ended_by` | String | Provenance | extension |
+| `lash.span.point` | Boolean | Provenance | point |
 | `gen_ai.response.model` | String | Provenance | model |
 | `gen_ai.tool.name` | String | Provenance | tool, cell, process, tool_intent |
 | `gen_ai.tool.call.id` | String | Provenance | tool, process, tool_intent |
@@ -106,7 +112,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `lash.obligation.outcome` | String | Provenance | metrics only |
 | `lash.recovery_leader.name` | String | Provenance | metrics only |
 | `gen_ai.tool.type` | String | Refinable | tool, cell |
-| `gen_ai.provider.name` | String | Refinable | model |
+| `gen_ai.provider.name` | String | Refinable | model, extension |
 | `error.type` | String | Refinable | producer, agent, model, model_attempt, tool, cell, process, workflow, workflow_node, tool_intent, extension, point |
 
 | Span kind | Attribute reserve |
@@ -121,8 +127,8 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `workflow` | 24 |
 | `workflow_node` | 20 |
 | `tool_intent` | 24 |
-| `extension` | 19 |
-| `point` | 19 |
+| `extension` | 26 |
+| `point` | 22 |
 
 | Metric | Kind | Unit | Ownership |
 |---|---|---|---|

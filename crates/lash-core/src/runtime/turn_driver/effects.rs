@@ -420,6 +420,10 @@ impl RuntimeTurnDriver<'_> {
                 checkpoint,
                 state: self.checkpoint_state_view(messages, protocol_iteration),
                 sessions: self.session_services.read_service(),
+                trace: crate::trace::ExtensionTrace::seed(
+                    self.trace.clone(),
+                    self.trace_context(protocol_iteration),
+                ),
             })
             .await
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint))?;
@@ -472,11 +476,21 @@ impl RuntimeTurnDriver<'_> {
             .with_held_response(self.held_response.clone());
         let context = context.with_parent_invocation(invocation);
         let result = match code_executor {
-            Some(code_executor) => code_executor
-                .execute_code(
-                    context.clone(),
-                    crate::ExecRequest {
-                        code: code.to_string(),
+            // The cell is the code executor's body: bound from its
+            // registration and revoked when the cell returns.
+            Some(code_executor) => context
+                .clone()
+                .run_executing(
+                    self.session.plugins().code_executor_identity().as_ref(),
+                    |context| async move {
+                        code_executor
+                            .execute_code(
+                                context,
+                                crate::ExecRequest {
+                                    code: code.to_string(),
+                                },
+                            )
+                            .await
                     },
                 )
                 .await

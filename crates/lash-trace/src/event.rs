@@ -183,6 +183,10 @@ pub enum TraceEvent {
         issuing_node_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attempts: Option<Vec<TraceRetryAttempt>>,
+        /// What the body of the attempt that settled the call set on its own
+        /// tool span: in memory only, stamped by the span's closer.
+        #[serde(default, skip_serializing_if = "crate::ToolSpanAnnotations::is_empty")]
+        span_attributes: crate::ToolSpanAnnotations,
     },
     /// A code cell's span opens: once per execution of the cell, starting at
     /// the cell's retained first start.
@@ -300,9 +304,19 @@ pub enum TraceEvent {
         plugin_id: String,
         conflict: lash_sansio::ToolCheckConflict,
     },
-    Custom {
-        name: String,
-        payload: Value,
+    /// An extension span or point ended: its one whole record, with what
+    /// it buffered. Its position names the span and its parent.
+    ExtensionSpan(crate::ExtensionSpanRecord),
+    /// What one extension body's contributions lost, with the body's
+    /// address: emitted once when the body exits, only when not empty.
+    BodyOmissions(crate::TraceOmissionDiagnostic),
+    /// A context-pressure hook's decision opened a compaction frame for the
+    /// turn. `task` is the frame's model-facing task.
+    ContextPressure {
+        plugin_id: String,
+        hook_id: String,
+        task: String,
+        frame_node_id: String,
     },
 }
 
@@ -384,7 +398,9 @@ impl TraceEvent {
             | Self::ProtocolStep { .. }
             | Self::StepBodyStarted { .. }
             | Self::ToolCheckConflict { .. }
-            | Self::Custom { .. } => false,
+            | Self::BodyOmissions(_)
+            | Self::ContextPressure { .. } => false,
+            Self::ExtensionSpan(span) => span.error_type.is_some(),
         }
     }
 

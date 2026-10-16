@@ -374,6 +374,7 @@ mod tests {
                 state: lash_core::SessionReadView::from_snapshot(&state),
                 sessions: Arc::new(NoopPromptManager),
                 plugin_config: Default::default(),
+                trace: Default::default(),
             })
             .expect("warning contributions");
         assert!(directives.events.is_empty());
@@ -421,6 +422,7 @@ mod tests {
                 state: lash_core::SessionReadView::from_snapshot(&state),
                 sessions: Arc::new(NoopPromptManager),
                 plugin_config: Default::default(),
+                trace: Default::default(),
             })
             .expect("warning contributions");
 
@@ -470,6 +472,7 @@ mod tests {
             state: lash_core::SessionReadView::from_snapshot(&state),
             sessions: Arc::new(NoopPromptManager),
             plugin_config,
+            trace: Default::default(),
         }
     }
 

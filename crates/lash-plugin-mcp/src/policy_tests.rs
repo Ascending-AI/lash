@@ -83,6 +83,7 @@ struct MockOptions {
     reconnect_max_ms: Option<u64>,
     reconnect_max_attempts: ReconnectAttempts,
     startup_timeout_ms: u64,
+    trace_propagation: crate::McpTracePropagation,
 }
 
 impl Default for MockOptions {
@@ -101,6 +102,7 @@ impl Default for MockOptions {
                 std::num::NonZeroU64::new(1).unwrap(),
             ),
             startup_timeout_ms: 1_000,
+            trace_propagation: crate::McpTracePropagation::W3c,
         }
     }
 }
@@ -153,6 +155,7 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
             ]),
             cwd: None,
         }),
+        trace_propagation: options.trace_propagation,
     }
 }
 

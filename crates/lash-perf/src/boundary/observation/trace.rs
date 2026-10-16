@@ -195,9 +195,9 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
 
         let mut custom = 0;
         if matches!(args.case, Case::TraceSinkCustom) {
-            // A custom record is its producer's payload and passes the host's
-            // sink unread. These are host-authored and offered to the
-            // installed sink; no plugin emission path is driven.
+            // A host-authored extension point, its payload one content value,
+            // offered to the installed sink unread; no plugin emission path
+            // is driven.
             let timed = TimedSink::new(sink.clone(), &meter, "trace.sink.append.custom");
             let payload = serde_json::json!({"text": "x".repeat(args.callers * 1024)});
             let window = Instant::now();
@@ -213,10 +213,24 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
                     context: Default::default(),
                     position: None,
                     omissions: Default::default(),
-                    event: TraceEvent::Custom {
+                    event: TraceEvent::ExtensionSpan(lash::tracing::ExtensionSpanRecord {
+                        plugin_id: "observation_workload".into(),
+                        callback: "host".into(),
                         name: "observation_workload.custom".into(),
-                        payload: payload.clone(),
-                    },
+                        kind: lash::tracing::ExtensionSpanKind::Internal,
+                        operation: None,
+                        started_at_ms: 0,
+                        ended_at_ms: 0,
+                        point: true,
+                        error_type: None,
+                        ended_by: None,
+                        attributes: Vec::new(),
+                        events: Vec::new(),
+                        content: vec![lash::tracing::ExtensionContent {
+                            key: "payload".into(),
+                            value: payload.clone(),
+                        }],
+                    }),
                 })?;
                 custom += 1;
             }

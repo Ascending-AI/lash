@@ -490,6 +490,20 @@ impl SurfaceTools {
             .find(|entry| entry.definition.manifest.name == name)
     }
 
+    /// The handle of the provider `tool` routes to under `route`.
+    fn route_handle<'a>(
+        &'a self,
+        tool: &ToolId,
+        route: &'a crate::tool_provider::ToolExecutionRoute,
+    ) -> Option<&'a crate::plugin::ToolProviderHandle> {
+        match route {
+            crate::tool_provider::ToolExecutionRoute::Catalog => {
+                self.routes.get(tool).map(|route| &route.provider)
+            }
+            crate::tool_provider::ToolExecutionRoute::Granted { provider } => Some(provider),
+        }
+    }
+
     fn route(
         &self,
         tool: &ToolId,
@@ -570,6 +584,13 @@ impl ToolProvider for SurfaceTools {
             Ok(provider) => provider,
             Err(outcome) => return outcome.into(),
         };
+        // The body's capability is bound from the registered provider the
+        // call routes to, never from anything the call names.
+        if let Some(handle) = self.route_handle(call.tool_id(), call.context.execution_route())
+            && let Some(callback) = crate::trace::BoundCallback::of(&handle.callback_identity())
+        {
+            call.context.trace().bind(callback);
+        }
         provider.execute(call).await
     }
 }

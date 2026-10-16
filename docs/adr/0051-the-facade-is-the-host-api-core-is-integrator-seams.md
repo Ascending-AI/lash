@@ -82,20 +82,15 @@ the runtime's authority.
 Prompt sections follow [ADR 0133](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md): `lash::plugins` carries the section and wrapper
 contracts, and `lash::prompt` the host's plan and the recorded snapshots.
 
-Plugins must honour the host's telemetry content policy for content in their
-custom trace payloads. Lash governs built-in telemetry and passes custom
-payloads without inspecting or classifying them. A plugin factory reads the
-current deployment policy through its read-only context accessor:
-
-```rust
-let content = ctx.telemetry_content().capture(|| text.to_owned());
-```
-
-Here `ctx` is a `lash::plugins::PluginSessionContext`. Reopening with another
-host policy exposes that policy; telemetry privacy is an operational setting,
-not recorded execution configuration. Hosts can filter custom payloads with a
-wrapping `TraceSink` at their exporter, as shown in the
-[tracing contract](../architecture/tracing.md#plugin-custom-payloads-and-host-filtering).
+Plugins record telemetry as extension spans through the capability lash
+binds for each callback (`ExtensionTrace`), never as free-form payloads. Lash
+attributes each span to the registration that opened it and applies the
+host's content policy, capture selector and limits to it: a content builder
+runs only when the host captures the `extension` category. Telemetry privacy
+is an operational setting, not recorded execution configuration. Hosts can
+filter extension spans with a wrapping `TraceSink` at their exporter, or skip
+their kinds by export policy, as shown in the
+[tracing contract](../architecture/tracing.md#extension-spans-and-host-filtering).
 
 ### Callback deadlines
 

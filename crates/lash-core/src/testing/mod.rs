@@ -20,6 +20,9 @@
 /// Opt in to implementing runtime service substitutes in tests.
 pub use crate::core_internal::RuntimeService;
 
+pub use lash_core_execution::testing::extension_trace::{
+    BoundExtensionTrace, bound_extension_trace, bound_tool_trace,
+};
 pub use lash_core_execution::testing::kernel_internals::prompt_catalog_from_recipes;
 pub use lash_core_execution::testing::{
     Call, CallbackCounts, DeploymentOp, FaultKind, GATE_DEADLINE, Gate, Op, Outcome, Phase, Script,

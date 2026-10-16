@@ -93,13 +93,48 @@ fn mock_manager() -> MockSessionManager {
         ))
 }
 
-/// Captures what a context hook emits through its trace-only emitter.
+/// Captures what a context hook emits through its trace-only emitter, and
+/// the points its bound trace capability records.
 #[derive(Default)]
 struct RecordingTraces {
     events: Mutex<Vec<(lash_core::TraceContext, lash_core::TraceEvent)>>,
+    sink: Arc<lash_core::testing::RecordingTraceSink>,
+    bound: Mutex<Vec<lash_core::testing::BoundExtensionTrace>>,
 }
 
 impl RecordingTraces {
+    /// A capability bound as the standard-compaction context-pressure hook,
+    /// recording into this recorder until it is dropped.
+    fn extension(&self) -> lash_core::trace::ExtensionTrace {
+        let runtime =
+            lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock))
+                .with_trace_sink(self.sink.clone());
+        let bound = lash_core::testing::bound_extension_trace(
+            &runtime,
+            &lash_core::plugin::PluginCallbackIdentity {
+                owner: "standard-compaction".to_string(),
+                key: "context_pressure:standard".to_string(),
+            },
+        );
+        let trace = bound.trace();
+        self.bound.lock_recover().push(bound);
+        trace
+    }
+
+    /// The points the bound capabilities recorded named `name`.
+    fn points(&self, name: &str) -> Vec<lash_core::ExtensionSpanRecord> {
+        self.sink
+            .records()
+            .into_iter()
+            .filter_map(|record| match record.event {
+                lash_core::TraceEvent::ExtensionSpan(span) if span.point && span.name == name => {
+                    Some(span)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     fn emitter(self: &Arc<Self>) -> PluginTraceEmitter {
         let traces = Arc::clone(self);
         PluginTraceEmitter::new(move |context, event| {
@@ -155,6 +190,7 @@ fn build_pressure_ctx(
         scoped_effect_controller: test_turn_controller(),
         direct_completions,
         plugin_config: Default::default(),
+        trace: traces.extension(),
     }
 }
 
@@ -176,6 +212,7 @@ fn build_compaction_ctx(
             .expect("test scoped effect controller"),
         direct_completions,
         plugin_config: Default::default(),
+        trace: Default::default(),
     }
 }
 
@@ -518,9 +555,7 @@ async fn recovery_invocation_faults_preserve_their_typed_cause_without_spending_
                 panic!("the typed runtime cause survives: {error:?}");
             };
             assert_eq!(error.code, code);
-            assert!(!traces.events().iter().any(|(_, event)| matches!(event,
-                lash_core::TraceEvent::Custom { name, .. } if name == TRACE_OVERFLOW_RECOVERY_OUTCOME
-            )));
+            assert!(traces.points(TRACE_OVERFLOW_RECOVERY_OUTCOME).is_empty());
         }
         ctx.direct_completions = RecordingLlmCompletions::client(&direct);
         assert!(matches!(
@@ -618,6 +653,7 @@ fn recovery_ctx(
             .expect("test scoped effect controller"),
         direct_completions: RecordingLlmCompletions::client(direct),
         plugin_config: Default::default(),
+        trace: traces.extension(),
     }
 }
 
@@ -749,6 +785,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         )),
         sessions: sessions.clone(),
         plugin_config: Default::default(),
+        trace: Default::default(),
     };
     let contributions =
         overflow_recovery_after_turn(&overflow, &StandardCompactionConfig::standard())
@@ -775,6 +812,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         )),
         sessions,
         plugin_config: Default::default(),
+        trace: Default::default(),
     };
     assert!(
         overflow_recovery_after_turn(&provider_error, &StandardCompactionConfig::standard())
@@ -800,6 +838,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         }),
         sessions: Arc::new(MockSessionManager::default()),
         plugin_config: Default::default(),
+        trace: Default::default(),
     };
     assert!(
         overflow_recovery_after_turn(&guided, &StandardCompactionConfig::standard())
@@ -1012,18 +1051,17 @@ async fn recovery_failure_is_bounded_and_explicit() {
     assert!(captured.requests().is_empty());
 
     let outcomes: Vec<String> = traces
-        .events()
+        .points(TRACE_OVERFLOW_RECOVERY_OUTCOME)
         .into_iter()
-        .filter_map(|(_, event)| match event {
-            lash_core::TraceEvent::Custom { name, payload }
-                if name == TRACE_OVERFLOW_RECOVERY_OUTCOME =>
-            {
-                payload
-                    .get("outcome")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string)
-            }
-            _ => None,
+        .filter_map(|point| {
+            point
+                .attributes
+                .into_iter()
+                .find(|attribute| attribute.key == "compaction.outcome")
+                .and_then(|attribute| match attribute.value {
+                    lash_core::TraceValue::Str(outcome) => Some(outcome.into_owned()),
+                    _ => None,
+                })
         })
         .collect();
     assert_eq!(outcomes, ["exhausted:recoverable_failure"]);

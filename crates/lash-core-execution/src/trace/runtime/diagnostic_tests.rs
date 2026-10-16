@@ -109,6 +109,7 @@ fn a_panicking_sink_or_snapshot_callback_costs_only_its_own_delivery() {
             duration_ms: 10,
             issuing_node_id: None,
             attempts: None,
+            span_attributes: Default::default(),
         },
     };
     for _ in 0..3 {

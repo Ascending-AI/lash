@@ -27,6 +27,8 @@ use lash_sansio::sync::MutexExt;
 // submodule's own intra-doc links — would resolve it against *this* module's
 // scope, where none of the linked items exist.
 pub mod behavior_transcript;
+#[cfg(any(test, feature = "testing"))]
+pub mod extension_trace;
 #[cfg(feature = "testing")]
 pub mod trace_capture;
 

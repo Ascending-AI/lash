@@ -192,11 +192,17 @@ impl ExecutionComposition {
             current = context
                 .check_phase
                 .run(context.clock.as_ref(), &registered.identity, || {
-                    (registered.hook)(ToolArgsTransformInput {
-                        context: context.clone(),
-                        original: Arc::clone(&original),
-                        current,
-                    })
+                    crate::trace::extension::run_bound(
+                        &context.trace,
+                        &registered.identity,
+                        |trace| {
+                            (registered.hook)(ToolArgsTransformInput {
+                                context: context.with_trace(trace),
+                                original: Arc::clone(&original),
+                                current,
+                            })
+                        },
+                    )
                 })
                 .await
                 .map_err(|error| {
@@ -223,11 +229,17 @@ impl ExecutionComposition {
             let verdict = context
                 .check_phase
                 .run(context.clock.as_ref(), &registered.identity, || {
-                    (registered.hook)(ToolArgsCheckInput {
-                        context: context.clone(),
-                        original_args: Arc::clone(original_args),
-                        prepared: prepared.clone(),
-                    })
+                    crate::trace::extension::run_bound(
+                        &context.trace,
+                        &registered.identity,
+                        |trace| {
+                            (registered.hook)(ToolArgsCheckInput {
+                                context: context.with_trace(trace),
+                                original_args: Arc::clone(original_args),
+                                prepared: prepared.clone(),
+                            })
+                        },
+                    )
                 })
                 .await
                 .unwrap_or_else(|error| {
@@ -263,13 +275,19 @@ impl ExecutionComposition {
             current = context
                 .check_phase
                 .run(context.clock.as_ref(), &registered.identity, || {
-                    (registered.hook)(ToolResultTransformInput {
-                        context: context.clone(),
-                        occurrence,
-                        prepared: prepared.clone(),
-                        original: Arc::clone(original),
-                        current,
-                    })
+                    crate::trace::extension::run_bound(
+                        &context.trace,
+                        &registered.identity,
+                        |trace| {
+                            (registered.hook)(ToolResultTransformInput {
+                                context: context.with_trace(trace),
+                                occurrence,
+                                prepared: prepared.clone(),
+                                original: Arc::clone(original),
+                                current,
+                            })
+                        },
+                    )
                 })
                 .await
                 .map_err(|error| {
@@ -300,13 +318,19 @@ impl ExecutionComposition {
             let reply = context
                 .check_phase
                 .run(context.clock.as_ref(), &registered.identity, || {
-                    (registered.hook)(ToolResultCheckInput {
-                        context: context.clone(),
-                        occurrence,
-                        prepared: prepared.clone(),
-                        original: Arc::clone(original),
-                        final_result: Arc::clone(final_result),
-                    })
+                    crate::trace::extension::run_bound(
+                        &context.trace,
+                        &registered.identity,
+                        |trace| {
+                            (registered.hook)(ToolResultCheckInput {
+                                context: context.with_trace(trace),
+                                occurrence,
+                                prepared: prepared.clone(),
+                                original: Arc::clone(original),
+                                final_result: Arc::clone(final_result),
+                            })
+                        },
+                    )
                 })
                 .await;
             let verdict = match reply {

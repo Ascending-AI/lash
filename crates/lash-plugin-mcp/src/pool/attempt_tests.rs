@@ -444,3 +444,120 @@ async fn l22_mcp_transport_timeout_is_an_inline_body_failure() {
     drop(clock);
     pool.shutdown_all().await;
 }
+
+/// The one `tools/call` request the mock received.
+fn received_call(root: &std::path::Path) -> serde_json::Value {
+    let calls: Vec<serde_json::Value> = std::fs::read_to_string(root.join("received.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .filter(|request: &serde_json::Value| request["method"] == "tools/call")
+        .collect();
+    assert_eq!(calls.len(), 1);
+    calls.into_iter().next().unwrap()
+}
+
+/// L13 and L9's MCP rows: a server at the default `W3c` policy receives
+/// `_meta.traceparent` equal to the context of the attempt's tool span
+/// (trace id, span id and flags; `tracestate` when it has one), and one
+/// configured `off` receives exactly the `lash.dev/*` keys beside the
+/// protocol's own.
+/// Either way the client annotates the tool span with the MCP method, the
+/// transport and the JSON-RPC request id, and an `isError` result with
+/// `error.type = tool_error`.
+#[tokio::test]
+async fn l13_mcp_propagates_the_tool_span_context_under_the_servers_policy() {
+    use crate::McpTracePropagation;
+    for propagation in [McpTracePropagation::W3c, McpTracePropagation::Off] {
+        let scratch = tempfile::tempdir().unwrap();
+        let pool = connect_mock(
+            scratch.path(),
+            MockOptions {
+                behavior: "tool_error",
+                trace_propagation: propagation,
+                ..Default::default()
+            },
+        )
+        .await;
+        let runtime =
+            lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock))
+                .with_trace_sink(Arc::new(lash_core::testing::RecordingTraceSink::new()));
+        let bound = lash_core::testing::bound_tool_trace(
+            &runtime,
+            &lash_core::plugin::PluginCallbackIdentity {
+                owner: "mcp".to_string(),
+                key: "tool_provider:mcp".to_string(),
+            },
+        );
+        let fixture = lash_core::testing::ToolCallFixture::mock();
+        let context = bound.on(fixture.attempt("mcp-trace-law"));
+        let outcome = pool
+            .call_tool(&mcp_name("mock", "work"), &json!({}), &context)
+            .await;
+        assert!(!outcome.is_success(), "the server answered isError");
+        pool.shutdown_all().await;
+
+        let request = received_call(scratch.path());
+        let meta = request["params"]["_meta"].as_object().expect("a _meta");
+        let position = bound.trace().position().expect("a traced body");
+        // The keys beside the protocol's own, which its transport adds.
+        let added: std::collections::BTreeSet<&str> = meta
+            .keys()
+            .map(String::as_str)
+            .filter(|key| !key.starts_with("io.modelcontextprotocol/") && *key != "progressToken")
+            .collect();
+        let mut expected =
+            std::collections::BTreeSet::from(["lash.dev/tool-attempt", "lash.dev/tool-call-id"]);
+        if propagation == McpTracePropagation::W3c {
+            expected.insert("traceparent");
+            if !position.tracestate().is_empty() {
+                expected.insert("tracestate");
+            }
+        }
+        assert_eq!(added, expected, "{meta:?}");
+        match propagation {
+            McpTracePropagation::W3c => {
+                assert_eq!(meta["traceparent"], position.traceparent());
+                assert_eq!(
+                    meta.get("tracestate").and_then(Value::as_str),
+                    (!position.tracestate().is_empty()).then(|| position.tracestate().as_str()),
+                );
+            }
+            McpTracePropagation::Off => {}
+        }
+        let annotations = bound.tool_span_annotations();
+        let value = |key: &str| {
+            annotations
+                .get(key)
+                .map(|value| format!("{value:?}"))
+                .unwrap_or_else(|| panic!("{key} is set: {annotations:?}"))
+        };
+        assert!(value("mcp.method.name").contains("tools/call"));
+        assert!(value("network.transport").contains("pipe"));
+        assert!(value("error.type").contains("tool_error"));
+        assert!(value("jsonrpc.request.id").contains(&request["id"].to_string()));
+    }
+}
+
+/// L13's round trip: a server configured `off` keeps it, and the default
+/// is omitted.
+#[test]
+fn l13_mcp_trace_propagation_round_trips_and_omits_the_default() {
+    let root = std::path::Path::new("/nonexistent");
+    for (propagation, written) in [
+        (crate::McpTracePropagation::W3c, None),
+        (crate::McpTracePropagation::Off, Some(json!("off"))),
+    ] {
+        let config = mock_config(
+            root,
+            MockOptions {
+                trace_propagation: propagation,
+                ..Default::default()
+            },
+        );
+        let value = serde_json::to_value(&config).unwrap();
+        assert_eq!(value.get("trace_propagation").cloned(), written);
+        let back: McpServerConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(back.trace_propagation, propagation);
+    }
+}

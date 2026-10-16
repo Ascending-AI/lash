@@ -7,12 +7,21 @@ pub use lash_core::facade_support::{
 pub use lash_core::facade_support::{ProviderCompletionSideband, StoreObserver};
 /// Physical SQL windows and the receipt vocabulary their store sinks receive.
 pub use lash_core::operational_metrics::sql;
+/// The extension tracing capability: where a tool provider, hook, protocol
+/// or code-executor body, or plugin operation stands in the trace, the
+/// spans it opens there, and the annotations of its own tool span.
+pub use lash_core::trace::{ExtensionSpan, ExtensionTrace, ToolSpanAttributes, TraceInstrumented};
 pub use lash_sansio::AttachmentMaterializationReason;
 /// The scope, cause, permit and identity vocabulary the trace runtime's
 /// signatures name.
 pub use lash_trace::telemetry::metrics::{
     DurableCommitCost, ObligationMetrics, ParkedWorkMetrics, RuntimeTuningMetrics,
     TelemetryMetrics, ToolIntentMetrics,
+};
+pub use lash_trace::{
+    AmbientContext, AmbientGuard, AmbientScope, ExtensionAttribute, ExtensionContent,
+    ExtensionOperation, ExtensionSpanEnd, ExtensionSpanEvent, ExtensionSpanKind,
+    ExtensionSpanRecord, SpanAttributes, SpanSpec, ToolSpanAnnotations,
 };
 /// Every tracing knob's sealed policy, its typed refusal, and the bounded
 /// writer and omission vocabulary every host contribution goes through.
@@ -52,6 +61,22 @@ pub use lash_core::{
 pub use lash_sansio::ExecutionNodeKind;
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::api as otel;
+
+/// Explicit OpenTelemetry access to an extension position, for libraries
+/// that take a context argument instead of reading the current one.
+#[cfg(feature = "otel-trace")]
+pub trait ExtensionTraceOtelExt {
+    /// The OpenTelemetry context whose remote parent is this position; the
+    /// empty context when untraced.
+    fn otel_context(&self) -> otel::Context;
+}
+
+#[cfg(feature = "otel-trace")]
+impl ExtensionTraceOtelExt for ExtensionTrace {
+    fn otel_context(&self) -> otel::Context {
+        lash_trace::otel::otel_context(self.position().as_ref())
+    }
+}
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::registry::{
     GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT, LASH_INSTRUMENTATION_NAME,

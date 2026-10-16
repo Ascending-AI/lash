@@ -50,7 +50,7 @@ pub use state_command::{
     ApplyReducer, CallbackSlot, FrontierRefusal, FrontierStep, NamespaceFrontierRefusal,
     PublicationOrdinal, ReducerRefusal, ResolvedStateChange, StateAuthority, StateCommand,
     StateCommandBatch, StateCommandLimits, StateCommandOrigin, StateCommandRefusal, StateFrontier,
-    StateResolution, StateResolutionOutcome,
+    StateResolution, StateResolutionOutcome, TraceScopeOf,
 };
 pub use tool_hooks::{
     AfterCheckVerdict, AttributedVerdict, BeforeCheckVerdict, BeforeSelection, CheckRank,

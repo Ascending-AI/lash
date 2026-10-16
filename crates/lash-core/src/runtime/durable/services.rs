@@ -337,7 +337,7 @@ impl TurnServices for RuntimeTurnServices {
         row: &TurnRow,
         _head: &SessionHead,
     ) -> Result<Box<dyn TurnDrive>, TurnError> {
-        let (turn, parts) = self.prepare(cx, row, None).await?;
+        let (turn, parts) = Box::pin(self.prepare(cx, row, None)).await?;
         Ok(Box::new(RuntimeDrive::start(turn, parts)?))
     }
 
@@ -347,7 +347,7 @@ impl TurnServices for RuntimeTurnServices {
         mut restore: TurnRestore<'_>,
     ) -> Result<OpenTurn, TurnError> {
         let recorded = restore.recorded_preparation().await?;
-        let (turn, parts) = self.prepare(cx, restore.row(), Some(recorded)).await?;
+        let (turn, parts) = Box::pin(self.prepare(cx, restore.row(), Some(recorded))).await?;
         RuntimeDrive::resume(cx, turn, parts, restore).await
     }
 

@@ -88,8 +88,8 @@ mod stdio_transport;
 
 pub use config::{
     McpCallPolicy, McpDataLimits, McpDiagnosticsPolicy, McpServerConfig, McpShutdownPolicy,
-    McpStdioTransport, McpStreamableHttpTransport, McpTransport, ReconnectAttempts,
-    TimeoutDisconnectPolicy,
+    McpStdioTransport, McpStreamableHttpTransport, McpTracePropagation, McpTransport,
+    ReconnectAttempts, TimeoutDisconnectPolicy,
 };
 pub use error::{
     McpDecodeCause, McpDiagnosticContent, McpError, McpExitObservation, McpInvalidLine, McpPeer,

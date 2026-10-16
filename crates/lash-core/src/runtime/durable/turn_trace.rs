@@ -351,6 +351,7 @@ pub(super) fn members_ended(
                         duration_ms: ended_at_ms.saturating_sub(scope.started_at_ms),
                         issuing_node_id: None,
                         attempts: None,
+                        span_attributes: Default::default(),
                     },
                 )
             });
