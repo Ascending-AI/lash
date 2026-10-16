@@ -64,9 +64,8 @@ impl Corpus {
 
     /// Adds new identities after verifying every existing recorded identity.
     /// A new release reuses records of identities already held by another release.
-    /// The release the tree builds is unsealed, so an identity it no longer
-    /// holds natively leaves its index: the build certifies exactly the
-    /// natives it holds.
+    /// Retiring an identity requires explicit unsealed baseline replacement;
+    /// ordinary recording must retain and certify every pinned native.
     pub(crate) fn record_new(
         &mut self,
         registry: &FunctionRegistry,
@@ -75,11 +74,6 @@ impl Corpus {
     ) -> Result<(), String> {
         let key = format!("{dialect}@{release}");
         let mut index = self.releases.get(&key).cloned().unwrap_or_default();
-        index.retain(|function, _| {
-            registry
-                .get(function)
-                .is_some_and(|registered| registered.native().is_some())
-        });
         for (function, registered) in registry
             .iter()
             .filter(|(_, registered)| registered.native().is_some())
