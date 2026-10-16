@@ -392,6 +392,20 @@ impl LlmCallRecord {
                 && attempt.protocol_position != ProtocolPosition::NoResponse
         })
     }
+
+    /// The call's usage, what a host meters it by: the sum its attempts'
+    /// providers reported, counting the call in
+    /// [`LlmUsage::unknown_calls`] when [`Self::usage_unknown`], so the
+    /// counters are then a lower bound, never a total (ADR 0031). `Err`
+    /// when the sum overflows.
+    pub fn usage(&self) -> Result<LlmUsage, TokenUsageOverflow> {
+        let unknown = self.usage_unknown().then(LlmUsage::unknown_call);
+        self.attempts
+            .iter()
+            .filter_map(|attempt| attempt.usage.as_ref())
+            .chain(unknown.as_ref())
+            .try_fold(LlmUsage::default(), |total, usage| total.checked_add(usage))
+    }
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]

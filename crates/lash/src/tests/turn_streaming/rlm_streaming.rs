@@ -538,6 +538,185 @@ pub(super) fn rlm_accepted_cell_without_tail_usage_is_unknown_never_zero() -> Re
     })
 }
 
+/// The `ModelCallRecorded` activities of a turn: the host's settle records.
+#[cfg(feature = "rlm")]
+fn settle_records(activities: &[TurnActivity]) -> Vec<&lash_core::LlmCallRecord> {
+    activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::ModelCallRecorded { record } => Some(record),
+            _ => None,
+        })
+        .collect()
+}
+
+/// FIG-6446: a call lash drops before its provider future returns, so a
+/// host decorator around it never settles, reaches the host exactly once
+/// as `ModelCallRecorded` with unknown usage: at its deadline while it
+/// streams, at its deadline while its accepted cell's tail drains, and on
+/// the turn's immediate cancel.
+#[cfg(feature = "rlm")]
+#[test]
+pub(super) fn a_dropped_call_settles_once_with_unknown_usage() -> Result<()> {
+    run_async_test_on_stack_budget("dropped-call-settles", || async {
+        for case in ["deadline-streaming", "deadline-tail", "cancel-streaming"] {
+            let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let dropped_early = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let provider = crate::testing::TestProvider::builder()
+                .kind("dropped-call-settles")
+                .requires_streaming(true)
+                .complete({
+                    let ended = Arc::clone(&ended);
+                    let dropped_early = Arc::clone(&dropped_early);
+                    move |request| {
+                        let decorated = DecoratedFuture {
+                            ended: Arc::clone(&ended),
+                            dropped_early: Arc::clone(&dropped_early),
+                        };
+                        async move {
+                            let _decorated = decorated;
+                            let stream = request.stream_events.expect("stream events");
+                            if case == "deadline-tail" {
+                                streamed_cell(&stream, "dropped tail");
+                            } else {
+                                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                                    kind: StreamBlockKind::AssistantText,
+                                    block: lash_core::llm::types::StreamBlockIdentity::new(
+                                        "text:0", 0,
+                                    ),
+                                    text: "Let me think.".to_string(),
+                                }));
+                            }
+                            std::future::pending().await
+                        }
+                    }
+                })
+                .build()
+                .into_handle();
+            // The cancel case's deadline never reaches the call first.
+            let model_total = if case == "cancel-streaming" { 60 } else { 2 };
+            let core =
+                rlm_abort_drain_core(provider, std::time::Duration::from_secs(model_total)).await?;
+            let session = core
+                .session(
+                    crate::SessionId::parse(format!("dropped-call-settles-{case}"))
+                        .expect("nonblank host identity"),
+                )
+                .created()
+                .await
+                .open()
+                .await?;
+
+            let handle = session.send(TurnInput::text("finish")).await?;
+            if case == "cancel-streaming" {
+                // Cancel once the call's output reached the turn.
+                let mut events = handle.events();
+                while let Some(activity) = events.next_activity().await {
+                    if matches!(
+                        activity?.event,
+                        TurnEvent::StreamBlock(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
+                            ..
+                        })
+                    ) {
+                        break;
+                    }
+                }
+                let requested = handle
+                    .cancel()
+                    .mode(crate::TurnCancelMode::Immediate)
+                    .await?;
+                assert!(
+                    matches!(requested, crate::CancelReceipt::Cancelled { .. }),
+                    "{requested:?}"
+                );
+            }
+            let output = handle.output().await?;
+
+            assert!(
+                dropped_early.load(Ordering::SeqCst),
+                "{case}: lash dropped the provider future"
+            );
+            let [record] = settle_records(&output.activities)[..] else {
+                panic!("{case}: one settle record: {:?}", output.activities);
+            };
+            let unknown = lash_core::llm::types::LlmUsage::unknown_call();
+            assert_eq!(record.usage(), Ok(unknown.clone()), "{case}");
+            assert_eq!(output.result.usage, unknown, "{case}");
+        }
+        Ok(())
+    })
+}
+
+/// FIG-6446: a call whose provider returns reaches the host exactly once as
+/// `ModelCallRecorded` with the usage it reported, whether its response
+/// completed the call or its cell was accepted mid-stream and its tail
+/// drained.
+#[cfg(feature = "rlm")]
+#[test]
+pub(super) fn a_completed_call_settles_once_with_known_usage() -> Result<()> {
+    run_async_test_on_stack_budget("completed-call-settles", || async {
+        for case in ["completed", "accepted-mid-stream"] {
+            let provider = crate::testing::TestProvider::builder()
+                .kind("completed-call-settles")
+                .requires_streaming(case == "accepted-mid-stream")
+                .complete(move |request| async move {
+                    if case == "accepted-mid-stream" {
+                        let stream = request.stream_events.expect("stream events");
+                        streamed_cell(&stream, "settled");
+                        tokio::time::sleep(TAIL_STOP_GRACE * 3).await;
+                    }
+                    Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text:
+                                "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
+                                    .to_string(),
+                            response_meta: None,
+                        }],
+                        usage: lash_core::llm::types::LlmUsage {
+                            input_tokens: 17,
+                            output_tokens: 5,
+                            ..Default::default()
+                        },
+                        terminal_reason: lash_core::LlmTerminalReason::Stop,
+                        ..LlmResponse::default()
+                    })
+                })
+                .build()
+                .into_handle();
+            let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(60)).await?;
+            let session = core
+                .session(
+                    crate::SessionId::parse(format!("completed-call-settles-{case}"))
+                        .expect("nonblank host identity"),
+                )
+                .created()
+                .await
+                .open()
+                .await?;
+
+            let output = session.send(TurnInput::text("finish")).output().await?;
+
+            assert_eq!(
+                output.finished().map(|(_, value)| value),
+                Some(&serde_json::json!("settled")),
+                "{case}"
+            );
+            let [record] = settle_records(&output.activities)[..] else {
+                panic!("{case}: one settle record: {:?}", output.activities);
+            };
+            let usage = record.usage().expect("the call's usage");
+            assert_eq!(
+                (usage.input_tokens, usage.output_tokens, usage.unknown_calls),
+                (17, 5, 0),
+                "{case}"
+            );
+            assert_eq!(output.result.usage, usage, "{case}");
+        }
+        Ok(())
+    })
+}
+
 /// A provider reset after the cell was accepted never erases the cell: the
 /// reset belongs to the call's tail.
 #[cfg(feature = "rlm")]

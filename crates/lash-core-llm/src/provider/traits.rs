@@ -118,6 +118,14 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     /// canonically reads it back with
     /// [`canonical_request`], or [`canonical_call`] when forwarding its
     /// transient deliveries through another canonical provider.
+    ///
+    /// Lash may drop this future before it returns: at the call's deadline,
+    /// on the turn's immediate cancel, or when the tail of a call whose cell
+    /// was accepted mid-stream outlives either. A decorator that meters a
+    /// turn's calls therefore settles each from the turn's
+    /// `TurnEvent::ModelCallRecorded`, which every such call reaches once,
+    /// with `LlmCallRecord::usage` counting it unknown when its usage never
+    /// arrived (ADR 0127).
     async fn send(
         &mut self,
         body: &LiveRequestBody,

@@ -85,6 +85,26 @@ the template must remain unused so a fresh call starts its own sequence.
 Figments ADRs 0048 and 0050 own receipt settlement and operation-class
 in-flight liability. Those policies are examples, not Lash policy.
 
+### The settle point
+
+A decorator's settlement runs only when its future returns, and Lash may drop
+a turn's call future first: at the call's `model_total` deadline, on the
+turn's immediate cancel, or when the tail of a call whose cell was accepted
+mid-stream (FIG-6433) outlives either. The host then holds a reservation that
+no receipt settles.
+
+The turn's `TurnEvent::ModelCallRecorded` is the one settle point for every
+model call a turn sends (FIG-6446). Each call reaches the host once as this
+event: completed, failed, or dropped. Its `LlmCallRecord` carries every
+attempt's outcome and reported usage, and `LlmCallRecord::usage()` is the
+call's usage, with `unknown_calls == 1` when the call was cut short after a
+response was observed and its usage never arrived. A host settles a dropped
+call's reservation from that record, pricing it from its own receipts or as
+unpriced, never as zero. A call accepted mid-stream is recorded when its tail
+drains, after its cell started and before the turn commits. A direct
+completion outside a turn returns to the host that awaits it and has no such
+event.
+
 ### What Lash provides
 
 Lash provides no usage ledger, usage-fact store, accounting delivery,
