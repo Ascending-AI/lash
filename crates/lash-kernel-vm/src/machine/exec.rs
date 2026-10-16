@@ -440,7 +440,7 @@ impl KernelMachine {
             |index| {
                 args.get(
                     &lash_kernel_state::paged::directory::ordinal_key(index as u64),
-                    &self.heap.access,
+                    self.heap.pages(),
                 )
             },
             result,
@@ -542,9 +542,9 @@ impl KernelMachine {
             code: code_id,
             record: FrameRecord::fresh(lash_kernel_state::paged::SiteRef::new(
                 &code.site.child(0),
-                &self.heap.access,
+                self.heap.pages(),
             )?),
-            access: self.heap.access.clone(),
+            access: self.heap.pages().clone(),
             exe: Arc::clone(&self.exe),
             control,
             awaiting: None,
@@ -564,7 +564,7 @@ impl KernelMachine {
                     args.write(
                         lash_kernel_state::paged::directory::ordinal_key(at as u64),
                         value,
-                        &self.heap.access,
+                        self.heap.pages(),
                     )?;
                 }
             }
@@ -606,7 +606,7 @@ impl KernelMachine {
             super::Tree::<lash_kernel_state::paged::FunctionRecord>::of_keyed(&self.functions)
                 .get(
                     &lash_kernel_state::paged::metadata::metadata_key(function),
-                    &self.heap.access,
+                    self.heap.pages(),
                 )?;
         let Some(saved) = saved else {
             return Ok(());
@@ -695,7 +695,7 @@ impl KernelMachine {
         let key = lash_kernel_state::paged::directory::ordinal_key(wait.0);
         let pending = self
             .waits
-            .get(&key, &self.heap.access)?
+            .get(&key, self.heap.pages())?
             .ok_or_else(|| fault("a resuming outcome has no wait"))?;
         let lash_kernel_state::paged::WaitPhase::Committed(outcome) = pending.phase else {
             return Err(fault("a resuming outcome is not committed").into());
@@ -717,7 +717,7 @@ impl KernelMachine {
         };
         // run cannot seal inside a statement; installation and consumption
         // therefore publish together at the statement's safe point.
-        self.waits.remove(&key, &self.heap.access)?;
+        self.waits.remove(&key, self.heap.pages())?;
         if failed {
             Err(Interrupt::raised(value))
         } else {

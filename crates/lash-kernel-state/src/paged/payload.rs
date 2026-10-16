@@ -724,10 +724,7 @@ impl NativeHeap for PagedHeap {
                 .map_err(census_fault)?;
             self.accounting = census.certificate();
         }
-        self.reserved = self
-            .reserved
-            .checked_add(bytes)
-            .ok_or_else(|| HeapFault::Malformed("outstanding reservation overflow".into()))?;
+        self.holdings.reserve(bytes)?;
         Ok(())
     }
 }

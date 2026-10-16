@@ -21,24 +21,27 @@ fn binding(name: &str, value: Value) -> (Name, Value) {
 fn empty() -> KeyedRoot {
     KeyedRoot::Empty
 }
+fn record(heap: &PagedHeap, name: &Name, value: Value) -> BindingRecord {
+    BindingRecord {
+        name: NameRef::new(name, &heap.access).unwrap(),
+        declared: SiteRef::new(
+            &(lash_kernel_doc::Site {
+                unit: lash_kernel_doc::Unit::Main,
+                path: vec![],
+            }),
+            &heap.access,
+        )
+        .unwrap(),
+        value: BoundRecord::Value(value),
+    }
+}
 fn bindings(heap: &mut PagedHeap, values: impl IntoIterator<Item = (Name, Value)>) -> KeyedRoot {
     let mut table = crate::paged::tree::Tree::new(false);
     for (name, value) in values {
         table
             .write(
                 name.as_str().as_bytes().to_vec(),
-                BindingRecord {
-                    name: NameRef::new(&name, &heap.access).unwrap(),
-                    declared: SiteRef::new(
-                        &(lash_kernel_doc::Site {
-                            unit: lash_kernel_doc::Unit::Main,
-                            path: vec![],
-                        }),
-                        &heap.access,
-                    )
-                    .unwrap(),
-                    value: BoundRecord::Value(value),
-                },
+                record(heap, &name, value),
                 &heap.access,
             )
             .expect("binding");
@@ -115,6 +118,79 @@ fn a_noop_next_cell_copies_nothing() {
     assert!(writes <= 1, "{writes} pages sealed");
     assert_eq!(list(get(&next, "root")), id);
     eprintln!("100001 objects: next-cell reads={reads}, seals={writes}");
+}
+/// FIG-6425: a no-op cold carry traces no body row, however long the one
+/// scalar list the session holds: the cell left nothing unreachable, and
+/// one entity is no bound on the elements a trace would walk.
+#[test]
+fn a_noop_cold_carry_of_a_growing_scalar_list_traces_rows_independent_of_its_length() {
+    let traced = [100, 5_000, 80_000].map(|length| {
+        let (mut heap, pages) = fresh();
+        let id = heap
+            .allocate_object(ObjectInit::List((0..length).map(int).collect()))
+            .expect("list");
+        let root = bindings(&mut heap, [binding("root", Value::List(id))]);
+        heap.release_statement_roots().expect("release");
+        seal(&mut heap);
+        let (mut cold, adopted) = next(&mut heap, &pages, root);
+        let before = crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get);
+        let (after, _) = next(&mut cold, &pages, adopted);
+        assert_eq!(list(get(&after, "root")), id);
+        crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get) - before
+    });
+    assert_eq!(
+        traced, [0; 3],
+        "rows traced by a no-op carry over 100, 5k and 80k elements"
+    );
+}
+/// FIG-6425: a cell that projects the same host bindings over a growing
+/// list, a text and a freshly decoded list as the machine's start writes
+/// them and its end removes them, traces no body row at its carry: what
+/// the opened session reached cannot shrink, and the projection's copies
+/// were never reachable from it.
+#[test]
+fn a_cell_projecting_unchanged_host_bindings_over_a_growing_list_traces_no_rows() {
+    let traced = [100, 5_000, 80_000].map(|length| {
+        let (mut heap, pages) = fresh();
+        let id = heap
+            .allocate_object(ObjectInit::List((0..length).map(int).collect()))
+            .expect("list");
+        let root = bindings(&mut heap, [binding("root", Value::List(id))]);
+        heap.release_statement_roots().expect("release");
+        seal(&mut heap);
+        let (mut cold, adopted) = next(&mut heap, &pages, root);
+        let before = crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get);
+        // The start projects the host's bindings over the session's.
+        let data = cold
+            .allocate_object(ObjectInit::List(vec![int(7), Value::text("x")]))
+            .expect("projected list");
+        let mut projected = cold.session_root().clone();
+        for (name, value) in [
+            (Name::new("context"), Value::text("the task")),
+            (Name::new("data"), Value::List(data)),
+        ] {
+            let record = record(&cold, &name, value);
+            projected
+                .write(name.as_str().as_bytes().to_vec(), record, &cold.access)
+                .expect("projection");
+        }
+        cold.set_session_root(projected).expect("project");
+        // The end removes them again: they are the host's.
+        let mut kept = cold.session_root().clone();
+        for name in ["context", "data"] {
+            kept.remove(name.as_bytes(), &cold.access)
+                .expect("unproject");
+        }
+        cold.set_session_root(kept).expect("unproject");
+        cold.release_statement_roots().expect("release");
+        let (after, _) = next(&mut cold, &pages, adopted);
+        assert_eq!(list(get(&after, "root")), id);
+        crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get) - before
+    });
+    assert_eq!(
+        traced, [0; 3],
+        "rows traced by a carry after an unchanged projection over 100, 5k and 80k lists"
+    );
 }
 #[test]
 fn a_noop_cell_with_100k_separate_bindings_reads_only_the_header() {

@@ -193,7 +193,7 @@ impl KernelMachine {
                     if member == task {
                         return raise("join_self", "a task cannot join its own handle");
                     }
-                    tasks.write(ordinal_key(at), member, &self.heap.access)?;
+                    tasks.write(ordinal_key(at), member, self.heap.pages())?;
                 }
                 if len == 0 && matches!(mode, JoinMode::Race | JoinMode::Any) {
                     return raise("empty_join", "this `join` needs at least one task");
@@ -209,7 +209,7 @@ impl KernelMachine {
                         self.next_join += 1;
                         // Repeated handles keep their places in the result,
                         // but register only one wake on each live member.
-                        for member in task_members(&tasks, &self.heap.access)?
+                        for member in task_members(&tasks, self.heap.pages())?
                             .into_iter()
                             .collect::<BTreeSet<_>>()
                         {
@@ -224,7 +224,7 @@ impl KernelMachine {
                                 mode: *mode,
                                 members: tasks,
                             },
-                            &self.heap.access,
+                            self.heap.pages(),
                         )?;
                         self.suspend(task, stmt, Wait::JoinMany(order))?;
                         Ok(Flow::Step)
@@ -317,7 +317,7 @@ impl KernelMachine {
             Callee::Value(var) => match self.read_var(task, exe, var)? {
                 Value::Closure(id) => {
                     let closure = self.heap.closure(id)?;
-                    let closure_site = closure.site.resolve(&self.heap.access)?;
+                    let closure_site = closure.site.resolve(self.heap.pages())?;
                     let site = Site::new(
                         closure_site.unit.clone(),
                         closure_site
@@ -340,7 +340,7 @@ impl KernelMachine {
                                 .captures
                                 .get(
                                     &lash_kernel_state::paged::metadata::metadata_key(name),
-                                    &self.heap.access,
+                                    self.heap.pages(),
                                 )?
                                 .map(|(_, id)| id)
                                 .ok_or_else(|| fault("a closure capture is missing"))
@@ -410,7 +410,7 @@ impl KernelMachine {
 
     fn occurrence(&mut self, task: TaskId, site: &Site) -> Result<u64, Halt> {
         let key = lash_kernel_state::paged::metadata::metadata_key(site);
-        let access = self.heap.access.clone();
+        let access = self.heap.pages().clone();
         let task = self.task(task)?;
         let occurrence = task.occurrences.get(&key, &access)?.unwrap_or(0);
         let next = occurrence
@@ -445,7 +445,7 @@ impl KernelMachine {
         site: &Site,
         occurrence: u64,
     ) -> Result<EffectIdentity, Halt> {
-        let access = self.heap.access.clone();
+        let access = self.heap.pages().clone();
         let running = self.task(task)?;
         let loops = running.frames.loop_coordinates()?;
         Ok(EffectIdentity {
@@ -480,8 +480,9 @@ impl KernelMachine {
                 kind,
                 phase: WaitPhase::Issued { request: frozen },
             },
-            &self.heap.access,
+            self.heap.pages(),
         )?;
+        self.count_issued()?;
         Ok(())
     }
     pub(super) fn report_request(
@@ -497,7 +498,7 @@ impl KernelMachine {
         };
         let intent: lash_kernel_state::AdmittedRequest = decode_body(bytes.as_slice())
             .map_err(|error| lash_kernel_doc::heap::HeapFault::Malformed(error.to_string()))?;
-        let access = self.heap.access.clone();
+        let access = self.heap.pages().clone();
         let running = self.tasks.get_mut(task.0 as usize)?.ok_or_else(|| {
             lash_kernel_doc::heap::HeapFault::Malformed("issued task is missing".into())
         })?;
@@ -556,16 +557,8 @@ impl KernelMachine {
             }
         })
     }
-    fn issued_count(&self) -> Result<u64, Halt> {
-        let mut count = 0;
-        self.waits.visit(&self.heap.access, &mut |_, wait| {
-            count += u64::from(matches!(wait.phase, WaitPhase::Issued { .. }));
-            true
-        })?;
-        Ok(count)
-    }
     fn add_joiner(&mut self, task: TaskId, joiner: Joiner) -> Result<(), Halt> {
-        let access = self.heap.access.clone();
+        let access = self.heap.pages().clone();
         let task = self.task(task)?;
         append(&mut task.joiners, joiner, &access)?;
         Ok(())
@@ -614,11 +607,11 @@ impl KernelMachine {
         self.tasks.push(Task::fresh(
             lash_kernel_state::paged::TaskIdentityRef::spawn(
                 parent,
-                lash_kernel_state::paged::SiteRef::new(site, &self.heap.access)?,
+                lash_kernel_state::paged::SiteRef::new(site, self.heap.pages())?,
                 occurrence,
-                &self.heap.access,
+                self.heap.pages(),
             )?,
-            self.heap.access.clone(),
+            self.heap.pages().clone(),
             Arc::clone(&self.exe),
         ))?;
         self.live_tasks += 1;
@@ -660,7 +653,7 @@ impl KernelMachine {
     /// raised: their errors are observed, and the run's end cancels them
     /// (`K-TASK-016`, `K-TASK-018`).
     pub(super) fn pass(&mut self, members: &Tree<TaskId>) -> Result<(), Halt> {
-        for member in task_members(members, &self.heap.access)? {
+        for member in task_members(members, self.heap.pages())? {
             self.task(member)?.passed = true;
         }
         Ok(())
@@ -669,9 +662,9 @@ impl KernelMachine {
     /// Removes a decided or cancelled list join from every member's wake
     /// queue, so no later ending can wake its joiner again.
     pub(super) fn remove_list_join(&mut self, order: u64) -> Result<Option<ListJoin>, Halt> {
-        let join = self.joins.remove(&ordinal_key(order), &self.heap.access)?;
+        let join = self.joins.remove(&ordinal_key(order), self.heap.pages())?;
         if let Some(join) = &join {
-            for member in task_members(&join.members, &self.heap.access)? {
+            for member in task_members(&join.members, self.heap.pages())? {
                 self.remove_joiner(member, Joiner::List(order))?;
             }
         }
@@ -710,7 +703,7 @@ impl KernelMachine {
         let mut complete = true;
         for at in 0..members.len() {
             let (_, member) = members
-                .rank_get(at, &self.heap.access)?
+                .rank_get(at, self.heap.pages())?
                 .ok_or_else(|| fault("a join member is missing"))?;
             let result = match &self.task(member)?.state {
                 TaskState::Ended(super::EndedTask::Returned(value)) => Some(Ok(value.clone())),
@@ -787,7 +780,7 @@ impl KernelMachine {
     }
 
     fn remove_joiner(&mut self, task: TaskId, wanted: Joiner) -> Result<(), Halt> {
-        let access = self.heap.access.clone();
+        let access = self.heap.pages().clone();
         let task = self.task(task)?;
         let mut key = None;
         while let Some((next, joiner)) = task.joiners.after(key.as_deref(), &access)? {
@@ -810,12 +803,19 @@ impl KernelMachine {
         };
         match wait {
             Wait::Request(wait) => {
-                if let Some(pending) = self.waits.remove(&ordinal_key(wait.0), &self.heap.access)?
-                    && !matches!(pending.phase, WaitPhase::Issued { .. })
-                {
-                    self.withdrawn.push_back(wait.0)?;
-                    self.withdrawn_ever
-                        .write(ordinal_key(wait.0), wait.0, &self.heap.access)?;
+                match self.waits.remove(&ordinal_key(wait.0), self.heap.pages())? {
+                    Some(pending) if matches!(pending.phase, WaitPhase::Issued { .. }) => {
+                        self.uncount_issued()?;
+                    }
+                    Some(_) => {
+                        self.withdrawn.push_back(wait.0)?;
+                        self.withdrawn_ever.write(
+                            ordinal_key(wait.0),
+                            wait.0,
+                            self.heap.pages(),
+                        )?;
+                    }
+                    None => {}
                 }
             }
             Wait::Join(joined) => self.remove_joiner(joined, Joiner::Single(target))?,

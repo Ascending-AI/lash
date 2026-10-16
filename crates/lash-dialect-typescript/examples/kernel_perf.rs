@@ -282,19 +282,19 @@ fn pending_unit(machine: &mut KernelMachine, source: &pages::Source) -> Option<U
     let root = sealed.root;
     let heap = PagedHeap::open_header(root.heap, Box::new(source.clone()), EditEpoch(1)).ok()?;
     let ready = Tree::<lash_kernel_doc::TaskId>::of_sequence(&root.ready);
-    let (_, next) = ready.rank_get(0, &heap.access).ok()??;
+    let (_, next) = ready.rank_get(0, heap.pages()).ok()??;
     let tasks = Tree::<TaskRecord>::of_keyed(&root.tasks);
     let task = tasks
         .get(
             &lash_kernel_state::paged::directory::ordinal_key(next.0),
-            &heap.access,
+            heap.pages(),
         )
         .ok()??;
     let (_, frame): (_, FrameRecord) = task
         .frames
-        .rank_get(task.frames.len().checked_sub(1)?, &heap.access)
+        .rank_get(task.frames.len().checked_sub(1)?, heap.pages())
         .ok()??;
-    Some(frame.statement.resolve(&heap.access).ok()?.unit.clone())
+    Some(frame.statement.resolve(heap.pages()).ok()?.unit.clone())
 }
 
 /// What one invocation does.

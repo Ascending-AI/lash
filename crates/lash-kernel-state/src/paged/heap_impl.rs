@@ -14,10 +14,10 @@ use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
 pub struct PagedHeap {
-    pub access: Access<'static>,
+    pub(super) access: Access<'static>,
     pub(super) limits: lash_kernel_doc::KernelDataLimits,
-    pub directory: Tree<ObjectHead>,
-    pub families: Tree<FamilyRecord>,
+    pub(super) directory: Tree<ObjectHead>,
+    pub(super) families: Tree<FamilyRecord>,
     next_ordinal: u64,
     next_family: u64,
     epoch: EditEpoch,
@@ -29,24 +29,12 @@ pub struct PagedHeap {
     pub(super) population: DataOnlyCertificate,
     pub(super) family_base: RefCell<Option<Box<dyn FamilyBase>>>,
     pub(super) census: Option<Box<dyn AllocationCensus>>,
-    pub session: Tree<BindingRecord>,
-    pub tasks: Tree<super::directory::execution::TaskRecord>,
-    pub joins: Tree<ListJoinRecord>,
-    temporary: Vec<Value>,
-    temporary_fresh: Vec<EntityId>,
-    pub(super) reserved: u64,
-    /// What the machine holds for its frames since it last published:
-    /// counted in U, and taken as credit when the roots it pays for are
-    /// installed (FIG-6318).
-    pub(super) held: u64,
-    /// Whether the installed task and join trees are the execution state's
-    /// current roots. A machine clears it once its state moves past what it
-    /// published; a write that then needs a refinement refuses rather than
-    /// trace them (FIG-6318).
-    pub(super) roots_current: bool,
-    /// The bytes the last write refused for (FIG-6318): the refusal also
-    /// crosses the native face, whose errors cannot name it.
-    refused: Option<u64>,
+    /// The execution roots, installed only through publication.
+    pub(super) session: Tree<BindingRecord>,
+    pub(super) tasks: Tree<super::directory::execution::TaskRecord>,
+    pub(super) joins: Tree<ListJoinRecord>,
+    /// What the machine holds outside these trees.
+    pub(super) holdings: super::publication::Holdings,
 }
 /// The heap root a heap-header page holds: a keyed leaf of one current
 /// header record.
@@ -89,12 +77,6 @@ pub fn heap_accounting(
     Ok(header_root(page, answer)?.accounting)
 }
 
-/// The most census entities a carry traces to collect the cell's garbage
-/// (FIG-6321): a small session sheds what its cell left dead before it
-/// rides into every later cell's pages; a larger one collects under
-/// pressure only (ADR 0145 §5).
-pub(super) const CARRY_COLLECTION_ENTITIES: u64 = 4096;
-
 impl PagedHeap {
     /// Opens the one heap-header page; directory and payloads stay lazy.
     pub fn open_header(
@@ -130,12 +112,7 @@ impl PagedHeap {
             session: Tree::new(false),
             tasks: Tree::new(false),
             joins: Tree::new(false),
-            temporary: Vec::new(),
-            temporary_fresh: Vec::new(),
-            held: 0,
-            roots_current: true,
-            refused: None,
-            reserved: 0,
+            holdings: super::publication::Holdings::opened(root.next_ordinal, root.next_family),
         })
     }
     pub fn set_data_limits(&mut self, limits: lash_kernel_doc::KernelDataLimits) {
@@ -150,6 +127,13 @@ impl PagedHeap {
         }
         self.census = Some(census);
         Ok(())
+    }
+    /// The page port the machine's own record trees read and edit through:
+    /// names, sites, task identities, frames and waits. The heap's
+    /// directory, families and installed roots are not reachable through
+    /// it; they change only through the heap's operations.
+    pub fn pages(&self) -> &Access<'static> {
+        &self.access
     }
     pub fn data_only_certificate(&self) -> DataOnlyCertificate {
         self.population
@@ -170,151 +154,6 @@ impl PagedHeap {
     /// current membership has been proved by that reader.
     pub fn set_family_base(&mut self, base: Box<dyn FamilyBase>) {
         *self.family_base.borrow_mut() = Some(base);
-    }
-    /// The execution state moved past the roots last installed with
-    /// [`Self::set_execution_roots`]: until the next installation, a write
-    /// that needs an exact refinement refuses with
-    /// [`HeapWriteError::NeedsPrecision`] before it changes anything, so no
-    /// trace ever runs over roots the machine has not published (FIG-6318).
-    pub fn execution_roots_moved(&mut self) {
-        self.roots_current = false;
-    }
-    /// Holds `bytes` the running statement pays for, as a native
-    /// reservation does: U grows by them at once. A statement's hold is
-    /// credit for its writes and is released at the statement's end; a
-    /// persistent one pays for what the machine keeps in its frames and is
-    /// taken as credit when it next publishes them (FIG-6318). `false`, with
-    /// nothing held, when the census needs an exact refinement first.
-    ///
-    /// # Errors
-    ///
-    /// A fault of the census.
-    pub fn hold(&mut self, bytes: u64, persistent: bool) -> Result<bool, HeapFault> {
-        let census = self
-            .census
-            .as_mut()
-            .ok_or_else(|| HeapFault::Malformed("a hold has no census".into()))?;
-        if !matches!(
-            census.reserve(LogicalBytes(bytes)),
-            ReservationDecision::Granted(_)
-        ) {
-            return Ok(false);
-        }
-        self.held_now(bytes, persistent)?;
-        Ok(true)
-    }
-    /// Refines exactly over the roots the machine has just published, with
-    /// `bytes` pending: after it, a hold or write of `bytes` is granted.
-    ///
-    /// # Errors
-    ///
-    /// [`HeapWriteError::Memory`] when what is live, held and pending does
-    /// not fit the bound; a fault when the roots are not published.
-    pub fn refine(&mut self, bytes: u64) -> Result<(), HeapWriteError> {
-        if !self.roots_current {
-            return Err(HeapFault::Malformed(
-                "a refinement would trace roots the machine has not published".into(),
-            )
-            .into());
-        }
-        let mut census = self
-            .census
-            .take()
-            .ok_or_else(|| HeapFault::Malformed("a refinement has no census".into()))?;
-        let result = self.refine_installed(census.as_mut(), &[], bytes);
-        self.accounting = census.certificate();
-        self.header = None;
-        self.census = Some(census);
-        result
-    }
-    fn held_now(&mut self, bytes: u64, persistent: bool) -> Result<(), HeapFault> {
-        let census = self
-            .census
-            .as_mut()
-            .ok_or_else(|| HeapFault::Malformed("a hold has no census".into()))?;
-        census
-            .changed(LogicalBytes(0), LogicalBytes(bytes))
-            .map_err(census_fault)?;
-        self.accounting = census.certificate();
-        self.header = None;
-        let counter = if persistent {
-            &mut self.held
-        } else {
-            &mut self.reserved
-        };
-        *counter = counter
-            .checked_add(bytes)
-            .ok_or_else(|| HeapFault::Malformed("outstanding hold overflow".into()))?;
-        Ok(())
-    }
-    /// The refusal of a write that needs an exact refinement of `bytes`
-    /// while the installed roots are not the machine's: `None` when the
-    /// refinement may run now.
-    pub(super) fn refuses_precision(&mut self, bytes: u64) -> Option<HeapWriteError> {
-        if self.roots_current {
-            return None;
-        }
-        self.refused = Some(bytes);
-        Some(HeapWriteError::NeedsPrecision { bytes })
-    }
-    /// The bytes of the refinement the last write refused for, if it
-    /// refused with [`HeapWriteError::NeedsPrecision`], however its error
-    /// reached the caller; clearing it.
-    pub fn take_refusal(&mut self) -> Option<u64> {
-        self.refused.take()
-    }
-    /// Releases what the running statement holds, keeping its installed
-    /// roots: a cell's end seals the session priced exactly, not by the
-    /// holds its last statement took on the way (FIG-6318).
-    ///
-    /// # Errors
-    ///
-    /// A fault of the census.
-    pub fn release_statement_holds(&mut self) -> Result<(), HeapFault> {
-        if self.reserved == 0 {
-            return Ok(());
-        }
-        let census = self
-            .census
-            .as_mut()
-            .ok_or_else(|| HeapFault::Malformed("a hold has no census".into()))?;
-        census
-            .changed(LogicalBytes(self.reserved), LogicalBytes(0))
-            .map_err(census_fault)?;
-        self.reserved = 0;
-        self.accounting = census.certificate();
-        self.header = None;
-        Ok(())
-    }
-    pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
-        let before = self.accounting;
-        if let Some(census) = &mut self.census {
-            census
-                .changed(
-                    LogicalBytes(checked_sum(
-                        self.temporary.iter().map(value_cost).chain([self.reserved]),
-                    )?),
-                    LogicalBytes(0),
-                )
-                .map_err(census_fault)?;
-            self.accounting = census.certificate();
-        }
-        self.temporary.clear();
-        self.temporary_fresh.clear();
-        self.reserved = 0;
-        if before != self.accounting {
-            self.header = None;
-        }
-        Ok(())
-    }
-    pub(super) fn statement_roots(&self) -> &[Value] {
-        &self.temporary
-    }
-    pub(super) fn fresh_roots(&self) -> &[EntityId] {
-        &self.temporary_fresh
-    }
-    pub(super) fn outstanding_reserved(&self) -> u64 {
-        self.reserved.saturating_add(self.held)
     }
     pub fn epoch(&self) -> EditEpoch {
         self.epoch
@@ -388,109 +227,6 @@ impl PagedHeap {
             _ => Err(raised("type_error", "the object has another kind")),
         }
     }
-    pub(super) fn install_transient(
-        &mut self,
-        values: &[Value],
-        pinned: &[Value],
-        fresh: &[EntityId],
-    ) {
-        self.temporary.clear();
-        self.temporary.extend_from_slice(values);
-        self.temporary.extend_from_slice(pinned);
-        self.temporary_fresh.clear();
-        self.temporary_fresh.extend_from_slice(fresh);
-    }
-    fn refine_installed(
-        &mut self,
-        census: &mut dyn AllocationCensus,
-        fresh: &[EntityId],
-        pending: u64,
-    ) -> Result<(), HeapWriteError> {
-        let registers = self.temporary.clone();
-        let reserved = self.outstanding_reserved();
-        let mut seeds = self.temporary_fresh.clone();
-        seeds.extend_from_slice(fresh);
-        match census.refine(
-            self,
-            &TransientRoots {
-                registers: &registers,
-                pinned: &[],
-                native_args: &[],
-                fresh: &seeds,
-                reserved: LogicalBytes(reserved),
-            },
-            PendingReservation {
-                bytes: LogicalBytes(pending),
-                overflowed: false,
-            },
-        ) {
-            Ok(RefinedDecision::Granted(_)) => Ok(()),
-            Ok(RefinedDecision::Refused { .. }) => Err(HeapWriteError::Memory),
-            Err(error) => Err(census_fault(error).into()),
-        }
-    }
-    /// Whether a carry collects: when the census holds some entity, and at
-    /// most [`CARRY_COLLECTION_ENTITIES`], so the trace is bounded by a
-    /// constant and a carry stays O(1) however much the session holds.
-    pub(super) fn collects_at_carry(&self) -> bool {
-        self.census.as_ref().is_some_and(|census| {
-            (1..=CARRY_COLLECTION_ENTITIES).contains(&census.certificate().entities)
-        })
-    }
-    /// One exact refinement outside pressure: traces from the persistent
-    /// roots and the installed statement roots, sweeps what it did not
-    /// reach and makes U exact. Nothing is pending, so no verdict follows;
-    /// a heap with no census has nothing to refine. It is refused over
-    /// roots the machine has not published (FIG-6318).
-    pub fn collect(&mut self) -> Result<(), HeapFault> {
-        if !self.roots_current {
-            return Err(HeapFault::Malformed(
-                "a collection would trace roots the machine has not published".into(),
-            ));
-        }
-        let Some(mut census) = self.census.take() else {
-            return Ok(());
-        };
-        let result = match self.refine_installed(census.as_mut(), &[], 0) {
-            Ok(()) | Err(HeapWriteError::Memory) => Ok(()),
-            Err(HeapWriteError::Fault(fault)) => Err(fault),
-            Err(other) => Err(HeapFault::Malformed(format!("collection failed: {other}"))),
-        };
-        if self.accounting != census.certificate() {
-            self.accounting = census.certificate();
-            self.header = None;
-        }
-        self.census = Some(census);
-        result
-    }
-    pub(super) fn admit(&mut self, bytes: u64, extra: &[Value]) -> Result<(), HeapWriteError> {
-        let census = self
-            .census
-            .as_mut()
-            .ok_or_else(|| HeapFault::Malformed("reservation has no census".into()))?;
-        if matches!(
-            census.reserve(LogicalBytes(bytes)),
-            ReservationDecision::Granted(_)
-        ) {
-            return Ok(());
-        }
-        if let Some(refusal) = self.refuses_precision(bytes) {
-            return Err(refusal);
-        }
-        let fresh = self.temporary_fresh.clone();
-        let mut values = self.temporary.clone();
-        values.extend_from_slice(extra);
-        self.reserve_logical(
-            LogicalBytes(bytes),
-            &TransientRoots {
-                registers: &values,
-                pinned: &[],
-                native_args: &[],
-                fresh: &fresh,
-                reserved: LogicalBytes(self.outstanding_reserved()),
-            },
-        )
-    }
     fn publish(&mut self, entity: EntityId, head: ObjectHead) -> Result<(), HeapWriteError> {
         let before = self.head(entity)?.map_or(0, |h| h.cost());
         let after = head.cost();
@@ -498,7 +234,7 @@ impl PagedHeap {
             .census
             .take()
             .ok_or_else(|| HeapFault::Malformed("edit has no census".into()))?;
-        let credit = self.reserved.min(after.saturating_sub(before));
+        let credit = self.holdings.credit(after.saturating_sub(before));
         let decision = census.reserve(LogicalBytes(
             after.saturating_sub(before).saturating_sub(credit),
         ));
@@ -512,7 +248,7 @@ impl PagedHeap {
             census
                 .changed(LogicalBytes(credit), LogicalBytes(0))
                 .map_err(census_fault)?;
-            self.reserved -= credit;
+            self.holdings.spend(credit);
             let old = self.directory.get(&entity_key(entity), &self.access)?;
             let old_closures =
                 old.as_ref()
@@ -795,12 +531,7 @@ impl SemanticHeap for PagedHeap {
             session: Tree::new(false),
             tasks: Tree::new(false),
             joins: Tree::new(false),
-            temporary: Vec::new(),
-            temporary_fresh: Vec::new(),
-            held: 0,
-            roots_current: true,
-            refused: None,
-            reserved: 0,
+            holdings: super::publication::Holdings::opened(0, 1),
         }
     }
     fn open(
@@ -825,12 +556,7 @@ impl SemanticHeap for PagedHeap {
             session: Tree::new(false),
             tasks: Tree::new(false),
             joins: Tree::new(false),
-            temporary: Vec::new(),
-            temporary_fresh: Vec::new(),
-            held: 0,
-            roots_current: true,
-            refused: None,
-            reserved: 0,
+            holdings: super::publication::Holdings::opened(root.next_ordinal, root.next_family),
         })
     }
     fn canonical_value(&mut self, value: Value) -> Result<Value, HeapWriteError> {
@@ -951,6 +677,7 @@ impl SemanticHeap for PagedHeap {
             ));
         }
         let value = self.canonical(value)?;
+        let mut dropped = None;
         if let Body::List { rows, next } = &mut head.body {
             let key = if index == rows.len() {
                 let key = ordinal_key(*next);
@@ -959,11 +686,16 @@ impl SemanticHeap for PagedHeap {
                     .ok_or_else(|| HeapFault::Malformed("list ordinal overflow".into()))?;
                 key
             } else {
-                rows.rank_get(index, &self.access)?
-                    .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?
-                    .0
+                let (key, old) = rows
+                    .rank_get(index, &self.access)?
+                    .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?;
+                dropped = Some(old);
+                key
             };
             rows.write(key, value, &self.access)?;
+        }
+        if let Some(old) = dropped {
+            self.dropped(list, &old);
         }
         self.publish(list, head)
     }
@@ -985,6 +717,7 @@ impl SemanticHeap for PagedHeap {
             }
             _ => return Err(HeapFault::Malformed("list descriptor kind mismatch".into()).into()),
         };
+        self.dropped(list, &value);
         self.publish(list, head)?;
         Ok(value)
     }
@@ -1013,7 +746,10 @@ impl SemanticHeap for PagedHeap {
             return Err(raised("type_error", "expected a table"));
         };
         if let Some(Ordinal(ordinal)) = lookup.remove(&normal, &self.access)? {
-            rows.remove(&ordinal_key(ordinal), &self.access)?;
+            if let Some(entry) = rows.remove(&ordinal_key(ordinal), &self.access)? {
+                self.dropped(table, &entry.key);
+                self.dropped(table, &entry.value);
+            }
             self.publish(table, head)?;
         }
         Ok(())
@@ -1043,7 +779,9 @@ impl SemanticHeap for PagedHeap {
         self.table_remove(record, &key)
     }
     fn variable_write(&mut self, variable: EntityId, value: Value) -> Result<(), HeapWriteError> {
-        self.required(variable, ObjectKind::Variable)?;
+        if let Body::Variable(old) = self.required(variable, ObjectKind::Variable)?.body {
+            self.dropped(variable, &old);
+        }
         let value = self.canonical(value)?;
         self.publish(
             variable,
@@ -1177,6 +915,7 @@ impl PagedHeap {
         let mut head = self.required(table, kind)?;
         let key = self.canonical(key)?;
         let value = self.canonical(value)?;
+        let mut dropped = None;
         if let Body::Table {
             lookup, rows, next, ..
         } = &mut head.body
@@ -1185,7 +924,7 @@ impl PagedHeap {
                 let mut e = rows
                     .get(&ordinal_key(ordinal), &self.access)?
                     .ok_or_else(|| HeapFault::Malformed("lookup points at no entry".into()))?;
-                e.value = value;
+                dropped = Some(std::mem::replace(&mut e.value, value));
                 rows.write(ordinal_key(ordinal), e, &self.access)?;
             } else {
                 let following = next
@@ -1195,6 +934,9 @@ impl PagedHeap {
                 lookup.write(normal, Ordinal(*next), &self.access)?;
                 *next = following;
             }
+        }
+        if let Some(old) = dropped {
+            self.dropped(table, &old);
         }
         self.publish(table, head)
     }

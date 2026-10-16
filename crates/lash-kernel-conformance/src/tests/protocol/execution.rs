@@ -122,14 +122,14 @@ fn session(rule: &str, case: &Case) {
         let a = table
             .get(
                 &lash_kernel_state::paged::metadata::metadata_key(&Name::new("a")),
-                &heap.access,
+                heap.pages(),
             )
             .unwrap()
             .unwrap();
         let b = table
             .get(
                 &lash_kernel_state::paged::metadata::metadata_key(&Name::new("b")),
-                &heap.access,
+                heap.pages(),
             )
             .unwrap()
             .unwrap();
@@ -210,7 +210,7 @@ fn sites(rule: &str, case: &Case) {
             tasks
                 .get(
                     &lash_kernel_state::paged::directory::ordinal_key(n),
-                    &heap.access,
+                    heap.pages(),
                 )
                 .unwrap()
                 .unwrap()
@@ -219,7 +219,7 @@ fn sites(rule: &str, case: &Case) {
             task.frames
                 .get(
                     &lash_kernel_state::paged::directory::ordinal_key(n),
-                    &heap.access,
+                    heap.pages(),
                 )
                 .unwrap()
                 .unwrap()
@@ -241,9 +241,9 @@ fn sites(rule: &str, case: &Case) {
                 let task = task(0);
                 let outer = frame(&task, 0);
                 let inner = frame(&task, 1);
-                assert_eq!(*outer.statement.resolve(&heap.access).unwrap(), main(&[0]));
+                assert_eq!(*outer.statement.resolve(heap.pages()).unwrap(), main(&[0]));
                 assert_eq!(
-                    *inner.statement.resolve(&heap.access).unwrap(),
+                    *inner.statement.resolve(heap.pages()).unwrap(),
                     lash_kernel_doc::Site {
                         unit: lash_kernel_doc::Unit::Function(lash_kernel_doc::Name::new("f")),
                         path: vec![0, 1, 0]
@@ -254,30 +254,30 @@ fn sites(rule: &str, case: &Case) {
                         .finally
                         .get(
                             &lash_kernel_state::paged::directory::ordinal_key(0),
-                            &heap.access
+                            heap.pages()
                         )
                         .unwrap()
                         .unwrap()
                         .site
-                        .resolve(&heap.access)
+                        .resolve(heap.pages())
                         .unwrap()
                         .path,
                     [0]
                 );
                 task.frames
-                    .visit(&heap.access, &mut |_, call| {
+                    .visit(heap.pages(), &mut |_, call| {
                         assert!(matches!(
                             at.program
                                 .document
-                                .node(&call.statement.resolve(&heap.access).unwrap()),
+                                .node(&call.statement.resolve(heap.pages()).unwrap()),
                             Some(lash_kernel_doc::Node::Stmt(_))
                         ));
                         call.finally
-                            .visit(&heap.access, &mut |_, cleanup| {
+                            .visit(heap.pages(), &mut |_, cleanup| {
                                 assert!(matches!(
                                     at.program
                                         .document
-                                        .node(&cleanup.site.resolve(&heap.access).unwrap()),
+                                        .node(&cleanup.site.resolve(heap.pages()).unwrap()),
                                     Some(lash_kernel_doc::Node::Stmt(lash_kernel_doc::Stmt::Try(
                                         _
                                     )))
@@ -302,7 +302,7 @@ fn sites(rule: &str, case: &Case) {
                         .occurrences
                         .get(
                             &lash_kernel_state::paged::metadata::metadata_key(&spawn.site),
-                            &heap.access
+                            heap.pages()
                         )
                         .unwrap(),
                     Some(1)
@@ -318,7 +318,7 @@ fn sites(rule: &str, case: &Case) {
                         .occurrences
                         .get(
                             &lash_kernel_state::paged::metadata::metadata_key(&identity.site),
-                            &heap.access
+                            heap.pages()
                         )
                         .unwrap(),
                     Some(1)
@@ -327,7 +327,7 @@ fn sites(rule: &str, case: &Case) {
                 statement.path.pop();
                 assert_eq!(
                     statement,
-                    *frame(&child, 0).statement.resolve(&heap.access).unwrap()
+                    *frame(&child, 0).statement.resolve(heap.pages()).unwrap()
                 );
                 assert!(matches!(
                     at.program.document.node(&identity.site),
@@ -340,12 +340,12 @@ fn sites(rule: &str, case: &Case) {
                     .loops
                     .get(
                         &lash_kernel_state::paged::directory::ordinal_key(0),
-                        &heap.access,
+                        heap.pages(),
                     )
                     .unwrap()
                     .unwrap()
                     .site
-                    .resolve(&heap.access)
+                    .resolve(heap.pages())
                     .unwrap();
                 assert_eq!(site.as_ref(), &main(&[0]));
                 assert_eq!(effect().identity.loops[0].site, main(&[0]));
@@ -407,7 +407,7 @@ fn committed(case: &Case) {
         waits
             .get(
                 &lash_kernel_state::paged::directory::ordinal_key(request.wait.0),
-                &heap.access
+                heap.pages()
             )
             .unwrap()
             .unwrap()

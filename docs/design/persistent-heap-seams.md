@@ -1210,8 +1210,20 @@ copy keeps its residency weight; a self-contained site reference is
 memoized per heap. The census sees the same root cost at every reservation
 as before, because a frame's cost counts holdings only (FIG-6318).
 
-S7, collection: a cell's carry refines once when the census holds 1 to 4096
-entities (`CARRY_COLLECTION_ENTITIES`); a park never collects.
+S7, collection: a cell's carry refines once when what the session's
+bindings reached when the heap opened can have shrunk, the census holds some entity, and U
+is at most 128 KiB (`CARRY_COLLECTION_BYTES`, 4096 entities at their minimum
+cost); a park never collects. The roots' reach can shrink only when an
+entity that existed at the open drops a value naming anything (a list
+element or table entry overwritten or removed, a variable rewritten), a
+session-binding change drops a value naming such an entity (found by
+diffing the old and new binding tables). A no-op cell, or one that only
+adds bindings or projects the host's and removes them again, traces
+nothing; what only the cell's own values reached (its allocations, and
+what its frames held across a park) waits for pressure. U bounds
+the trace's work where an entity count does not: every entity, element,
+entry and capture it walks costs at least 8 bytes, while one list of
+scalars is one entity however long it is (FIG-6425).
 
 Replay measurement: `lash-perf replay` settles page retirement between
 rounds, outside each round's window, as it settles artifact cleanup; the

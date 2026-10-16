@@ -82,13 +82,13 @@ impl SessionEditor {
     /// The heap's faults.
     pub fn names(&self) -> Result<BTreeSet<Name>, HeapFault> {
         let mut names = Vec::new();
-        self.bindings.visit(&self.heap.access, &mut |_, record| {
+        self.bindings.visit(self.heap.pages(), &mut |_, record| {
             names.push(record.name.clone());
             true
         })?;
         names
             .iter()
-            .map(|name| name.resolve(&self.heap.access))
+            .map(|name| name.resolve(self.heap.pages()))
             .collect()
     }
 
@@ -107,14 +107,14 @@ impl SessionEditor {
         let older = Tree::<BindingRecord>::of_keyed(older);
         let newer = Tree::<BindingRecord>::of_keyed(newer);
         let mut changed = Vec::new();
-        older.diff(&newer, &self.heap.access, &mut |(_, old, new)| {
+        older.diff(&newer, self.heap.pages(), &mut |(_, old, new)| {
             if let Some(record) = new.or(old) {
                 changed.push((record.name.clone(), (old.is_some(), new.is_some())));
             }
         })?;
         changed
             .into_iter()
-            .map(|(name, held)| Ok((name.resolve(&self.heap.access)?, held)))
+            .map(|(name, held)| Ok((name.resolve(self.heap.pages())?, held)))
             .collect()
     }
 
@@ -134,7 +134,7 @@ impl SessionEditor {
         let older = Tree::<FunctionRecord>::of_keyed(older);
         let newer = Tree::<FunctionRecord>::of_keyed(newer);
         let mut changed = Vec::new();
-        older.diff(&newer, &self.heap.access, &mut |(_, old, new)| {
+        older.diff(&newer, self.heap.pages(), &mut |(_, old, new)| {
             if let Some(record) = new.or(old) {
                 changed.push((record.name.clone(), new.cloned()));
             }
@@ -142,7 +142,7 @@ impl SessionEditor {
         changed
             .into_iter()
             .map(|(name, record)| {
-                let name = name.resolve(&self.heap.access)?;
+                let name = name.resolve(self.heap.pages())?;
                 let meta = record.map(|record| self.meta(&name, &record)).transpose()?;
                 Ok((name, meta))
             })
@@ -165,7 +165,7 @@ impl SessionEditor {
     ///
     /// The heap's faults.
     pub fn get(&mut self, name: &Name) -> Result<Option<SessionValue>, HeapFault> {
-        let Some(record) = self.bindings.get(&metadata_key(name), &self.heap.access)? else {
+        let Some(record) = self.bindings.get(&metadata_key(name), self.heap.pages())? else {
             return Ok(None);
         };
         let value = match record.value {
@@ -186,7 +186,7 @@ impl SessionEditor {
     ///
     /// The heap's faults.
     pub fn function_reference(&mut self, name: &Name) -> Result<Option<Name>, HeapFault> {
-        let Some(record) = self.bindings.get(&metadata_key(name), &self.heap.access)? else {
+        let Some(record) = self.bindings.get(&metadata_key(name), self.heap.pages())? else {
             return Ok(None);
         };
         let value = match record.value {
@@ -214,7 +214,7 @@ impl SessionEditor {
         function: &Name,
     ) -> Result<Option<BTreeMap<Name, Datum>>, HeapFault> {
         let Some(record) = Tree::<FunctionRecord>::of_keyed(&self.functions)
-            .get(&metadata_key(function), &self.heap.access)?
+            .get(&metadata_key(function), self.heap.pages())?
         else {
             return Ok(None);
         };
@@ -244,15 +244,15 @@ impl SessionEditor {
         let frozen = self.heap.freeze_datum(value).map_err(write_fault)?;
         let value: Value = self.heap.instantiate(&frozen).map_err(write_fault)?;
         let record = BindingRecord {
-            name: NameRef::new(name, &self.heap.access)?,
+            name: NameRef::new(name, self.heap.pages())?,
             declared: SiteRef::new(
                 &lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, Vec::new()),
-                &self.heap.access,
+                self.heap.pages(),
             )?,
             value: BoundRecord::Value(value),
         };
         self.bindings
-            .write(metadata_key(name), record, &self.heap.access)?;
+            .write(metadata_key(name), record, self.heap.pages())?;
         self.changed = true;
         Ok(())
     }
@@ -265,7 +265,7 @@ impl SessionEditor {
     pub fn remove(&mut self, name: &Name) -> Result<bool, HeapFault> {
         let removed = self
             .bindings
-            .remove(&metadata_key(name), &self.heap.access)?
+            .remove(&metadata_key(name), self.heap.pages())?
             .is_some();
         self.changed |= removed;
         Ok(removed)
@@ -280,7 +280,7 @@ impl SessionEditor {
     pub fn functions(&self) -> Result<BTreeMap<Name, String>, HeapFault> {
         let mut records = Vec::new();
         Tree::<FunctionRecord>::of_keyed(&self.functions).visit(
-            &self.heap.access,
+            self.heap.pages(),
             &mut |_, record| {
                 records.push(record.clone());
                 true
@@ -288,7 +288,7 @@ impl SessionEditor {
         )?;
         let mut functions = BTreeMap::new();
         for record in records {
-            let name = record.name.resolve(&self.heap.access)?;
+            let name = record.name.resolve(self.heap.pages())?;
             let meta = self.meta(&name, &record)?;
             functions.insert(name, meta);
         }
@@ -312,7 +312,7 @@ impl SessionEditor {
                 pages: u64::MAX,
                 bytes: u64::MAX,
             });
-        self.bindings.seal(&self.heap.access, &mut work)?;
+        self.bindings.seal(self.heap.pages(), &mut work)?;
         let bindings = self.bindings.keyed_root()?;
         self.heap.carry(CarryRoots {
             bindings,

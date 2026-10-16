@@ -1,6 +1,7 @@
-//! S5 task-count work over an admitted checkpoint and the real S7 census.
+//! S5 task-count work over an admitted checkpoint and the real S7 census,
+//! and the wait pages a park reads (FIG-6425).
 use super::*;
-use crate::laws::embedder::{Embedder, ROOMY, Source};
+use crate::laws::embedder::{Embedder, ROOMY, Setup, Source};
 use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
 use lash_kernel_doc::{Site, Unit};
 use lash_kernel_state::paged::census_impl::Census;
@@ -12,18 +13,19 @@ use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-struct CountTaskReads {
+/// Counts the reads of `counted`, the pages of one tree.
+struct CountReads {
     source: Source,
-    task_pages: BTreeSet<PageId>,
+    counted: BTreeSet<PageId>,
     reads: Rc<Cell<u64>>,
 }
-impl PageSource for CountTaskReads {
+impl PageSource for CountReads {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
         self.reads.set(
             self.reads.get()
                 + pages
                     .iter()
-                    .filter(|p| self.task_pages.contains(&p.id))
+                    .filter(|p| self.counted.contains(&p.id))
                     .count() as u64,
         );
         self.source.read(pages)
@@ -31,6 +33,29 @@ impl PageSource for CountTaskReads {
     fn seal(&mut self, page: PageBody) -> Result<PageRef, HeapFault> {
         self.source.seal(page)
     }
+}
+
+/// The index and leaf pages of the keyed tree rooted at `page`, never what
+/// its rows name.
+fn tree_pages(source: &Source, page: Option<PageRef>) -> BTreeSet<PageId> {
+    fn walk(source: &Source, page: PageRef, pages: &mut BTreeSet<PageId>) {
+        if !pages.insert(page.id) {
+            return;
+        }
+        let answer = source.0.borrow().get(&page.id).unwrap().clone();
+        if answer.kind == PageKind::KEYED_INDEX {
+            for child in answer.children {
+                walk(source, child, pages);
+            }
+        } else {
+            assert_eq!(answer.kind, PageKind::KEYED_LEAF);
+        }
+    }
+    let mut pages = BTreeSet::new();
+    if let Some(page) = page {
+        walk(source, page, &mut pages);
+    }
+    pages
 }
 
 /// S5 amendment 332782: an unchanged park uses one task-root summary,
@@ -41,7 +66,7 @@ fn a_park_with_one_hundred_thousand_live_tasks_reads_one_task_root() {
         "fn child() { do perform echo(1) as Any } main { do spawn call child() do perform echo(0) as Any }",
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
-    let access = embedder.machine.heap.access.clone();
+    let access = embedder.machine.heap.pages().clone();
     let template = embedder
         .machine
         .tasks
@@ -115,25 +140,7 @@ fn a_park_with_one_hundred_thousand_live_tasks_reads_one_task_root() {
         .unwrap()
         .unwrap();
     let certificate = embedder.machine.accounting();
-    let mut task_pages = BTreeSet::new();
-    fn walk(source: &Source, page: PageRef, pages: &mut BTreeSet<PageId>) {
-        if !pages.insert(page.id) {
-            return;
-        }
-        let answer = source.0.borrow().get(&page.id).unwrap().clone();
-        if answer.kind == PageKind::KEYED_INDEX {
-            for child in answer.children {
-                walk(source, child, pages);
-            }
-        } else {
-            assert_eq!(answer.kind, PageKind::KEYED_LEAF);
-        }
-    }
-    walk(
-        &embedder.source,
-        sealed.root.tasks.page().unwrap(),
-        &mut task_pages,
-    );
+    let task_pages = tree_pages(&embedder.source, sealed.root.tasks.page());
     let reads = Rc::new(Cell::new(0));
     let bounds = Bounds {
         live_tasks: 100_001,
@@ -145,9 +152,9 @@ fn a_park_with_one_hundred_thousand_live_tasks_reads_one_task_root() {
         bounds,
         &sealed.root,
         Vec::new(),
-        Box::new(CountTaskReads {
+        Box::new(CountReads {
             source: embedder.source.clone(),
-            task_pages,
+            counted: task_pages,
             reads: Rc::clone(&reads),
         }),
         Box::new(
@@ -170,5 +177,92 @@ fn a_park_with_one_hundred_thousand_live_tasks_reads_one_task_root() {
         reads.get(),
         1,
         "only the root aggregate, never member paths"
+    );
+}
+
+/// FIG-6425: a park reports only the waits issued since the last one. A
+/// 1,000-way fan-out delivered one at a time, each delivery on a machine
+/// opened cold from the last checkpoint, reads at most a constant number of
+/// wait pages per delivery: O(W) in all, never the whole table per park.
+/// The children are joined one by one, so each delivery wakes one joiner.
+#[test]
+fn a_thousand_way_fan_out_delivered_one_at_a_time_reads_linear_wait_pages() {
+    const W: u64 = 1_000;
+    let bounds = Bounds {
+        live_tasks: 1_001,
+        requests_per_park: 1_000,
+        ..ROOMY
+    };
+    let mut embedder = Embedder::with(
+        &format!(
+            "fn child(i) {{ let r = perform echo(i) as Any return r }}
+main {{
+  let hs = []
+  let i = 0
+  while num.lt(i, {W}) {{
+    let h = spawn call child(i)
+    set hs[list.len(hs)] = h
+    set i = num.add(i, 1)
+  }}
+  let n = 0
+  for h in hs {{
+    let r = join h
+    set n = num.add(n, 1)
+  }}
+  return n
+}}"
+        ),
+        Setup {
+            bounds,
+            ..Setup::default()
+        },
+    );
+    let step = embedder.run();
+    let Step::Parked(park) = step else {
+        panic!("every child waits: {step:?}");
+    };
+    assert_eq!(park.requests.len() as u64, W);
+    let (mut reads, mut delivered) = (0, 0);
+    let end = loop {
+        let (root, certificate) = embedder.checkpoint();
+        let counted = tree_pages(&embedder.source, root.waits.page());
+        let count = Rc::new(Cell::new(0));
+        let (program, _) = embedder.program(true);
+        embedder.machine = KernelMachine::open(
+            program,
+            bounds,
+            &root,
+            Vec::new(),
+            Box::new(CountReads {
+                source: embedder.source.clone(),
+                counted,
+                reads: Rc::clone(&count),
+            }),
+            Box::new(
+                Census::restore(
+                    certificate,
+                    lash_kernel_doc::heap::LogicalBytes(bounds.memory),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+        embedder.deliver_next();
+        delivered += 1;
+        let step = embedder.run();
+        reads += count.get();
+        if let Step::Ended(end) = step {
+            break end;
+        }
+        assert!(matches!(step, Step::Parked(_)));
+    };
+    assert_eq!(
+        crate::laws::embedder::result(end),
+        crate::laws::embedder::int(W as i64)
+    );
+    assert_eq!(delivered, W);
+    assert!(
+        reads <= 8 * W,
+        "{reads} wait pages read over {W} deliveries"
     );
 }

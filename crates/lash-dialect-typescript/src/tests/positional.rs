@@ -230,7 +230,7 @@ fn a_paged_positional_stack_resumes_with_a_new_layout() {
     let task = tasks
         .get(
             &lash_kernel_state::paged::directory::ordinal_key(0),
-            &heap.access,
+            heap.pages(),
         )
         .unwrap()
         .unwrap();

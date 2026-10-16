@@ -65,7 +65,7 @@ impl CellSave for DialectSave {
                 .map(|token| (token.before.clone(), token.after.clone()))
                 .unwrap_or_default();
             let record = FunctionRecord {
-                name: NameRef::new(&function.name, &heap.access)?,
+                name: NameRef::new(&function.name, heap.pages())?,
                 meta: Value::Text(heap.text(&meta).map_err(native)?),
                 release: function.release,
                 captures: function.captures.clone(),

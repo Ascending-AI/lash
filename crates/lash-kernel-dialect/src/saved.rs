@@ -634,7 +634,7 @@ fn closure_code<'a>(
     left: &Left<'a>,
     object: &ClosureView,
 ) -> Result<&'a lash_kernel_doc::Closure, SaveError> {
-    let site = object.site.resolve(&heap.access)?;
+    let site = object.site.resolve(heap.pages())?;
     let body = match &site.unit {
         Unit::Main => &left.document.main,
         Unit::Function(name) => {
@@ -657,13 +657,13 @@ fn captured_value(
 ) -> Result<Option<Value>, SaveError> {
     if let Some((_, cell)) = object.captures.get(
         &lash_kernel_state::paged::metadata::metadata_key(free),
-        &heap.access,
+        heap.pages(),
     )? {
         return heap.variable_get(cell).map(Some).map_err(Into::into);
     }
     // A closure `main` made reads the session's bindings: the ones the
     // cell left, whether or not they are among the bindings it drops.
-    if object.site.resolve(&heap.access)?.unit == Unit::Main {
+    if object.site.resolve(heap.pages())?.unit == Unit::Main {
         return match left.bindings.get(free) {
             Some(value) => Ok(Some(value.clone())),
             None => heap.session_binding(free).map_err(Into::into),
@@ -887,7 +887,7 @@ fn save_closure(
         },
     );
     frozen.owners.remove(name);
-    let site = object.site.resolve(&frozen.heap.access)?;
+    let site = object.site.resolve(frozen.heap.pages())?;
     Ok(SavedFunction {
         name: name.clone(),
         document,

@@ -23,7 +23,7 @@ impl KernelMachine {
         site: &lash_kernel_doc::Site,
     ) -> Result<u64, lash_kernel_doc::heap::HeapFault> {
         let key = lash_kernel_state::paged::metadata::metadata_key(site);
-        let access = self.heap.access.clone();
+        let access = self.heap.pages().clone();
         let mut total = 0;
         for index in 0..self.tasks.len() {
             if let Some(task) = self.tasks.get_mut(index)? {
@@ -82,7 +82,7 @@ impl KernelMachine {
         if let Some(path) = self.observer.as_deref_mut().and_then(|o| o.path.as_mut())
             && !matches!(site.unit, lash_kernel_doc::Unit::Library(_))
         {
-            let (tasks, access) = (&mut self.tasks, &self.heap.access);
+            let (tasks, access) = (&mut self.tasks, self.heap.pages());
             path.push(
                 task,
                 || match tasks.get_mut(task.0 as usize)? {
@@ -186,7 +186,7 @@ impl KernelMachine {
                 // The path uses the live coordinate, independently of the
                 // compiled ordinal lookup used by the accumulator.
                 let site = self.exe.block(*block).site.child((*next - 1) as u32);
-                let (identity, access) = (running.identity, &self.heap.access);
+                let (identity, access) = (running.identity, self.heap.pages());
                 if let Some(path) = &mut observer.path {
                     path.push(task, || identity.resolve(access), site);
                 }

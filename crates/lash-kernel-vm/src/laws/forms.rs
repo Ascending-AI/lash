@@ -694,10 +694,10 @@ fn a_cell_carries_unsealed_bindings_at_its_end() {
     .unwrap();
     lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
     let binding = heap
-        .session
+        .session_root()
         .get(
             &lash_kernel_state::paged::metadata::metadata_key(&Name::new("x")),
-            &heap.access,
+            heap.pages(),
         )
         .unwrap()
         .unwrap();

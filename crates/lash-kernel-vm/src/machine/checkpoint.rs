@@ -64,8 +64,8 @@ impl Machine for KernelMachine {
             return Err(DeliverError::Ended);
         }
         let key = ordinal_key(wait.0);
-        let Some(mut pending) = self.waits.get(&key, &self.heap.access)? else {
-            return if self.withdrawn_ever.get(&key, &self.heap.access)?.is_some() {
+        let Some(mut pending) = self.waits.get(&key, self.heap.pages())? else {
+            return if self.withdrawn_ever.get(&key, self.heap.pages())?.is_some() {
                 Ok(Delivered::Dropped)
             } else if wait.0 < self.next_wait {
                 Err(DeliverError::AlreadyDelivered { wait })
@@ -150,7 +150,7 @@ impl Machine for KernelMachine {
         };
         pending.phase = WaitPhase::Committed(frozen);
         let task = pending.task;
-        self.waits.write(key, pending, &self.heap.access)?;
+        self.waits.write(key, pending, self.heap.pages())?;
         self.task(task)
             .map_err(|error| DeliverError::Heap(HeapFault::Malformed(format!("{error:?}"))))?
             .wake(Incoming::Outcome(wait));
@@ -169,7 +169,7 @@ impl Machine for KernelMachine {
         self.publish_roots().map_err(|error| SealError::Fault {
             problem: format!("{error:?}"),
         })?;
-        let access = self.heap.access.clone();
+        let access = self.heap.pages().clone();
         // The running task is first on reopen; retain the untouched ready tree.
         if let Some(task) = self.current.take() {
             self.ready.push_front(task).map_err(SealError::Heap)?;
@@ -177,8 +177,7 @@ impl Machine for KernelMachine {
         let mut work = SealWork::new(budget);
         if !self
             .heap
-            .tasks
-            .seal(&access, &mut work)
+            .seal_task_root(&mut work)
             .map_err(SealError::Heap)?
             || !self
                 .ready
@@ -208,8 +207,7 @@ impl Machine for KernelMachine {
                 .map_err(SealError::Heap)?
             || !self
                 .heap
-                .session
-                .seal(&access, &mut work)
+                .seal_session_root(&mut work)
                 .map_err(SealError::Heap)?
         {
             return Ok(None);
@@ -251,14 +249,14 @@ impl Machine for KernelMachine {
             heap: self.heap.sealed_root().ok_or_else(|| SealError::Fault {
                 problem: "sealed heap has no header".into(),
             })?,
-            tasks: keyed(&self.heap.tasks).map_err(SealError::Heap)?,
+            tasks: keyed(self.heap.task_root()).map_err(SealError::Heap)?,
             ready: sequence_root(&self.ready.rows).map_err(SealError::Heap)?,
             waits: keyed(&self.waits).map_err(SealError::Heap)?,
             joins: keyed(&self.joins).map_err(SealError::Heap)?,
             withdrawn: keyed(&self.withdrawn_ever).map_err(SealError::Heap)?,
             unreported: sequence_root(&self.withdrawn.rows).map_err(SealError::Heap)?,
             reads: keyed(&self.modes).map_err(SealError::Heap)?,
-            session: keyed(&self.heap.session).map_err(SealError::Heap)?,
+            session: keyed(self.heap.session_root()).map_err(SealError::Heap)?,
             host: self.host.clone(),
             meters: SavedMeters {
                 charged: self.charged,
@@ -291,14 +289,15 @@ impl Machine for KernelMachine {
         let page = access
             .seal(PageKind::CHECKPOINT_ROOT, tokens, children)
             .map_err(SealError::Heap)?;
-        self.tasks = tasks::Tasks::open(self.heap.tasks.clone(), access, Arc::clone(&self.exe));
+        self.tasks =
+            tasks::Tasks::open(self.heap.task_root().clone(), access, Arc::clone(&self.exe));
         Ok(Some(SealedRoot { page, root }))
     }
     fn task_identity(
         &self,
         identity: lash_kernel_state::paged::TaskIdentityRef,
     ) -> Result<lash_kernel_doc::TaskIdentity, lash_kernel_doc::heap::HeapFault> {
-        identity.resolve(&self.heap.access)
+        identity.resolve(self.heap.pages())
     }
     fn tasks(
         &self,
@@ -319,7 +318,7 @@ impl Machine for KernelMachine {
         let mut finished = after.is_some_and(|id| id.0 >= root.len().saturating_sub(1));
         for _ in 0..limit {
             let key = cursor.map(|id| ordinal_key(id.0));
-            let Some((key, task)) = rows.after(key.as_deref(), &self.heap.access)? else {
+            let Some((key, task)) = rows.after(key.as_deref(), self.heap.pages())? else {
                 finished = true;
                 break;
             };
@@ -428,10 +427,8 @@ impl KernelMachine {
         heap.set_family_base(Box::new(
             lash_kernel_state::paged::family_impl::FrozenBase::default(),
         ));
-        heap.session = open_tree(root.session);
-        heap.tasks = open_tree(root.tasks);
-        heap.joins = open_tree(root.joins);
-        let access = heap.access.clone();
+        heap.restore_execution_roots(root);
+        let access = heap.pages().clone();
         let census_refinements = heap.certificate().refinements;
         Ok(Self {
             release: root.release,
@@ -443,12 +440,13 @@ impl KernelMachine {
             exe: Arc::clone(&exe),
             bounds,
             limits,
-            tasks: tasks::Tasks::open(heap.tasks.clone(), access.clone(), exe),
+            tasks: tasks::Tasks::open(heap.task_root().clone(), access.clone(), exe),
             ready: queue::Queue::open(sequence(root.ready), access.clone()),
             current: None,
-            joins: heap.joins.clone(),
+            joins: heap.join_root().clone(),
             waits: open_tree(root.waits),
             next_wait: root.meters.waits_issued,
+            issued: None,
             next_join: root.meters.next_join,
             withdrawn: queue::Queue::open(sequence(root.unreported), access),
             withdrawn_ever: open_tree(root.withdrawn),

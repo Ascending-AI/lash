@@ -1,0 +1,370 @@
+//! The heap as the census traces it (S7): its persistent roots, its
+//! entities' costs and the identity edges their bodies name, streamed from
+//! directory rows and edge summaries, never from scalar payloads.
+use super::census::{CensusGraph, EntityCost, SweepSet};
+use super::directory::{Body, entity_key, ordinal_key, value_cost};
+use super::heap_impl::PagedHeap;
+use super::tree::{Access, Cell, Tree, checked_sum};
+use super::*;
+use lash_kernel_doc::TaskId;
+use lash_kernel_doc::heap::*;
+use std::ops::ControlFlow;
+
+impl CensusGraph for PagedHeap {
+    fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault> {
+        // U prices every retained result. Exact L instead prices only results
+        // reached through handles, in task_result, so remove them here.
+        let mut retained = 0;
+        visit_tree(&self.tasks, &self.access, &mut |task| {
+            if task.result_retained
+                && let TaskStateRecord::Ended(EndedTask::Returned(value) | EndedTask::Raised(value)) =
+                    &task.state
+            {
+                retained = checked_sum([retained, value_cost(value)].into_iter())?;
+            }
+            Ok(())
+        })?;
+        let tasks = self.tasks.cost().checked_sub(retained).ok_or_else(|| {
+            HeapFault::Malformed("retained task results exceed the task root cost".into())
+        })?;
+        Ok(LogicalBytes(checked_sum(
+            [self.session.cost(), tasks, self.joins.cost()].into_iter(),
+        )?))
+    }
+    fn value_cost(&mut self, value: &Value) -> Result<LogicalBytes, HeapFault> {
+        Ok(LogicalBytes(value_cost(value)))
+    }
+    fn value_edges(
+        &mut self,
+        value: &Value,
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        self.stream_edges(value, out)
+    }
+    fn persistent_roots(
+        &mut self,
+        visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        let binding =
+            |binding: &BindingRecord, visit: &mut dyn FnMut(&Value) -> Result<(), HeapFault>| {
+                match &binding.value {
+                    BoundRecord::Value(v) => visit(v),
+                    BoundRecord::Shared(id) => visit(&Value::Ref(Identity::Object(*id))),
+                }
+            };
+        visit_tree(&self.session, &self.access, &mut |b| binding(b, visit))?;
+        visit_tree(&self.joins, &self.access, &mut |join| {
+            visit_tree(&join.members, &self.access, &mut |member| {
+                visit(&Value::Task(*member))
+            })
+        })?;
+        visit_tree(&self.tasks, &self.access, &mut |task| {
+            match &task.state {
+                TaskStateRecord::Resuming(IncomingRecord::Value(v) | IncomingRecord::Raise(v)) => {
+                    visit(v)?
+                }
+                TaskStateRecord::Resuming(IncomingRecord::Joined(t))
+                | TaskStateRecord::Joining(t) => visit(&Value::Task(*t))?,
+                _ => (),
+            }
+            visit_tree(&task.frames, &self.access, &mut |frame| {
+                visit_tree(&frame.bindings, &self.access, &mut |b| binding(b, visit))?;
+                visit_tree(&frame.iterated, &self.access, &mut |cursor| {
+                    visit(&cursor.0)
+                })?;
+                visit_tree(&frame.departing, &self.access, visit)?;
+                if let Some(args) = &frame.arguments {
+                    visit_tree(args, &self.access, visit)?;
+                }
+                Ok(())
+            })
+        })
+    }
+    fn entity_cost(&mut self, entity: EntityId) -> Result<Option<EntityCost>, HeapFault> {
+        Ok(self.head(entity)?.map(|head| EntityCost {
+            local: LogicalBytes(head.cost()),
+            has_edges: true,
+        }))
+    }
+    fn entity_edges(
+        &mut self,
+        entity: EntityId,
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        let Some(head) = self.head(entity)? else {
+            return Ok(());
+        };
+        let mut error = None;
+        #[cfg(test)]
+        TRACED_ROWS.with(|rows| rows.set(rows.get() + head.body.rows()));
+        match head.body {
+            Body::Variable(v) => return self.stream_edges(&v, out),
+            Body::Closure { captures, .. } => captures.visit(
+                &self.access,
+                &mut |_, id| match out(Identity::Object(id.1)) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        error = Some(e);
+                        false
+                    }
+                },
+            )?,
+            Body::List { rows, .. } => {
+                rows.visit(&self.access, &mut |_, v| match self.stream_edges(v, out) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        error = Some(e);
+                        false
+                    }
+                })?
+            }
+            Body::Table { rows, .. } => rows.visit(&self.access, &mut |_, e| match self
+                .stream_edges(&e.key, out)
+                .and_then(|()| self.stream_edges(&e.value, out))
+            {
+                Ok(()) => true,
+                Err(e) => {
+                    error = Some(e);
+                    false
+                }
+            })?,
+        }
+        error.map_or(Ok(()), Err)
+    }
+    fn task_result(
+        &mut self,
+        task: TaskId,
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
+    ) -> Result<LogicalBytes, HeapFault> {
+        let Some(task) = self.tasks.get(&ordinal_key(task.0), &self.access)? else {
+            return Ok(LogicalBytes(0));
+        };
+        let value = match &task.state {
+            TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v))
+                if task.result_retained =>
+            {
+                v
+            }
+            _ => return Ok(LogicalBytes(0)),
+        };
+        self.stream_edges(value, out)?;
+        Ok(LogicalBytes(value_cost(value)))
+    }
+    fn sweep(&mut self, unreachable: &SweepSet) -> Result<(), HeapFault> {
+        for entity in &unreachable.entities {
+            if entity.family != FamilyId::PRIMARY {
+                self.sweep_family_member(*entity)?;
+            }
+            if let Some(head) = self.directory.remove(&entity_key(*entity), &self.access)? {
+                self.population.closure_entities = self
+                    .population
+                    .closure_entities
+                    .checked_sub((head.kind() == ObjectKind::Closure) as u64)
+                    .ok_or_else(|| HeapFault::Malformed("sweep population underflow".into()))?;
+                self.population.task_edges = self
+                    .population
+                    .task_edges
+                    .checked_sub(head.task_edges())
+                    .ok_or_else(|| HeapFault::Malformed("sweep task-edge underflow".into()))?;
+            }
+        }
+        for task in &unreachable.ended_task_results {
+            if let Some(mut row) = self.tasks.get(&ordinal_key(task.0), &self.access)? {
+                let old_edges = row.task_edges();
+                row.state = match row.state {
+                    TaskStateRecord::Ended(EndedTask::Returned(_)) => {
+                        TaskStateRecord::Ended(EndedTask::Returned(Value::Null))
+                    }
+                    TaskStateRecord::Ended(EndedTask::Raised(_)) => {
+                        TaskStateRecord::Ended(EndedTask::Raised(Value::Null))
+                    }
+                    _ => {
+                        return Err(HeapFault::Malformed(
+                            "sweep named a running task result".into(),
+                        ));
+                    }
+                };
+                row.result_retained = false;
+                self.population.task_edges = self
+                    .population
+                    .task_edges
+                    .checked_sub(old_edges)
+                    .and_then(|value| value.checked_add(row.task_edges()))
+                    .ok_or_else(|| {
+                        HeapFault::Malformed("retired task population underflow".into())
+                    })?;
+                self.tasks.write(ordinal_key(task.0), row, &self.access)?;
+            }
+        }
+        self.header = None;
+        Ok(())
+    }
+    fn census_after(
+        &mut self,
+        after: Option<EntityId>,
+        limit: usize,
+    ) -> Result<Vec<EntityId>, HeapFault> {
+        let mut entities = Vec::new();
+        if after.is_none_or(|id| id.family == FamilyId::PRIMARY) {
+            let mut key = after.map(entity_key);
+            while entities.len() < limit {
+                let Some((next, head)) = self.directory.after(key.as_deref(), &self.access)? else {
+                    break;
+                };
+                if head.family != FamilyId::PRIMARY {
+                    break;
+                }
+                let ordinal = u64::from_be_bytes(
+                    next.get(8..)
+                        .ok_or_else(|| HeapFault::Malformed("identity key malformed".into()))?
+                        .try_into()
+                        .map_err(|_| HeapFault::Malformed("identity key malformed".into()))?,
+                );
+                entities.push(EntityId {
+                    family: FamilyId::PRIMARY,
+                    ordinal,
+                });
+                key = Some(next);
+            }
+        }
+        let mut key = after
+            .and_then(|id| id.family.0.checked_sub(1))
+            .map(ordinal_key);
+        while entities.len() < limit {
+            let Some((next, family)) = self.families.after(key.as_deref(), &self.access)? else {
+                break;
+            };
+            let runs = Tree::<MembershipRun>::of_keyed(&family.membership);
+            let first = after
+                .filter(|id| id.family == family.family)
+                .and_then(|id| id.ordinal.checked_add(1))
+                .unwrap_or(0);
+            let mut rank = runs
+                .passed(&ordinal_key(first), &self.access)?
+                .saturating_sub(1);
+            while entities.len() < limit {
+                let Some((_, run)) = runs.rank_get(rank, &self.access)? else {
+                    break;
+                };
+                let end = run
+                    .start
+                    .checked_add(run.len)
+                    .ok_or_else(|| HeapFault::Malformed("family run extent overflow".into()))?;
+                if end > family.extent {
+                    return Err(HeapFault::Corrupt {
+                        page: family.base.root.id,
+                        reason: "membership exceeds family extent".into(),
+                    });
+                }
+                if run.live {
+                    let count = (end.saturating_sub(run.start.max(first)))
+                        .min((limit - entities.len()) as u64);
+                    for ordinal in run.start.max(first)..run.start.max(first) + count {
+                        entities.push(EntityId {
+                            family: family.family,
+                            ordinal,
+                        });
+                    }
+                }
+                rank += 1;
+            }
+            key = Some(next);
+        }
+        Ok(entities)
+    }
+    fn ended_tasks_after(
+        &mut self,
+        after: Option<TaskId>,
+        limit: usize,
+    ) -> Result<Vec<TaskId>, HeapFault> {
+        let mut key = after.map(|t| ordinal_key(t.0));
+        let mut tasks = Vec::new();
+        while tasks.len() < limit {
+            let Some((next, row)) = self.tasks.after(key.as_deref(), &self.access)? else {
+                break;
+            };
+            if !matches!(row.state, TaskStateRecord::Ended(EndedTask::Returned(_) | EndedTask::Raised(_)) if row.result_retained)
+            {
+                key = Some(next);
+                continue;
+            }
+            tasks.push(TaskId(u64::from_be_bytes(
+                next.as_slice()
+                    .try_into()
+                    .map_err(|_| HeapFault::Malformed("task identity key is not 8 bytes".into()))?,
+            )));
+            key = Some(next);
+        }
+        Ok(tasks)
+    }
+}
+impl PagedHeap {
+    /// Streams nested immutable edges in place, stopping on the first visitor
+    /// failure. Scalar payloads are never loaded by a trace.
+    pub fn stream_edges(
+        &self,
+        value: &Value,
+        out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        match value {
+            Value::List(id)
+            | Value::Map(id)
+            | Value::Set(id)
+            | Value::Record(id)
+            | Value::Closure(id) => out(Identity::Object(*id))?,
+            Value::Task(id) => out(Identity::Task(*id))?,
+            Value::Ref(id) => out(*id)?,
+            Value::Tuple(t) if t.summary.has_edges => {
+                let mut error = None;
+                self.tuple_visit(t, &mut |v| match self.stream_edges(v, out) {
+                    Ok(()) => ControlFlow::Continue(()),
+                    Err(e) => {
+                        error = Some(e);
+                        ControlFlow::Break(())
+                    }
+                })?;
+                if let Some(e) = error {
+                    return Err(e);
+                }
+            }
+            Value::Error(e) if e.has_edges => self.stream_edges(&self.error_data(e)?, out)?,
+            _ => (),
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The body rows this thread's census traces have visited (FIG-6425).
+    pub(super) static TRACED_ROWS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+impl Body {
+    /// The rows a trace visits to stream this body's edges.
+    #[cfg(test)]
+    fn rows(&self) -> u64 {
+        match self {
+            Self::Variable(_) => 1,
+            Self::Closure { captures, .. } => captures.len(),
+            Self::List { rows, .. } => rows.len(),
+            Self::Table { rows, .. } => rows.len(),
+        }
+    }
+}
+
+fn visit_tree<T: Cell>(
+    tree: &Tree<T>,
+    access: &Access<'_>,
+    visit: &mut dyn FnMut(&T) -> Result<(), HeapFault>,
+) -> Result<(), HeapFault> {
+    let mut error = None;
+    tree.visit(access, &mut |_, v| match visit(v) {
+        Ok(()) => true,
+        Err(e) => {
+            error = Some(e);
+            false
+        }
+    })?;
+    error.map_or(Ok(()), Err)
+}

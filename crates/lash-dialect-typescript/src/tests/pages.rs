@@ -70,8 +70,8 @@ impl Session {
         if let Some(root) = &self.root {
             let heap = self.heap();
             let tree = Tree::<BindingRecord>::of_keyed(&root.bindings);
-            tree.visit(&heap.access, &mut |_, binding| {
-                names.insert(binding.name.resolve(&heap.access).unwrap());
+            tree.visit(heap.pages(), &mut |_, binding| {
+                names.insert(binding.name.resolve(heap.pages()).unwrap());
                 true
             })
             .unwrap();
@@ -101,23 +101,23 @@ impl Session {
                 .write(
                     lash_kernel_state::paged::metadata::metadata_key(&name),
                     BindingRecord {
-                        name: NameRef::new(&name, &heap.access).unwrap(),
+                        name: NameRef::new(&name, heap.pages()).unwrap(),
                         declared: SiteRef::new(
                             &lash_kernel_doc::Site {
                                 unit: lash_kernel_doc::Unit::Main,
                                 path: Vec::new(),
                             },
-                            &heap.access,
+                            heap.pages(),
                         )
                         .unwrap(),
                         value: BoundRecord::Value(value),
                     },
-                    &heap.access,
+                    heap.pages(),
                 )
                 .unwrap();
         }
         table
-            .seal(&heap.access, &mut SealWork::new(BUDGET))
+            .seal(heap.pages(), &mut SealWork::new(BUDGET))
             .unwrap();
         let bindings = table.keyed_root().unwrap();
         heap.set_session_root(table).unwrap();

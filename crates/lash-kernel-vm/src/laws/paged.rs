@@ -46,11 +46,11 @@ fn main_and_entry_keep_their_distinct_checkpoint_roots() {
         let pin = heap.freeze_datum(&Datum::Null).unwrap().root;
         let mut functions = Tree::new(false);
         functions
-            .write(b"host pin".to_vec(), pin, &heap.access)
+            .write(b"host pin".to_vec(), pin, heap.pages())
             .unwrap();
         functions
             .seal(
-                &heap.access,
+                heap.pages(),
                 &mut SealWork::new(SealBudget {
                     pages: u64::MAX,
                     bytes: u64::MAX,
@@ -250,7 +250,7 @@ fn a_committed_delivery_waits_behind_other_ready_work() {
         .unwrap();
         let waits = tree::Tree::<WaitRecord>::of_keyed(&sealed.root.waits);
         waits
-            .visit(&heap.access, &mut |_, wait| {
+            .visit(heap.pages(), &mut |_, wait| {
                 assert!(matches!(
                     wait.phase,
                     WaitPhase::Committed(CommittedOutcomeRecord::Completed(_))

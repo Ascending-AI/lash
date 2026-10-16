@@ -217,19 +217,19 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
     };
     let first = heap
         .allocate_object(ObjectInit::Closure {
-            site: SiteRef::new(&site, &heap.access).unwrap(),
+            site: SiteRef::new(&site, heap.pages()).unwrap(),
             captures: vec![
-                (NameRef::new(&Name::new("z"), &heap.access).unwrap(), z),
-                (NameRef::new(&Name::new("a"), &heap.access).unwrap(), a),
+                (NameRef::new(&Name::new("z"), heap.pages()).unwrap(), z),
+                (NameRef::new(&Name::new("a"), heap.pages()).unwrap(), a),
             ],
         })
         .expect("closure");
     let second = heap
         .allocate_object(ObjectInit::Closure {
-            site: SiteRef::new(&site, &heap.access).unwrap(),
+            site: SiteRef::new(&site, heap.pages()).unwrap(),
             captures: vec![
-                (NameRef::new(&Name::new("a"), &heap.access).unwrap(), a),
-                (NameRef::new(&Name::new("z"), &heap.access).unwrap(), z),
+                (NameRef::new(&Name::new("a"), heap.pages()).unwrap(), a),
+                (NameRef::new(&Name::new("z"), heap.pages()).unwrap(), z),
             ],
         })
         .expect("recompiled closure");

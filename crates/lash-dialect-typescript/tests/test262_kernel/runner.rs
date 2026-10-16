@@ -325,7 +325,7 @@ fn completed(finished: &lash_kernel_vm::Finished, source: &pages::Source) -> Res
         lash_kernel_state::paged::metadata::metadata_key(&Name::new(super::ingest::COMPLETED));
     Ok(matches!(
         bindings
-            .get(&key, &heap.access)
+            .get(&key, heap.pages())
             .map_err(|e| e.to_string())?,
         Some(BindingRecord {
             value: BoundRecord::Value(lash_kernel_doc::Value::Bool(true)),

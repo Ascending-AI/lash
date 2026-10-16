@@ -11,6 +11,7 @@ mod actions;
 mod checkpoint;
 mod exec;
 mod frames;
+mod issued;
 mod observing;
 mod ops;
 mod queue;
@@ -358,6 +359,8 @@ pub struct KernelMachine {
     next_join: u64,
     waits: Tree<WaitRecord>,
     next_wait: u64,
+    /// The waits issued since the last park, once found.
+    issued: Option<issued::Issued>,
     /// The effects and sleeps requested since the last park, in request
     /// order.
     // Issued requests are retained in waits until reporting.
@@ -531,8 +534,8 @@ impl KernelMachine {
             let name = Name::new(effect.as_str());
             self.modes.write(
                 lash_kernel_state::paged::metadata::metadata_key(&name),
-                lash_kernel_state::paged::NameRef::new(&name, &self.heap.access)?,
-                &self.heap.access,
+                lash_kernel_state::paged::NameRef::new(&name, self.heap.pages())?,
+                self.heap.pages(),
             )?;
         }
         Ok(())
@@ -547,7 +550,7 @@ impl KernelMachine {
                 .modes
                 .get(
                     &lash_kernel_state::paged::metadata::metadata_key(&name),
-                    &self.heap.access,
+                    self.heap.pages(),
                 )?
                 .is_some()
             {
@@ -575,7 +578,7 @@ impl KernelMachine {
     fn reconcile_sweep(&mut self) -> Result<(), Halt> {
         let refinements = self.heap.certificate().refinements;
         if refinements != self.census_refinements {
-            self.tasks.after_refinement(self.heap.tasks.clone())?;
+            self.tasks.after_refinement(self.heap.task_root().clone())?;
             self.census_refinements = refinements;
         }
         Ok(())
@@ -777,7 +780,7 @@ impl KernelMachine {
             Err(value) => EndedTask::Raised(value),
         });
         let joiners = std::mem::replace(&mut ended.joiners, Tree::new(true));
-        let access = self.heap.access.clone();
+        let access = self.heap.pages().clone();
         self.live_tasks = self.live_tasks.saturating_sub(1);
         if self.current == Some(task) {
             self.current = None;
@@ -838,7 +841,7 @@ impl KernelMachine {
     fn conclude(&mut self, ender: Option<TaskId>, ending: Ending) -> Result<End, Halt> {
         let mut unfinished = Vec::new();
         let mut unobserved = Vec::new();
-        let access = self.heap.access.clone();
+        let access = self.heap.pages().clone();
         self.tasks.visit(&mut |id, task| {
             if id != TaskId::MAIN && ender != Some(id) && !task.passed {
                 match task.state {
@@ -894,39 +897,12 @@ impl KernelMachine {
                 .map_err(MachineError::Heap)?;
             let waiting = waiting
                 .into_iter()
-                .map(|id| id.resolve(&self.heap.access))
+                .map(|id| id.resolve(self.heap.pages()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(MachineError::Heap)?;
             return Ok(self.finish_with(End::Error(RunError::Deadlock { waiting })));
         }
-        let mut requests = Vec::new();
-        // Each report changes Issued to Admitted. Sealing alone changes neither.
-        let access = self.heap.access.clone();
-        let mut key = None;
-        while let Some((next, mut wait)) = self
-            .waits
-            .after(key.as_deref(), &access)
-            .map_err(MachineError::Heap)?
-        {
-            if let WaitPhase::Issued { request } = wait.phase {
-                let raw: [u8; 8] = next
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| MachineError::Fault {
-                        problem: "wait key width".into(),
-                    })?;
-                let id = WaitId(u64::from_be_bytes(raw));
-                requests.push(
-                    self.report_request(id, wait.task, &request)
-                        .map_err(MachineError::Heap)?,
-                );
-                wait.phase = WaitPhase::Admitted;
-                self.waits
-                    .write(next.clone(), wait, &access)
-                    .map_err(MachineError::Heap)?;
-            }
-            key = Some(next);
-        }
+        let requests = self.report_issued()?;
         let mut withdrawn = Vec::new();
         while let Some(wait) = self.withdrawn.pop_front().map_err(MachineError::Heap)? {
             withdrawn.push(WaitId(wait));

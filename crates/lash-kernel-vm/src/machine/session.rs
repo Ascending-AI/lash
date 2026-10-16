@@ -39,10 +39,9 @@ pub(super) fn start(
         .as_ref()
         .map_or_else(empty_root, |session| session.functions);
     if let Some(session) = &start.session {
-        let bindings = heap.adopt(session)?;
-        heap.session = open_tree(bindings);
+        heap.adopt(session)?;
     }
-    let access = heap.access.clone();
+    let access = heap.pages().clone();
     let mut machine = KernelMachine {
         release: program.release,
         owner: start.owner,
@@ -61,6 +60,7 @@ pub(super) fn start(
         next_join: 0,
         waits: Tree::new(false),
         next_wait: 0,
+        issued: None,
         withdrawn: queue::Queue::open(Tree::new(true), access.clone()),
         withdrawn_ever: Tree::new(false),
         modes: Tree::new(false),
@@ -191,13 +191,13 @@ impl KernelMachine {
         };
         let functions: Tree<lash_kernel_state::paged::FunctionRecord> = open_tree(self.functions);
         let mut names = Vec::new();
-        functions.visit(&self.heap.access, &mut |_, record| {
+        functions.visit(self.heap.pages(), &mut |_, record| {
             names.push(record.name.clone());
             true
         })?;
         let held = names
             .iter()
-            .map(|name| name.resolve(&self.heap.access))
+            .map(|name| name.resolve(self.heap.pages()))
             .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
         let mut bindings = std::collections::BTreeMap::new();
         for name in dropped.iter().chain(&held) {
@@ -227,7 +227,7 @@ impl KernelMachine {
             functions.write(
                 lash_kernel_state::paged::metadata::metadata_key(&name),
                 record,
-                &self.heap.access,
+                self.heap.pages(),
             )?;
         }
         let mut bindings: Tree<BindingRecord> = open_tree(carried);
@@ -237,7 +237,7 @@ impl KernelMachine {
             bindings.write(
                 lash_kernel_state::paged::metadata::metadata_key(&name),
                 record,
-                &self.heap.access,
+                self.heap.pages(),
             )?;
             kept.insert(name);
         }
@@ -258,8 +258,8 @@ impl KernelMachine {
                 pages: u64::MAX,
                 bytes: u64::MAX,
             });
-        functions.seal(&self.heap.access, &mut work)?;
-        bindings.seal(&self.heap.access, &mut work)?;
+        functions.seal(self.heap.pages(), &mut work)?;
+        bindings.seal(self.heap.pages(), &mut work)?;
         Ok((keyed(&bindings)?, keyed(&functions)?, not_carried))
     }
 
@@ -271,10 +271,10 @@ impl KernelMachine {
             .canonical_value(value)
             .map_err(|error| self.heap_halt(error))?;
         Ok(BindingRecord {
-            name: lash_kernel_state::paged::NameRef::new(name, &self.heap.access)?,
+            name: lash_kernel_state::paged::NameRef::new(name, self.heap.pages())?,
             declared: lash_kernel_state::paged::SiteRef::new(
                 &self.exe.code(self.exe.main).site,
-                &self.heap.access,
+                self.heap.pages(),
             )?,
             value: BoundRecord::Value(value),
         })
@@ -285,11 +285,11 @@ impl KernelMachine {
     }
     pub(super) fn session_write(&mut self, name: Name, value: Value) -> Result<(), Halt> {
         let record = self.binding_record(&name, value)?;
-        let mut bindings = self.heap.session.clone();
+        let mut bindings = self.heap.session_root().clone();
         bindings.write(
             lash_kernel_state::paged::metadata::metadata_key(&name),
             record,
-            &self.heap.access,
+            self.heap.pages(),
         )?;
         self.heap_write(|heap| {
             heap.set_session_root(bindings.clone())
@@ -310,11 +310,11 @@ impl KernelMachine {
         // The host's bindings are the host's: what the cell made of its
         // copy is not the session's.
         if !self.host.is_empty() {
-            let mut bindings = self.heap.session.clone();
+            let mut bindings = self.heap.session_root().clone();
             for name in std::mem::take(&mut self.host) {
                 bindings.remove(
                     &lash_kernel_state::paged::metadata::metadata_key(&name),
-                    &self.heap.access,
+                    self.heap.pages(),
                 )?;
             }
             self.heap
@@ -323,16 +323,14 @@ impl KernelMachine {
         }
         // Lifecycle roots name sealed trees. A cell may finish before its
         // first park, so its session still has only transient pages here.
-        self.heap.session.seal(
-            &self.heap.access,
-            &mut lash_kernel_state::paged::tree::SealWork::new(
+        self.heap
+            .seal_session_root(&mut lash_kernel_state::paged::tree::SealWork::new(
                 lash_kernel_state::paged::SealBudget {
                     pages: u64::MAX,
                     bytes: u64::MAX,
                 },
-            ),
-        )?;
-        let bindings = keyed(&self.heap.session)?;
+            ))?;
+        let bindings = keyed(self.heap.session_root())?;
         let classification = self.heap.classify_carry(&bindings)?;
         let mut dropped = classification.dropped;
         // Metadata tree keys are bounded digests; public diagnostics retain
