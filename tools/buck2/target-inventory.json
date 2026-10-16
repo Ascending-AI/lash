@@ -73405,6 +73405,7 @@
         "lash-internal-sqlite-store",
         "lash-internal-trace",
         "lash-kernel-doc",
+        "lash-kernel-migrate",
         "libc",
         "rmp-serde",
         "schemars",
@@ -75176,6 +75177,7 @@
       "dependencies": [
         "lash-kernel-dialect",
         "lash-kernel-doc",
+        "schemars",
         "serde",
         "thiserror"
       ],

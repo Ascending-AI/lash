@@ -1,0 +1,178 @@
+{
+  "$defs": {
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-parked-refusal/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Why a parked run is not carried onto a rewritten document.",
+  "oneOf": [
+    {
+      "properties": {
+        "found": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "from": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "const": "version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "found",
+        "from"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "parked": {
+          "$ref": "#/$defs/DocumentId"
+        },
+        "reason": {
+          "const": "document",
+          "type": "string"
+        },
+        "rewritten": {
+          "$ref": "#/$defs/DocumentId"
+        }
+      },
+      "required": [
+        "reason",
+        "parked",
+        "rewritten"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The run holds a coordinate at a node the rewrite does not carry: a\ntask stands there, a variable or a closure was made there, a loop or\na cleanup block there is under way, or a task or an effect is\nidentified by it.",
+      "properties": {
+        "held": {
+          "type": "string"
+        },
+        "reason": {
+          "const": "site_not_carried",
+          "type": "string"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "reason",
+        "site",
+        "held"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "function": {
+          "$ref": "#/$defs/FunctionId"
+        },
+        "reason": {
+          "const": "function_not_carried",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "function"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "reason": {
+          "const": "state_not_carried",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "detail"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "ParkedRefusal",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

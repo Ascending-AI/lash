@@ -344,12 +344,36 @@ pub enum HeapFault {
 pub enum HostResource {
     /// Quiescent census bitmap, work-list and root scratch budget.
     TraceBudget,
+    /// Resident clean-page cache.
     CleanResidency,
+    /// Resident dirty-page budget.
     DirtyResidency,
+    /// Pages pinned for an activation.
     PinnedPages,
+    /// Uncommitted staged page bytes.
     StagingBytes,
+    /// One page-read batch.
     ReadBatch,
+    /// Host work granted to an activation.
     HostWork,
+}
+
+impl HostResource {
+    /// Whether redriving from committed state can succeed once the host
+    /// resource is available. The engine owns redrive; this is no guarantee
+    /// that the same resource grant will suffice on another attempt.
+    #[must_use]
+    pub const fn is_retryable(self) -> bool {
+        match self {
+            Self::TraceBudget
+            | Self::CleanResidency
+            | Self::DirtyResidency
+            | Self::PinnedPages
+            | Self::StagingBytes
+            | Self::ReadBatch
+            | Self::HostWork => true,
+        }
+    }
 }
 
 impl HeapFault {

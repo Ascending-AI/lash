@@ -102,6 +102,8 @@ mod data_retention;
 pub use change_page::ChangePage;
 pub use lash_core::facade_support::RuntimeDataLimits;
 pub use lash_core_store::plugin_state::NameByteLimit;
+/// An exhausted host resource and whether its execution can be redriven.
+pub use lash_core_store::runtime_error::HostResource;
 /// The durable substrate's backend builder (ADR 0132 §1).
 pub mod durable;
 mod durable_session;
@@ -1274,7 +1276,7 @@ pub mod runtime {
 
     pub use lash_core::ServedOnly;
     pub use lash_core::{ConfigResolution, ConfigResolutionDecision};
-    pub use lash_core_store::runtime_error::EffectErrorJournalPolicy;
+    pub use lash_core_store::runtime_error::{EffectErrorJournalPolicy, HostResource};
     pub use lash_core_store::turn_input_vocabulary::RunDefinitions;
     pub use lash_sansio::sansio::{
         ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,

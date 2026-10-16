@@ -2266,6 +2266,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "lash-kernel-doc",
+ "lash-kernel-migrate",
  "libc",
  "rmp-serde",
  "schemars",
@@ -3165,6 +3166,7 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "schemars",
  "serde",
  "thiserror 2.0.18",
 ]

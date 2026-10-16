@@ -22,6 +22,8 @@ target runs all of them:
 | --- | --- | --- | --- |
 | `trace-record` | `TraceRecord` with its `TraceEvent` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
 | `workflow-execution-overlay` | `WorkflowExecutionOverlay` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
+| `kernel-migration-refusal` | `KernelMigrationRefusal`, including document and parked causes | `KERNEL_VERSION` | `crates/lash-core/src/bin/process_workflow_schema_generator.rs` |
+| `kernel-parked-refusal` | `ParkedRefusal` | `KERNEL_VERSION` | `crates/lash-core/src/bin/process_workflow_schema_generator.rs` |
 | `process-workflow-overlay` | `ProcessWorkflowOverlay` | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core/src/bin/process_workflow_schema_generator.rs` |
 | `process-effect-outcome` | `process.effect_outcome` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
 | `process-effect-omissions` | `process.effect_omissions` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
@@ -50,6 +52,12 @@ token grammar version and its Lash-issued id; JSON and generated TypeScript
 are only for reading and editing. See the [host blob format note](../../docs/kernel/document-bytes.md). Lash
 ships no engine wire protocol; hosts own transport DTOs and compatibility
 ([ADR 0136](../../docs/adr/0136-hosts-own-their-wire-contracts.md)).
+
+Kernel migration and parked refusals also publish `v1.d.ts`, derived from
+those schemas. Hosts enabling `codemode` can use `lash::vm::KernelMigrationRefusal`
+and `lash::vm::KernelParkedRefusal` directly with Schemars. As with other
+published enums, the schemas and TypeScript name this build's known variants;
+Rust consumers retain a wildcard arm for the `#[non_exhaustive]` enums.
 
 ## Run-owned tool and operation contracts
 

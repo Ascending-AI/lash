@@ -271,6 +271,40 @@ impl From<SendError> for EmbedError {
 }
 
 impl EmbedError {
+    /// The exhausted host resource, through runtime, plugin, session or
+    /// source-service errors. Unrelated errors return `None`.
+    /// [`HostResource::is_retryable`](crate::HostResource::is_retryable)
+    /// describes whether the engine can redrive when capacity is available.
+    #[must_use]
+    pub fn host_resource_exhausted(&self) -> Option<crate::HostResource> {
+        use lash_core::facade_support::PluginOperationInvokeError;
+
+        match self {
+            Self::Runtime(error)
+            | Self::Plugin(lash_core::PluginError::Runtime(error))
+            | Self::Session(SessionError::Plugin(lash_core::PluginError::Runtime(error)))
+            | Self::ProcessEnvLoad(crate::plugins::ProcessEnvLoadError::Store(
+                lash_core::PluginError::Runtime(error),
+            )) => error.host_resource(),
+            Self::Plugin(lash_core::PluginError::RuntimeEffectController(error))
+            | Self::Session(SessionError::Plugin(
+                lash_core::PluginError::RuntimeEffectController(error),
+            ))
+            | Self::ProcessEnvLoad(crate::plugins::ProcessEnvLoadError::Store(
+                lash_core::PluginError::RuntimeEffectController(error),
+            )) => error.clone().into_runtime_error().host_resource(),
+            Self::Control(
+                PluginOperationInvokeError::Runtime(error)
+                | PluginOperationInvokeError::AdmissionRefused(error),
+            ) => error.host_resource(),
+            #[cfg(feature = "codemode")]
+            Self::WorkflowSource(lash_vm_client::service::SourceServiceError::Worker(error)) => {
+                error.clone().into_runtime_error().host_resource()
+            }
+            _ => None,
+        }
+    }
+
     /// The typed environment refusal, independent of the operation that
     /// encountered it. Store and transport faults return `None`.
     pub fn process_env_refusal(&self) -> Option<&crate::process::ProcessEnvRefusal> {
@@ -697,6 +731,92 @@ mod tests {
         RuntimeErrorCode, SessionError, StoreError,
     };
     use lash_sansio::SessionId;
+
+    /// FIG-6549: exhaustion stays typed through runtime, plugin and session wrappers.
+    #[cfg(feature = "codemode")]
+    #[test]
+    fn host_resource_exhaustion_survives_embed_wrappers() {
+        use crate::vm::{
+            HeapFault, HostResource, InfrastructureOutcome, PageRefusal, PoolError,
+            SourceServiceError,
+        };
+        use lash_core::facade_support::PluginOperationInvokeError;
+
+        let mut cases: Vec<_> = [
+            HostResource::TraceBudget,
+            HostResource::CleanResidency,
+            HostResource::DirtyResidency,
+            HostResource::PinnedPages,
+            HostResource::StagingBytes,
+            HostResource::ReadBatch,
+            HostResource::HostWork,
+        ]
+        .into_iter()
+        .map(|resource| {
+            (
+                InfrastructureOutcome::HeapFault {
+                    fault: HeapFault::Exhausted { resource },
+                },
+                Some(resource),
+            )
+        })
+        .collect();
+        cases.push((
+            InfrastructureOutcome::PageRefused {
+                refusal: PageRefusal::StagingExhausted { bytes: 1 },
+            },
+            Some(HostResource::StagingBytes),
+        ));
+        cases.push((
+            InfrastructureOutcome::PageRefused {
+                refusal: PageRefusal::Corrupt,
+            },
+            None,
+        ));
+        for (outcome, expected) in cases {
+            let source = EmbedError::WorkflowSource(SourceServiceError::Worker(
+                PoolError::Infrastructure(outcome.clone()),
+            ));
+            assert_eq!(source.host_resource_exhausted(), expected);
+            let runtime = RuntimeError::new(RuntimeErrorCode::VmWorkerFailed, "opaque").with_cause(
+                RuntimeErrorCause::VmWorker {
+                    outcome: Box::new(outcome),
+                },
+            );
+            let controller = RuntimeEffectControllerError::from(runtime.clone());
+            for error in [
+                EmbedError::Control(PluginOperationInvokeError::Runtime(Box::new(
+                    runtime.clone(),
+                ))),
+                EmbedError::Control(PluginOperationInvokeError::AdmissionRefused(Box::new(
+                    runtime.clone(),
+                ))),
+                EmbedError::ProcessEnvLoad(crate::plugins::ProcessEnvLoadError::Store(
+                    PluginError::Runtime(runtime.clone()),
+                )),
+                EmbedError::ProcessEnvLoad(crate::plugins::ProcessEnvLoadError::Store(
+                    PluginError::RuntimeEffectController(controller.clone()),
+                )),
+                EmbedError::Runtime(runtime.clone()),
+                EmbedError::Plugin(PluginError::Runtime(runtime.clone())),
+                EmbedError::Session(SessionError::Plugin(PluginError::Runtime(runtime))),
+                EmbedError::Plugin(PluginError::RuntimeEffectController(controller.clone())),
+                EmbedError::Session(SessionError::Plugin(PluginError::RuntimeEffectController(
+                    controller,
+                ))),
+            ] {
+                assert_eq!(error.host_resource_exhausted(), expected);
+            }
+        }
+        assert_eq!(
+            EmbedError::MissingProtocolPlugin.host_resource_exhausted(),
+            None
+        );
+        assert_eq!(
+            runtime_error(RuntimeErrorCode::VmWorkerFailed).host_resource_exhausted(),
+            None
+        );
+    }
 
     fn runtime_error(code: RuntimeErrorCode) -> EmbedError {
         EmbedError::Runtime(RuntimeError::new(code, "test"))

@@ -7,6 +7,7 @@
 
 pub use crate::executable_generation::{ExecutableGeneration, ExecutableGenerationRefusal};
 use crate::{RuntimeEffectKind, SessionId};
+pub use lash_vm_protocol::page::HostResource;
 use serde::{Deserialize, Serialize};
 
 mod attachment_retention;
@@ -933,6 +934,30 @@ pub struct RuntimeError {
     executable_generation_refusal: Option<Box<ExecutableGenerationRefusal>>,
 }
 impl RuntimeError {
+    /// The exhausted host resource carried by a worker's typed cause.
+    /// Unrelated worker faults and errors without that cause return `None`.
+    /// [`HostResource::is_retryable`] states whether redrive can succeed.
+    #[must_use]
+    pub fn host_resource(&self) -> Option<HostResource> {
+        use lash_vm_protocol::{
+            InfrastructureOutcome,
+            page::{HeapFault, PageRefusal},
+        };
+
+        let RuntimeErrorCause::VmWorker { outcome } = self.cause.as_ref()? else {
+            return None;
+        };
+        match outcome.as_ref() {
+            InfrastructureOutcome::PageRefused {
+                refusal: PageRefusal::StagingExhausted { .. },
+            } => Some(HostResource::StagingBytes),
+            InfrastructureOutcome::HeapFault {
+                fault: HeapFault::Exhausted { resource },
+            } => Some(*resource),
+            _ => None,
+        }
+    }
+
     /// Constructs a `RuntimeError` for effect-host implementors while creating, observing, or
     /// resolving a durable wait.
     pub fn new(code: RuntimeErrorCode, message: impl Into<String>) -> Self {

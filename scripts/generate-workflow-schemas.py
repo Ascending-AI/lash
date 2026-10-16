@@ -131,7 +131,8 @@ def rendered_documents(payload: list[dict[str, object]]) -> dict[Path, str]:
             raise ValueError("generator returned an invalid shape registration")
         relative = Path(shape) / f"v{version}.schema.json"
         documents[relative] = json.dumps(schema, indent=2) + "\n"
-        if shape in {"kernel-workflow-view", "kernel-authoring-operation"}:
+        if shape in {"kernel-workflow-view", "kernel-authoring-operation",
+                     "kernel-migration-refusal", "kernel-parked-refusal"}:
             documents[Path(shape) / f"v{version}.d.ts"] = typescript_declarations(schema)
     return documents
 

@@ -7,6 +7,7 @@ use lash_kernel_doc::{
     Document, DocumentId, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName,
     FunctionRegistry, KernelVersion, RegistryError, Site,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The migration a breaking kernel version ships from the version before
@@ -45,7 +46,7 @@ impl Rewritten {
 }
 
 /// Why a document is not rewritten for the next version.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, thiserror::Error)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 #[non_exhaustive]
 pub enum DocumentRefusal {
@@ -65,7 +66,7 @@ pub enum DocumentRefusal {
 }
 
 /// Why a parked run is not carried onto a rewritten document.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, thiserror::Error)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 #[non_exhaustive]
 pub enum ParkedRefusal {
@@ -89,7 +90,9 @@ pub enum ParkedRefusal {
 }
 
 /// Why a kernel process is not carried to the next kernel version.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, thiserror::Error)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema, thiserror::Error,
+)]
 #[serde(rename_all = "snake_case", tag = "refused")]
 #[non_exhaustive]
 pub enum KernelMigrationRefusal {

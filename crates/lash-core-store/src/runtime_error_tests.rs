@@ -685,3 +685,49 @@ mod typed_refusal_causes {
         assert_eq!(decoded.run_shape_refusal(), None);
     }
 }
+
+/// FIG-6549: every worker exhaustion names its host resource, independently of error text.
+#[test]
+fn worker_exhaustion_exposes_its_host_resource() {
+    use crate::runtime_error::RuntimeErrorCause;
+    use lash_vm_protocol::{
+        InfrastructureOutcome,
+        page::{HeapFault, HostResource, PageRefusal},
+    };
+
+    for resource in [
+        HostResource::TraceBudget,
+        HostResource::CleanResidency,
+        HostResource::DirtyResidency,
+        HostResource::PinnedPages,
+        HostResource::StagingBytes,
+        HostResource::ReadBatch,
+        HostResource::HostWork,
+    ] {
+        let error = RuntimeError::new(RuntimeErrorCode::VmWorkerFailed, "opaque").with_cause(
+            RuntimeErrorCause::VmWorker {
+                outcome: Box::new(InfrastructureOutcome::HeapFault {
+                    fault: HeapFault::Exhausted { resource },
+                }),
+            },
+        );
+        assert_eq!(error.host_resource(), Some(resource));
+        assert!(resource.is_retryable());
+    }
+    let error = RuntimeError::new(RuntimeErrorCode::VmWorkerFailed, "opaque").with_cause(
+        RuntimeErrorCause::VmWorker {
+            outcome: Box::new(InfrastructureOutcome::PageRefused {
+                refusal: PageRefusal::StagingExhausted { bytes: 1 },
+            }),
+        },
+    );
+    assert_eq!(error.host_resource(), Some(HostResource::StagingBytes));
+    let unrelated = RuntimeError::new(RuntimeErrorCode::VmWorkerFailed, "staging exhausted");
+    assert_eq!(unrelated.host_resource(), None);
+    let corrupt = unrelated.with_cause(RuntimeErrorCause::VmWorker {
+        outcome: Box::new(InfrastructureOutcome::PageRefused {
+            refusal: PageRefusal::Corrupt,
+        }),
+    });
+    assert_eq!(corrupt.host_resource(), None);
+}

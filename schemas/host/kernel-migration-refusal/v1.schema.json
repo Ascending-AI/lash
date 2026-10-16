@@ -1,0 +1,377 @@
+{
+  "$defs": {
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "DocumentRefusal": {
+      "description": "Why a document is not rewritten for the next version.",
+      "oneOf": [
+        {
+          "properties": {
+            "found": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "from": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reason": {
+              "const": "version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "found",
+            "from"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/FunctionId"
+            },
+            "reason": {
+              "const": "function_not_held",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/FunctionId"
+            },
+            "name": {
+              "$ref": "#/$defs/QualifiedName"
+            },
+            "reason": {
+              "const": "function_retired",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "function",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "detail": {
+              "type": "string"
+            },
+            "reason": {
+              "const": "form_not_carried",
+              "type": "string"
+            },
+            "site": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "reason",
+            "site",
+            "detail"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "const": "correspondence",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "ParkedRefusal": {
+      "description": "Why a parked run is not carried onto a rewritten document.",
+      "oneOf": [
+        {
+          "properties": {
+            "found": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "from": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reason": {
+              "const": "version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "found",
+            "from"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "parked": {
+              "$ref": "#/$defs/DocumentId"
+            },
+            "reason": {
+              "const": "document",
+              "type": "string"
+            },
+            "rewritten": {
+              "$ref": "#/$defs/DocumentId"
+            }
+          },
+          "required": [
+            "reason",
+            "parked",
+            "rewritten"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The run holds a coordinate at a node the rewrite does not carry: a\ntask stands there, a variable or a closure was made there, a loop or\na cleanup block there is under way, or a task or an effect is\nidentified by it.",
+          "properties": {
+            "held": {
+              "type": "string"
+            },
+            "reason": {
+              "const": "site_not_carried",
+              "type": "string"
+            },
+            "site": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "reason",
+            "site",
+            "held"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/FunctionId"
+            },
+            "reason": {
+              "const": "function_not_carried",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "detail": {
+              "type": "string"
+            },
+            "reason": {
+              "const": "state_not_carried",
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "detail"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "QualifiedName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-migration-refusal/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Why a kernel process is not carried to the next kernel version.",
+  "oneOf": [
+    {
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/DocumentId"
+        },
+        "refused": {
+          "const": "document_missing",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "document"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/DocumentId"
+        },
+        "refusal": {
+          "$ref": "#/$defs/DocumentRefusal"
+        },
+        "refused": {
+          "const": "document",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "document",
+        "refusal"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The rewritten document is not one this build runs: a function it\nlists, redeclared for the next version, is not in this build's\nlibrary.",
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/DocumentId"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "refused": {
+          "const": "not_admitted",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "document",
+        "reason"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/DocumentId"
+        },
+        "refusal": {
+          "$ref": "#/$defs/ParkedRefusal"
+        },
+        "refused": {
+          "const": "parked",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "document",
+        "refusal"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "refused": {
+          "const": "state",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refused",
+        "message"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "KernelMigrationRefusal",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

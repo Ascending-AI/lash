@@ -89,6 +89,16 @@ A **runbook** is an **agent-driven test scenario**: QA performed by an agent aga
 
 The `lash` crate is the host API (ADR 0051). Every type named by a facade signature -- parameters, returns, fields, variants, trait members and supertraits, generic bounds, aliases -- is nameable through `lash::`. Export what hosts genuinely need, in the facade module of the item that names it; narrow the rest (`pub(crate)`, a changed signature, or a hidden cross-crate support module such as `core_internal`, `facade_ops` or `core_support`). `#[doc(hidden)]` is not a resolution, except on explicitly test- or support-only items. `scripts/facade_completeness.py` enforces the rule over the rustdoc JSON (`--document-hidden-items`) of `lash` and every first-party library in its dependency closure. It has no allowlist and no exemption mechanism, and no hand-maintained list of API items of any kind may be added to it.
 
+## Host changes in commit bodies
+
+A commit that changes what hosts write, configure or read includes a
+"Hosts that ..." paragraph. Name every removed, renamed or retyped public
+item and its replacement, and every opt-in the behavior depends on: build
+features, configuration fields, policies and non-default detail levels. State
+when no new opt-in is required. For example, hosts that want workflow node
+spans set `TraceDetailPolicy` for `TraceSpanKind::Workflow` to
+`TraceDetail::Extended`; `standard()` does not enable those spans.
+
 ## Lifecycle: states and labels
 
 **States are the lifecycle position. Labels carry only what a state can't express: who picks the ticket up.** Keep the two orthogonal; don't say the same thing twice in both.
