@@ -46,6 +46,7 @@ pub struct Entry {
 struct Reports {
     entries: Mutex<Vec<Entry>>,
     changed: Notify,
+    stop_delivery_delay: Mutex<Duration>,
 }
 
 impl Reports {
@@ -276,6 +277,15 @@ impl Cluster {
         cluster
     }
 
+    /// Delay shutdown reports to exercise timing independently of stdout delivery.
+    pub fn delay_stop_reports(&self, delay: Duration) {
+        *self
+            .reports
+            .stop_delivery_delay
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = delay;
+    }
+
     /// Boot `name` as a node process.
     pub fn boot(&mut self, name: &str) {
         let notifier = match self.notifier {
@@ -304,6 +314,13 @@ impl Cluster {
                 match serde_json::from_str::<Report>(&line) {
                     Ok(report) => {
                         eprintln!("[{node}] {line}");
+                        if matches!(report.event, Event::Stopped { .. }) {
+                            let delay = *reports
+                                .stop_delivery_delay
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            tokio::time::sleep(delay).await;
+                        }
                         reports.push(Entry {
                             at: Instant::now(),
                             node: report.node,

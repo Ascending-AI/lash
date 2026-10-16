@@ -209,10 +209,12 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
     let stop = async move {
         let _ = stop.await;
     };
+    let registration = lash_durable::runner::NodeRegistration::default();
+    let clock_origin = backend.clock().now();
     let stopped = serve(
         &backend,
         NodeServe {
-            registration: Default::default(),
+            registration: registration.clone(),
             node: NodeId::new(config.node.clone()),
             drain: lash_durable::runner::Drain::default(),
             sessions: Arc::new(sessions),
@@ -224,6 +226,15 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
         stop,
     )
     .await;
+    if let Some((last_renewed, at)) = registration.serving_interval() {
+        report(
+            &config.node,
+            Event::ServingStopped {
+                last_renewed: last_renewed.duration_since(clock_origin),
+                at: at.duration_since(clock_origin),
+            },
+        );
+    }
     let why = match &stopped {
         Ok(Stopped::Requested) => "requested".to_owned(),
         Ok(Stopped::LeaseLost) => "lease_lost".to_owned(),

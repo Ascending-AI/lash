@@ -495,6 +495,8 @@ async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses_on(
         Hold::StepUntilRelease,
     )
     .await;
+    // Shutdown and report delivery must not count as time spent serving.
+    cluster.delay_stop_reports(lease().claim_poll * 4);
     cluster.admit_turn().await;
     let entered = cluster
         .wait(STEP, "ext.write is entered", |entry| {
@@ -506,21 +508,6 @@ async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses_on(
     cluster.send(&zombie, Command::BlockHeartbeat).await;
     cluster.nemesis("partition", Some(&zombie)).await;
     let partitioned = Instant::now();
-    // Its lease was last extended by its registration or its last renewal.
-    let last_renewed = cluster
-        .reports()
-        .iter()
-        .rev()
-        .find(|entry| {
-            entry.node == zombie
-                && match &entry.event {
-                    Event::Registered { .. } => true,
-                    Event::Heartbeat { outcome } => outcome == "renewed",
-                    _ => false,
-                }
-        })
-        .map(|entry| entry.at)
-        .expect("the zombie registered");
     let lease = lease();
     // The runner reports its stop only once every activation it ran is
     // dropped, the held body among them.
@@ -539,7 +526,22 @@ async fn a_node_whose_heartbeat_is_held_stops_itself_before_its_lease_lapses_on(
         },
         "the zombie stopped"
     );
-    let served = stopped.at.saturating_duration_since(last_renewed);
+    let (last_renewed, serving_stopped) = cluster
+        .reports()
+        .into_iter()
+        .find_map(|entry| {
+            if entry.node == zombie
+                && let Event::ServingStopped { last_renewed, at } = entry.event
+            {
+                Some((last_renewed, at))
+            } else {
+                None
+            }
+        })
+        .expect("the zombie reports its serving decision on its own clock");
+    let served = serving_stopped
+        .checked_sub(last_renewed)
+        .expect("the serving decision follows the last renewal on the node clock");
     assert!(
         served <= lease.self_stop_after + lease.claim_poll,
         "the zombie served {} ms past its last renewal, past self_stop_after ({} ms) and one poll ({} ms)",

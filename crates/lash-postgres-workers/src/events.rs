@@ -7,6 +7,7 @@
 //! store answered, so its order across nodes is the order the test read it.
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 /// One line a node writes.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,7 +23,14 @@ pub enum Event {
         /// `renewed`, `reaped`, or the error.
         outcome: String,
     },
-    /// The node stopped serving.
+    /// The runner's serving-stop decision, independent of shutdown and report delivery.
+    ServingStopped {
+        /// Last successful registration or heartbeat send, since the node's clock origin.
+        last_renewed: Duration,
+        /// Serving-stop decision, on the same node monotonic clock.
+        at: Duration,
+    },
+    /// The node finished shutting down.
     Stopped {
         /// `requested`, `lease_lost`, `unrenewed`, or the error.
         why: String,

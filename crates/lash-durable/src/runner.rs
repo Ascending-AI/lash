@@ -56,6 +56,11 @@
 //! the claim poll, each owner's mail poll and the lease reap find every
 //! piece of work.
 
+mod lease;
+
+pub use lease::NodeRegistration;
+use lease::Renewal;
+
 use crate::config::{LeaseConfig, LeaseSettings};
 use crate::durable_config::{DurableConfig, RetirementSettings};
 use crate::error::{DurableError, StoreFailure, StoreFailureKind};
@@ -63,8 +68,8 @@ use crate::formats::FormatSet;
 use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
 use crate::node_wakes::{NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
 use crate::port::{
-    ActorCommit, ActorState, ClaimCause, Claimed, DurableStore, HeartbeatOutcome, MailCommit,
-    NodeLease, NodeSpec, Owner, Woken,
+    ActorCommit, ActorState, ClaimCause, Claimed, DurableStore, MailCommit, NodeLease, NodeSpec,
+    Owner, Woken,
 };
 use crate::tx::{ActorTx, Release};
 use lash_core_ids::clock::Clock;
@@ -885,18 +890,6 @@ impl Hints {
     }
 }
 
-/// One runner's registered boot, observed without querying the store.
-#[derive(Clone, Default)]
-pub struct NodeRegistration(Arc<Mutex<Option<NodeLease>>>);
-impl NodeRegistration {
-    pub fn snapshot(&self) -> Option<NodeLease> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-}
-
 /// One node's serving loop.
 pub struct Runner {
     store: Arc<dyn DurableStore>,
@@ -1036,11 +1029,7 @@ impl Runner {
             }
             register_delay = register_delay.saturating_mul(2).min(settings.claim_poll);
         };
-        *self
-            .registration
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(lease.clone());
+        self.registration.registered(lease.clone(), registering);
         // The stored lease cannot start before this send, so the local
         // deadline is never later than the stored one.
         let started_by = registering + settings.startup;
@@ -1073,15 +1062,19 @@ impl Runner {
         // Whether the last claim was held back for retirement: the loop then
         // claims as soon as retirement catches up.
         let mut deferred = false;
-        renewal.spawn(renew(
-            Arc::clone(&self.store),
-            Arc::clone(&self.clock),
-            lease.clone(),
-            settings,
-            self.liveness.clone(),
-            registering,
-            ended_tx,
-        ));
+        renewal.spawn(
+            Renewal {
+                store: Arc::clone(&self.store),
+                clock: Arc::clone(&self.clock),
+                lease: lease.clone(),
+                settings,
+                liveness: self.liveness.clone(),
+                registration: self.registration.clone(),
+                registering,
+                ended: ended_tx,
+            }
+            .run(),
+        );
         // The listener is in place before the first claim scans.
         let mut feed = match &self.node_wakes {
             Some(node_wakes) => match self.within(started_by, node_wakes.listen(&lease)).await {
@@ -1344,6 +1337,9 @@ impl Runner {
         if stopped == Stopped::LeaseLost {
             self.liveness.lose();
         }
+        // Capture the serving decision before waiting for activation cancellation,
+        // listener teardown or any shutdown/reporting work.
+        self.registration.stopped(self.clock.now());
         active.abort_all();
         while active.join_next().await.is_some() {}
         renewal.abort_all();
@@ -1454,52 +1450,6 @@ impl Runner {
         });
         claims.insert(task.id(), claim);
     }
-}
-
-/// Renew `lease` until it is lost or unrenewed, one heartbeat at a time,
-/// and report why the renewal ended through `ended`. The self-stop deadline
-/// starts at `registering + self_stop_after` and each renewal moves it to
-/// `self_stop_after` past the moment its heartbeat was sent; a heartbeat
-/// still unanswered at the deadline is dropped and the node stops.
-async fn renew(
-    store: Arc<dyn DurableStore>,
-    clock: Arc<dyn Clock>,
-    lease: NodeLease,
-    settings: LeaseSettings,
-    liveness: Liveness,
-    registering: Instant,
-    ended: watch::Sender<Option<Stopped>>,
-) {
-    let mut deadline = registering + settings.self_stop_after;
-    let mut next = registering + settings.heartbeat_every;
-    let stopped = loop {
-        tokio::select! {
-            biased;
-            () = clock.sleep_until(deadline) => break Stopped::Unrenewed,
-            () = clock.sleep_until(next) => {}
-        }
-        let sent = clock.now();
-        next = sent + settings.heartbeat_every;
-        tokio::select! {
-            biased;
-            () = clock.sleep_until(deadline) => break Stopped::Unrenewed,
-            beat = store.heartbeat(&lease) => match beat {
-                Ok(HeartbeatOutcome::Renewed { .. }) => {
-                    deadline = deadline.max(sent + settings.self_stop_after);
-                    liveness.renew(deadline);
-                }
-                Ok(HeartbeatOutcome::Reaped) | Err(DurableError::NodeLeaseLost { .. }) => {
-                    break Stopped::LeaseLost;
-                }
-                // Retried at the next heartbeat.
-                Err(_) => {}
-            },
-        }
-    };
-    if stopped == Stopped::LeaseLost {
-        liveness.lose();
-    }
-    ended.send_replace(Some(stopped));
 }
 
 /// Why the node's renewal ended, once it has. A renewal task that ended
