@@ -830,7 +830,8 @@ fn provider_call_id_map(req: &LlmRequest) -> Result<ToolIds, LlmTransportError> 
 }
 
 fn legal_tool_call_id(id: &str) -> bool {
-    id.len() <= 64
+    !id.is_empty()
+        && id.len() <= 64
         && id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
