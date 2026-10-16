@@ -15,7 +15,7 @@ use lash_kernel_doc::{Site, Unit, Value};
 use lash_kernel_exec::ActIx;
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::payload::TextCursor;
-use lash_kernel_state::paged::tree::{Access, Cell, Tree};
+use lash_kernel_state::paged::tree::{Access, Cell, Tree, Version};
 use lash_kernel_state::paged::{
     BindingRecord, BoundRecord, CursorKind, CursorRecord, EnteredRecord, FinallyRecord,
     FrameRecord, GuardRecord, HeaderRecord, IncomingRecord, IteratedRecord, LoopRecord,
@@ -473,6 +473,89 @@ impl Frame {
     }
 }
 
+/// Comparison metadata must not keep binding leaves (or the other mutable
+/// holdings trees) shared after the real publication has been retired.
+pub(super) struct Publication {
+    statement: lash_kernel_state::paged::SiteRef,
+    bindings: Version<BindingRecord>,
+    loops: Version<LoopRecord>,
+    finally: Version<FinallyRecord>,
+    iterated: Version<IteratedRecord>,
+    departing: Version<Value>,
+    arguments: Option<Version<Value>>,
+    pending: Option<PendingPublication>,
+}
+struct PendingPublication {
+    site: Vec<u32>,
+    phase: PhaseRecord,
+    roles: RolesPublication,
+}
+enum RolesPublication {
+    Flat(std::sync::Weak<[RoleRecord]>),
+    Spilled(Version<lash_kernel_state::paged::RoleChunk>),
+}
+impl RolesPublication {
+    fn matches(&self, roles: &lash_kernel_state::paged::RolesRecord) -> bool {
+        use lash_kernel_state::paged::RolesRecord;
+        match (self, roles) {
+            (Self::Flat(a), RolesRecord::Flat(b)) => std::ptr::eq(a.as_ptr(), Arc::as_ptr(b)),
+            (Self::Spilled(a), RolesRecord::Spilled(b)) => a.matches(b),
+            _ => false,
+        }
+    }
+}
+impl Publication {
+    fn new(record: &FrameRecord) -> Self {
+        Self {
+            statement: record.statement.clone(),
+            bindings: record.bindings.version(),
+            loops: record.loops.version(),
+            finally: record.finally.version(),
+            iterated: record.iterated.version(),
+            departing: record.departing.version(),
+            arguments: record.arguments.as_ref().map(Tree::version),
+            pending: record.pending.as_ref().map(|pending| PendingPublication {
+                site: pending.site.clone(),
+                phase: pending.phase,
+                roles: match &pending.roles {
+                    lash_kernel_state::paged::RolesRecord::Flat(roles) => {
+                        RolesPublication::Flat(Arc::downgrade(roles))
+                    }
+                    lash_kernel_state::paged::RolesRecord::Spilled(tree) => {
+                        RolesPublication::Spilled(tree.version())
+                    }
+                },
+            }),
+        }
+    }
+    fn same_holdings(&self, record: &FrameRecord) -> bool {
+        self.bindings.matches(&record.bindings)
+            && self.iterated.matches(&record.iterated)
+            && self.departing.matches(&record.departing)
+            && match (&self.arguments, &record.arguments) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.matches(b),
+                _ => false,
+            }
+            && match (&self.pending, &record.pending) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.roles.matches(&b.roles),
+                _ => false,
+            }
+    }
+    fn same_version(&self, record: &FrameRecord) -> bool {
+        self.same_holdings(record)
+            && self.statement.same_version(&record.statement)
+            && self.loops.matches(&record.loops)
+            && self.finally.matches(&record.finally)
+            && match (&self.pending, &record.pending) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.site == b.site && a.phase == b.phase,
+                _ => false,
+            }
+    }
+}
+
 pub(super) struct Frames {
     #[cfg(test)]
     pub(super) cache_probes: usize,
@@ -575,38 +658,72 @@ impl Frames {
         self.cache.clear();
         self.parked = ParkKind::Fresh;
     }
-    pub(super) fn flush(&mut self) -> Result<(), HeapFault> {
-        truncate(&mut self.rows, self.len, &self.access)?;
-        for (index, frame) in &mut self.cache {
-            frame.sync()?;
-            if !frame
-                .published
-                .as_ref()
-                .is_some_and(|old| old.same_version(&frame.record))
-            {
-                self.rows
-                    .write(ordinal_key(*index), frame.record.clone(), &self.access)?;
-                frame.published = Some(frame.record.clone());
-            }
-        }
-        Ok(())
+    pub(super) fn has_pending_bindings(&self) -> bool {
+        self.cache
+            .iter()
+            .any(|(_, frame)| !frame.slots.pending.is_empty())
     }
-    /// Publishes what the cached frames hold, not where they stand: a
-    /// frame whose held values did not change since its row was written
-    /// is not written again (FIG-6318). The cache stays the authority for
-    /// coordinates until [`Self::flush`].
+    pub(super) fn flush(&mut self) -> Result<(), HeapFault> {
+        self.publish(true)
+    }
+    /// Publishes holdings without moving the cached frame's coordinates.
     pub(super) fn flush_holdings(&mut self) -> Result<(), HeapFault> {
+        self.publish(false)
+    }
+    fn publish(&mut self, coordinates: bool) -> Result<(), HeapFault> {
         truncate(&mut self.rows, self.len, &self.access)?;
         for (index, frame) in &mut self.cache {
-            frame.sync_holdings()?;
-            if !frame
-                .published
-                .as_ref()
-                .is_some_and(|old| old.same_holdings(&frame.record))
-            {
+            let sync = |frame: &mut Frame| {
+                if coordinates {
+                    frame.sync()
+                } else {
+                    frame.sync_holdings()
+                }
+            };
+            let same = |frame: &Frame| {
+                frame.published.as_ref().is_some_and(|old| {
+                    if coordinates {
+                        old.same_version(&frame.record)
+                    } else {
+                        old.same_holdings(&frame.record)
+                    }
+                })
+            };
+            // No binding edit needs ownership transfer. Synchronize the
+            // other fields first, so unchanged rows stay cold after seal.
+            let synced = frame.slots.pending.is_empty();
+            if synced {
+                sync(frame)?;
+                if same(frame) {
+                    continue;
+                }
+            }
+            if *index < self.rows.len() {
+                self.rows
+                    .update(ordinal_key(*index), &self.access, |stored| {
+                        // Relinquish the obsolete binding owner. If all edits
+                        // were absent removals, restore the identical stored view.
+                        let previous =
+                            std::mem::replace(&mut stored.bindings, Tree::new(false)).retire();
+                        if !synced {
+                            sync(frame)?;
+                        }
+                        let changed = !same(frame);
+                        if changed {
+                            *stored = frame.record.clone();
+                            frame.published = Some(Publication::new(&frame.record));
+                        } else {
+                            stored.bindings = previous.restore()?;
+                        }
+                        Ok(changed)
+                    })?;
+            } else {
+                if !synced {
+                    sync(frame)?;
+                }
                 self.rows
                     .write(ordinal_key(*index), frame.record.clone(), &self.access)?;
-                frame.published = Some(frame.record.clone());
+                frame.published = Some(Publication::new(&frame.record));
             }
         }
         Ok(())
@@ -889,7 +1006,7 @@ fn restore(
     Ok(Box::new(Frame {
         slots: Slots::unloaded(code.slots_by_at.len()),
         code: code_id,
-        published: Some(record.clone()),
+        published: Some(Publication::new(&record)),
         record,
         access,
         exe,
@@ -1117,6 +1234,85 @@ fn continuation(
 #[cfg(test)]
 mod laws {
     use crate::laws::embedder::Embedder;
+
+    /// FIG-6586: obsolete task/frame/publication owners must not make a
+    /// hot binding copy its neighbours. Real snapshots still require COW,
+    /// including across precision and a coordinate-only publication.
+    #[test]
+    fn a_publication_comparison_copies_no_unchanged_binding_neighbours() {
+        use super::*;
+        use crate::Machine;
+        use lash_kernel_doc::heap::ErrorRef;
+        for retain_snapshot in [false, true] {
+            let mut embedder = Embedder::new(
+                "fn f() { let a = null let b = null do perform echo(0) as Any print \"coordinate\" return [a, b] } main { let r = call f() return r }",
+            );
+            assert!(matches!(embedder.run(), crate::Step::Parked(_)));
+            let neighbour = Arc::new(ErrorRef::new("kept", "unchanged"));
+            let frame = embedder
+                .machine
+                .frame(lash_kernel_doc::TaskId::MAIN)
+                .unwrap();
+            frame.set_slot(0, SlotState::Value(Value::Bool(false)));
+            frame.set_slot(1, SlotState::Value(Value::Error(neighbour.clone())));
+            embedder.machine.publish_holdings().unwrap();
+            embedder.machine.heap.refine(0).unwrap();
+            let snapshot = retain_snapshot.then(|| embedder.machine.heap.task_root().clone());
+            lash_kernel_state::paged::tree::enable_binding_copies();
+            // Completing an unbound action advances the coordinate without
+            // replacing either local. Publish that coordinate, then trace.
+            embedder.deliver("echo");
+            assert!(matches!(
+                Machine::run(&mut embedder.machine, &mut embedder.world, 1).unwrap(),
+                crate::Step::Slice
+            ));
+            embedder.machine.publish_roots().unwrap();
+            embedder.machine.heap.refine(0).unwrap();
+            assert_eq!(
+                lash_kernel_state::paged::tree::take_binding_copies(),
+                (0, 0),
+                "coordinate-only publication"
+            );
+            let frame = embedder
+                .machine
+                .frame(lash_kernel_doc::TaskId::MAIN)
+                .unwrap();
+            let code = frame.exe.code(frame.code);
+            let key = code.slots[code.slots_by_at[0] as usize].key.clone();
+            frame.set_slot(0, SlotState::Value(Value::Bool(true)));
+            embedder.machine.publish_holdings().unwrap();
+            embedder.machine.heap.refine(0).unwrap();
+            let (leaves, rows) = lash_kernel_state::paged::tree::take_binding_copies();
+            let copies = rows - leaves;
+            println!("retained checkpoint={retain_snapshot}: unchanged binding copies={copies}");
+            assert_eq!(
+                copies,
+                u64::from(retain_snapshot),
+                "retained checkpoint={retain_snapshot}"
+            );
+            let binding = |tasks: &Tree<lash_kernel_state::paged::TaskRecord>| {
+                let access = embedder.machine.heap.pages();
+                let task = tasks.get(&ordinal_key(0), access).unwrap().unwrap();
+                let frame = task
+                    .frames
+                    .rank_get(task.frames.len() - 1, access)
+                    .unwrap()
+                    .unwrap()
+                    .1;
+                frame.bindings.get(&key, access).unwrap().unwrap().value
+            };
+            assert!(matches!(
+                binding(embedder.machine.heap.task_root()),
+                BoundRecord::Value(Value::Bool(true))
+            ));
+            if let Some(snapshot) = snapshot {
+                assert!(matches!(
+                    binding(&snapshot),
+                    BoundRecord::Value(Value::Bool(false))
+                ));
+            }
+        }
+    }
 
     /// FIG-6470: scalar call results have no payload
     /// to canonicalize; repeated calls must not clone them through the heap.

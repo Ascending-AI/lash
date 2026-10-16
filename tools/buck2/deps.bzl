@@ -1360,6 +1360,7 @@ PACKAGE_DEPS = {
     "lash-kernel-vm": {
         "build": {},
         "dev": {
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "serde_json": "//third-party/rust:p0322"
         },
         "normal": {

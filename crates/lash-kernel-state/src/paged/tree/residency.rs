@@ -6,9 +6,13 @@ use std::rc::Weak;
 pub(super) const DIRTY_LIMIT: usize = 32 << 20;
 const DIRTY_TARGET: usize = 24 << 20;
 trait Stage {
+    fn can_spill(&self) -> bool;
     fn spill(&self, access: &Access<'_>, sequence: bool) -> Result<(), HeapFault>;
 }
 impl<T: Cell> Stage for DirtyNode<T> {
+    fn can_spill(&self) -> bool {
+        self.try_borrow_mut().is_ok()
+    }
     fn spill(&self, access: &Access<'_>, sequence: bool) -> Result<(), HeapFault> {
         let node = self.borrow().clone();
         if matches!(node, Node::Staged(..)) {
@@ -57,12 +61,14 @@ struct Entry {
 /// another Access cannot acquire the same identity by address reuse.
 pub(super) struct DirtyNode<T: Cell> {
     node: RefCell<Node<T>>,
+    pub(super) revision: std::cell::Cell<u64>,
     registration: RefCell<Option<Registration>>,
 }
 impl<T: Cell> DirtyNode<T> {
     pub(super) fn new(node: Node<T>) -> Self {
         Self {
             node: RefCell::new(node),
+            revision: std::cell::Cell::new(0),
             registration: RefCell::new(None),
         }
     }
@@ -206,6 +212,24 @@ impl DirtyResidency {
             slot.generation = generation;
             slot.next = self.free;
             self.free = Some(id.slot);
+        }
+    }
+    fn restore_after(&mut self, id: Identity, entry: Entry, previous: Option<Identity>) {
+        let Some(previous) = previous.filter(|id| self.contains(*id)) else {
+            self.restore_front(id, entry);
+            return;
+        };
+        let next = self.slots[previous.slot].next;
+        self.bytes += entry.bytes;
+        let slot = &mut self.slots[id.slot];
+        slot.entry = Some(entry);
+        slot.prev = Some(previous.slot);
+        slot.next = next;
+        self.slots[previous.slot].next = Some(id.slot);
+        if let Some(next) = next {
+            self.slots[next].prev = Some(id.slot);
+        } else {
+            self.tail = Some(id.slot);
         }
     }
     fn restore_front(&mut self, id: Identity, entry: Entry) {
@@ -373,19 +397,42 @@ impl Access<'_> {
                     if dirty.bytes <= DIRTY_TARGET {
                         break;
                     }
-                    let Some(index) = dirty.head else {
+                    let mut candidate = dirty.head;
+                    while let Some(index) = candidate {
+                        if dirty.slots[index]
+                            .entry
+                            .as_ref()
+                            .and_then(|entry| entry.node.upgrade())
+                            .is_none_or(|node| node.can_spill())
+                        {
+                            break;
+                        }
+                        candidate = dirty.slots[index].next;
+                    }
+                    let Some(index) = candidate else {
+                        if dirty.bytes > DIRTY_LIMIT {
+                            return Err(HeapFault::Exhausted {
+                                resource: lash_kernel_doc::heap::HostResource::DirtyResidency,
+                            });
+                        }
                         break;
                     };
                     let id = Identity {
                         slot: index,
                         generation: dirty.slots[index].generation,
                     };
-                    (id, dirty.take(index))
+                    let previous = dirty.slots[index].prev.map(|slot| Identity {
+                        slot,
+                        generation: dirty.slots[slot].generation,
+                    });
+                    (id, dirty.take(index), previous)
                 };
                 if let Some(node) = entry.1.node.upgrade()
                     && let Err(fault) = node.spill(self, entry.1.sequence)
                 {
-                    self.dirty.borrow_mut().restore_front(entry.0, entry.1);
+                    self.dirty
+                        .borrow_mut()
+                        .restore_after(entry.0, entry.1, entry.2);
                     return Err(fault);
                 }
                 self.dirty.borrow_mut().recycle(entry.0);
@@ -451,6 +498,43 @@ mod laws {
             panic!("page is registered")
         };
         registration.id
+    }
+
+    /// D-CAP: a nested publication edit keeps borrowed ancestors charged;
+    /// a later spill failure restores its FIFO position behind those pages.
+    #[test]
+    fn borrowed_publication_pages_keep_their_weight_and_fifo_on_spill_failure() {
+        struct RefusingSource;
+        impl PageSource for RefusingSource {
+            fn read(&mut self, _: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+                unreachable!("no read")
+            }
+            fn seal(&mut self, _: PageBody) -> Result<PageRef, HeapFault> {
+                Err(HeapFault::Exhausted {
+                    resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+                })
+            }
+        }
+        let mut source = RefusingSource;
+        let access = Access::borrowed(&mut source);
+        let (first, next) = (page(), page());
+        access.record(&first, DIRTY_LIMIT / 2 + 1, false, None);
+        access.record(&next, DIRTY_LIMIT / 2 + 1, false, None);
+        let first_id = identity(&first);
+        let next_id = identity(&next);
+        let bytes = access.dirty.borrow().bytes;
+        let _editing = first.borrow_mut();
+        assert!(matches!(
+            access.stage_pressure(),
+            Err(HeapFault::Exhausted {
+                resource: lash_kernel_doc::heap::HostResource::StagingBytes,
+            })
+        ));
+        let dirty = access.dirty.borrow();
+        assert_eq!(dirty.bytes, bytes);
+        assert_eq!(dirty.head, Some(first_id.slot));
+        assert_eq!(dirty.slots[first_id.slot].next, Some(next_id.slot));
+        assert_eq!(dirty.tail, Some(next_id.slot));
     }
 
     /// D-CAP / D-SEALTIME: reuse cannot alias a staged generation or

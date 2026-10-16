@@ -271,9 +271,8 @@ struct Frame {
     nested: Option<lash_kernel_exec::ActIx>,
     /// The library call this frame is the body of, charged when it ends.
     library: Option<LibraryCall>,
-    /// The record as last written to its row: what a flush compares to
-    /// instead of reading the row back (FIG-6318).
-    published: Option<FrameRecord>,
+    /// Non-owning comparison with the last row written (FIG-6586).
+    published: Option<frames::Publication>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -286,8 +285,8 @@ enum Wait {
 struct Task {
     record: lash_kernel_state::paged::TaskRecord,
     frames: frames::Frames,
-    /// The record as last written to its row (FIG-6318).
-    published: Option<lash_kernel_state::paged::TaskRecord>,
+    /// Non-owning comparison with the last row written (FIG-6586).
+    published: Option<tasks::Publication>,
 }
 
 /// A kernel machine. It implements [`Machine`]; an embedder drives it with

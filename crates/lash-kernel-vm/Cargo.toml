@@ -19,7 +19,7 @@ doctest = false
 
 [features]
 # Unsupported synchronous capture/import diagnostics; absent from ordinary builds.
-perf-witness = []
+perf-witness = ["lash-kernel-state/perf-witness"]
 # The machine also runs the synthetic successor of kernel version 1.
 synthetic-next = ["lash-kernel-doc/synthetic-next", "lash-kernel-state/synthetic-next"]
 
@@ -35,4 +35,5 @@ num-traits = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-state = { workspace = true, features = ["perf-witness"] }
 serde_json = { workspace = true }

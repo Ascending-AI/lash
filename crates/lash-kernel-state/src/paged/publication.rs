@@ -80,6 +80,37 @@ impl Holdings {
     }
 }
 
+/// Retiring an installed working root keeps its accounting and comparison,
+/// not its mutable pages. A cold root defers its edge read to the original
+/// failure point; retaining that sealed source cannot pin a working leaf.
+struct PreviousTasks {
+    version: super::tree::Version<TaskRecord>,
+    cost: u64,
+    edges: Option<u64>,
+    cold: Option<Tree<TaskRecord>>,
+}
+impl PreviousTasks {
+    fn new(root: Tree<TaskRecord>) -> Self {
+        let edges = root.cached_task_edges();
+        Self {
+            version: root.version(),
+            cost: root.cost(),
+            edges,
+            cold: edges.is_none().then_some(root),
+        }
+    }
+    fn edges(&self, access: &super::tree::Access<'_>) -> Result<u64, HeapFault> {
+        match self.edges {
+            Some(edges) => Ok(edges),
+            None => self
+                .cold
+                .as_ref()
+                .ok_or_else(|| HeapFault::Malformed("missing cold task root".into()))?
+                .read_task_edges(access),
+        }
+    }
+}
+
 impl PagedHeap {
     /// Opens the execution roots `root` names over the heap whose header it
     /// names: that header's accounting already prices them, so nothing is
@@ -423,11 +454,56 @@ impl PagedHeap {
         pinned_bytes: u64,
         fresh: &[EntityId],
     ) -> Result<(), HeapWriteError> {
+        let previous = PreviousTasks::new(self.tasks.clone());
+        self.install_execution_roots(
+            (previous, tasks),
+            joins,
+            registers,
+            pinned,
+            pinned_bytes,
+            fresh,
+        )
+    }
+    /// Synchronously consumes obsolete installed task ownership before the
+    /// machine updates its authoritative rows. A failed edit leaves roots
+    /// unpublished; no refinement may trace a partially updated graph.
+    /// `pinned_bytes` has the same holding-location meaning as in
+    /// [`Self::set_execution_roots`].
+    pub fn update_execution_roots(
+        &mut self,
+        joins: Tree<ListJoinRecord>,
+        registers: &[Value],
+        pinned: &[Value],
+        pinned_bytes: u64,
+        fresh: &[EntityId],
+        update: impl FnOnce() -> Result<Tree<TaskRecord>, HeapFault>,
+    ) -> Result<(), HeapWriteError> {
+        self.holdings.roots_current = false;
+        let previous = PreviousTasks::new(std::mem::take(&mut self.tasks));
+        let tasks = update()?;
+        self.install_execution_roots(
+            (previous, tasks),
+            joins,
+            registers,
+            pinned,
+            pinned_bytes,
+            fresh,
+        )
+    }
+    fn install_execution_roots(
+        &mut self,
+        (previous, tasks): (PreviousTasks, Tree<TaskRecord>),
+        joins: Tree<ListJoinRecord>,
+        registers: &[Value],
+        pinned: &[Value],
+        pinned_bytes: u64,
+        fresh: &[EntityId],
+    ) -> Result<(), HeapWriteError> {
         // The proposed roots are current: a precision check installing them
         // traces them, and what the machine held for them is their credit.
         self.holdings.roots_current = true;
         let before = checked_sum(
-            [self.tasks.cost(), self.joins.cost()]
+            [previous.cost, self.joins.cost()]
                 .into_iter()
                 .chain(self.statement_roots().iter().map(value_cost))
                 .chain([self.holdings.scalar_bytes]),
@@ -440,15 +516,16 @@ impl PagedHeap {
         )?;
         // Republishing the installed trees changes only the statement
         // roots: their task edges are those already counted (FIG-6318).
-        if tasks.same_version(&self.tasks) && joins.same_version(&self.joins) {
+        if previous.version.matches(&tasks) && joins.same_version(&self.joins) {
             self.replace_holding(before, after, 0, 0, |heap| {
+                heap.tasks = tasks;
                 heap.install_transient(registers, pinned, pinned_bytes, fresh);
             })?;
             return self.release_held();
         }
         let old_tasks = checked_sum(
             [
-                self.tasks.read_task_edges(&self.access)?,
+                previous.edges(&self.access)?,
                 self.joins.read_task_edges(&self.access)?,
             ]
             .into_iter(),

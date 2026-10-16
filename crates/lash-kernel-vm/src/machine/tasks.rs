@@ -5,7 +5,7 @@ use crate::compile::Executable;
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::paged::directory::ordinal_key;
-use lash_kernel_state::paged::tree::{Access, Cell, Tree};
+use lash_kernel_state::paged::tree::{Access, Tree, Version};
 use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
 use std::sync::Arc;
 
@@ -99,6 +99,50 @@ impl std::ops::Deref for Task {
 impl std::ops::DerefMut for Task {
     fn deref_mut(&mut self) -> &mut TaskRecord {
         &mut self.record
+    }
+}
+
+/// Equality bookkeeping must not retain a second frame tree, which would
+/// keep its binding leaves alive after the real roots are replaced.
+pub(super) struct Publication {
+    identity: Option<lash_kernel_doc::heap::PageId>,
+    state: Vec<u8>,
+    result_retained: bool,
+    observed: bool,
+    passed: bool,
+    failed: bool,
+    frames: Version<lash_kernel_state::paged::FrameRecord>,
+    joiners: Version<lash_kernel_state::paged::JoinerRecord>,
+    occurrences: Version<u64>,
+}
+impl Publication {
+    fn new(record: &TaskRecord, frames: &Tree<lash_kernel_state::paged::FrameRecord>) -> Self {
+        Self {
+            identity: record.identity.root.map(|p| p.id),
+            state: lash_kernel_doc::graph_tokens::encode_body(&record.state),
+            result_retained: record.result_retained,
+            observed: record.observed,
+            passed: record.passed,
+            failed: record.failed,
+            frames: frames.version(),
+            joiners: record.joiners.version(),
+            occurrences: record.occurrences.version(),
+        }
+    }
+    fn same_version(
+        &self,
+        record: &TaskRecord,
+        frames: &Tree<lash_kernel_state::paged::FrameRecord>,
+    ) -> bool {
+        self.identity == record.identity.root.map(|p| p.id)
+            && self.result_retained == record.result_retained
+            && self.observed == record.observed
+            && self.passed == record.passed
+            && self.failed == record.failed
+            && self.frames.matches(frames)
+            && self.joiners.matches(&record.joiners)
+            && self.occurrences.matches(&record.occurrences)
+            && self.state == lash_kernel_doc::graph_tokens::encode_body(&record.state)
     }
 }
 
@@ -206,13 +250,13 @@ impl Tasks {
     /// slot is reused. Two ways leave room beside the running task.
     #[cold]
     fn load(&mut self, index: u64) -> Result<Option<usize>, HeapFault> {
-        let Some(record) = self.rows.get(&ordinal_key(index), &self.access)? else {
+        let Some(mut record) = self.rows.get(&ordinal_key(index), &self.access)? else {
             return Ok(None);
         };
         let slot = self.replacement(index)?;
         self.evict(slot)?;
         let frames = Frames::open(
-            record.frames.clone(),
+            std::mem::replace(&mut record.frames, Tree::new(true)),
             self.access.clone(),
             Arc::clone(&self.exe),
             ParkKind::of(&record.state),
@@ -220,7 +264,7 @@ impl Tasks {
         self.cache[slot] = Some((
             index,
             Box::new(Task {
-                published: Some(record.clone()),
+                published: Some(Publication::new(&record, &frames.rows)),
                 record,
                 frames,
             }),
@@ -234,7 +278,7 @@ impl Tasks {
         self.evict(slot)?;
         self.rows
             .write(ordinal_key(index), task.record.clone(), &self.access)?;
-        task.published = Some(task.record.clone());
+        task.published = Some(Publication::new(&task.record, &task.frames.rows));
         self.cache[slot] = Some((index, Box::new(task)));
         Ok(())
     }
@@ -262,9 +306,7 @@ impl Tasks {
         let mut cached: Vec<_> = self.cache.iter_mut().flatten().collect();
         cached.sort_unstable_by_key(|(index, _)| *index);
         for (index, task) in cached {
-            task.frames.flush_holdings()?;
-            task.record.frames = task.frames.rows.clone();
-            put(&mut self.rows, *index, task, &self.access)?;
+            put(&mut self.rows, *index, task, &self.access, false)?;
         }
         Ok(self.rows.clone())
     }
@@ -272,9 +314,7 @@ impl Tasks {
         let mut cached: Vec<_> = self.cache.iter_mut().flatten().collect();
         cached.sort_unstable_by_key(|(index, _)| *index);
         for (index, task) in cached {
-            task.frames.flush()?;
-            task.record.frames = task.frames.rows.clone();
-            put(&mut self.rows, *index, task, &self.access)?;
+            put(&mut self.rows, *index, task, &self.access, true)?;
         }
         Ok(self.rows.clone())
     }
@@ -324,9 +364,7 @@ impl Tasks {
         let Some((index, mut task)) = self.cache[slot].take() else {
             return Ok(());
         };
-        task.frames.flush()?;
-        task.record.frames = task.frames.rows.clone();
-        put(&mut self.rows, index, &mut task, &self.access)
+        put(&mut self.rows, index, &mut task, &self.access, true)
     }
 }
 
@@ -337,15 +375,42 @@ fn put(
     index: u64,
     task: &mut Task,
     access: &Access<'static>,
+    coordinates: bool,
 ) -> Result<(), HeapFault> {
-    if !task
-        .published
-        .as_ref()
-        .is_some_and(|old| old.same_version(&task.record))
-    {
-        rows.write(ordinal_key(index), task.record.clone(), access)?;
-        task.published = Some(task.record.clone());
+    let sync = |task: &mut Task| {
+        if coordinates {
+            task.frames.flush()
+        } else {
+            task.frames.flush_holdings()
+        }
+    };
+    let same = |task: &Task| {
+        task.published
+            .as_ref()
+            .is_some_and(|old| old.same_version(&task.record, &task.frames.rows))
+    };
+    let synced = !task.frames.has_pending_bindings();
+    if synced {
+        sync(task)?;
+        if same(task) {
+            return Ok(());
+        }
     }
+    rows.update(ordinal_key(index), access, |stored| {
+        let previous = std::mem::replace(&mut stored.frames, Tree::new(true)).retire();
+        if !synced {
+            sync(task)?;
+        }
+        let changed = !same(task);
+        if changed {
+            *stored = task.record.clone();
+            stored.frames = task.frames.rows.clone();
+            task.published = Some(Publication::new(&task.record, &task.frames.rows));
+        } else {
+            stored.frames = previous.restore()?;
+        }
+        Ok(changed)
+    })?;
     Ok(())
 }
 

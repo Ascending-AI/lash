@@ -8,7 +8,7 @@ use lash_kernel_doc::graph_tokens::{
 use lash_kernel_doc::heap::{FamilyId, HeapFault, LogicalBytes, PageId, PageRef};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 mod decoded;
@@ -16,6 +16,8 @@ mod diff;
 pub use diff::Change;
 mod inline;
 mod residency;
+mod retired;
+pub use retired::Retired;
 pub const INLINE_TREE_BYTES: usize = super::source::INLINE_BODY_MAX as usize;
 
 /// Cells maintain their child links and accounting before publication.
@@ -224,12 +226,64 @@ pub struct Tree<T: Cell> {
     root: Option<Branch<T>>,
     sequence: bool,
 }
+/// A comparison with a published tree, without owning its mutable pages.
+/// Dirty-page revisions distinguish same-size in-place edits; a weak link
+/// prevents allocation reuse from making a retired version match again.
+pub struct Version<T: Cell> {
+    sequence: bool,
+    root: Option<(Option<FamilyId>, Summary, VersionLink<T>)>,
+}
+enum VersionLink<T: Cell> {
+    Sealed(PageId),
+    Inline(Arc<[u8]>),
+    Dirty(Weak<residency::DirtyNode<T>>, u64),
+}
+impl<T: Cell> Version<T> {
+    pub fn matches(&self, tree: &Tree<T>) -> bool {
+        if self.sequence != tree.sequence {
+            return false;
+        }
+        match (&self.root, &tree.root) {
+            (None, None) => true,
+            (Some((family, summary, link)), Some(root))
+                if *family == root.family && *summary == root.summary =>
+            {
+                match (link, &root.link) {
+                    (VersionLink::Sealed(a), Link::Sealed(b)) => *a == b.id,
+                    (VersionLink::Inline(a), Link::Inline { tokens: b, .. }) => a == b,
+                    (VersionLink::Dirty(a, revision), Link::Dirty(b)) => {
+                        std::ptr::eq(a.as_ptr(), Rc::as_ptr(b)) && *revision == b.revision.get()
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+}
 impl<T: Cell> Default for Tree<T> {
     fn default() -> Self {
         Self::new(false)
     }
 }
 impl<T: Cell> Tree<T> {
+    /// Captures only the identity and revision needed for a later comparison.
+    /// Unlike cloning the tree, this never makes an edit copy its old rows.
+    pub fn version(&self) -> Version<T> {
+        Version {
+            sequence: self.sequence,
+            root: self.root.as_ref().map(|root| {
+                let link = match &root.link {
+                    Link::Sealed(page) => VersionLink::Sealed(page.id),
+                    Link::Inline { tokens, .. } => VersionLink::Inline(Arc::clone(tokens)),
+                    Link::Dirty(page) => {
+                        VersionLink::Dirty(Rc::downgrade(page), page.revision.get())
+                    }
+                };
+                (root.family, root.summary, link)
+            }),
+        }
+    }
     pub fn same_version(&self, other: &Self) -> bool {
         if self.sequence != other.sequence {
             return false;
@@ -329,6 +383,11 @@ impl<T: Cell> Tree<T> {
     }
     pub fn cost(&self) -> u64 {
         self.root.as_ref().map_or(0, |r| r.summary.cost)
+    }
+    pub(crate) fn cached_task_edges(&self) -> Option<u64> {
+        self.root.as_ref().map_or(Some(0), |root| {
+            root.tasks_known.then_some(root.summary.tasks)
+        })
     }
     pub fn task_edges(&self) -> u64 {
         self.root.as_ref().map_or(0, |r| r.summary.tasks)
@@ -708,35 +767,88 @@ impl<T: Cell> Tree<T> {
             .map_or(Ok(0), |r| walk(r, key, access, self.sequence))
     }
     pub fn write(&mut self, key: Vec<u8>, value: T, access: &Access<'_>) -> Result<(), HeapFault> {
+        self.change(key, access, false, |rows, position, key| {
+            match position {
+                Ok(i) => rows[i].1 = value,
+                Err(i) => rows.insert(i, (key, value)),
+            }
+            Ok(true)
+        })
+        .map(|_| ())
+    }
+    /// Edits an existing cell without retaining a cloned copy of its nested
+    /// trees. `false` means the callback restored the identical cell version.
+    /// Ancestor pages remain charged and protected while nested edits stage.
+    pub fn update(
+        &mut self,
+        key: Vec<u8>,
+        access: &Access<'_>,
+        update: impl FnOnce(&mut T) -> Result<bool, HeapFault>,
+    ) -> Result<bool, HeapFault> {
+        self.change(key, access, true, |rows, position, _| {
+            let i =
+                position.map_err(|_| HeapFault::Malformed("updated tree row is missing".into()))?;
+            update(&mut rows[i].1)
+        })
+    }
+    fn change<F>(
+        &mut self,
+        key: Vec<u8>,
+        access: &Access<'_>,
+        preserve: bool,
+        patch: F,
+    ) -> Result<bool, HeapFault>
+    where
+        F: FnOnce(&mut Vec<(Key, T)>, Result<usize, usize>, Key) -> Result<bool, HeapFault>,
+    {
         #[cfg(test)]
         note_lookup::<T>();
-        fn edit<T: Cell>(
+        fn edit<T: Cell, F>(
             branch: &mut Branch<T>,
             key: Key,
-            value: T,
             access: &Access<'_>,
             seq: bool,
-        ) -> Result<Option<Branch<T>>, HeapFault> {
+            patch: &mut Option<F>,
+            preserve: bool,
+        ) -> Result<(bool, Option<Branch<T>>), HeapFault>
+        where
+            F: FnOnce(&mut Vec<(Key, T)>, Result<usize, usize>, Key) -> Result<bool, HeapFault>,
+        {
+            let previous = (preserve && !matches!(&branch.link, Link::Dirty(page) if Rc::strong_count(page) == 1 && !matches!(&*page.borrow(), Node::Staged(..)))).then(|| branch.clone());
             let page = make_dirty(branch, access, seq)?;
+            let revision = page.revision.get() - 1;
             let mut node = page.borrow_mut();
             match &mut *node {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
-                    let encoded = access.encoded_len(&value);
-                    let added = Aggregate::of(&value);
-                    let (at, before, removed) = match rows.binary_search_by(|(k, _)| k.cmp(&key)) {
-                        Ok(i) => {
-                            let before =
-                                decoded::RowSize::of(&rows[i].0, access.encoded_len(&rows[i].1));
-                            let removed = Aggregate::of(&rows[i].1);
-                            rows[i].1 = value;
-                            (i, Some(before), Some(removed))
-                        }
-                        Err(i) => {
-                            rows.insert(i, (key, value));
-                            (i, None, None)
-                        }
+                    let position = rows.binary_search_by(|(k, _)| k.cmp(&key));
+                    let (at, before, removed) = match position {
+                        Ok(i) => (
+                            i,
+                            Some(decoded::RowSize::of(
+                                &rows[i].0,
+                                access.encoded_len(&rows[i].1),
+                            )),
+                            Some(Aggregate::of(&rows[i].1)),
+                        ),
+                        Err(i) => (i, None, None),
                     };
+                    let changed = patch
+                        .take()
+                        .ok_or_else(|| HeapFault::Malformed("tree edit used twice".into()))?(
+                        rows, position, key,
+                    )?;
+                    if !changed {
+                        drop(node);
+                        if let Some(previous) = previous {
+                            *branch = previous;
+                        } else {
+                            page.revision.set(revision);
+                        }
+                        return Ok((false, None));
+                    }
+                    let encoded = access.encoded_len(&rows[at].1);
+                    let added = Aggregate::of(&rows[at].1);
                     let after = decoded::RowSize::of(&rows[at].0, encoded);
                     let bytes = access.track_row(&page, rows, seq, before, Some(after));
                     if rows.len() > KEYED_LEAF_ROWS as usize || bytes > PAGE_TARGET_BYTES as usize {
@@ -746,7 +858,7 @@ impl<T: Cell> Tree<T> {
                         let right = rows.split_off(rows.len() / 2);
                         refresh(branch, &node)?;
                         access.track(&page, &node, seq);
-                        return Ok(Some(dirty(Node::Leaf(right), access, seq)?));
+                        return Ok((true, Some(dirty(Node::Leaf(right), access, seq)?)));
                     }
                     // One row changed: adjust the leaf's aggregates by it
                     // instead of summing every row again (FIG-6465).
@@ -760,12 +872,22 @@ impl<T: Cell> Tree<T> {
                     } else {
                         refresh(branch, &node)?;
                     }
-                    return Ok(None);
+                    return Ok((true, None));
                 }
                 Node::Index(rows) => {
                     let i = rows.partition_point(|r| r.first <= key).saturating_sub(1);
                     let before = rows[i].summary;
-                    if let Some(right) = edit(&mut rows[i], key, value, access, seq)? {
+                    let (changed, right) = edit(&mut rows[i], key, access, seq, patch, preserve)?;
+                    if !changed {
+                        drop(node);
+                        if let Some(previous) = previous {
+                            *branch = previous;
+                        } else {
+                            page.revision.set(revision);
+                        }
+                        return Ok((false, None));
+                    }
+                    if let Some(right) = right {
                         rows.insert(i + 1, right);
                     } else if branch.tasks_known && branch.members_known {
                         // One child changed: adjust by its delta (FIG-6465).
@@ -776,41 +898,52 @@ impl<T: Cell> Tree<T> {
                             branch.first = rows[0].first.clone();
                         }
                         access.track(&page, &node, seq);
-                        return Ok(None);
+                        return Ok((true, None));
                     }
                     if rows.len() > INDEX_FANOUT as usize {
                         let right = rows.split_off(rows.len() / 2);
                         refresh(branch, &node)?;
                         access.track(&page, &node, seq);
-                        return Ok(Some(dirty(Node::Index(right), access, seq)?));
+                        return Ok((true, Some(dirty(Node::Index(right), access, seq)?)));
                     }
                 }
             }
             refresh(branch, &node)?;
             access.track(&page, &node, seq);
-            Ok(None)
+            Ok((true, None))
         }
         let key = Key(key);
-        match &mut self.root {
+        let mut patch = Some(patch);
+        let changed = match &mut self.root {
             None => {
-                self.root = Some(dirty(
-                    Node::Leaf(vec![(key, value)]),
-                    access,
-                    self.sequence,
-                )?)
+                let mut rows = Vec::new();
+                let changed = patch
+                    .take()
+                    .ok_or_else(|| HeapFault::Malformed("tree edit used twice".into()))?(
+                    &mut rows,
+                    Err(0),
+                    key,
+                )?;
+                if changed {
+                    self.root = Some(dirty(Node::Leaf(rows), access, self.sequence)?);
+                }
+                changed
             }
             Some(root) => {
-                if let Some(right) = edit(root, key, value, access, self.sequence)? {
+                let (changed, right) =
+                    edit(root, key, access, self.sequence, &mut patch, preserve)?;
+                if let Some(right) = right {
                     self.root = Some(dirty(
                         Node::Index(vec![root.clone(), right]),
                         access,
                         self.sequence,
                     )?);
                 }
+                changed
             }
-        }
+        };
         access.stage_pressure()?;
-        Ok(())
+        Ok(changed)
     }
     pub fn remove(&mut self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
         #[cfg(test)]
@@ -1029,6 +1162,19 @@ impl<T: Cell> std::ops::Deref for NodeGuard<'_, T> {
         }
     }
 }
+#[cfg(any(test, feature = "perf-witness"))]
+thread_local! {
+    static BINDING_COPIES: std::cell::Cell<Option<(u64, u64)>> = const { std::cell::Cell::new(None) };
+}
+/// Enables transient binding-leaf copy counts on this thread: leaves and rows.
+#[cfg(any(test, feature = "perf-witness"))]
+pub fn enable_binding_copies() {
+    BINDING_COPIES.set(Some((0, 0)));
+}
+#[cfg(any(test, feature = "perf-witness"))]
+pub fn take_binding_copies() -> (u64, u64) {
+    BINDING_COPIES.replace(Some((0, 0))).unwrap_or_default()
+}
 fn make_dirty<T: Cell>(
     branch: &mut Branch<T>,
     access: &Access<'_>,
@@ -1046,6 +1192,16 @@ fn make_dirty<T: Cell>(
     if let Link::Dirty(page) = &mut branch.link
         && Rc::strong_count(page) > 1
     {
+        #[cfg(any(test, feature = "perf-witness"))]
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<super::BindingRecord>() {
+            BINDING_COPIES.with(|count| {
+                if let Some((leaves, rows)) = count.get()
+                    && let Node::Leaf(values) = &*page.borrow()
+                {
+                    count.set(Some((leaves + 1, rows + values.len() as u64)));
+                }
+            });
+        }
         let private = page.borrow().clone();
         let private = Rc::new(residency::DirtyNode::new(private));
         access.track_copy(page, &private, seq);
@@ -1053,6 +1209,12 @@ fn make_dirty<T: Cell>(
     }
     match &branch.link {
         Link::Dirty(page) => {
+            page.revision.set(
+                page.revision
+                    .get()
+                    .checked_add(1)
+                    .ok_or_else(|| HeapFault::Malformed("dirty page revision overflow".into()))?,
+            );
             access.ensure_tracked(page, seq);
             Ok(Rc::clone(page))
         }

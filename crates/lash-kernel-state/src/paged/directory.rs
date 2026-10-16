@@ -615,26 +615,6 @@ pub mod execution {
             Ok(())
         }
     }
-    impl FrameRecord {
-        /// Whether `other` holds what this record holds: the same values
-        /// and arguments, whatever coordinates either stands at. What the
-        /// census accounts and traces of a frame is only this.
-        pub fn same_holdings(&self, other: &Self) -> bool {
-            self.bindings.same_version(&other.bindings)
-                && self.iterated.same_version(&other.iterated)
-                && self.departing.same_version(&other.departing)
-                && match (&self.arguments, &other.arguments) {
-                    (None, None) => true,
-                    (Some(a), Some(b)) => a.same_version(b),
-                    _ => false,
-                }
-                && match (&self.pending, &other.pending) {
-                    (None, None) => true,
-                    (Some(a), Some(b)) => a.roles.same_version(&b.roles),
-                    _ => false,
-                }
-        }
-    }
     impl Cell for FrameRecord {
         fn same_version(&self, other: &Self) -> bool {
             self.statement.same_version(&other.statement)

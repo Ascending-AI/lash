@@ -41,18 +41,19 @@ impl Roots<'_> {
         #[cfg(any(test, feature = "perf-witness"))]
         crate::perf_witness::publish();
         self.reconcile(heap)?;
-        let tasks = if coordinates {
-            self.tasks.roots()?
-        } else {
-            self.tasks.holdings()?
-        };
-        heap.set_execution_roots(
-            tasks,
+        heap.update_execution_roots(
             self.joins.clone(),
             &self.registers.projection(),
             self.pinned,
             self.pinned_bytes,
             self.fresh,
+            || {
+                if coordinates {
+                    self.tasks.roots()
+                } else {
+                    self.tasks.holdings()
+                }
+            },
         )?;
         self.reconcile(heap)?;
         Ok(())
