@@ -334,7 +334,6 @@ impl PageTier for Tier {
     async fn drop_blob(&self, node: &NodeId) {
         for sql in [
             "DELETE FROM blob_edges WHERE parent_hash = ?1 OR child_hash = ?1",
-            "DELETE FROM semantic_admissions WHERE root_ref = ?1",
             "DELETE FROM blobs WHERE hash = ?1",
         ] {
             self.raw(sql.to_owned(), vec![hex(node)]).await;
@@ -408,7 +407,7 @@ macro_rules! page_law {
 }
 
 page_law!(a_candidate_installs_only_new_nodes_and_direct_references);
-page_law!(publication_is_atomic_with_admissions_and_semantic_admission);
+page_law!(publication_is_atomic_with_its_effect_admissions);
 page_law!(a_step_outcome_owns_its_candidate);
 page_law!(a_pruned_step_outcome_frees_exactly_its_unshared_pages);
 page_law!(a_host_read_never_descends_into_a_heap_page);
@@ -943,4 +942,157 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
             }
         }
     }
+}
+
+/// FIG-6420: one park publication writes a counted number of SQL
+/// statements, and none of them records a semantic admission.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_park_publication_writes_a_counted_number_of_statements() {
+    use lash_core_store::checkpoint_graph::stage::{
+        CandidateManifest, ManifestEntry, ManifestSummary, StageFault,
+    };
+    use lash_core_store::checkpoint_graph::{
+        CommitId, EncodeBudget, EncodedNode, ExplicitLimit, GraphStaging, NodeKind, TokenWriter,
+        TypedBody,
+    };
+    use lash_durable::domain::graph::{EffectAdmissionWrite, ExecRootWrite};
+    use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
+    use lash_durable::domain::{CellId, DomainWrite, EffectKey, ExecKey};
+    use lash_durable::{ActorKey, CommitLabel, Epoch};
+
+    /// A page of `kind` naming `tag` and `children`.
+    fn encode(kind: NodeKind, tag: &str, children: &[NodeId]) -> EncodedNode {
+        let mut out = TokenWriter::new();
+        out.seq(1 + children.len() as u64);
+        out.text(tag);
+        for child in children {
+            out.child(child.child_ref());
+        }
+        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+        let id = staging
+            .encode(kind, TypedBody::logical(out.as_bytes()))
+            .expect("a counted page encodes");
+        staging.into_nodes().remove(&id).expect("the staged page")
+    }
+
+    /// A candidate held whole: its entries in digest order.
+    struct Listed {
+        summary: ManifestSummary,
+        entries: Vec<ManifestEntry>,
+    }
+
+    impl Listed {
+        fn new(root: NodeId, commit: CommitId, fresh: Vec<EncodedNode>) -> Self {
+            let summary = ManifestSummary {
+                root,
+                base: None,
+                commit,
+                fresh_nodes: fresh.len() as u64,
+                fresh_bytes: fresh.iter().map(EncodedNode::len).sum(),
+                fresh_edges: fresh
+                    .iter()
+                    .map(|node| node.children().map_or(0, |children| children.len() as u64))
+                    .sum(),
+                external: 0,
+            };
+            let mut entries: Vec<ManifestEntry> =
+                fresh.into_iter().map(ManifestEntry::Fresh).collect();
+            entries.sort_by_key(|entry| match entry {
+                ManifestEntry::External(id) => *id,
+                ManifestEntry::Fresh(node) => node.id,
+            });
+            Self { summary, entries }
+        }
+    }
+
+    impl CandidateManifest for Listed {
+        fn summary(&self) -> ManifestSummary {
+            self.summary
+        }
+
+        fn entries(
+            &mut self,
+            after: Option<NodeId>,
+            limit: usize,
+        ) -> Result<Vec<ManifestEntry>, StageFault> {
+            let id = |entry: &ManifestEntry| match entry {
+                ManifestEntry::External(id) => *id,
+                ManifestEntry::Fresh(node) => node.id,
+            };
+            Ok(self
+                .entries
+                .iter()
+                .filter(|entry| after.is_none_or(|after| id(entry) > after))
+                .take(limit)
+                .cloned()
+                .collect())
+        }
+    }
+
+    let tier = tier(false).await;
+    let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
+    let actor = ActorKey::session("sql-work-owner").expect("actor");
+    let exec = ExecKey::Cell(
+        lash_sansio::SessionId::parse("counted-park").expect("a session id"),
+        lash_sansio::TurnId::try_from("counted-turn".to_owned()).expect("a turn id"),
+        CellId::new("counted-cell"),
+    );
+    let leaf = encode(NodeKind::PAYLOAD_LEAF, "counted leaf", &[]);
+    let checkpoint = encode(NodeKind::CHECKPOINT_ROOT, "counted root", &[leaf.id]);
+    let exec_root = encode(NodeKind::FROZEN_VALUE, "exec root", &[checkpoint.id]);
+    let effect_node = encode(NodeKind::FROZEN_VALUE, "admission", &[]);
+    let commit = CommitId::mint();
+    let manifest = Listed::new(checkpoint.id, commit, vec![leaf, checkpoint]);
+    let mut tx = tier
+        .store
+        .begin(&actor, Epoch(identity.epoch))
+        .await
+        .unwrap();
+    tx.stage([exec_root.clone(), effect_node.clone()]);
+    tx.write(DomainWrite::EffectAdmission(EffectAdmissionWrite::Put {
+        exec: exec.clone(),
+        effect: EffectKey(Arc::from(&b"counted"[..])),
+        member: None,
+        admission: effect_node.id,
+    }));
+    tx.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
+        exec: exec.clone(),
+        expected: None,
+        expected_root: None,
+        root: exec_root.id,
+        commit_id: commit,
+    }));
+    let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+        "park.publish",
+        "sqlite",
+        tier.store.commit_candidate(
+            tx,
+            CandidatePublication {
+                owner: CandidateOwner::ExecRootPut(exec),
+                manifest: Box::new(manifest),
+            },
+            CommitLabel::new("park.publish"),
+        ),
+    )
+    .await;
+    answer.unwrap();
+    eprintln!(
+        "PARK-PUBLICATION SQL {}",
+        serde_json::to_string(&receipt).unwrap()
+    );
+    // The park's write statements: inserts, updates and deletes only.
+    let writes: u64 = receipt
+        .shapes
+        .iter()
+        .filter(|(sql, _)| {
+            ["insert", "update", "delete"]
+                .iter()
+                .any(|verb| sql.starts_with(verb))
+        })
+        .map(|(_, shape)| shape.statements)
+        .sum();
+    // The park's write count, pinned: the publication's rows and its effect
+    // admission, with no semantic-admission row.
+    const EXPECTED: u64 = 5;
+    assert_eq!(writes, EXPECTED, "the park's write count: {receipt:?}");
 }

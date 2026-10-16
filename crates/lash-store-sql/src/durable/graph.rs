@@ -39,9 +39,6 @@ crate::statements! {
         /// Blob `?1`'s bytes and encoding.
         blob = "SELECT content, encoding FROM blobs WHERE hash = ?1";
 
-        /// Blob `?1`'s encoding, when it exists.
-        blob_encoding = "SELECT encoding FROM blobs WHERE hash = ?1";
-
         /// Record the edge from node `?1` to child `?2`.
         insert_edge = "INSERT INTO blob_edges (parent_hash, child_hash) VALUES (?1, ?2)
              ON CONFLICT (parent_hash, child_hash) DO NOTHING";

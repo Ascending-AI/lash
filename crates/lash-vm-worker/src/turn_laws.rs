@@ -116,7 +116,8 @@ impl Parent {
             CapabilityKey::fresh(),
             self.lease,
             Box::new(self.spools.spool(StageLeaseId(self.lease)).expect("spool")),
-            Instant::now() + Duration::from_secs(120),
+            Arc::new(lash_core_execution::runtime::SystemClock),
+            Duration::from_secs(120),
             PageLimits::within(self.codec.limits()),
         )
         // The host nodes a parked root names: its release and its binding.
@@ -146,8 +147,12 @@ impl Parent {
         seal: Option<lash_vm_protocol::page::SealBatch>,
     ) -> Vec<lash_vm_protocol::page::PageCapability> {
         let pages = self.pages.as_mut().expect("a lease's page service");
-        seal.map(|batch| pages.admit(batch).expect("the parent admits the batch"))
-            .unwrap_or_default()
+        seal.map(|batch| {
+            self.runtime
+                .block_on(pages.admit(batch))
+                .expect("the parent admits the batch")
+        })
+        .unwrap_or_default()
     }
 
     fn send(&mut self, message: ParentMessage) -> WorkerMessage {

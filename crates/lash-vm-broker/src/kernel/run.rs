@@ -24,7 +24,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lash_core_store::checkpoint_graph::stage::{StageFault, StageLeaseId, StageSpool};
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
@@ -41,7 +41,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::graph::{FrozenRequest, Projections};
 use super::ledger::{AdmittedEffect, EffectLedger};
-use super::pages::{ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot};
+use super::pages::{
+    ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot, renew_when_due,
+};
 use super::state::{GraphStateFailure, ReleaseGraph, checkpoint_header};
 use super::store::{
     AdmitAs, AdmittedCall, Checkpoint, EffectAdmission, FirstPark, HostParts, ParkSave,
@@ -670,6 +672,7 @@ impl KernelBroker<'_> {
                                 waiting.release().await?;
                             }
                         }
+                        () = renew_when_due(&activation.pages), if machine.is_some() => {}
                     }
                 }
             };
@@ -741,7 +744,8 @@ impl KernelBroker<'_> {
             CapabilityKey::fresh(),
             stage.0,
             (self.pages.spool)()?,
-            Instant::now() + self.pages.span,
+            Arc::clone(self.store.context().clock()),
+            self.pages.span,
             self.pages.limits,
         )
         .with_references(references);

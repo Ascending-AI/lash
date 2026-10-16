@@ -160,13 +160,7 @@ Validation is inductive and on demand:
   membership when the page is first read. A bad page is refused before its
   contents are used.
 - Changed pages are validated by the worker that produced them before they
-  are sealed. Unchanged pages keep the admission of the root that published
-  them.
-- The publishing transaction records one `SemanticAdmission` per root: the
-  root, the kernel version, the page format, the validating build's
-  validator and the commit. A root admitted under another validator, or a
-  foreign image, enters the trusted population only after a complete
-  validation pass.
+  are sealed.
 
 Corruption in a page the run never touches is therefore not detected before
 the run's next effect. Detecting it would mean reading every page at every
@@ -263,8 +257,8 @@ order.
 existing fenced transaction, in global digest order: committed pages it
 names are key-share locked and checked present, fresh pages are inserted,
 edges follow once every row exists, then the domain writes (the execution
-root, effect admissions, waits, host and session rows) and the semantic
-admission. Effects dispatch only after the receipt confirms the commit.
+root, effect admissions, waits, host and session rows). Effects dispatch
+only after the receipt confirms the commit.
 
 A candidate has one publication identity
 (`lash_durable::domain::graph_commit::check_candidate`). The commit names
@@ -272,8 +266,8 @@ exactly one owner write that publishes it: an execution root
 (`CandidateOwner::ExecRootPut`) or a process run fact
 (`CandidateOwner::RunFactAppend`, §7). That write's root reaches the
 candidate's `CheckpointRoot` through supplied nodes, the manifest's base is
-the root the row holds now, and the row, the manifest and the semantic
-admission name the same root and commit. Anything else is
+the root the row holds now, and the row and the manifest name the same root
+and commit. Anything else is
 `GraphRefusal::PublicationMismatch`, and nothing is written.
 
 An authoritative commit settles the spool and deletes it. An authoritative
@@ -287,7 +281,7 @@ outlives its parent process.
 
 Laws: `crates/lash-durable/src/laws/pages.rs`, on SQLite memory and file
 and PostgreSQL (`a_candidate_installs_only_new_nodes_and_direct_references`,
-`publication_is_atomic_with_admissions_and_semantic_admission`,
+`publication_is_atomic_with_its_effect_admissions`,
 `the_lost_receipt_resolves_by_commit_identity`,
 `publication_keeps_global_digest_lock_order`), and
 `crates/lash-vm-broker/src/kernel/pages/spool_laws.rs`
@@ -315,8 +309,15 @@ acquired in one transaction that checks the owner's current root under the
 actor's fence. The store's clock decides expiry. A read checks its lease in
 the transaction that returns the bytes; after expiry every read and renewal
 is `GraphRefusal::LeaseLost` and the activation is fenced, but the row
-protects its root until it is released or reaped. The parent renews a live
-activation's lease at a third of its time to live.
+protects its root until it is released or reaped. The parent's authority
+check runs on every page exchange, whether the cache holds the page or not:
+it renews the lease once a third of its time to live has passed since the
+last renewal, and a failed renewal refuses the exchange as
+`PageRefusal::LeaseLost`. Within that third of a confirmed renewal the
+store's expiry is still two thirds of a ttl away; past it, the store decides.
+A held activation renews on the same schedule while it waits on a tool. The
+cache answers only for immutable bytes, never for authority. An activation's
+span bounds the host work its exchanges take, not wall time.
 
 Replacing or releasing a root never reclaims inside the publishing
 transaction. The old root becomes a **retirement hold**, a root source in the

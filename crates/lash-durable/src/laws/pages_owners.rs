@@ -5,7 +5,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_core_store::checkpoint_graph::stage::CandidateManifest;
 use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, GraphRefusal, NodeId, NodeKind};
 
 use super::super::{LABEL, LawBroken, LawOutcome, ensure};
@@ -15,7 +14,7 @@ use super::{
 };
 use crate::DomainWrite;
 use crate::domain::graph::{ExecRootWrite, RootOwner, RunFactKind, RunFactWrite};
-use crate::domain::pages::{CandidateOwner, CandidatePublication, SemanticAdmission};
+use crate::domain::pages::{CandidateOwner, CandidatePublication};
 use crate::domain::{ExecKey, Ordinal, OwnerKey, RunSeq};
 
 /// A process engine step's outcome owns its candidate (FIG-6193, P1): the
@@ -42,7 +41,6 @@ pub async fn a_step_outcome_owns_its_candidate(tier: &dyn PageTier) -> LawOutcom
     let store = tier.pages();
     let publish = |record: EncodedNode, ordinal: u64, base: Option<NodeId>| {
         let manifest = candidate.manifest(base, CommitId([ordinal as u8 + 1; 32]));
-        let summary = manifest.summary();
         let facts = facts.clone();
         let actor = owner.actor.clone();
         let epoch = owner.epoch;
@@ -67,13 +65,6 @@ pub async fn a_step_outcome_owns_its_candidate(tier: &dyn PageTier) -> LawOutcom
                             ordinal: Ordinal(ordinal),
                         },
                         manifest: Box::new(manifest),
-                        admission: SemanticAdmission {
-                            root: summary.root,
-                            kernel: 1,
-                            page_format: 1,
-                            validator: "law-validator".into(),
-                            commit: summary.commit,
-                        },
                     },
                     LABEL,
                 )
@@ -158,7 +149,6 @@ pub async fn a_pruned_step_outcome_frees_exactly_its_unshared_pages(
     );
     let candidate = Candidate { root, fresh };
     let manifest = candidate.manifest(None, CommitId::mint());
-    let summary = manifest.summary();
     let record = encoded(NodeKind::FROZEN_VALUE, "prune outcome", &[root]);
     let mut tx = store.begin(&owner.actor, owner.epoch).await?;
     tx.stage([record.clone()]);
@@ -180,13 +170,6 @@ pub async fn a_pruned_step_outcome_frees_exactly_its_unshared_pages(
                     ordinal: Ordinal(0),
                 },
                 manifest: Box::new(manifest),
-                admission: SemanticAdmission {
-                    root: summary.root,
-                    kernel: 1,
-                    page_format: 1,
-                    validator: "law-validator".into(),
-                    commit: summary.commit,
-                },
             },
             LABEL,
         )

@@ -278,46 +278,6 @@ pub fn checkpoint_header(id: NodeId, bytes: &[u8]) -> Result<CheckpointRoot, Gra
         .map_err(|error| malformed(error).into())
 }
 
-/// The validator this build is (D-ADM): the kernel version, the semantic
-/// page format and the digest of the page kinds it registers, so a root
-/// admitted by another build's grammar is never trusted by this one.
-#[must_use]
-pub fn validator() -> String {
-    static VALIDATOR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    VALIDATOR
-        .get_or_init(|| {
-            let mut kinds = blake3::Hasher::new();
-            for spec in lash_core_store::checkpoint_graph::SEMANTIC_REGISTRY {
-                kinds.update(&spec.kind.0.to_le_bytes());
-                kinds.update(spec.name.as_bytes());
-                kinds.update(&[0]);
-            }
-            format!(
-                "lash-kernel/{}/pages-{}/{}",
-                lash_kernel_doc::KERNEL_VERSION,
-                lash_kernel_state::paged::source::PAGE_FORMAT,
-                kinds.finalize().to_hex()
-            )
-        })
-        .clone()
-}
-
-/// The semantic admission of `root`, published under `commit` by this
-/// build's validator.
-#[must_use]
-pub fn admission_of(
-    root: NodeId,
-    commit: lash_core_store::checkpoint_graph::CommitId,
-) -> lash_durable::domain::pages::SemanticAdmission {
-    lash_durable::domain::pages::SemanticAdmission {
-        root,
-        kernel: lash_kernel_doc::KERNEL_VERSION,
-        page_format: lash_kernel_state::paged::source::PAGE_FORMAT,
-        validator: validator(),
-        commit,
-    }
-}
-
 /// How a run that parked ended, as its CellEnd records it: every detail
 /// the machine reported, each datum a FrozenValue child. A cancelled run
 /// records no end; a finished cell's carry is the session descriptor its

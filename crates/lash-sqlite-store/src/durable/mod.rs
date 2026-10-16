@@ -686,7 +686,7 @@ fn apply_owner(
     write: ActorTx,
     now: DurableInstant,
     blob_profile: crate::BuiltinBlobProfile,
-    mut candidate: Option<&mut CandidatePublication>,
+    candidate: Option<&mut CandidatePublication>,
 ) -> Flow<ActorCommit> {
     let fleet = tx.fleet();
     let actor = write.actor().as_str().to_owned();
@@ -738,7 +738,7 @@ fn apply_owner(
                 return refuse(DurableError::from(refusal));
             }
         }
-        let installed = match candidate.as_deref_mut() {
+        let installed = match candidate {
             None => graph::install(tx, &checked)?.map(drop),
             Some(candidate) => pages::install_candidate(tx, write.domain(), &checked, candidate)?,
         };
@@ -758,11 +758,6 @@ fn apply_owner(
         if let Err(refusal) = apply_domain(tx, &committing, domain)? {
             return refuse(refusal);
         }
-    }
-    if let Some(candidate) = candidate.as_deref()
-        && let Err(refusal) = pages::admit(tx, &candidate.admission)?
-    {
-        return refuse(DurableError::from(refusal));
     }
     graph::hold_retired(tx, committing.retired, now)?;
     if let Some(formats) = write.formats() {

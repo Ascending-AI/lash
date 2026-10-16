@@ -12,21 +12,20 @@
 //! holds it, and publishes nothing.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lash_core::{ProcessId, StepPages};
+use lash_core_execution::runtime::Clock;
 use lash_core_store::checkpoint_graph::stage::StageFault;
 use lash_core_store::checkpoint_graph::{CommitId, NodeId};
 use lash_durable::DurableError;
-use lash_durable::domain::pages::{
-    LeaseFence, PageStore, RootLeaseId, RootLeaseRequest, SemanticAdmission,
-};
+use lash_durable::domain::pages::{LeaseFence, PageStore, RootLeaseId, RootLeaseRequest};
 use lash_durable::domain::{ExecKey, RootOwner};
 use lash_kernel_state::AdmittedWait;
 use lash_vm_broker::kernel::pages::{
     ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot,
 };
-use lash_vm_broker::kernel::state::{ReleaseGraph, admission_of, checkpoint_header, held_releases};
+use lash_vm_broker::kernel::state::{ReleaseGraph, checkpoint_header, held_releases};
 use lash_vm_broker::kernel::{KernelFailure, ParkedState, next_stage_lease};
 
 use super::run::RunFault;
@@ -84,6 +83,7 @@ impl StepActivation {
         binding: NodeId,
         releases: &ReleaseGraph,
         spools: &SpoolRoot,
+        clock: Arc<dyn Clock>,
         limits: PageLimits,
     ) -> Result<Self, KernelFailure> {
         let mut references: Vec<NodeId> = releases
@@ -176,7 +176,8 @@ impl StepActivation {
             CapabilityKey::fresh(),
             stage.0,
             Box::new(spool),
-            Instant::now() + SPAN,
+            clock,
+            SPAN,
             limits,
         )
         .with_references(references);
@@ -251,13 +252,8 @@ impl lash_core::StepPublication for RunCandidate {
         &self,
         tx: &mut lash_durable::ActorTx,
         commit: CommitId,
-    ) -> Result<
-        (
-            Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>,
-            SemanticAdmission,
-        ),
-        DurableError,
-    > {
+    ) -> Result<Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>, DurableError>
+    {
         let releases = held_releases().map_err(|failure| {
             DurableError::Store(lash_durable::StoreFailure {
                 kind: lash_durable::StoreFailureKind::Corrupt,
@@ -279,7 +275,7 @@ impl lash_core::StepPublication for RunCandidate {
             .await
             .candidate(self.root, None, self.root, commit)
             .map_err(staging)?;
-        Ok((manifest, admission_of(self.root, commit)))
+        Ok(manifest)
     }
 
     async fn settled(&self, commit: CommitId) {

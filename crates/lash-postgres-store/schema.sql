@@ -1207,17 +1207,6 @@ CREATE TABLE IF NOT EXISTS lash_retirement_frontier (
 CREATE INDEX IF NOT EXISTS idx_lash_retirement_frontier_queue
     ON lash_retirement_frontier (queued_at_ms, node_ref);
 
--- A checkpoint root's semantic admission (FIG-6191, D-ADM): the validator
--- that certified the pages it changed, written with the root. Not a root
--- owner: it goes with its root.
-CREATE TABLE IF NOT EXISTS lash_semantic_admissions (
-    root_ref TEXT PRIMARY KEY REFERENCES lash_blobs(hash) ON DELETE CASCADE,
-    kernel BIGINT NOT NULL,
-    page_format BIGINT NOT NULL,
-    validator TEXT NOT NULL,
-    commit_id BYTEA NOT NULL
-        CONSTRAINT ck_semantic_admissions_commit_id CHECK (octet_length(commit_id) = 32)
-);
 
 -- Every root of every source: a view of the owning columns, never a cache.
 CREATE OR REPLACE VIEW lash_graph_root_catalog AS

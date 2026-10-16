@@ -1,7 +1,7 @@
 //! Persistent-heap pages on PostgreSQL (FIG-6191, S6): root leases, demand
-//! page reads, a candidate's streamed install beside its owner commit, the
-//! semantic admission it publishes, and the bounded retirement steps that
-//! peel retired roots off the publication path.
+//! page reads, a candidate's streamed install beside its owner commit, and
+//! the bounded retirement steps that peel retired roots off the
+//! publication path.
 //!
 //! # Lock order
 //!
@@ -11,8 +11,7 @@
 //! 1. the retirement advisory key (steps only), or the owner's fence row;
 //! 2. blob rows a writer names or installs: key-share locks and inserts, a
 //!    candidate's batch at a time, then the children its edges name;
-//! 3. the root catalog's owning rows the commit's domain writes change, and
-//!    the semantic admission row;
+//! 3. the root catalog's owning rows the commit's domain writes change;
 //! 4. retirement holds ([`hold`]): one statement key-share locks every node
 //!    the transaction holds, then one statement inserts or widens every
 //!    hold row, so a holder waits on a peel lock only before it owns any
@@ -69,8 +68,7 @@ use lash_durable::domain::graph_commit::{
 };
 use lash_durable::domain::pages::{
     CandidatePublication, CandidateReceipt, LeaseFence, PageStore, RetirementBacklog,
-    RetirementBudget, RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest,
-    SemanticAdmission, StoredPage,
+    RetirementBudget, RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, StoredPage,
 };
 use lash_durable::domain::{DomainWrite, ExecKey};
 use lash_durable::{
@@ -312,38 +310,6 @@ async fn frontier_put(
     Ok(())
 }
 
-/// Records `admission` with its root, in the publishing transaction.
-pub(super) async fn admit(
-    tx: &mut PgConnection,
-    admission: &SemanticAdmission,
-) -> Result<(), GraphRefusal> {
-    let hash = admission.root.to_hex();
-    let stored: Vec<(String, i16)> =
-        crate::observed_sql::query_as(SQL.postgres.lock_children.sql())
-            .bind(vec![hash.clone()])
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(db)?;
-    match stored.first() {
-        None => return Err(GraphRefusal::MissingNode(admission.root)),
-        Some((_, encoding)) => {
-            if graph::encoding_of(*encoding)? != BlobEncoding::Graph {
-                return Err(GraphRefusal::EncodingConflict(admission.root));
-            }
-        }
-    }
-    crate::observed_sql::query(SQL.pages.admission_put.sql())
-        .bind(hash)
-        .bind(i64::from(admission.kernel))
-        .bind(i64::from(admission.page_format))
-        .bind(admission.validator.as_str())
-        .bind(&admission.commit.0[..])
-        .execute(crate::observed_sql::executor(tx))
-        .await
-        .map_err(db)?;
-    Ok(())
-}
-
 /// Installs `candidate` with the owner commit's own `checked` graph, in the
 /// caller's fenced transaction: every node the stream names is checked
 /// present and every node it supplies is compared or inserted, in global
@@ -357,13 +323,7 @@ pub(super) async fn install_candidate(
     candidate: &mut CandidatePublication,
 ) -> Result<(), GraphRefusal> {
     let summary = candidate.manifest.summary();
-    check_candidate(
-        writes,
-        checked,
-        &candidate.owner,
-        &summary,
-        &candidate.admission,
-    )?;
+    check_candidate(writes, checked, &candidate.owner, &summary)?;
     let mut install =
         CandidateInstall::new(checked, &mut *candidate.manifest, CandidateBuffers::DEFAULT);
     let mut installed = InstalledGraphMeasurement::default();
@@ -879,37 +839,6 @@ impl PageStore for PostgresDurableStore {
             root: summary.root,
             commit: summary.commit,
         })
-    }
-
-    async fn admission(&self, root: NodeId) -> Result<Option<SemanticAdmission>, DurableError> {
-        let row: Option<(i64, i64, String, Vec<u8>)> = self
-            .read(|connection| {
-                Box::pin(async move {
-                    crate::observed_sql::query_as(SQL.pages.admission_get.sql())
-                        .bind(root.to_hex())
-                        .fetch_optional(crate::observed_sql::executor(&mut **connection))
-                        .await
-                        .map_err(sqlx_failure)
-                })
-            })
-            .await?;
-        let Some((kernel, page_format, validator, commit_id)) = row else {
-            return Ok(None);
-        };
-        match (
-            u32::try_from(kernel),
-            u32::try_from(page_format),
-            <[u8; 32]>::try_from(commit_id.as_slice()),
-        ) {
-            (Ok(kernel), Ok(page_format), Ok(commit)) => Ok(Some(SemanticAdmission {
-                root,
-                kernel,
-                page_format,
-                validator,
-                commit: CommitId(commit),
-            })),
-            _ => Err(super::corrupt("semantic admission", &root.to_hex())),
-        }
     }
 
     async fn candidate_state(

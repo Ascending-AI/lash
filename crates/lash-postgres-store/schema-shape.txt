@@ -445,14 +445,6 @@ table lash_schema_versions
   column min_reader integer not-null
   column version integer not-null
   primary-key (component)
-table lash_semantic_admissions
-  column commit_id bytea not-null
-  column kernel bigint not-null
-  column page_format bigint not-null
-  column root_ref text not-null
-  column validator text not-null
-  primary-key (root_ref)
-  foreign-key (root_ref) references lash_blobs (hash) on delete cascade
 table lash_session_close
   column begun_at_ms bigint not-null
   column done_step text nullable

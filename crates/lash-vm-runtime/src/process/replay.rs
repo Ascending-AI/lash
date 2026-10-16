@@ -566,6 +566,9 @@ impl KernelProcessEngine {
             binding,
             releases,
             &spools,
+            // A host-side replay runs outside the engine: it times its
+            // reader's lease on the system clock.
+            Arc::new(lash_core_execution::runtime::SystemClock),
             lash_vm_broker::kernel::pages::PageLimits::within(config.protocol.decode),
         )
         .await;

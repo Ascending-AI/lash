@@ -291,9 +291,9 @@ impl PostgresDurableStore {
 /// Apply the owner's `write` after its ownership fence, which the commit's
 /// first statement ran ([`super::PostgresDurableStatements::owner_envelope`]):
 /// `fence` is what it read under the fence, `None` when the epoch was not
-/// current. A `candidate` is installed with the owner's own graph and its
-/// semantic admission recorded once the domain writes ran (FIG-6191); the
-/// roots the commit retired are held for retirement steps (D-RET).
+/// current. A `candidate` is installed with the owner's own graph once the
+/// domain writes ran (FIG-6191); the roots the commit retired are held for
+/// retirement steps (D-RET).
 pub(super) async fn apply_owner(
     tx: &mut Tx,
     write: &ActorTx,
@@ -301,7 +301,7 @@ pub(super) async fn apply_owner(
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
     checkpoint_ref_chunk: usize,
-    mut candidate: Option<&mut CandidatePublication>,
+    candidate: Option<&mut CandidatePublication>,
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
     let Some(fence) = fence else {
@@ -327,7 +327,7 @@ pub(super) async fn apply_owner(
             lash_durable::domain::graph_commit::measure_owner_commit(write.graph(), write.domain())
                 .and_then(|measured| budget.admit(&measured))?;
         }
-        match candidate.as_deref_mut() {
+        match candidate {
             Some(candidate) => {
                 pages::install_candidate(tx, write.domain(), &checked, candidate)
                     .await
@@ -351,11 +351,6 @@ pub(super) async fn apply_owner(
         .map_err(store_failure)?;
     for domain in write.domain() {
         apply_domain(tx, &committing, domain).await?;
-    }
-    if let Some(candidate) = &candidate {
-        pages::admit(tx, &candidate.admission)
-            .await
-            .map_err(DurableError::Graph)?;
     }
     pages::hold_retired(tx, committing.retired, now)
         .await

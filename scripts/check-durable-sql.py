@@ -8,9 +8,7 @@ the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
 `effect_admissions`, `graph_release_pins`, and the persistent heap's
 `root_leases` and `retirement_holds`;
 `lash_`-prefixed on PostgreSQL) are written by one
-neutral statement set and one module per dialect. `semantic_admissions`
-belongs to its root's blob row and cascades from it, so, like `blobs`, it
-is not listed. Since I0 (FIG-5194) each
+neutral statement set and one module per dialect. Since I0 (FIG-5194) each
 of those is a directory. Any file in the durable module directory belongs
 to that module; membership comes from tracked files, not a domain-name list.
 PostgreSQL's one-call owner commit (FIG-5936, FIG-5942) also keeps its step

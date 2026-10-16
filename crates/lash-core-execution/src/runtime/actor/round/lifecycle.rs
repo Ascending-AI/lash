@@ -1055,8 +1055,8 @@ impl Lifecycle {
     ) -> Result<Act, RoundError> {
         let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
         let commit = lash_core_store::checkpoint_graph::CommitId::mint();
-        let (manifest, admission) = match candidate.0.publication(&mut tx, commit).await {
-            Ok(publication) => publication,
+        let manifest = match candidate.0.publication(&mut tx, commit).await {
+            Ok(manifest) => manifest,
             Err(error) => {
                 candidate.0.abandoned().await;
                 return Err(error.into());
@@ -1069,7 +1069,6 @@ impl Lifecycle {
                 ordinal,
             },
             manifest,
-            admission,
         };
         match self
             .cx

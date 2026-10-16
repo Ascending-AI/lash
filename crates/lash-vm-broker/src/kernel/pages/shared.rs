@@ -122,3 +122,21 @@ impl PageSource for ParentSeal<'_> {
         })
     }
 }
+
+/// One tick of a held activation's lease schedule (D-LEASE): sleeps on the
+/// activation's clock until its renewal is due, then keeps the lease
+/// alive as any exchange would. Never ends for an activation with no
+/// lease, or one already refused.
+pub async fn renew_when_due<R: super::LeasedReads + ?Sized>(
+    pages: &Arc<tokio::sync::Mutex<ActivationPages<R>>>,
+) {
+    let armed = {
+        let pages = pages.lock().await;
+        pages.renew_at()
+    };
+    let Some((clock, due)) = armed else {
+        return std::future::pending().await;
+    };
+    clock.sleep_until(due).await;
+    let _ = pages.lock().await.keep_alive().await;
+}

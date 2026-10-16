@@ -368,9 +368,9 @@ pub trait StepPublication: Send + Sync {
     fn root(&self) -> lash_core_store::checkpoint_graph::NodeId;
 
     /// The candidate rooted at [`root`](Self::root), with no base,
-    /// published under `commit`, and its semantic admission. What the
-    /// pages name beyond the heap and the store may not hold yet, such as
-    /// the release the root pins, is staged in the outcome's `tx`.
+    /// published under `commit`. What the pages name beyond the heap and
+    /// the store may not hold yet, such as the release the root pins, is
+    /// staged in the outcome's `tx`.
     ///
     /// # Errors
     ///
@@ -381,10 +381,7 @@ pub trait StepPublication: Send + Sync {
         tx: &mut lash_durable::ActorTx,
         commit: lash_core_store::checkpoint_graph::CommitId,
     ) -> Result<
-        (
-            Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>,
-            lash_durable::domain::pages::SemanticAdmission,
-        ),
+        Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>,
         lash_durable::DurableError,
     >;
 

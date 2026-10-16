@@ -907,6 +907,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
+            "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "tempfile": "//third-party/rust:p0372",
             "tokio": "//third-party/rust:p0381"

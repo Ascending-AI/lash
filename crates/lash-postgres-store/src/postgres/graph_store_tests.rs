@@ -431,7 +431,6 @@ impl PageTier for Tier {
             .expect("foreign damage skips the foreign keys");
         for sql in [
             "DELETE FROM lash_blob_edges WHERE parent_hash = $1 OR child_hash = $1",
-            "DELETE FROM lash_semantic_admissions WHERE root_ref = $1",
             "DELETE FROM lash_blobs WHERE hash = $1",
         ] {
             sqlx::query(sql)
@@ -499,7 +498,7 @@ macro_rules! page_law {
 }
 
 page_law!(a_candidate_installs_only_new_nodes_and_direct_references);
-page_law!(publication_is_atomic_with_admissions_and_semantic_admission);
+page_law!(publication_is_atomic_with_its_effect_admissions);
 page_law!(a_step_outcome_owns_its_candidate);
 page_law!(a_pruned_step_outcome_frees_exactly_its_unshared_pages);
 page_law!(a_host_read_never_descends_into_a_heap_page);

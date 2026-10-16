@@ -25,7 +25,7 @@ use super::graph::{
     AdmissionMember, EffectAdmissionWrite, ExecRootWrite, ReleasePinWrite, RootChange, RootOwner,
     RunFactWrite,
 };
-use super::pages::{CandidateOwner, SemanticAdmission};
+use super::pages::CandidateOwner;
 
 fn encode_node(out: &mut TokenWriter, node: Option<&NodeId>) {
     match node {
@@ -523,8 +523,7 @@ pub fn stage_refusal(fault: &StageFault) -> GraphRefusal {
 /// (`summary.base` is the row's `expected_root`, a wrapper too) and its
 /// row records the candidate's commit identity, which is how an ambiguous
 /// publication resolves against the row ([`PageStore::candidate_state`]).
-/// A step outcome's manifest has no base. The semantic admission certifies
-/// the manifest's root under the manifest's commit.
+/// A step outcome's manifest has no base.
 ///
 /// # Errors
 ///
@@ -536,7 +535,6 @@ pub fn check_candidate(
     checked: &CheckedGraph,
     owner: &CandidateOwner,
     summary: &ManifestSummary,
-    admission: &SemanticAdmission,
 ) -> Result<(), GraphRefusal> {
     let mut owned = writes.iter().filter_map(|write| match (owner, write) {
         (
@@ -572,8 +570,6 @@ pub fn check_candidate(
         && reaches(checked, root, summary.root)
         && base == summary.base
         && row_commit.is_none_or(|commit| commit == summary.commit)
-        && admission.commit == summary.commit
-        && admission.root == summary.root
     {
         Ok(())
     } else {

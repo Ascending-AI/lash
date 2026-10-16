@@ -11,9 +11,7 @@ use super::super::graph::LockHold;
 use super::super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use super::{Candidate, Owned, PageTier, drain, encoded, exec_root, lease_request, page};
 use crate::domain::graph::{EffectAdmissionWrite, EffectKey, ExecRootWrite};
-use crate::domain::pages::{
-    CandidateOwner, CandidatePublication, PageStore, RetirementBudget, SemanticAdmission,
-};
+use crate::domain::pages::{CandidateOwner, CandidatePublication, PageStore, RetirementBudget};
 use crate::domain::{ExecKey, SnapshotRev};
 use crate::{DomainWrite, DurableError, NodeLease};
 
@@ -488,13 +486,6 @@ async fn publish(
             CandidatePublication {
                 owner: CandidateOwner::ExecRootPut(exec.clone()),
                 manifest: Box::new(manifest),
-                admission: SemanticAdmission {
-                    root: summary.root,
-                    kernel: 1,
-                    page_format: 1,
-                    validator: "law-validator".into(),
-                    commit: summary.commit,
-                },
             },
             LABEL,
         )

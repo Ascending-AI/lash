@@ -9,7 +9,7 @@
 //! another process from the checkpoint root the park sealed.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::stage::{StageLeaseId, StageSpool as _};
@@ -249,7 +249,8 @@ impl Parent {
             CapabilityKey::fresh(),
             1,
             Box::new(spool.clone()),
-            Instant::now() + Duration::from_secs(600),
+            Arc::new(lash_core_execution::runtime::SystemClock),
+            Duration::from_secs(600),
             PageLimits::within(
                 PoolConfig::standard(WorkerEntry::helper("unused"))
                     .protocol
@@ -295,8 +296,8 @@ impl Parent {
         } = &step
         {
             let sealed = self
-                .pages
-                .admit(batch.clone())
+                .runtime
+                .block_on(self.pages.admit(batch.clone()))
                 .expect("the parent admits the batch");
             self.grants.extend(
                 sealed
@@ -1532,7 +1533,8 @@ main {}"#,
                 CapabilityKey::fresh(),
                 1,
                 Box::new(spools.spool(StageLeaseId(2 + u64::from(live))).unwrap()),
-                Instant::now() + Duration::from_secs(600),
+                Arc::new(lash_core_execution::runtime::SystemClock),
+                Duration::from_secs(600),
                 PageLimits::within(config("").protocol.decode),
             )
             .with_references([NodeId(release.0), NodeId(BINDING)]),

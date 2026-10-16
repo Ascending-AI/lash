@@ -80,7 +80,7 @@ use super::graph::{
 use super::ledger::{AdmittedEffect, EffectLedger, PendingEffect, Standing};
 use super::pages::{Resolution, SharedPages};
 use super::run::KernelEffects;
-use super::state::{EndRecord, ReleaseGraph, admission_of, checkpoint_header};
+use super::state::{EndRecord, ReleaseGraph, checkpoint_header};
 use super::value::datum_from_json;
 use crate::effects::MemberDraft;
 use crate::members::{Decide, Driven, Undriven};
@@ -926,7 +926,6 @@ impl DurableSnapshotStore {
                 CandidatePublication {
                     owner: CandidateOwner::ExecRootPut(self.exec.clone()),
                     manifest,
-                    admission: admission_of(candidate, commit),
                 },
                 label,
                 &owing,

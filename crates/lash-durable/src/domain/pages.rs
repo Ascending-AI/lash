@@ -12,7 +12,7 @@
 //!   external references ([`check_graph`](super::graph_commit::check_graph)'s
 //!   inductive rule), inserts its fresh nodes in global digest order, then
 //!   their edges, then publishes the execution root, host records, effect
-//!   admissions and the [`SemanticAdmission`] in the same fenced
+//!   admissions, in the same fenced
 //!   transaction;
 //! - retiring an old root moves it to a durable retirement hold in the
 //!   publication transaction; bounded background steps peel it later,
@@ -80,25 +80,6 @@ pub struct StoredPage {
     pub bytes: Arc<[u8]>,
 }
 
-/// The semantic admission of a checkpoint root: which validator certified
-/// the pages it changed, recorded with the root in its publishing
-/// transaction. A content hash certifies bytes only; this certifies the
-/// root's object references, memory summaries and guest schema under the
-/// named validator. A root whose admission names another validator is not
-/// trusted by this one: it needs full validation first.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SemanticAdmission {
-    /// The CheckpointRoot node.
-    pub root: NodeId,
-    pub kernel: u32,
-    /// The semantic page format number (`lash_kernel_state::paged`).
-    pub page_format: u32,
-    /// The validator's identity: kernel version, page format and the
-    /// digest of the validating build's page schema.
-    pub validator: String,
-    pub commit: CommitId,
-}
-
 /// The one write of the owner commit that owns a candidate (FIG-6197 F1):
 /// the root it publishes reaches the candidate's semantic root through
 /// nodes the commit supplies.
@@ -121,7 +102,6 @@ pub enum CandidateOwner {
 pub struct CandidatePublication {
     pub owner: CandidateOwner,
     pub manifest: Box<dyn CandidateManifest>,
-    pub admission: SemanticAdmission,
 }
 
 /// An authoritative publication: the activation's new baseline. Its
@@ -196,17 +176,14 @@ pub trait PageStore: DurableStore {
 
     /// Commits `tx` with `candidate` in its one fenced transaction: the
     /// candidate's nodes and edges with the transaction's own staged nodes,
-    /// its domain writes (the execution root, host records, effect
-    /// admissions) and the semantic admission, atomically.
+    /// and its domain writes (the execution root, host records, effect
+    /// admissions), atomically.
     async fn commit_candidate(
         &self,
         tx: ActorTx,
         candidate: CandidatePublication,
         label: CommitLabel,
     ) -> Result<CandidateReceipt, DurableError>;
-
-    /// The semantic admission recorded with `root`, if any.
-    async fn admission(&self, root: NodeId) -> Result<Option<SemanticAdmission>, DurableError>;
 
     /// The execution's current root and commit identity: how an ambiguous
     /// publication is resolved before it is retried or discarded.

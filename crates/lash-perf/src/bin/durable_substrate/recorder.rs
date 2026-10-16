@@ -17,7 +17,7 @@ use lash_core_execution::{
 };
 use lash_durable::domain::pages::{
     CandidatePublication, CandidateReceipt, PageStore, RetirementBacklog, RetirementBudget,
-    RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, SemanticAdmission, StoredPage,
+    RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, StoredPage,
 };
 use lash_durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
@@ -666,13 +666,6 @@ impl PageStore for RecordingStore {
         self.recorder
             .record_with(started, actor, label.as_str(), answer.is_ok(), encoded);
         answer
-    }
-
-    async fn admission(
-        &self,
-        root: lash_core_store::checkpoint_graph::NodeId,
-    ) -> Result<Option<SemanticAdmission>, DurableError> {
-        self.page_store()?.admission(root).await
     }
 
     async fn candidate_state(

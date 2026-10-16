@@ -18,6 +18,10 @@
 //! - A seal is checked the same way and staged in the spool ([`spool`]): its
 //!   children must be committed pages a capability authorizes or pages the
 //!   activation staged before. Staging publishes nothing.
+//! - Every exchange runs the authority check first: the lease is renewed
+//!   at a third of its ttl even while the worker waits on a tool, a cached
+//!   read checks it too, and an activation that waits or outlives its
+//!   budget of host work in exchanges refuses `Deadline`.
 //! - Every refusal is infrastructure ([`PageRefusal`]), and the first one
 //!   ends the activation: every later exchange is refused the same way.
 //!
@@ -36,6 +40,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use lash_core_execution::runtime::Clock;
 use lash_core_store::checkpoint_graph::node::{SEMANTIC_KINDS, direct_logical, frame_direct};
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, ManifestSummary, StageFault, StageSpool, StageUsage,
@@ -55,7 +60,7 @@ use lash_vm_protocol::page::{
 
 pub use capability::CapabilityKey;
 pub use local::{CommittedPages, LocalPages};
-pub use shared::{ParentSeal, SharedPages, SharedSpool};
+pub use shared::{ParentSeal, SharedPages, SharedSpool, renew_when_due};
 pub use spool::{DiskSpool, SpoolRoot};
 
 /// The store reads a page service makes under its root lease: the slice of
@@ -155,16 +160,13 @@ pub enum Resolution {
     /// The row holds the candidate's commit: it committed, and the spool is
     /// settled.
     Committed,
-    /// The row still holds the base: publish the exact candidate again
-    /// (idempotent by commit identity), or discard the activation.
-    Retry(Box<dyn CandidateManifest>),
-    /// The row holds another root: the candidate lost, and the activation
-    /// is discarded with its spool.
-    Superseded,
+    /// The row does not hold it: the publication is retried by its caller,
+    /// or the activation discarded.
+    NotCommitted,
 }
 
 /// One activation's page service: its root lease, capability key, epoch
-/// and spool, under one absolute deadline.
+/// and spool, within a budget of host work.
 pub struct ActivationPages<R: ?Sized> {
     store: Arc<R>,
     /// The committed root the activation reads under; none for a fresh run
@@ -173,12 +175,19 @@ pub struct ActivationPages<R: ?Sized> {
     /// Renew the lease once this long has passed since it was last renewed
     /// (a third of its ttl, `D-LEASE`).
     renew_every: Duration,
+    /// When the lease was last renewed, on `clock`.
     renewed: Instant,
+    /// The runtime's clock: the activation's timing, and the schedule a
+    /// held activation renews on.
+    clock: Arc<dyn Clock>,
     key: CapabilityKey,
     epoch: u64,
     spool: Box<dyn StageSpool>,
-    /// Covers every exchange of the activation; progress never extends it.
-    deadline: Instant,
+    /// The budget of host work `spent` may reach across every exchange of
+    /// the activation; wall time does not charge it.
+    span: Duration,
+    /// The host work every exchange so far measured on `clock`.
+    spent: Duration,
     limits: PageLimits,
     /// The first refusal, which every later exchange repeats.
     refused: Option<PageRefusal>,
@@ -205,7 +214,8 @@ pub struct ActivationPages<R: ?Sized> {
 
 impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     /// The page service of an activation leased on `lease`'s root (none
-    /// for one that reads only what it stages), staging into `spool`.
+    /// for one that reads only what it stages), staging into `spool`,
+    /// timed on `clock` within `span` of host work in exchanges.
     #[expect(
         clippy::too_many_arguments,
         reason = "one activation's whole authority"
@@ -217,18 +227,21 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         key: CapabilityKey,
         epoch: u64,
         spool: Box<dyn StageSpool>,
-        deadline: Instant,
+        clock: Arc<dyn Clock>,
+        span: Duration,
         limits: PageLimits,
     ) -> Self {
         Self {
+            renewed: clock.now(),
             store,
             lease,
             renew_every,
-            renewed: Instant::now(),
+            clock,
             key,
             epoch,
             spool,
-            deadline,
+            span,
+            spent: Duration::ZERO,
             limits,
             refused: None,
             pending: None,
@@ -277,7 +290,22 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         &mut self,
         pages: &[NodeId],
     ) -> Result<Vec<StoredPage>, PageRefusal> {
-        self.store_read(pages).await
+        if let Some(refusal) = &self.refused {
+            return Err(refusal.clone());
+        }
+        let at = self.clock.now();
+        let answer = match self.authority().await.and_then(|()| self.check_span()) {
+            Err(refusal) => Err(refusal),
+            Ok(()) => self.store_read(pages).await,
+        };
+        self.spent += self.clock.now().saturating_duration_since(at);
+        match answer {
+            Ok(pages) => Ok(pages),
+            Err(refusal) => {
+                self.refused = Some(refusal.clone());
+                Err(refusal)
+            }
+        }
     }
 
     /// The capability for `page`, which the parent knows the activation
@@ -306,13 +334,16 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     /// # Errors
     ///
     /// The refusal a seal exchange of the batch would get.
-    pub fn admit(&mut self, batch: SealBatch) -> Result<Vec<PageCapability>, PageRefusal> {
+    pub async fn admit(&mut self, batch: SealBatch) -> Result<Vec<PageCapability>, PageRefusal> {
         if let Some(refusal) = &self.refused {
             return Err(refusal.clone());
         }
-        let reply = self
-            .check_deadline()
-            .and_then(|()| self.seal(batch.pages, &batch.children));
+        let at = self.clock.now();
+        let reply = match self.authority().await.and_then(|()| self.check_span()) {
+            Err(refusal) => Err(refusal),
+            Ok(()) => self.seal(batch.pages, &batch.children),
+        };
+        self.spent += self.clock.now().saturating_duration_since(at);
         match reply {
             Ok(PageReply::Sealed { pages }) => Ok(pages),
             Ok(_) => Err(PageRefusal::Corrupt),
@@ -346,7 +377,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     /// under none takes one on the root its first park published.
     pub fn lease_on(&mut self, lease: RootLease) {
         self.lease = Some(lease);
-        self.renewed = Instant::now();
+        self.renewed = self.clock.now();
         self.owned = true;
     }
 
@@ -419,8 +450,73 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         Ok(NodeId(capability.page))
     }
 
-    fn check_deadline(&self) -> Result<(), PageRefusal> {
-        if Instant::now() >= self.deadline {
+    /// The activation's authority, checked on every exchange independent
+    /// of residency: the lease is renewed once `renew_every` (a third of
+    /// its ttl) passed since its last renewal, and a failed or timed-out
+    /// renewal refuses like a lost lease. Within `renew_every` of a
+    /// confirmed renewal the store's expiry is still at least two thirds
+    /// of a ttl away, so a lease that answers locally is live; past it,
+    /// the store decides. An activation with no lease answers `Ok`.
+    ///
+    /// # Errors
+    ///
+    /// [`PageRefusal::Deadline`] when the renewal could not run within the
+    /// remaining span, [`PageRefusal::LeaseLost`] when the store refused
+    /// it.
+    async fn authority(&mut self) -> Result<(), PageRefusal> {
+        let Some(lease) = self.lease.clone() else {
+            return Ok(());
+        };
+        if self.clock.now().saturating_duration_since(self.renewed) < self.renew_every {
+            return Ok(());
+        }
+        let before = self.clock.now();
+        let renewed = tokio::time::timeout(
+            self.span.saturating_sub(self.spent),
+            self.store.renew_root_lease(&lease),
+        )
+        .await
+        .map_err(|_| PageRefusal::Deadline)?
+        .map_err(|_| PageRefusal::LeaseLost)?;
+        self.lease = Some(renewed);
+        self.renewed = before;
+        Ok(())
+    }
+
+    /// One tick of the held-activation schedule the run loop arms: the
+    /// same authority check an exchange runs, recording its refusal as the
+    /// activation's first like any exchange does.
+    ///
+    /// # Errors
+    ///
+    /// The refusal an exchange at this instant would get.
+    pub async fn keep_alive(&mut self) -> Result<(), PageRefusal> {
+        if let Some(refusal) = &self.refused {
+            return Err(refusal.clone());
+        }
+        match self.authority().await {
+            Ok(()) => Ok(()),
+            Err(refusal) => {
+                self.refused = Some(refusal.clone());
+                Err(refusal)
+            }
+        }
+    }
+
+    /// The clock the activation times on, and the instant its renewal is
+    /// due on it: none for an activation with no lease, or one already
+    /// refused.
+    fn renew_at(&self) -> Option<(Arc<dyn Clock>, Instant)> {
+        if self.lease.is_none() || self.refused.is_some() {
+            return None;
+        }
+        Some((Arc::clone(&self.clock), self.renewed + self.renew_every))
+    }
+
+    /// Refused when the exchanges of this activation already spent `span`
+    /// of host work.
+    fn check_span(&self) -> Result<(), PageRefusal> {
+        if self.spent >= self.span {
             return Err(PageRefusal::Deadline);
         }
         Ok(())
@@ -460,29 +556,20 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
         Ok(read)
     }
 
-    /// Reads `pages` from the store under the lease, renewing it first when
-    /// a third of its ttl has passed.
+    /// Reads `pages` from the store under the lease the authority guard
+    /// keeps live; the cache stays responsible only for immutable bytes.
     async fn fetch(&mut self, pages: &[NodeId]) -> Result<Vec<StoredPage>, PageRefusal> {
-        let deadline = tokio::time::Instant::from_std(self.deadline);
         let Some(lease) = self.lease.clone() else {
             return Err(PageRefusal::Unauthorized);
         };
-        let lease = if self.renewed.elapsed() >= self.renew_every {
-            let renewed = tokio::time::timeout_at(deadline, self.store.renew_root_lease(&lease))
-                .await
-                .map_err(|_| PageRefusal::Deadline)?
-                .map_err(|_| PageRefusal::LeaseLost)?;
-            self.lease = Some(renewed.clone());
-            self.renewed = Instant::now();
-            renewed
-        } else {
-            lease
-        };
         self.stats.store_reads += 1;
-        tokio::time::timeout_at(deadline, self.store.read_pages(&lease, pages))
-            .await
-            .map_err(|_| PageRefusal::Deadline)?
-            .map_err(store_refusal)
+        tokio::time::timeout(
+            self.span.saturating_sub(self.spent),
+            self.store.read_pages(&lease, pages),
+        )
+        .await
+        .map_err(|_| PageRefusal::Deadline)?
+        .map_err(store_refusal)
     }
 
     async fn read(&mut self, capabilities: Vec<PageCapability>) -> Result<PageReply, PageRefusal> {
@@ -577,6 +664,31 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     ///
     /// As a read of the pages.
     pub async fn warm(
+        &mut self,
+        roots: &[NodeId],
+        budget: u64,
+    ) -> Result<Vec<ReadPage>, PageRefusal> {
+        if let Some(refusal) = &self.refused {
+            return Err(refusal.clone());
+        }
+        let at = self.clock.now();
+        let warmed = match self.authority().await.and_then(|()| self.check_span()) {
+            Err(refusal) => Err(refusal),
+            Ok(()) => self.warm_within(roots, budget).await,
+        };
+        self.spent += self.clock.now().saturating_duration_since(at);
+        match warmed {
+            Ok(warm) => Ok(warm),
+            Err(refusal) => {
+                self.refused = Some(refusal.clone());
+                Err(refusal)
+            }
+        }
+    }
+
+    /// The body of [`Self::warm`], run once its authority and span check
+    /// pass.
+    async fn warm_within(
         &mut self,
         roots: &[NodeId],
         budget: u64,
@@ -738,16 +850,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
                 self.settle(commit)?;
                 Ok(Resolution::Committed)
             }
-            Some((root, _)) if Some(root) == summary.base => Ok(Resolution::Retry(
-                self.spool
-                    .candidate(summary.root, summary.base, summary.commit)?,
-            )),
-            None if summary.base.is_none() => Ok(Resolution::Retry(self.spool.candidate(
-                summary.root,
-                summary.base,
-                summary.commit,
-            )?)),
-            _ => Ok(Resolution::Superseded),
+            _ => Ok(Resolution::NotCommitted),
         }
     }
 
@@ -765,13 +868,15 @@ impl<R: LeasedReads + ?Sized> PageExchange for ActivationPages<R> {
         if let Some(refusal) = &self.refused {
             return PageReply::Refused(refusal.clone());
         }
-        let reply = match self.check_deadline() {
+        let at = self.clock.now();
+        let reply = match self.authority().await.and_then(|()| self.check_span()) {
             Err(refusal) => Err(refusal),
             Ok(()) => match request {
                 PageRequest::Read { pages } => self.read(pages).await,
                 PageRequest::Seal { pages, children } => self.seal(pages, &children),
             },
         };
+        self.spent += self.clock.now().saturating_duration_since(at);
         reply.unwrap_or_else(|refusal| {
             self.refused = Some(refusal.clone());
             PageReply::Refused(refusal)

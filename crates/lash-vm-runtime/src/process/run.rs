@@ -351,7 +351,16 @@ async fn kernel_run(
     let Some(step_pages) = run.pages.as_ref() else {
         return Err(RunFault("the store holds no heap pages for the run".to_owned()).into());
     };
-    let driven = drive(&machines, engine, step_pages, &run.process, input, &stop).await;
+    let driven = drive(
+        &machines,
+        engine,
+        step_pages,
+        &run.process,
+        Arc::clone(&run.clock),
+        input,
+        &stop,
+    )
+    .await;
     let Driven {
         step,
         parked: state,
@@ -482,6 +491,7 @@ async fn drive(
     engine: &KernelProcessEngine,
     step: &lash_core::StepPages,
     process: &ProcessId,
+    clock: std::sync::Arc<dyn lash_core_execution::runtime::Clock>,
     input: KernelRunInput,
     stop: &CancellationToken,
 ) -> Result<Driven, KernelFailure> {
@@ -505,6 +515,7 @@ async fn drive(
         binding,
         machines.releases()?,
         &spools,
+        clock,
         lash_vm_broker::kernel::pages::PageLimits::within(config.protocol.decode),
     )
     .await?;

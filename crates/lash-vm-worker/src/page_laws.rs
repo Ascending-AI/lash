@@ -256,7 +256,8 @@ fn activation(
         key,
         epoch,
         Box::new(spools.spool(StageLeaseId(epoch)).expect("spool")),
-        Instant::now() + Duration::from_secs(120),
+        Arc::new(lash_core_execution::runtime::SystemClock),
+        Duration::from_secs(120),
         PageLimits::within(ProtocolBounds::standard().decode),
     )
 }

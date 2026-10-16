@@ -46,5 +46,7 @@ tokio-util = { workspace = true }
 # The laws' runs pin a dialect's release, so their build holds one.
 lash-vm-releases = { workspace = true, features = ["dialect-typescript"] }
 lash-core-execution = { workspace = true, features = ["testing"] }
+# The lease laws time an activation on the simulated clock.
+lash-durable-test = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

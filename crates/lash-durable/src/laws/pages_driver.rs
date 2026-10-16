@@ -27,7 +27,7 @@ use super::{
 };
 use crate::domain::pages::{
     CandidatePublication, CandidateReceipt, PageStore, RetirementBacklog, RetirementBudget,
-    RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, SemanticAdmission, StoredPage,
+    RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, StoredPage,
 };
 use crate::domain::{self, ExecKey};
 use crate::{
@@ -556,10 +556,6 @@ impl PageStore for Retiring {
         label: CommitLabel,
     ) -> Result<CandidateReceipt, DurableError> {
         self.inner.commit_candidate(tx, candidate, label).await
-    }
-
-    async fn admission(&self, root: NodeId) -> Result<Option<SemanticAdmission>, DurableError> {
-        self.inner.admission(root).await
     }
 
     async fn candidate_state(

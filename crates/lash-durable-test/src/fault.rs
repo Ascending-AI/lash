@@ -13,7 +13,7 @@ use crate::life::NodeLife;
 use crate::script::{Entry, Fault, Shared, Stored, WriteKind};
 use lash_durable::domain::pages::{
     CandidatePublication, CandidateReceipt, PageStore, RetirementBacklog, RetirementBudget,
-    RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, SemanticAdmission, StoredPage,
+    RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, StoredPage,
 };
 use lash_durable::domain::{
     AdmittedId, ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner,
@@ -561,14 +561,6 @@ impl PageStore for FaultStore {
             |receipt: &CandidateReceipt| &receipt.actor,
         )
         .await
-    }
-
-    async fn admission(
-        &self,
-        root: lash_core_store::checkpoint_graph::NodeId,
-    ) -> Result<Option<SemanticAdmission>, DurableError> {
-        let pages = self.page_store()?;
-        self.read(pages.admission(root)).await
     }
 
     async fn candidate_state(

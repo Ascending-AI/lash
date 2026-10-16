@@ -1,9 +1,8 @@
 //! The persistent-heap page store (FIG-6191, S6) compared across the three
-//! backends: one scripted sequence of a candidate's publication, its
-//! semantic admission and execution row, a root lease's reads, renewal and
-//! release, a replacing publication, the retirement steps that reclaim
-//! the replaced root, and a reader's unfenced lease must answer
-//! identically.
+//! backends: one scripted sequence of a candidate's publication and
+//! execution row, a root lease's reads, renewal and release, a replacing
+//! publication, the retirement steps that reclaim the replaced root, and a
+//! reader's unfenced lease must answer identically.
 //!
 //! Retirement steps are store-wide, so each backend runs on a database of
 //! its own: PostgreSQL on an isolated database beside the shared one, and
@@ -19,7 +18,6 @@ use lash_core_store::checkpoint_graph::{
 use lash_durable::domain::graph::{ExecRootWrite, RootOwner};
 use lash_durable::domain::pages::{
     CandidatePublication, LeaseFence, PageStore, RetirementBudget, RootLeaseRequest,
-    SemanticAdmission,
 };
 use lash_durable::domain::{CellId, DomainWrite, ExecKey, SnapshotRev};
 use lash_durable::{ActorKey, DurableError, Epoch, FormatSet, MailTx, NodeSpec};
@@ -137,13 +135,6 @@ async fn publish(
             CandidatePublication {
                 owner: lash_durable::domain::pages::CandidateOwner::ExecRootPut(exec.clone()),
                 manifest: Box::new(manifest),
-                admission: SemanticAdmission {
-                    root: summary.root,
-                    kernel: 1,
-                    page_format: 1,
-                    validator: "differential".to_owned(),
-                    commit: summary.commit,
-                },
             },
             lash_durable::CommitLabel::new("pages.publish"),
         )
@@ -241,7 +232,6 @@ async fn page_transcript(store: &dyn PageStore) -> Transcript {
         root == first.id,
         commit == first_commit
     ));
-    out.push(answer(&store.admission(first.id).await));
     out.push(answer(&store.candidate_state(&exec).await));
 
     let lease = store
@@ -316,7 +306,6 @@ async fn page_transcript(store: &dyn PageStore) -> Transcript {
             .map(|pages| pages.len()),
     ));
     out.push(format!("retired after release {}", drain(store).await));
-    out.push(answer(&store.admission(first.id).await));
     out.push(format!(
         "backlog {:?}",
         store

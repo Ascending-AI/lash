@@ -68751,6 +68751,7 @@
         "lash-internal-core-execution",
         "lash-internal-core-store",
         "lash-internal-durable",
+        "lash-internal-durable-test",
         "lash-internal-sansio",
         "lash-internal-vm-protocol",
         "lash-internal-vm-releases",

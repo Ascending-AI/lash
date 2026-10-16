@@ -1,14 +1,12 @@
 //! Persistent-heap pages (FIG-6191, S6): the neutral statements of root
-//! leases, the retirement frontier and semantic admissions.
+//! leases and the retirement frontier.
 //!
 //! A root lease (`root_leases`) and a retirement hold (`retirement_holds`)
 //! are rows of the root catalog: while one stands, nothing its root reaches
 //! is peeled. A retirement step's unfinished frontier
 //! (`retirement_frontier`) is the steps' own: no root of the catalog, and
-//! no reference a node must outlive. A semantic admission (`semantic_admissions`) records which
-//! validator certified a checkpoint root; it is no root owner and goes
-//! with its root. This file and `pages.rs` in each dialect's durable module
-//! issue their SQL.
+//! no reference a node must outlive. This file and `pages.rs` in each
+//! dialect's durable module issue their SQL.
 
 /// `root_leases`: an activation's lease on the exact committed root it
 /// reads on demand.
@@ -19,9 +17,6 @@ pub const HOLDS_TABLE: &str = "retirement_holds";
 
 /// `retirement_frontier`: what retirement steps have yet to peel.
 pub const FRONTIER_TABLE: &str = "retirement_frontier";
-
-/// `semantic_admissions`: a checkpoint root's validator, by root.
-pub const ADMISSIONS_TABLE: &str = "semantic_admissions";
 
 crate::statements! {
     /// Page statements both backends issue verbatim.
@@ -68,18 +63,5 @@ crate::statements! {
                  SELECT queued_at_ms FROM retirement_holds
                  UNION ALL SELECT queued_at_ms FROM retirement_frontier
              ) AS queued";
-
-        /// Record root `?1`'s semantic admission: kernel `?2`, page format
-        /// `?3`, validator `?4`, by commit `?5`. A later publication of the
-        /// same root records its own validator.
-        admission_put = "INSERT INTO semantic_admissions (root_ref, kernel, page_format, validator, commit_id)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT (root_ref) DO UPDATE SET kernel = excluded.kernel,
-                 page_format = excluded.page_format, validator = excluded.validator,
-                 commit_id = excluded.commit_id";
-
-        /// Root `?1`'s semantic admission.
-        admission_get = "SELECT kernel, page_format, validator, commit_id
-             FROM semantic_admissions WHERE root_ref = ?1";
     }
 }

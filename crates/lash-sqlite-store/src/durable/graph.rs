@@ -134,17 +134,6 @@ CREATE TABLE IF NOT EXISTS retirement_frontier (
 CREATE INDEX IF NOT EXISTS idx_retirement_frontier_queue
     ON retirement_frontier (queued_at_ms, node_ref);
 
--- A checkpoint root's semantic admission (FIG-6191, D-ADM): the validator
--- that certified the pages it changed, written with the root. Not a root
--- owner: it goes with its root.
-CREATE TABLE IF NOT EXISTS semantic_admissions (
-    root_ref TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,
-    kernel INTEGER NOT NULL,
-    page_format INTEGER NOT NULL,
-    validator TEXT NOT NULL,
-    commit_id BLOB NOT NULL
-        CONSTRAINT ck_semantic_admissions_commit_id CHECK (length(commit_id) = 32)
-);
 
 -- Every root of every source: a view of the owning columns, never a cache.
 CREATE VIEW IF NOT EXISTS graph_root_catalog AS
@@ -331,14 +320,6 @@ pub(super) fn encoding_of(stored: i64) -> Result<BlobEncoding, GraphRefusal> {
         1 => Ok(BlobEncoding::Graph),
         other => Err(corrupt("blob encoding", &other.to_string())),
     }
-}
-
-pub(super) fn stored_encoding(tx: &Connection, node: &NodeId) -> GraphAnswer<Option<BlobEncoding>> {
-    let row = tx
-        .prepare_cached(SQL.graph.blob_encoding.sql())?
-        .query_row([node.to_hex()], |row| row.get::<_, i64>(0))
-        .optional()?;
-    Ok(row.map(encoding_of).transpose())
 }
 
 /// `owner`'s current root, or none when its row is gone or holds none.

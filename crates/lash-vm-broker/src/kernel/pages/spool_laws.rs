@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use lash_core_store::checkpoint_graph::node::frame_direct;
@@ -26,9 +26,12 @@ use lash_kernel_state::paged::{PageBody, PageKind, PageSource};
 use lash_vm_protocol::page::{PageCapability, PageEnvelope, PageRefusal, PageReply, PageRequest};
 use lash_vm_protocol::{InfrastructureOutcome, ProtocolBounds};
 
+use lash_core_execution::runtime::SystemClock;
+
+use super::shared::renew_when_due;
 use super::{
     ActivationPages, CapabilityKey, CommittedPages, LeasedReads, LocalPages, PageExchange,
-    PageLimits, Resolution, SpoolRoot,
+    PageLimits, Resolution, SpoolRoot, cache,
 };
 
 /// A sequence leaf naming `children`, told apart by `label`.
@@ -122,7 +125,8 @@ fn activation(
         CapabilityKey::fresh(),
         3,
         Box::new(root.spool(StageLeaseId(11)).expect("spool")),
-        Instant::now() + Duration::from_secs(60),
+        Arc::new(SystemClock),
+        Duration::from_secs(60),
         PageLimits::within(ProtocolBounds::standard().decode),
     )
 }
@@ -475,10 +479,10 @@ async fn a_reused_committed_child_resolves_after_a_spill() {
 
 /// D-SPOOL, and the lost-receipt crash cut: a publication whose outcome
 /// is unknown keeps its spool. Read against the execution row, a row that
-/// still holds the base retries the exact candidate (the same digest
-/// stream), the candidate's own commit settles and deletes it, and another
-/// root supersedes it. The activation's staged pages stay readable until
-/// then, and a committed candidate's pages read from the store after.
+/// holds the base or another root is not committed and the candidate
+/// stands; the candidate's own commit settles and deletes it. The
+/// activation's staged pages stay readable until then, and a committed
+/// candidate's pages read from the store after.
 #[tokio::test]
 async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
     let dir = tempfile::tempdir().expect("dir");
@@ -505,13 +509,9 @@ async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
 
     let commit = CommitId([4; 32]);
     let wrapper = page("exec root", &[top.id]).id;
-    let mut manifest = pages
+    pages
         .candidate(NodeId(top_cap.page), Some(base.id), wrapper, commit)
         .expect("candidate");
-    let published: Vec<NodeId> = drain(manifest.as_mut(), None, 8)
-        .iter()
-        .map(id_of)
-        .collect();
     // The receipt is lost. Worker disconnection settles nothing: the spool
     // still holds the candidate, and its pages still read.
     let held = pages.usage();
@@ -524,34 +524,27 @@ async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
             .await,
         PageReply::Read { .. }
     ));
-    // The row still holds the base: retry the exact candidate.
-    let Resolution::Retry(mut retry) = pages
-        .resolve(Some((base.id, CommitId([1; 32]))))
-        .expect("resolves")
-    else {
-        panic!("the base stands, so the candidate is retried")
-    };
-    assert_eq!(retry.summary(), manifest.summary());
-    let again: Vec<NodeId> = drain(retry.as_mut(), None, 1).iter().map(id_of).collect();
-    assert_eq!(again, published);
-    assert_eq!(pages.usage(), held);
-    // A row that names the commit under another root is not this
-    // candidate's publication (FIG-6197 F1).
+    // A row that still holds the base, or names the commit under another
+    // root (FIG-6197 F1), is not this candidate's publication; its spool
+    // stands.
+    assert!(matches!(
+        pages
+            .resolve(Some((base.id, CommitId([1; 32]))))
+            .expect("resolves"),
+        Resolution::NotCommitted
+    ));
     assert!(matches!(
         pages.resolve(Some((top.id, commit))).expect("resolves"),
-        Resolution::Superseded
+        Resolution::NotCommitted
     ));
-    // The retry's receipt names the candidate's root and commit: settled,
+    assert_eq!(pages.usage(), held);
+    // The receipt naming the candidate's root and commit: settled,
     // deleted.
     assert!(matches!(
         pages.resolve(Some((wrapper, commit))).expect("resolves"),
         Resolution::Committed
     ));
     assert_eq!((pages.usage().pages, pages.usage().bytes), (0, 0));
-    assert!(
-        retry.entries(None, 8).is_err(),
-        "a settled manifest is gone"
-    );
     // The committed pages are the store's now, and read under the lease.
     store.commit(&fresh);
     store.commit(&top);
@@ -573,7 +566,8 @@ async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
         CapabilityKey::fresh(),
         5,
         Box::new(root.spool(StageLeaseId(12)).expect("spool")),
-        Instant::now() + Duration::from_secs(60),
+        Arc::new(SystemClock),
+        Duration::from_secs(60),
         PageLimits::within(ProtocolBounds::standard().decode),
     );
     let lone = page("lone", &[]);
@@ -588,7 +582,7 @@ async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
         .expect("candidate");
     assert!(matches!(
         loser.resolve(Some((wrapper, commit))).expect("resolves"),
-        Resolution::Superseded
+        Resolution::NotCommitted
     ));
     assert_eq!(
         loser.usage().pages,
@@ -661,6 +655,215 @@ async fn a_quota_failure_is_a_host_outcome() {
         local.read(&[unknown]).map(|answers| answers.len()),
         Err(HeapFault::Missing { page: unknown.id })
     );
+}
+
+/// The committed pages behind a root lease that lives on `clock`: the
+/// lease expires `ttl` after its last renewal, `renew_root_lease` succeeds
+/// only before then (and counts itself), and `read_pages` refuses an
+/// expired lease.
+struct Expiring {
+    committed: Committed,
+    clock: Arc<lash_durable_test::SimClock>,
+    ttl: Duration,
+    expires_at: std::sync::Mutex<Instant>,
+    renewals: AtomicUsize,
+    /// Signalled on every renewal.
+    renewed: tokio::sync::Notify,
+}
+
+impl Expiring {
+    /// A store over `clock` whose lease expires `ttl` after its last
+    /// renewal, `now` from when it is built.
+    fn new(clock: &Arc<lash_durable_test::SimClock>, ttl: Duration) -> Self {
+        use lash_core_execution::runtime::Clock;
+        Self {
+            committed: Committed::default(),
+            expires_at: std::sync::Mutex::new(clock.now() + ttl),
+            clock: Arc::clone(clock),
+            ttl,
+            renewals: AtomicUsize::new(0),
+            renewed: tokio::sync::Notify::new(),
+        }
+    }
+
+    fn commit(&self, node: &EncodedNode) {
+        self.committed.commit(node);
+    }
+
+    fn renewals(&self) -> usize {
+        self.renewals.load(Ordering::SeqCst)
+    }
+
+    /// Returns once the store has counted `count` renewals.
+    async fn renewed(&self, count: usize) {
+        loop {
+            let renewed = self.renewed.notified();
+            if self.renewals() >= count {
+                return;
+            }
+            renewed.await;
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl LeasedReads for Expiring {
+    async fn read_pages(
+        &self,
+        lease: &RootLease,
+        pages: &[NodeId],
+    ) -> Result<Vec<StoredPage>, DurableError> {
+        use lash_core_execution::runtime::Clock;
+        if self.clock.now() >= *self.expires_at.lock().expect("expiry") {
+            return Err(DurableError::Graph(GraphRefusal::LeaseLost));
+        }
+        self.committed.read_pages(lease, pages).await
+    }
+
+    async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError> {
+        use lash_core_execution::runtime::Clock;
+        let now = self.clock.now();
+        let mut expires_at = self.expires_at.lock().expect("expiry");
+        if now >= *expires_at {
+            return Err(DurableError::Graph(GraphRefusal::LeaseLost));
+        }
+        *expires_at = now + self.ttl;
+        self.renewals.fetch_add(1, Ordering::SeqCst);
+        self.renewed.notify_waiters();
+        Ok(lease.clone())
+    }
+}
+
+/// D-LEASE: an activation's lease is checked on every exchange, not only
+/// when a read misses the cache: a warm read after the lease expired is
+/// refused exactly like a cold one. The activation renews its lease while
+/// it is live; after it lapses the store decides, and the cached bytes of
+/// a committed page answer nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_warm_cache_read_after_the_lease_expired_is_refused_like_a_cold_one() {
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let clock = lash_durable_test::SimClock::new();
+    let ttl = Duration::from_secs(3);
+    let store = Arc::new(Expiring::new(&clock, ttl));
+    let base = page("base", &[]);
+    store.commit(&base);
+    let build = |stage: u64| {
+        ActivationPages::new(
+            Arc::clone(&store),
+            Some(lease(base.id)),
+            ttl / 3,
+            CapabilityKey::fresh(),
+            stage,
+            Box::new(root.spool(StageLeaseId(stage)).expect("spool")),
+            clock.clone(),
+            Duration::from_secs(60),
+            PageLimits::within(ProtocolBounds::standard().decode),
+        )
+    };
+    let mut warm = build(21).caching(cache::PageCache::new(1 << 20));
+    let mut cold = build(22);
+    // The root reads once through the cached activation, which keeps its
+    // bytes for the next read.
+    let capability = warm.issue(base.id);
+    let PageReply::Read { .. } = warm
+        .serve(PageRequest::Read {
+            pages: vec![capability],
+        })
+        .await
+    else {
+        panic!("the root reads")
+    };
+    clock.advance_by(2 * ttl.as_millis() as u64).await;
+    let capability = warm.issue(base.id);
+    let warmed = warm
+        .serve(PageRequest::Read {
+            pages: vec![capability],
+        })
+        .await;
+    let capability = cold.issue(base.id);
+    let read = cold
+        .serve(PageRequest::Read {
+            pages: vec![capability],
+        })
+        .await;
+    assert_eq!(warmed, read);
+    assert_eq!(warmed, PageReply::Refused(PageRefusal::LeaseLost));
+    assert_eq!(warm.refusal(), Some(&PageRefusal::LeaseLost));
+}
+
+/// D-LEASE: an activation parked on a long tool keeps its lease: the
+/// schedule the held activation arms renews it at a third of its ttl, so a
+/// tool twice the ttl does not lose it and a read after it still answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_held_activation_renews_its_lease_through_a_tool_twice_its_ttl() {
+    use lash_core_execution::runtime::Clock;
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let clock = lash_durable_test::SimClock::new();
+    let ttl = Duration::from_secs(3);
+    let store = Arc::new(Expiring::new(&clock, ttl));
+    let base = page("base", &[]);
+    store.commit(&base);
+    let pages = ActivationPages::new(
+        Arc::clone(&store),
+        Some(lease(base.id)),
+        ttl / 3,
+        CapabilityKey::fresh(),
+        23,
+        Box::new(root.spool(StageLeaseId(23)).expect("spool")),
+        clock.clone(),
+        Duration::from_secs(60),
+        PageLimits::within(ProtocolBounds::standard().decode),
+    );
+    let pages = Arc::new(tokio::sync::Mutex::new(pages));
+    let held = tokio::spawn({
+        let pages = Arc::clone(&pages);
+        let clock = Arc::clone(&clock);
+        async move {
+            let mut tool = std::pin::pin!(clock.sleep(2 * ttl));
+            loop {
+                tokio::select! {
+                    biased;
+                    () = &mut tool => break,
+                    () = renew_when_due(&pages) => {}
+                }
+            }
+        }
+    });
+    // Walk the clock to each renewal due and wait for the store to count
+    // that renewal before moving on, so the tool's own due never overtakes
+    // a renewal still in flight. The tool's sleep is registered first: it
+    // measures its 6 s from the start.
+    let renew_every = (ttl / 3).as_millis() as u64;
+    let tool_due = 2 * ttl.as_millis() as u64;
+    clock.wait_for_sleep(tool_due).await;
+    for (count, due) in (renew_every..tool_due)
+        .step_by(renew_every as usize)
+        .enumerate()
+    {
+        clock.advance_to(due).await;
+        tokio::time::timeout(Duration::from_secs(10), store.renewed(count + 1))
+            .await
+            .unwrap_or_else(|_| panic!("the renewal due at {due} ms never ran"));
+    }
+    clock.advance_to(tool_due).await;
+    held.await.expect("the held task ran");
+    // A 1 s renewal schedule through a 6 s tool: renewals at each second's
+    // tick before the tool's own.
+    assert_eq!(store.renewals(), 5, "the held activation's renewals");
+    assert!(pages.lock().await.refusal().is_none());
+    let capability = pages.lock().await.issue(base.id);
+    let PageReply::Read { .. } = pages
+        .lock()
+        .await
+        .serve(PageRequest::Read {
+            pages: vec![capability],
+        })
+        .await
+    else {
+        panic!("the root still reads")
+    };
 }
 
 /// The parent crash cuts: after a spill, and after a candidate is sealed.

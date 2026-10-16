@@ -122,9 +122,12 @@ open that two lanes would otherwise settle differently.
   owner releases it or a retirement step removes it. Reads are transactional
   and check the lease inside the same transaction that returns the bytes. A
   candidate's commit protects what it reuses with its own key-share locks,
-  so lease expiry needs no grace period. The parent renews a live
-  activation's lease at a third of its ttl (start value 60 s). Expiry fences
-  the activation.
+  so lease expiry needs no grace period. The parent's authority guard
+  checks the lease on every exchange, independent of residency, and renews
+  it at a third of its ttl (start value 60 s); a held activation renews on
+  that schedule while it waits. Expiry fences the activation. The page cache
+  holds immutable bytes only. The activation span bounds host work in
+  exchanges, not wall time.
 - **D-SPOOL.** A spool lives exactly as long as its stage lease: the
   activation plus the resolution of its last publication. On an
   authoritative commit it is settled and deleted. On an authoritative
@@ -151,15 +154,8 @@ open that two lanes would otherwise settle differently.
   nothing after its advisory key, so it is never part of a lock cycle and
   never stops publication. Hosts apply backpressure from
   `retirement_backlog` (holds and frontier) and staging usage.
-- **D-ADM.** One semantic admission is recorded per published root, keyed by
-  the root, in the publishing transaction:
-  `(root, kernel, page_format, validator, commit)`. The validator string
-  names the kernel version, the page format and the digest of the validating
-  build's page schema. Unchanged pages inherit admission. Changed pages are
-  validated by the producing worker before sealing. A root admitted under
-  another validator, or a foreign image, enters the trusted population only
-  after the full validation pass. It
-  never inherits an incompatible attestation.
+- **D-ADM.** No semantic admission is recorded: every stored format resets
+  at the 1.0 release, and pages are validated when read.
 - **D-WAITS (amended): table root digest; no XOR summary.** The waits table
   is canonical; its root digest is its identity. There is no separate summary.
 - **S1/S4 (amended): heap-header page; CheckpointRoot references it.** A
@@ -553,7 +549,7 @@ Laws: unit, `//crates/lash-vm-broker:lash-vm-broker__unit_test`, in
 
 Declaration: `crates/lash-durable/src/domain/pages.rs`, with `PageStore`,
 `RootLeaseId`, `RootLeaseRequest`, `RootLease`, `StoredPage`,
-`SemanticAdmission`, `CandidatePublication`, `CandidateReceipt`,
+`CandidatePublication`, `CandidateReceipt`,
 `RetirementBudget`, `RetirementProgress` and `RetirementBacklog`. The owning
 crate is `lash-durable`, beside `graph_commit.rs`. hp-publish implements it
 for the SQLite and PostgreSQL durable stores.
@@ -566,7 +562,6 @@ for the SQLite and PostgreSQL durable stores.
     async fn read_pages(&self, lease: &RootLease, pages: &[NodeId]) -> Result<Vec<StoredPage>, DurableError>;
     async fn commit_candidate(&self, tx: ActorTx, candidate: CandidatePublication, label: CommitLabel)
         -> Result<CandidateReceipt, DurableError>;
-    async fn admission(&self, root: NodeId) -> Result<Option<SemanticAdmission>, DurableError>;
     async fn candidate_state(&self, exec: &ExecKey) -> Result<Option<(NodeId, CommitId)>, DurableError>;
     async fn retire_step(&self, budget: RetirementBudget) -> Result<RetirementProgress, DurableError>;
     async fn retirement_backlog(&self) -> Result<RetirementBacklog, DurableError>;
@@ -583,7 +578,7 @@ existing `LockStep` order:
    in batches (canonical bytes are compared on conflict, as today).
 3. Edges are inserted after every node row exists.
 4. The domain writes (execution root, effect admissions, waits, host and
-   session rows) and the `SemanticAdmission` are written.
+   session rows) are written.
 5. A replaced root moves to a retirement hold (D-RET).
 
 The store reuses `check_graph`'s direct-reference rule: it validates each
@@ -593,7 +588,7 @@ the receipt confirms the commit.
 
 New catalog sources are `RootSource::ReadLease` and
 `RootSource::RetirementHold`. New tables (`root_leases`,
-`retirement_holds`, `retirement_frontier`, `semantic_admissions`) go
+`retirement_holds`, `retirement_frontier`) go
 straight into both 1.0 baselines. Normal activation stops using
 `DurableReads::hydrate` for heap roots; hydrate stays the generic reader of
 host roots (§7); the integrator deletes it.
@@ -611,7 +606,7 @@ Laws:
   `crates/lash-postgres-store/src/postgres/graph_store_tests.rs`
   (PostgreSQL, service gate `pg-store`):
   - `a_candidate_installs_only_new_nodes_and_direct_references`
-  - `publication_is_atomic_with_admissions_and_semantic_admission`
+  - `publication_is_atomic_with_its_effect_admissions`
   - `a_leased_root_survives_concurrent_retirement`
   - `an_expired_lease_reads_nothing`
   - `retirement_advances_in_bounded_steps_and_reclaims_everything_unowned`
@@ -671,8 +666,7 @@ Invariants:
 - Eviction and residency never change a verdict.
 - A refinement that runs out of host work, or faults, is `CensusFault`
   (infrastructure), never `Bound::Memory`.
-- An admitted certificate is trusted inductively. One from a foreign image
-  is validated in full before it can grant anything (D-ADM).
+- An admitted certificate is trusted inductively.
 
 Laws:
 
@@ -771,7 +765,7 @@ by that lane. Seam declaration files (§3) are read-only for every lane.
 | hp-heap | `lash-kernel-doc/src/{value,native,lib,graph_codec,graph_codec_forms}.rs`; new `lash-kernel-state/src/paged/{tree,directory,payload,codec,heap_impl,laws/heap,laws/root}.rs`; `lash-kernel-vm/src/{heap,interface,data,costs,functions,compile*,lib}.rs`; `lash-kernel-vm/src/machine/{mod,exec,ops,stream,actions,steps,observing}.rs`; new `lash-kernel-vm/src/machine/paged.rs`; `lash-kernel-vm/src/laws/{paged,stream,forms,bounds,tasks,embedder,fast,observe,layout}.rs`; `lash-kernel-lib/**`; `lash-ext-*/**`; `lash-vm-library/**`; the `Value` uses in `lash-kernel-exec`, `lash-kernel-check`, `lash-dialect-typescript` and `lash-dialect-python`; `lash-kernel-conformance` machine adapters | S1, S2, S4 encodings, `CensusGraph` | S3 (as `PageSource` test double), S7 (`AllocationCensus`), S8 (`FamilyBase`, `instantiate`) |
 | hp-memory | new `lash-kernel-state/src/paged/census_impl/**` (U ledger, reservation, tracer, sweeper, mark state with spill, certificate validation); new `lash-kernel-state/src/paged/laws/census.rs`; new `lash-kernel-vm/src/laws/census.rs` | S7 `AllocationCensus` | S1 (`CensusGraph`, `TransientRoots`) |
 | hp-paging | `lash-vm-worker/src/{host,worker,entry,service}.rs`; new `lash-vm-worker/src/page_laws.rs`; `lash-vm-protocol/src/{message,codec,bounds,outcome}.rs` (variants, bounds, refusals); `lash-vm-client/src/{machine,pool,wire,ipc,config}.rs`; new `lash-vm-broker/src/kernel/pages/**` (page service, capability MAC, spool, `spool_laws.rs`); `lash-core-store/src/checkpoint_graph/node.rs` (a public framing function for direct semantic kinds) | S3, S5 `StageSpool` | S6 (`acquire_root_lease`, `read_pages`) |
-| hp-publish | `lash-durable/src/domain/{graph,graph_commit,mod}.rs`; `lash-durable/src/{tx,port}.rs` (only if `commit_candidate` needs `ActorTx` accessors); new `lash-durable/src/laws/pages.rs`; `lash-core-store/src/checkpoint_graph/{registry,roots,bodies,refusal,commit}.rs`; `lash-sqlite-store/src/durable/**`, `lash-sqlite-store/src/schema.rs`, `lash-sqlite-store/src/graph_store_tests.rs`; `lash-postgres-store/src/postgres/durable/**`, its schema, `migrate.rs`, `schema_shape.rs`, `schema-shape.txt`, `graph_store_tests.rs`; `lash-sim/tests/cross_backend_store_differential/**`; `lash-vm-broker/src/kernel/store.rs` (lease acquisition, `commit_candidate`, `pin_release` from the root header) | S6, D-RET, D-ADM | S5 (`CandidateManifest`) |
+| hp-publish | `lash-durable/src/domain/{graph,graph_commit,mod}.rs`; `lash-durable/src/{tx,port}.rs` (only if `commit_candidate` needs `ActorTx` accessors); new `lash-durable/src/laws/pages.rs`; `lash-core-store/src/checkpoint_graph/{registry,roots,bodies,refusal,commit}.rs`; `lash-sqlite-store/src/durable/**`, `lash-sqlite-store/src/schema.rs`, `lash-sqlite-store/src/graph_store_tests.rs`; `lash-postgres-store/src/postgres/durable/**`, its schema, `migrate.rs`, `schema_shape.rs`, `schema-shape.txt`, `graph_store_tests.rs`; `lash-sim/tests/cross_backend_store_differential/**`; `lash-vm-broker/src/kernel/store.rs` (lease acquisition, `commit_candidate`, `pin_release` from the root header) | S6, D-RET | S5 (`CandidateManifest`) |
 | hp-life | new `lash-kernel-state/src/paged/family_impl/**`; `lash-kernel-vm/src/machine/session.rs`; new `lash-kernel-vm/src/laws/lifecycle.rs`; `lash-protocol-rlm/src/executor/session.rs`, `session/graph.rs`; `lash-kernel-dialect/src/saved.rs`, `saved/graph.rs`, new `saved/laws.rs` | S8 | S1 |
 | hp-integrate | `lash-vm-broker/src/kernel/{state,run,graph,ledger,value}.rs`; `lash-vm-runtime/src/process/**`, `formats.rs`; `lash-core-execution/src/runtime/actor/process/state_graph.rs`; `lash-kernel-migrate/**`; `lash-kernel-conformance/src/{migration,smith}/**`; `lash-vm-protocol/src/graph_state*.rs`; `lash-durable/src/domain/mod.rs` (`DurableReads::hydrate`) and every implementation; `lash-durable-test/**` fixtures and crash laws; `lash-perf/**`; `examples/**`;  `docs/kernel/**`, `docs/adr/**`; facade and schema exports | end-to-end wiring of activation (lease → page service → seal → candidate → commit) | all |
 
@@ -872,7 +866,7 @@ The integrator's end state, as ADR 0145 states it:
   Heap pages are read only under a root lease through the page exchange.
 - **One publication identity (FIG-6197 F1).** `check_candidate` relates the
   owner write (`CandidateOwner::ExecRootPut` or `RunFactAppend`), the
-  manifest summary's root and base, the semantic admission and the commit;
+  manifest summary's root and base, and the commit;
   `candidate_state` and resolution use the same pair. A mismatch is
   `GraphRefusal::PublicationMismatch`.
 - **Spool child provenance (FIG-6197 F2).** A staged page's child that was

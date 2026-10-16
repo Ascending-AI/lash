@@ -1,7 +1,7 @@
 //! Persistent-heap pages on SQLite (FIG-6191, S6): root leases, demand
-//! page reads, a candidate's streamed install beside its owner commit, the
-//! semantic admission it publishes, and the bounded retirement steps that
-//! peel retired roots off the publication path.
+//! page reads, a candidate's streamed install beside its owner commit, and
+//! the bounded retirement steps that peel retired roots off the
+//! publication path.
 //!
 //! # Locks
 //!
@@ -34,8 +34,7 @@ use lash_durable::domain::graph_commit::{
 };
 use lash_durable::domain::pages::{
     CandidatePublication, CandidateReceipt, LeaseFence, PageStore, RetirementBacklog,
-    RetirementBudget, RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest,
-    SemanticAdmission, StoredPage,
+    RetirementBudget, RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, StoredPage,
 };
 use lash_durable::domain::{DomainWrite, ExecKey};
 use lash_durable::{ActorTx, CommitLabel, DurableError, DurableInstant, DurableReads, Fenced};
@@ -162,30 +161,6 @@ pub(super) fn hold(
     Ok(held)
 }
 
-/// Records `admission` with its root, in the publishing transaction.
-pub(super) fn admit(tx: &Connection, admission: &SemanticAdmission) -> GraphAnswer<()> {
-    match graph::stored_encoding(tx, &admission.root)? {
-        Ok(Some(BlobEncoding::Graph)) => {}
-        Ok(Some(BlobEncoding::Opaque)) => {
-            return Ok(Err(GraphRefusal::EncodingConflict(admission.root)));
-        }
-        Ok(None) => return Ok(Err(GraphRefusal::MissingNode(admission.root))),
-        Err(refusal) => return Ok(Err(refusal)),
-    }
-    cached_execute(
-        tx,
-        SQL.pages.admission_put.sql(),
-        rusqlite::params![
-            admission.root.to_hex(),
-            i64::from(admission.kernel),
-            i64::from(admission.page_format),
-            admission.validator,
-            &admission.commit.0[..]
-        ],
-    )?;
-    Ok(Ok(()))
-}
-
 /// Installs `candidate` with the owner commit's own `checked` graph, in the
 /// caller's fenced transaction: every node the stream names is checked
 /// present and every node it supplies is compared or inserted, in global
@@ -207,13 +182,7 @@ pub(super) fn install_candidate(
         };
     }
     let summary = candidate.manifest.summary();
-    answer!(check_candidate(
-        writes,
-        checked,
-        &candidate.owner,
-        &summary,
-        &candidate.admission
-    ));
+    answer!(check_candidate(writes, checked, &candidate.owner, &summary));
     let mut install =
         CandidateInstall::new(checked, &mut *candidate.manifest, CandidateBuffers::DEFAULT);
     let mut installed = InstalledGraphMeasurement::default();
@@ -705,41 +674,6 @@ impl PageStore for SqliteDurableStore {
             root: summary.root,
             commit: summary.commit,
         })
-    }
-
-    async fn admission(&self, root: NodeId) -> Result<Option<SemanticAdmission>, DurableError> {
-        self.read(move |tx| -> Answer<Option<SemanticAdmission>> {
-            let row = tx
-                .prepare_cached(SQL.pages.admission_get.sql())?
-                .query_row([root.to_hex()], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Vec<u8>>(3)?,
-                    ))
-                })
-                .optional()?;
-            let Some((kernel, page_format, validator, commit_id)) = row else {
-                return Ok(Ok(None));
-            };
-            let decoded = (
-                u32::try_from(kernel),
-                u32::try_from(page_format),
-                <[u8; 32]>::try_from(commit_id.as_slice()),
-            );
-            Ok(match decoded {
-                (Ok(kernel), Ok(page_format), Ok(commit)) => Ok(Some(SemanticAdmission {
-                    root,
-                    kernel,
-                    page_format,
-                    validator,
-                    commit: CommitId(commit),
-                })),
-                _ => Err(super::corrupt("semantic admission", &root.to_hex())),
-            })
-        })
-        .await
     }
 
     async fn candidate_state(

@@ -1,5 +1,5 @@
 //! The persistent-heap page store's laws (FIG-6191, S6; D-LEASE, D-RET,
-//! D-ADM, D-SPOOL), written once and run by each dialect over its own store
+//! D-SPOOL), written once and run by each dialect over its own store
 //! through a [`PageTier`].
 //!
 //! Candidates are synthetic: a [`ScriptedManifest`] streams pages built here
@@ -26,7 +26,7 @@ use crate::domain::graph::{EffectAdmissionWrite, EffectKey, ExecRootWrite, RootO
 use crate::domain::graph_commit::CandidateBuffers;
 use crate::domain::pages::{
     CandidateOwner, CandidatePublication, CandidateReceipt, PageStore, RetirementBudget,
-    RootLeaseRequest, SemanticAdmission,
+    RootLeaseRequest,
 };
 use crate::domain::{CellId, ExecKey, SnapshotRev};
 use crate::{ActorKey, DomainWrite, DurableError, Epoch, NodeLease};
@@ -312,12 +312,9 @@ struct Publication<'a> {
     base: Option<(u64, NodeId)>,
     /// Effects it admits.
     effects: &'a [&'a str],
-    validator: &'a str,
     /// The commit identity its execution row records, when not the
     /// manifest's.
     row_commit: Option<CommitId>,
-    /// The root its semantic admission certifies, when not the manifest's.
-    admitted: Option<NodeId>,
     /// The page its execution root wraps, when not the manifest's root.
     wraps: Option<NodeId>,
 }
@@ -361,20 +358,12 @@ async fn publish_in(
         root: root.id,
         commit_id: publication.row_commit.unwrap_or(summary.commit),
     }));
-    let admission = SemanticAdmission {
-        root: publication.admitted.unwrap_or(summary.root),
-        kernel: 1,
-        page_format: 1,
-        validator: publication.validator.to_owned(),
-        commit: summary.commit,
-    };
     store
         .commit_candidate(
             tx,
             CandidatePublication {
                 owner: CandidateOwner::ExecRootPut(publication.exec.clone()),
                 manifest,
-                admission,
             },
             LABEL,
         )
@@ -402,9 +391,7 @@ fn simple(exec: &ExecKey, base: Option<(u64, NodeId)>) -> Publication<'_> {
         exec,
         base,
         effects: &[],
-        validator: "law-validator",
         row_commit: None,
-        admitted: None,
         wraps: None,
     }
 }
@@ -625,16 +612,13 @@ pub async fn a_candidate_installs_only_new_nodes_and_direct_references(
     Ok(())
 }
 
-/// S6, D-ADM: the execution root, the effect admissions and the semantic
-/// admission publish in one transaction or not at all, and an admission is
-/// the validator of its own root only.
+/// S6: the execution root and the effect admissions publish in one
+/// transaction or not at all.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn publication_is_atomic_with_admissions_and_semantic_admission(
-    tier: &dyn PageTier,
-) -> LawOutcome {
+pub async fn publication_is_atomic_with_its_effect_admissions(tier: &dyn PageTier) -> LawOutcome {
     let owner = owned(tier, "pages-atomic").await?;
     let exec = owner.exec("atomic");
     let mut fresh = BTreeMap::new();
@@ -656,24 +640,12 @@ pub async fn publication_is_atomic_with_admissions_and_semantic_admission(
         &owner,
         &Publication {
             effects: &["effect-a", "effect-b"],
-            validator: "validator-1",
             ..simple(&exec, None)
         },
         Box::new(first.manifest(None, commit)),
     )
     .await?;
     let first_exec = exec_root(first_root).id;
-    ensure!(
-        store.admission(first_root).await?
-            == Some(SemanticAdmission {
-                root: first_root,
-                kernel: 1,
-                page_format: 1,
-                validator: "validator-1".into(),
-                commit,
-            }),
-        "the root's semantic admission is not the one published"
-    );
     let roots: BTreeSet<NodeId> = tier.catalog().await.into_iter().collect();
     for effect in ["effect-a", "effect-b"] {
         ensure!(
@@ -703,7 +675,6 @@ pub async fn publication_is_atomic_with_admissions_and_semantic_admission(
     let roots = tier.catalog().await;
     let with_effect = Publication {
         effects: &["effect-c"],
-        validator: "validator-2",
         ..simple(&exec, Some((1, first_exec)))
     };
     let cut = publish(
@@ -722,10 +693,6 @@ pub async fn publication_is_atomic_with_admissions_and_semantic_admission(
         tier.stored().await == blobs && tier.catalog().await == roots,
         "a cut publication left rows behind"
     );
-    ensure!(
-        store.admission(second_root).await?.is_none(),
-        "a cut publication left its semantic admission"
-    );
     // A candidate whose commit identity the execution row would not record
     // is refused before anything is written.
     let mismatched = publish(
@@ -743,20 +710,13 @@ pub async fn publication_is_atomic_with_admissions_and_semantic_admission(
         "a candidate under another commit identity was not refused"
     );
     // One publication identity (FIG-6197 F1): a manifest built against the
-    // semantic root rather than the execution root the row holds, an
-    // admission certifying another root, and an execution root wrapping
-    // another page each disagree with it, and are refused alike.
+    // semantic root rather than the execution root the row holds, and an
+    // execution root wrapping another page each disagree with it, and are
+    // refused alike.
     let disagreeing = [
         (
             simple(&exec, Some((1, first_exec))),
             second.manifest(Some(first_root), second_commit),
-        ),
-        (
-            Publication {
-                admitted: Some(first_root),
-                ..simple(&exec, Some((1, first_exec)))
-            },
-            second.manifest(Some(first_exec), second_commit),
         ),
         (
             Publication {
@@ -784,22 +744,6 @@ pub async fn publication_is_atomic_with_admissions_and_semantic_admission(
         Box::new(second.manifest(Some(exec_root(first_root).id), second_commit)),
     )
     .await?;
-    let second_admission = store.admission(second_root).await?;
-    ensure!(
-        second_admission
-            .as_ref()
-            .map(|admission| admission.validator.as_str())
-            == Some("validator-2"),
-        "the second root's admission is {second_admission:?}"
-    );
-    let first_admission = store.admission(first_root).await?;
-    ensure!(
-        first_admission
-            .as_ref()
-            .map(|admission| admission.validator.as_str())
-            == Some("validator-1"),
-        "the first root's admission changed to {first_admission:?}"
-    );
     ensure!(
         tier.catalog()
             .await
