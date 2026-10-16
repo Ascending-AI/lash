@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use lash_core::store::StoreTestSupport as _;
@@ -285,7 +286,8 @@ impl Meter {
         } = &self.probe
         {
             let work = if let Some(observer) = &self.traffic {
-                let (work, physical) = observer.cut(|| self.witness.snapshot());
+                let (work, physical) =
+                    sqlite_cut(|| observer.cut(|| self.witness.snapshot())).await;
                 if let Some(traffic) = &mut traffic {
                     traffic.sqlite = Some(physical);
                 }
@@ -340,5 +342,114 @@ impl Meter {
             reading.insert("worker_cpu_ms", pool.measured_cpu().as_secs_f64() * 1_000.0);
         }
         (reading, shapes, traffic)
+    }
+}
+
+/// A session outcome can race the tail of an observed connection operation.
+/// Retake the entire locked counter/physical pair after yielding to its owner.
+/// Permanent loss or failure to reach idle within one second keeps the original
+/// incomplete receipt, so interval admission still refuses it.
+async fn sqlite_cut<T>(
+    mut cut: impl FnMut() -> (T, lash_sqlite_store::write_observer::Receipt),
+) -> (T, lash_sqlite_store::write_observer::Receipt) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let (counters, receipt) = cut();
+        if receipt.active_operations == 0
+            || receipt.overflow_bytes != 0
+            || receipt.unknown_bytes != 0
+            || receipt.failed_writes != 0
+            || tokio::time::Instant::now() >= deadline
+        {
+            return (counters, receipt);
+        }
+        tokio::time::sleep_until(
+            (tokio::time::Instant::now() + Duration::from_millis(1)).min(deadline),
+        )
+        .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_sqlite_store::write_observer::{Receipt, WriteKey, WriteKind, WriteRow};
+
+    /// TRAFFIC-CONSERVATION (FIG-6540): a physical write can precede its
+    /// CACHE_WRITE accounting. Retake both counters at the idle boundary.
+    #[tokio::test(start_paused = true)]
+    async fn traffic_conservation_waits_for_an_idle_sqlite_cut() {
+        let before = Receipt {
+            epoch: 1,
+            complete: true,
+            ..Default::default()
+        };
+        let partial = Receipt {
+            active_operations: 1,
+            complete: false,
+            write_calls: 1,
+            total_bytes: 4096,
+            rows: vec![WriteRow {
+                key: WriteKey {
+                    database: "sample.db".into(),
+                    page: Some(2),
+                    kind: WriteKind::WalBody,
+                    operation: "sqlite.connection".into(),
+                    origin: "sample.update".into(),
+                },
+                bytes: 4096,
+            }],
+            ..before.clone()
+        };
+        let mut settled = partial.clone();
+        settled.active_operations = 0;
+        settled.complete = true;
+        settled.write_calls = 2;
+        settled.total_bytes = 8192;
+        settled.rows[0].bytes = 8192;
+        let mut cuts = [(0, partial), (8192, settled)].into_iter();
+        let (store_bytes, receipt) = sqlite_cut(|| cuts.next().unwrap()).await;
+        assert!(receipt.complete, "the cut split a connection operation");
+        let interval = receipt.difference(&before).unwrap();
+        assert_eq!(interval.bytes(WriteKind::WalBody), 8192);
+        assert!(interval.conserves(store_bytes));
+    }
+
+    /// TRAFFIC-CONSERVATION: retries cannot hang or repair an incomplete
+    /// receipt by clearing evidence of active work or lost attribution.
+    #[tokio::test(start_paused = true)]
+    async fn traffic_conservation_bounds_sqlite_cut_wait_and_preserves_refusals() {
+        let before = Receipt {
+            epoch: 1,
+            complete: true,
+            ..Default::default()
+        };
+        let active = Receipt {
+            complete: false,
+            active_operations: 1,
+            ..before.clone()
+        };
+        let (_, receipt) =
+            tokio::time::timeout(Duration::from_secs(2), sqlite_cut(|| (0, active.clone())))
+                .await
+                .expect("boundary acquisition must stop even if the operation never settles");
+        assert_eq!(receipt.active_operations, 1);
+        assert!(!receipt.complete);
+        assert!(receipt.difference(&before).is_none());
+        for (overflow_bytes, unknown_bytes, failed_writes) in [(1, 0, 0), (0, 1, 0), (0, 0, 1)] {
+            let lost = Receipt {
+                overflow_bytes,
+                unknown_bytes,
+                failed_writes,
+                ..active.clone()
+            };
+            let mut cuts = [lost].into_iter();
+            let (_, receipt) =
+                sqlite_cut(|| (0, cuts.next().expect("loss cannot be retried"))).await;
+            assert_eq!(receipt.overflow_bytes, overflow_bytes);
+            assert_eq!(receipt.unknown_bytes, unknown_bytes);
+            assert_eq!(receipt.failed_writes, failed_writes);
+            assert!(receipt.difference(&before).is_none());
+        }
     }
 }
