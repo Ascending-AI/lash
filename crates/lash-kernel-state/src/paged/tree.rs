@@ -738,7 +738,7 @@ impl<T: Cell> Tree<T> {
                         }
                     };
                     let after = decoded::RowSize::of(&rows[at].0, encoded);
-                    let bytes = access.track_row(&page, rows, seq, before, after);
+                    let bytes = access.track_row(&page, rows, seq, before, Some(after));
                     if rows.len() > KEYED_LEAF_ROWS as usize || bytes > PAGE_TARGET_BYTES as usize {
                         if rows.len() == 1 {
                             return Err(HeapFault::Malformed("unbounded tree cell".into()));
@@ -815,25 +815,47 @@ impl<T: Cell> Tree<T> {
     pub fn remove(&mut self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
         #[cfg(test)]
         note_lookup::<T>();
-        fn edit<T: Cell>(
-            branch: &mut Branch<T>,
+        // Find the row without taking ownership of any search-path node.
+        // In particular, an absent key must not dirty or measure a leaf.
+        fn locate<T: Cell>(
+            branch: &Branch<T>,
             key: &[u8],
             access: &Access<'_>,
             seq: bool,
-        ) -> Result<Option<T>, HeapFault> {
-            let page = make_dirty(branch, access, seq)?;
-            let mut node = page.borrow_mut();
-            let removed = match &mut *node {
-                Node::Staged(..) => unreachable!("mutable staged node"),
-                Node::Leaf(rows) => rows
-                    .binary_search_by(|(k, _)| k.as_slice().cmp(key))
-                    .ok()
-                    .map(|i| rows.remove(i).1),
+            path: &mut Vec<usize>,
+        ) -> Result<Option<usize>, HeapFault> {
+            match &*Tree::load_node(branch, access, seq)?.node() {
+                Node::Staged(..) => unreachable!("loaded staged node"),
+                Node::Leaf(rows) => Ok(rows.binary_search_by(|(k, _)| k.as_slice().cmp(key)).ok()),
                 Node::Index(rows) => {
                     let i = rows
                         .partition_point(|r| r.first.as_slice() <= key)
                         .saturating_sub(1);
-                    let removed = edit(&mut rows[i], key, access, seq)?;
+                    path.push(i);
+                    locate(&rows[i], key, access, seq, path)
+                }
+            }
+        }
+        fn edit<T: Cell>(
+            branch: &mut Branch<T>,
+            path: &[usize],
+            at: usize,
+            access: &Access<'_>,
+            seq: bool,
+        ) -> Result<T, HeapFault> {
+            let page = make_dirty(branch, access, seq)?;
+            let mut node = page.borrow_mut();
+            let removed = match &mut *node {
+                Node::Staged(..) => unreachable!("mutable staged node"),
+                Node::Leaf(rows) => {
+                    let (key, value) = rows.remove(at);
+                    let before = decoded::RowSize::of(&key, access.encoded_len(&value));
+                    access.track_row(&page, rows, seq, Some(before), None);
+                    value
+                }
+                Node::Index(rows) => {
+                    let i = path[0];
+                    let removed = edit(&mut rows[i], &path[1..], at, access, seq)?;
                     if rows[i].summary.len == 0 {
                         rows.remove(i);
                     }
@@ -841,18 +863,24 @@ impl<T: Cell> Tree<T> {
                 }
             };
             refresh(branch, &node)?;
-            access.track(&page, &node, seq);
+            if matches!(&*node, Node::Index(_)) {
+                access.track(&page, &node, seq);
+            }
             Ok(removed)
         }
-        let result = self
-            .root
-            .as_mut()
-            .map_or(Ok(None), |r| edit(r, key, access, self.sequence))?;
+        let Some(root) = &mut self.root else {
+            return Ok(None);
+        };
+        let mut path = Vec::new();
+        let Some(at) = locate(root, key, access, self.sequence, &mut path)? else {
+            return Ok(None);
+        };
+        let result = edit(root, &path, at, access, self.sequence)?;
         if self.is_empty() {
             self.root = None;
         }
         access.stage_pressure()?;
-        Ok(result)
+        Ok(Some(result))
     }
     pub fn visit(
         &self,

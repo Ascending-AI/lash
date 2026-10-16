@@ -127,15 +127,15 @@ impl Access<'_> {
         }
     }
     /// Re-tracks a leaf after one of its rows changed from `before` (None
-    /// for an inserted row) to `after`, and gives the leaf's encoded body
-    /// size. The other rows are not encoded again.
+    /// for an inserted row) to `after` (None for a removed row), and gives
+    /// the leaf's encoded body size. The other rows are not encoded again.
     pub(super) fn track_row<T: Cell>(
         &self,
         page: &Rc<RefCell<Node<T>>>,
         rows: &Vec<(Key, T)>,
         sequence: bool,
         before: Option<RowSize>,
-        after: RowSize,
+        after: Option<RowSize>,
     ) -> usize {
         let known = self
             .dirty
@@ -149,7 +149,7 @@ impl Access<'_> {
                 Some(row) => sums.without(row),
                 None => Some(sums),
             })
-            .map(|sums| sums.add(after))
+            .map(|sums| after.map_or(sums, |row| sums.add(row)))
             .unwrap_or_else(|| super::decoded::row_sums(rows));
         let weight = super::decoded::leaf_weight(rows, sums);
         self.record(page, weight, sequence, Some(sums));

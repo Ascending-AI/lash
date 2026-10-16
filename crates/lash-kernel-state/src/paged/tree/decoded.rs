@@ -108,7 +108,7 @@ impl Access<'_> {
             }
         }
         let node = Rc::new(Tree::inline_node(branch, tokens, children, true)?);
-        let weight = node_weight(&node) + tokens.len();
+        let weight = decoded_weight(&node, tokens.len()) + tokens.len();
         if *self.bytes.borrow() + self.decoded.borrow().bytes + weight > 64 << 20 {
             self.clear();
         }
