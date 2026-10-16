@@ -135,7 +135,17 @@ def git_blob_identity(path: pathlib.Path) -> str:
 def rust_generation_identity(path: pathlib.Path) -> str:
     # Cargo discovers targets from paths, not Rust bodies. The generator reads
     # bodies only to supply CARGO_BIN_EXE_* inputs to target entry points.
-    markers = sorted(set(re.findall(r"CARGO_BIN_EXE_[A-Za-z0-9_-]+", path.read_text())))
+    source = path.read_text()
+    # Opted-in packages derive ownership from module/include declarations.
+    # Their bodies must invalidate a receipt too; path-only discovery would
+    # otherwise accept a newly imported support module without regenerating.
+    relative = path.relative_to(ROOT).as_posix()
+    if any(
+        policy.get("derive_tests") and relative.startswith(directory + "/")
+        for directory, policy in generate_model.SOURCE_OWNERSHIP.items()
+    ):
+        return "rust-inputs:" + digest_bytes(source.encode())
+    markers = sorted(set(re.findall(r"CARGO_BIN_EXE_[A-Za-z0-9_-]+", source)))
     return "cargo-bin-env:" + digest_bytes("\0".join(markers).encode())
 
 
@@ -154,6 +164,7 @@ def is_content_input(relative: str) -> bool:
             "tools/buck2/clippy_policy.py",
             "tools/buck2/feature_variants.py",
             "tools/buck2/generate_model.py",
+            "tools/buck2/rust_inputs.py",
             "tools/buck2/optimized-sizes.json",
             "tools/buck2/metadata-sizes.json",
             "tools/buck2/package-policy.toml",
@@ -191,6 +202,17 @@ def input_identity(generated_paths: set[str]) -> dict[str, str]:
         for relative in relatives
         if is_content_input(relative)
     }
+    # This file mixes reviewed runtime policy and generated module closures.
+    # Only its derived fields may be excluded as generated outputs; otherwise
+    # a shared receipt could replace a newly declared fixture with old policy.
+    ownership_path = ROOT / "tools/buck2/source-ownership.json"
+    if ownership_path.is_file():
+        ownership = json.loads(ownership_path.read_text())
+        for policy in ownership.values():
+            if policy.get("derive_tests"):
+                for key in ("tests", "test_includes", "unit_test_sources", "unit_test_includes", "test_input_fallbacks"):
+                    policy.pop(key, None)
+        result["@source-ownership-policy"] = digest_bytes(json.dumps(ownership, sort_keys=True).encode())
     # Generator ownership globs and Cargo's implicit target discovery depend
     # on names as well as contents. Include every graph-sensitive visible
     # path, but do not invalidate for unrelated docs or repository tests.

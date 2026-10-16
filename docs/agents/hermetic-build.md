@@ -235,6 +235,15 @@ variants. Unlisted targets retain conservative source inputs. The generator
 rejects missing crate roots, stale patterns, unknown labels and paths outside
 the owning package.
 
+For packages with `derive_tests = true`, `kiln sync` refreshes the `tests`,
+`test_includes`, `unit_test_sources` and `unit_test_includes` entries from Cargo
+roots, Rust `mod`/`#[path]` declarations and literal includes. It takes the union
+of conditional modules. Unsupported computed paths retain package-wide inputs
+and appear in `test_input_fallbacks`. Do not edit the derived entries by hand.
+These tests receive only their module closure and included assets as compile
+inputs. Declare runtime fixture trees and source-inspection inputs in `test_data`;
+they become inputs and resources of that integration test and its feature variants.
+
 `library_test_sources` excludes files reachable only under `cfg(test)` from
 production libraries while retaining them in unit tests. Do not put
 `cfg(feature = "testing")` fixtures there. Remove a declaration when its module

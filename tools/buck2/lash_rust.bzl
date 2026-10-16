@@ -407,6 +407,7 @@ def _rust_test(
         exec_properties,
         srcs_patterns,
         data_exclude,
+        data_patterns,
         extra_compile_data,
         extra_data,
         library,
@@ -425,8 +426,10 @@ def _rust_test(
         _cargo_env(package_name, crate_name, manifest_dir, version, rustc_env),
         _rustc_flags(package_name, declared_features),
     )
-    package_files = glob(["**"], exclude = _IGNORED + data_exclude)
-    package_data = _data(["**"], data_exclude)
+    # None is the conservative fallback for tests whose inputs have not been
+    # derived. An empty list is a complete declaration of no package data.
+    package_files = glob(["**"], exclude = _IGNORED + data_exclude) if data_patterns == None else glob(data_patterns, exclude = _IGNORED)
+    package_data = _data(["**"], data_exclude) if data_patterns == None else package_files
     source_attrs = _source_attrs(
         binary,
         manifest_dir,
@@ -487,6 +490,7 @@ def lash_rust_unit_test(
         exec_properties = {},
         srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"],
         data_exclude = [],
+        data_patterns = None,
         extra_compile_data = [],
         extra_data = [],
         library = None,
@@ -498,7 +502,7 @@ def lash_rust_unit_test(
     _rust_test(
         name, crate_name, crate_root, crate_features, declared_features,
         manifest_dir, package_name, version, args, build_script, exec_properties,
-        srcs_patterns, data_exclude, extra_compile_data, extra_data, library,
+        srcs_patterns, data_exclude, data_patterns, extra_compile_data, extra_data, library,
         library_crate_name, {}, shard_count, test_env, tags, timeout,
         _named_deps(package_name, include_dev = True),
     )
@@ -516,6 +520,7 @@ def lash_rust_integration_test(
         exec_properties = {},
         srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
         data_exclude = [],
+        data_patterns = None,
         library = None,
         library_crate_name = None,
         extra_compile_data = [],
@@ -528,7 +533,7 @@ def lash_rust_integration_test(
     _rust_test(
         name, crate_name, crate_root, crate_features, declared_features,
         manifest_dir, package_name, version, args, None, exec_properties,
-        srcs_patterns, data_exclude, extra_compile_data, extra_data, library,
+        srcs_patterns, data_exclude, data_patterns, extra_compile_data, extra_data, library,
         library_crate_name, rustc_env, shard_count, test_env, tags, timeout,
         _named_deps(package_name, include_dev = True),
     )
@@ -681,6 +686,7 @@ def lash_rust_feature_test(
         kwargs.pop("exec_properties", {}),
         kwargs.pop("srcs_patterns", ["src/**/*.rs", "tests/**/*.rs", "shared/**/*.rs"]),
         kwargs.pop("data_exclude", []),
+        kwargs.pop("data_patterns", None),
         kwargs.pop("extra_compile_data", []),
         kwargs.pop("extra_data", []),
         None,

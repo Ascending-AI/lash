@@ -1,19 +1,44 @@
 {
   "crates/lash": {
     "tests": {
+      "artifact_referrers_evidence": [
+        "tests/artifact_referrers_evidence.rs",
+        "tests/artifact_referrers_evidence/fixture.rs"
+      ],
       "attachments_evidence": [
         "tests/attachments_evidence.rs"
       ],
       "integration": [
         "tests/integration.rs",
-        "tests/integration/**/*.rs"
+        "tests/integration/embed_plugins.rs",
+        "tests/integration/facade_host_wrappers.rs",
+        "tests/integration/facade_inventory.rs",
+        "tests/integration/mcp_catalog.rs",
+        "tests/integration/one_home.rs",
+        "tests/integration/owned_call_purpose.rs",
+        "tests/integration/prompt_section_leak.rs",
+        "tests/integration/prompt_sections.rs",
+        "tests/integration/stores_evidence.rs",
+        "tests/integration/support.rs",
+        "tests/integration/tool_intent_ingress_observability.rs"
+      ],
+      "kernel_two_build_claim": [
+        "tests/kernel_two_build_claim.rs"
+      ],
+      "llm_profiles": [
+        "tests/llm_profiles.rs",
+        "tests/llm_profiles/session_turn_starts.rs"
       ],
       "otel_trace_evidence": [
         "tests/otel_trace_evidence.rs"
       ],
+      "plugin_certification": [
+        "examples/plugin_authoring.rs",
+        "tests/plugin_certification.rs"
+      ],
       "processes_evidence": [
         "tests/processes_evidence.rs",
-        "tests/processes_evidence/*.rs"
+        "tests/processes_evidence/link_laws.rs"
       ],
       "processes_evidence_b": [
         "tests/processes_evidence_b.rs"
@@ -23,16 +48,240 @@
       ],
       "ui": [
         "tests/ui.rs",
-        "tests/ui/*.rs"
+        "tests/ui/durable_builder_without_advanced.rs",
+        "tests/ui/facade_boundary_types_are_public.rs",
+        "tests/ui/observation_enums_match_without_mcp.rs",
+        "tests/ui/process_surface_types_are_public.rs",
+        "tests/ui/rlm_facade_boundary_types_are_public.rs"
+      ],
+      "workflow_laws": [
+        "src/workflow/document_example.rs",
+        "tests/workflow_laws.rs",
+        "tests/workflow_laws/documents.rs",
+        "tests/workflow_laws/generated_source.rs",
+        "tests/workflow_laws/node_spans.rs"
       ]
     },
     "unit_test_sources": [
+      "src/admin.rs",
+      "src/admin/config_transactions.rs",
+      "src/admin/context.rs",
+      "src/admin/host_commands.rs",
+      "src/admin/injection.rs",
+      "src/admin/plugin_operations.rs",
+      "src/admin/process_admin.rs",
+      "src/admin/prompt.rs",
+      "src/admin/protocol.rs",
+      "src/admin/state.rs",
+      "src/artifacts.rs",
+      "src/change_page.rs",
+      "src/core.rs",
+      "src/core/capacity_laws.rs",
+      "src/core/drain.rs",
+      "src/core/node.rs",
+      "src/core/plugin_retirement.rs",
+      "src/core/recovery.rs",
+      "src/core/retired_observers.rs",
+      "src/core/runtime_host_config.rs",
+      "src/core/session_deletion.rs",
+      "src/core/session_deletion/tests.rs",
+      "src/core/tool_live.rs",
+      "src/core/trace_config.rs",
+      "src/core/work_drivers.rs",
+      "src/data_retention.rs",
+      "src/durable.rs",
+      "src/durable_session.rs",
+      "src/error.rs",
+      "src/formats.rs",
+      "src/helper_releases.rs",
+      "src/kernel_migration.rs",
+      "src/language_observation.rs",
+      "src/language_observation/ingress.rs",
+      "src/language_observation/routing.rs",
+      "src/language_observation/tests.rs",
+      "src/language_observation/worker.rs",
       "src/lib.rs",
-      "src/**/*.rs"
+      "src/mcp_events.rs",
+      "src/observation_feed.rs",
+      "src/pacing.rs",
+      "src/parked_work.rs",
+      "src/persistence.rs",
+      "src/plugin_diagnostics/attribution.rs",
+      "src/plugin_diagnostics/claim.rs",
+      "src/plugin_diagnostics/mod.rs",
+      "src/plugin_diagnostics/types.rs",
+      "src/postgres_host.rs",
+      "src/postgres_live_replay.rs",
+      "src/postgres_live_replay/cleanup.rs",
+      "src/postgres_live_replay/codec.rs",
+      "src/postgres_live_replay/heads.rs",
+      "src/postgres_live_replay/listener.rs",
+      "src/postgres_live_replay/mirror.rs",
+      "src/postgres_live_replay/publisher.rs",
+      "src/postgres_live_replay/schema.rs",
+      "src/postgres_live_replay/schema_shape.rs",
+      "src/postgres_live_replay/subscription.rs",
+      "src/postgres_process_replay.rs",
+      "src/postgres_process_replay/cleanup.rs",
+      "src/postgres_process_replay/codec.rs",
+      "src/postgres_process_replay/heads.rs",
+      "src/postgres_process_replay/listener.rs",
+      "src/postgres_process_replay/publisher.rs",
+      "src/postgres_process_replay/schema.rs",
+      "src/postgres_process_replay/schema_shape.rs",
+      "src/postgres_process_replay/subscription.rs",
+      "src/postgres_replay.rs",
+      "src/postgres_replay/schema.rs",
+      "src/postgres_replay/tool_live.rs",
+      "src/preflight.rs",
+      "src/preflight/extract.rs",
+      "src/preflight/report.rs",
+      "src/preflight/tests.rs",
+      "src/process_admin.rs",
+      "src/process_authority.rs",
+      "src/process_feed.rs",
+      "src/process_feed/reconcile_tests.rs",
+      "src/process_feed/tests.rs",
+      "src/process_history.rs",
+      "src/process_history/tests.rs",
+      "src/process_lifecycle.rs",
+      "src/rlm.rs",
+      "src/scenario_contracts.rs",
+      "src/send.rs",
+      "src/send/batch.rs",
+      "src/send/cancel.rs",
+      "src/send/follow.rs",
+      "src/send/resolve.rs",
+      "src/session.rs",
+      "src/session_binding.rs",
+      "src/support.rs",
+      "src/testing.rs",
+      "src/testing/actor_park.rs",
+      "src/testing/plugin_harness.rs",
+      "src/testing/plugin_harness/certification.rs",
+      "src/tests.rs",
+      "src/tests/absent_session_delete.rs",
+      "src/tests/admin_reads_without_runtime.rs",
+      "src/tests/adr_claims.rs",
+      "src/tests/agent_scenarios.rs",
+      "src/tests/aggregate_await_comprehension.rs",
+      "src/tests/assistant_hook_faults.rs",
+      "src/tests/cell_budget.rs",
+      "src/tests/cell_call_feedback.rs",
+      "src/tests/cell_race_loser.rs",
+      "src/tests/config_transactions.rs",
+      "src/tests/control_settlement.rs",
+      "src/tests/core_session_builder.rs",
+      "src/tests/core_session_builder/commit_budget.rs",
+      "src/tests/core_session_builder/recorded_plugin_config.rs",
+      "src/tests/core_session_builder/runtime_assembly.rs",
+      "src/tests/core_session_builder/runtime_dependencies.rs",
+      "src/tests/core_session_builder/session_lifecycle.rs",
+      "src/tests/core_session_builder/session_lifecycle/session_binding.rs",
+      "src/tests/core_session_builder/typed_errors.rs",
+      "src/tests/crashed_create_drain.rs",
+      "src/tests/cross_core_process_changes.rs",
+      "src/tests/deleted_session_run_replay.rs",
+      "src/tests/deployment_and_testing_facade.rs",
+      "src/tests/direct_completion.rs",
+      "src/tests/direct_completion_lanes.rs",
+      "src/tests/discovery_execution.rs",
+      "src/tests/durable_session.rs",
+      "src/tests/facade_construction.rs",
+      "src/tests/facade_turn.rs",
+      "src/tests/fixtures.rs",
+      "src/tests/generation_policy.rs",
+      "src/tests/harness.rs",
+      "src/tests/history_hydration.rs",
+      "src/tests/node_drain.rs",
+      "src/tests/output_retention.rs",
+      "src/tests/output_settlement.rs",
+      "src/tests/panic_containment.rs",
+      "src/tests/plugin_build_refusal.rs",
+      "src/tests/plugin_diagnostics.rs",
+      "src/tests/plugin_lifecycle.rs",
+      "src/tests/plugin_operations.rs",
+      "src/tests/plugin_reopen.rs",
+      "src/tests/plugin_stack.rs",
+      "src/tests/presentation_fallback.rs",
+      "src/tests/process_start_input.rs",
+      "src/tests/projection.rs",
+      "src/tests/protocol_effects.rs",
+      "src/tests/provider_attempts.rs",
+      "src/tests/recorded_carriers.rs",
+      "src/tests/recorded_execution_controls.rs",
+      "src/tests/recorded_protocol_prompt.rs",
+      "src/tests/recorded_request_defaults.rs",
+      "src/tests/replay_origin.rs",
+      "src/tests/response_phase_replay.rs",
+      "src/tests/round_cancel_state.rs",
+      "src/tests/run_effects.rs",
+      "src/tests/send_handle.rs",
+      "src/tests/send_handle/arrival.rs",
+      "src/tests/send_handle/forsake.rs",
+      "src/tests/send_handle/pins.rs",
+      "src/tests/send_handle/replay_lag.rs",
+      "src/tests/session_cancel_loop.rs",
+      "src/tests/session_cancel_without_provider.rs",
+      "src/tests/session_control.rs",
+      "src/tests/session_create.rs",
+      "src/tests/session_turn_process.rs",
+      "src/tests/standard_compaction_persistence.rs",
+      "src/tests/standard_protocol_turns.rs",
+      "src/tests/store_faults.rs",
+      "src/tests/stream_evidence.rs",
+      "src/tests/tool_check_control.rs",
+      "src/tests/tool_intent_ingress.rs",
+      "src/tests/trace_call_ids.rs",
+      "src/tests/trace_cells.rs",
+      "src/tests/trace_detail.rs",
+      "src/tests/trace_emission.rs",
+      "src/tests/trace_enrichment.rs",
+      "src/tests/trace_extension.rs",
+      "src/tests/trace_nesting.rs",
+      "src/tests/trace_parentage.rs",
+      "src/tests/trace_policy.rs",
+      "src/tests/trace_sampling.rs",
+      "src/tests/trace_terminals.rs",
+      "src/tests/tracing.rs",
+      "src/tests/turn_cancel_modes.rs",
+      "src/tests/turn_cancel_waits.rs",
+      "src/tests/turn_checkpoints.rs",
+      "src/tests/turn_retirement.rs",
+      "src/tests/turn_streaming.rs",
+      "src/tests/turn_streaming/builders_and_queue.rs",
+      "src/tests/turn_streaming/control_and_cancel.rs",
+      "src/tests/turn_streaming/observation_recovery.rs",
+      "src/tests/turn_streaming/observations.rs",
+      "src/tests/turn_streaming/publication_gap.rs",
+      "src/tests/turn_streaming/rlm_streaming.rs",
+      "src/tests/turn_streaming/tool_live.rs",
+      "src/tests/warm_admission.rs",
+      "src/tests/workflow_reads.rs",
+      "src/tests/writer_fence.rs",
+      "src/tool_intent_ingress.rs",
+      "src/tracing.rs",
+      "src/turn.rs",
+      "src/usage.rs",
+      "src/vm.rs",
+      "src/workflow.rs",
+      "src/workflow/import.rs"
     ],
     "test_data": {
       "ui": [
         "tests/ui/*"
+      ],
+      "integration": [
+        "src/**/*.rs"
+      ],
+      "otel_trace_evidence": [
+        "docs/instrumentation-contract.md",
+        "src/core/trace_config.rs",
+        "examples/plugin_authoring.rs",
+        "tests/plugin_certification.rs",
+        "src/lib.rs",
+        "src/durable_session.rs",
+        "tests/ui.rs"
       ]
     },
     "compile_data": [
@@ -40,6 +289,20 @@
       "postgres-live-replay-schema-shape.txt",
       "postgres-process-replay-schema.sql",
       "postgres-process-replay-schema-shape.txt"
+    ],
+    "derive_tests": true,
+    "test_includes": {
+      "otel_trace_evidence": [
+        "docs/instrumentation-contract.md"
+      ]
+    },
+    "test_input_fallbacks": {},
+    "unit_test_includes": [
+      "postgres-live-replay-schema-shape.txt",
+      "postgres-live-replay-schema.sql",
+      "postgres-process-replay-schema-shape.txt",
+      "postgres-process-replay-schema.sql",
+      "src/workflow/document_example.rs"
     ]
   },
   "crates/lash-dialect-python": {
@@ -209,5 +472,404 @@
         "tests/test_message_schema/server_json_rpc_message_schema.json"
       ]
     }
+  },
+  "crates/lash-durable-test": {
+    "derive_tests": true,
+    "test_data": {
+      "vertical_crash_proof": [
+        "tests/fixtures/formats/**"
+      ],
+      "format_fixtures": [
+        "tests/fixtures/formats/**"
+      ]
+    },
+    "tests": {
+      "after_turn_crash_laws": [
+        "tests/after_turn_crash_laws.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "attachment_delivery_secret": [
+        "tests/attachment_delivery_secret.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "attachment_ref_laws": [
+        "tests/attachment_ref_laws.rs"
+      ],
+      "attachment_referrer_laws": [
+        "tests/attachment_referrer_laws.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "cell_dialect_releases": [
+        "tests/cell_dialect_releases.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "cell_process_handles": [
+        "tests/cell_process_handles.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "cell_read_laws": [
+        "tests/cell_read_laws.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "cell_restore_laws": [
+        "tests/cell_restore_laws.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "child_turn_crash_proof": [
+        "tests/child_turn_crash_proof.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "codemode_execution_documents": [
+        "tests/codemode_execution_documents.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs",
+        "tests/support/web_fetch.rs"
+      ],
+      "committed_turns": [
+        "tests/committed_turns.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "config_change_observer_laws": [
+        "tests/config_change_observer_laws.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "context_budget_warning": [
+        "tests/context_budget_warning.rs",
+        "tests/support/served.rs"
+      ],
+      "control_phase_expiry": [
+        "tests/control_phase_expiry.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "core_node_processes": [
+        "tests/core_node_processes.rs",
+        "tests/core_node_processes/capacity_verdicts.rs",
+        "tests/core_node_processes/engine_steps.rs",
+        "tests/core_node_processes/idle_obligations.rs",
+        "tests/core_node_processes/process_endstates.rs",
+        "tests/core_node_processes/read_tools.rs",
+        "tests/core_node_processes/session_and_isolated_envs.rs",
+        "tests/support/kernel_process.rs"
+      ],
+      "declared_start": [
+        "tests/declared_start.rs",
+        "tests/declared_start/process_own_env.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "declared_start_crash_laws": [
+        "tests/declared_start_crash_laws.rs",
+        "tests/declared_start_crash_laws/start_policy.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "deleted_session_crash_laws": [
+        "tests/deleted_session_crash_laws.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "drain_by_release": [
+        "tests/drain_by_release.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "first_party_tools": [
+        "tests/first_party_tools.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "format_fixtures": [
+        "tests/format_fixtures.rs",
+        "tests/support/images.rs",
+        "tests/support/kernel_images.rs",
+        "tests/support/sim.rs"
+      ],
+      "frame_switch_crash_proof": [
+        "tests/frame_switch_crash_proof.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "frame_switch_laws": [
+        "tests/frame_switch_laws.rs",
+        "tests/support/served.rs"
+      ],
+      "kernel_step_crash_laws": [
+        "tests/kernel_step_crash_laws.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "live_fault_park": [
+        "tests/live_fault_park.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "live_stream_takeover": [
+        "tests/live_stream_takeover.rs",
+        "tests/support/dialect.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "mcp_events_crash_proof": [
+        "tests/mcp_events_crash_proof.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "mcp_events_laws": [
+        "tests/mcp_events_laws.rs",
+        "tests/support/served.rs"
+      ],
+      "model_answer_receipt_laws": [
+        "tests/model_answer_receipt_laws.rs",
+        "tests/support/sim.rs"
+      ],
+      "one_slot_process_await": [
+        "tests/one_slot_process_await.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "open_session_commands": [
+        "tests/open_session_commands.rs",
+        "tests/support/dialect.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "plugin_state_storage_laws": [
+        "tests/plugin_state_storage_laws.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "pressure_frame_crash_proof": [
+        "tests/pressure_frame_crash_proof.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "process_actor_laws": [
+        "tests/process_actor_laws.rs",
+        "tests/support/sim.rs"
+      ],
+      "process_crash_proof": [
+        "tests/process_crash_proof.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "process_lifecycle_events": [
+        "tests/process_lifecycle_events.rs",
+        "tests/support/sim.rs"
+      ],
+      "process_ran_laws": [
+        "tests/process_ran_laws.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "process_step_crash_proof": [
+        "tests/process_step_crash_proof.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "process_tool_call_crash_laws": [
+        "tests/process_tool_call_crash_laws.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "process_tool_calls": [
+        "tests/process_tool_calls.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "recorded_behaviour_laws": [
+        "tests/recorded_behaviour_laws.rs",
+        "tests/support/kernel_process.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "render_cache_laws": [
+        "tests/render_cache_laws.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
+      "resource_capacity": [
+        "tests/resource_capacity.rs"
+      ],
+      "rlm_session_globals": [
+        "tests/rlm_session_globals.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs",
+        "tests/support/web_fetch.rs"
+      ],
+      "round_crash_matrix": [
+        "tests/round_crash_matrix.rs",
+        "tests/support/matrix.rs",
+        "tests/support/sim.rs"
+      ],
+      "session_send": [
+        "tests/session_send.rs",
+        "tests/support/served.rs"
+      ],
+      "standard_turn_outcomes": [
+        "tests/standard_turn_outcomes.rs",
+        "tests/support/served.rs"
+      ],
+      "steering_crash_laws": [
+        "tests/steering_crash_laws.rs",
+        "tests/support/dialect.rs",
+        "tests/support/sim.rs"
+      ],
+      "tool_activity": [
+        "tests/support/served.rs",
+        "tests/tool_activity.rs"
+      ],
+      "tool_batches": [
+        "tests/support/served.rs",
+        "tests/support/sim.rs",
+        "tests/tool_batches.rs"
+      ],
+      "tool_call_identity": [
+        "tests/support/served.rs",
+        "tests/tool_call_identity.rs"
+      ],
+      "tool_crash_laws": [
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs",
+        "tests/support/telemetry.rs",
+        "tests/support/turn_commit_bound.rs",
+        "tests/tool_crash_laws.rs",
+        "tests/tool_crash_laws/obligation_settlement.rs",
+        "tests/tool_crash_laws/plugin_sections.rs",
+        "tests/tool_crash_laws/presentation_obligations.rs",
+        "tests/tool_crash_laws/publication_loss.rs"
+      ],
+      "tool_group_pool_width": [
+        "tests/tool_group_pool_width.rs"
+      ],
+      "tool_surface_laws": [
+        "tests/support/served.rs",
+        "tests/tool_surface_laws.rs"
+      ],
+      "turn_callback_crash_laws": [
+        "tests/support/dialect.rs",
+        "tests/support/failure_kind.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs",
+        "tests/turn_callback_crash_laws.rs"
+      ],
+      "turn_execution_state": [
+        "tests/support/served.rs",
+        "tests/turn_execution_state.rs"
+      ],
+      "turn_phases": [
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/seed.rs",
+        "tests/support/sim.rs",
+        "tests/turn_phases.rs",
+        "tests/turn_phases/head_commits.rs",
+        "tests/turn_phases/model_receipts.rs",
+        "tests/turn_phases/parks.rs",
+        "tests/turn_phases/slots.rs"
+      ],
+      "turn_round_crash_matrix": [
+        "tests/support/matrix.rs",
+        "tests/support/seed.rs",
+        "tests/support/sim.rs",
+        "tests/turn_round_crash_matrix.rs"
+      ],
+      "turn_terminal_refusals": [
+        "tests/support/served.rs",
+        "tests/turn_terminal_refusals.rs"
+      ],
+      "turn_trace_scope_laws": [
+        "tests/support/served.rs",
+        "tests/support/sim.rs",
+        "tests/support/telemetry.rs",
+        "tests/turn_trace_scope_laws.rs"
+      ],
+      "vertical_crash_proof": [
+        "tests/support/dialect.rs",
+        "tests/support/images.rs",
+        "tests/support/kernel_images.rs",
+        "tests/support/matrix.rs",
+        "tests/support/noted.rs",
+        "tests/support/sim.rs",
+        "tests/vertical_crash_proof.rs",
+        "tests/vertical_crash_proof/corpus.rs",
+        "tests/vertical_crash_proof/images.rs",
+        "tests/vertical_crash_proof/large_values.rs",
+        "tests/vertical_crash_proof/run_config.rs",
+        "tests/vertical_crash_proof/session_capture.rs"
+      ],
+      "worker_crashes": [
+        "tests/support/served.rs",
+        "tests/worker_crashes.rs"
+      ]
+    },
+    "test_includes": {
+      "format_fixtures": [
+        "tests/fixtures/formats/lashvm/db-wal.gz",
+        "tests/fixtures/formats/lashvm/db.gz",
+        "tests/fixtures/formats/pre-heap-lashvm/db-wal.gz",
+        "tests/fixtures/formats/pre-heap-lashvm/db.gz",
+        "tests/fixtures/formats/pre-heap-session/db-wal.gz",
+        "tests/fixtures/formats/pre-heap-session/db.gz",
+        "tests/fixtures/formats/session/db-wal.gz",
+        "tests/fixtures/formats/session/db.gz"
+      ],
+      "vertical_crash_proof": [
+        "tests/fixtures/formats/lashvm/db-wal.gz",
+        "tests/fixtures/formats/lashvm/db.gz",
+        "tests/fixtures/formats/pre-heap-lashvm/db-wal.gz",
+        "tests/fixtures/formats/pre-heap-lashvm/db.gz",
+        "tests/fixtures/formats/pre-heap-session/db-wal.gz",
+        "tests/fixtures/formats/pre-heap-session/db.gz",
+        "tests/fixtures/formats/session/db-wal.gz",
+        "tests/fixtures/formats/session/db.gz"
+      ]
+    },
+    "test_input_fallbacks": {},
+    "unit_test_sources": [
+      "src/clock.rs",
+      "src/fault.rs",
+      "src/fencing.rs",
+      "src/lib.rs",
+      "src/life.rs",
+      "src/matrix.rs",
+      "src/nodes.rs",
+      "src/script.rs",
+      "src/testing.rs",
+      "src/tripwire.rs"
+    ],
+    "unit_test_includes": []
   }
 }

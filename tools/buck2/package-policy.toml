@@ -724,8 +724,6 @@ targets = ["otel_trace_evidence"]
 data = [
   "//:tracing_docs",
   "//docs/kernel:package_files",
-  "//crates/lash:package_files",
-  "//crates/lash:rust_sources",
   "//crates/lash-core:rust_sources",
   "//crates/lash-core-execution:rust_sources",
   "//crates/lash-core-store:rust_sources",

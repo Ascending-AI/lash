@@ -567,12 +567,146 @@ def check_ownership() -> None:
         assert package in package_dirs
         patterns = []
         for key, value in policy.items():
+            if key == "test_input_fallbacks":
+                continue
             if isinstance(value, list):
                 patterns.extend(value)
             elif isinstance(value, dict):
                 patterns.extend(pattern for values in value.values() for pattern in values)
         for pattern in patterns:
             assert list((ROOT / package).glob(pattern)), f"unmatched ownership pattern {package}/{pattern}"
+
+
+def check_per_test_inputs() -> None:
+    """FIG-6484: a sibling test is neither a compile input nor a runfile."""
+    import generate_model
+
+    directory = "crates/lash-durable-test"
+    sources = generate_model.test_source_patterns(directory, "vertical_crash_proof")
+    files = {
+        path.relative_to(ROOT / directory).as_posix()
+        for pattern in sources
+        for path in (ROOT / directory).glob(pattern)
+    }
+    assert "tests/attachment_ref_laws.rs" not in files, "vertical owns an unrelated sibling"
+    assert "tests/support/images.rs" in files
+    assert "tests/vertical_crash_proof/corpus.rs" in files
+
+    # Evaluate the actual macro with inert rule declarations, so the law
+    # observes both compiler inputs and runfiles without invoking rustc.
+    from types import SimpleNamespace
+    import inspect
+
+    source = (HERE / "lash_rust.bzl").read_text()
+    names = {"_rust_test", "_srcs", "_data", "_resources"}
+    definitions = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in names]
+    declarations = []
+    package = ROOT / directory
+
+    def glob(patterns, exclude=()):
+        import fnmatch
+        return sorted({
+            path.relative_to(package).as_posix()
+            for pattern in patterns for path in package.glob(pattern + "/*" if pattern.endswith("/**") else pattern)
+            if path.is_file() and not any(fnmatch.fnmatch(path.relative_to(package).as_posix(), pattern) for pattern in exclude)
+        })
+
+    namespace = {
+        "glob": glob, "_IGNORED": ["BUCK"], "_TIMEOUTS": {None: 300},
+        "native": SimpleNamespace(rust_test=None),
+        "_rust_rule": lambda *args, **kwargs: declarations.append(kwargs),
+        "_source_attrs": lambda name, manifest, root, srcs, extra: {"srcs": srcs},
+        "_buildscript_args": lambda build, env, flags: (env, flags),
+        "_cargo_env": lambda *args: {}, "_rustc_flags": lambda *args: [],
+        "first_party_clippy_configuration": lambda *args: None,
+        "_run_request": lambda *args: (1, 524288),
+        "lash_test_wrapper": lambda **kwargs: None,
+    }
+    exec(compile(ast.Module(body=definitions, type_ignores=[]), str(HERE / "lash_rust.bzl"), "exec"), namespace)
+    macro = namespace["_rust_test"]
+    arguments = dict.fromkeys(inspect.signature(macro).parameters, None)
+    arguments.update(
+        name="vertical", crate_name="vertical", crate_root="tests/vertical_crash_proof.rs",
+        manifest_dir=directory, package_name="lash-durable-test", srcs_patterns=sources,
+        data_exclude=["tests/fixtures/formats/**"], data_patterns=generate_model.SOURCE_OWNERSHIP[directory]["test_data"]["vertical_crash_proof"],
+        extra_compile_data=[], extra_data=[], named_deps={}, tags=[],
+    )
+    macro(**arguments)
+    for kind in ("srcs", "resources"):
+        assert "tests/attachment_ref_laws.rs" not in declarations[0][kind], f"sibling leaked into {kind}"
+        assert "tests/fixtures/formats/session/db.gz" in declarations[0][kind], f"fixture lost from {kind}"
+
+
+def check_module_input_closure() -> None:
+    """Conditional modules, inline backend macros and includes keep their inputs."""
+    import rust_inputs
+
+    with tempfile.TemporaryDirectory(prefix="lash-module-inputs-") as directory:
+        root = pathlib.Path(directory)
+        files = {
+            "tests/law.rs": '''
+                // mod unrelated;
+                const TEXT: &str = r###"mod unrelated;"###;
+                #[cfg(feature = "one")] #[path = "support/one.rs"] pub(in crate::ancestor) mod one;
+                #[cfg(not(feature = "one"))] #[path = "support/two.rs"] mod two;
+                #[doc = include_str!("doc.md")] fn documented() {}
+                mod nested { mod leaf; }
+                macro_rules! backend { ($name:ident) => { mod $name {
+                    const DATA: &[u8] = include_bytes!("fixture.bin");
+                } } }
+                include!("included.rs");
+            ''',
+            "tests/support/one.rs": 'mod child; include_str!(r#"../fixture.bin"#);',
+            "tests/support/one/child.rs": "",
+            "tests/support/two.rs": "",
+            "tests/nested/leaf.rs": "",
+            "tests/included.rs": "#[test] fn included_law() {}",
+            "tests/fixture.bin": "fixture",
+            "tests/doc.md": "documentation",
+            "tests/unrelated.rs": "#[test] fn unrelated_law() {}",
+        }
+        for name, body in files.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
+        inputs = rust_inputs.closure(root, "tests/law.rs")
+        assert inputs.sources == set(files) - {"tests/fixture.bin", "tests/doc.md", "tests/unrelated.rs"}
+        assert inputs.includes == {"tests/fixture.bin", "tests/doc.md"}
+        (root / "tests/law.rs").write_text('include!(concat!(env!("OUT_DIR"), "/generated.rs"));')
+        try:
+            rust_inputs.closure(root, "tests/law.rs")
+        except rust_inputs.Underivable:
+            pass
+        else:
+            raise AssertionError("computed include path silently dropped")
+
+
+def check_derived_ownership_receipt() -> None:
+    """Module edits and reviewed runtime declarations cannot reuse stale graphs."""
+    import sync
+
+    with tempfile.TemporaryDirectory(prefix="lash-derived-receipt-") as directory:
+        root = pathlib.Path(directory)
+        with patch.object(sync, "ROOT", root), patch.object(sync, "RECEIPT", root / ".buck2/sync-receipt.json"):
+            subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+            source = root / "crates/lash/tests/law.rs"
+            source.parent.mkdir(parents=True)
+            source.write_text("#[test] fn law() {}")
+            ownership = root / "tools/buck2/source-ownership.json"
+            ownership.parent.mkdir(parents=True)
+            policy = {"crates/lash": {"derive_tests": True, "tests": {"law": ["tests/law.rs"]}}}
+            ownership.write_text(json.dumps(policy))
+            outputs = {"tools/buck2/source-ownership.json", "BUCK"}
+            before = sync.input_identity(outputs)
+            source.write_text("mod support; #[test] fn law() {}")
+            assert sync.input_identity(outputs) != before, "module graph edit reused a receipt"
+            before = sync.input_identity(outputs)
+            policy["crates/lash"]["tests"]["law"].append("tests/support.rs")
+            ownership.write_text(json.dumps(policy))
+            assert sync.input_identity(outputs) == before, "derived closures became reviewed policy"
+            policy["crates/lash"]["test_data"] = {"law": ["fixtures/**"]}
+            ownership.write_text(json.dumps(policy))
+            assert sync.input_identity(outputs) != before, "runtime policy reused a shared receipt"
 
 
 def check_action_bridge() -> None:
@@ -1889,6 +2023,9 @@ def main() -> int:
         check_queue_priority,
         check_action_categories,
         check_ownership,
+        check_per_test_inputs,
+        check_module_input_closure,
+        check_derived_ownership_receipt,
         check_action_bridge,
         check_transitive_source_inputs,
         check_repo_rooted_source_remap,

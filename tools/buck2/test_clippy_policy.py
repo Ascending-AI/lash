@@ -192,10 +192,6 @@ class ClippyPolicyTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            'package_files = glob(["**"], exclude = _IGNORED + data_exclude)',
-            source,
-        )
-        self.assertIn(
             "resources = _resources(package_files, extra_compile_data + extra_data)", source
         )
         self.assertIn(

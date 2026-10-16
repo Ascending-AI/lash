@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 import clippy_policy
 import feature_variants
+import rust_inputs
 import vm_worker_runfiles
 
 
@@ -641,6 +642,58 @@ def test_source_patterns(directory: str, target: str) -> list[str]:
     )
 
 
+def derive_test_ownership(metadata: dict) -> None:
+    """Refresh opted-in tests from Cargo roots and the Rust module graph."""
+    token_cache = {}
+    for package in metadata["packages"]:
+        if package["id"] not in metadata["workspace_members"]:
+            continue
+        directory = relative(package["manifest_path"]).removesuffix("/Cargo.toml")
+        policy = SOURCE_OWNERSHIP.get(directory, {})
+        if not policy.get("derive_tests"):
+            continue
+        tests, includes, fallbacks = {}, {}, {}
+        for target in package["targets"]:
+            if "test" not in target["kind"]:
+                continue
+            root = relative(target["src_path"]).removeprefix(directory + "/")
+            try:
+                inputs = rust_inputs.closure(ROOT / directory, root, token_cache=token_cache)
+            except rust_inputs.Underivable as error:
+                fallbacks[target["name"]] = str(error)
+                continue
+            tests[target["name"]] = sorted(inputs.sources)
+            if inputs.includes:
+                includes[target["name"]] = sorted(inputs.includes)
+        policy["tests"] = dict(sorted(tests.items()))
+        policy["test_includes"] = dict(sorted(includes.items()))
+        policy["test_input_fallbacks"] = dict(sorted(fallbacks.items()))
+        library = next((target for target in package["targets"] if "lib" in target["kind"] and target.get("test")), None)
+        if library:
+            root = relative(library["src_path"]).removeprefix(directory + "/")
+            try:
+                inputs = rust_inputs.closure(ROOT / directory, root, token_cache=token_cache)
+            except rust_inputs.Underivable as error:
+                policy.pop("unit_test_sources", None)
+                policy.pop("unit_test_includes", None)
+                policy["test_input_fallbacks"]["unit-test"] = str(error)
+            else:
+                policy["unit_test_sources"] = sorted(inputs.sources)
+                policy["unit_test_includes"] = sorted(inputs.includes)
+
+
+def test_inputs_argument(directory: str, target: str) -> str:
+    """Only derived tests have a complete, declared package input set."""
+    policy = SOURCE_OWNERSHIP.get(directory, {})
+    if not policy.get("derive_tests") or target not in policy.get("tests", {}):
+        return ""
+    patterns = sorted(set(
+        policy.get("test_data", {}).get(target, [])
+        + policy.get("test_includes", {}).get(target, [])
+    ))
+    return f"    data_patterns = {string_list(patterns)},\n"
+
+
 def compile_data_argument(directory: str) -> str:
     """The package files a library or binary compiles in (none unless declared)."""
     patterns = SOURCE_OWNERSHIP.get(directory, {}).get("compile_data", [])
@@ -675,7 +728,11 @@ def library_test_sources_argument(directory: str) -> str:
 
 def unit_test_sources_argument(directory: str) -> str:
     patterns = SOURCE_OWNERSHIP.get(directory, {}).get("unit_test_sources", [])
-    return f"    srcs_patterns = {string_list(patterns)},\n" if patterns else ""
+    result = f"    srcs_patterns = {string_list(patterns)},\n" if patterns else ""
+    policy = SOURCE_OWNERSHIP.get(directory, {})
+    if policy.get("derive_tests") and "unit_test_includes" in policy:
+        result += f"    data_patterns = {string_list(policy['unit_test_includes'])},\n"
+    return result
 
 
 def validate_source_ownership(metadata: dict) -> None:
@@ -688,7 +745,7 @@ def validate_source_ownership(metadata: dict) -> None:
     for directory, policy in SOURCE_OWNERSHIP.items():
         if directory not in packages:
             raise ValueError(f"source ownership names unknown package {directory}")
-        if policy.keys() - {"tests", "library_test_sources", "unit_test_sources", "compile_data", "test_data"}:
+        if policy.keys() - {"tests", "library_test_sources", "unit_test_sources", "unit_test_includes", "compile_data", "test_data", "derive_tests", "test_includes", "test_input_fallbacks"}:
             raise ValueError(f"unknown source ownership keys for {directory}")
         package = packages[directory]
         tests = {
@@ -740,19 +797,21 @@ def validate_source_ownership(metadata: dict) -> None:
                 raise ValueError(f"compile data must be a list: {directory}")
             for pattern in patterns:
                 validate_data_pattern(directory, pattern, rust_allowed=False)
-        test_data = policy.get("test_data", {})
-        if not isinstance(test_data, dict):
-            raise ValueError(f"test data must map test targets to patterns: {directory}")
-        for name, patterns in test_data.items():
-            if name not in tests:
-                raise ValueError(f"test data names unknown test {directory}:{name}")
-            if not isinstance(patterns, list) or not patterns:
-                raise ValueError(f"test data must be a non-empty list: {directory}:{name}")
-            for pattern in patterns:
-                validate_data_pattern(directory, pattern, rust_allowed=True)
+        for test_data in (policy.get("test_data", {}), policy.get("test_includes", {})):
+            if not isinstance(test_data, dict):
+                raise ValueError(f"test data must map test targets to patterns: {directory}")
+            for name, patterns in test_data.items():
+                if name not in tests:
+                    raise ValueError(f"test data names unknown test {directory}:{name}")
+                if not isinstance(patterns, list) or not patterns:
+                    raise ValueError(f"test data must be a non-empty list: {directory}:{name}")
+                for pattern in patterns:
+                    validate_data_pattern(directory, pattern, rust_allowed=True)
         for source in policy.get("library_test_sources", []):
             if "*" in source or not (ROOT / directory / source).is_file():
                 raise ValueError(f"test-only source must name a file: {directory}/{source}")
+        for pattern in policy.get("unit_test_includes", []):
+            validate_data_pattern(directory, pattern, rust_allowed=True)
 
 
 def validate_data_pattern(directory: str, pattern: object, rust_allowed: bool) -> None:
@@ -762,7 +821,7 @@ def validate_data_pattern(directory: str, pattern: object, rust_allowed: bool) -
         or ".." in pathlib.PurePosixPath(pattern).parts
     ):
         raise ValueError(f"invalid data pattern {directory}/{pattern}")
-    matches = [path for path in (ROOT / directory).glob(pattern) if path.is_file()]
+    matches = [path for path in (ROOT / directory).glob(pattern + "/*" if pattern.endswith("/**") else pattern) if path.is_file()]
     if not matches:
         raise ValueError(f"data pattern matches nothing: {directory}/{pattern}")
     if not rust_allowed and any(path.suffix == ".rs" for path in matches):
@@ -1267,6 +1326,7 @@ def render_package(package: dict, features: list[str], worker_tests: bool = Fals
             )
         else:
             args.extend(data_exclude_argument(package_dir, target["name"]).splitlines())
+            args.extend(test_inputs_argument(package_dir, target["name"]).splitlines())
         sized = exec_properties_argument(
             package["name"],
             crate_name,
@@ -1575,6 +1635,7 @@ def generated(
     metadata: dict,
     third_party_labels: dict[tuple[str, str], str],
 ) -> tuple[dict[pathlib.Path, str], list[dict]]:
+    derive_test_ownership(metadata)
     validate_source_ownership(metadata)
     validate_package_policy(metadata)
     validate_action_sizes(metadata)
@@ -1594,7 +1655,9 @@ def generated(
     EMITTED_TEST_LABELS.clear()
     RESOLVED_TEST_RUNS.clear()
     RESOLVED_BATCH_BUDGETS.clear()
-    outputs = {}
+    outputs = {
+        ROOT / "tools/buck2/source-ownership.json": json.dumps(SOURCE_OWNERSHIP, indent=2) + "\n",
+    }
     inventory = []
     workspace_members = set(metadata["workspace_members"])
     for package in metadata["packages"]:
@@ -2623,6 +2686,7 @@ class FeatureLaneGraph:
                 package_name, crate_name, "test", f"//{directory}:{name}"
             )
             + data_exclude_argument(directory, target["name"])
+            + test_inputs_argument(directory, target["name"])
             + f"    extra_compile_data = {string_list(extra_compile_data + binary_data)},\n"
             + (f"    extra_data = {string_list(extra_data)},\n" if extra_data else "")
             + f"    library = {quote(library_label) if library_label else 'None'},\n"
