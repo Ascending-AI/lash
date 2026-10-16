@@ -40,7 +40,7 @@ use crate::{
 /// does not retire, or never claims, fails here instead of hanging.
 const WATCHDOG: Duration = Duration::from_secs(60);
 
-/// What a law node's store saw, in the order its calls returned.
+/// What a law node's store saw, in the order observed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Seen {
     /// A backlog read and the holds it answered.
@@ -51,7 +51,9 @@ enum Seen {
     Step(RetirementProgress),
     /// The law's cut fired in a step: the node dies there.
     Cut,
-    /// A claim and how many actors it took.
+    /// A claim attempt, recorded before entering the store's await.
+    ClaimAttempt,
+    /// A returned claim and how many actors it took.
     Claim(usize),
     /// A reap: one turn of the node's serve loop.
     Reap,
@@ -103,6 +105,8 @@ struct Probe {
     calls: AtomicU32,
     /// The call whose batch the node dies in, and where.
     cut: Option<(u32, BatchCut)>,
+    /// A successful claim reached its cut or recorded outcome.
+    claim_observed: watch::Sender<bool>,
 }
 
 impl Probe {
@@ -161,6 +165,8 @@ where
 struct Retiring {
     inner: Arc<dyn PageStore>,
     probe: Arc<Probe>,
+    /// Park after a successful claim, before recording its outcome.
+    cut_claim: bool,
 }
 
 impl Retiring {
@@ -182,7 +188,9 @@ impl Retiring {
                 gate: watch::Sender::new(open),
                 calls: AtomicU32::new(0),
                 cut,
+                claim_observed: watch::Sender::new(false),
             }),
+            cut_claim: false,
         })
     }
 
@@ -349,7 +357,9 @@ pub async fn a_node_retires_sealed_pages_on_its_own(tier: &dyn PageTier) -> LawO
 /// limit claims nothing, from its boot on, while its retirement cannot
 /// catch up; its serve loop keeps turning on its timers without spinning.
 /// Once retirement brings the backlog under the limit it claims the ready
-/// actor, and no claim comes before a backlog read under the limit.
+/// actor, and no claim attempt comes before a backlog read under the limit.
+/// Both a returned claim and a kill after its commit but before its outcome
+/// is recorded retain the attempt that acquired the actor.
 ///
 /// # Errors
 ///
@@ -357,18 +367,29 @@ pub async fn a_node_retires_sealed_pages_on_its_own(tier: &dyn PageTier) -> LawO
 pub async fn backpressure_holds_claims_until_retirement_catches_up(
     tier: &dyn PageTier,
 ) -> LawOutcome {
+    for cut_claim in [false, true] {
+        backpressure_case(tier, cut_claim).await?;
+    }
+    Ok(())
+}
+
+async fn backpressure_case(tier: &dyn PageTier, cut_claim: bool) -> LawOutcome {
     const LIMIT: u64 = 1;
-    let owner = owned(tier, "pages-pressure").await?;
+    let case = if cut_claim { "cut" } else { "returned" };
+    let owner = owned(tier, &format!("pages-pressure-{case}")).await?;
     for cell in ["pressure-a", "pressure-b", "pressure-c"] {
         retired_tree(tier, &owner, cell, 300).await?;
     }
     let before = holds(tier).await?;
     ensure!(before > LIMIT, "{before} holds are not behind {LIMIT}");
-    let work = session("pages-pressure-work")?;
+    let work = session(&format!("pages-pressure-work-{case}"))?;
     create(tier.pages(), std::slice::from_ref(&work)).await?;
     // Retirement stays behind until the law opens the gate.
-    let store = Retiring::over(tier, false, None)?;
-    let name = "pages-pressure-claimer";
+    let mut store = Retiring::over(tier, false, None)?;
+    // Force the cancellation window: ownership is durable, but the wrapper
+    // cannot record the returned claim before the law kills the node.
+    store.cut_claim = cut_claim;
+    let name = &format!("pages-pressure-claimer-{case}");
     let node = store.serve(
         name,
         RetirementSettings {
@@ -410,7 +431,7 @@ pub async fn backpressure_holds_claims_until_retirement_catches_up(
         "the held node's serve loop spun: {late} waits ended at once across {turns} reaps"
     );
     ensure!(
-        !held.iter().any(|seen| matches!(seen, Seen::Claim(_))),
+        !held.contains(&Seen::ClaimAttempt),
         "the node claimed while its retirement was behind: {held:?}"
     );
     ensure!(
@@ -431,11 +452,22 @@ pub async fn backpressure_holds_claims_until_retirement_catches_up(
             .is_some_and(|owner| owner.node.as_str() == name))
     })
     .await?;
+    let mut observed = probe.claim_observed.subscribe();
+    tokio::time::timeout(WATCHDOG, observed.wait_for(|observed| *observed))
+        .await
+        .map_err(|_| LawBroken("the successful claim was never observed".to_owned()))?
+        .map_err(|_| LawBroken("the claim probe closed before observing it".to_owned()))?;
     node.kill().await;
     let seen = probe.seen();
+    if cut_claim {
+        ensure!(
+            !seen.iter().any(|seen| matches!(seen, Seen::Claim(_))),
+            "the claim outcome escaped the cancellation cut: {seen:?}"
+        );
+    }
     let first_claim = seen
         .iter()
-        .position(|seen| matches!(seen, Seen::Claim(_)))
+        .position(|seen| *seen == Seen::ClaimAttempt)
         .ok_or_else(|| LawBroken("the owner took the actor without a claim".to_owned()))?;
     let caught_up = seen
         .iter()
@@ -451,7 +483,7 @@ pub async fn backpressure_holds_claims_until_retirement_catches_up(
         .count();
     ensure!(batches > 0, "no retirement batch ran before the claim");
     eprintln!(
-        "backpressure: holds_before={before} limit={LIMIT} retirement_batches_before_claim={batches} held_reaps={turns} late_waits={late}"
+        "backpressure {case}: holds_before={before} limit={LIMIT} retirement_batches_before_claim={batches} held_reaps={turns} late_waits={late}"
     );
     Ok(())
 }
@@ -646,9 +678,19 @@ impl DurableStore for Retiring {
     }
 
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
+        // A committed claim can become visible before this await returns.
+        // Cancellation must not erase the attempt that acquired its owner.
+        self.probe.see(Seen::ClaimAttempt);
         let claimed = self.inner.claim(node, limit).await;
         if let Ok(claimed) = &claimed {
+            if self.cut_claim && !claimed.is_empty() {
+                self.probe.claim_observed.send_replace(true);
+                return std::future::pending().await;
+            }
             self.probe.see(Seen::Claim(claimed.len()));
+            if !claimed.is_empty() {
+                self.probe.claim_observed.send_replace(true);
+            }
         }
         claimed
     }
