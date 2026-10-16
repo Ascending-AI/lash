@@ -14,6 +14,7 @@ supervisor):
           tool=<argv[0]>  peak_bytes=<memory.peak>  cpu_usec=<cpu time>
           wall_ms=<wall time>  exit=<status>  requested_kb=<...>  requested_cpu=<...>
           test=<...>  op=<...>  category=<Buck2 category>  anon_peak_bytes=<...>
+          action_digest=<...>  worker_cpu_count=<...>  worker_max_inflight=<...>
 
 Copy the logs off the workers (`/workspace/kiln-executor/usage/actions.log*`)
 and refresh every size file with one command:
@@ -60,15 +61,13 @@ sample.
 
 The rule, per `<package>/<crate>`:
 
-* `cpu_count` = 1 while the p95 of cores (cpu time / wall time) is at most 1.6,
-  otherwise ceil(p95 cores - 0.2), capped at 8. The executor's `cpu.max` for an
-  action is the larger of its request and the worker's slot share (advertised
-  CPUs / max_inflight: 1.67 cores on the bazelboxes, 2 on the devbox), so a
-  one-CPU request already runs unthrottled up to that share and asking for two
-  only reserves a core the action leaves idle. Above the share the quota is the
-  request itself; a p95 within 0.2 of a whole core rounds down because CPU is
-  compressible: an action that briefly wants 2.1 cores on 2 runs slightly
-  slower and does not fail.
+* `cpu_count` = 1 while p95(cpu time / wall time / worker slot share) is
+  at most 1; otherwise ceil(p95 cores - 0.2), capped at 8. The slot share is
+  that sampled worker's advertised CPU count / max_inflight (1.25 on i9,
+  1.67 on 02). Compile samples require both worker metadata fields above;
+  legacy logs can supply them with `--worker-metadata`, a JSON object keyed
+  by log path whose values hold `worker_cpu_count` and `worker_max_inflight`.
+  Missing metadata refuses sizing (S1); no pool-wide share is assumed.
 * `memory_kb` = p99 anonymous peak x 1.25 plus 512 MiB, rounded up to
   256 MiB and at least the 1.5 GiB default and `MINIMUM_MEMORY_KB` floor.
   Anonymous peaks are sampled every 250 ms. The fixed allowance covers
@@ -225,12 +224,6 @@ MIN_SAMPLES = 20
 CPU_PERCENTILE = 95
 # How far above a whole core the p95 may sit and still round down.
 CPU_TOLERANCE = 0.2
-# The p95 a one-CPU request covers. Every pool worker gives an action the
-# larger of its request and the slot share as `cpu.max`
-# (`/workspace/tools/kiln/executor/install.sh`: advertised cpu_count /
-# max_inflight, 1.67 cores at the least), so one CPU is the accurate request up
-# to just under that share.
-SHARE_CORES = 1.6
 # The pool caps a single action's request at 8 cores.
 MAX_CPU_COUNT = 8
 # The proportional margin covers variation between inputs; compile anonymous
@@ -283,6 +276,7 @@ class Samples:
         self.legacy_peaks: list[int] = []
         self.anon_peaks: list[int] = []
         self.oom_kills = 0
+        self.slot_ratios: list[float] = []
 
     def observe(
         self,
@@ -291,9 +285,12 @@ class Samples:
         requested_cpu: int,
         requested_kb: int = 0,
         anon_peak_bytes: int | None = None,
+        slot_share: float | None = None,
     ) -> None:
         basis = peak_bytes if anon_peak_bytes is None else anon_peak_bytes
         self.records.append((cores, basis, requested_cpu))
+        if slot_share is not None:
+            self.slot_ratios.append(cores / slot_share)
         if anon_peak_bytes is None:
             self.legacy_peaks.append(peak_bytes)
             self.needs.append(memory_need(peak_bytes, requested_kb))
@@ -317,9 +314,9 @@ def percentile(values: list[float], pct: int) -> float:
     return ordered[max(0, math.ceil(pct / 100 * len(ordered)) - 1)]
 
 
-def cpu_count_for(p95_cores: float, within_share: bool = True) -> int:
-    """The compile request; a test run passes `within_share=False`."""
-    if within_share and p95_cores <= SHARE_CORES:
+def cpu_count_for(p95_cores: float, *, slot_share: float | None = None) -> int:
+    """The request above a compile slot share, or for any test run."""
+    if slot_share is not None and p95_cores <= slot_share:
         return DEFAULT_CPU_COUNT
     wanted = math.ceil(p95_cores - CPU_TOLERANCE)
     return min(MAX_CPU_COUNT, max(DEFAULT_CPU_COUNT, wanted))
@@ -459,7 +456,20 @@ def observe_compile(samples: Samples, record: dict[str, str]) -> None:
         as_int(record.get("requested_cpu")) or DEFAULT_CPU_COUNT,
         as_int(record.get("requested_kb")) or 0,
         as_int(record.get("anon_peak_bytes")),
+        worker_slot_share(record),
     )
+
+
+def worker_slot_share(record: dict[str, str]) -> float:
+    """S1: no compile sizing without the sampled worker's advertised share."""
+    cpus = as_int(record.get("worker_cpu_count"))
+    slots = as_int(record.get("worker_max_inflight"))
+    if not cpus or not slots:
+        raise ValueError(
+            "compile sizing requires worker metadata: worker_cpu_count and "
+            "worker_max_inflight on each record, or --worker-metadata for each log"
+        )
+    return cpus / slots
 
 
 def oom_killed(record: dict[str, str]) -> bool:
@@ -729,7 +739,7 @@ def test_run_table(
             else 0.0
         )
         p99_peak_bytes = percentile(runs.peaks, MEMORY_PERCENTILE) if runs.peaks else 0
-        cpu_count = cpu_count_for(p95, within_share=False)
+        cpu_count = cpu_count_for(p95)
         memory_kb = max(
             memory_kb_for(runs.needs, floor_kb=TEST_MEMORY_FLOOR_KB if runs.anonymous else 1024 * 1024)
             if runs.peaks
@@ -786,8 +796,15 @@ def compile_row(
         if samples.records else floor_kb,
         minimum,
     )
+    if samples.records and len(samples.slot_ratios) != len(samples.records):
+        raise ValueError("compile sizing requires worker metadata for every sample")
+    cpu_count = (
+        DEFAULT_CPU_COUNT
+        if not samples.records or percentile(samples.slot_ratios, CPU_PERCENTILE) <= 1
+        else cpu_count_for(p95)
+    )
     cpu_count, memory_kb = settled(
-        current, cpu_count_for(p95), memory_kb, max(max(samples.legacy_peaks, default=0), minimum * 1024)
+        current, cpu_count, memory_kb, max(max(samples.legacy_peaks, default=0), minimum * 1024)
     )
     return {
         "cpu_count": cpu_count,
@@ -1186,13 +1203,22 @@ def check_compile_memory(evidence: dict, memory_kb: int, identity: object) -> No
     assert evidence["legacy_peak_bytes"] <= memory_kb * 1024, (identity, "legacy peak exceeds request")
 
 
-def read_lines(paths: list[pathlib.Path], since: int) -> list[str]:
+def read_lines(
+    paths: list[pathlib.Path], since: int, worker_metadata: dict | None = None
+) -> list[str]:
     lines = []
     for path in paths:
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             stamp = line.partition("\t")[0]
             if since and (not stamp.isdigit() or int(stamp) < since):
                 continue
+            if worker_metadata is not None:
+                metadata = worker_metadata.get(str(path))
+                if metadata is None:
+                    raise ValueError(f"missing worker metadata for {path}")
+                # Metadata belongs to this captured log, not the current pool.
+                for field in ("worker_cpu_count", "worker_max_inflight"):
+                    line += f"\t{field}={metadata[field]}"
             lines.append(line)
     return lines
 
@@ -1243,8 +1269,16 @@ def main() -> int:
     )
     parser.add_argument("--phase-report", action="store_true", help="report per-crate phase peaks and time from --events")
     parser.add_argument("--metadata-only", action="store_true", help="generate measured metadata-sizes.json from --events; run kiln sync afterwards")
+    parser.add_argument(
+        "--worker-metadata", type=pathlib.Path,
+        help="JSON keyed by usage-log path, with worker_cpu_count and worker_max_inflight",
+    )
     args = parser.parse_args()
-    lines = read_lines(args.logs, args.since)
+    worker_metadata = (
+        json.loads(args.worker_metadata.read_text(encoding="utf-8"))
+        if args.worker_metadata else None
+    )
+    lines = read_lines(args.logs, args.since, worker_metadata)
     inventory = json.loads(
         (ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
     )

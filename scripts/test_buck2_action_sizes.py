@@ -7,6 +7,7 @@ import json
 import pathlib
 import sys
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/buck2"))
@@ -41,6 +42,8 @@ def record(
             f"exit={exit_status}",
             f"requested_kb={requested_kb}",
             f"requested_cpu={requested_cpu}",
+            "worker_cpu_count=40",
+            "worker_max_inflight=32",
         ]
     )
 
@@ -109,14 +112,35 @@ class TableTest(unittest.TestCase):
         self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 8)
         self.assertEqual(sizes.MAX_CPU_COUNT, 8)
 
-    def test_a_p95_inside_the_slot_share_asks_for_one_cpu(self) -> None:
-        # The worker's cpu.max for a one-CPU request is its slot share (1.67
-        # cores at the least), so a p95 up to 1.6 runs unthrottled on one.
-        self.assertEqual(sizes.SHARE_CORES, 1.6)
-        lines = [record(cores=1.6, peak_bytes=2 * GIB)] * 20
-        self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 1)
-        lines = [record(cores=1.7)] * 20
-        self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], 2)
+    def test_s1_compile_sizing_uses_each_workers_slot_share(self) -> None:
+        for cpus, slots, expected in ((40, 32, 2), (80, 48, 1)):
+            with self.subTest(cpus=cpus):
+                line = record(cores=1.6, peak_bytes=2 * GIB)
+                line = line.replace("worker_cpu_count=40", f"worker_cpu_count={cpus}")
+                line = line.replace("worker_max_inflight=32", f"worker_max_inflight={slots}")
+                self.assertEqual(table([line] * 20)["lash-internal-core/lash_core"]["cpu_count"], expected)
+
+    def test_s1_mixed_workers_use_the_p95_of_each_samples_share(self) -> None:
+        i9 = record(cores=1.6, peak_bytes=2 * GIB)
+        box02 = i9.replace("worker_cpu_count=40", "worker_cpu_count=80").replace("worker_max_inflight=32", "worker_max_inflight=48")
+        self.assertEqual(table([box02] * 19 + [i9])["lash-internal-core/lash_core"]["cpu_count"], 1)
+        self.assertEqual(table([box02] * 18 + [i9] * 2)["lash-internal-core/lash_core"]["cpu_count"], 2)
+
+    def test_s1_missing_worker_metadata_refuses_compile_sizing(self) -> None:
+        line = record().replace("\tworker_cpu_count=40", "").replace("\tworker_max_inflight=32", "")
+        with self.assertRaisesRegex(ValueError, "worker.*metadata"):
+            table([line] * 20)
+
+    def test_s1_per_log_worker_metadata_reaches_compile_sizing(self) -> None:
+        line = record(cores=1.6, peak_bytes=2 * GIB)
+        line = line.replace("\tworker_cpu_count=40", "").replace("\tworker_max_inflight=32", "")
+        for cpus, slots, expected in ((40, 32, 2), (80, 48, 1)):
+            metadata = {"captured.log": {"worker_cpu_count": cpus, "worker_max_inflight": slots}}
+            with mock.patch.object(pathlib.Path, "read_text", return_value="\n".join([line] * 20)):
+                lines = sizes.read_lines([pathlib.Path("captured.log")], 0, metadata)
+                self.assertEqual(table(lines)["lash-internal-core/lash_core"]["cpu_count"], expected)
+                with self.assertRaisesRegex(ValueError, "missing worker metadata"):
+                    sizes.read_lines([pathlib.Path("unknown.log")], 0, metadata)
 
     def test_samples_at_every_request_are_cpu_evidence(self) -> None:
         lines = [record(cores=1.0, requested_cpu="1")] * 200
@@ -246,7 +270,8 @@ class TableTest(unittest.TestCase):
                     or entry["cpu_count"] > sizes.DEFAULT_CPU_COUNT,
                     "an entry that asks for no more than the defaults is noise",
                 )
-                self.assertEqual(entry["cpu_count"], sizes.cpu_count_for(entry["p95_cores"]))
+                # These committed measurements predate per-worker metadata.
+                self.assertEqual(entry["cpu_count"], sizes.cpu_count_for(entry["p95_cores"], slot_share=1.6))
                 self.assertEqual(entry["memory_kb"] % sizes.MEMORY_GRANULARITY_KB, 0)
                 self.assertGreaterEqual(entry["memory_kb"] * 1024, entry["peak_bytes"])
                 self.assertGreaterEqual(
@@ -315,7 +340,8 @@ class ClippyTableTest(unittest.TestCase):
                 self.assertGreaterEqual(entry["memory_kb"], sizes.CLIPPY_FLOOR_KB)
                 self.assertGreaterEqual(entry["memory_kb"] * 1024, entry["peak_bytes"])
                 self.assertGreaterEqual(entry["samples"], sizes.MIN_SAMPLES)
-                self.assertEqual(entry["cpu_count"], sizes.cpu_count_for(entry["p95_cores"]))
+                # These committed measurements predate per-worker metadata.
+                self.assertEqual(entry["cpu_count"], sizes.cpu_count_for(entry["p95_cores"], slot_share=1.6))
 
 
 def run_record(
@@ -342,6 +368,8 @@ def run_record(
             f"exit={exit_status}",
             f"requested_kb={requested_kb}",
             f"requested_cpu={requested_cpu}",
+            "worker_cpu_count=40",
+            "worker_max_inflight=32",
             f"test={role}:-:{label}",
         ]
     )

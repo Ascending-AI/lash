@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import json
+import io
 import pathlib
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import action_categories_from_events as joined  # noqa: E402
@@ -68,8 +70,11 @@ def usage(
             "exit=0",
             f"requested_kb={requested_kb}",
             "requested_cpu=1",
+            "worker_cpu_count=40",
+            "worker_max_inflight=32",
             "test=-",
-            "op=0",
+            f"op=op-{stamp}",
+            f"action_digest=digest-{stamp}",
             f"category={category}",
             f"anon_peak_bytes={anon_peak_bytes}",
         ]
@@ -104,6 +109,7 @@ def event(
                         "command": {
                             "RemoteCommand": {
                                 "cache_hit": cache_hit,
+                                "action_digest": f"digest-{int(end)}",
                                 "details": {
                                     "platform": {
                                         "properties": [
@@ -137,7 +143,7 @@ def labelled(events: list[str], lines: list[str]) -> list[tuple]:
 def samples(peak_bytes: int, count: int, requested_kb: int = 4194304) -> sizes.Samples:
     kept = sizes.Samples()
     for _ in range(count):
-        kept.observe(1.0, peak_bytes, 1, requested_kb)
+        kept.observe(1.0, peak_bytes, 1, requested_kb, slot_share=1.25)
     return kept
 
 
@@ -160,15 +166,37 @@ class JoinTest(unittest.TestCase):
             ],
         )
 
-    def test_a_guess_is_not_a_match(self) -> None:
-        # Two records that fit, a cache hit, another request, another crate,
-        # another wall time, and a target the inventory does not name.
-        self.assertEqual(labelled([event()], [usage(), usage(stamp=1001)]), [])
+    def test_action_digest_rejects_ambiguous_or_unrelated_samples(self) -> None:
+        self.assertEqual(labelled([event()], [usage(), usage()]), [])
         self.assertEqual(labelled([event(cache_hit=True)], [usage()]), [])
-        self.assertEqual(labelled([event()], [usage(requested_kb=1572864)]), [])
+        self.assertEqual(labelled([event()], [usage(stamp=1001)]), [])
         self.assertEqual(labelled([event()], [usage(crate="runtime_turns")]), [])
-        self.assertEqual(labelled([event()], [usage(wall_ms=12_000)]), [])
         self.assertEqual(labelled([event(name="build_script")], [usage()]), [])
+
+    def test_action_digest_join_keeps_raised_and_killed_attempts(self) -> None:
+        for status in ("0", "137"):
+            line = usage(requested_kb=8388608, stamp=5000, wall_ms=1234)
+            line = line.replace("digest-5000", "digest-1000").replace("exit=0", f"exit={status}")
+            records = list(joined.labelled_records(list(joined.executed_actions([event()])), [line], INVENTORY))
+            self.assertEqual(len(records), 1)
+            self.assertEqual(records[0][-1]["requested_kb"], "8388608")
+            if status == "137":
+                measured = sizes.collect_metadata([(*records[0][:3], "metadata", *records[0][4:])])
+                self.assertEqual(measured[(KEY, "target", False)].oom_kills, 1)
+
+    def test_legacy_logs_use_the_reservation_join_with_an_explicit_warning(self) -> None:
+        legacy = usage().replace("\taction_digest=digest-1000", "")
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as warning:
+            self.assertEqual(len(labelled([event()], [legacy])), 1)
+            self.assertIn("legacy reservation/time join", warning.getvalue())
+        with mock.patch("sys.stderr", new_callable=io.StringIO):
+            self.assertEqual(labelled([event()], [legacy.replace("requested_kb=4194304", "requested_kb=8388608")]), [])
+
+    def test_digest_formats_match_between_buck2_and_worker(self) -> None:
+        action = list(joined.executed_actions([event()]))[0]
+        action["action_digest"] = "abcdef:123"
+        line = usage().replace("digest-1000", "abcdef/123")
+        self.assertEqual(len(list(joined.labelled_records([action], [line], INVENTORY))), 1)
 
     def test_one_record_labels_one_action(self) -> None:
         self.assertEqual(len(labelled([event(), event(end=1001.0)], [usage()])), 1)
@@ -495,9 +523,9 @@ class MetadataSizingTest(unittest.TestCase):
         group = (KEY, "target", False)
         sample = sizes.Samples()
         for _ in range(19):
-            sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4)
+            sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4, slot_share=1.25)
         self.assertEqual(sizes.metadata_table({group: sample}, {}, inherited), {"dev": {}, "optimized": {}})
-        sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4)
+        sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4, slot_share=1.25)
         rows = sizes.metadata_table({group: sample}, {}, inherited)
         row = rows["dev"][KEY]["target"]
         self.assertEqual(row["memory_kb"], 1024 * 1024)

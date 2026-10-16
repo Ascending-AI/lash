@@ -223,6 +223,14 @@
     "peak_bytes": 120905728,
     "samples": 25
   },
+  "//crates/lash-durable-test:process_lifecycle_events__test": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.06,
+    "p99_peak_bytes": 180490240,
+    "peak_bytes": 180490240,
+    "samples": 44
+  },
   "//crates/lash-durable-test:render_cache_laws__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
@@ -238,6 +246,14 @@
     "p99_peak_bytes": 179769344,
     "peak_bytes": 179769344,
     "samples": 47
+  },
+  "//crates/lash-durable-test:tool_activity__test": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.09,
+    "p99_peak_bytes": 157937664,
+    "peak_bytes": 157937664,
+    "samples": 42
   },
   "//crates/lash-durable-test:tool_call_identity__test": {
     "cpu_count": 2,
@@ -446,6 +462,14 @@
     "p99_peak_bytes": 42393600,
     "peak_bytes": 42393600,
     "samples": 12
+  },
+  "//crates/lash-postgres-workers:failover__test": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 0.63,
+    "p99_peak_bytes": 211644416,
+    "peak_bytes": 211644416,
+    "samples": 21
   },
   "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test": {
     "cpu_count": 2,

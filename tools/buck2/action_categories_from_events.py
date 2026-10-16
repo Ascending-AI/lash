@@ -15,10 +15,14 @@ usage. This joins the two for the invocations of any checkout:
 `--events` takes Buck2 event logs (`*.pb.zst`, decoded with the checkout's
 pinned Buck2) or saved `buck2 log show` output; `buck2 --isolation-dir kiln
 log path --all` lists a checkout's logs. An executed (not cached) remote
-action matches the one usage record with the same Cargo identity, category
-and `memory_kb` request that ended within five seconds of it and ran as long,
-to within 0.5 s or 8%. An action with no such record, or with several, is left
-out: its worker's log was not given, or the match would be a guess.
+action matches the one usage record with its `action_digest`, Cargo identity
+and category. Reservation and elapsed time do not identify an action: hints
+change the former and killed attempts can have different durations. Ambiguous
+digests remain unmatched. Until kiln deploys `action_digest` in worker logs,
+legacy records explicitly use the old identity/category/reservation/time join:
+end within five seconds, duration within 0.5 s or 8%. A warning names this
+branch because it still cannot retain raised or killed samples reliably.
+
 
 The table printed here is evidence. The same join is what
 `action_sizes_from_log.py --refresh --events` sizes a library apart from its
@@ -108,6 +112,7 @@ def executed_actions(lines):
             package = label.get("package", "")
             configuration = (owner.get("configuration") or {}).get("full_name", "")
             yield {
+                "action_digest": remote.get("action_digest"),
                 "category": category,
                 "optimized": configuration.partition("#")[0] in OPTIMIZED_CONFIGURATIONS,
                 "emit": emit,
@@ -157,62 +162,73 @@ def shared_identities(inventory: dict) -> set[str]:
     return {key for key, both in kinds.items() if both == {"target", "test"}}
 
 
-def usage_by_identity(lines):
-    """The compile records, as `(key, category) -> [(stamp, record)]`."""
+def digest_key(digest: str | None) -> str | None:
+    """Buck2 writes hash:size; REAPI worker telemetry writes hash/size."""
+    return digest.replace(":", "/") if digest else None
+
+
+def usage_by_digest(lines):
+    """Keep successful and killed attempts without filtering their reservation."""
     records = collections.defaultdict(list)
     for line in lines:
         record = parse_record(line)
-        stamp = line.partition("\t")[0]
-        if record is None or not stamp.isdigit():
+        if record is None or record.get("category") not in COMPILE_CATEGORIES:
             continue
-        if record.get("category") not in COMPILE_CATEGORIES:
-            continue
+        digest = record.get("action_digest")
+        if digest == "-":
+            digest = None
         if None in [as_int(record.get(name)) for name in ("wall_ms", "cpu_usec", "requested_kb")]:
             continue
-        if held_bytes(record) is None:
-            continue
-        key = f"{record.get('pkg', '-')}/{record.get('crate', '-')}"
-        records[(key, record["category"])].append((int(stamp), record))
+        if held_bytes(record) is not None and line.partition("\t")[0].isdigit():
+            records[digest_key(digest)].append((int(line.partition("\t")[0]), record))
     return records
 
 
 def labelled_records(actions, lines, inventory: dict):
-    """Each matched first-party compile action with its usage record.
+    """Join exact action digests, rejecting ambiguous attempts and identity mismatches.
 
-    Yields `(key, inventory kind, category, emit, optimized, record)`, where
-    `optimized` says the action ran in an optimized configuration. A usage
-    record is matched at most once.
+    Yields `(key, inventory kind, category, emit, optimized, record)` once per
+    worker attempt. Digest-bearing records survive hints, escalation and kills.
+    Until kiln deploys digests, legacy records use the old reservation/time join
+    with an explicit warning. They cannot prove raised or killed usage absent.
     """
     identities = target_identities(inventory)
-    records = usage_by_identity(lines)
+    records = usage_by_digest(lines)
     taken = set()
+    warned_legacy = False
     for action in actions:
         identity = identities.get(action["label"])
         if identity is None or action["category"] not in COMPILE_CATEGORIES:
             continue
         key, kind = identity
-        tolerance = max(WALL_TOLERANCE_SECONDS, WALL_TOLERANCE_RATIO * action["wall"])
-        candidates = [
-            (stamp, record)
-            for stamp, record in records.get((key, action["category"]), [])
-            if abs(stamp - action["end"]) <= END_TOLERANCE_SECONDS
-            and int(record["requested_kb"]) == action["memory_kb"]
-            and abs(int(record["wall_ms"]) / 1000 - action["wall"]) <= tolerance
-        ]
+        digest = digest_key(action.get("action_digest"))
+        candidates = records.get(digest, []) if digest else []
+        if not candidates:
+            legacy = records.get(None, []) if digest else [item for rows in records.values() for item in rows]
+            if legacy and not warned_legacy:
+                print(
+                    "worker usage lacks action_digest: using legacy reservation/time join; "
+                    "hint-raised and killed samples may be unmatched",
+                    file=sys.stderr,
+                )
+                warned_legacy = True
+            tolerance = max(WALL_TOLERANCE_SECONDS, WALL_TOLERANCE_RATIO * action["wall"])
+            candidates = [
+                (stamp, record) for stamp, record in legacy
+                if abs(stamp - action["end"]) <= END_TOLERANCE_SECONDS
+                and int(record["requested_kb"]) == action["memory_kb"]
+                and abs(int(record["wall_ms"]) / 1000 - action["wall"]) <= tolerance
+                and f"{record.get('pkg')}/{record.get('crate')}" == key
+                and record["category"] == action["category"]
+            ]
         if len(candidates) != 1:
             continue
-        mark = (key, action["category"], id(candidates[0][1]))
-        if mark in taken:
+        record = candidates[0][1]
+        if (id(record) in taken or f"{record.get('pkg')}/{record.get('crate')}" != key
+                or record["category"] != action["category"]):
             continue
-        taken.add(mark)
-        yield (
-            key,
-            kind,
-            action["category"],
-            action["emit"],
-            action["optimized"],
-            candidates[0][1],
-        )
+        taken.add(id(record))
+        yield key, kind, action["category"], action["emit"], action["optimized"], record
 
 
 def render(matched) -> str:
