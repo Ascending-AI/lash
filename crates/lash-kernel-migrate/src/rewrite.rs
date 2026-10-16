@@ -67,11 +67,7 @@ fn redeclare_one(
             .collect();
         replace_in_block(&mut body.block, done);
     }
-    let to = redeclared
-        .identity()
-        .map_err(|error| DocumentRefusal::Encode {
-            message: error.message,
-        })?;
+    let to = redeclared.identity();
     done.insert(function, to);
     ordered.push(Redeclared {
         from: function,
@@ -217,22 +213,8 @@ fn replace_in_expr(expr: &mut Expr, functions: &BTreeMap<FunctionId, FunctionId>
 /// declared function: every node of `base` to the same site of `result`.
 /// A node of a library function's body is not listed.
 pub fn unchanged(base: &Document, result: &Document) -> Result<Correspondence, DocumentRefusal> {
-    Correspondence::of(
-        document_identity(base)?,
-        document_identity(result)?,
-        unmoved(base),
-    )
-    .ok_or(DocumentRefusal::Correspondence)
-}
-
-pub(crate) fn document_identity(
-    document: &Document,
-) -> Result<lash_kernel_doc::DocumentId, DocumentRefusal> {
-    document
-        .identity()
-        .map_err(|error| DocumentRefusal::Encode {
-            message: error.message,
-        })
+    Correspondence::of(base.identity(), result.identity(), unmoved(base))
+        .ok_or(DocumentRefusal::Correspondence)
 }
 
 /// Every node of `base`'s `main` and declared functions, at the same site.

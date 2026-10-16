@@ -637,16 +637,6 @@ migration_refusal_law!(
     "form_not_carried"
 );
 migration_refusal_law!(
-    migration_document_encode_round_trips,
-    Document,
-    DocumentRefusal,
-    Encode {
-        message: "invalid document".to_owned()
-    },
-    "document",
-    "encode"
-);
-migration_refusal_law!(
     migration_document_correspondence_round_trips,
     Document,
     DocumentRefusal,

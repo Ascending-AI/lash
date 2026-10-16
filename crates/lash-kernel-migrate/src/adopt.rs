@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_doc::{Document, FunctionBody, FunctionCatalog, FunctionId, Unit};
 
 use crate::migration::{DocumentRefusal, Rewritten};
-use crate::rewrite::{document_identity, replace_functions, replace_in_block, same_sites, unmoved};
+use crate::rewrite::{replace_functions, replace_in_block, same_sites, unmoved};
 
 /// `base` with each library function `replacements` names replaced, and
 /// the correspondence a run of it is carried over: every node of its own
@@ -77,12 +77,8 @@ pub fn adopt(
             );
         }
     }
-    let correspondence = Correspondence::of(
-        document_identity(base)?,
-        document_identity(&document)?,
-        entries,
-    )
-    .ok_or(DocumentRefusal::Correspondence)?;
+    let correspondence = Correspondence::of(base.identity(), document.identity(), entries)
+        .ok_or(DocumentRefusal::Correspondence)?;
     Ok(Rewritten {
         document,
         correspondence,

@@ -138,7 +138,7 @@ impl DocumentEncodings {
         }
         let prepared = Arc::new(DocumentEncoding {
             document: document.clone(),
-            identity: document.identity()?,
+            identity: document.identity(),
             encoded: Arc::new(
                 wire::wrap(PayloadKind::Document, document.to_json()?.as_bytes())
                     .map_err(worker)?
@@ -193,8 +193,7 @@ impl RemoteMachines {
     ///
     /// # Errors
     ///
-    /// [`KernelFailure::Document`] when the document has no canonical
-    /// encoding.
+    /// [`KernelFailure::Document`] when the document has no JSON encoding.
     #[expect(clippy::too_many_arguments, reason = "one run's whole identity")]
     pub fn new(
         service: Service,

@@ -390,10 +390,7 @@ fn independent_native_source_has_exact_numeric_collection_and_member_inverse() {
             ]),
         }],
     );
-    assert_eq!(
-        decoded.canonical_bytes().unwrap(),
-        expected.canonical_bytes().unwrap()
-    );
+    assert_eq!(decoded.canonical_bytes(), expected.canonical_bytes());
     roundtrip(&expected, true);
 }
 
@@ -476,9 +473,8 @@ main {
     assert_eq!(
         crate::read(ORDINARY_WORKFLOW, &document, Default::default())
             .unwrap()
-            .canonical_bytes()
-            .unwrap(),
-        document.canonical_bytes().unwrap()
+            .canonical_bytes(),
+        document.canonical_bytes()
     );
     assert!(
         !source.contains("k.") && !source.contains(" as "),
@@ -779,9 +775,8 @@ fn native_operator_aliases_preserve_helper_identity_precedence_and_ambiguity() {
     assert_eq!(
         crate::read(independent, &document, Default::default())
             .unwrap()
-            .canonical_bytes()
-            .unwrap(),
-        document.canonical_bytes().unwrap()
+            .canonical_bytes(),
+        document.canonical_bytes()
     );
     // Unary expressions on the left of exponentiation need an outer group;
     // the inner numeric group still distinguishes a helper from a literal.

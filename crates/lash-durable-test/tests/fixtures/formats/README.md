@@ -256,3 +256,19 @@ Each fresh corpus image resumed to exactly its original expected result.
 The three kernel corpus images and `lashvm` hold no cell envelope and keep
 their bytes. Both pre-heap refusal witnesses also keep their bytes; their
 retired formats are refused as described above.
+
+FIG-6256 redefined document and function identity (`K-ID-001`..`K-ID-003`)
+in place under the 1.0 freeze: a `DocumentId` or `FunctionId` is now the
+logical digest of the canonical token body the checkpoint graph encodes, not
+SHA-256 over canonical JSON. Every image pins identities (each parked root
+names its document, each release manifest its helpers), so this is a
+deliberate re-record of FIG-6183's (`b6cf0eeb40`) retained images. Main's
+copies were taken, then `lashvm`, `session` and all six images of set
+`4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1` were re-recorded in place with
+their recorders on one build rebased onto `origin/main` (`4c7e93b29a`): the
+two baseline recorders, then `corpus::record_current_parked_image_set` under
+a temporary build id whose fresh image bytes and helper identity catalogue
+replaced the set's before the temporary set was dropped. Every fresh image
+recorded exactly the result the set names; the set keeps its id, programs,
+versions and every oracle member. The pre-heap refusal witnesses keep their
+bytes.

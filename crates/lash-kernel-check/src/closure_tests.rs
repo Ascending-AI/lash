@@ -148,7 +148,7 @@ fn helper_callbacks_through_values_are_certified_or_refused() {
                 let body = helper.body().unwrap().clone();
                 helper.implementation = lash_kernel_doc::Implementation::Both(body);
             }
-            let id = helper.identity().unwrap();
+            let id = helper.identity();
             let catalog = BTreeMap::from([(id, helper)]);
             let text = format!(
                 r#"kernel 1
@@ -212,7 +212,7 @@ main {{ finish null }}
             helper.implementation =
                 lash_kernel_doc::Implementation::Both(helper.body().unwrap().clone());
         }
-        let id = helper.identity().unwrap();
+        let id = helper.identity();
         let catalog = BTreeMap::from([(id, helper)]);
         let document = parse_document(&format!(
             r#"kernel 1

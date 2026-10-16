@@ -3,13 +3,13 @@
   "cases": [
     {
       "name": "regex guard ends at its stated input formula and skips guest cleanup",
-      "document": "kernel 1\nnumbers by_spelling\nuse regex.ecma.test = @32a56c05dec1999e8c320d453e09f9debf92ed19699bcb4f0bd3c763730cfba7\nmain { let r = {\"brand\": \"regex.ecma\", \"pattern\": \"(a+)+b\", \"flags\": \"\", \"lastIndex\": 0} try { print regex.ecma.test(r, \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\") } catch e { print \"caught\" } finally { print \"cleanup\" } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse regex.ecma.test = @c847d6c74482b96264a4f7e927d41728da3c63231272aec6e0c224aa683ff5a5\nmain { let r = {\"brand\": \"regex.ecma\", \"pattern\": \"(a+)+b\", \"flags\": \"\", \"lastIndex\": 0} try { print regex.ecma.test(r, \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\") } catch e { print \"caught\" } finally { print \"cleanup\" } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],
         "end": {
           "bound": {
-            "name": "guard:32a56c05dec1999e8c320d453e09f9debf92ed19699bcb4f0bd3c763730cfba7",
+            "name": "guard:c847d6c74482b96264a4f7e927d41728da3c63231272aec6e0c224aa683ff5a5",
             "limit": 1002624
           }
         }
@@ -22,7 +22,7 @@
     },
     {
       "name": "same regex arguments stay deterministic with a warm pattern cache",
-      "document": "kernel 1\nnumbers by_spelling\nuse regex.ecma.test = @32a56c05dec1999e8c320d453e09f9debf92ed19699bcb4f0bd3c763730cfba7\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain { let r = {\"brand\": \"regex.ecma\", \"pattern\": \"a\", \"flags\": \"g\", \"lastIndex\": 0} let a = regex.ecma.test(r, \"ab\") let b = regex.ecma.test(r, \"ab\") finish [eq(a, b), r.lastIndex] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse regex.ecma.test = @c847d6c74482b96264a4f7e927d41728da3c63231272aec6e0c224aa683ff5a5\nuse eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954\nmain { let r = {\"brand\": \"regex.ecma\", \"pattern\": \"a\", \"flags\": \"g\", \"lastIndex\": 0} let a = regex.ecma.test(r, \"ab\") let b = regex.ecma.test(r, \"ab\") finish [eq(a, b), r.lastIndex] }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -42,13 +42,13 @@
     },
     {
       "name": "warm regex cache passes the guard at the same formula limit",
-      "document": "kernel 1\nnumbers by_spelling\nuse regex.ecma.test = @32a56c05dec1999e8c320d453e09f9debf92ed19699bcb4f0bd3c763730cfba7\nmain { let r = {\"brand\": \"regex.ecma\", \"pattern\": \"(a+)+b\", \"flags\": \"\", \"lastIndex\": 0} try { print regex.ecma.test(r, \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\") } catch e { print \"caught\" } finally { print \"cleanup\" } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse regex.ecma.test = @c847d6c74482b96264a4f7e927d41728da3c63231272aec6e0c224aa683ff5a5\nmain { let r = {\"brand\": \"regex.ecma\", \"pattern\": \"(a+)+b\", \"flags\": \"\", \"lastIndex\": 0} try { print regex.ecma.test(r, \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\") } catch e { print \"caught\" } finally { print \"cleanup\" } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],
         "end": {
           "bound": {
-            "name": "guard:32a56c05dec1999e8c320d453e09f9debf92ed19699bcb4f0bd3c763730cfba7",
+            "name": "guard:c847d6c74482b96264a4f7e927d41728da3c63231272aec6e0c224aa683ff5a5",
             "limit": 1002624
           }
         }

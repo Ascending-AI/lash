@@ -15,10 +15,10 @@ fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
     .expect("valid in-budget document prints");
     let decoded = crate::read(&printed.source, document, Default::default())
         .expect("exported source reads back against its base without a library");
-    assert_eq!(document.identity().unwrap(), decoded.identity().unwrap());
+    assert_eq!(document.identity(), decoded.identity());
     assert_eq!(
-        document.canonical_bytes().unwrap(),
-        decoded.canonical_bytes().unwrap(),
+        document.canonical_bytes(),
+        decoded.canonical_bytes(),
         "{}",
         printed.source
     );
@@ -74,10 +74,7 @@ fn hand_document() -> k::Document {
 fn independent_source_reads_its_environment_from_the_base_document() {
     let expected = hand_document();
     let decoded = crate::read(HAND_WRITTEN, &expected, Default::default()).unwrap();
-    assert_eq!(
-        decoded.canonical_bytes().unwrap(),
-        expected.canonical_bytes().unwrap()
-    );
+    assert_eq!(decoded.canonical_bytes(), expected.canonical_bytes());
     roundtrip(&expected, false);
     let mut controls = vec![];
     let mut changed = expected.clone();
@@ -124,10 +121,7 @@ fn independent_source_reads_its_environment_from_the_base_document() {
     }
     controls.push(changed);
     for control in controls {
-        assert_ne!(
-            expected.canonical_bytes().unwrap(),
-            control.canonical_bytes().unwrap()
-        );
+        assert_ne!(expected.canonical_bytes(), control.canonical_bytes());
         roundtrip(&control, false);
     }
 }
@@ -350,7 +344,7 @@ fn maps_cover_real_sites_in_final_utf8_and_never_change_text() {
     assert_eq!(off.source, on.source);
     assert!(off.source_map.is_none());
     let map = on.source_map.unwrap();
-    assert_eq!(map.document, document.identity().unwrap());
+    assert_eq!(map.document, document.identity());
     assert_eq!(map.language, on.format.language());
     map.validate(&document, &on.source).unwrap();
     let mut expected = BTreeSet::new();
@@ -452,9 +446,8 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     assert_eq!(
         crate::read(&at_limit.source, &document, limits)
             .unwrap()
-            .canonical_bytes()
-            .unwrap(),
-        document.canonical_bytes().unwrap()
+            .canonical_bytes(),
+        document.canonical_bytes()
     );
     let short = GeneratedSourceLimits {
         max_bytes: printed.source.len() - 1,
@@ -491,9 +484,8 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     assert_eq!(
         crate::read(&accepted.source, &document, exact_depth)
             .unwrap()
-            .canonical_bytes()
-            .unwrap(),
-        document.canonical_bytes().unwrap()
+            .canonical_bytes(),
+        document.canonical_bytes()
     );
     let shallow = GeneratedSourceLimits {
         max_depth: 1,
@@ -1442,5 +1434,5 @@ fn authored_import_of_printed_source_needs_its_base() {
         crate::Code::UnknownName.as_str()
     );
     let read = crate::read(&printed.source, &document, Default::default()).unwrap();
-    assert_eq!(read.identity().unwrap(), document.identity().unwrap());
+    assert_eq!(read.identity(), document.identity());
 }

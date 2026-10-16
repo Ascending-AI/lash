@@ -38,6 +38,11 @@ path = "src/bin/admission.rs"
 test = false
 
 [[bin]]
+name = "identity"
+path = "src/bin/identity.rs"
+test = false
+
+[[bin]]
 name = "growturn"
 path = "src/bin/growturn.rs"
 test = false

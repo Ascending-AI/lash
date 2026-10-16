@@ -619,7 +619,7 @@ fn argument_apply_changes_total_census() {
          return outcome\n}\n",
     )
     .expect("a helper with a locally created closure");
-    let id = definition.identity().expect("helper identity");
+    let id = definition.identity();
     let pinned = "helper\ttotal\n";
     assert_eq!(
         census(
@@ -641,7 +641,7 @@ fn argument_apply_changes_total_census() {
             },
         },
     );
-    let id = seeded.identity().expect("seeded identity");
+    let id = seeded.identity();
     let changed = census(&BTreeMap::from([(id, seeded)]), &BTreeSet::from([id]));
     assert_eq!(changed, "helper\toperation\n");
     assert_eq!(
@@ -664,7 +664,7 @@ body {
 "#,
     )
     .expect("conditional closures and an expression-local alias");
-    let id = conditional.identity().expect("conditional identity");
+    let id = conditional.identity();
     assert_eq!(
         census(&BTreeMap::from([(id, conditional)]), &BTreeSet::from([id])),
         "helper\toperation\n"

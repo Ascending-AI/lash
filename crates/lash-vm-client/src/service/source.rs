@@ -96,8 +96,9 @@ impl Service {
     /// Read exported source back against `base`, the document it was printed
     /// from, without resolving or admitting its dependencies. The source
     /// carries only code; the environment is the base document's. A host may
-    /// then compare `Document::canonical_bytes()` and separately admit the
-    /// document against its execution environment.
+    /// then compare `Document::canonical_bytes()`, the canonical token
+    /// encoding identities are taken over (`K-ID-003`), and separately admit
+    /// the document against its execution environment.
     pub async fn read_exported(
         &self,
         source: &str,

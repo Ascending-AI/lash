@@ -168,7 +168,7 @@ pub fn plan_carry(
     replacements: &BTreeMap<FunctionId, FunctionId>,
 ) -> Result<AdoptedRun, HelperAdoptionRefusal> {
     let state = |message: String| HelperAdoptionRefusal::State { message };
-    let from = document.identity().map_err(|error| state(error.message))?;
+    let from = document.identity();
     if parked {
         return Err(HelperAdoptionRefusal::Parked {
             document: from,

@@ -259,8 +259,8 @@ fn promise_instanceof_preserves_its_operand_through_printing() {
         .expect("printed promise predicates lower");
     // The same document runs the same.
     assert_eq!(
-        original.document.canonical_bytes().unwrap(),
-        re_lowered.canonical_bytes().unwrap()
+        original.document.canonical_bytes(),
+        re_lowered.canonical_bytes()
     );
     let recorded = run(source, &[]);
     assert_eq!(recorded.lines(), ["true false"]);

@@ -1335,3 +1335,54 @@ fn checked_unplaced_bodies_are_borrowed_by_typed_decoders() {
         vectors::GRAMMAR_VECTORS
     );
 }
+
+/// K-ID-001, K-ID-002: a document's or a definition's identity is the
+/// logical digest of the body its graph node holds, whether the node is
+/// inline, places a long text in a leaf or streams, and the encoder keys
+/// that node's encoding by the same digest: one identity per document.
+#[test]
+fn an_identity_is_the_logical_digest_of_its_graph_node() {
+    let header = "kernel 1\nnumbers float\n";
+    let long = "x".repeat(300);
+    let many = format!("print \"{}\"\n", "y".repeat(200)).repeat(400);
+    let documents = [
+        format!("{header}main {{ finish 7 }}"),
+        format!("{header}main {{ finish \"{long}\" }}"),
+        format!("{header}main {{\n{many}}}"),
+    ];
+    let mut shapes = BTreeSet::new();
+    for text in documents {
+        let document = lash_kernel_doc::parse_document(&text).unwrap();
+        let mut nodes = staging();
+        let id = nodes.encode_value(NodeKind::DOCUMENT, &document).unwrap();
+        shapes.insert((
+            nodes.nodes().len(),
+            nodes.get(&id).unwrap().children().unwrap().len(),
+        ));
+        let body = logical(&nodes, id, NodeKind::DOCUMENT).unwrap();
+        assert_eq!(body, document.canonical_bytes());
+        assert_eq!(
+            &TypedBody::logical(&body).digest(),
+            document.identity().as_bytes()
+        );
+        let again = nodes
+            .encode(NodeKind::DOCUMENT, TypedBody::logical(&body))
+            .unwrap();
+        assert_eq!(again, id);
+    }
+    // Inline, one leaf, and a stream: three node shapes.
+    assert_eq!(shapes.len(), 3, "{shapes:?}");
+    let definition = lash_kernel_doc::parse_definition(
+        "function probe.twice(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }\n",
+    )
+    .unwrap();
+    let mut nodes = staging();
+    let id = nodes
+        .encode_value(NodeKind::HELPER_DEFINITION, &definition)
+        .unwrap();
+    let body = logical(&nodes, id, NodeKind::HELPER_DEFINITION).unwrap();
+    assert_eq!(
+        &TypedBody::logical(&body).digest(),
+        definition.identity().as_bytes()
+    );
+}

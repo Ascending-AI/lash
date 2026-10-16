@@ -11,8 +11,7 @@ async fn a_kernel_process_whose_document_is_not_stored_is_refused_at_its_start(t
         "kernel 1\nnumbers float\n\nmain {\n  finish \"unpublished\"\n}\n",
     )
     .expect("the document parses")
-    .identity()
-    .expect("the document has an identity");
+    .identity();
     payload["document"] = serde_json::to_value(other).expect("the identity encodes");
     let env_ref = deployment
         .core

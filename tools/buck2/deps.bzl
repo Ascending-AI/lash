@@ -1149,6 +1149,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {},
         "normal": {
+            "blake3": "//third-party/rust:p0032",
             "num_bigint": "//third-party/rust:p0212",
             "num_traits": "//third-party/rust:p0218",
             "schemars": "//third-party/rust:p0309",

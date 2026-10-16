@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Document, DocumentId, FunctionCatalog, FunctionDeclarations, InvalidReason, Name, Signature,
-    Unit, WorkflowDocumentEntry, WorkflowDocumentRef,
+    Document, DocumentId, FunctionCatalog, FunctionDeclarations, Name, Signature, Unit,
+    WorkflowDocumentEntry, WorkflowDocumentRef,
 };
 
 use crate::{
@@ -62,7 +62,7 @@ impl WorkflowDocument {
         entry: WorkflowDocumentEntry,
         declarations: FunctionDeclarations,
     ) -> Result<Self, WorkflowDocumentError> {
-        let identity = document.identity()?;
+        let identity = document.identity();
         lash_kernel_doc::check_declarations(&document, &declarations)?;
         lash_kernel_doc::validate_document(&document, &declarations)?;
         let graph = match &entry {
@@ -186,8 +186,6 @@ impl WorkflowDocument {
 /// Why a document has no view.
 #[derive(Debug, thiserror::Error)]
 pub enum WorkflowDocumentError {
-    #[error("the document has no canonical encoding: {0}")]
-    Encode(#[from] lash_kernel_doc::EncodeError),
     #[error("the document does not link: {0}")]
     Refused(#[from] Refusal),
     #[error("document `{document}` has no entry `{entry}`")]
@@ -282,15 +280,5 @@ fn admit_entry(
     if !errors.is_empty() {
         return Err(WorkflowAdmissionRefusal::Document(Refusal { errors }));
     }
-    let identity = document.identity().map_err(|error| {
-        WorkflowAdmissionRefusal::Document(Refusal {
-            errors: vec![Refused {
-                site: None,
-                reason: RefusalReason::Invalid(InvalidReason::Identity {
-                    message: error.message,
-                }),
-            }],
-        })
-    })?;
-    Ok((identity, graph))
+    Ok((document.identity(), graph))
 }

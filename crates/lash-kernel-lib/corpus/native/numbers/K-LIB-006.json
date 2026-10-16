@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "math.acos: K-LIB-006 edge",
-      "function": "3e974e9e22624f576708fb7aa5e8796e3b6823674270721d1573d015203938f6",
+      "function": "5816fae9aea136d2e42e284c878f199e715a9a397df62f120daeb9a14a2e2a84",
       "args": [
         {
           "float": "2.0"
@@ -21,7 +21,7 @@
     },
     {
       "name": "math.acosh: K-LIB-006 edge",
-      "function": "3c545acb5b878d2ea290cd5651de50add31674811db4d780d8583a6394960a8b",
+      "function": "a786bba549e93f8686cd03e054306a96ef1c9223213965aaf90c5c0991b75a33",
       "args": [
         {
           "float": "0.0"
@@ -39,7 +39,7 @@
     },
     {
       "name": "math.asin: K-LIB-006 edge",
-      "function": "3a2d632fe47eadeb86ad84e3305dd2645f782db649f7b3f829cd0bd9c3a17383",
+      "function": "b2dc781abf0bc9362a991090069e72b3504d7bea0f35a21f7c62144857423493",
       "args": [
         {
           "float": "-2.0"
@@ -57,7 +57,7 @@
     },
     {
       "name": "math.asinh: K-LIB-006 edge",
-      "function": "1c5642674edd2035a6ad1893c0f4709981df0fe5ed14421fb097e7d27a8b7053",
+      "function": "3c8fd951c94929dfd46f91a0824b846550c399c40797ac48ca01b6e13c0eb6c1",
       "args": [
         {
           "float": "-inf"
@@ -75,7 +75,7 @@
     },
     {
       "name": "math.atan: K-LIB-006 edge",
-      "function": "94d4680cfdf4744b382f7de4b9395e218f735ea5d06f5990047d9cdcd790a178",
+      "function": "029cf6b958bccc224d4633350ba1ea4ba228714b9d35fbc0f5e65a617681df72",
       "args": [
         {
           "float": "-0.0"
@@ -93,7 +93,7 @@
     },
     {
       "name": "math.atan2: K-LIB-006 edge",
-      "function": "b993ac94a36eb1e9ca97067abd21230d6602c79a3a39974427e25626284fac8c",
+      "function": "fdc6aea4b86867bcfe9a15fb5174cf3aded821dc55f296a319a4370f3f75b865",
       "args": [
         {
           "float": "-0.0"
@@ -114,7 +114,7 @@
     },
     {
       "name": "math.atanh: K-LIB-006 edge",
-      "function": "ed6d914004ba9b683a8b8526517c0b01f93feb4662f531195f6df9bbbeba8517",
+      "function": "cb1355b144ff6c623b51a08eb8ac7e8f5ea85e9a321a06fbc3a055159c6af196",
       "args": [
         {
           "float": "-1.0"
@@ -132,7 +132,7 @@
     },
     {
       "name": "math.cbrt: K-LIB-006 edge",
-      "function": "0a3545ead0cd43f90384a1820f518b1e3b137180509114758298882a288b10eb",
+      "function": "94904af1987514b79d980e031ca8ac4af874dbc27bbd757594f7bd7f98060977",
       "args": [
         {
           "float": "-8.0"
@@ -150,7 +150,7 @@
     },
     {
       "name": "math.copysign: K-LIB-006 edge",
-      "function": "27e671ad447880b7ce3392e2f368b239180052e472e7a981224220f20e03a27e",
+      "function": "0836f63d7e0a40f4e884ae77add6699a4545377b7b43b9015ecf6b5dcc9f8a68",
       "args": [
         {
           "float": "0.0"
@@ -171,7 +171,7 @@
     },
     {
       "name": "math.cos: K-LIB-006 edge",
-      "function": "e8859ec1651902f10bbad6d0df23c0e4a746a4ece673f6358baff209f1b89b08",
+      "function": "6e9986d803f2da99d2bdb94bc35db387b71534a6c9c7de76143cc9675127e33e",
       "args": [
         {
           "float": "inf"
@@ -189,7 +189,7 @@
     },
     {
       "name": "math.cosh: K-LIB-006 edge",
-      "function": "d7ac4dd1b6c4878cd485cd45bd93b07abd72650c5f845002351988e9e8ca3b2f",
+      "function": "91dc00baa613460d2b4fc6a04c7e5b71babdfafdb989ab4729c5b332a5987913",
       "args": [
         {
           "float": "-inf"
@@ -207,7 +207,7 @@
     },
     {
       "name": "math.erf: K-LIB-006 edge",
-      "function": "681c321d327bdbb6faad6c719b5235837b753e4be63c699597a68f0b1396edfc",
+      "function": "7c8d51a2e110d9ecbba8178a7708d00559a402bb019b5fed205fec8bd6606232",
       "args": [
         {
           "float": "-inf"
@@ -225,7 +225,7 @@
     },
     {
       "name": "math.erfc: K-LIB-006 edge",
-      "function": "4d6a347ce7455b129dfb7fa57e8a14a8632172ab2f79045473ea4b962bd53c52",
+      "function": "6f18a87c1ab0faad4d594e166475209b85d166ab722d516af92f51cf9a0c7039",
       "args": [
         {
           "float": "inf"
@@ -243,7 +243,7 @@
     },
     {
       "name": "math.exp: K-LIB-006 edge",
-      "function": "3a7b6d872f5f4f34e94346c6298360ff7c9f92a33a0a163754db921197174a63",
+      "function": "567c1b4d56ba6ff84c85cc7bd32fbffa22d6b4b8c3093f4e1a2f5de7c86084bf",
       "args": [
         {
           "float": "-inf"
@@ -261,7 +261,7 @@
     },
     {
       "name": "math.exp2: K-LIB-006 edge",
-      "function": "81231c8842a8185c2629954151cb13b3b11a282688b44bfd5a7d91476f5099ed",
+      "function": "a854f2ea06502d052092bbb77c10d205be220086ffe994d37a0eb8ac2e23e257",
       "args": [
         {
           "float": "-1075.0"
@@ -279,7 +279,7 @@
     },
     {
       "name": "math.expm1: K-LIB-006 edge",
-      "function": "c4606963134d3d8158b2ad8d22fbf6b4228fb2526e94356c9a853b40fbb062fa",
+      "function": "9feec48d3846cadcf959475719a24719c805f60a34c9766e0faec92e868110aa",
       "args": [
         {
           "float": "-0.0"
@@ -297,7 +297,7 @@
     },
     {
       "name": "math.fma: K-LIB-006 edge",
-      "function": "8561068ab1fe94ecad8c656f6ffd0797a13af07f1a95a57661c8879c9fce546c",
+      "function": "ed3bc75a68fa7ebfbba9d1cc46b11a2234d5816eeb0372477f1e62c1a0208a46",
       "args": [
         {
           "float": "1.0000000000000002"
@@ -321,7 +321,7 @@
     },
     {
       "name": "math.gamma: K-LIB-006 edge",
-      "function": "b1a54f67a9aef8b5ce0faad030b314ca1f8cc2b7da50199922bf607684e59ef4",
+      "function": "d3e09c0b853e607f6b5a199b87e07d81f4133b1927ed83cd7256c2671223429d",
       "args": [
         {
           "float": "-1.0"
@@ -339,7 +339,7 @@
     },
     {
       "name": "math.hypot: K-LIB-006 edge",
-      "function": "b8ea9582f2335c23295aae83dd6de79a2e43fd15fb374dc239e34244c32f689c",
+      "function": "725f31bffaa4eaec86e26c1d14be6e8f50fb6122b0d2c30dc895f643ee43c2fc",
       "args": [
         {
           "float": "nan"
@@ -360,7 +360,7 @@
     },
     {
       "name": "math.lgamma: K-LIB-006 edge",
-      "function": "e9ebeee3a21d3c3e1190aaf6e1baccfb0f6482bdc442cea2d8ec37156ed485e5",
+      "function": "da470fedce73890f957587745d1423861478ab6b72676a052d438b714d8df014",
       "args": [
         {
           "float": "-1.0"
@@ -378,7 +378,7 @@
     },
     {
       "name": "math.log: K-LIB-006 edge",
-      "function": "e950fd0fbcad2169800dbe17d3f66a2236125bcee1aa0255d9f8bc1229364940",
+      "function": "31ba8e968bfe32f3d37cccac8c3276179e44934b55ea4e8bf98f337932bdc686",
       "args": [
         {
           "float": "0.0"
@@ -396,7 +396,7 @@
     },
     {
       "name": "math.log10: K-LIB-006 edge",
-      "function": "d4c2c17bc8ca1029695995ebc076afef239a517e41585fbfd714d0ccab11f714",
+      "function": "eac6c2d57196d42ace64c7847f8de83677489054748ac86a5115490b23de5ec8",
       "args": [
         {
           "float": "-0.0"
@@ -414,7 +414,7 @@
     },
     {
       "name": "math.log1p: K-LIB-006 edge",
-      "function": "e50e21d5dee0c8a0dbfb6279f9f0b015e7457d96909061f216825118a9525166",
+      "function": "9f910859f5e05463065955004a21a340c91cc14dc7a824e2d49acf3da68ebb58",
       "args": [
         {
           "float": "-0.0"
@@ -432,7 +432,7 @@
     },
     {
       "name": "math.log2: K-LIB-006 edge",
-      "function": "7f2b1000bee96d68793ab6192e1320ea144e8a5d729aaf60a811beb7c1f364ee",
+      "function": "9d4534f37b7b141e62728f10b7f98bb0c5421d1ca6a17d540490f9e12af59c1a",
       "args": [
         {
           "float": "-1.0"
@@ -450,7 +450,7 @@
     },
     {
       "name": "math.nextafter: K-LIB-006 edge",
-      "function": "4bad741f843b414f57fbc3d6606df9c6d3972679500f67d935040a8eb1e8a5e1",
+      "function": "1ad30089ebd09697e325d6a5daa87dbda8d3875351bd746fafbf67869244d646",
       "args": [
         {
           "float": "0.0"
@@ -471,7 +471,7 @@
     },
     {
       "name": "math.pow: K-LIB-006 edge",
-      "function": "7318c0f4f5669ba713415bddfc3bf210d7c80419f5c7bccd9af3d1abc5fb0562",
+      "function": "f1cb61a1f6f6e2001f4fb72fc5ad7a11cf5ffe6ffc7af829e584040ed4704d59",
       "args": [
         {
           "float": "nan"
@@ -492,7 +492,7 @@
     },
     {
       "name": "math.remainder: K-LIB-006 edge",
-      "function": "1be1878e954850f0e2124e13ca1cb6fd2d782b22334c8d344b13e99478491748",
+      "function": "af6a346204c873b9cc29b3794a1b1a8edb354328b1110e7eae1cc60b79a69a55",
       "args": [
         {
           "float": "7.0"
@@ -513,7 +513,7 @@
     },
     {
       "name": "math.sin: K-LIB-006 edge",
-      "function": "a1b1913e8ad237ba11860aaaefa6ae5ebf2a7ac5d8e371f7d3eeed9dbd547735",
+      "function": "35587f11ab840a644e7fe0380b6d7524c38164da96de6433fcdb289c929f25d0",
       "args": [
         {
           "float": "inf"
@@ -531,7 +531,7 @@
     },
     {
       "name": "math.sinh: K-LIB-006 edge",
-      "function": "7e88e80154ebe40c1ffe9550ed8f9060bfd15b818a3bd0994614097a4fdb8dad",
+      "function": "b618e0492fb1a64db2a7a2059799e5d561110b1984d51bd201af2c219a204985",
       "args": [
         {
           "float": "-inf"
@@ -549,7 +549,7 @@
     },
     {
       "name": "math.sqrt: K-LIB-006 edge",
-      "function": "4125885e8052ee7170dbf2aa41996f7e6bddc2ba8f80c7a59482c3f086374889",
+      "function": "c1b1d905b1aed00b7db610248ded059cf936b7e6905a957b8f21709448f92adf",
       "args": [
         {
           "float": "-0.0"
@@ -567,7 +567,7 @@
     },
     {
       "name": "math.tan: K-LIB-006 edge",
-      "function": "2c0120bafdd57e6adcd99e7a486c3931e34b63f9854684469ff5f5f475e3e8bc",
+      "function": "f23af18d602ecb0aa8b076e2d1b7075c7fa0fff8deb6dc5d603d68571540a43f",
       "args": [
         {
           "float": "inf"
@@ -585,7 +585,7 @@
     },
     {
       "name": "math.tanh: K-LIB-006 edge",
-      "function": "775d85112e3df5669452c3c0e9754e4994980bb8af11a0484f897a497c482db6",
+      "function": "daf9b318bbd7f9cf13addf619c95bdad1133b9eb70c2cb2f2490d8aae1c90587",
       "args": [
         {
           "float": "-inf"

@@ -844,10 +844,7 @@ mod tests {
         let generated = crate::print(&document, Default::default()).expect("small document prints");
         let decoded = crate::read(&generated.source, &document, Default::default())
             .expect("small, shallow generated source decodes");
-        assert_eq!(
-            document.canonical_bytes().unwrap(),
-            decoded.canonical_bytes().unwrap()
-        );
+        assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
         let examples = [
             (PrintedSourceNeedsBase, generated.source.as_str()),
             (GeneratedSourceBytes, generated.source.as_str()),

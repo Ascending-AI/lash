@@ -63,10 +63,7 @@ fn every_admitted_conformance_document_preserves_observations_when_printed_and_l
                     .source;
                 let lowered = crate::read(&source, &document, Default::default())
                     .map_err(|e| e.to_string())?;
-                assert_eq!(
-                    document.canonical_bytes().unwrap(),
-                    lowered.canonical_bytes().unwrap()
-                );
+                assert_eq!(document.canonical_bytes(), lowered.canonical_bytes());
                 let mut clone = case.clone();
                 clone.document = print_document(&lowered);
                 let roundtrip = check_case(&mut runner, &clone).map_err(|e| e.to_string())?;

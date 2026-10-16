@@ -445,7 +445,7 @@ mod tests {
                 "function helper() -> Int\nkernel 1\ncharge 1\nbody {{ return {result} }}\n"
             ))
             .expect("a helper");
-            let function = definition.identity().expect("identity");
+            let function = definition.identity();
             HelperRelease {
                 release: format!("{ordinal}.0"),
                 ordinal,

@@ -174,14 +174,7 @@ pub fn admit(document: &Document, environment: &Environment<'_>) -> Result<Admit
             }
         }
     }
-    let identity = document.identity().map_err(|error| Refusal {
-        errors: vec![refused(
-            None,
-            RefusalReason::Invalid(InvalidReason::Identity {
-                message: error.message,
-            }),
-        )],
-    })?;
+    let identity = document.identity();
     match graph {
         Some(graph) if errors.is_empty() => Ok(Admitted { identity, graph }),
         _ => Err(Refusal { errors }),
@@ -293,8 +286,12 @@ fn unregistered_library(
         let (v, i, g) = work.get();
         work.set((v, i + 1, g));
     });
-    let function = definition.identity().ok()?;
-    Some(library_graph(definition, function, catalog, errors))
+    Some(library_graph(
+        definition,
+        definition.identity(),
+        catalog,
+        errors,
+    ))
 }
 
 fn library_graph(

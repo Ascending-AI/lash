@@ -130,7 +130,7 @@ fn document(body: &str) -> (String, EncodedPayload) {
     text.push_str(body);
     let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
     (
-        document.identity().expect("identity").to_string(),
+        document.identity().to_string(),
         wire::wrap(
             PayloadKind::Document,
             document.to_json().expect("json").as_bytes(),
@@ -629,7 +629,6 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
     )
     .expect("document")
     .identity()
-    .expect("identity")
     .to_string();
     let document = wire::wrap(PayloadKind::Document, &document).expect("payload");
     let mut parent = Parent::new(DIALECT);
@@ -744,7 +743,6 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
     )
     .expect("document")
     .identity()
-    .expect("identity")
     .to_string();
     let document = wire::wrap(PayloadKind::Document, &document).expect("payload");
     worker.release().expect("reset");

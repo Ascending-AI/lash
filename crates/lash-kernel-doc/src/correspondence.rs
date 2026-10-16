@@ -42,11 +42,6 @@ impl Survivor {
 }
 
 impl Correspondence {
-    /// Canonical JSON in the same encoding as documents.
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, crate::EncodeError> {
-        crate::canonical::canonical_bytes(self)
-    }
-
     fn new(base: DocumentId, result: DocumentId, mut entries: Vec<Survivor>) -> Self {
         entries.sort_by(|a, b| a.from.cmp(&b.from));
         Self {

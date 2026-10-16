@@ -42,7 +42,7 @@ fn a_helper_source_is_resolved_by_name_in_order() {
     let definitions = define_functions(HELPERS, &mut library).unwrap();
     assert_eq!(definitions.len(), 2);
     let twice = library.resolve("demo.twice").unwrap();
-    assert_eq!(twice, definitions[0].identity().unwrap());
+    assert_eq!(twice, definitions[0].identity());
     let Implementation::Body(body) = &definitions[1].implementation else {
         panic!("a helper has a body");
     };

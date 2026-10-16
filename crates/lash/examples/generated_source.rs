@@ -78,7 +78,7 @@ fn read_local(source: &str, base: &Document, format: SourceFormat) -> Result<Doc
 
 fn compare(original: &Document, decoded: &Document) -> Result<()> {
     // Compare the complete canonical bytes, including manifest and unused bodies.
-    if original.canonical_bytes()? != decoded.canonical_bytes()? {
+    if original.canonical_bytes() != decoded.canonical_bytes() {
         return Err("exported source changed the document".into());
     }
     Ok(())
@@ -100,7 +100,7 @@ async fn measure(iterations: u32) -> Result<()> {
     ] {
         let document = fixture(width, depth)?;
         let nodes = count(Node::Block(&document.main));
-        let document_bytes = document.canonical_bytes()?.len();
+        let document_bytes = document.canonical_bytes().len();
         let view = WorkflowDocument::derive(
             document.clone(),
             WorkflowDocumentEntry::Main,

@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{Block, Function, Node, Site};
-use crate::canonical::{EncodeError, digest, json_depth};
+use crate::graph_tokens::{encode_body, logical_digest};
 use crate::name::{DocumentId, EffectName, FunctionId, FunctionName, Name};
 use crate::number::NumberPolicy;
 use crate::types::Signature;
@@ -134,14 +134,17 @@ impl Document {
             .collect()
     }
 
-    /// The document's behavioural identity (`K-ID-001`).
-    pub fn identity(&self) -> Result<DocumentId, EncodeError> {
-        digest("lash-kernel-document", self).map(DocumentId::from_bytes)
+    /// The document's behavioural identity (`K-ID-001`): the digest of its
+    /// canonical bytes, which is the checkpoint graph's digest of its
+    /// logical body.
+    pub fn identity(&self) -> DocumentId {
+        DocumentId::from_bytes(logical_digest(&self.canonical_bytes()))
     }
 
-    /// Complete canonical document bytes, using the identity encoder (K-ID-003).
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, EncodeError> {
-        crate::canonical::canonical_bytes(self)
+    /// The document's canonical encoding (`K-ID-003`): its logical token
+    /// body. Two documents are equal exactly when these bytes are.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        encode_body(self)
     }
 
     pub fn to_json(&self) -> Result<String, EncodeError> {
@@ -158,6 +161,13 @@ impl Document {
     ) -> Result<Self, DecodeError> {
         from_versioned_json_with_limits(text, limits)
     }
+}
+
+/// A value that could not be written as JSON. No type of this crate fails.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("cannot encode as JSON: {message}")]
+pub struct EncodeError {
+    pub message: String,
 }
 
 /// A JSON text that is not the shape asked for.
@@ -208,6 +218,36 @@ pub(crate) fn from_json_with_limits<T: DeserializeOwned>(
     let value = T::deserialize(&mut decoder).map_err(invalid)?;
     decoder.end().map_err(invalid)?;
     Ok(value)
+}
+
+/// The deepest nesting of arrays and objects in a JSON text, counted without
+/// recursion so that an over-deep text is refused before it is decoded.
+fn json_depth(text: &str) -> usize {
+    let mut depth = 0usize;
+    let mut deepest = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for byte in text.bytes() {
+        if in_string {
+            match byte {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    deepest
 }
 
 /// Read only the version envelope before decoding any forms (K-VER-003).

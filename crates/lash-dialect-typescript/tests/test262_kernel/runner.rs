@@ -596,11 +596,8 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
         lash_dialect_typescript::read(&printed.source, &original.document, Default::default())
             .unwrap_or_else(|error| panic!("{relative}: {error}\n{printed:?}"));
     assert_eq!(
-        original
-            .document
-            .canonical_bytes()
-            .expect("original encodes"),
-        re_lowered.canonical_bytes().expect("decoded encodes"),
+        original.document.canonical_bytes(),
+        re_lowered.canonical_bytes(),
         "{relative}"
     );
     true

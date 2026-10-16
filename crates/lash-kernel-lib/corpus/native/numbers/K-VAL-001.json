@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "kind null",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         "null"
       ],
@@ -19,7 +19,7 @@
     },
     {
       "name": "kind absent",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         "absent"
       ],
@@ -35,7 +35,7 @@
     },
     {
       "name": "kind bool",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "bool": false
@@ -53,7 +53,7 @@
     },
     {
       "name": "kind integer",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "int": "1"
@@ -71,7 +71,7 @@
     },
     {
       "name": "kind float",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "float": "1.0"
@@ -89,7 +89,7 @@
     },
     {
       "name": "kind text",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "text": "x"
@@ -107,7 +107,7 @@
     },
     {
       "name": "kind bytes",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "bytes": "00ff"
@@ -125,7 +125,7 @@
     },
     {
       "name": "kind timestamp",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "timestamp": "0"
@@ -143,7 +143,7 @@
     },
     {
       "name": "kind tuple",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "tuple": [
@@ -165,7 +165,7 @@
     },
     {
       "name": "kind list",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "list": [
@@ -187,7 +187,7 @@
     },
     {
       "name": "kind map",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "map": [
@@ -214,7 +214,7 @@
     },
     {
       "name": "kind set",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "set": [
@@ -236,7 +236,7 @@
     },
     {
       "name": "kind record",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "record": [
@@ -261,7 +261,7 @@
     },
     {
       "name": "kind error",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "error": {
@@ -283,7 +283,7 @@
     },
     {
       "name": "kind function",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "function": "f"
@@ -301,7 +301,7 @@
     },
     {
       "name": "kind handle",
-      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
+      "function": "3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7",
       "args": [
         {
           "handle": {

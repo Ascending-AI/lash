@@ -298,7 +298,7 @@ pub(super) fn check(rule: &str, case: &Case) {
             let absent = {
                 let mut d = definition;
                 d.charge = lash_kernel_doc::Formula::Constant(3);
-                d.identity().unwrap()
+                d.identity()
             };
             let env = Environment::new(&library);
             let written = parse_document(&case.document).unwrap();

@@ -126,8 +126,8 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
     // Retaining the tree also retains sites, task interleaving and errors at
     // bounds. The law's oracle remains a run on the production machine.
     assert_eq!(
-        lowered.canonical_bytes().unwrap(),
-        document.canonical_bytes().unwrap(),
+        lowered.canonical_bytes(),
+        document.canonical_bytes(),
         "{source}"
     );
     let registry = &PreparedLibrary::new(Arc::clone(registry));
@@ -377,8 +377,5 @@ fn generated_decoding_does_not_require_installed_dependencies() {
     let source = crate::print(&document, Default::default()).unwrap().source;
     let decoded = crate::read(&source, &document, Default::default())
         .expect("decoding is independent of admission");
-    assert_eq!(
-        document.canonical_bytes().unwrap(),
-        decoded.canonical_bytes().unwrap()
-    );
+    assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
 }

@@ -26,7 +26,7 @@ struct Library {
 
 fn register(catalog: &mut BTreeMap<FunctionId, FunctionDefinition>, text: &str) -> FunctionId {
     let definition = parse_definition(text).unwrap_or_else(|error| panic!("{error}\n{text}"));
-    let function = definition.identity().unwrap();
+    let function = definition.identity();
     catalog.insert(function, definition);
     function
 }
@@ -202,7 +202,7 @@ fn a_document_that_uses_every_form_admits() {
 
     environment.bindings.insert(Name::new("seen"));
     let admitted = admit(&document, &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
-    assert_eq!(admitted.identity, document.identity().unwrap());
+    assert_eq!(admitted.identity, document.identity());
 
     // The manifest the document carries is the one its code derives.
     let derived = requirements(&document, &library.catalog);
@@ -427,7 +427,7 @@ fn derived_ids_and_sites_are_a_function_of_the_document_alone() {
         })
         .collect();
     let map = SourceMap::new(&document, source, SourceLanguage::TypeScript, sites).unwrap();
-    assert_eq!(map.document, stored.identity().unwrap());
+    assert_eq!(map.document, stored.identity());
     assert_eq!(derive(&document, &library.catalog).unwrap(), graph);
 }
 
@@ -859,7 +859,7 @@ main {
         "function helper.leak(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return y }\n",
     )
     .unwrap();
-    let site = Site::new(Unit::Library(body.identity().unwrap()), [0, 0]);
+    let site = Site::new(Unit::Library(body.identity()), [0, 0]);
     assert_eq!(
         derive_definition(&body, &library.catalog)
             .unwrap_err()

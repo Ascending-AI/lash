@@ -60,8 +60,6 @@ pub enum DocumentRefusal {
     },
     #[error("the node at {site} has no form in the next version: {detail}")]
     FormNotCarried { site: Site, detail: String },
-    #[error("the rewritten document has no identity: {message}")]
-    Encode { message: String },
     #[error("the rewrite states two nodes at one site")]
     Correspondence,
 }

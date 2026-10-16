@@ -701,7 +701,7 @@ pub(crate) mod tests {
         for (dialect, defined) in [("python", python), ("typescript", typescript)] {
             let defined: Vec<_> = defined
                 .into_iter()
-                .map(|definition| (definition.identity().expect("an identity"), definition))
+                .map(|definition| (definition.identity(), definition))
                 .collect();
             let built = lash_vm_releases::dialect(dialect).expect("the built dialect");
             let built = ValidatedFunctions::from_json(built.helpers).expect("the built helpers");

@@ -12,7 +12,6 @@
 //! It depends on no other lash crate.
 
 mod ast;
-mod canonical;
 mod correspondence;
 mod declarations;
 mod source_map;
@@ -58,8 +57,9 @@ pub use ast::{
     Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode, Literal, MapEntry,
     Member, Node, Place, ProjectionRead, RecordEntry, Rhs, Site, Stmt, TryStmt, Unit,
 };
-pub use canonical::EncodeError;
-pub use document::{DecodeError, Document, KERNEL_VERSION, Label, MAX_NESTING_DEPTH, Manifest};
+pub use document::{
+    DecodeError, Document, EncodeError, KERNEL_VERSION, Label, MAX_NESTING_DEPTH, Manifest,
+};
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition, Guard,
     Implementation, Measure, Operand,

@@ -395,7 +395,7 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
     );
     for refused_document in [&document, &other] {
         let reference = WorkflowDocumentRef {
-            document: refused_document.identity().expect("an identity"),
+            document: refused_document.identity(),
             entry: WorkflowDocumentEntry::Main,
         };
         assert!(
@@ -427,7 +427,7 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
     let id = publication
         .source_map
         .expect("the publication names its map");
-    assert_eq!(id, map.identity().expect("the map's identity"));
+    assert_eq!(id, map.identity());
     assert_eq!(
         artifacts.read_source_map(&id).await.expect("the map reads"),
         SourceMapRead::Read {

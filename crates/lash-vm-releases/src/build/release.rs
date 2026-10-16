@@ -123,10 +123,7 @@ pub(crate) fn keep(
         for released in &release.functions {
             let function = released.function;
             let name = &released.definition.name;
-            let identity = released
-                .definition
-                .identity()
-                .map_err(|error| error.to_string())?;
+            let identity = released.definition.identity();
             if identity != function {
                 return Err(format!(
                     "helper release {} holds `{name}` as {function}, and its definition is {identity}",

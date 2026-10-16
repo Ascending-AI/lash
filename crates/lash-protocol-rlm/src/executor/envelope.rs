@@ -249,7 +249,7 @@ pub(super) fn load_cell(
     let state = HostState::load(&mut decoder, host).map_err(text)?;
     let document = cell.document()?;
     let entries = super::processes::CellEntries {
-        identity: document.identity().map_err(|error| error.to_string())?,
+        identity: document.identity(),
         document,
     };
     let projections = EntryProjections(&entries);
@@ -474,7 +474,7 @@ pub(crate) fn check_cell_snapshot(cell: &lash_core::plugin::StoredCell) -> Resul
 
 use lash_core_store::checkpoint_graph::{
     GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec, TokenError,
-    TokenReader, TokenWriter,
+    TokenReader, TokenWriter, TypedBody,
 };
 use lash_vm_broker::round_graph::{decode_opt_tree, decode_tree, encode_opt_tree, encode_tree};
 
@@ -646,9 +646,11 @@ impl CellEnvelope {
         let document = self
             .document()
             .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?;
-        let document_id = document
-            .identity()
-            .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?;
+        // The document's identity is the digest of the logical body its
+        // node is encoded from (`K-ID-001`): encode it once for both.
+        let logical = document.canonical_bytes();
+        let logical = TypedBody::logical(&logical);
+        let document_id = lash_kernel_doc::DocumentId::from_bytes(logical.digest());
         if self
             .source_map
             .as_ref()
@@ -663,7 +665,7 @@ impl CellEnvelope {
             code: self.code.clone(),
             dialect: self.dialect.clone(),
             document_id,
-            document: staging.encode_value(NodeKind::DOCUMENT, &document)?,
+            document: staging.encode(NodeKind::DOCUMENT, logical)?,
             source_map: self
                 .source_map
                 .as_ref()
@@ -701,7 +703,7 @@ impl CellEnvelope {
         let body: EnvelopeBody = decoder.decode(id, NodeKind::CELL_ENVELOPE)?;
         decoder.child_kind(id, body.release, &[NodeKind::RELEASE_MANIFEST])?;
         let document: Document = decoder.decode(body.document, NodeKind::DOCUMENT)?;
-        if document.identity().ok() != Some(body.document_id) {
+        if document.identity() != body.document_id {
             return Err(graph_invalid(
                 NodeKind::CELL_ENVELOPE,
                 "the document is not the one its identity names",

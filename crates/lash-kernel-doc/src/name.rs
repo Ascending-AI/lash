@@ -128,7 +128,7 @@ pub(crate) fn is_identifier(text: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// A text that is not a SHA-256 digest in lower-case hexadecimal.
+/// A text that is not a 32-byte digest in lower-case hexadecimal.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("`{text}` is not an identity: write 64 lower-case hexadecimal digits")]
 pub struct InvalidIdentity {
@@ -243,13 +243,13 @@ macro_rules! identity {
 }
 
 identity!(
-    /// The content-addressed identity of a library function: the SHA-256 of
-    /// its definition's canonical form (`K-ID-002`).
+    /// The content-addressed identity of a library function: the logical
+    /// digest of its definition's canonical token body (`K-ID-002`).
     FunctionId
 );
 identity!(
-    /// A document's behavioural identity: the SHA-256 of its canonical form,
-    /// which holds no source map (`K-ID-001`).
+    /// A document's behavioural identity: the logical digest of its
+    /// canonical token body, which holds no source map (`K-ID-001`).
     DocumentId
 );
 identity!(

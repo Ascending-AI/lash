@@ -146,7 +146,7 @@ fn implementations() {
     for text in [NATIVE, BODY, BOTH] {
         let original = definition(text);
         let catalog = same_registry(text, text != BODY);
-        let id = original.identity().unwrap();
+        let id = original.identity();
         let expression = doc(&format!(
             "{HEADER}use probe.same = @{id}\nmain {{ finish probe.same(7) }}"
         ));
@@ -206,7 +206,7 @@ fn body_rules() {
 }
 
 fn outer(inner: &FunctionDefinition) -> FunctionDefinition {
-    let id = inner.identity().unwrap();
+    let id = inner.identity();
     definition(&format!(
         "function probe.outer(x: Any) -> Any\nkernel 1\ncharge 5\nuse probe.same = @{id}\nbody {{ let y = invoke probe.same(x) return y }}"
     ))
@@ -217,7 +217,7 @@ fn manifest_closure() {
     let inner = definition(BODY);
     let outer = outer(&inner);
     let outer_id = registry.register(outer, None).unwrap();
-    let inner_id = inner.identity().unwrap();
+    let inner_id = inner.identity();
     let mut document = doc(&format!(
         "{HEADER}use probe.outer = @{outer_id}\nmain {{ let x = invoke probe.outer(7) finish x }}"
     ));
@@ -235,8 +235,8 @@ fn manifest_closure() {
 fn missing_transitive() {
     let inner = definition(BODY);
     let outer = outer(&inner);
-    let id = outer.identity().unwrap();
-    let inner_id = inner.identity().unwrap();
+    let id = outer.identity();
+    let inner_id = inner.identity();
     let catalog = BTreeMap::from([(id, outer)]);
     let document = doc(&format!(
         "{HEADER}use probe.outer = @{id}\nuse probe.same = @{inner_id}\nmain {{ let x = invoke probe.outer(7) finish x }}"
@@ -252,7 +252,7 @@ fn reached_body_rules() {
         let bad = definition(&format!(
             "function probe.bad() -> Any\nkernel 1\ncharge 1\nbody {{ {statement} }}"
         ));
-        let id = bad.identity().unwrap();
+        let id = bad.identity();
         let catalog = BTreeMap::from([(id, bad)]);
         let document = doc(&format!(
             "{HEADER}use probe.bad = @{id}\nmain {{ let x = invoke probe.bad() finish x }}"
@@ -289,7 +289,7 @@ fn adoption() {
     let mut registry = same_registry(BODY, false);
     let first = definition(BODY);
     let corrected = definition(&BODY.replace("return x", "return 9"));
-    let first_id = first.identity().unwrap();
+    let first_id = first.identity();
     let next_id = registry.register(corrected.clone(), None).unwrap();
     assert_ne!(first_id, next_id);
     let text = format!(
@@ -315,7 +315,7 @@ fn native_versions() {
     assert_eq!(first.native_version, 1);
     let second = definition(&NATIVE.replace("native\n", "native 2\n"));
     assert_eq!(second.native_version, 2);
-    assert_ne!(first.identity().unwrap(), second.identity().unwrap());
+    assert_ne!(first.identity(), second.identity());
     assert_eq!(definition(&print_definition(&second)), second);
     let mut zero = first;
     zero.native_version = 0;
@@ -334,7 +334,7 @@ fn native_versions() {
 
 fn native_repeat() {
     let registry = Arc::new(same_registry(NATIVE, true));
-    let id = definition(NATIVE).identity().unwrap();
+    let id = definition(NATIVE).identity();
     let mut case = super::case("equal native arguments cold and warm");
     case.document = format!("{HEADER}use probe.same = @{id}\nmain {{ finish probe.same(7) }}");
     case.expected.end = ExpectedEnd::Finished(lash_kernel_doc::Datum::Int(7.into()));
@@ -357,12 +357,12 @@ fn statement_map(document: &Document, source: &str) -> SourceMap {
 
 fn source_map_independence(shard: &Shard, registry: &FunctionRegistry) {
     let document = doc(&shard.cases[0].document);
-    let id = document.identity().unwrap();
+    let id = document.identity();
     let graph = derive(&document, registry).unwrap();
     let map = statement_map(&document, "let x = 1 // arbitrary authored source");
     assert_eq!(map.document, id);
     let stored = Document::from_json(&document.to_json().unwrap()).unwrap();
-    assert_eq!(stored.identity().unwrap(), id);
+    assert_eq!(stored.identity(), id);
     assert_eq!(derive(&stored, registry).unwrap(), graph);
     assert!(!print_document(&document).contains("arbitrary"));
     drop(map);
@@ -469,7 +469,7 @@ fn site_order(shard: &Shard, registry: &FunctionRegistry) {
         Some(Node::Expr(lash_kernel_doc::Expr::Closure(_)))
     )));
     let body = definition(BODY);
-    let id = body.identity().unwrap();
+    let id = body.identity();
     let library = derive_definition(&body, registry).unwrap();
     assert!(
         library
@@ -481,7 +481,7 @@ fn site_order(shard: &Shard, registry: &FunctionRegistry) {
 
 fn statement_locality() {
     let registry = same_registry(BODY, false);
-    let id = definition(BODY).identity().unwrap();
+    let id = definition(BODY).identity();
     for body in [
         "let x = 7 let y = invoke probe.same(x) finish y",
         "let x = 7 print 0 let y = invoke probe.same(x) print 0 finish y",
@@ -499,7 +499,7 @@ fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {
     let resumed = check_case(&mut runner, &case).unwrap();
     case.environment.resume = false;
     assert_eq!(check_case(&mut runner, &case).unwrap(), resumed);
-    let id = definition(BOTH).identity().unwrap();
+    let id = definition(BOTH).identity();
     let document = doc(&format!(
         "{HEADER}use probe.same = @{id}\nmain {{ let x = invoke probe.same(7) finish x }}"
     ));
@@ -640,30 +640,41 @@ impl lash_kernel_vm::Host for ProbeHost {
 fn identity_document(shard: &Shard) {
     let document = doc(&shard.cases[0].document);
     let expected = if shard.rule == "K-ID-001" {
-        "327c6a61cbff309611ad4af70ad4f9cb4ba2e9bc515bbd3458f8f5dea83a4e7f"
+        "bbe2c448d21e1c03d359bde09174a1d8440d2b617b92616eb7836bb180b5d838"
     } else {
-        "aaaced107a063053435c79613097364cfe8afdda36f476681a9e0f912b7e2b3b"
+        "ce0ece8bcc22ba85f70553afdf75efaa279cbe661c2e8f5baf15d5f8f05c96ab"
     };
-    assert_eq!(document.identity().unwrap().to_string(), expected);
+    assert_eq!(document.identity().to_string(), expected);
+    // K-ID-003: the canonical form is the document's logical token body,
+    // which decodes back to it, and the identity is that body's digest.
+    let bytes = document.canonical_bytes();
+    assert_eq!(
+        lash_kernel_doc::graph_tokens::decode_body::<Document>(&bytes).unwrap(),
+        document
+    );
+    assert_eq!(
+        document.identity().as_bytes(),
+        &lash_kernel_doc::graph_tokens::logical_digest(&bytes)
+    );
     if shard.rule == "K-ID-001" {
         // Two sources mapped onto one document share its identity.
         let first = statement_map(&document, "return 7");
         let second = statement_map(&document, "finish(7)  # another spelling");
         assert_ne!(first.source, second.source);
-        let id = document.identity().unwrap();
+        let id = document.identity();
         assert_eq!((first.document, second.document), (id, id));
     }
     let different = doc(&format!("{HEADER}main {{ finish 8 }}"));
-    assert_ne!(document.identity().unwrap(), different.identity().unwrap());
+    assert_ne!(document.identity(), different.identity());
 }
 
 fn identity_definition() {
     let original = definition(NATIVE);
     assert_eq!(
-        original.identity().unwrap().to_string(),
-        "72975a48e74d563086004e9d5e17c6664336158d7b9b75717b84d07a9f1f2d4f"
+        original.identity().to_string(),
+        "7ed045f645382b2ce50e6c57fe9266565c87b5ee157c103698eed1059b3c8b8e"
     );
-    let first = original.identity().unwrap();
+    let first = original.identity();
     let json: serde_json::Value = serde_json::from_str(&original.to_json().unwrap()).unwrap();
     for (field, value) in [
         ("name", serde_json::json!("probe.other")),
@@ -682,7 +693,7 @@ fn identity_definition() {
         let mut changed = json.clone();
         changed[field] = value;
         let changed = FunctionDefinition::from_json(&changed.to_string()).unwrap();
-        assert_ne!(changed.identity().unwrap(), first, "{field}");
+        assert_ne!(changed.identity(), first, "{field}");
         assert_eq!(changed.kernel, 1);
     }
 }

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "div_floor: K-NUM-005 edge",
-      "function": "83306b3a20d5564088f2e56e2d21b058034fced15dbf22df0bd3f74017159d8d",
+      "function": "e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb",
       "args": [
         {
           "int": "2"
@@ -24,7 +24,7 @@
     },
     {
       "name": "float.div_floor: K-NUM-005 edge",
-      "function": "18389ec843b589630108bfc02858b4d8790b8d630e1c53bd47152c94046e94bd",
+      "function": "1e8e02dc03049869b04c07a5bc6c43094906df4f7ac3a8c7522318c4160b7360",
       "args": [
         {
           "float": "2.0"
@@ -45,7 +45,7 @@
     },
     {
       "name": "float.rem_floor: K-NUM-005 edge",
-      "function": "a4b49c18837c6fc48fd74cd5121f4ad598376b86384667dcf399e3be83b74c88",
+      "function": "49c51169f125ef780103cfaac1d100a6abcfbdeb6b3bf56aba592d4cf566bc46",
       "args": [
         {
           "float": "2.0"
@@ -66,7 +66,7 @@
     },
     {
       "name": "int.div_floor: K-NUM-005 edge",
-      "function": "55bc8173a398425bf7db667c7d09422dc7eca188d231e69be4d751c454adb62c",
+      "function": "ebe65811f61f7e8eacdb0869fffd62062a5424a93c09efad9772dbfd58ff2e5e",
       "args": [
         {
           "int": "2"
@@ -87,7 +87,7 @@
     },
     {
       "name": "int.rem_floor: K-NUM-005 edge",
-      "function": "c82b170a2f30ead493b167e4fffaf7d6f78d69fe2450fd07373285f5b721c9c1",
+      "function": "5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671",
       "args": [
         {
           "int": "2"
@@ -108,7 +108,7 @@
     },
     {
       "name": "num.div_floor: K-NUM-005 edge",
-      "function": "d886208a38c577e9c9077cc5c587f2cc0749f11133035918d28719d8d297db74",
+      "function": "62183aa8ed84dd2b2dca1a994e3761db1edb6cb3b697f28eb5f5dee074f7458c",
       "args": [
         {
           "int": "2"
@@ -129,7 +129,7 @@
     },
     {
       "name": "num.rem_floor: K-NUM-005 edge",
-      "function": "0db02487ea389281abf85464df85d4bf6d638a4af16ec9fe76b37db8c1781b71",
+      "function": "208ceaa55ce6be1d3e82977425e48284c78f2b88ec47cc45ee09bbf6385e7e3e",
       "args": [
         {
           "int": "2"
@@ -150,7 +150,7 @@
     },
     {
       "name": "rem_floor: K-NUM-005 edge",
-      "function": "f07a0fa6b2f34d777f8b4d3646e615b575368a349026da774dab08d2d555e672",
+      "function": "29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e",
       "args": [
         {
           "int": "2"

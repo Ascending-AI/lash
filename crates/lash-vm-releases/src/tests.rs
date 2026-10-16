@@ -396,7 +396,7 @@ impl Staged {
 
 fn released(definition: lash_kernel_doc::FunctionDefinition, native: bool) -> ReleasedFunction {
     ReleasedFunction {
-        function: definition.identity().expect("an identity"),
+        function: definition.identity(),
         definition,
         fingerprint: native.then(|| "f".repeat(64)),
     }
@@ -492,7 +492,7 @@ fn a_missing_native_or_helper_refuses_resume() {
         }),
         Err(ReleaseRefusal::MissingHelper { function: body })
     );
-    let stranger = helper(9).identity().unwrap();
+    let stranger = helper(9).identity();
     assert_eq!(
         manifests.admit(&pinned, &[stranger].into(), |_| Some(true)),
         Err(ReleaseRefusal::MissingHelper { function: stranger })

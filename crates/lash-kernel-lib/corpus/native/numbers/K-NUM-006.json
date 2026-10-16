@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "div_trunc: K-NUM-006 edge",
-      "function": "14bed014672e47e0f025a2598bcfd4d7530594753d17b5c120103db0133488a5",
+      "function": "6f3357941ffdd7bbbee0530a7ec533fe86d55478e920c526b047ee8251ff0ae5",
       "args": [
         {
           "int": "2"
@@ -24,7 +24,7 @@
     },
     {
       "name": "float.div_trunc: K-NUM-006 edge",
-      "function": "9dd38eaa1fabc8a5f975a9a274b99fd47c791bfd2283a8fd46ec38e58b5a8f37",
+      "function": "b33a431b04778013f6c04e85e63305a211b898c4eaf89c43e04e76d7e4d84a34",
       "args": [
         {
           "float": "2.0"
@@ -45,7 +45,7 @@
     },
     {
       "name": "float.rem_trunc: K-NUM-006 edge",
-      "function": "5784e558e0c6c78315bf5195f479f454d55ec1e4d329ccb5409573a44364c4f0",
+      "function": "499ba597abdd50bf6d337d0ed1f73b4450acb3142fd6e2c4567244abf4150e47",
       "args": [
         {
           "float": "2.0"
@@ -66,7 +66,7 @@
     },
     {
       "name": "int.div_trunc: K-NUM-006 edge",
-      "function": "c1c1dca11cc8658961b454ea49d2147c71510526a99e3e69c0b27120549551ed",
+      "function": "a631f1db16e0919582a48c0115c70f620ac78ec530925aebb79838359199e6b4",
       "args": [
         {
           "int": "2"
@@ -87,7 +87,7 @@
     },
     {
       "name": "int.rem_trunc: K-NUM-006 edge",
-      "function": "f606b63f7c0ddaa1d645f312bafa3184c601ac63f6d452ac91a671952460ec82",
+      "function": "1966318104704b5e0349d117c7da61381305ced9c68b0316de24cf54ec1f1227",
       "args": [
         {
           "int": "2"
@@ -108,7 +108,7 @@
     },
     {
       "name": "num.div_trunc: K-NUM-006 edge",
-      "function": "b591f2dac7100e61e7321785ba1dcfc8a015eb1be47f0f40c5c454b28e08b386",
+      "function": "c9893e10f01a4457d07f2fdf1dcdfb6738384a6dc3ead2a17fb61c8aaf08e01f",
       "args": [
         {
           "int": "2"
@@ -129,7 +129,7 @@
     },
     {
       "name": "num.rem_trunc: K-NUM-006 edge",
-      "function": "1df0b5cb76059eaabf6bb757f86144ccf344849a5445878e6d463b3b2f304262",
+      "function": "ddc71def75c553460771da4d369727feaee3697855d8bd53b06b285fe33e4374",
       "args": [
         {
           "int": "2"
@@ -150,7 +150,7 @@
     },
     {
       "name": "rem_trunc: K-NUM-006 edge",
-      "function": "418efa003407974409069fc77475df673eaba2ba7aec7068c5cfff03d1433c8d",
+      "function": "f40345e032dde30b6d07ca6afea7f0dcd4923cd4d8fe403843068097bfc6b7ab",
       "args": [
         {
           "int": "2"

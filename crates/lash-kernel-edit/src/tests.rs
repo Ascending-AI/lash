@@ -43,7 +43,7 @@ fn library() -> Library {
     let mut catalog = BTreeMap::new();
     let mut register = |text: &str, held: bool| {
         let definition = parse_definition(text).unwrap_or_else(|error| panic!("{error}\n{text}"));
-        let function = definition.identity().unwrap();
+        let function = definition.identity();
         if held {
             catalog.insert(function, definition);
         }
@@ -399,7 +399,7 @@ main {
 "#,
     );
     assert_eq!(draft.document(), &expected);
-    assert_eq!(applied.admitted.identity, expected.identity().unwrap());
+    assert_eq!(applied.admitted.identity, expected.identity());
     assert_eq!(draft.identity(), applied.admitted.identity);
     // As edited: it fetches `b`, prints the page and, the page not being
     // ready, does not notify.
@@ -814,7 +814,7 @@ fn after_each_edit_kind_every_surviving_node_maps_to_its_successor_and_no_other(
         let successors: BTreeSet<&Site> = found.iter().map(|(_, to, _)| to).collect();
         assert_eq!(successors.len(), found.len(), "{kind}");
         assert!(successors.iter().all(|to| result.contains(to)), "{kind}");
-        assert_eq!(applied.correspondence.base, base.identity().unwrap());
+        assert_eq!(applied.correspondence.base, base.identity());
         assert_eq!(applied.correspondence.result, draft.identity(), "{kind}");
     }
 }
@@ -1484,7 +1484,7 @@ main {{
     let extraction = crate::extract_entry(&source, &name("chosen")).unwrap();
     assert_eq!(extraction.requirements, effects.effects);
     let transaction = extraction.transaction;
-    assert_eq!(transaction.base, source.identity().unwrap());
+    assert_eq!(transaction.base, source.identity());
     let mut draft = Draft::open(source.clone()).unwrap();
     draft.apply(&transaction, &environment).unwrap();
     let extracted = draft.document();

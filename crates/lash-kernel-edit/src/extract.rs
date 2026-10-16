@@ -48,7 +48,7 @@ pub fn extract_entry(document: &Document, entry: &Name) -> Result<Extraction, Ed
         });
     }
     let reached = entry_reachability(document, entry).map_err(|error| refused(None, error))?;
-    let base = crate::draft::identity(document)?;
+    let base = document.identity();
     let mut edits = Vec::new();
     let statements: Vec<_> = (0u32..)
         .zip(&document.main)

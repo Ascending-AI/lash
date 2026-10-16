@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "byte slicing and concatenation preserve immutable octets",
-      "document": "kernel 1\nnumbers by_spelling\nuse bytes.slice = @6fe09bebb68b68d03e3602273ec3ce592cc6ce0f7c2789ff9fdc1195db8073b9\nuse bytes.concat = @aacadcf76173cb2a8db3e57851bacc3e37429fe0f49aee57a169a5db43feaa99\nmain { let x = b\"00ff80\" finish [bytes.slice(x, 1, 3), bytes.concat(x, b\"01\"), x] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse bytes.slice = @0ac4aab60030d0f8bcb10560ead160e582457cfe0c4677af44a692f8a729706b\nuse bytes.concat = @c0881c5fdaac158ab874efa89b20218b9578f06442374c1a6a12cafaa04079cf\nmain { let x = b\"00ff80\" finish [bytes.slice(x, 1, 3), bytes.concat(x, b\"01\"), x] }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -26,7 +26,7 @@
     },
     {
       "name": "byte construction refuses a nonoctet",
-      "document": "kernel 1\nnumbers by_spelling\nuse bytes.from_octets = @a677fcb6830dea0b329311fd94e6842f93a93eafebbe9152441f7d25a99390a0\nmain {  try { print bytes.from_octets([256]) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse bytes.from_octets = @7a80e37aa7ed48e0618fe2cec6b37d406d3481c681652c58cdc91977dff017a3\nmain {  try { print bytes.from_octets([256]) } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],

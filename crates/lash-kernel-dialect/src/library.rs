@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    EncodeError, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry,
+    FunctionCatalog, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry,
     RegisteredFunction,
 };
 
@@ -26,8 +26,6 @@ pub enum LibraryError {
         name: FunctionName,
         function: FunctionId,
     },
-    #[error(transparent)]
-    Encode(#[from] EncodeError),
 }
 
 /// A [`Library`] held in memory.
@@ -85,7 +83,7 @@ impl NamedLibrary {
         definition: impl Into<Arc<FunctionDefinition>>,
     ) -> Result<FunctionId, LibraryError> {
         let definition = definition.into();
-        let function = definition.identity()?;
+        let function = definition.identity();
         self.insert_identified(function, definition)
     }
 

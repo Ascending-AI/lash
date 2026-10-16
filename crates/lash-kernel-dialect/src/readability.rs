@@ -74,15 +74,9 @@ pub fn check(cases: &[Case], dialects: &[Dialect<'_>]) -> Report {
                     .map_err(|e| e.to_string())?;
                 let decoded = (dialect.decode)(&printed.source, &case.document, Default::default())
                     .map_err(|e| format!("{e:?}"))?;
-                if decoded.canonical_bytes().map_err(|e| e.to_string())?
-                    != case.document.canonical_bytes().map_err(|e| e.to_string())?
-                {
+                // Equal canonical bytes are one DocumentId (`K-ID-001`).
+                if decoded.canonical_bytes() != case.document.canonical_bytes() {
                     return Err("canonical bytes differ".into());
-                }
-                if decoded.identity().map_err(|e| e.to_string())?
-                    != case.document.identity().map_err(|e| e.to_string())?
-                {
-                    return Err("DocumentId differs".into());
                 }
                 let map = printed
                     .source_map

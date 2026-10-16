@@ -300,7 +300,7 @@ mod walk {
             "numbers by_spelling\nkernel 1\nmain { return \"done\" }",
         )
         .expect("kernel document");
-        let identity = document.identity().expect("document identity").to_string();
+        let identity = document.identity().to_string();
         let json = document.to_json().expect("canonical document JSON");
         lash_core_execution::ModuleArtifactStore::publish_module_artifact(
             &store,
@@ -336,7 +336,7 @@ mod walk {
             "numbers by_spelling\nkernel 1\nmain {{ return \"{answer}\" }}"
         ))
         .expect("kernel document");
-        let identity = document.identity().expect("document identity").to_string();
+        let identity = document.identity().to_string();
         let json = document.to_json().expect("canonical document JSON");
         lash_core_execution::ModuleArtifactStore::publish_module_artifact(
             store,

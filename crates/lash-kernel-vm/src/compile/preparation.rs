@@ -8,8 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock, Weak};
 
 use lash_kernel_doc::{
-    Document, DocumentId, EncodeError, FunctionId, Invalid, KernelDataLimits,
-    validate_document_with_limits,
+    Document, DocumentId, FunctionId, Invalid, KernelDataLimits, validate_document_with_limits,
 };
 
 use super::{DocumentCode, Executable, Missing, PreparedLibrary, compile_document};
@@ -21,7 +20,7 @@ pub(super) struct Documents(BTreeMap<(usize, usize), Arc<Admission>>);
 pub(crate) struct Admission {
     document: Weak<Document>,
     code: OnceLock<Result<Arc<DocumentCode>, Missing>>,
-    identity: OnceLock<Result<DocumentId, EncodeError>>,
+    identity: OnceLock<DocumentId>,
 }
 
 pub(crate) enum Refused {
@@ -90,8 +89,8 @@ impl PreparedLibrary {
 }
 
 impl Admission {
-    pub(crate) fn identity(&self, document: &Document) -> Result<DocumentId, EncodeError> {
-        self.identity.get_or_init(|| document.identity()).clone()
+    pub(crate) fn identity(&self, document: &Document) -> DocumentId {
+        *self.identity.get_or_init(|| document.identity())
     }
 
     pub(crate) fn executable(
@@ -113,7 +112,7 @@ impl Admission {
 }
 
 impl Executable {
-    pub(crate) fn identity(&self) -> Result<DocumentId, EncodeError> {
+    pub(crate) fn identity(&self) -> DocumentId {
         self.admission.identity(&self.document)
     }
 }

@@ -1,12 +1,12 @@
 //! A draft: a document a host is editing.
 
 use lash_kernel_check::{Admitted, Environment};
-use lash_kernel_doc::{Document, DocumentId, InvalidReason};
+use lash_kernel_doc::{Document, DocumentId};
 
 use crate::apply::{FaultKind, Working};
 use crate::edit::Transaction;
 use crate::refusal::{
-    EditDiagnostic, EditDiagnosticKind, EditRefusal, Location, invalid_correspondence, refused,
+    EditDiagnostic, EditDiagnosticKind, EditRefusal, invalid_correspondence, refused,
 };
 use lash_kernel_doc::Correspondence;
 
@@ -38,7 +38,7 @@ impl Draft {
     /// The document need not be admitted anywhere yet: a host may open one
     /// its environment refuses in order to repair it.
     pub fn open(document: Document) -> Result<Self, EditRefusal> {
-        let identity = identity(&document)?;
+        let identity = document.identity();
         let sites = Working::open(&document).sites();
         let since_open =
             Correspondence::identity(identity, sites).ok_or_else(invalid_correspondence)?;
@@ -109,16 +109,4 @@ impl Draft {
             admitted: published.admitted,
         })
     }
-}
-
-pub(crate) fn identity(document: &Document) -> Result<DocumentId, EditRefusal> {
-    document.identity().map_err(|error| EditRefusal {
-        diagnostics: vec![EditDiagnostic {
-            edit: None,
-            location: None::<Location>,
-            kind: EditDiagnosticKind::Invalid(InvalidReason::Identity {
-                message: error.message,
-            }),
-        }],
-    })
 }

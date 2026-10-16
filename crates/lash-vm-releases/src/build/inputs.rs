@@ -68,7 +68,7 @@ pub(crate) fn generate(definition: &FunctionDefinition, seeds: &[Input]) -> Vec<
         append(args.clone(), 0, ROOM);
         append(args, WORK, 0);
     }
-    let identity = definition.identity().expect("a registered definition");
+    let identity = definition.identity();
     let mut seed = [0_u8; 8];
     seed.copy_from_slice(&identity.as_bytes()[..8]);
     let mut random = Random(u64::from_le_bytes(seed) | 1);

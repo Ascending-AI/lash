@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "text holds scalars and empty text",
-      "document": "kernel 1\nnumbers by_spelling\nuse text.from_utf16_units = @393343160a5dda8248d7c93524754111a3c3fb49a293b0f9099f4b499df358de\nuse text.len = @b66f4b89cffe6636459db57eae646b19497ac8d5ce2dadd5fa80edf2c607b14a\nuse text.from_code_points = @e834b2d932248e7c512e2920764878b56a534e25febe9c6c4bc3de9d2bf3fb1a\nmain {  finish [text.len(\"\"), text.from_code_points([128512]), text.from_utf16_units([55357, 56832])] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse text.from_utf16_units = @501ce1af4c8c6d36b5addf29e27cad4e176edd2671761669760f27d58a94f6a5\nuse text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716\nuse text.from_code_points = @15ee852f242cc41febea71421a0af456926ad0f91429c4c96f1217c5b8732e43\nmain {  finish [text.len(\"\"), text.from_code_points([128512]), text.from_utf16_units([55357, 56832])] }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -26,7 +26,7 @@
     },
     {
       "name": "scalar construction refuses a surrogate",
-      "document": "kernel 1\nnumbers by_spelling\nuse text.from_code_points = @e834b2d932248e7c512e2920764878b56a534e25febe9c6c4bc3de9d2bf3fb1a\nmain {  try { print text.from_code_points([55296]) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse text.from_code_points = @15ee852f242cc41febea71421a0af456926ad0f91429c4c96f1217c5b8732e43\nmain {  try { print text.from_code_points([55296]) } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -39,7 +39,7 @@
     },
     {
       "name": "UTF16 construction refuses an unpaired surrogate",
-      "document": "kernel 1\nnumbers by_spelling\nuse text.from_utf16_units = @393343160a5dda8248d7c93524754111a3c3fb49a293b0f9099f4b499df358de\nmain {  try { print text.from_utf16_units([55296]) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse text.from_utf16_units = @501ce1af4c8c6d36b5addf29e27cad4e176edd2671761669760f27d58a94f6a5\nmain {  try { print text.from_utf16_units([55296]) } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],

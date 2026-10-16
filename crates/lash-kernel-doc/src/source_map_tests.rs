@@ -37,8 +37,7 @@ fn validation_checks_identity_sites_utf8_offsets_and_order() {
     let mut invalid = map.clone();
     invalid.document = parse_document("kernel 1\nnumbers float\nmain {}")
         .unwrap()
-        .identity()
-        .unwrap();
+        .identity();
     assert_eq!(
         invalid.validate(&document, "bad"),
         Err(SourceMapRefusal::Document)
@@ -109,7 +108,7 @@ fn rekey_retains_edited_survivors_and_refuses_another_base() {
     let result = parse_document("kernel 1\nnumbers float\nmain { print 3 print 4 }").unwrap();
     let correspondence = Correspondence::of(
         map.document,
-        result.identity().unwrap(),
+        result.identity(),
         vec![
             Survivor::new(site(&[0]), site(&[1]), true),
             Survivor::new(site(&[1]), site(&[0]), false),
@@ -140,7 +139,7 @@ fn canonical_encodings_preserve_checked_invariants() {
     let map = map();
     assert_eq!(decode_body::<SourceMap>(&encode_body(&map)).unwrap(), map);
     assert_eq!(
-        serde_json::from_slice::<SourceMap>(&map.canonical_bytes().unwrap()).unwrap(),
+        serde_json::from_str::<SourceMap>(&serde_json::to_string(&map).unwrap()).unwrap(),
         map
     );
     let mut reversed = map.clone();
@@ -159,7 +158,7 @@ fn canonical_encodings_preserve_checked_invariants() {
         correspondence
     );
     assert_eq!(
-        serde_json::from_slice::<Correspondence>(&correspondence.canonical_bytes().unwrap())
+        serde_json::from_str::<Correspondence>(&serde_json::to_string(&correspondence).unwrap())
             .unwrap(),
         correspondence
     );

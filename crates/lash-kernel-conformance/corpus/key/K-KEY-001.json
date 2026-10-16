@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "all immutable key kinds and nested tuples are legal",
-      "document": "kernel 1\nnumbers by_spelling\nuse map.len = @01ff13637210dc3961b07aed1e03072219444eefd4683c2def4e3a8d553fbb36\nuse ref = @153e944ca1091d91e3ca964a3f8eba0e8ace1517880176d10fab14781a6cd663\nmain { let xs = [] let r = ref(xs) let m = map{null: 0, true: 1, 2: 2, 3.5: 3, \"x\": 4, b\"00ff\": 5, clock: 6, r: 7, (null, (true, 2,),): 8} finish map.len(m) }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse map.len = @eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d\nuse ref = @45d4961349c42b673de1c1e92b4122299b421191ead13812e4d5f978f1323c65\nmain { let xs = [] let r = ref(xs) let m = map{null: 0, true: 1, 2: 2, 3.5: 3, \"x\": 4, b\"00ff\": 5, clock: 6, r: 7, (null, (true, 2,),): 8} finish map.len(m) }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -179,7 +179,7 @@
     },
     {
       "name": "map refuses key error.new(\"x\", \"y\")",
-      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @964a1a401df1dda6b8ac84bb4f769be97a5552602a639575641964c9b83e3c4a\nmain { let x = error.new(\"x\", \"y\")  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064\nmain { let x = error.new(\"x\", \"y\")  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -192,7 +192,7 @@
     },
     {
       "name": "set refuses member error.new(\"x\", \"y\")",
-      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @964a1a401df1dda6b8ac84bb4f769be97a5552602a639575641964c9b83e3c4a\nmain { let x = error.new(\"x\", \"y\")  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064\nmain { let x = error.new(\"x\", \"y\")  try { print set{x} } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],

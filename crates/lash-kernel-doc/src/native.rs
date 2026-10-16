@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::canonical::EncodeError;
 use crate::document::DecodeError;
+use crate::document::EncodeError;
 use crate::function::FunctionDefinition;
 use crate::heap::NativeFunction;
 use crate::name::{FunctionId, FunctionName};
@@ -206,8 +206,6 @@ pub enum RegistryError {
         #[source]
         source: Invalid,
     },
-    #[error(transparent)]
-    Encode(#[from] EncodeError),
     /// The definition states no native implementation and one was supplied.
     #[error("`{name}` states no native implementation, so none can be registered for it")]
     NativeNotStated { name: FunctionName },
@@ -284,7 +282,7 @@ impl FunctionRegistry {
         }
         let function = match identity {
             Some(function) => function,
-            None => definition.identity()?,
+            None => definition.identity(),
         };
         if self.functions.contains_key(&function) {
             return Err(RegistryError::AlreadyRegistered { name, function });

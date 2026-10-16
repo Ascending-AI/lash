@@ -102,7 +102,7 @@ fn kernels() -> Kernels {
     // Retained definitions keep their exact identities and transitive pins;
     // old documents run on the successor registry, not a rewritten document.
     for definition in lash_kernel_dialect::define_functions(&source, &mut library).unwrap() {
-        let id = definition.identity().unwrap();
+        let id = definition.identity();
         old.insert(definition.name.to_string(), id);
         if registry.get(&id).is_none() {
             registry.register(definition, None).unwrap();

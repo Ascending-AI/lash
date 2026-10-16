@@ -796,26 +796,14 @@ async fn run_linked_cell(
     let observation = ctx
         .run_spec()
         .map_or(lash_kernel_doc::RunObservation::Off, |spec| spec.observe);
-    let trace = document_identity
-        .as_ref()
-        .ok()
-        .and_then(|identity| trace::CellTrace::new(&ctx, *identity, &envelope.dialect, segment));
+    let trace = trace::CellTrace::new(&ctx, document_identity, &envelope.dialect, segment);
     if let Some(trace) = &trace {
         trace.started();
     }
-    let entries = match &document_identity {
-        Ok(identity) => Arc::new(processes::CellEntries {
-            document: document.clone(),
-            identity: *identity,
-        }),
-        Err(error) => {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
-            );
-        }
-    };
+    let entries = Arc::new(processes::CellEntries {
+        document: document.clone(),
+        identity: document_identity,
+    });
     let published = if runs_on {
         Ok(())
     } else {
@@ -1045,7 +1033,7 @@ async fn run_linked_cell(
         &run,
         Ok(KernelEnd::Ended { end, owed: None, .. }) if !matches!(end, End::Cancelled)
     );
-    let document_id = document_identity.clone();
+    let document_id = document_identity;
     // The rest answers the cell from what the run left; the execution's
     // terminal fact follows its answer.
     let answer = || -> ExecResponse {
@@ -1092,9 +1080,6 @@ async fn run_linked_cell(
         }
         match end {
             End::Finished(finished) => {
-                if let Err(error) = document_identity {
-                    return failed(lash_core::CellFailureKind::Host, error.to_string());
-                }
                 let bindings = match staged {
                     Some(Ok(changes)) => changes.bindings,
                     Some(Err(error)) => {
@@ -1166,14 +1151,13 @@ async fn run_linked_cell(
         }
     };
     let mut response = answer();
-    let ended = match (owed, document_id) {
-        (Some((ledger, end, pages)), Ok(document)) => {
-            end_cell(state, snapshots, &host, document, ledger, end, &pages)
+    let ended = match owed {
+        Some((ledger, end, pages)) => {
+            end_cell(state, snapshots, &host, document_id, ledger, end, &pages)
                 .await
                 .map(Some)
         }
-        (Some(_), Err(error)) => Err(KernelFailure::Document(error)),
-        (None, _) if recorded => snapshots
+        None if recorded => snapshots
             .root()
             .await
             .map(|root| {
@@ -1184,7 +1168,7 @@ async fn run_linked_cell(
                 })
             })
             .map_err(KernelFailure::Checkpoint),
-        (None, _) => Ok(None),
+        None => Ok(None),
     };
     match ended {
         Ok(Some(ended)) => ctx.cell_ended(ended),

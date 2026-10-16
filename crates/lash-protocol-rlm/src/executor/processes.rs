@@ -109,7 +109,7 @@ pub(super) async fn declare_saved_captures(
         return Ok((document, source_map));
     }
     if let Some(map) = &mut source_map {
-        map.document = lowered.identity().map_err(|error| error.to_string())?;
+        map.document = lowered.identity();
     }
     let document = lowered.to_json().map_err(|error| error.to_string())?;
     Ok((document, source_map))

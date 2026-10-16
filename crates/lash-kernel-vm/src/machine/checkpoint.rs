@@ -227,9 +227,7 @@ impl Machine for KernelMachine {
         let document = match self.document {
             Some(document) => document,
             None => {
-                let document = self.exe.identity().map_err(|error| SealError::Fault {
-                    problem: error.to_string(),
-                })?;
+                let document = self.exe.identity();
                 self.document = Some(document);
                 document
             }
@@ -386,22 +384,11 @@ impl KernelMachine {
             .map_err(|missing| OpenError::MissingFunction {
                 function: missing.0,
             })?;
-        if root.document
-            != program
-                .document
-                .identity()
-                .map_err(|error| OpenError::Malformed {
-                    problem: error.to_string(),
-                })?
-        {
+        let given = exe.identity();
+        if root.document != given {
             return Err(OpenError::DocumentMismatch {
                 parked: root.document,
-                given: program
-                    .document
-                    .identity()
-                    .map_err(|error| OpenError::Malformed {
-                        problem: error.to_string(),
-                    })?,
+                given,
             });
         }
         if root.kernel != program.document.manifest.kernel {

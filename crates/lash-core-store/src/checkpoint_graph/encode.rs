@@ -33,7 +33,7 @@ use lash_sansio::sync::MutexExt;
 
 use lash_kernel_doc::graph_tokens::{
     CanonicalFault, ChildRef, TokenCodec, TokenEvent, TokenReader, TokenWriter, encode_body,
-    varint_len,
+    logical_digest, varint_len,
 };
 
 use super::commit::EncodeBudget;
@@ -58,6 +58,14 @@ impl<'a> TypedBody<'a> {
     #[must_use]
     pub const fn as_bytes(&self) -> &'a [u8] {
         self.0
+    }
+
+    /// The body's logical digest: what the encoder keys the nodes it makes
+    /// from the body by, and the identity of a document or definition whose
+    /// body this is (`K-ID-001`, `K-ID-002`).
+    #[must_use]
+    pub fn digest(&self) -> [u8; 32] {
+        logical_digest(self.0)
     }
 }
 
@@ -386,7 +394,7 @@ impl GraphStaging {
         }
         #[cfg(feature = "perf-witness")]
         crate::perf_witness::record_hash_pass(input.len());
-        let key = (kind, crate::store::BlobRef::digest_for_content(input));
+        let key = (kind, TypedBody::logical(input).digest());
         let prepared = self.cache.lock_recover().get(&key, input);
         if let Some(prepared) = prepared {
             for node in &prepared.nodes {

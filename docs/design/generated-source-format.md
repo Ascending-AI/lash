@@ -30,7 +30,8 @@ JSON or, per FIG-6258, as its bytes or id). The source supplies the code: the
 functions and main. The base supplies the rest: manifest, entries, private
 bindings, the full identity behind each helper spelling and each renamed
 identifier. `read` needs no library or name catalogue and does not admit.
-`Document::canonical_bytes()` exposes the identity encoder.
+`Document::canonical_bytes()` is the canonical token encoding the identity is
+the digest of (`K-ID-003`).
 
 Tests compose all three on every successful print; hosts may too. There is no
 verifier service or verification flag:
@@ -38,7 +39,7 @@ verifier service or verification flag:
 ```rust,ignore
 let printed = lash::typescript::print(&document, Default::default())?;
 let read = lash::typescript::read(&printed.source, &document, Default::default())?;
-assert_eq!(document.canonical_bytes()?, read.canonical_bytes()?);
+assert_eq!(document.canonical_bytes(), read.canonical_bytes());
 ```
 
 A host that edits the exported text reads the edit against the same base. An

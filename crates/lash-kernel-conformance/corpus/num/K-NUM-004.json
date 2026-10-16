@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "integer quotient rounds once before float division rules apply",
-      "document": "kernel 1\nnumbers by_spelling\nuse div = @ccfc7ada2c3ee9ebf74ed4c4ac62e664fc6d29d1e3f43a594cca4349261ce84d\nmain {  finish [div(9007199254740993, 3), div(1.0, 0.0), div(0.0, 0.0), div(-1.0, 0.0)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse div = @e14bda27238ed858ee9307d2c894b3400add981ebb21583bd441b5531f49321a\nmain {  finish [div(9007199254740993, 3), div(1.0, 0.0), div(0.0, 0.0), div(-1.0, 0.0)] }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -29,7 +29,7 @@
     },
     {
       "name": "integer zero divisor raises division by zero",
-      "document": "kernel 1\nnumbers by_spelling\nuse div = @ccfc7ada2c3ee9ebf74ed4c4ac62e664fc6d29d1e3f43a594cca4349261ce84d\nmain {  try { print div(1, 0) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse div = @e14bda27238ed858ee9307d2c894b3400add981ebb21583bd441b5531f49321a\nmain {  try { print div(1, 0) } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -42,7 +42,7 @@
     },
     {
       "name": "integer quotient overflow raises number range",
-      "document": "kernel 1\nnumbers by_spelling\nuse div = @ccfc7ada2c3ee9ebf74ed4c4ac62e664fc6d29d1e3f43a594cca4349261ce84d\nmain {  try { print div(179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137216, 1) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse div = @e14bda27238ed858ee9307d2c894b3400add981ebb21583bd441b5531f49321a\nmain {  try { print div(179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137216, 1) } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],

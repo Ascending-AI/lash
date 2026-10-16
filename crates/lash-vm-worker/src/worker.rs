@@ -703,10 +703,7 @@ impl<'embedding> Server<'embedding> {
                 Document::from_json_with_limits(text, self.bootstrap.tuning.kernel_data)
                     .map_err(|error| undecodable(RunInput::Document, &error))
             })?;
-        let identity = document
-            .identity()
-            .map_err(|error| undecodable(RunInput::Document, &error))?
-            .to_string();
+        let identity = document.identity().to_string();
         let kernel = document.manifest.kernel;
         let library = self.embedding.prepared_for(kernel).map_err(|error| {
             PoolError::breach(ProtocolBreach::Machine {

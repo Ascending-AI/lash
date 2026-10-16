@@ -300,7 +300,7 @@ impl KernelDocuments {
         declarations: &FunctionDeclarations,
     ) -> Result<DocumentId, DocumentStoreError> {
         lash_kernel_doc::check_declarations(document, declarations)?;
-        let identity = document.identity()?;
+        let identity = document.identity();
         for (function, definition) in declarations {
             self.hold(claim, &function_artifact(function), || {
                 definition.to_json().map(String::into_bytes)
@@ -375,11 +375,10 @@ impl KernelDocuments {
                 artifact: match &refusal {
                     lash_kernel_doc::DeclarationRefusal::Identity { function, .. }
                     | lash_kernel_doc::DeclarationRefusal::Name { function, .. }
-                    | lash_kernel_doc::DeclarationRefusal::Dependency { function, .. }
-                    | lash_kernel_doc::DeclarationRefusal::Encode { function, .. } => {
+                    | lash_kernel_doc::DeclarationRefusal::Dependency { function, .. } => {
                         function_artifact(function)
                     }
-                    _ => document_artifact(&document.identity()?),
+                    _ => document_artifact(&document.identity()),
                 },
                 message: refusal.to_string(),
             }),
@@ -444,7 +443,9 @@ impl KernelDocuments {
     ) -> Result<(), DocumentStoreError> {
         match self
             .hold(claim, &rewrite_artifact(&correspondence.result), || {
-                correspondence.canonical_bytes()
+                serde_json::to_vec(correspondence).map_err(|error| lash_kernel_doc::EncodeError {
+                    message: error.to_string(),
+                })
             })
             .await
         {
@@ -495,13 +496,13 @@ impl KernelDocuments {
         source: &str,
     ) -> Result<SourceMapId, DocumentStoreError> {
         map.validate(document, source)?;
-        let identity = map.identity()?;
+        let identity = map.identity();
         self.hold(claim, &source_artifact(&map.source), || {
             Ok(source.as_bytes().to_vec())
         })
         .await?;
         self.hold(claim, &source_map_artifact(&identity), || {
-            map.canonical_bytes()
+            Ok(map.canonical_bytes())
         })
         .await?;
         Ok(identity)
@@ -536,7 +537,7 @@ impl KernelDocuments {
             Ok(map) => map,
             Err(message) => return corrupt(artifact, message),
         };
-        if map.identity()? != *identity {
+        if map.identity() != *identity {
             return corrupt(artifact, "the source map is another map".to_owned());
         }
         let artifact = source_artifact(&map.source);
@@ -621,7 +622,7 @@ impl KernelDocuments {
         };
         let text = std::str::from_utf8(&bytes).map_err(|error| corrupt(error.to_string()))?;
         let document = Document::from_json(text).map_err(|error| corrupt(error.to_string()))?;
-        let found = document.identity()?;
+        let found = document.identity();
         if found != *identity {
             return Err(DocumentStoreError::Identity {
                 document: *identity,
@@ -696,7 +697,7 @@ mod tests {
         let document =
             lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return 7 }")
                 .expect("document");
-        let identity = document.identity().expect("identity");
+        let identity = document.identity();
         let store = Arc::new(Stored(Mutex::new(Some(
             document.to_json().expect("json").into_bytes(),
         ))));
@@ -753,7 +754,7 @@ mod tests {
         let document = lash_kernel_doc::parse_document(&format!(
             "kernel 1\nnumbers float\nuse helper = @{helper}\neffect ping(x: Any) -> Any\nentry work() -> Any\nfn work() {{ let n = invoke helper() let x = perform ping(n) as Any return x }}\nmain {{ }}",
         )).expect("document");
-        let identity = document.identity().expect("identity");
+        let identity = document.identity();
         let store = Arc::new(Stored(Mutex::new(Some(
             document.to_json().expect("json").into_bytes(),
         ))));

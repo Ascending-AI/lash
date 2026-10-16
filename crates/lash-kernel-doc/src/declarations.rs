@@ -36,11 +36,6 @@ pub enum DeclarationRefusal {
         function: FunctionId,
         dependency: FunctionId,
     },
-    #[error("declaration {function} has no canonical encoding: {message}")]
-    Encode {
-        function: FunctionId,
-        message: String,
-    },
 }
 
 /// Checks that `declarations` are exactly the library functions `document`
@@ -70,12 +65,7 @@ pub fn check_declarations(
                 function: *function,
             });
         };
-        let found = definition
-            .identity()
-            .map_err(|error| DeclarationRefusal::Encode {
-                function: *function,
-                message: error.message,
-            })?;
+        let found = definition.identity();
         if found != *function {
             return Err(DeclarationRefusal::Identity {
                 function: *function,

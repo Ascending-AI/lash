@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "machine functions are recognised by identity inside expressions",
-      "document": "kernel 1\nnumbers by_spelling\nuse tasks.unfinished = @2e4b1fc9067053510f2bdef6bf6bde3c31aa69bb3a8156f8f4ece8e38e914ff1\nmain { finish tasks.unfinished() }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse tasks.unfinished = @5e80cb13afcf53414557d360bb2c75280ba4316c3929d6a76150ee665a80596b\nmain { finish tasks.unfinished() }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -16,7 +16,7 @@
     },
     {
       "name": "deref is an expression and returns the same mutable object",
-      "document": "kernel 1\nnumbers by_spelling\nuse deref = @de72f688caa0a0a18d9b16f9d8c09f1eb7f541d481e6c5abbe1731c8deb0c42b\nuse ref = @153e944ca1091d91e3ca964a3f8eba0e8ace1517880176d10fab14781a6cd663\nmain { let a = [1] let b = deref(ref(a)) set b[0] = 7 finish a[0] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse deref = @12677ad7e3e9aab3865fdbd2799e5c17d9d207b757de5a56c60b6911444f3207\nuse ref = @45d4961349c42b673de1c1e92b4122299b421191ead13812e4d5f978f1323c65\nmain { let a = [1] let b = deref(ref(a)) set b[0] = 7 finish a[0] }\n",
       "expected": {
         "prints": [],
         "trace": [],

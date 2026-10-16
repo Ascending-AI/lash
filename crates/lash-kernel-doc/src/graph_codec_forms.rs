@@ -773,8 +773,8 @@ impl TokenCodec for Manifest {
     }
 }
 
-/// Node kind 10's typed body. Its semantic identity, [`Document::identity`],
-/// is a separate digest that a consumer checks on its own.
+/// Node kind 10's typed body, and the document's canonical form: its
+/// identity, [`Document::identity`], is this body's logical digest.
 impl TokenCodec for Document {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(5);

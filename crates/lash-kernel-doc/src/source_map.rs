@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{Correspondence, Document, DocumentId, EncodeError, Site, SourceMapId};
+use crate::{Correspondence, Document, DocumentId, Site, SourceMapId};
 
 /// UTF-8 byte offsets in authored or printed source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
@@ -65,8 +65,6 @@ pub struct SourceMap {
 /// The first failed check: document, digest, site, range, offset, then ordering.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SourceMapRefusal {
-    #[error("cannot identify source map document: {0}")]
-    Identity(#[from] EncodeError),
     #[error("source map names another document")]
     Document,
     #[error("source map digest differs from source")]
@@ -92,7 +90,7 @@ impl SourceMap {
         sites.sort_by(|a, b| a.site.cmp(&b.site));
         let map = Self {
             source: Sha256::digest(source.as_bytes()).into(),
-            document: document.identity()?,
+            document: document.identity(),
             language,
             sites,
         };
@@ -102,7 +100,7 @@ impl SourceMap {
 
     /// Check against the actual document and UTF-8 source, in a stable order.
     pub fn validate(&self, document: &Document, source: &str) -> Result<(), SourceMapRefusal> {
-        if self.document != document.identity()? {
+        if self.document != document.identity() {
             return Err(SourceMapRefusal::Document);
         }
         if self.source != <[u8; 32]>::from(Sha256::digest(source.as_bytes())) {
@@ -191,31 +189,27 @@ impl SourceMap {
         })
     }
 
-    /// Canonical JSON, using the document vocabulary's identity encoder.
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, EncodeError> {
-        crate::canonical::canonical_bytes(self)
+    /// The map's canonical form: its token body (`K-ID-003`'s grammar),
+    /// which a store holds and the identity is the digest of.
+    #[must_use]
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        crate::graph_tokens::encode_body(self)
     }
 
-    /// The map's identity: the digest of [`Self::canonical_bytes`].
-    pub fn identity(&self) -> Result<SourceMapId, EncodeError> {
-        Ok(SourceMapId::from_bytes(crate::canonical::digest_bytes(
-            "lash-kernel-source-map",
-            &self.canonical_bytes()?,
-        )))
+    /// The map's identity: the logical digest of [`Self::canonical_bytes`].
+    #[must_use]
+    pub fn identity(&self) -> SourceMapId {
+        SourceMapId::from_bytes(crate::graph_tokens::logical_digest(&self.canonical_bytes()))
     }
 
     /// The map `bytes` encode canonically, or why they do not.
     ///
     /// # Errors
     ///
-    /// The decoder's message, or that the bytes are not the canonical
-    /// encoding of the map they decode to.
+    /// The decoder's refusal: bytes that are not the one canonical body of a
+    /// well-formed map.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, String> {
-        let map: Self = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-        if map.canonical_bytes().map_err(|error| error.message)? != bytes {
-            return Err("the source map is not in its canonical encoding".to_owned());
-        }
-        Ok(map)
+        crate::graph_tokens::decode_body(bytes).map_err(|error| error.to_string())
     }
 }
 

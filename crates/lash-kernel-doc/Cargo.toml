@@ -26,6 +26,7 @@ synthetic-next = []
 workspace = true
 
 [dependencies]
+blake3 = { workspace = true }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }

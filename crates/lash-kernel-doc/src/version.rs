@@ -89,8 +89,8 @@ pub(crate) mod synthetic {
     use serde_json::Value;
 
     use super::KernelVersion;
-    use crate::canonical::EncodeError;
     use crate::document::DecodeError;
+    use crate::document::EncodeError;
 
     /// `print` is a tag of the statement enum and of nothing else in a
     /// block: no other form, field or type of the grammar is spelled so.

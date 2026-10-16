@@ -25,10 +25,7 @@ fn decode(source: &str, base: &Document, format: SourceFormat) -> Document {
 }
 
 fn exact(original: &Document, decoded: &Document) {
-    assert_eq!(
-        original.canonical_bytes().expect("canonical bytes"),
-        decoded.canonical_bytes().expect("canonical bytes")
-    );
+    assert_eq!(original.canonical_bytes(), decoded.canonical_bytes());
 }
 
 fn sites(document: &Document) -> Vec<Site> {
@@ -128,7 +125,7 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
                 assert_eq!(printed.format, format);
                 if let Some(map) = &printed.source_map {
                     assert!(maps);
-                    assert_eq!(map.document, document.identity().expect("identity"));
+                    assert_eq!(map.document, document.identity());
                     assert_eq!(map.language, format.language());
                     map.validate(&document, &printed.source).unwrap();
                     let mut mapped: Vec<_> =

@@ -55,8 +55,7 @@ pub fn plan_migration(
     document: &Document,
     functions: &FunctionRegistry,
 ) -> Result<Option<PlannedMigration>, KernelMigrationRefusal> {
-    let state = |message: String| KernelMigrationRefusal::State { message };
-    let from = document.identity().map_err(|error| state(error.message))?;
+    let from = document.identity();
     let Some(version) = KernelVersion::of(document.manifest.kernel) else {
         return Err(KernelMigrationRefusal::Document {
             document: from,
@@ -102,7 +101,6 @@ pub fn migrate_saved_function(
     functions: &FunctionRegistry,
     writes: KernelVersion,
 ) -> Result<Option<lash_kernel_dialect::SavedFunction>, KernelMigrationRefusal> {
-    let state = |message: String| KernelMigrationRefusal::State { message };
     let mut carried: Option<lash_kernel_dialect::SavedFunction> = None;
     loop {
         let current = carried.as_ref().unwrap_or(function);
@@ -110,10 +108,7 @@ pub fn migrate_saved_function(
         if found == writes.number() {
             return Ok(carried);
         }
-        let from = current
-            .document
-            .identity()
-            .map_err(|error| state(error.message))?;
+        let from = current.document.identity();
         let refused = |refusal| KernelMigrationRefusal::Document {
             document: from,
             refusal,

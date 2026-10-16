@@ -6,8 +6,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::Block;
-use crate::canonical::{EncodeError, canonical_bytes, digest_bytes};
-use crate::document::{DecodeError, from_versioned_json_with_limits, to_json};
+use crate::document::{DecodeError, EncodeError, from_versioned_json_with_limits, to_json};
+use crate::graph_tokens::{encode_body, logical_digest};
 use crate::name::{FunctionId, FunctionName, Name};
 use crate::types::Signature;
 
@@ -195,15 +195,12 @@ std::thread_local! {
 }
 
 impl FunctionDefinition {
-    /// The function's identity (`K-ID-002`).
-    pub fn identity(&self) -> Result<FunctionId, EncodeError> {
+    /// The function's identity (`K-ID-002`): the digest of its canonical
+    /// bytes, its logical token body (`K-ID-003`).
+    pub fn identity(&self) -> FunctionId {
         #[cfg(test)]
         IDENTITY_CALLS.with(|calls| calls.set(calls.get() + 1));
-        let canonical = canonical_bytes(self)?;
-        Ok(FunctionId::from_bytes(digest_bytes(
-            "lash-kernel-function",
-            &canonical,
-        )))
+        FunctionId::from_bytes(logical_digest(&encode_body(self)))
     }
 
     /// Whether the definition states a native implementation: the property

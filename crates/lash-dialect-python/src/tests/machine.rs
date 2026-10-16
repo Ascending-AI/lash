@@ -721,7 +721,7 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
     let mut registry = current.as_ref().clone();
     for definition in definitions {
         assert!(
-            !ids.contains(&definition.identity().unwrap()),
+            !ids.contains(&definition.identity()),
             "a successor has a new identity"
         );
         registry

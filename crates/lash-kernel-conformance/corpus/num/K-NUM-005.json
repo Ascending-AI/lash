@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "integer floor quotient and remainder sign",
-      "document": "kernel 1\nnumbers by_spelling\nuse div_floor = @83306b3a20d5564088f2e56e2d21b058034fced15dbf22df0bd3f74017159d8d\nuse rem_floor = @f07a0fa6b2f34d777f8b4d3646e615b575368a349026da774dab08d2d555e672\nmain {  finish [div_floor(-7, 3), rem_floor(-7, 3), div_floor(7, -3), rem_floor(7, -3)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse div_floor = @e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb\nuse rem_floor = @29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e\nmain {  finish [div_floor(-7, 3), rem_floor(-7, 3), div_floor(7, -3), rem_floor(7, -3)] }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -29,7 +29,7 @@
     },
     {
       "name": "div floor integer zero divisor",
-      "document": "kernel 1\nnumbers by_spelling\nuse div_floor = @83306b3a20d5564088f2e56e2d21b058034fced15dbf22df0bd3f74017159d8d\nmain {  try { print div_floor(1, 0) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse div_floor = @e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb\nmain {  try { print div_floor(1, 0) } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -42,7 +42,7 @@
     },
     {
       "name": "rem floor integer zero divisor",
-      "document": "kernel 1\nnumbers by_spelling\nuse rem_floor = @f07a0fa6b2f34d777f8b4d3646e615b575368a349026da774dab08d2d555e672\nmain {  try { print rem_floor(1, 0) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse rem_floor = @29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e\nmain {  try { print rem_floor(1, 0) } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],

@@ -28,7 +28,7 @@ pub(crate) fn catalog() -> (BTreeMap<FunctionId, FunctionDefinition>, String) {
     let mut header = String::from("kernel 1\nnumbers float\neffect fetch(url: Text) -> Any\n");
     for (name, native) in [("num.neg", true), ("helper.twice", false)] {
         let definition = definition(name, native);
-        let function = definition.identity().unwrap();
+        let function = definition.identity();
         header.push_str(&format!("use {name} = @{function}\n"));
         catalog.insert(function, definition);
     }
@@ -177,8 +177,8 @@ fn kernel_text_round_trips_documents_that_use_every_form() {
         let json = document.to_json().unwrap();
         assert_eq!(Document::from_json(&json).unwrap(), document);
         assert_eq!(
-            Document::from_json(&json).unwrap().identity().unwrap(),
-            document.identity().unwrap()
+            Document::from_json(&json).unwrap().identity(),
+            document.identity()
         );
         for body in document
             .functions
@@ -482,28 +482,39 @@ fn statement_rule_refuses_statement_forms_nested_in_an_expression() {
 #[test]
 fn identity_is_stable_across_encodings_and_moves_with_behaviour() {
     let document = parse_document(&main_of("let y = 1")).unwrap();
-    let identity = document.identity().unwrap();
+    let identity = document.identity();
     // White space, comments and the order of top-level items are not
     // behaviour.
     let respelled = main_of("# a comment\n   let   y =\n 1");
-    assert_eq!(
-        parse_document(&respelled).unwrap().identity().unwrap(),
-        identity
-    );
+    assert_eq!(parse_document(&respelled).unwrap().identity(), identity);
     // A different literal is.
     let changed = parse_document(&main_of("let y = 1.0")).unwrap();
-    assert_ne!(changed.identity().unwrap(), identity);
-    // The canonical form is pinned: a reader in another language must
-    // reach this digest for this document.
+    assert_ne!(changed.identity(), identity);
+    // The canonical form is pinned (`K-ID-003`): the document's logical
+    // token body, and its identity that body's logical digest.
     let pinned = Document::new(
         NumberPolicy::Float,
         vec![Stmt::Return {
             value: Expr::Literal(Literal::Float(Float::new(-0.0))),
         }],
     );
+    let bytes = pinned.canonical_bytes();
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
     assert_eq!(
-        String::from_utf8(crate::canonical::canonical_bytes(&pinned).unwrap()).unwrap(),
-        r#"{"main":[{"return":{"value":{"literal":{"float":"-0.0"}}}}],"manifest":{"kernel":1,"numbers":"float"}}"#
+        hex,
+        "0905090403010a000a000c00000a000a00090009010c09010c00010c0401060000000000000080"
+    );
+    assert_eq!(
+        crate::graph_tokens::decode_body::<Document>(&bytes).unwrap(),
+        pinned
+    );
+    assert_eq!(
+        pinned.identity().as_bytes(),
+        &crate::graph_tokens::logical_digest(&bytes)
+    );
+    assert_eq!(
+        pinned.identity().to_string(),
+        "423297a9161481df576e8d264afe1ea8546ba58fb1b9773b1ce6d1a02245a421"
     );
 }
 
@@ -709,7 +720,7 @@ fn a_native_version_is_part_of_the_identity_and_only_a_native_states_one() {
     let second = parse_definition(text).unwrap();
     assert_eq!(second.native_version, 2);
     assert_eq!(print_definition(&second), text);
-    assert_ne!(second.identity().unwrap(), first.identity().unwrap());
+    assert_ne!(second.identity(), first.identity());
     let empty = FunctionRegistry::new();
     crate::validate_definition(&second, &empty).expect("a native states its version");
     let body = FunctionDefinition {

@@ -158,8 +158,6 @@ pub enum InvalidReason {
     /// cannot wait.
     #[error("the body stands beside a native implementation, so it cannot `{}`", .form.keyword())]
     NativeBodyMayWait { form: StatementForm },
-    #[error("cannot take the document's identity: {message}")]
-    Identity { message: String },
 }
 
 fn invalid(site: Option<&Site>, reason: InvalidReason) -> Invalid {
@@ -334,16 +332,8 @@ pub(crate) fn validate_identified_definition(
     let Some(body) = definition.body() else {
         return Ok(None);
     };
-    // The site names the body by the definition's own identity, which a
-    // definition that cannot be encoded does not have.
-    let function = definition.identity().map_err(|error| {
-        invalid(
-            None,
-            InvalidReason::Identity {
-                message: error.message,
-            },
-        )
-    })?;
+    // The site names the body by the definition's own identity.
+    let function = definition.identity();
     let scope = Scope {
         limits,
         document: None,

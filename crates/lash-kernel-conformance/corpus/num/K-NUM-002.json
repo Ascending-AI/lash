@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "binary64 rounds ties to even and retains signed zero",
-      "document": "kernel 1\nnumbers by_spelling\nuse mul = @3262358baaf57e850452cb7c4e73d49f2659d940b8a1b4bbf36ac75a442e327a\nuse add = @4f6c490dbe79a55eb2012d5b3f04e6915666dc4b5af14b8d9d1142eabfe1b773\nuse sub = @c27cdb3e7e1eaf81192a11fe66a2cb68096d6fc2859c61efb0357be5ce843668\nmain {  finish [add(9007199254740992.0, 1.0), add(9007199254740994.0, 1.0), mul(-0.0, 2.0), sub(0.1, 0.2)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse mul = @16c930374dc518862f2c4f68a88248760ad0cddb3b96742f004d21aa74a89857\nuse add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537\nuse sub = @59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a\nmain {  finish [add(9007199254740992.0, 1.0), add(9007199254740994.0, 1.0), mul(-0.0, 2.0), sub(0.1, 0.2)] }\n",
       "expected": {
         "prints": [],
         "trace": [],

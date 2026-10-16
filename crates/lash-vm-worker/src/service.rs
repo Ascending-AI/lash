@@ -345,10 +345,7 @@ mod tests {
                             .expect("Python read")
                     }
                 };
-                assert_eq!(
-                    document.canonical_bytes().expect("canonical"),
-                    decoded.canonical_bytes().expect("canonical")
-                );
+                assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
                 assert_eq!(READER_CALLS.get(), 0);
             }
             let encoded = EncodedPayload(

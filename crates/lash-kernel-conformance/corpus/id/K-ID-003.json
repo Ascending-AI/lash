@@ -2,7 +2,7 @@
   "rule": "K-ID-003",
   "cases": [
     {
-      "name": "canonical identity sorts keys and uses only prescribed escapes",
+      "name": "canonical identity holds text as its UTF-8 bytes, unescaped",
       "document": "kernel 1\nnumbers by_spelling\nmain { finish {z: \"é\\n\\t\\\"\\\\\", a: 1} }\n",
       "expected": {
         "end": {

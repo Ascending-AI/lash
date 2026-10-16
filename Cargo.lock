@@ -3010,6 +3010,7 @@ dependencies = [
 name = "lash-kernel-doc"
 version = "0.0.0-dev"
 dependencies = [
+ "blake3",
  "num-bigint",
  "num-traits",
  "schemars",

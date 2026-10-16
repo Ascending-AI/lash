@@ -23,7 +23,7 @@ main {
     // same identity.
     let printed = print_document(&document);
     let reparsed = parse_document(&printed).expect("the printed text parses");
-    assert_eq!(reparsed.identity().unwrap(), document.identity().unwrap());
+    assert_eq!(reparsed.identity(), document.identity());
 
     // A trailing `;` is a typed refusal naming its line and column.
     let misspelled = text.replace("return inbox", "return inbox;");

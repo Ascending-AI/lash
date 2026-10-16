@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "a library function with only a kernel-code body is charged its forms as they run, not its formula",
-      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @2af47738c9957502745b3ba75ddaff3325cf093a5eee2059159363b7674fcc03\nuse list.push = @f79996ff493ff2eda606d6256e7bd9492c9ddc049f3b91a7780819b03b4a1e7a\nmain { let xs = [1] do invoke list.push(xs, 2) finish xs }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nuse list.push = @d8d471be15d3c9a20f78cd917b30c6f86614855de571ce46d44ac2585be23e57\nmain { let xs = [1] do invoke list.push(xs, 2) finish xs }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -24,7 +24,7 @@
     },
     {
       "name": "callback code is charged within a library body",
-      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @2af47738c9957502745b3ba75ddaff3325cf093a5eee2059159363b7674fcc03\nuse collection.map = @88bf325aa4eda58b2c42bebd0da3777b9e440955735df3041b4e77daa4ee27cc\nuse collection.function_check = @949d6dbcda876ed611e162dfb3fa30e697ae6d4bb5aadc6b643900966f4700e3\nmain { let xs = [1] let cb = fn(x) { return x } let ys = invoke collection.map(xs, cb) finish ys }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nuse collection.map = @18c35b30da8cd10ab2c0039bcc1712e89e5bfa9b87727ec514d1f12b78460ea7\nuse collection.function_check = @a76697deec5c174c74ed173a04b4207532f093c3fa95ae478cdebc9c38466e0c\nmain { let xs = [1] let cb = fn(x) { return x } let ys = invoke collection.map(xs, cb) finish ys }\n",
       "expected": {
         "prints": [],
         "trace": [],

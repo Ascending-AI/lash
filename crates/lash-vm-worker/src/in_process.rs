@@ -80,7 +80,7 @@ impl<H> InProcess<H> {
     ) -> Result<Self, KernelFailure> {
         Ok(Self {
             hold: None,
-            document: program.document.identity()?,
+            document: program.document.identity(),
             program,
             dialect: dialect.to_owned(),
             bounds,

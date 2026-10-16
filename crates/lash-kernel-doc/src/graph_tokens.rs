@@ -26,8 +26,10 @@
 //! In a **physical** body, the form stored inside a node envelope, it is the
 //! tag and the minimal index of the child in the node's sorted child table.
 //! The graph layer (`lash_core_store::checkpoint_graph`) converts between
-//! them, places large text and bytes in leaves, and hashes envelopes; this
-//! module never hashes.
+//! them, places large text and bytes in leaves, and hashes envelopes. This
+//! module hashes only a logical body, with [`logical_digest`]: the graph keys
+//! its encodings by that digest, and it is a document's and a definition's
+//! identity (`K-ID-001`, `K-ID-002`).
 //!
 //! Every count and length is a u64 and is checked before it sizes an
 //! allocation. A reader refuses every non-canonical spelling: an overlong or
@@ -971,6 +973,26 @@ pub fn encode_body<T: TokenCodec>(value: &T) -> Vec<u8> {
     let mut out = TokenWriter::new();
     value.encode(&mut out);
     out.into_bytes()
+}
+
+/// The hash domain of a logical body's digest.
+/// version_surface = "coexist"
+/// version_guard(items(LOGICAL_BODY_DOMAIN, logical_digest))
+const LOGICAL_BODY_DOMAIN: &str = "lash-logical-body/v1";
+
+/// The digest of one logical body (`K-ID-003`): BLAKE3 in key-derivation
+/// mode with the context `lash-logical-body/v1`, over the body. The context
+/// becomes the key rather than a prefix, so the body starts on a chunk
+/// boundary and every chunk compresses in parallel. A checkpoint graph keys the nodes it encodes from a
+/// body by this digest, and a document's or a definition's identity is the
+/// digest of its body, so the two are one value.
+#[must_use]
+pub fn logical_digest(body: &[u8]) -> [u8; 32] {
+    static KEYED: std::sync::LazyLock<blake3::Hasher> =
+        std::sync::LazyLock::new(|| blake3::Hasher::new_derive_key(LOGICAL_BODY_DOMAIN));
+    let mut hasher = KEYED.clone();
+    hasher.update(body);
+    hasher.finalize().into()
 }
 
 /// Decodes one logical body that holds exactly one `T`.

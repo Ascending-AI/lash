@@ -593,7 +593,7 @@ fn numeric_map_keys_charge_only_their_body_and_retained_pins_resume() {
         .unwrap()
         .pop()
         .unwrap();
-    let old = retained.identity().unwrap();
+    let old = retained.identity();
     if old != current {
         registry.register(retained, None).unwrap();
     }
