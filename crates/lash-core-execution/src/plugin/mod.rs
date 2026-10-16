@@ -9,7 +9,6 @@ pub use transition::{
     PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
 };
 
-use crate::runtime::AssembledTurn;
 use crate::{SessionPolicy, ToolManifest, ToolProvider};
 
 pub use lash_core_store::store::plugin_writers::{
@@ -69,6 +68,13 @@ pub(crate) use state::{collect_proposals, propose, propose_all};
 mod tool_catalog;
 mod tool_hooks;
 
+pub use actions::{
+    CommittedTurnReadError, PluginCommand, PluginCommandContext, PluginFailureClass,
+    PluginFailureOrigin, PluginHookFailure, PluginOperation, PluginOperationDef,
+    PluginOperationFailure, PluginOperationFuture, PluginOperationKind, PluginOperationOutcome,
+    PluginOperationReceipt, PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask,
+    PluginTaskContext, ProcessReadService, SessionParam, SessionReadService,
+};
 pub(crate) use actions::{
     ErasedPluginOperationInvokeFuture, PluginCommandHandler, PluginOperationContext,
     PluginOperationRegistration, PluginQueryHandler, PluginQueryInvokeFuture, PluginTaskHandler,
@@ -76,13 +82,6 @@ pub(crate) use actions::{
     plugin_operation_spec,
 };
 pub(crate) use actions::{ErasedPluginOperationOutcome, PluginOperationSpec};
-pub use actions::{
-    PluginCommand, PluginCommandContext, PluginFailureClass, PluginFailureOrigin,
-    PluginHookFailure, PluginOperation, PluginOperationDef, PluginOperationFailure,
-    PluginOperationFuture, PluginOperationKind, PluginOperationOutcome, PluginOperationReceipt,
-    PluginQuery, PluginQueryContext, PluginRuntimeDirective, PluginTask, PluginTaskContext,
-    ProcessReadService, SessionParam, SessionReadService,
-};
 pub use attachment_omission::{
     AttachmentOmissionContext, AttachmentOmissionPolicy, AttachmentOmissions, HistoryPartId,
     apply_attachment_omissions, omit_part_attachments,
@@ -113,8 +112,8 @@ pub use hooks::{
     NoPresentationArtifacts, PluginFuture, PluginLifecycleEvent, PluginLifecycleEventHook,
     PluginLifecycleFuture, PluginSessionTask, SessionConfigChangedContext, ToolCatalogContributor,
     ToolPresentationArtifacts, ToolPresentationFacts, ToolPresentationInput,
-    ToolPresentationPresenter, ToolPresentationStep, ToolResultProjectionContext, TurnHookContext,
-    TurnHookReport, TurnResultHookContext,
+    ToolPresentationPresenter, ToolPresentationStep, ToolResultProjectionContext, TurnFinalized,
+    TurnHookContext, TurnHookReport, TurnResultHookContext,
 };
 pub use protocol::{
     AssistantProseProjectorPlugin, CellCallReferences, CheckpointComponentKey,

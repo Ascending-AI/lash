@@ -727,6 +727,31 @@ impl DurableSession {
             .await?)
     }
 
+    /// Read exactly the committed turn identified by a
+    /// [`TurnFinalized`](crate::plugins::TurnFinalized) notification, without
+    /// opening a runtime or following live activity. The transcript, outcome
+    /// and original tool-call ledger are read from committed facts on any node.
+    /// `None` means this turn has no committed terminal (including an unknown,
+    /// running or cancelled-before-commit turn).
+    pub async fn committed_turn(
+        &self,
+        turn: &crate::TurnId,
+    ) -> Result<Option<crate::transcript::CommittedTurnWithToolCalls>> {
+        let store = self.store().await?;
+        lash_core::runtime::durable::services::RuntimeTurnServices::committed_turn(
+            &self.effect_host,
+            store,
+            turn,
+            &self.transcript_decoders,
+        )
+        .await
+        .map_err(|error| match error {
+            crate::plugins::CommittedTurnReadError::Store(error) => EmbedError::Store(error),
+            crate::plugins::CommittedTurnReadError::Durable(error) => EmbedError::Durable(error),
+            crate::plugins::CommittedTurnReadError::Plugin(error) => EmbedError::Plugin(error),
+        })
+    }
+
     /// At most `limit` of this session's committed turns after `after`,
     /// oldest first by commit, each with its transcript rows, commit time and
     /// outcome (ADR 0129). `None` starts before the session's first turn; a

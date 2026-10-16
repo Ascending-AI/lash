@@ -1150,11 +1150,11 @@ needs = ["turn"]
 class = "mechanical"
 lane = "L9b"
 laws = [
-  "observer_failure_is_advisory_and_keeps_committed_state",
+  "finalization_identifies_a_committed_turn_readable_on_another_node",
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5311: moved to the facade on SQLite memory as crates/lash/src/tests/plugin_lifecycle.rs::observer_failure_is_advisory_and_keeps_committed_state: a failing TurnFinalized observer sees each finalized turn, each send answers, and a new deployment over the stores continues both turns' transcript. The observer's advisory TurnIssue on the turn's result is subject-deleted: observers run after the acknowledged commit and their failure is traced, not reported on a result already committed (e50bce0088, FIG-5283)"
+note = "FIG-5311 moved the advisory observer law to the facade on SQLite memory. FIG-6546 deletes that law with the AssembledTurn payload API; crates/lash/src/tests/plugin_lifecycle.rs::finalization_identifies_a_committed_turn_readable_on_another_node covers completion while delivery is held, observer failure and a second node reading the committed outcome, transcript and tool-call ledger by the notification's identity after a later turn. Observer failures remain traced after commit and cannot change its outcome."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/projection.rs"

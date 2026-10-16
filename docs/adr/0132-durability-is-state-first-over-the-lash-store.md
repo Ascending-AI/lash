@@ -163,6 +163,17 @@ effect the checkpoint names.
   commit, so hooks are repeat-safe. An at-most-once external mutation is an
   admitted `Once` execution, not a hook.
 
+Events carry new information plus the identity of what was committed, never
+a repackaged copy of committed state.
+`TurnFinalized` carries only `session_id`, `turn_id` and the committed
+`TurnCommitOutcome` kind. Hosts read that exact turn through
+`DurableSession::committed_turn`; plugins use
+`SessionReadService::committed_turn`. Both read the existing terminal, receipt,
+transcript and tool-call ledger on any node; model-call billing belongs at
+the provider seam (FIG-6547). `TurnHookReport` likewise exposes only the
+pre-commit facts the callback actually has: the outcome and the tool-call
+records, without invented usage, execution metrics or issues.
+
 `TurnFinalized` lifecycle observers are advisory post-commit delivery. The
 owner delivers them after the turn's commit is acknowledged and its live
 commit observation is published or publication fails. The engine awaits

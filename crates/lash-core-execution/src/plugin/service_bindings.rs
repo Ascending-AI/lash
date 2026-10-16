@@ -17,6 +17,18 @@ pub trait TurnScopePort: Send + Sync {
 }
 
 #[async_trait::async_trait]
+pub trait CommittedTurnReadPort: Send + Sync {
+    async fn committed_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<
+        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
+        CommittedTurnReadError,
+    >;
+}
+
+#[async_trait::async_trait]
 pub trait CurrentSessionSnapshotPort: Send + Sync {
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError>;
 }
@@ -195,6 +207,7 @@ pub trait ProcessTransferPort: Send + Sync {
 pub struct ServiceBindings {
     pub turn_scope: Option<Arc<dyn TurnScopePort>>,
     pub snapshot_current: Option<Arc<dyn CurrentSessionSnapshotPort>>,
+    pub committed_turn: Option<Arc<dyn CommittedTurnReadPort>>,
     pub snapshot_session: Option<Arc<dyn NamedSessionSnapshotPort>>,
     pub tool_catalog: Option<Arc<dyn RecordedToolCatalogPort>>,
     pub create_session: Option<Arc<dyn SessionCreatePort>>,
@@ -221,6 +234,23 @@ impl std::fmt::Debug for ServiceBindings {
     }
 }
 impl ServiceBindings {
+    pub async fn committed_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<
+        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
+        CommittedTurnReadError,
+    > {
+        let service = self.committed_turn.as_ref().ok_or_else(|| {
+            PluginError::Preflight(PreflightIssue::MissingService {
+                owner: "invocation".into(),
+                service: ServiceKind::CommittedTurnRead,
+            })
+        })?;
+        service.committed_turn(session_id, turn_id).await
+    }
+
     pub async fn turn_scope(
         &self,
         _session_id: &SessionId,
@@ -504,6 +534,7 @@ impl ServiceBindings {
             CurrentSessionSnapshot,
             NamedSessionSnapshot,
             RecordedToolCatalog,
+            CommittedTurnRead,
             SessionCreate,
             SessionGraphAppend,
         ]);
@@ -537,6 +568,9 @@ impl ServiceBindings {
         }
         if self.snapshot_session.is_some() {
             services.insert(ServiceKind::NamedSessionSnapshot);
+        }
+        if self.committed_turn.is_some() {
+            services.insert(ServiceKind::CommittedTurnRead);
         }
         if self.tool_catalog.is_some() {
             services.insert(ServiceKind::RecordedToolCatalog);
@@ -612,6 +646,7 @@ impl ServiceBindings {
     }
     pub fn with_session_reads(mut self, service: Arc<dyn SessionReadService>) -> Self {
         let service = Arc::new(SessionReadServiceBindings(service));
+        self.committed_turn = Some(service.clone());
         self.snapshot_current = Some(service.clone());
         self.snapshot_session = Some(service.clone());
         self.tool_catalog = Some(service.clone());
@@ -683,6 +718,19 @@ impl SessionStateService for ServiceBindings {
 }
 struct SessionReadServiceBindings(Arc<dyn SessionReadService>);
 #[async_trait::async_trait]
+impl CommittedTurnReadPort for SessionReadServiceBindings {
+    async fn committed_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<
+        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
+        CommittedTurnReadError,
+    > {
+        self.0.committed_turn(session_id, turn_id).await
+    }
+}
+#[async_trait::async_trait]
 impl CurrentSessionSnapshotPort for SessionReadServiceBindings {
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
         self.0.snapshot_current().await
@@ -708,6 +756,23 @@ impl RecordedToolCatalogPort for SessionReadServiceBindings {
 }
 #[async_trait::async_trait]
 impl SessionReadService for ServiceBindings {
+    async fn committed_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<
+        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
+        CommittedTurnReadError,
+    > {
+        let service = self.committed_turn.as_ref().ok_or_else(|| {
+            PluginError::Preflight(PreflightIssue::MissingService {
+                owner: "invocation".into(),
+                service: ServiceKind::CommittedTurnRead,
+            })
+        })?;
+        service.committed_turn(session_id, turn_id).await
+    }
+
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
         let service = self.snapshot_current.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {

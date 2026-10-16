@@ -32,6 +32,7 @@ pub enum ServiceKind {
     CurrentSessionSnapshot,
     NamedSessionSnapshot,
     RecordedToolCatalog,
+    CommittedTurnRead,
     SessionCreate,
     SessionGraphAppend,
     ProcessList,

@@ -258,13 +258,24 @@ pub struct SessionConfigChangedContext {
     pub sessions: Arc<dyn SessionReadService>,
 }
 
+/// The committed turn identified by an advisory finalization notification.
+/// Read its transcript and tool-call ledger through
+/// [`SessionReadService::committed_turn`]; billing belongs at the provider seam.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnFinalized {
+    pub session_id: SessionId,
+    pub turn_id: crate::TurnId,
+    /// The same outcome kind the committed-turn reader returns.
+    pub outcome: crate::store::TurnCommitOutcome,
+}
+
 #[derive(Clone)]
 pub enum PluginLifecycleEvent {
     /// Advisory delivery after the turn's commit is acknowledged. The caller
     /// may receive the committed outcome before observers run; observer
     /// failures are reported and cannot change that outcome. Delivery is
     /// not durable: an owner lost after commit may never deliver the event.
-    TurnFinalized(Arc<AssembledTurn>),
+    TurnFinalized(TurnFinalized),
     SessionRestored(SessionReadView),
     /// A config transaction changed the session's policy. Observers see it
     /// once its change is committed, never for a transaction that was stale
@@ -282,25 +293,13 @@ pub enum PluginLifecycleEvent {
     SessionConfigChanged(Box<SessionConfigChangedContext>),
 }
 
+/// Facts available before the turn's commit: its outcome and the tool calls
+/// its rounds committed. Usage, execution metrics and issues are not part of
+/// this report; this boundary never collected them.
 #[derive(Clone, Debug)]
 pub struct TurnHookReport {
     pub outcome: crate::TurnOutcome,
-    pub execution: crate::runtime::TurnExecutionMetrics,
-    pub token_usage: crate::LlmUsage,
     pub tool_calls: Arc<Vec<crate::ToolCallRecord>>,
-    pub errors: Arc<Vec<crate::runtime::TurnIssue>>,
-}
-
-impl TurnHookReport {
-    pub fn from_assembled(turn: &AssembledTurn) -> Self {
-        Self {
-            outcome: turn.outcome.clone(),
-            execution: turn.execution.clone(),
-            token_usage: turn.token_usage.clone(),
-            tool_calls: Arc::new(turn.tool_calls.clone()),
-            errors: Arc::new(turn.errors.clone()),
-        }
-    }
 }
 
 #[derive(Clone)]

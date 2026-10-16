@@ -5,6 +5,37 @@ impl crate::core_internal::RuntimeService for RuntimeSessionStateService {}
 
 #[async_trait::async_trait]
 impl crate::plugin::SessionReadService for RuntimeSessionStateService {
+    async fn committed_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &TurnId,
+    ) -> Result<
+        Option<crate::transcript::CommittedTurnWithToolCalls>,
+        crate::plugin::CommittedTurnReadError,
+    > {
+        let current = &self.services.current;
+        let decoders = current.plugins.plugin_host().transcript_decoders()?;
+        let store = if let Some(store) = current
+            .session()
+            .filter(|bound| bound.session_id == *session_id)
+            .and_then(|bound| bound.store.as_ref())
+        {
+            store.clone()
+        } else {
+            crate::store::SessionStore::new(
+                current.host.core.session_store_factory(),
+                session_id.clone(),
+            )?
+        };
+        crate::runtime::durable::services::RuntimeTurnServices::committed_turn(
+            &current.host.core.control.effect_host,
+            &store,
+            turn_id,
+            &decoders,
+        )
+        .await
+    }
+
     async fn snapshot_current(&self) -> Result<SessionSnapshot, crate::PluginError> {
         self.services.current.snapshot_current().await
     }

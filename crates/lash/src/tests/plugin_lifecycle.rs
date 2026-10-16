@@ -1,137 +1,203 @@
-//! A lifecycle observer is advisory (ADR 0132 §4): it sees each turn once
-//! the turn's commit landed, it has no veto, and what it fails with changes
-//! nothing that turn committed. A caller may answer before delivery; laws
-//! wait for the observer's own receipt before asserting its observations.
+//! Finalization is an advisory notification identifying committed facts,
+//! readable on any node without following the executing node's live stream.
 
 use super::*;
 use crate::TurnInput;
 
-/// A model answering its `n`th call `reply-n`, and every request's
-/// messages as it saw them.
-fn numbered_replies(requests: Arc<StdMutex<Vec<String>>>) -> ProviderHandle {
-    crate::testing::TestProvider::builder()
-        .kind("lifecycle-numbered")
-        .complete(move |request| {
-            let requests = Arc::clone(&requests);
-            async move {
-                let mut seen = requests.lock_recover();
-                seen.push(format!("{:?}", request.messages));
-                Ok(text_response(&format!("reply-{}", seen.len())))
+/// FIG-6546: an observer receives the committed identity and outcome kind.
+/// Its failure cannot undo the commit, and another node reads the exact
+/// turn's transcript and tool-call ledger after a later turn advanced the head.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> Result<()> {
+    let (observed, mut observations) = tokio::sync::mpsc::unbounded_channel();
+    let release_observer = Arc::new(tokio::sync::Semaphore::new(0));
+    let observer_gate = Arc::clone(&release_observer);
+    let observer = Arc::new(StaticPluginFactory::new(
+        crate::plugins::PluginDeclaration::initial("finalized-identity"),
+        crate::plugins::PluginSpec::new().with_runtime_event(
+            crate::hook_key!("turn-finalized"),
+            Arc::new(move |event| {
+                let observed = observed.clone();
+                let release = Arc::clone(&observer_gate);
+                Box::pin(async move {
+                    if let crate::plugins::PluginLifecycleEvent::TurnFinalized(turn) = event {
+                        release
+                            .acquire()
+                            .await
+                            .expect("the observer gate stays open")
+                            .forget();
+                        observed
+                            .send(turn)
+                            .expect("the law receives the notification");
+                        return Err(crate::plugins::PluginError::Session(
+                            "observer unavailable".into(),
+                        ));
+                    }
+                    Ok(())
+                })
+            }),
+        ),
+    ));
+    let prior = Arc::new(StdMutex::new(None::<crate::plugins::TurnFinalized>));
+    let (plugin_read, mut plugin_reads) = tokio::sync::mpsc::unbounded_channel();
+    let reader = Arc::new(StaticPluginFactory::new(
+        crate::plugins::PluginDeclaration::initial("committed-reader"),
+        crate::plugins::PluginSpec::new().with_before_turn(
+            crate::hook_key!("read-prior-turn"),
+            Arc::new({
+                let prior = Arc::clone(&prior);
+                move |ctx| {
+                    let prior = prior.lock_recover().clone();
+                    let plugin_read = plugin_read.clone();
+                    Box::pin(async move {
+                        if let Some(prior) = prior {
+                            let read = ctx
+                                .sessions
+                                .committed_turn(&prior.session_id, &prior.turn_id)
+                                .await
+                                .expect("the plugin reads committed facts");
+                            plugin_read
+                                .send(read)
+                                .expect("the law receives the plugin read");
+                        }
+                        Ok(crate::plugins::TurnContributions::default())
+                    })
+                }
+            }),
+        ),
+    ));
+    let sends = Arc::new(AtomicUsize::new(0));
+    let model = crate::testing::TestProvider::builder()
+        .kind("finalized-identity")
+        .complete({
+            let sends = Arc::clone(&sends);
+            move |_| {
+                let call = sends.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if call == 0 {
+                        Ok(LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "lookup".into(),
+                                tool_name: "app_lookup".into(),
+                                input_json: "{}".into(),
+                                replay: None,
+                            }],
+                            ..Default::default()
+                        })
+                    } else {
+                        Ok(text_response(&format!("reply-{call}")))
+                    }
+                }
             }
         })
         .build()
-        .into_handle()
-}
-
-/// A failing `TurnFinalized` observer leaves its turn answered and
-/// committed: each send answers while its observer is held, the observer
-/// then sees each finalized turn, and a new deployment over the same stores
-/// continues the transcript of both.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn observer_failure_is_advisory_and_keeps_committed_state() -> Result<()> {
-    let finalized = Arc::new(StdMutex::new(Vec::<crate::TurnStatus>::new()));
-    let release_observer = Arc::new(tokio::sync::Semaphore::new(0));
-    let (observed, mut observations) = tokio::sync::mpsc::unbounded_channel();
-    let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
-    let observer = {
-        let finalized = Arc::clone(&finalized);
-        let release_observer = Arc::clone(&release_observer);
-        Arc::new(StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial("failing-observer"),
-            lash_core::facade_support::PluginSpec::new().with_runtime_event(
-                crate::hook_key!("turn-finalized"),
-                Arc::new(move |event| {
-                    let finalized = Arc::clone(&finalized);
-                    let release_observer = Arc::clone(&release_observer);
-                    let observed = observed.clone();
-                    Box::pin(async move {
-                        if let lash_core::plugin::PluginLifecycleEvent::TurnFinalized(turn) = event
-                        {
-                            release_observer
-                                .acquire()
-                                .await
-                                .expect("the observer gate stays open")
-                                .forget();
-                            finalized
-                                .lock_recover()
-                                .push(crate::TurnStatus::of_outcome(&turn.outcome));
-                            observed
-                                .send(())
-                                .expect("the law receives each observation");
-                        }
-                        Err(lash_core::PluginError::Session(
-                            "observer sink unavailable".into(),
-                        ))
-                    })
-                }),
-            ),
-        ))
-    };
+        .into_handle();
     let stores = sqlite_memory_store_set().await;
-    let deploy = || {
+    let deploy = |serves| {
         explicit_ephemeral_facets(LashCore::standard_builder(lash_conformance::backend_over(
             stores.clone(),
         )))
-        .serve_test_llm_profile(
-            numbered_replies(Arc::clone(&requests)),
-            mock_llm_profile_spec(),
-        )
+        .serve_sessions(serves)
+        .serve_test_llm_profile(model.clone(), mock_llm_profile_spec())
+        .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
         .plugin(observer.clone())
+        .plugin(reader.clone())
         .build(crate::testing::runtime_lease_owner())
     };
-    let id = crate::SessionId::parse("failing-observer").expect("nonblank host identity");
-    let core = deploy()?;
+    let core = deploy(true)?;
+    let session_id = crate::SessionId::from("finalized-identity");
     let session = core
-        .session(id.clone())
+        .session(session_id.clone())
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
-    for turn in 1..=2 {
-        let output = session
-            .send(TurnInput::text(format!("turn {turn}")))
-            .output()
-            .await?;
-        assert_eq!(
-            crate::TurnStatus::of_outcome(&output.result.outcome),
-            crate::TurnStatus::Answered,
-            "turn {turn} answers despite its failing observer"
-        );
-        // The store's terminal answers the caller independently of advisory
-        // delivery. Release the held observer only after that answer, then
-        // await its receipt rather than racing its post-commit callback.
-        release_observer.add_permits(1);
-        observations
-            .recv()
-            .await
-            .expect("the observer saw the turn");
-    }
+    // The host awaits the outcome only; it does not follow its own send.
+    let answer = session
+        .send(TurnInput::text("look up app state"))
+        .await?
+        .outcome()
+        .await?;
+    assert_eq!(answer.status(), crate::TurnStatus::Answered);
+    release_observer.add_permits(1);
+    let first = observations
+        .recv()
+        .await
+        .expect("the observer ran after commit");
+    assert_eq!(&first.session_id, &session_id);
     assert_eq!(
-        *finalized.lock_recover(),
-        vec![crate::TurnStatus::Answered; 2],
-        "the observer saw each finalized turn"
+        first.outcome,
+        crate::persistence::TurnCommitOutcome::Completed
     );
-    drop(session);
+    session
+        .send(TurnInput::text("a later turn"))
+        .await?
+        .outcome()
+        .await?;
+    release_observer.add_permits(1);
+    let later = observations.recv().await.expect("the later observer ran");
+    assert_ne!(first.turn_id, later.turn_id);
     core.shutdown().await?;
 
-    let core = deploy()?;
-    core.session(id)
-        .open()
+    let other = deploy(true)?;
+    let durable = other.session(session_id).durable().await?;
+    let read = durable
+        .committed_turn(&first.turn_id)
         .await?
-        .send(TurnInput::text("turn 3"))
-        .output()
+        .expect("the turn committed");
+    assert_eq!(&read.turn.turn_id, &first.turn_id);
+    assert_eq!(read.turn.outcome, first.outcome);
+    let texts = read
+        .turn
+        .entries
+        .iter()
+        .filter_map(|entry| match &entry.item {
+            crate::transcript::TranscriptItem::Message(message) => Some(&message.blocks),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|block| match block {
+            crate::transcript::TranscriptBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(texts.contains(&"reply-1"));
+    assert!(!texts.contains(&"reply-2"));
+    let [call] = read.tool_calls.as_slice() else {
+        panic!("the committed turn holds one tool call")
+    };
+    assert_eq!(call.tool, "app_lookup");
+    assert_eq!(call.args, serde_json::json!({}));
+    assert!(call.output.is_success());
+    assert_eq!(
+        sends.load(Ordering::SeqCst),
+        3,
+        "the read invokes no provider"
+    );
+    assert!(
+        durable
+            .committed_turn(&crate::TurnId::fixture("unknown-turn"))
+            .await?
+            .is_none()
+    );
+    *prior.lock_recover() = Some(first);
+    durable
+        .send(TurnInput::text("read the first turn in a plugin"))
+        .await?
+        .outcome()
         .await?;
     release_observer.add_permits(1);
     observations
         .recv()
         .await
-        .expect("the observer saw the turn");
-    {
-        let requests = requests.lock_recover();
-        let third = requests.last().expect("the third turn called the model");
-        assert!(
-            third.contains("reply-1") && third.contains("reply-2"),
-            "both observed turns' replies are committed history: {third}"
-        );
-    }
-    core.shutdown().await?;
+        .expect("the second node's observer ran");
+    let plugin_read = plugin_reads
+        .recv()
+        .await
+        .expect("the second node's plugin read the commit");
+    assert_eq!(
+        plugin_read,
+        Some(read),
+        "plugins and hosts read the same committed facts"
+    );
+    other.shutdown().await?;
     Ok(())
 }

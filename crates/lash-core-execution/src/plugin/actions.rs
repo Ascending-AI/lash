@@ -279,8 +279,31 @@ macro_rules! operation_trace {
 
 operation_trace!(PluginQueryContext, PluginCommandContext, PluginTaskContext);
 
+/// A committed-turn read preserves both session-store and durable-ledger
+/// refusals. It is a read result, never a journaled plugin operation failure.
+#[derive(Debug, thiserror::Error)]
+pub enum CommittedTurnReadError {
+    #[error(transparent)]
+    Store(#[from] crate::StoreError),
+    #[error(transparent)]
+    Durable(#[from] lash_durable::DurableError),
+    #[error(transparent)]
+    Plugin(#[from] PluginError),
+}
+
 #[async_trait::async_trait]
 pub trait SessionReadService: crate::core_internal::RuntimeService + Send + Sync {
+    /// Read a committed turn's outcome, transcript and original tool-call
+    /// ledger by the identity in its finalization notification, on any node.
+    async fn committed_turn(
+        &self,
+        session_id: &SessionId,
+        turn_id: &crate::TurnId,
+    ) -> Result<
+        Option<lash_core_store::transcript::CommittedTurnWithToolCalls>,
+        CommittedTurnReadError,
+    >;
+
     async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError>;
 
     async fn snapshot_session(

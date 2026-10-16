@@ -135,6 +135,17 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
 
     #[async_trait::async_trait]
     impl crate::plugin::SessionReadService for Sessions {
+        async fn committed_turn(
+            &self,
+            _session_id: &crate::SessionId,
+            _turn_id: &crate::TurnId,
+        ) -> Result<
+            Option<crate::transcript::CommittedTurnWithToolCalls>,
+            crate::plugin::CommittedTurnReadError,
+        > {
+            Err(crate::PluginError::Session("operation is absent from this fixture".into()).into())
+        }
+
         async fn snapshot_current(
             &self,
         ) -> Result<lash_core::SessionSnapshot, lash_core::PluginError> {

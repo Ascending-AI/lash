@@ -1559,7 +1559,6 @@
     "tests::panic_containment::provider_panic_records_the_typed_attempt_releases_the_lease_and_next_turn_succeeds": 379,
     "tests::plugin_build_refusal::a_refused_plugin_build_fails_the_turn_typed_on_sqlite": 350,
     "tests::plugin_build_refusal::a_retryably_refused_plugin_build_completes_the_turn_on_sqlite": 385,
-    "tests::plugin_lifecycle::observer_failure_is_advisory_and_keeps_committed_state": 394,
     "tests::plugin_operations::agent_scenario_plugin_reserved_source_key_refusal_is_typed": 108,
     "tests::plugin_operations::operation_run_follow_returns_the_task_terminal": 116,
     "tests::plugin_operations::plugin_operation_failure_reaches_the_facade_as_a_typed_settlement": 153,

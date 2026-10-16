@@ -187,6 +187,20 @@ mod tests {
 
     #[async_trait::async_trait]
     impl lash_core::plugin::SessionReadService for NoopPromptManager {
+        async fn committed_turn(
+            &self,
+            _session_id: &lash_core::SessionId,
+            _turn_id: &lash_core::TurnId,
+        ) -> Result<
+            Option<lash_core::transcript::CommittedTurnWithToolCalls>,
+            lash_core::plugin::CommittedTurnReadError,
+        > {
+            Err(
+                lash_core::PluginError::Session("operation is absent from this fixture".into())
+                    .into(),
+            )
+        }
+
         async fn snapshot_current(
             &self,
         ) -> Result<lash_core::SessionSnapshot, lash_core::plugin::PluginError> {

@@ -73,6 +73,69 @@ impl RuntimeTurnServices {
         }
     }
 
+    /// Read the committed turn named by its durable identity on any node.
+    /// Its terminal supplies the commit revision; one existing committed-turn
+    /// page reads precisely that receipt and its retained transcript, then the
+    /// turn's original tool-call ledger supplies its call bodies.
+    ///
+    /// # Errors
+    ///
+    /// A typed store, ledger or transcript-decoding refusal.
+    pub async fn committed_turn(
+        cx: &ActorContext,
+        store: &crate::store::SessionStore,
+        turn: &TurnId,
+        decoders: &crate::transcript::TranscriptDecoders,
+    ) -> Result<
+        Option<crate::transcript::CommittedTurnWithToolCalls>,
+        crate::plugin::CommittedTurnReadError,
+    > {
+        let session = store.session_id();
+        let Some(terminal) = store.run_terminal(turn).await? else {
+            return Ok(None);
+        };
+        let crate::store::RunTerminalCause::Committed {
+            turn: committed, ..
+        } = terminal.cause
+        else {
+            return Ok(None);
+        };
+        let corrupt = |message: &str| crate::PluginError::StoredDataCorrupt {
+            record_kind: "CommittedTurn".to_owned(),
+            message: message.to_owned(),
+        };
+        if committed != *turn {
+            return Err(corrupt("the run terminal names another turn").into());
+        }
+        let revision = terminal
+            .head_revision
+            .and_then(|revision| revision.checked_sub(1))
+            .ok_or_else(|| corrupt("the committed turn has no head revision"))?;
+        let after = crate::store::CommittedTurnCursor::new(session.clone(), revision);
+        let page = store
+            .load_committed_turns(Some(&after), std::num::NonZeroU32::MIN)
+            .await?;
+        let mut page =
+            crate::transcript::CommittedTurnsPage::decode(page, decoders).map_err(|error| {
+                crate::PluginError::StoredDataCorrupt {
+                    record_kind: error.record_kind,
+                    message: error.message,
+                }
+            })?;
+        let read = page
+            .turns
+            .pop()
+            .ok_or_else(|| corrupt("the committed turn has no receipt"))?;
+        if read.turn_id != *turn {
+            return Err(corrupt("the commit revision names another turn").into());
+        }
+        let tool_calls = Self::recorded_tool_calls(cx, session, turn, decoders).await?;
+        Ok(Some(crate::transcript::CommittedTurnWithToolCalls {
+            turn: read,
+            tool_calls,
+        }))
+    }
+
     /// Materialize a turn's original call ledger in admission order. Cell
     /// reports retain references to the existing admission/outcome nodes;
     /// the offline protocol decoder reconstructs their exact typed arguments.

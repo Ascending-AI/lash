@@ -358,6 +358,20 @@ mod tests {
 
     #[async_trait]
     impl lash_core::plugin::SessionReadService for BatonManager {
+        async fn committed_turn(
+            &self,
+            _session_id: &lash_core::SessionId,
+            _turn_id: &lash_core::TurnId,
+        ) -> Result<
+            Option<lash_core::transcript::CommittedTurnWithToolCalls>,
+            lash_core::plugin::CommittedTurnReadError,
+        > {
+            Err(
+                lash_core::PluginError::Session("operation is absent from this fixture".into())
+                    .into(),
+            )
+        }
+
         async fn snapshot_current(&self) -> Result<SessionSnapshot, PluginError> {
             Ok(self.snapshot.to_snapshot())
         }

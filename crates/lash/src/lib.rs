@@ -690,9 +690,9 @@ pub mod plugins {
     }
     pub use lash_core::plugin::ToolProviderHandle;
     pub use lash_core::plugin::{
-        CurrentSessionSnapshotPort, NamedSessionSnapshotPort, ProcessAbandonHoldPort,
-        ProcessAwaitPort, ProcessBoundCancelPort, ProcessBoundStartPort, ProcessCancelPort,
-        ProcessListForAttemptPort, ProcessListPort, ProcessRecordedCancelPort,
+        CommittedTurnReadPort, CurrentSessionSnapshotPort, NamedSessionSnapshotPort,
+        ProcessAbandonHoldPort, ProcessAwaitPort, ProcessBoundCancelPort, ProcessBoundStartPort,
+        ProcessCancelPort, ProcessListForAttemptPort, ProcessListPort, ProcessRecordedCancelPort,
         ProcessRecordedStartPort, ProcessReleaseHoldPort, ProcessStartFromRequestPort,
         ProcessStartPort, ProcessTransferPort, ProcessValidateVisiblePort, RecordedToolCatalogPort,
         ServiceBindings, SessionCreatePort, SessionGraphAppendPort, TurnScopePort,
@@ -817,12 +817,12 @@ pub mod plugins {
         AssistantResponseTransform, AssistantStreamFinishReason, AssistantStreamFinishedContext,
         AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform, BeforeTurnHook,
         CellFailureDiagnostic, CellFailureFeedbackHook, CheckpointHook, CheckpointHookContext,
-        CompactionContext, ContextCompaction, ContextCompactor, ContextError,
-        ContextPressureContext, ContextPressureDecision, ContextPressureHook, ControlPhaseExpired,
-        HookKey, PluginExtensionContribution, PluginRecordContribution,
+        CommittedTurnReadError, CompactionContext, ContextCompaction, ContextCompactor,
+        ContextError, ContextPressureContext, ContextPressureDecision, ContextPressureHook,
+        ControlPhaseExpired, HookKey, PluginExtensionContribution, PluginRecordContribution,
         PluginSessionMaterialization, PluginTraceEmitter, SessionContributions,
         StaticPluginFactory, ToolCatalogContext, ToolPresentationPresenter,
-        ToolResultProjectionContext, TurnContributions, TurnHookReport,
+        ToolResultProjectionContext, TurnContributions, TurnFinalized, TurnHookReport,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{

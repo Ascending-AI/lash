@@ -367,6 +367,14 @@ pub struct CommittedTurn {
     pub outcome: crate::store::TurnCommitOutcome,
 }
 
+/// One committed turn with its original tool-call bodies in admission order.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CommittedTurnWithToolCalls {
+    pub turn: CommittedTurn,
+    #[serde(serialize_with = "lash_sansio::durable_serde::serialize")]
+    pub tool_calls: Vec<lash_sansio::tool_output::ToolCallRecord>,
+}
+
 /// One page of a session's committed turns, oldest first by commit, read
 /// after a [`CommittedTurnCursor`](crate::store::CommittedTurnCursor).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

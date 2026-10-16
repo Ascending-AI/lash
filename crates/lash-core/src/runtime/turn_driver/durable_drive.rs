@@ -72,7 +72,7 @@ pub(in crate::runtime) struct RuntimeDrive {
 #[derive(Default)]
 struct AfterCommit {
     state: Option<crate::plugin::StagedPluginState>,
-    finalized: Option<crate::AssembledTurn>,
+    finalized: Option<crate::plugin::TurnFinalized>,
     panic: Option<(&'static str, String)>,
 }
 
@@ -1202,7 +1202,7 @@ impl TurnDrive for RuntimeDrive {
             .unwrap_or(TurnOutcome::Stopped(TurnStop::Incomplete));
         let plugins = Arc::clone(driver.session.plugins());
         let observed = plugins.has_runtime_event_hooks();
-        let finished = if plugins.has_after_turn_hooks() || observed {
+        let finished = if plugins.has_after_turn_hooks() {
             let unrecorded = self.finishing_cell_calls.take();
             Some(
                 FinishedTurn::read(
@@ -1267,9 +1267,11 @@ impl TurnDrive for RuntimeDrive {
         self.after_commit = AfterCommit {
             panic,
             state: after_turn.map(|after_turn| after_turn.state),
-            finalized: finished
-                .filter(|_| observed)
-                .map(|finished| finished.finalized(driver.turn_pipeline.state().to_snapshot())),
+            finalized: observed.then(|| crate::plugin::TurnFinalized {
+                session_id: driver.session_id.clone(),
+                turn_id: driver.turn_id.clone(),
+                outcome: crate::store::TurnCommitOutcome::from_terminal(&outcome),
+            }),
         };
         // The commit settles every input the turn executed, with the
         // application evidence its delivery recorded: those its run took and
@@ -1345,7 +1347,7 @@ impl TurnDrive for RuntimeDrive {
         if let Some(turn) = finalized
             && let Err(error) = plugins
                 .dispatch(self.driver.turn_phase_probe.as_ref())
-                .emit_runtime_event(crate::PluginLifecycleEvent::TurnFinalized(Arc::new(turn)))
+                .emit_runtime_event(crate::PluginLifecycleEvent::TurnFinalized(turn))
                 .await
         {
             tracing::warn!(%error, "a finalized turn's lifecycle observers failed");

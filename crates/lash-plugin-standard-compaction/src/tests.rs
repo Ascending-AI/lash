@@ -628,9 +628,10 @@ async fn recovery_refusal_causes_are_distinct_durable_values() {
 fn overflow_turn_report(
     outcome: lash_core::facade_support::TurnOutcome,
 ) -> Arc<lash_core::plugin::TurnHookReport> {
-    let mut turn = empty_turn(&SessionId::from("root"), "overflow");
-    turn.outcome = outcome;
-    Arc::new(lash_core::plugin::TurnHookReport::from_assembled(&turn))
+    Arc::new(lash_core::plugin::TurnHookReport {
+        outcome,
+        tool_calls: Arc::new(Vec::new()),
+    })
 }
 
 fn recovery_ctx(

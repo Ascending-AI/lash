@@ -56,28 +56,7 @@ impl FinishedTurn {
     fn report(&self) -> crate::plugin::TurnHookReport {
         crate::plugin::TurnHookReport {
             outcome: self.outcome.clone(),
-            execution: Default::default(),
-            token_usage: Default::default(),
             tool_calls: Arc::new(self.tool_calls.clone()),
-            errors: Arc::new(Vec::new()),
-        }
-    }
-
-    /// The finalized turn the lifecycle observers see, over its committed
-    /// `state`.
-    pub(super) fn finalized(self, state: crate::SessionSnapshot) -> crate::AssembledTurn {
-        crate::AssembledTurn {
-            state,
-            outcome: self.outcome,
-            execution: Default::default(),
-            token_usage: Default::default(),
-            llm_calls: Vec::new(),
-            tool_calls: self.tool_calls,
-            retained_outputs: Vec::new(),
-            failure_evidence: Vec::new(),
-            errors: Vec::new(),
-            turn_input_acceptance: None,
-            turn_cancel_input_outcome: Default::default(),
         }
     }
 }

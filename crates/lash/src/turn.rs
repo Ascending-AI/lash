@@ -20,13 +20,7 @@ pub struct TurnToolCallRef {
     pub call_id: crate::ToolCallId,
 }
 
-/// One committed turn with its original tool-call bodies in admission order.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CommittedTurnWithToolCalls {
-    pub turn: crate::transcript::CommittedTurn,
-    #[serde(serialize_with = "crate::persistence::serialize_durable")]
-    pub tool_calls: Vec<ToolCallRecord>,
-}
+pub use lash_core::transcript::CommittedTurnWithToolCalls;
 
 /// A committed-turn page that opted into decoding each returned turn's calls.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

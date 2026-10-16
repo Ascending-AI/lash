@@ -26,6 +26,21 @@ impl lash::testing::RuntimeService for NoSnapshots {}
 
 #[lash::async_trait]
 impl lash::plugins::SessionReadService for NoSnapshots {
+    async fn committed_turn(
+        &self,
+        session_id: &SessionId,
+        _turn_id: &lash::TurnId,
+    ) -> Result<
+        Option<lash::transcript::CommittedTurnWithToolCalls>,
+        lash::plugins::CommittedTurnReadError,
+    > {
+        self.read
+            .lock()
+            .expect("the record lock")
+            .push(session_id.clone());
+        Err(PluginError::Session("a spawn reads no committed turn".to_owned()).into())
+    }
+
     async fn snapshot_session(
         &self,
         session_id: &SessionId,
