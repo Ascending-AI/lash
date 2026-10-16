@@ -413,14 +413,11 @@ def operate(options, remaining, executable, inventory, invocation_directory):
     argv = command(options, remaining, executable, ROOT, inventory, skipped)
     if skipped:
         print(skipped_line(dict.fromkeys(skipped)), file=sys.stderr, flush=True)
+    if options.operation == 'run':
+        return run_application(options, argv, invocation_directory)
     if options.operation != 'test':
-        environment = None
-        if options.operation == 'run':
-            environment = dict(os.environ, BUILD_WORKING_DIRECTORY=invocation_directory, BUILD_WORKSPACE_DIRECTORY=str(ROOT))
-            environment.pop('LASH_BUILD_WORKING_DIRECTORY', None)
-        return run_command(ROOT, options.jobs, options.isolation_dir, argv, env=environment, stdout=subprocess.DEVNULL if options.operation == 'analyze' else None)
+        return run_command(ROOT, options.jobs, options.isolation_dir, argv, stdout=subprocess.DEVNULL if options.operation == 'analyze' else None)
     from runner_bootstrap import ensure_runtime, safe_directory
-    from test_selection import plan_test_command
     ensure_runtime()
     values = resolve_environment(options.test_env, os.environ)
     state = safe_directory(ROOT / '.buck2/runtime-env')
@@ -430,10 +427,69 @@ def operate(options, remaining, executable, inventory, invocation_directory):
         extra = ['--test-env-file', environment.name]
 
         def execute(args):
-            return run_command(ROOT, options.jobs, options.isolation_dir, args, planner=lambda args: plan_test_command(args, ROOT))
+            return execute_test_phases(options, args)
         if options.runs_per_test is not None:
             return repeat_tests(options, remaining, executable, ROOT, extra, execute)
         return execute(argv + extra)
+
+
+def run_application(options, argv, invocation_directory):
+    from runner_bootstrap import safe_directory
+    environment = dict(os.environ, BUILD_WORKING_DIRECTORY=invocation_directory, BUILD_WORKSPACE_DIRECTORY=str(ROOT))
+    environment.pop('LASH_BUILD_WORKING_DIRECTORY', None)
+    boundary = argv.index('--') if '--' in argv else len(argv)
+    # These native modes only build and emit a command; the caller owns launch.
+    if '--emit-shell' in argv[:boundary] or any(arg.startswith('--command-args-file') for arg in argv[:boundary]):
+        return run_command(ROOT, options.jobs, options.isolation_dir, argv, env=environment)
+    state = safe_directory(ROOT / '.buck2/run-commands')
+    with tempfile.TemporaryDirectory(dir=state) as work:
+        command_path = Path(work) / 'command.json'
+        build_id = command_option(argv[:boundary], '--write-build-id')
+        build_id_path = Path(build_id) if build_id else Path(work) / 'build-id'
+        extra = ['--command-args-file', str(command_path)]
+        if build_id is None:
+            extra += ['--write-build-id', str(build_id_path)]
+        code = run_command(ROOT, options.jobs, options.isolation_dir, argv[:4] + extra + argv[4:], env=environment)
+        if code:
+            return code
+        launch = json.loads(command_path.read_text())
+        environment = dict(launch['envp'], BUCK_RUN_BUILD_ID=build_id_path.read_text().strip())
+    chdir = command_option(argv[:boundary], '--chdir')
+    directory = ROOT / chdir if chdir is not None else ROOT
+    return run_command(directory, options.jobs, options.isolation_dir, launch['argv'], managed=False, env=environment)
+
+
+def command_option(argv, name):
+    for index, argument in enumerate(argv):
+        if argument == name:
+            return argv[index + 1]
+        if argument.startswith(name + '='):
+            return argument.partition('=')[2]
+    return None
+
+
+def execute_test_phases(options, argv):
+    from test_selection import plan_test_command
+    planner = lambda args: plan_test_command(args, ROOT)
+    if options.local:
+        return run_command(ROOT, options.jobs, options.isolation_dir, argv, planner=planner)
+    # The first client builds every selected test and executes remote tests.
+    # Its runner records service/local tests without launching them. The
+    # second client cannot execute remote actions and merges their verdicts.
+    boundary = argv.index('--')
+    runner = argv[boundary + 1:]
+    report_path = Path(runner[runner.index('--test-report') + 1])
+    report_path.unlink(missing_ok=True)
+    code = run_command(ROOT, options.jobs, options.isolation_dir, argv + ['--defer-local-tests'], planner=planner)
+    if code not in (0, 32):
+        return code
+    if not report_path.exists():
+        return code
+    report = json.loads(report_path.read_text())
+    if not report.get('session_complete') or not report.get('deferred_local_tests'):
+        return code
+    local_code = run_command(ROOT, options.jobs, options.isolation_dir, argv[:boundary] + ['--local-only'] + argv[boundary:] + ['--resume-local-tests'], planner=planner)
+    return local_code or code
 
 
 def published_invocations(root):

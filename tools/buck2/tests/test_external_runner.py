@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 import json
 import os
@@ -178,6 +179,35 @@ class RunnerTests(unittest.TestCase):
         for name, path in [('junit', self.junit), ('undeclared', self.receipts)]:
             result.outputs.append(runner.pb.OutputEntry(declared_output=runner.pb.OutputName(name=name), output=runner.pb.Output(local_path=str(path))))
         return result
+
+    def test_mixed_phases_execute_each_test_once_and_merge_remote_failures(self):
+        remote = runner.pb.ExternalRunnerSpec()
+        remote.CopyFrom(self.spec)
+        remote.target.target = 'remote_test'
+        self.spec.labels.append('lash.service=local')
+        self.options.defer_local_tests = True
+        self.options.resume_local_tests = False
+        path = self.root / 'report.json'
+        reports = runner.Reports(path, 'remote-trace')
+        client = Client(self.result(code=1))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            runner.submit_test(pool, reports, client, self.spec, self.options, {})
+            runner.submit_test(pool, reports, client, remote, self.options, {})
+        self.assertEqual(len(client.requests), 1)
+        self.assertEqual(reports.complete(), 32)
+        self.assertEqual(reports.value['deferred_local_tests'], ['root//crates/sql:unit_test'])
+        self.options.defer_local_tests = False
+        self.options.resume_local_tests = True
+        reports = runner.Reports(path, 'local-trace', resume=True)
+        client = Client(self.result())
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            runner.submit_test(pool, reports, client, remote, self.options, {})
+            runner.submit_test(pool, reports, client, self.spec, self.options, {})
+        self.assertEqual(len(client.requests), 1)
+        self.assertEqual(client.requests[0].executor_override.name, 'local')
+        self.assertEqual(reports.pending_local, set())
+        self.assertEqual(reports.complete(), 32)
+        self.assertEqual({name: result['status'] for name, result in reports.value['results'].items()}, {'root//crates/sql:remote_test': 'FAIL', 'root//crates/sql:unit_test': 'PASS'})
 
     def test_cached_outputs_and_canonical_environment_are_preserved(self):
         client = Client(self.result())

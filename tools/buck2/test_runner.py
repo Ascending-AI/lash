@@ -395,6 +395,9 @@ def arguments():
     options.add_argument('--test-output', choices=['errors', 'all'], default='errors')
     options.add_argument('--no-test-cache', action='store_true')
     options.add_argument('--local-test-execution', action='store_true')
+    phases = options.add_mutually_exclusive_group()
+    phases.add_argument('--defer-local-tests', action='store_true')
+    phases.add_argument('--resume-local-tests', action='store_true')
     run = options.parse_args(remaining)
     if (run.timeout is not None and run.timeout <= 0) or run.max_concurrency <= 0:
         options.error('Timeout and concurrency must be positive')
@@ -406,10 +409,17 @@ def arguments():
 
 
 class Reports:
-    def __init__(self, path, trace_id):
+    def __init__(self, path, trace_id, resume=False):
         self.path = path
         self.lock = threading.Lock()
         self.value = {'schema': 1, 'trace_id': trace_id, 'session_complete': False, 'results': {}, 'infrastructure_errors': []}
+        self.pending_local = set()
+        if resume:
+            self.value = json.loads(path.read_text())
+            if not self.value.get('session_complete') or not self.value.get('deferred_local_tests'):
+                raise ValueError('No completed remote test phase to resume')
+            self.pending_local = set(self.value.pop('deferred_local_tests'))
+            self.value['session_complete'] = False
         self.write()
 
     def write(self):
@@ -418,6 +428,14 @@ class Reports:
             json.dump(self.value, output, indent=2)
             output.write('\n')
         os.replace(temporary, self.path)
+
+    def defer(self, label):
+        with self.lock:
+            deferred = self.value.setdefault('deferred_local_tests', [])
+            if label in deferred:
+                raise ValueError(f'Duplicate test label/configuration: {label}')
+            deferred.append(label)
+            self.write()
 
     def started(self, spec):
         label = f'{spec.target.cell}//{spec.target.package}:{spec.target.target}'
@@ -450,6 +468,21 @@ class Reports:
             return 32 if self.value['infrastructure_errors'] or any(t['status'] != 'PASS' for t in self.value['results'].values()) else 0
 
 
+def submit_test(pool, reports, client, spec, options, runtime_env):
+    label = f'{spec.target.cell}//{spec.target.package}:{spec.target.target}'
+    if options.resume_local_tests:
+        if label not in reports.pending_local:
+            return
+        reports.pending_local.remove(label)
+    elif options.defer_local_tests and (options.local_test_execution or needs_local_uncached(set(spec.env) | set(runtime_env), spec.labels)):
+        reports.defer(label)
+        return
+    reports.started(spec)
+    future = pool.submit(run_test, client, spec, options, runtime_env)
+    future.lash_label = label
+    future.add_done_callback(reports.finished)
+
+
 def main():
     transport, options = arguments()
     runtime_env = parse_env(options.test_env)
@@ -459,7 +492,7 @@ def main():
             raise ValueError('The runtime environment file must be a private regular file')
         supplied = json.loads(options.test_env_file.read_text())
         runtime_env.update(parse_env([key + '=' + val for key, val in supplied.items()]))
-    reports = Reports(options.test_report, transport.buck_trace_id)
+    reports = Reports(options.test_report, transport.buck_trace_id, resume=options.resume_local_tests)
     # The sockets below bind under this directory; a forwarded TMPDIR scopes
     # them per invocation instead of whatever this daemon-inherited process got.
     with tempfile.TemporaryDirectory(prefix='lash-tests-', dir=runtime_env.get('TMPDIR')) as work:
@@ -493,10 +526,10 @@ def main():
             raise RuntimeError(reports.value['infrastructure_errors'][-1])
         with ThreadPoolExecutor(max_workers=options.max_concurrency) as pool:
             while (spec := executor.requests.get()) is not None:
-                reports.started(spec)
-                future = pool.submit(run_test, client, spec, options, runtime_env)
-                future.lash_label = f'{spec.target.cell}//{spec.target.package}:{spec.target.target}'
-                future.add_done_callback(reports.finished)
+                submit_test(pool, reports, client, spec, options, runtime_env)
+        if reports.pending_local:
+            reports.value['infrastructure_errors'].append('Local test phase did not discover deferred tests: ' + ', '.join(sorted(reports.pending_local)))
+            reports.write()
         code = reports.exit_code()
         client.EndOfTestResults(pb.EndOfTestResultsRequest(exit_code=code))
         reports.complete()

@@ -327,20 +327,70 @@ class DriverTests(unittest.TestCase):
         self.assertNotIn('--no-test-cache', command)
         self.assertNotIn('--local-test-execution', command)
 
-    def test_run_preserves_invocation_and_workspace_environment(self):
+    def test_run_records_under_admission_then_launches_locally_with_host_environment(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
-            (root / '.buckconfig.local').write_text(REMOTE_CONFIG)
-            current = Path.cwd()
-            try:
-                with patch.object(driver, 'ROOT', root), patch.object(driver.subprocess, 'run'), patch.object(driver, 'run_command', return_value=0) as call, patch.dict(os.environ, {'LASH_BUILD_WORKING_DIRECTORY': '/original/subdirectory'}):
-                    self.assertEqual(driver.main(['run', '//pkg:bin']), 0)
-                    environment = call.call_args.kwargs['env']
-                    self.assertEqual(environment['BUILD_WORKING_DIRECTORY'], '/original/subdirectory')
-                    self.assertEqual(environment['BUILD_WORKSPACE_DIRECTORY'], str(root))
-                    self.assertNotIn('LASH_BUILD_WORKING_DIRECTORY', environment)
-            finally:
-                os.chdir(current)
+            options, remaining = driver.arguments(['run', '--chdir=application-dir', '//pkg:bin', '--', 'one argument', '; literal'])
+            calls = []
+
+            def execute(root_arg, jobs, isolation, argv, **kwargs):
+                calls.append((argv, kwargs))
+                self.assertEqual(kwargs['env']['BUILD_WORKING_DIRECTORY'], '/original/subdirectory')
+                self.assertEqual(kwargs['env']['BUILD_WORKSPACE_DIRECTORY'], str(root))
+                self.assertNotIn('LASH_BUILD_WORKING_DIRECTORY', kwargs['env'])
+                if len(calls) == 1:
+                    self.assertIn('--command-args-file', argv[:argv.index('--')])
+                    self.assertEqual(argv[-3:], ['--', 'one argument', '; literal'])
+                    command = Path(argv[argv.index('--command-args-file') + 1])
+                    command.write_text(json.dumps({'argv': ['/application', 'one argument', '; literal'], 'envp': kwargs['env']}))
+                    Path(argv[argv.index('--write-build-id') + 1]).write_text('build-identity\n')
+                    return 0
+                self.assertFalse(kwargs['managed'])
+                self.assertEqual(root_arg, root / 'application-dir')
+                self.assertEqual(argv, ['/application', 'one argument', '; literal'])
+                self.assertEqual(kwargs['env']['BUCK_RUN_BUILD_ID'], 'build-identity')
+                return 47
+
+            with patch.object(driver, 'ROOT', root), patch.object(driver, 'run_command', side_effect=execute), patch.dict(os.environ, {'LASH_BUILD_WORKING_DIRECTORY': '/original/subdirectory'}):
+                self.assertEqual(driver.operate(options, remaining, Path('/buck2'), None, '/original/subdirectory'), 47)
+            self.assertEqual(len(calls), 2)
+            with patch.object(driver, 'ROOT', root), patch.object(driver, 'run_command', return_value=23) as execute:
+                self.assertEqual(driver.operate(options, remaining, Path('/buck2'), None, '/original/subdirectory'), 23)
+                self.assertEqual(execute.call_count, 1)
+
+    def test_mixed_tests_release_remote_client_before_local_only_phase(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            report = root / 'report.json'
+            options, remaining = driver.arguments(['test', f'--test-report={report}', '//pkg:test'])
+            argv = driver.command(options, remaining, Path('/buck2'), root)
+            calls = []
+
+            def execute(root_arg, jobs, isolation, args, **kwargs):
+                calls.append(args)
+                if len(calls) == 1:
+                    self.assertEqual(args[-1], '--defer-local-tests')
+                    self.assertNotIn('--local-only', args)
+                    report.write_text(json.dumps({'session_complete': True, 'deferred_local_tests': ['root//pkg:test']}))
+                    return 0
+                self.assertIn('--local-only', args[:args.index('--')])
+                self.assertEqual(args[-1], '--resume-local-tests')
+                return 32
+
+            with patch.object(driver, 'ROOT', root), patch.object(driver, 'run_command', side_effect=execute):
+                self.assertEqual(driver.execute_test_phases(options, argv), 32)
+            self.assertEqual(len(calls), 2)
+            for status in (23, 32):
+                with self.subTest(remote_status=status), patch.object(driver, 'ROOT', root), patch.object(driver, 'run_command', return_value=status) as execute:
+                    report.write_text(json.dumps({'session_complete': True, 'deferred_local_tests': ['stale']}))
+                    self.assertEqual(driver.execute_test_phases(options, argv), status)
+                    self.assertFalse(report.exists())
+                    self.assertEqual(execute.call_count, 1)
+            options.local = True
+            with patch.object(driver, 'run_command', return_value=0) as execute:
+                self.assertEqual(driver.execute_test_phases(options, argv), 0)
+                self.assertEqual(execute.call_count, 1)
+                self.assertNotIn('--defer-local-tests', execute.call_args.args[3])
 
     def test_service_environment_is_resolved_in_caller(self):
         self.assertEqual(driver.resolve_environment(['SERVICE', 'OTHER=value'], {'SERVICE': 'secret'}), {'SERVICE': 'secret', 'OTHER': 'value'})

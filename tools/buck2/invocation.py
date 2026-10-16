@@ -1,5 +1,5 @@
 """Coordinate the stock daemon's startup-only remote execution configuration."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import configparser
 import fcntl
 import hashlib
@@ -17,28 +17,43 @@ import time
 
 MANAGED_REMOTE_JOBS = 16
 CI_REMOTE_JOBS_VARIABLE = 'LASH_CI_REMOTE_JOBS'
+REMOTE_JOBS_MAX_VARIABLE = 'REMOTE_JOBS_MAX'
 
 
 def remote_jobs(jobs):
-    """Keep a managed fork's remote queue independent of driver parallelism."""
-    override = os.environ.get(CI_REMOTE_JOBS_VARIABLE)
-    if override is not None:
-        if os.environ.get('CI') != 'true':
-            raise ValueError(f'{CI_REMOTE_JOBS_VARIABLE} requires CI=true')
-        if not re.fullmatch(r'[1-9][0-9]*', override):
-            raise ValueError(f'{CI_REMOTE_JOBS_VARIABLE} must be a positive integer')
-        return min(jobs, int(override))
-    return min(jobs, MANAGED_REMOTE_JOBS) if os.environ.get('KILN_REPO') == 'lash' else jobs
+    """Apply Kiln's remote budget even when phase admission is disabled."""
+    maximum = os.environ.get(REMOTE_JOBS_MAX_VARIABLE)
+    if maximum is None:
+        legacy_override = os.environ.get(CI_REMOTE_JOBS_VARIABLE)
+        if legacy_override is not None:
+            if os.environ.get('CI') != 'true':
+                raise ValueError(f'{CI_REMOTE_JOBS_VARIABLE} requires CI=true')
+            if not re.fullmatch(r'[1-9][0-9]*', legacy_override):
+                raise ValueError(f'{CI_REMOTE_JOBS_VARIABLE} must be a positive integer')
+            maximum = legacy_override
+        else:
+            maximum = str(MANAGED_REMOTE_JOBS)
+    if not re.fullmatch(r'[1-9][0-9]*', maximum):
+        raise ValueError(f'{REMOTE_JOBS_MAX_VARIABLE} must be a positive integer')
+    return min(jobs, int(maximum))
 
 
-@contextmanager
-def repo_build_admission(root):
-    """Seam for Kiln's forthcoming per-repo/user remote build-phase lease.
+def remote_phase(argv):
+    front = argv[:argv.index('--')] if '--' in argv else argv
+    return argv[3] in ('build', 'test', 'run') and '--local-only' not in front and 'kiln.execution_mode=local' not in front
 
-    Kiln owns the two-active-phase policy. Its env/lock contract is not yet
-    published; wire it here once available, without inventing another lock.
-    """
-    yield
+
+def phase_command(root, jobs, isolation, argv, planner):
+    helper = os.environ.get('KILN_ADMISSION_COMMAND')
+    if not helper or os.environ.get('KILN_ADMISSION', 'on') == 'off' or not remote_phase(argv):
+        return None
+    if os.environ.get('KILN_ADMISSION_VERSION') != '1':
+        raise ValueError('Unsupported KILN_ADMISSION_VERSION; expected 1')
+    # Re-enter before taking daemon locks: a queued client must not hold a
+    # lock needed by an admitted client. The direct child supervises Buck2
+    # synchronously, so Kiln's cancellation watcher reaches the remote client.
+    return [helper, 'admit', '--', sys.executable, str(Path(__file__).resolve()),
+            str(root), str(jobs), isolation, json.dumps(argv), str(planner is not None)]
 
 
 def regular_file(path):
@@ -268,41 +283,48 @@ def admission(root, executable, isolation, jobs, exclusive=False, cancelled=lamb
         yield
 
 
-def run_command(root, jobs, isolation, argv, planner=None, **kwargs):
-    """An orphaned guardian keeps the lease until its Buck client exits."""
+def execute_command(root, jobs, isolation, argv, planner=None, managed=True, **kwargs):
+    child = None
+    interrupted = 0
+
+    def forward(signum, _frame):
+        nonlocal interrupted
+        interrupted = signum
+        if child is not None and child.poll() is None:
+            child.send_signal(signum)
+
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, forward)
+    try:
+        lease = admission(root, argv[0], isolation, jobs, exclusive=argv[3] == 'clean', cancelled=lambda: interrupted) if managed else nullcontext()
+        with lease:
+            if interrupted:
+                return 128 + interrupted
+            if planner is not None:
+                argv = planner(argv)
+            if interrupted:
+                return 128 + interrupted
+            # Never pass the lease FD: Buck's daemon inherits arbitrary FDs.
+            child = subprocess.Popen(argv, cwd=root, close_fds=True, **kwargs)
+            if interrupted:
+                child.send_signal(interrupted)
+            code = child.wait()
+            return 128 + interrupted if interrupted else code if code >= 0 else 128 - code
+    except BaseException as error:
+        print(f'hermetic-build: {error}', file=sys.stderr, flush=True)
+        return 128 + interrupted if interrupted else 2
+
+
+def run_command(root, jobs, isolation, argv, planner=None, managed=True, **kwargs):
+    """Keep the daemon lease until its client exits, including driver death."""
+    wrapped = phase_command(root, jobs, isolation, argv, planner) if managed else None
     sys.stdout.flush()
     sys.stderr.flush()
     guardian = os.fork()
     if guardian == 0:
-        child = None
-        interrupted = 0
-
-        def forward(signum, _frame):
-            nonlocal interrupted
-            interrupted = signum
-            if child is not None and child.poll() is None:
-                child.send_signal(signum)
-
-        try:
-            os.setsid()
-            for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-                signal.signal(signum, forward)
-            with repo_build_admission(root), admission(root, argv[0], isolation, jobs, exclusive=argv[3] == 'clean', cancelled=lambda: interrupted):
-                if interrupted:
-                    os._exit(128 + interrupted)
-                if planner is not None:
-                    argv = planner(argv)
-                if interrupted:
-                    os._exit(128 + interrupted)
-                # Never pass the lease FD: Buck's daemon inherits arbitrary FDs.
-                child = subprocess.Popen(argv, cwd=root, close_fds=True, **kwargs)
-                if interrupted:
-                    child.send_signal(interrupted)
-                code = child.wait()
-                os._exit(128 + interrupted if interrupted else code if code >= 0 else 128 - code)
-        except BaseException as error:
-            print(f'hermetic-build: {error}', file=sys.stderr, flush=True)
-            os._exit(128 + interrupted if interrupted else 2)
+        os.setsid()
+        code = execute_command(root, jobs, isolation, wrapped or argv, planner=None if wrapped else planner, managed=managed and not wrapped, **kwargs)
+        os._exit(code)
     saved = {}
 
     def relay(signum, _frame):
@@ -320,3 +342,12 @@ def run_command(root, jobs, isolation, argv, planner=None, **kwargs):
     finally:
         for signum, handler in saved.items():
             signal.signal(signum, handler)
+
+
+if __name__ == '__main__':
+    root, jobs, isolation, encoded, planned = sys.argv[1:]
+    planner = None
+    if planned == 'True':
+        from test_selection import plan_test_command
+        planner = lambda argv: plan_test_command(argv, Path(root))
+    raise SystemExit(execute_command(Path(root), int(jobs), isolation, json.loads(encoded), planner))

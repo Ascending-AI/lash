@@ -595,9 +595,9 @@ commands on the same test binary with different filters.
   and no case outside the requested filters or behind a requested `--skip`.
   Otherwise the test is an `INFRA_FAILURE` whose message starts
   `Test report does not match its selection`. It never passes.
-- **`--jobs`.** Driver parallelism defaults to 32. Managed Lash forks
-  (`KILN_REPO=lash`, supplied by `env.sh`) cap the daemon's outstanding remote
-  requests at `min(--jobs, 16)`. Lower `--jobs` values still lower the cap.
+- **`--jobs`.** Driver parallelism defaults to 32. The daemon's outstanding remote
+  requests are capped at `min(--jobs, REMOTE_JOBS_MAX)`; the positive integer
+  budget defaults to 16. `KILN_ADMISSION=off` keeps this cap.
   A changed effective remote limit waits for every running command to finish
   before restarting the daemon. It never restarts under another command.
 - **Build and test together.** Both hold a shared lease on the daemon and run
@@ -605,21 +605,22 @@ commands on the same test binary with different filters.
 
 ### Remote admission
 
-The driver logs effective remote and driver jobs on every invocation. CI in a
-managed fork uses the same 16-request cap unless it explicitly sets
-`CI=true LASH_CI_REMOTE_JOBS=<positive integer>`; the effective cap then becomes
-`min(--jobs, LASH_CI_REMOTE_JOBS)`. For example, `CI=true
-LASH_CI_REMOTE_JOBS=32` retains the previous 32-request envelope with the default
-driver jobs. A CI allocation above 16 needs its own recorded pool-demand
-measurement before deployment; no larger CI allocation is enabled here. The
-override is rejected outside `CI=true`.
+The driver logs effective remote and driver jobs on every invocation and writes
+that cap to Buck2's startup-only `buck2_re_client.execution_concurrency_limit`.
+`REMOTE_JOBS_MAX` sets the positive integer ceiling and defaults to 16 for all
+clients, including managed forks and CI. For compatibility, when
+`REMOTE_JOBS_MAX` is unset, `LASH_CI_REMOTE_JOBS` remains a CI-only fallback;
+hosts should migrate that setting to `REMOTE_JOBS_MAX`. The legacy variable is
+rejected unless `CI=true`.
 
-`tools/buck2/invocation.py:repo_build_admission` is the single integration seam
-for Kiln's planned two-active-remote-build-phase admission per repo and user.
-It currently yields without acquiring a lease because Kiln's env/lock contract
-has not been published. The fork's existing daemon transition locks remain in
-force; the 16-request cap controls client fan-out independently of that future
-repo-wide policy.
+When Kiln supplies `KILN_ADMISSION_COMMAND` and protocol version 1, the driver
+calls that executable with `admit --` around remote clients. Admission precedes
+the daemon transition locks; local preparation runs before it. `run` first asks
+Buck2 to build and record its argument vector, then launches that command after the
+admitted client exits. Tests first build and execute remote tests, deferring
+service and explicitly local tests to a second, local-only client. Their reports
+are merged so each selected test executes once. Analysis, clean and local-only
+operations do not acquire a phase slot. `KILN_ADMISSION=off` bypasses admission.
 
 ### Queue priority
 

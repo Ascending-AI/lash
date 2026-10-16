@@ -36,6 +36,11 @@ elif operation == 'kill':
     state.unlink(missing_ok=True)
 else:
     token = sys.argv[4]
+    if token == 'admission-check':
+        config = configparser.ConfigParser()
+        config.read(root / '.buckconfig.local')
+        print(json.dumps({'argv': sys.argv[4:], 'stdin': sys.stdin.read(), 'admitted': os.environ.get('TEST_ADMITTED'), 'jobs': config.getint('buck2_re_client', 'execution_concurrency_limit')}))
+        raise SystemExit(37)
     if not state.exists():
         config = configparser.ConfigParser()
         config.read(root / '.buckconfig.local')
@@ -70,6 +75,10 @@ raise SystemExit(run_command(root, int(sys.argv[3]), 'kiln', [str(root / 'buck2'
 
 class InvocationTests(unittest.TestCase):
     def setUp(self):
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop('KILN_ADMISSION_COMMAND', None)
         self.temporary = tempfile.TemporaryDirectory()
         self.root = self.make_root(Path(self.temporary.name) / 'one')
         self.processes = []
@@ -259,6 +268,66 @@ class InvocationTests(unittest.TestCase):
         process = self.start('refused', 1)
         self.assertEqual(process.wait(timeout=10), 2)
         self.assertEqual(target.read_text(), 'original')
+
+    def test_kiln_admits_before_daemon_locks_and_preserves_client_io_and_status(self):
+        helper = self.root / 'fake admission'
+        helper.write_text("""#!/usr/bin/env python3
+import fcntl, json, os, sys
+from pathlib import Path
+root = Path.cwd()
+assert sys.argv[1:3] == ['admit', '--']
+for name in ('admission.lock', 'active.lock'):
+    path = root / '.buck2/invocations' / name
+    if path.exists():
+        with path.open() as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+(root / 'admitted').write_text(json.dumps(sys.argv[3:]))
+os.environ['TEST_ADMITTED'] = 'yes'
+os.execv(sys.argv[3], sys.argv[3:])
+""")
+        helper.chmod(0o700)
+        worker = WORKER.replace("sys.argv[4]]", "sys.argv[4], 'one argument', '; literal']")
+        environment = dict(os.environ, KILN_ADMISSION_VERSION='1', KILN_ADMISSION_COMMAND=str(helper), KILN_REPO='lash', REMOTE_JOBS_MAX='3', KILN_ADMISSION='on')
+        process = subprocess.run([sys.executable, '-c', worker, str(HERE), str(self.root), '32', 'admission-check'], input='caller stdin', capture_output=True, text=True, env=environment, timeout=10)
+        self.assertEqual(process.returncode, 37, process.stderr)
+        self.assertTrue((self.root / 'admitted').exists(), process.stderr)
+        self.assertEqual(json.loads(process.stdout), {'argv': ['admission-check', 'one argument', '; literal'], 'stdin': 'caller stdin', 'admitted': 'yes', 'jobs': 3})
+        (self.root / 'admitted').unlink()
+        environment['KILN_ADMISSION'] = 'off'
+        process = subprocess.run([sys.executable, '-c', worker, str(HERE), str(self.root), '32', 'admission-check'], input='bypass stdin', capture_output=True, text=True, env=environment, timeout=10)
+        self.assertEqual(process.returncode, 37, process.stderr)
+        self.assertFalse((self.root / 'admitted').exists())
+        self.assertEqual(json.loads(process.stdout)['jobs'], 3)
+        self.assertIsNone(json.loads(process.stdout)['admitted'])
+
+    def test_only_remote_clients_enter_phase_admission(self):
+        with patch.dict(os.environ, {'KILN_ADMISSION_VERSION': '1', 'KILN_ADMISSION_COMMAND': '/fake admission', 'KILN_ADMISSION': 'on'}):
+            for operation, controls, expected in (
+                ('build', [], True), ('test', [], True), ('run', ['--emit-shell'], True),
+                ('build', ['--local-only'], False), ('test', ['--local-only'], False),
+                ('build', ['-c', 'kiln.execution_mode=local'], False),
+                ('cquery', [], False), ('clean', [], False),
+                ('run', ['--emit-shell', '--', '--local-only', 'kiln.execution_mode=local'], True),
+            ):
+                with self.subTest(operation=operation, controls=controls):
+                    argv = ['/buck2', '--isolation-dir', 'kiln', operation, *controls]
+                    command = invocation.phase_command(self.root, 32, 'kiln', argv, None)
+                    self.assertEqual(command is not None, expected)
+                    if expected:
+                        self.assertEqual(command[:3], ['/fake admission', 'admit', '--'])
+            os.environ['KILN_ADMISSION_VERSION'] = '2'
+            with self.assertRaisesRegex(ValueError, 'KILN_ADMISSION_VERSION'):
+                invocation.phase_command(self.root, 32, 'kiln', ['/buck2', '--isolation-dir', 'kiln', 'build'], None)
+
+    def test_kiln_jobs_budget_caps_configuration(self):
+        for cap, jobs, expected in (('3', 32, 3), ('64', 32, 32), ('16', 8, 8)):
+            with self.subTest(cap=cap, jobs=jobs), patch.dict(os.environ, {'KILN_REPO': 'lash', 'REMOTE_JOBS_MAX': cap}, clear=True):
+                _, desired, _ = invocation.configuration(self.root, jobs)
+                self.assertIn(f'execution_concurrency_limit = {expected}\n', desired)
+        for invalid in ('0', '-1', 'invalid'):
+            with self.subTest(invalid=invalid), patch.dict(os.environ, {'REMOTE_JOBS_MAX': invalid}, clear=True):
+                with self.assertRaisesRegex(ValueError, 'REMOTE_JOBS_MAX.*positive integer'):
+                    invocation.remote_jobs(32)
 
     def test_managed_fork_caps_remote_requests_at_sixteen(self):
         with patch.dict(os.environ, {'KILN_REPO': 'lash'}, clear=True):
