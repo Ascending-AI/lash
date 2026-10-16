@@ -37,4 +37,4 @@ mod corpus_tests;
 mod prepared_tests;
 
 mod collections;
-pub use collections::{CollectionError, register_collections};
+pub use collections::{CollectionError, implement_collections, register_collections};

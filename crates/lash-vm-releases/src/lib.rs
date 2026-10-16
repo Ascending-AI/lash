@@ -151,3 +151,13 @@ mod python_helpers {
 }
 #[cfg(feature = "dialect-python")]
 pub use python_helpers::PythonHelper;
+
+/// Kernel collection definitions, validated against the kernel's native base
+/// and encoded in the same token form as dialect helpers.
+pub const KERNEL_COLLECTIONS: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/kernel_collections.bin"));
+
+/// TypeScript date and URL definitions, validated against its kernel and regex library.
+#[cfg(feature = "dialect-typescript")]
+pub const TYPESCRIPT_EXTENSIONS: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/typescript_extensions.bin"));

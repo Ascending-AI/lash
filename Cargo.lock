@@ -3021,6 +3021,7 @@ name = "lash-internal-vm-worker"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
+ "blake3",
  "dhat",
  "lash-dialect-python",
  "lash-dialect-typescript",

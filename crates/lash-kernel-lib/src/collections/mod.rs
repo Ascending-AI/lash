@@ -14,6 +14,8 @@ use lash_kernel_doc::{FunctionId, FunctionRegistry, ParseError, RegistryError, p
 pub enum CollectionError {
     /// Register the numeric library and the machine functions first.
     Missing(&'static str),
+    /// The build did not supply a collection native definition.
+    MissingDefinition(String),
     /// A built-in kernel text definition could not be read.
     Parse(ParseError),
     /// A definition could not be admitted to this registry.
@@ -24,6 +26,7 @@ impl std::fmt::Display for CollectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Missing(name) => write!(f, "collections require registered native `{name}`"),
+            Self::MissingDefinition(name) => write!(f, "collections require definition `{name}`"),
             Self::Parse(error) => error.fmt(f),
             Self::Registry(error) => error.fmt(f),
         }
@@ -32,7 +35,7 @@ impl std::fmt::Display for CollectionError {
 impl std::error::Error for CollectionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Missing(_) => None,
+            Self::Missing(_) | Self::MissingDefinition(_) => None,
             Self::Parse(error) => Some(error),
             Self::Registry(error) => Some(error),
         }
@@ -62,7 +65,9 @@ pub fn register_collections(
         uses.push_str(&format!("use {name} = @{id}\n"));
     }
     let mut ids = BTreeMap::new();
-    for (definition, native) in native::functions()? {
+    for (definition, native) in
+        native::functions(|_, text| parse_definition(&text()).map_err(CollectionError::Parse))?
+    {
         let name = definition.name.as_str().to_owned();
         let id = registry
             .register(definition, Some(native))
@@ -97,4 +102,22 @@ fn raise(kind: &str, message: &str) -> lash_kernel_doc::NativeError {
     lash_kernel_doc::NativeError::Raised(std::sync::Arc::new(lash_kernel_doc::heap::ErrorRef::new(
         kind, message,
     )))
+}
+
+/// Attaches collection natives to the definitions supplied by the build.
+/// No kernel text is constructed or parsed on this path.
+pub fn implement_collections(registry: &mut FunctionRegistry) -> Result<(), CollectionError> {
+    let functions = native::functions(|name, _| {
+        registry
+            .iter()
+            .find(|(_, function)| function.definition().name.as_str() == name)
+            .map(|(id, _)| *id)
+            .ok_or_else(|| CollectionError::MissingDefinition(name.to_owned()))
+    })?;
+    for (function, native) in functions {
+        registry
+            .implement(function, native)
+            .map_err(CollectionError::Registry)?;
+    }
+    Ok(())
 }

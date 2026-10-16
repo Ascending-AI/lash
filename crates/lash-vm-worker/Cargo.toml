@@ -97,6 +97,7 @@ tokio = { workspace = true, optional = true, features = ["rt", "sync"] }
 libc = { workspace = true }
 
 [dev-dependencies]
+blake3 = { workspace = true }
 tokio-util = { workspace = true }
 lash-sansio = { workspace = true }
 lash-vm-broker = { workspace = true, features = ["testing"] }
@@ -116,3 +117,7 @@ serde_bytes = { workspace = true }
 [[test]]
 name = "pool_laws"
 path = "tests/pool_laws.rs"
+
+[[test]]
+name = "fresh_embedding"
+path = "tests/fresh_embedding.rs"

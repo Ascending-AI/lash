@@ -2,8 +2,8 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Element, EntityId, Float, FunctionDefinition, Identity, Integer, NativeCall, NativeError,
-    NativeFunction, NativeHeap, Object, PreparedNative, Value, parse_definition,
+    Element, EntityId, Float, Identity, Integer, NativeCall, NativeError, NativeFunction,
+    NativeHeap, Object, PreparedNative, Value,
 };
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -14,7 +14,7 @@ use lash_kernel_doc::heap::{
     ErrorRef, FieldName, HeapFault, IntRef, LogicalBytes, Payload, TextRef,
 };
 
-type NativeDefinition = (FunctionDefinition, Arc<dyn NativeFunction>);
+type NativeDefinition<T> = (T, Arc<dyn NativeFunction>);
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -49,7 +49,9 @@ struct Native {
     op: Op,
 }
 
-pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
+pub(super) fn functions<T>(
+    mut define: impl FnMut(&str, &dyn Fn() -> String) -> Result<T, CollectionError>,
+) -> Result<Vec<NativeDefinition<T>>, CollectionError> {
     let mut functions = Vec::new();
     let kinds = [
         (Kind::List, "list", "List(Any)"),
@@ -276,10 +278,12 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
             if matches!(kind, Kind::Tuple) && matches!(op, Op::Check | Op::InsertIndex) {
                 continue;
             }
-            let definition = parse_definition(&format!(
-                "function {prefix}.{name}(xs: {ty}{params}) -> {result}\nkernel 1\n\
+            let definition = define(&format!("{prefix}.{name}"), &|| {
+                format!(
+                    "function {prefix}.{name}(xs: {ty}{params}) -> {result}\nkernel 1\n\
                  errors \"type_error\", \"index_out_of_range\", \"key_missing\", \"invalid_key\", \"cyclic_value\", \"too_deep\"\ncharge {charge}\nnative\n"
-            )).map_err(CollectionError::Parse)?;
+                )
+            })?;
             functions.push((definition, Arc::new(Native { kind, op }) as _));
         }
     }
@@ -300,9 +304,11 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
             "type_error",
         ),
     ] {
-        let definition = parse_definition(&format!(
-            "function {name}(x: Any) -> {result}\nkernel 1\nerrors \"{error}\"\ncharge sum(1, size(x))\nnative\n"
-        )).map_err(CollectionError::Parse)?;
+        let definition = define(name, &|| {
+            format!(
+                "function {name}(x: Any) -> {result}\nkernel 1\nerrors \"{error}\"\ncharge sum(1, size(x))\nnative\n"
+            )
+        })?;
         functions.push((
             definition,
             Arc::new(Aux(
@@ -316,9 +322,11 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
     }
     // Range and NaN equivalence are explicit caller choices. No dialect's
     // coercion, missing-slot convention or index normalization lives here.
-    let definition = parse_definition(
-        "function list.index_of_range(xs: List(Any), value: Any, start: Number, end: Number, reverse: Bool, nan_equal: Bool) -> Int\nkernel 1\nerrors \"type_error\", \"index_out_of_range\"\ncharge sum(8, deep(xs), product(size(xs), deep(value)), size(start), size(end))\nnative\n",
-    ).map_err(CollectionError::Parse)?;
+    let definition = define("list.index_of_range", &|| {
+        String::from(
+            "function list.index_of_range(xs: List(Any), value: Any, start: Number, end: Number, reverse: Bool, nan_equal: Bool) -> Int\nkernel 1\nerrors \"type_error\", \"index_out_of_range\"\ncharge sum(8, deep(xs), product(size(xs), deep(value)), size(start), size(end))\nnative\n",
+        )
+    })?;
     functions.push((definition, Arc::new(IndexOfRange) as _));
     for (signature, function, entry, charge) in [
         (
@@ -340,10 +348,16 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
             "1",
         ),
     ] {
-        let definition = parse_definition(&format!(
-            "function {signature}\nkernel 1\nerrors \"type_error\"\ncharge {charge}\nnative\n"
-        ))
-        .map_err(CollectionError::Parse)?;
+        let definition = define(
+            signature
+                .split_once('(')
+                .map_or(signature, |(name, _)| name),
+            &|| {
+                format!(
+                    "function {signature}\nkernel 1\nerrors \"type_error\"\ncharge {charge}\nnative\n"
+                )
+            },
+        )?;
         functions.push((
             definition,
             Arc::new(Aux(
@@ -355,15 +369,18 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
             )) as _,
         ));
     }
-    let definition = parse_definition(
-        "function collection.holds_none(value: Any, kinds: Set(Text)) -> Bool\nkernel 1\n\
+    let definition = define("collection.holds_none", &|| {
+        String::from(
+            "function collection.holds_none(value: Any, kinds: Set(Text)) -> Bool\nkernel 1\n\
          errors \"type_error\"\ncharge sum(1, size(kinds), deep(value))\nnative\n",
-    )
-    .map_err(CollectionError::Parse)?;
+        )
+    })?;
     functions.push((definition, Arc::new(HoldsNone) as _));
-    let definition = parse_definition(
-        "function key.identity(value: Any, absent_key: Any, error_tag: Text) -> Any\nkernel 1\nerrors \"type_error\", \"too_deep\"\ncharge sum(1, deep(result))\nnative\n",
-    ).map_err(CollectionError::Parse)?;
+    let definition = define("key.identity", &|| {
+        String::from(
+            "function key.identity(value: Any, absent_key: Any, error_tag: Text) -> Any\nkernel 1\nerrors \"type_error\", \"too_deep\"\ncharge sum(1, deep(result))\nnative\n",
+        )
+    })?;
     functions.push((definition, Arc::new(IdentityKey) as _));
     Ok(functions)
 }

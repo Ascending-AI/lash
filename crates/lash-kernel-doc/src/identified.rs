@@ -131,10 +131,23 @@ impl From<Document> for IdentifiedDocument {
     }
 }
 
-/// How many times this thread encoded and decoded a whole document, in
-/// each form: what a law counts a document's trips by. Counting is a
-/// thread-local add, always on.
+/// This thread's document trips and kernel-text definition parses.
+/// Counting is a thread-local add, always on.
 pub mod document_work {
+    std::thread_local! {
+        static DEFINITION_PARSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+
+    pub(crate) fn note_definition_parse() {
+        let _ = DEFINITION_PARSES.try_with(|count| count.set(count.get() + 1));
+    }
+
+    /// Kernel-text function parses on this thread since the last take.
+    #[must_use]
+    pub fn take_definition_parses() -> u64 {
+        DEFINITION_PARSES.with(|count| count.replace(0))
+    }
+
     use std::cell::Cell;
 
     /// Whole-document encodes and decodes, by form.

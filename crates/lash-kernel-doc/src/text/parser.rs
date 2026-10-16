@@ -137,6 +137,7 @@ pub fn parse_definition_with_limits(
     text: &str,
     limits: crate::KernelDataLimits,
 ) -> Result<FunctionDefinition, ParseError> {
+    crate::document_work::note_definition_parse();
     let mut parser = Parser::new(text, limits)?;
     parser.expect_keyword("function")?;
     let name = parser.qualified_name()?;

@@ -309,7 +309,14 @@ impl Embedder {
     /// [`EmbedError::Registry`].
     pub fn kernel() -> Result<Self, EmbedError> {
         let mut registry = FunctionRegistry::new();
-        crate::library::register_kernel(&mut registry).map_err(EmbedError::Registry)?;
+        crate::library::register_kernel_base(&mut registry).map_err(EmbedError::Registry)?;
+        let collections = ValidatedFunctions::from_tokens(lash_vm_releases::KERNEL_COLLECTIONS)
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        registry
+            .register_validated(collections)
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        lash_kernel_lib::implement_collections(&mut registry)
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
         Ok(Self {
             registry,
             dialects: BTreeMap::new(),
@@ -476,7 +483,7 @@ pub fn typescript(tuning: &lash_vm_client::WorkerTuning) -> Dialect {
             function_values: Some(lash_dialect_typescript::function_values()),
             functions: Vec::new(),
         }),
-        extensions: Some(crate::library::register_extensions),
+        extensions: Some(register_typescript_extensions),
         natives: crate::library::implement_typescript,
     }
 }
@@ -715,10 +722,13 @@ pub(crate) mod tests {
     #[test]
     fn the_built_helpers_are_the_ones_each_dialect_defines() {
         let mut registry = FunctionRegistry::new();
-        crate::library::register_kernel(&mut registry).expect("the kernel library");
+        crate::library::register_kernel_base(&mut registry).expect("the kernel base");
+        lash_kernel_lib::register_collections(&mut registry).expect("the kernel library");
         let mut library = NamedLibrary::from_registry(&registry).expect("the library");
         let python = lash_dialect_python::define_helpers(&mut library).expect("Python's helpers");
-        crate::library::register_extensions(&mut registry).expect("lash's extensions");
+        crate::library::register_extensions(&mut registry).expect("regex extensions");
+        lash_ext_date_ecma::register(&mut registry).expect("date extensions");
+        lash_ext_url_whatwg::register(&mut registry).expect("URL extensions");
         let mut library = NamedLibrary::from_registry(&registry).expect("the library");
         let typescript =
             lash_dialect_typescript::define_helpers(&mut library).expect("TypeScript's helpers");
@@ -998,3 +1008,18 @@ pub(crate) mod tests {
 
 #[cfg(test)]
 mod release_tests;
+
+#[cfg(feature = "dialect-typescript")]
+fn register_typescript_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
+    crate::library::register_extensions(registry)?;
+    let definitions = ValidatedFunctions::from_tokens(lash_vm_releases::TYPESCRIPT_EXTENSIONS)
+        .map_err(|error| error.to_string())?;
+    let functions: Vec<_> = definitions.iter().map(|(function, _)| *function).collect();
+    registry
+        .register_validated(definitions)
+        .map_err(|error| error.to_string())?;
+    lash_ext_date_ecma::implement(registry, functions.iter().copied())
+        .map_err(|error| error.to_string())?;
+    lash_ext_url_whatwg::implement(registry, functions).map_err(|error| error.to_string())?;
+    Ok(())
+}

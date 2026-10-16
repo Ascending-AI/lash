@@ -1152,6 +1152,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "async_trait": "//third-party/rust:p0016",
+            "blake3": "//third-party/rust:p0032",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",

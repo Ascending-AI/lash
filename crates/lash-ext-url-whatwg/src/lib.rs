@@ -277,3 +277,22 @@ impl NativeFunction for Operation {
         }
     }
 }
+
+/// Adds natives to the registered build definitions this extension implements.
+pub fn implement(
+    registry: &mut FunctionRegistry,
+    functions: impl IntoIterator<Item = FunctionId>,
+) -> Result<(), RegistryError> {
+    for function in functions {
+        let registered = registry
+            .get(&function)
+            .ok_or(RegistryError::NotRegistered { function })?;
+        if let Some(operation) = Operation::ALL
+            .into_iter()
+            .find(|operation| operation.name() == registered.definition().name.as_str())
+        {
+            registry.implement(function, Arc::new(operation))?;
+        }
+    }
+    Ok(())
+}

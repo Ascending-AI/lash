@@ -18,17 +18,17 @@ use lash_kernel_doc::FunctionRegistry;
 #[cfg(feature = "dialect-typescript")]
 const CACHED_PATTERNS: usize = 256;
 
-/// Registers the kernel library and the machine's own functions.
-pub(crate) fn register_kernel(registry: &mut FunctionRegistry) -> Result<(), String> {
+/// Registers the kernel's native base and the machine's own functions.
+/// Collection definitions are supplied separately by the release build.
+pub(crate) fn register_kernel_base(registry: &mut FunctionRegistry) -> Result<(), String> {
     lash_kernel_lib::register_numbers(registry).map_err(|error| error.to_string())?;
     lash_kernel_lib::register_text_json(registry).map_err(|error| error.to_string())?;
     lash_kernel_vm::register_machine_functions(registry).map_err(|error| error.to_string())?;
-    lash_kernel_lib::register_collections(registry).map_err(|error| error.to_string())?;
     Ok(())
 }
 
-/// Registers lash's extensions: ECMAScript regular expressions and dates,
-/// and WHATWG URLs, which the TypeScript dialect's helpers call.
+/// Registers the regular-expression extension. Date and URL definitions
+/// are supplied separately by the release build.
 #[cfg(feature = "dialect-typescript")]
 pub(crate) fn register_extensions(registry: &mut FunctionRegistry) -> Result<(), String> {
     lash_ext_regex_ecma::register(
@@ -36,8 +36,6 @@ pub(crate) fn register_extensions(registry: &mut FunctionRegistry) -> Result<(),
         &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
     )
     .map_err(|error| error.to_string())?;
-    lash_ext_date_ecma::register(registry).map_err(|error| error.to_string())?;
-    lash_ext_url_whatwg::register(registry).map_err(|error| error.to_string())?;
     Ok(())
 }
 

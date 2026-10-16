@@ -80,12 +80,20 @@ fn main() -> Result<(), BuildError> {
             );
         }
     }
+    let mut kernel = FunctionRegistry::new();
+    library::register_kernel_base(&mut kernel)?;
+    let basis = kernel.clone();
+    lash_kernel_lib::register_collections(&mut kernel)?;
+    write_kernel_set(&out, &kernel)?;
+    write_functions(&out.join("kernel_collections.bin"), &basis, &kernel)?;
     #[cfg(feature = "dialect-typescript")]
     {
-        let mut registry = FunctionRegistry::new();
-        library::register_kernel(&mut registry)?;
-        write_kernel_set(&out, &registry)?;
+        let mut registry = kernel.clone();
         library::register_extensions(&mut registry)?;
+        let basis = registry.clone();
+        lash_ext_date_ecma::register(&mut registry)?;
+        lash_ext_url_whatwg::register(&mut registry)?;
+        write_functions(&out.join("typescript_extensions.bin"), &basis, &registry)?;
         dialect(
             &out,
             declared::TYPESCRIPT,
@@ -96,13 +104,10 @@ fn main() -> Result<(), BuildError> {
     }
     #[cfg(feature = "dialect-python")]
     {
-        let mut registry = FunctionRegistry::new();
-        library::register_kernel(&mut registry)?;
-        write_kernel_set(&out, &registry)?;
         dialect(
             &out,
             declared::PYTHON,
-            registry,
+            kernel,
             |library| Ok(lash_dialect_python::define_helpers(library)?),
             library::implement_python,
         )?;
@@ -228,5 +233,28 @@ fn write_kernel_set(out: &std::path::Path, registry: &FunctionRegistry) -> Resul
         out.join("kernel_helpers.rs"),
         sets::kernel_source(registry)?,
     )?;
+    Ok(())
+}
+
+/// Reuses the release's dependency order and the helper boot token form.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the build writes its OUT_DIR artifacts"
+)]
+fn write_functions(
+    path: &std::path::Path,
+    basis: &FunctionRegistry,
+    registry: &FunctionRegistry,
+) -> Result<(), BuildError> {
+    let ordered = release::freeze("build", 0, None, registry, &Default::default());
+    let (base, definitions): (Vec<_>, Vec<_>) = ordered
+        .functions
+        .into_iter()
+        .partition(|function| basis.get(&function.function).is_some());
+    let mut checked = FunctionRegistry::declarations();
+    checked.validate_functions(base.into_iter().map(|f| f.definition).collect())?;
+    let validated =
+        checked.validate_functions(definitions.into_iter().map(|f| f.definition).collect())?;
+    std::fs::write(path, validated.to_tokens())?;
     Ok(())
 }
