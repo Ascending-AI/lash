@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
-use lash_kernel_doc::{Name, Param, RecordType, RecordTypeField, Signature, Type};
+use lash_kernel_doc::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
 
 use crate::DiagnosticCode;
 
@@ -36,6 +36,41 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
         .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"))
         .document
         .entries
+}
+
+/// FIG-6507: a list-valued tool result admits as an array callback receiver.
+#[test]
+fn filtering_records_then_mapping_the_result_admits() {
+    let mut effects = super::machine::effects();
+    effects
+        .get_mut(&EffectName::new("echo").unwrap())
+        .unwrap()
+        .result = Type::List(Box::new(Type::Any));
+    let environment = Environment {
+        library: super::library(),
+        effects: &effects,
+        controls: super::controls(),
+        tool_roots: &BTreeSet::new(),
+    };
+    let lowered = crate::lower(
+        r#"
+export async function unread_subjects() {
+  const emails = await echo(null);
+  const unread = emails.filter((email) => email.unread);
+  const subjects = unread.map((email) => email.subject);
+  return subjects;
+}
+"#,
+        &environment,
+        Mode::Module,
+    )
+    .unwrap();
+    lash_kernel_check::derive(&lowered.document, super::library()).unwrap_or_else(|error| {
+        panic!(
+            "{error}\n{}",
+            lash_kernel_doc::print_document(&lowered.document)
+        );
+    });
 }
 
 fn refusal(source: &str) -> DiagnosticCode {

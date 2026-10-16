@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use lash_kernel_doc::Name;
+use lash_kernel_doc::{EffectName, Name, Signature};
 
 use super::{FRESH_LIST_METHODS, Ty, believed, binary_result, unary_result};
 use crate::adapter::{
@@ -29,6 +29,20 @@ use crate::adapter::{
 /// and believes nothing. Types only widen, three steps at most each, so
 /// real sources settle in a handful of rounds.
 const MAX_ROUNDS: usize = 32;
+
+/// A tool call's static dotted spelling. Shadowed roots are excluded from
+/// `effect_results`, conservatively across every scope in the source.
+fn effect_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Member {
+            object,
+            property: MemberProperty::Field(field),
+            ..
+        } => Some(format!("{}.{field}", effect_path(object)?)),
+        _ => None,
+    }
+}
 
 /// One declaration of a name, or one assignment to it.
 enum Source<'a> {
@@ -87,6 +101,8 @@ pub(crate) struct Facts {
     aliases: BTreeMap<String, Ty>,
     numeric_functions: HashSet<String>,
     direct_calls: HashSet<String>,
+    /// Declared results of tools whose root no source or session binding shadows.
+    effect_results: BTreeMap<String, Ty>,
 }
 
 impl Facts {
@@ -96,11 +112,22 @@ impl Facts {
         program: &Program,
         session: &BTreeSet<Name>,
         terminal: &BTreeSet<String>,
+        effects: &BTreeMap<EffectName, Signature>,
     ) -> Self {
         let mut collector = Collector::default();
         collector.statements(&program.statements);
         let aliases = resolve_aliases(&collector.aliases, &program.type_parameters);
         let mut facts = Self {
+            effect_results: effects
+                .iter()
+                .filter(|(name, _)| {
+                    let root = name.as_str().split('.').next().unwrap_or_default();
+                    !collector.entries.contains_key(root) && !session.contains(&Name::new(root))
+                })
+                .map(|(name, signature)| {
+                    (name.as_str().to_string(), Ty::decoded(&signature.result))
+                })
+                .collect(),
             direct_calls: collector
                 .direct_calls
                 .iter()
@@ -328,11 +355,16 @@ impl Facts {
             }
             Expr::Array(_) => Ty::Array,
             Expr::Object(_) => Ty::Object,
+            Expr::Await { value, .. } => match value.as_ref() {
+                Expr::Call { callee, .. } => effect_path(callee)
+                    .and_then(|path| self.effect_results.get(&path).cloned())
+                    .unwrap_or(Ty::Unknown),
+                _ => Ty::Unknown,
+            },
             Expr::RegExp { .. }
             | Expr::This
             | Expr::New { .. }
             | Expr::OptionalChain { .. }
-            | Expr::Await { .. }
             | Expr::LoneSurrogateString => Ty::Unknown,
         }
     }
