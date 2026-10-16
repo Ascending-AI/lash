@@ -37,14 +37,17 @@ target runs all of them:
 | `kernel-workflow-view` | kernel edit `view::WorkflowView` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
 
 The runtime registers and validates the process-event payload schemas. The
-three kernel documents are the stored forms of `lash-kernel-doc`
+three kernel documents are the typed readable/editable JSON forms of `lash-kernel-doc`
 ([kernel semantics](../../docs/kernel/semantics.md), `K-DOC-004`), and the
 kernel canvas and extraction documents are the data of `lash-kernel-edit` (`CANVAS-CLOSED`, `EXTRACT-REACHABLE`);
 the authoring operation is Lash-owned request data embedded in host envelopes,
 and the workflow view is the read a host edits against (`lash::workflow::view`). A parked
 run has no JSON document: it is the persistent heap's checkpoint pages
 ([kernel design](../../docs/kernel/design.md), section 6). These
-documents describe their owners' stored or projection contracts. Lash
+documents describe their owners' readable or projection contracts.
+The default runnable host value is opaque `DocumentBytes`, tagged with Lash's
+token grammar version and its Lash-issued id; JSON and generated TypeScript
+are only for reading and editing. See the [host blob format note](../../docs/kernel/document-bytes.md). Lash
 ships no engine wire protocol; hosts own transport DTOs and compatibility
 ([ADR 0136](../../docs/adr/0136-hosts-own-their-wire-contracts.md)).
 

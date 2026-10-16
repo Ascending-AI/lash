@@ -1,3 +1,6 @@
+//! Read/edit seam: typed checking and graph inspection; hosts retain runnable
+//! documents as `lash_kernel_doc::DocumentBytes`.
+//!
 //! A document as a host reads it: the document, the graph the checker
 //! derived from it, where it is entered and the library declarations it was
 //! linked against, held together so none of them can be paired with
@@ -200,6 +203,8 @@ pub enum WorkflowDocumentError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WorkflowAdmissionRefusal {
+    /// The opaque host blob failed receipt validation. Nothing was admitted.
+    Bytes(lash_kernel_doc::DocumentBytesRefusal),
     /// The checker refused the document, naming every fault at its site:
     /// a missing effect, an effect whose signature does not serve, a
     /// function identity the environment does not hold, an unbound
@@ -223,6 +228,7 @@ impl WorkflowAdmissionRefusal {
     /// For `Document`, inspect each nested `RefusalReason::code()`; multiple errors retain their detail.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Bytes(_) => "bytes",
             Self::Document(_) => "document",
             Self::EntryEffects(_) => "entry_effects",
             Self::NoSuchEntry { .. } => "no_such_entry",
@@ -235,6 +241,7 @@ impl WorkflowAdmissionRefusal {
 impl std::fmt::Display for WorkflowAdmissionRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Bytes(refusal) => write!(f, "{refusal}"),
             Self::Document(refusal) => write!(f, "{refusal}"),
             Self::EntryEffects(refusal) => write!(f, "{refusal}"),
             Self::NoSuchEntry { entry } => write!(f, "the document lists no entry `{entry}`"),

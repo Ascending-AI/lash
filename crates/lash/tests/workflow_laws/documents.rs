@@ -98,7 +98,13 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
     let pin = lash::process::HostArtifactPin::mint();
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &entry, &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &entry,
+                &environment,
+                None,
+            )
             .await
             .expect("the publication answers"),
     );
@@ -127,7 +133,13 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
     .expect("the marker parses");
     let marker = published(
         artifacts
-            .publish_workflow(&pin, &marker, &Name::new("marker"), &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(marker.clone()),
+                &Name::new("marker"),
+                &environment,
+                None,
+            )
             .await
             .expect("the marker publishes"),
     );
@@ -135,7 +147,7 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     while matches!(
         artifacts
-            .execution_document(marker.document.reference())
+            .execution_document(&marker.reference)
             .await
             .expect("the marker reads"),
         WorkflowDocumentRead::Read(_)
@@ -178,7 +190,7 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
     );
     let WorkflowDocumentRead::Read(read) = reader
         .host_artifacts()
-        .execution_document(publication.document.reference())
+        .execution_document(&publication.reference)
         .await
         .expect("the execution document reads")
     else {
@@ -233,7 +245,13 @@ async fn an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_cor
     else {
         panic!("the source imports");
     };
-    let document = imported.document().clone();
+    let document = imported.to_document().expect("explicit typed import read");
+    let imported = lash::workflow::WorkflowDocument::derive(
+        document.clone(),
+        lash::workflow::WorkflowDocumentEntry::Main,
+        checked.functions(),
+    )
+    .expect("import view");
     assert!(
         !document.manifest.functions.is_empty(),
         "the import uses helpers"
@@ -316,7 +334,7 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
             else {
                 panic!("the source imports: {source}");
             };
-            document.document().clone()
+            document.to_document().expect("explicit typed import read")
         }
     };
     let document =
@@ -346,7 +364,7 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
             artifacts
                 .publish_workflow(
                     &pin,
-                    &document,
+                    &lash::workflow::document::DocumentBytes::from(document.clone()),
                     &entry,
                     &environment,
                     Some((&map, "other source"))
@@ -361,7 +379,7 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
             artifacts
                 .publish_workflow(
                     &pin,
-                    &other,
+                    &lash::workflow::document::DocumentBytes::from(other.clone()),
                     &entry,
                     &environment,
                     Some((&map, &printed.source))
@@ -383,7 +401,7 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
             artifacts
                 .publish_workflow(
                     &pin,
-                    &document,
+                    &lash::workflow::document::DocumentBytes::from(document.clone()),
                     &entry,
                     &environment,
                     Some((&stray, &printed.source))
@@ -416,7 +434,7 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
         artifacts
             .publish_workflow(
                 &pin,
-                &document,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &entry,
                 &environment,
                 Some((&map, &printed.source)),
@@ -436,5 +454,134 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
         }
     );
     artifacts.release(pin).await.expect("the pin is released");
+    core.shutdown().await.expect("shutdown");
+}
+
+/// HOST-DOC-BYTES: retained host documents run without touching JSON.
+#[tokio::test]
+async fn a_host_runs_opaque_document_bytes_without_json() {
+    use lash::workflow::document::{DocumentBytes, document_work};
+    let core = super::core().await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let env = environment(false);
+    let typed = lash::workflow::document::parse_document(
+        "kernel 1\nnumbers float\nentry answer() -> Any\nfn answer() { return 42 }\nmain { finish null }\n",
+    ).expect("typed document");
+    let bytes = DocumentBytes::from(typed);
+    let received = DocumentBytes::from_parts(
+        bytes.grammar_version(),
+        bytes.id(),
+        bytes.as_bytes().to_vec(),
+    );
+    let _ = document_work::take();
+    let publication = published(
+        artifacts
+            .publish_workflow(&pin, &received, &Name::new("answer"), &env, None)
+            .await
+            .expect("publish bytes"),
+    );
+    assert_eq!(publication.document, bytes);
+    let env_ref = artifacts
+        .publish_process_env(&pin, &linking(&env, &[]))
+        .await
+        .expect("publish env");
+    let process = start_with(
+        &core,
+        &env_ref,
+        &publication.definition,
+        "opaque-document",
+        Default::default(),
+    )
+    .await;
+    assert_eq!(
+        super::finished(&core, &process).await,
+        serde_json::json!(42)
+    );
+    let work = document_work::take();
+    assert_eq!((work.json_encodes, work.json_decodes), (0, 0));
+    core.shutdown().await.expect("shutdown");
+}
+
+/// HOST-DOC-JSON: editing through typed JSON never contributes to identity.
+#[test]
+fn typed_json_round_trip_preserves_the_binary_document_id() {
+    use lash::workflow::document::DocumentBytes;
+    let document =
+        lash::workflow::document::parse_document("kernel 1\nnumbers float\nmain { finish 42 }")
+            .expect("document");
+    let bytes = DocumentBytes::from(document);
+    let json = bytes
+        .to_document()
+        .expect("read bytes")
+        .to_json()
+        .expect("readable JSON");
+    let edited = Document::from_json(&json).expect("typed JSON");
+    assert_eq!(DocumentBytes::from(edited).id(), bytes.id());
+}
+
+/// HOST-DOC-REFUSAL: bad versions, malformed tokens and identity tampering
+/// are refused before publication, retaining their typed causes.
+#[tokio::test]
+async fn host_document_bytes_refuse_tampering_and_wrong_grammar_typed() {
+    use lash::workflow::document::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
+    use lash::workflow::{WorkflowAdmissionRefusal, WorkflowPublish};
+    let core = super::core().await;
+    let artifacts = core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    let env = environment(false);
+    let bytes = DocumentBytes::from(Document::new(
+        lash::workflow::document::NumberPolicy::BySpelling,
+        Vec::new(),
+    ));
+    let other = DocumentBytes::from(
+        lash::workflow::document::parse_document("kernel 1\nnumbers float\nmain { finish 1 }")
+            .expect("other document"),
+    );
+    let cases = [
+        (
+            DocumentBytes::from_parts(DOCUMENT_GRAMMAR_VERSION + 1, bytes.id(), Vec::new()),
+            "version",
+        ),
+        (
+            DocumentBytes::from_parts(
+                bytes.grammar_version(),
+                other.id(),
+                bytes.as_bytes().to_vec(),
+            ),
+            "identity",
+        ),
+        (
+            DocumentBytes::from_parts(bytes.grammar_version(), bytes.id(), vec![0xff]),
+            "tokens",
+        ),
+    ];
+    // HOST-DOC-LIMIT: a host can narrow token recursion before reading.
+    let limits =
+        lash::persistence::KernelDataLimits::new(64, 352, 0, 512, 128).expect("narrow limits");
+    assert!(matches!(
+        other.decode(limits),
+        Err(DocumentBytesRefusal::Tokens(
+            lash::workflow::document::graph_tokens::TokenError::Limit { .. }
+        ))
+    ));
+    for (bad, expected) in cases {
+        let WorkflowPublish::Refused(WorkflowAdmissionRefusal::Bytes(refusal)) = artifacts
+            .publish_workflow(&pin, &bad, &Name::new("missing"), &env, None)
+            .await
+            .expect("typed answer")
+        else {
+            panic!("bytes must be refused before entry admission")
+        };
+        match (expected, refusal) {
+            ("version", DocumentBytesRefusal::GrammarVersion { found, supported }) => {
+                assert_eq!(found, DOCUMENT_GRAMMAR_VERSION + 1);
+                assert_eq!(supported, DOCUMENT_GRAMMAR_VERSION);
+            }
+            ("identity", DocumentBytesRefusal::Identity { .. }) => {}
+            ("tokens", DocumentBytesRefusal::Tokens(_)) => {}
+            other => panic!("wrong typed refusal: {other:?}"),
+        }
+    }
     core.shutdown().await.expect("shutdown");
 }

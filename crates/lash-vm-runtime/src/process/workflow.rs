@@ -16,7 +16,8 @@ use std::sync::Arc;
 use lash_kernel_check::Environment;
 pub use lash_kernel_check::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError};
 use lash_kernel_doc::{
-    Document, FunctionRegistry, Name, Signature, WorkflowDocumentEntry, WorkflowDocumentRef,
+    FunctionRegistry, IdentifiedDocument, Name, Signature, WorkflowDocumentEntry,
+    WorkflowDocumentRef,
 };
 
 use super::{
@@ -77,11 +78,11 @@ pub struct WorkflowEnvironmentRequest {
     pub tool_catalog: Arc<lash_core::ToolCatalog>,
 }
 
-/// A host's document, to be admitted as the definition of one of its
-/// entries.
+/// Internal integrator admission seam: the facade has validated the host's
+/// opaque bytes once; admission shares that decoded value with publication.
 #[derive(Clone, Debug)]
 pub struct WorkflowAdmissionRequest {
-    pub document: Document,
+    pub document: IdentifiedDocument,
     /// The entry the definition starts.
     pub entry: Name,
     /// The catalog a process of the definition would run under: the
@@ -325,11 +326,12 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
                 });
             }
         };
+        let identified = request.document;
         let admission = {
             let mut environment = Environment::new(self.engine.functions.as_ref());
             environment.effects = boundary.signatures();
             WorkflowDocument::admit(
-                request.document,
+                identified.document().clone(),
                 WorkflowDocumentEntry::Entry {
                     function: request.entry.clone(),
                 },
@@ -370,11 +372,7 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         .map_err(|refusal| store_fault(refusal.into()))?;
         self.engine
             .documents
-            .publish(
-                claim,
-                &lash_kernel_doc::IdentifiedDocument::new(document.document().clone()),
-                &declarations,
-            )
+            .publish(claim, &identified, &declarations)
             .await
             .map_err(store_fault)?;
         Ok(lash_core::ProcessDocument::new(

@@ -272,7 +272,10 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
     let lash::workflow::WorkflowImport::Read { document: imported } = imported else {
         panic!("full identities must bypass name resolution: {imported:?}");
     };
-    exact(&document, imported.document());
+    exact(
+        &document,
+        &imported.to_document().expect("explicit typed read"),
+    );
     core.shutdown().await.expect("shutdown");
 }
 

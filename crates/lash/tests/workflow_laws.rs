@@ -310,6 +310,18 @@ fn published(publish: WorkflowPublish) -> WorkflowPublication {
     }
 }
 
+fn publication_document(publication: &WorkflowPublication) -> lash::workflow::WorkflowDocument {
+    lash::workflow::WorkflowDocument::derive(
+        publication
+            .document
+            .to_document()
+            .expect("explicit typed read"),
+        publication.reference.entry.clone(),
+        lash::vm::standard_functions().expect("library").as_ref(),
+    )
+    .expect("publication view")
+}
+
 // The kernel-text example in `lash::workflow::document`'s module docs is
 // `src/workflow/document_example.rs`, included into the rustdoc verbatim;
 // this test is its compile-and-run proof.
@@ -365,7 +377,13 @@ main { finish null }
         .insert(effect.clone(), checked.effects()[&effect].clone());
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("list"), &list_env, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &Name::new("list"),
+                &list_env,
+                None,
+            )
             .await
             .expect("publish list"),
     );
@@ -453,7 +471,13 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
     }
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("supervisor"), &candidate, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &Name::new("supervisor"),
+                &candidate,
+                None,
+            )
             .await
             .expect("publish"),
     );
@@ -644,13 +668,22 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     .expect("the document parses");
     let first = published(
         artifacts
-            .publish_workflow(&pin, &document, &entry, &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &entry,
+                &environment,
+                None,
+            )
             .await
             .expect("the publication answers"),
     );
-    assert_eq!(first.document.document(), &document);
     assert_eq!(
-        first.document.reference().entry,
+        &first.document.to_document().expect("explicit typed read"),
+        &document
+    );
+    assert_eq!(
+        first.reference.entry,
         WorkflowDocumentEntry::Entry {
             function: entry.clone()
         }
@@ -664,7 +697,10 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
         panic!("a published workflow has a document");
     };
     assert_eq!(inspection.definition, first.definition);
-    assert_eq!(inspection.document, first.document);
+    assert_eq!(
+        inspection.document.document(),
+        &first.document.to_document().expect("read bytes")
+    );
 
     // The view names the one wait of the body inside both loops.
     let graph = inspection.document.graph();
@@ -697,15 +733,21 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
             &checked.checker(),
         )
         .expect("the edit applies");
-    assert_ne!(applied.admitted.identity, first.document.identity());
+    assert_ne!(applied.admitted.identity, first.document.id());
     let second = published(
         artifacts
-            .publish_workflow(&pin, draft.document(), &entry, &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
+                &entry,
+                &environment,
+                None,
+            )
             .await
             .expect("the publication answers"),
     );
     assert_ne!(second.definition.id, first.definition.id);
-    assert_eq!(second.document.identity(), applied.admitted.identity);
+    assert_eq!(second.document.id(), applied.admitted.identity);
     let survivor = applied
         .correspondence
         .survivor(&sleep.site)
@@ -731,7 +773,10 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     else {
         panic!("a kernel process has a document");
     };
-    assert_eq!(kept_read.document, first.document);
+    assert_eq!(
+        kept_read.document.document(),
+        &first.document.to_document().expect("read bytes")
+    );
     assert_eq!(kept_read.definition, first.definition);
 }
 
@@ -765,11 +810,18 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         .insert(echo.clone(), checked.effects()[&echo].clone());
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("guarded"), &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &Name::new("guarded"),
+                &environment,
+                None,
+            )
             .await
             .expect("publication"),
     );
-    let sites = publication.document.graph().execution_sites();
+    let publication_view = publication_document(&publication);
+    let sites = publication_view.graph().execution_sites();
     let sleep = sites
         .iter()
         .find(|site| site.kind == lash::workflow::graph::SiteKind::Sleep)
@@ -932,11 +984,18 @@ main { finish null }
     .expect("pure document");
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("computed"), &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &Name::new("computed"),
+                &environment,
+                None,
+            )
             .await
             .expect("publication"),
     );
-    let [call] = publication.document.graph().execution_sites() else {
+    let publication_view = publication_document(&publication);
+    let [call] = publication_view.graph().execution_sites() else {
         panic!("one call site");
     };
     let env_ref = artifacts
@@ -970,7 +1029,7 @@ main { finish null }
         // observations, before the later committed terminal settles them.
         if let ProcessObservationEventPayload::LanguageExecution(observation) = &event.payload {
             overlay
-                .observe(publication.document.reference(), &event.payload)
+                .observe(&publication.reference, &event.payload)
                 .expect("same execution");
             if let lash_trace::TraceLanguageExecutionPayload::Node {
                 at,
@@ -1032,12 +1091,18 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     let entry = Name::new("fan");
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &entry, &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &entry,
+                &environment,
+                None,
+            )
             .await
             .expect("the publication answers"),
     );
-    let performs: Vec<_> = publication
-        .document
+    let publication_view = publication_document(&publication);
+    let performs: Vec<_> = publication_view
         .graph()
         .execution_sites()
         .iter()
@@ -1066,7 +1131,7 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
 
     let mut overlay = WorkflowExecutionOverlayAccumulator::default();
     overlay.set_document(lash::workflow::WorkflowOverlayDocument::of(
-        &publication.document,
+        &publication_document(&publication),
     ));
     loop {
         let item = tokio::time::timeout(std::time::Duration::from_secs(60), feed.next())
@@ -1165,7 +1230,7 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
         artifacts
             .publish_workflow(
                 &pin,
-                &document,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("supervisor"),
                 &environment,
                 None,
@@ -1270,7 +1335,13 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     let document = lash::workflow::document::parse_document(GUARDED).expect("the document parses");
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("guarded"), &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &Name::new("guarded"),
+                &environment,
+                None,
+            )
             .await
             .expect("the publication answers"),
     );
@@ -1309,7 +1380,7 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
     else {
         panic!("a kernel process has a document");
     };
-    assert_eq!(read.document.identity(), publication.document.identity());
+    assert_eq!(read.document.identity(), publication.document.id());
 }
 
 /// SQLite file stores under a test clock, opened anew by each node of a
@@ -1360,7 +1431,13 @@ async fn a_sealed_env_naming_a_retired_component_builds_without_it_and_resumes()
     let document = lash::workflow::document::parse_document(GUARDED).expect("the document parses");
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("guarded"), &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &Name::new("guarded"),
+                &environment,
+                None,
+            )
             .await
             .expect("the publication answers"),
     );
@@ -1456,7 +1533,13 @@ async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_r
     let document = lash::workflow::document::parse_document(ECHOED).expect("the document parses");
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("echoed"), &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &Name::new("echoed"),
+                &environment,
+                None,
+            )
             .await
             .expect("the publication answers"),
     );
@@ -1563,11 +1646,11 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
             panic!("the module imports: {imported:?}\n{source}");
         };
         assert_eq!(text, source);
+        let document = document.to_document().expect("explicit typed import read");
         source_map
-            .validate(document.document(), &text)
+            .validate(&document, &text)
             .expect("the import maps its source");
         document
-            .document()
             .entries
             .keys()
             .map(|name| name.as_str().to_owned())

@@ -1,3 +1,6 @@
+//! Read/edit seam: drafts and transactions use typed documents; convert a
+//! completed edit to `lash_kernel_doc::DocumentBytes` for host retention.
+//!
 //! Closed canvas authoring and atomic entry extraction.
 //! Hosts apply base-addressed [`authoring::Operation`] batches through [`Draft`].
 //! Source import owns changes outside that vocabulary. Tree writes are private.

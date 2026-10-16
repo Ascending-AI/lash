@@ -1,3 +1,5 @@
+//! Run paths retain workflow document ids; this explicit graph-read path
+//! asks Lash for typed inspection data only when a view needs it.
 //! The workbench's execution graphs: a bounded cache of execution overlays,
 //! fed from lash's session and process feeds and drawn over the workflow
 //! document each execution names.

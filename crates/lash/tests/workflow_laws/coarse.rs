@@ -464,7 +464,13 @@ async fn launch(
     let env = linking(&environment(false), &[]);
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("flow"), &env, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(document.clone()),
+                &Name::new("flow"),
+                &env,
+                None,
+            )
             .await
             .unwrap(),
     );
@@ -475,6 +481,7 @@ async fn launch(
         .unwrap()
         .observing(lash::process::Observe::Counts)
         .into_engine_settings();
+    let document = super::publication_document(&publication);
     let process = core
         .processes()
         .start(
@@ -492,7 +499,7 @@ async fn launch(
         .await
         .unwrap()
         .process_id;
-    (process, publication.document)
+    (process, document)
 }
 async fn counts(core: &lash::LashCore, process: &lash::ProcessId) -> view::RanCounts {
     let snapshot = core.processes().observe(process).snapshot().await.unwrap();

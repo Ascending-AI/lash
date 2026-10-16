@@ -67,7 +67,9 @@ pub(crate) async fn import(
         .await
         .map_err(|error| ErrorResponse::invalid("source_import", error))?;
     match imported {
-        WorkflowImport::Imported { document, .. } => Ok(document.document().clone()),
+        WorkflowImport::Imported { document, .. } => document
+            .to_document()
+            .map_err(|error| ErrorResponse::invalid("document_bytes", error)),
         WorkflowImport::Refused(diagnostics) => Err(ErrorResponse::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "source_refused",

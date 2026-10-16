@@ -1,3 +1,6 @@
+//! Library authoring/linking seam: typed function definitions are editor and
+//! registry data, not retained runnable host documents (`DocumentBytes`).
+//!
 //! Library-function definitions (`K-LIB-001`).
 
 use std::collections::{BTreeMap, BTreeSet};

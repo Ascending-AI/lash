@@ -1436,6 +1436,8 @@ pub mod process_controls {
 /// (its front end, printer and helper functions), the library a front end
 /// names functions through, and the diagnostics both answer.
 #[cfg(feature = "codemode")]
+/// Integrator/read/edit seam: frontend operations expose typed documents;
+/// retain runnable host artifacts as `workflow::document::DocumentBytes`.
 pub mod dialect {
     pub use lash_kernel_dialect::*;
 }

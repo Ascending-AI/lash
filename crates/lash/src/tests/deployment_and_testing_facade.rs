@@ -109,7 +109,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
         .host_artifacts()
         .publish_workflow(
             &pin,
-            &document,
+            &crate::workflow::document::DocumentBytes::from(document.clone()),
             &crate::workflow::document::Name::new("handler"),
             &environment,
             None,
@@ -286,7 +286,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
         .host_artifacts()
         .publish_workflow(
             &pin,
-            &document,
+            &crate::workflow::document::DocumentBytes::from(document.clone()),
             &crate::workflow::document::Name::new("handler"),
             &environment,
             None,
@@ -362,7 +362,7 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
                 .await
                 .unwrap_err(),
             "execution_document" => artifacts
-                .execution_document(publication.document.reference())
+                .execution_document(&publication.reference)
                 .await
                 .unwrap_err(),
             _ => unreachable!(),

@@ -79,8 +79,11 @@
 //! # Publishing
 //!
 //! [`HostArtifacts::publish_workflow`](crate::process::HostArtifacts::publish_workflow)
-//! admits a document as a definition of one of its entries. It takes the
-//! document, not an editor's draft: publishing needs no editor. The
+//! admits opaque [`document::DocumentBytes`] as a definition of one entry.
+//! Import returns these bytes; a host retaining and running them needs no
+//! typed tree or JSON. Receipt validates grammar, tokens, limits and id.
+//! Reading/editing converts explicitly with `DocumentBytes::to_document`;
+//! turn a completed edit back into bytes with `DocumentBytes::from`. The
 //! checker admits the document against the environment a process of it
 //! would run under; lash stores the document under its identity, with the
 //! declaration of every library function it lists under that function's
@@ -88,7 +91,7 @@
 //! pin, so a process that starts another entry by function reference finds
 //! it. Every later read links the document against those retained
 //! declarations, never against the reading build's library. A
-//! [`WorkflowPublication`] names the definition, the admitted document and
+//! [`WorkflowPublication`] names the definition, opaque bytes, the entry reference and
 //! the id of the source map published with it, if any. A refused document
 //! ([`WorkflowAdmissionRefusal`]) or map publishes nothing.
 //!
@@ -193,9 +196,10 @@ pub mod document {
     // An explicit vocabulary keeps those names out of this module.
     pub use lash_kernel_doc::{
         ActExpr, ActKind, Action, Atom, Block, Bytes, Callee, Catch, CheckedDeclarations, Closure,
-        Correspondence, Datum, DeclarationRefusal as DocumentDeclarationRefusal, DecodeError,
-        DecodeMismatch, Decoder, Document, DocumentId, EffectIdentity, EffectName, Element,
-        EncodeError, ErrorDatum, Expr, FIRST_NATIVE_VERSION, FROZEN_DATUM, FROZEN_JSON,
+        Correspondence, DOCUMENT_GRAMMAR_VERSION, Datum,
+        DeclarationRefusal as DocumentDeclarationRefusal, DecodeError, DecodeMismatch, Decoder,
+        Document, DocumentBytes, DocumentBytesRefusal, DocumentId, EffectIdentity, EffectName,
+        Element, EncodeError, ErrorDatum, Expr, FIRST_NATIVE_VERSION, FROZEN_DATUM, FROZEN_JSON,
         FROZEN_TOOL_VALUE, Float, Formula, FrozenDatum, Function, FunctionBody, FunctionCatalog,
         FunctionDeclarations, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry,
         Guard, GuardExceeded, Handle, IdentifiedDocument, Identity, Implementation, Integer,
@@ -209,7 +213,7 @@ pub mod document {
         SourceMapId, SourceMapRefusal, SourceSite, Span, SpawnIdentity, StatementForm,
         StatementRuleViolation, Stmt, Survivor, TaskId, TaskIdentity, Timestamp, TryStmt, Type,
         Unit, ValidatedFunctions, Value, ValueKind, WorkCounter, check_declarations,
-        check_statement, core_support, graph_tokens, heap, parse_definition,
+        check_statement, core_support, document_work, graph_tokens, heap, parse_definition,
         parse_definition_with_limits, parse_document, parse_document_with_limits, print_definition,
         print_document, required_declarations, validate_definition,
         validate_definition_with_limits, validate_document, validate_document_with_limits,
@@ -319,8 +323,10 @@ pub struct WorkflowInspection {
 pub struct WorkflowPublication {
     /// The content-derived id and the signature of the entry.
     pub definition: ProcessDefinition,
-    /// The admitted document, entered at the entry the definition starts.
-    pub document: WorkflowDocument,
+    /// The opaque document to retain or publish again.
+    pub document: document::DocumentBytes,
+    /// The selected entry, independent of the opaque body.
+    pub reference: WorkflowDocumentRef,
     /// The id of the source map published with it, when one was: the host
     /// keeps it beside the definition id, and reads the map and its source
     /// back with

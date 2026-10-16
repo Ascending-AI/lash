@@ -30,6 +30,7 @@ mod decode;
 pub use decode::{DecodeMismatch, Decoder};
 mod document;
 pub use data_limits::KernelDataLimits;
+mod document_bytes;
 mod function;
 mod graph_codec;
 /// The canonical binary token grammar of checkpoint graph node bodies: a
@@ -41,6 +42,7 @@ pub mod graph_tokens;
 /// heap cutover moves it to the crate root.
 pub mod heap;
 mod identified;
+pub use document_bytes::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesRefusal};
 pub use identified::{IdentifiedDocument, document_work};
 mod identity;
 mod observation;

@@ -479,7 +479,7 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
         .host_artifacts()
         .publish_workflow(
             &host.pin,
-            draft.document(),
+            &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
             &request.entry,
             &environment().map_err(api_error)?,
             None,
@@ -487,16 +487,27 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
         .await
         .map_err(api_error)?;
     Ok(Json(match publish {
-        WorkflowPublish::Published(publication) => json!({
-            "published": true,
-            "definition": definition_json(&publication.definition).map_err(api_error)?,
-            "workflow": document_json(&publication.document).map_err(api_error)?,
-            // Lash publishes documents, not drafts: where each node of the
-            // document the draft was opened on sits now is this host's own
-            // read of its draft.
-            "correspondence":
-                serde_json::to_value(draft.correspondence_since_open()).map_err(api_error)?,
-        }),
+        WorkflowPublish::Published(publication) => {
+            let WorkflowRead::Inspected(inspection) = host
+                .core
+                .host_artifacts()
+                .definition_graph(&publication.definition.id)
+                .await
+                .map_err(api_error)?
+            else {
+                return Err(api_error("published workflow cannot be inspected"));
+            };
+            json!({
+                "published": true,
+                "definition": definition_json(&publication.definition).map_err(api_error)?,
+                "workflow": document_json(&inspection.document).map_err(api_error)?,
+                // Lash publishes documents, not drafts: where each node of the
+                // document the draft was opened on sits now is this host's own
+                // read of its draft.
+                "correspondence":
+                    serde_json::to_value(draft.correspondence_since_open()).map_err(api_error)?,
+            })
+        }
         WorkflowPublish::Refused(refusal) => json!({
             "published": false,
             "refused": refusal.to_string(),

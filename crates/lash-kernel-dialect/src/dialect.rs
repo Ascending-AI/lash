@@ -1,3 +1,6 @@
+//! Integrator seam: frontend lowering and saved functions use typed trees;
+//! hosts retain and publish runnable documents as `DocumentBytes`.
+//!
 //! The three parts of a dialect.
 
 use std::collections::{BTreeMap, BTreeSet};

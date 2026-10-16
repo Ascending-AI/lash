@@ -263,9 +263,9 @@ impl HostArtifacts {
     /// is read back with [`Self::import_exported_workflow`] instead.
     ///
     /// The answer carries the document, its source map and the source, for
-    /// [`Self::publish_workflow`] to keep together; the document reference
-    /// selects `main`, with every entry available for editing and
-    /// publication. Without `limits` the dialect's standard source policy
+    /// [`Self::publish_workflow`] to keep together; the opaque bytes retain
+    /// every entry, available through an explicit typed read for editing.
+    /// Select an entry when publishing. Without `limits` the dialect's standard source policy
     /// applies.
     ///
     /// The host supplies no dialect internals and links no parser: the
@@ -414,7 +414,7 @@ impl HostArtifacts {
         Ok(Ok((catalog, boundary, checked)))
     }
 
-    /// Admit `document` as the definition of its entry `entry`, and hold it
+    /// Validate opaque `document` bytes, admit their entry `entry`, and hold them
     /// under `pin`: the document, the declaration of every library function
     /// it lists, and the descriptor of every entry it lists. The answer
     /// names the one `entry` selects; the others are what a process of it
@@ -441,7 +441,7 @@ impl HostArtifacts {
     pub async fn publish_workflow(
         &self,
         pin: &HostArtifactPin,
-        document: &crate::workflow::document::Document,
+        document: &crate::workflow::document::DocumentBytes,
         entry: &crate::workflow::document::Name,
         environment: &ProcessEnv,
         source: Option<(&crate::workflow::document::SourceMap, &str)>,
@@ -456,14 +456,22 @@ impl HostArtifacts {
         else {
             return Ok(unsupported());
         };
+        let typed = match document.decode(lash_kernel_doc::KernelDataLimits::standard()) {
+            Ok(document) => document,
+            Err(refusal) => {
+                return Ok(WorkflowPublish::Refused(
+                    crate::workflow::WorkflowAdmissionRefusal::Bytes(refusal),
+                ));
+            }
+        };
         if let Some((map, text)) = source
-            && let Err(refusal) = map.validate(document, text)
+            && let Err(refusal) = map.validate_identified(&typed, text)
         {
             return Ok(WorkflowPublish::SourceMapRefused(refusal));
         }
         let claim = claim(pin)?;
         let request = lash_vm_runtime::WorkflowAdmissionRequest {
-            document: document.clone(),
+            document: typed,
             entry: entry.clone(),
             tool_catalog: self.core.process_tool_catalog(environment)?,
         };
@@ -499,7 +507,8 @@ impl HostArtifacts {
             .await?;
         Ok(WorkflowPublish::Published(Box::new(WorkflowPublication {
             definition,
-            document: admitted.document,
+            reference: admitted.document.reference().clone(),
+            document: document.clone(),
             source_map,
         })))
     }

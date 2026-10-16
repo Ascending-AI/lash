@@ -1,3 +1,6 @@
+//! Read/edit integrator seam: these source operations intentionally exchange
+//! typed documents; host retention uses `DocumentBytes`.
+//!
 //! Host-owned source operations, isolated in the service's worker pool.
 use lash_kernel_dialect::{GeneratedSourceLimits, PrintOptions, PrintedSource, SourceFormat};
 use lash_kernel_doc::Document;

@@ -11,7 +11,27 @@ parse a source language to do any of this.
 [`examples/workflow-graph-roundtrip`](../examples/workflow-graph-roundtrip/README.md)
 is a host built this way, and the code below is the shape of its backend.
 
-## The document
+## Keeping and running a document
+
+Hosts retain `lash::workflow::document::DocumentBytes` by default: opaque
+bytes, their Lash-issued `DocumentId`, and a token grammar tag. Workflow
+import returns this value, publication accepts it, and a published definition
+starts by id. No JSON encode or decode is needed to run it. Store the three
+parts verbatim; `DocumentBytes::from_parts` reassembles them, and Lash validates
+the grammar, tokens, limits and id on receipt. A typed
+`WorkflowAdmissionRefusal::Bytes(DocumentBytesRefusal)` refuses bad blobs.
+
+Use `bytes.to_document()?` only when a viewer or editor needs the typed tree,
+then `document.to_json()?` for readable JSON. After editing (including
+`Document::from_json`), `DocumentBytes::from(document)` derives the id again.
+Graph-read APIs continue to answer a typed `WorkflowDocument` explicitly.
+
+The blob is not a public durable format: a grammar change refuses old bytes
+with the found and supported versions. Keep readable JSON or source to
+re-lower when longevity across versions matters. See the
+[format note](kernel/document-bytes.md) for receipt and compatibility rules.
+
+## The typed document
 
 A `lash::workflow::document::Document` is one program. It holds a `main`
 block, the functions it declares, the entries (the declared functions a host
@@ -286,7 +306,8 @@ decides it does.
 
 Publishing admits a document as a definition of one entry. It takes the
 document, not a draft, so a host that only runs and publishes needs no
-editor; a host that edited one passes `draft.document()` and keeps its own
+editor; a host that edited one converts `draft.document().clone()` to
+`DocumentBytes` and keeps its own
 `draft.correspondence_since_open()`.
 
 ```rust,ignore
@@ -295,7 +316,7 @@ match core
     .host_artifacts()
     .publish_workflow(
         &pin,
-        draft.document(),
+        &DocumentBytes::from(draft.document().clone()),
         &Name::new("order_review"),
         &env_spec,
         Some((&source_map, &source)),   // or None
@@ -304,7 +325,8 @@ match core
 {
     WorkflowPublish::Published(publication) => {
         let definition = publication.definition;   // id and signature: what a run starts
-        let admitted = publication.document;       // the WorkflowDocument, with its graph
+        let bytes = publication.document;          // opaque DocumentBytes to retain
+        let reference = publication.reference;    // document id and selected entry
         let map = publication.source_map;          // Some(SourceMapId): keep it beside the id
     }
     WorkflowPublish::Refused(refusal) => { /* why admission refused it */ }
@@ -471,8 +493,8 @@ Both dialects implement one workflow contract (`lash::dialect::workflow`):
   `WORKFLOW_CAPTURED_MODULE_BINDING`, `WORKFLOW_UNMAPPABLE_ENTRY_ANNOTATION`
   and `WORKFLOW_ENTRY_DEFAULT`. Syntax errors keep each dialect's own codes.
 
-The imported reference selects `main`; select an entry when publishing the
-document.
+Import returns opaque `DocumentBytes`; select an entry when publishing them.
+Decode explicitly with `to_document()` when you need to inspect the entries.
 
 Printed source reads back through
 `HostArtifacts::import_exported_workflow(source, format, &base, &environment)`,
@@ -482,7 +504,7 @@ only code; the manifest, entries, helper identities and renames come from
 has no exact inverse for is a typed refusal naming the construct.
 
 `WorkflowImport::Imported { document, source_map, source }` carries the
-admitted workflow, the map from its sites to the source and that source:
+admitted opaque document bytes, the map from its sites to the source and that source:
 pass both to `publish_workflow` to keep them. Exported source read back with
 `import_exported_workflow` answers `WorkflowImport::Read { document }`, with
 no map of its own. `Refused(diagnostics)` carries front-end

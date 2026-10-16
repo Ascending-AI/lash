@@ -147,7 +147,13 @@ pub(crate) async fn publish(
         // the effects its entry calls or spawns, including called functions.
         let environment = environment.restrict(effects.keys())?;
         match artifacts
-            .publish_workflow(&pin, draft.document(), entry, &environment, None)
+            .publish_workflow(
+                &pin,
+                &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
+                entry,
+                &environment,
+                None,
+            )
             .await?
         {
             WorkflowPublish::Published(publication) => {

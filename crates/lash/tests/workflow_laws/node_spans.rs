@@ -135,7 +135,7 @@ async fn publish_nodes(
         artifacts
             .publish_workflow(
                 &pin,
-                draft.document(),
+                &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
                 &Name::new("nodes"),
                 &environment,
                 None,

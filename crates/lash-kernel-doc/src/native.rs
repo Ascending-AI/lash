@@ -1,3 +1,6 @@
+//! Integrator seam: registry definitions stay typed for library construction
+//! and linking; they are not the host document retention format.
+//!
 //! The native-function interface and the function registry (`K-LIB-005`).
 //!
 //! `lash-kernel-lib` and the `lash-ext-*` crates implement [`NativeFunction`];
