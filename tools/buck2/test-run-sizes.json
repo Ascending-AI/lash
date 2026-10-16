@@ -1,315 +1,939 @@
 {
+  "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 27176960,
+    "peak_bytes": 27176960,
+    "samples": 3
+  },
   "//crates/lash-conformance:lash-conformance__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.35,
-    "p99_peak_bytes": 28049408,
-    "peak_bytes": 28450816,
-    "samples": 197
+    "p95_cores": 0.48,
+    "p99_peak_bytes": 38014976,
+    "peak_bytes": 41402368,
+    "samples": 189
   },
   "//crates/lash-core-effect:lash-core-effect__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.08,
-    "p99_peak_bytes": 17682432,
-    "peak_bytes": 17940480,
-    "samples": 118
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13737984,
+    "peak_bytes": 13737984,
+    "samples": 110
   },
   "//crates/lash-core-execution:effect_model__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 17788928,
-    "peak_bytes": 17788928,
-    "samples": 15
+    "p95_cores": 0.94,
+    "p99_peak_bytes": 13692928,
+    "peak_bytes": 13692928,
+    "samples": 7
   },
   "//crates/lash-core-execution:lash-core-execution__unit_test": {
-    "cpu_count": 2,
-    "memory_kb": 524288,
-    "p95_cores": 1.86,
-    "p99_peak_bytes": 379867136,
-    "peak_bytes": 384438272,
-    "samples": 397
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.16,
+    "p99_peak_bytes": 25432064,
+    "peak_bytes": 25460736,
+    "samples": 125
   },
   "//crates/lash-core-execution:process_event_schema_generator__bin__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 16769024,
-    "peak_bytes": 16769024,
-    "samples": 11
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13295616,
+    "peak_bytes": 13295616,
+    "samples": 5
   },
   "//crates/lash-core-execution:store_backed__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.87,
-    "p99_peak_bytes": 151121920,
-    "peak_bytes": 151121920,
-    "samples": 51
+    "p95_cores": 1.59,
+    "p99_peak_bytes": 137543680,
+    "peak_bytes": 137543680,
+    "samples": 28
   },
   "//crates/lash-core-execution:test_batch": {
-    "cpu_count": 5,
-    "memory_kb": 1310720,
-    "p95_cores": 4.61,
-    "p99_peak_bytes": 979861504,
-    "peak_bytes": 1039060992,
-    "samples": 196
+    "cpu_count": 4,
+    "memory_kb": 262144,
+    "p95_cores": 3.28,
+    "p99_peak_bytes": 172220416,
+    "peak_bytes": 181805056,
+    "samples": 247
   },
   "//crates/lash-core-ids:lash-core-ids__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.08,
-    "p99_peak_bytes": 19644416,
-    "peak_bytes": 20238336,
-    "samples": 165
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13955072,
+    "peak_bytes": 13955072,
+    "samples": 91
   },
   "//crates/lash-core-llm:lash-core-llm__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.01,
-    "p99_peak_bytes": 22437888,
-    "peak_bytes": 22437888,
-    "samples": 56
+    "p95_cores": 1.03,
+    "p99_peak_bytes": 14200832,
+    "peak_bytes": 14659584,
+    "samples": 111
   },
   "//crates/lash-core-store:lash-core-store__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 22298624,
-    "peak_bytes": 31440896,
-    "samples": 386
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 115126272,
+    "peak_bytes": 127475712,
+    "samples": 222
   },
   "//crates/lash-core-worker:lash-core-worker__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 15155200,
-    "peak_bytes": 15155200,
-    "samples": 11
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 13729792,
+    "peak_bytes": 13729792,
+    "samples": 93
   },
   "//crates/lash-core:integration_boundary__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.02,
-    "p99_peak_bytes": 32935936,
-    "peak_bytes": 32935936,
-    "samples": 13
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13733888,
+    "peak_bytes": 13733888,
+    "samples": 7
   },
   "//crates/lash-core:lash-core__unit_test": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 524288,
-    "p95_cores": 1.49,
-    "p99_peak_bytes": 363835392,
-    "peak_bytes": 368525312,
-    "samples": 378
+    "p95_cores": 1.1,
+    "p99_peak_bytes": 250871808,
+    "peak_bytes": 268689408,
+    "samples": 225
   },
   "//crates/lash-core:panic_containment__test": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.43,
-    "p99_peak_bytes": 37109760,
-    "peak_bytes": 37109760,
-    "samples": 13
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13709312,
+    "peak_bytes": 13709312,
+    "samples": 6
   },
   "//crates/lash-core:runtime_effect__test": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.62,
-    "p99_peak_bytes": 49704960,
-    "peak_bytes": 49704960,
-    "samples": 40
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13705216,
+    "peak_bytes": 13705216,
+    "samples": 7
   },
   "//crates/lash-core:runtime_lifecycle__test": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.84,
-    "p99_peak_bytes": 64802816,
-    "peak_bytes": 64802816,
-    "samples": 34
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 12996608,
+    "peak_bytes": 12996608,
+    "samples": 10
   },
   "//crates/lash-core:runtime_observability__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.92,
-    "p99_peak_bytes": 40796160,
-    "peak_bytes": 129622016,
-    "samples": 177
+    "p95_cores": 0.95,
+    "p99_peak_bytes": 29794304,
+    "peak_bytes": 31211520,
+    "samples": 172
   },
   "//crates/lash-core:runtime_scenarios__test": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.54,
-    "p99_peak_bytes": 52813824,
-    "peak_bytes": 53743616,
-    "samples": 181
+    "p95_cores": 1.15,
+    "p99_peak_bytes": 17285120,
+    "peak_bytes": 17379328,
+    "samples": 176
   },
   "//crates/lash-core:runtime_turns__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.9,
-    "p99_peak_bytes": 74600448,
-    "peak_bytes": 76263424,
-    "samples": 211
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 23212032,
+    "peak_bytes": 25968640,
+    "samples": 176
   },
   "//crates/lash-core:test_batch": {
-    "cpu_count": 3,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 2.57,
-    "p99_peak_bytes": 147599360,
-    "peak_bytes": 397365248,
-    "samples": 190
+    "p95_cores": 1.09,
+    "p99_peak_bytes": 25796608,
+    "peak_bytes": 26415104,
+    "samples": 185
   },
   "//crates/lash-core:turn_event_schema__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 16523264,
-    "peak_bytes": 16523264,
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13733888,
+    "peak_bytes": 13733888,
     "samples": 11
   },
   "//crates/lash-dialect-python:lash-dialect-python__unit_test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.87,
-    "p99_peak_bytes": 59363328,
-    "peak_bytes": 59363328,
-    "samples": 44
+    "p95_cores": 1.85,
+    "p99_peak_bytes": 87470080,
+    "peak_bytes": 89538560,
+    "samples": 248
+  },
+  "//crates/lash-dialect-typescript:document_preparation__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.05,
+    "p99_peak_bytes": 77017088,
+    "peak_bytes": 77017088,
+    "samples": 27
+  },
+  "//crates/lash-dialect-typescript:helper_differential__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.16,
+    "p99_peak_bytes": 113926144,
+    "peak_bytes": 113926144,
+    "samples": 23
+  },
+  "//crates/lash-dialect-typescript:helper_plan_independence__test": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 2.08,
+    "p99_peak_bytes": 180772864,
+    "peak_bytes": 180772864,
+    "samples": 12
+  },
+  "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 1.71,
+    "p99_peak_bytes": 204095488,
+    "peak_bytes": 227528704,
+    "samples": 817
   },
   "//crates/lash-dialect-typescript:test262_kernel__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.56,
-    "p99_peak_bytes": 145711104,
-    "peak_bytes": 204419072,
-    "samples": 787
+    "p95_cores": 1.46,
+    "p99_peak_bytes": 177475584,
+    "peak_bytes": 373002240,
+    "samples": 7345
+  },
+  "//crates/lash-dialect-typescript:test_batch": {
+    "cpu_count": 3,
+    "memory_kb": 524288,
+    "p95_cores": 2.78,
+    "p99_peak_bytes": 306720768,
+    "peak_bytes": 306720768,
+    "samples": 77
   },
   "//crates/lash-durable-test:after_turn_crash_laws__test": {
     "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.74,
+    "p99_peak_bytes": 289103872,
+    "peak_bytes": 307884032,
+    "samples": 296
+  },
+  "//crates/lash-durable-test:attachment_delivery_secret__test": {
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.73,
-    "p99_peak_bytes": 192745472,
-    "peak_bytes": 192745472,
-    "samples": 48
+    "p95_cores": 0.91,
+    "p99_peak_bytes": 28680192,
+    "peak_bytes": 29626368,
+    "samples": 234
+  },
+  "//crates/lash-durable-test:attachment_ref_laws__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.1,
+    "p99_peak_bytes": 62291968,
+    "peak_bytes": 64434176,
+    "samples": 234
+  },
+  "//crates/lash-durable-test:attachment_referrer_laws__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.38,
+    "p99_peak_bytes": 362299392,
+    "peak_bytes": 366338048,
+    "samples": 295
+  },
+  "//crates/lash-durable-test:cell_declaration_crash_laws__test": {
+    "cpu_count": 4,
+    "memory_kb": 786432,
+    "p95_cores": 3.62,
+    "p99_peak_bytes": 638185472,
+    "peak_bytes": 638185472,
+    "samples": 7
+  },
+  "//crates/lash-durable-test:cell_dialect_releases__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.0,
+    "p99_peak_bytes": 101367808,
+    "peak_bytes": 101367808,
+    "samples": 62
+  },
+  "//crates/lash-durable-test:cell_process_handles__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.32,
+    "p99_peak_bytes": 341790720,
+    "peak_bytes": 401059840,
+    "samples": 358
+  },
+  "//crates/lash-durable-test:cell_read_laws__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.94,
+    "p99_peak_bytes": 381841408,
+    "peak_bytes": 381841408,
+    "samples": 67
+  },
+  "//crates/lash-durable-test:cell_restore_laws__test": {
+    "cpu_count": 3,
+    "memory_kb": 1048576,
+    "p95_cores": 3.15,
+    "p99_peak_bytes": 729866240,
+    "peak_bytes": 1126670336,
+    "samples": 1313
+  },
+  "//crates/lash-durable-test:child_turn_crash_proof__test": {
+    "cpu_count": 4,
+    "memory_kb": 262144,
+    "p95_cores": 3.25,
+    "p99_peak_bytes": 101478400,
+    "peak_bytes": 113766400,
+    "samples": 222
+  },
+  "//crates/lash-durable-test:codemode_execution_documents__test": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.17,
+    "p99_peak_bytes": 297222144,
+    "peak_bytes": 315662336,
+    "samples": 276
+  },
+  "//crates/lash-durable-test:committed_turns__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.48,
+    "p99_peak_bytes": 291708928,
+    "peak_bytes": 302608384,
+    "samples": 290
   },
   "//crates/lash-durable-test:config_change_observer_laws__test": {
     "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.63,
+    "p99_peak_bytes": 299253760,
+    "peak_bytes": 306941952,
+    "samples": 296
+  },
+  "//crates/lash-durable-test:context_budget_warning__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.27,
+    "p99_peak_bytes": 302854144,
+    "peak_bytes": 362360832,
+    "samples": 279
+  },
+  "//crates/lash-durable-test:control_phase_expiry__test": {
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.59,
-    "p99_peak_bytes": 198967296,
-    "peak_bytes": 198967296,
-    "samples": 47
+    "p95_cores": 1.06,
+    "p99_peak_bytes": 60465152,
+    "peak_bytes": 60465152,
+    "samples": 81
+  },
+  "//crates/lash-durable-test:core_node_processes__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.42,
+    "p99_peak_bytes": 327720960,
+    "peak_bytes": 354045952,
+    "samples": 317
+  },
+  "//crates/lash-durable-test:declared_start__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.27,
+    "p99_peak_bytes": 297193472,
+    "peak_bytes": 329953280,
+    "samples": 1250
+  },
+  "//crates/lash-durable-test:declared_start_crash_laws__test": {
+    "cpu_count": 3,
+    "memory_kb": 524288,
+    "p95_cores": 2.44,
+    "p99_peak_bytes": 366379008,
+    "peak_bytes": 593838080,
+    "samples": 2384
   },
   "//crates/lash-durable-test:deleted_session_crash_laws__test": {
     "cpu_count": 2,
-    "memory_kb": 262144,
+    "memory_kb": 524288,
     "p95_cores": 1.81,
-    "p99_peak_bytes": 149221376,
-    "peak_bytes": 149221376,
-    "samples": 47
+    "p99_peak_bytes": 225718272,
+    "peak_bytes": 245481472,
+    "samples": 285
+  },
+  "//crates/lash-durable-test:drain_by_release__test": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 1.26,
+    "p99_peak_bytes": 144302080,
+    "peak_bytes": 343617536,
+    "samples": 289
+  },
+  "//crates/lash-durable-test:first_party_tools__test": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.18,
+    "p99_peak_bytes": 254324736,
+    "peak_bytes": 339734528,
+    "samples": 290
+  },
+  "//crates/lash-durable-test:format_fixtures__test": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 1.38,
+    "p99_peak_bytes": 130248704,
+    "peak_bytes": 186626048,
+    "samples": 466
+  },
+  "//crates/lash-durable-test:frame_switch_crash_proof__test": {
+    "cpu_count": 3,
+    "memory_kb": 262144,
+    "p95_cores": 2.96,
+    "p99_peak_bytes": 208580608,
+    "peak_bytes": 330096640,
+    "samples": 1164
+  },
+  "//crates/lash-durable-test:frame_switch_laws__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.0,
+    "p99_peak_bytes": 127918080,
+    "peak_bytes": 128761856,
+    "samples": 296
+  },
+  "//crates/lash-durable-test:kernel_step_crash_laws__test": {
+    "cpu_count": 4,
+    "memory_kb": 786432,
+    "p95_cores": 3.53,
+    "p99_peak_bytes": 595755008,
+    "peak_bytes": 595755008,
+    "samples": 18
+  },
+  "//crates/lash-durable-test:lash-durable-test__unit_test": {
+    "cpu_count": 3,
+    "memory_kb": 262144,
+    "p95_cores": 2.89,
+    "p99_peak_bytes": 146976768,
+    "peak_bytes": 159805440,
+    "samples": 221
+  },
+  "//crates/lash-durable-test:live_fault_park__test": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 223821824,
+    "peak_bytes": 244776960,
+    "samples": 289
+  },
+  "//crates/lash-durable-test:live_stream_takeover__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.05,
+    "p99_peak_bytes": 122589184,
+    "peak_bytes": 123248640,
+    "samples": 289
+  },
+  "//crates/lash-durable-test:mcp_events_crash_proof__test": {
+    "cpu_count": 4,
+    "memory_kb": 1572864,
+    "p95_cores": 3.78,
+    "p99_peak_bytes": 1178808320,
+    "peak_bytes": 1178808320,
+    "samples": 77
+  },
+  "//crates/lash-durable-test:mcp_events_laws__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.12,
+    "p99_peak_bytes": 119885824,
+    "peak_bytes": 119885824,
+    "samples": 63
   },
   "//crates/lash-durable-test:model_answer_receipt_laws__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.7,
-    "p99_peak_bytes": 167075840,
-    "peak_bytes": 167075840,
-    "samples": 24
+    "p95_cores": 1.77,
+    "p99_peak_bytes": 170586112,
+    "peak_bytes": 170586112,
+    "samples": 57
+  },
+  "//crates/lash-durable-test:one_slot_process_await__test": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.19,
+    "p99_peak_bytes": 271101952,
+    "peak_bytes": 365236224,
+    "samples": 288
+  },
+  "//crates/lash-durable-test:open_session_commands__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.11,
+    "p99_peak_bytes": 133255168,
+    "peak_bytes": 135614464,
+    "samples": 289
+  },
+  "//crates/lash-durable-test:plugin_state_storage_laws__test": {
+    "cpu_count": 4,
+    "memory_kb": 786432,
+    "p95_cores": 3.36,
+    "p99_peak_bytes": 622219264,
+    "peak_bytes": 783695872,
+    "samples": 1777
+  },
+  "//crates/lash-durable-test:pressure_frame_crash_proof__test": {
+    "cpu_count": 4,
+    "memory_kb": 1048576,
+    "p95_cores": 3.42,
+    "p99_peak_bytes": 650309632,
+    "peak_bytes": 896331776,
+    "samples": 1774
+  },
+  "//crates/lash-durable-test:process_actor_laws__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.19,
+    "p99_peak_bytes": 26873856,
+    "peak_bytes": 33591296,
+    "samples": 229
   },
   "//crates/lash-durable-test:process_crash_proof__test": {
     "cpu_count": 4,
     "memory_kb": 262144,
-    "p95_cores": 3.48,
+    "p95_cores": 3.62,
     "p99_peak_bytes": 120905728,
-    "peak_bytes": 120905728,
-    "samples": 25
+    "peak_bytes": 190881792,
+    "samples": 225
   },
   "//crates/lash-durable-test:process_lifecycle_events__test": {
     "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.06,
+    "memory_kb": 262144,
+    "p95_cores": 1.1,
     "p99_peak_bytes": 180490240,
-    "peak_bytes": 180490240,
-    "samples": 44
+    "peak_bytes": 196931584,
+    "samples": 295
+  },
+  "//crates/lash-durable-test:process_ran_laws__test": {
+    "cpu_count": 4,
+    "memory_kb": 1048576,
+    "p95_cores": 3.43,
+    "p99_peak_bytes": 739774464,
+    "peak_bytes": 739774464,
+    "samples": 55
+  },
+  "//crates/lash-durable-test:process_step_crash_proof__test": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 2.18,
+    "p99_peak_bytes": 96436224,
+    "peak_bytes": 108990464,
+    "samples": 217
+  },
+  "//crates/lash-durable-test:process_tool_call_crash_laws__test": {
+    "cpu_count": 3,
+    "memory_kb": 786432,
+    "p95_cores": 3.05,
+    "p99_peak_bytes": 521338880,
+    "peak_bytes": 872976384,
+    "samples": 2432
+  },
+  "//crates/lash-durable-test:process_tool_calls__test": {
+    "cpu_count": 2,
+    "memory_kb": 786432,
+    "p95_cores": 1.49,
+    "p99_peak_bytes": 460378112,
+    "peak_bytes": 492847104,
+    "samples": 312
+  },
+  "//crates/lash-durable-test:recorded_behaviour_laws__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.2,
+    "p99_peak_bytes": 256098304,
+    "peak_bytes": 281595904,
+    "samples": 286
   },
   "//crates/lash-durable-test:render_cache_laws__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.35,
-    "p99_peak_bytes": 164212736,
-    "peak_bytes": 164212736,
-    "samples": 25
+    "p95_cores": 1.32,
+    "p99_peak_bytes": 169582592,
+    "peak_bytes": 182308864,
+    "samples": 231
+  },
+  "//crates/lash-durable-test:resource_capacity__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 71155712,
+    "peak_bytes": 71598080,
+    "samples": 223
+  },
+  "//crates/lash-durable-test:rlm_session_globals__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.41,
+    "p99_peak_bytes": 420139008,
+    "peak_bytes": 549187584,
+    "samples": 298
+  },
+  "//crates/lash-durable-test:round_crash_matrix__test": {
+    "cpu_count": 3,
+    "memory_kb": 262144,
+    "p95_cores": 3.09,
+    "p99_peak_bytes": 78860288,
+    "peak_bytes": 96387072,
+    "samples": 237
+  },
+  "//crates/lash-durable-test:session_send__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.18,
+    "p99_peak_bytes": 177700864,
+    "peak_bytes": 208474112,
+    "samples": 291
   },
   "//crates/lash-durable-test:standard_turn_outcomes__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.24,
-    "p99_peak_bytes": 179769344,
-    "peak_bytes": 179769344,
-    "samples": 47
+    "p95_cores": 1.21,
+    "p99_peak_bytes": 197390336,
+    "peak_bytes": 214937600,
+    "samples": 299
+  },
+  "//crates/lash-durable-test:steering_crash_laws__test": {
+    "cpu_count": 2,
+    "memory_kb": 2621440,
+    "p95_cores": 1.93,
+    "p99_peak_bytes": 2016636928,
+    "peak_bytes": 2069872640,
+    "samples": 372
   },
   "//crates/lash-durable-test:tool_activity__test": {
     "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.09,
+    "memory_kb": 262144,
+    "p95_cores": 1.08,
     "p99_peak_bytes": 157937664,
-    "peak_bytes": 157937664,
-    "samples": 42
+    "peak_bytes": 160604160,
+    "samples": 294
+  },
+  "//crates/lash-durable-test:tool_batches__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.35,
+    "p99_peak_bytes": 405909504,
+    "peak_bytes": 487383040,
+    "samples": 916
   },
   "//crates/lash-durable-test:tool_call_identity__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.3,
-    "p99_peak_bytes": 176623616,
-    "peak_bytes": 176623616,
-    "samples": 49
+    "p95_cores": 1.26,
+    "p99_peak_bytes": 211243008,
+    "peak_bytes": 236941312,
+    "samples": 292
+  },
+  "//crates/lash-durable-test:tool_crash_laws__test": {
+    "cpu_count": 4,
+    "memory_kb": 786432,
+    "p95_cores": 3.32,
+    "p99_peak_bytes": 586985472,
+    "peak_bytes": 1189720064,
+    "samples": 2844
+  },
+  "//crates/lash-durable-test:tool_group_pool_width__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.05,
+    "p99_peak_bytes": 133042176,
+    "peak_bytes": 176701440,
+    "samples": 287
+  },
+  "//crates/lash-durable-test:tool_surface_laws__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.44,
+    "p99_peak_bytes": 259993600,
+    "peak_bytes": 436613120,
+    "samples": 295
   },
   "//crates/lash-durable-test:turn_callback_crash_laws__test": {
     "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.9,
+    "p99_peak_bytes": 422440960,
+    "peak_bytes": 453365760,
+    "samples": 288
+  },
+  "//crates/lash-durable-test:turn_execution_state__test": {
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.91,
-    "p99_peak_bytes": 207601664,
-    "peak_bytes": 207601664,
-    "samples": 47
+    "p95_cores": 1.09,
+    "p99_peak_bytes": 176427008,
+    "peak_bytes": 210489344,
+    "samples": 282
+  },
+  "//crates/lash-durable-test:turn_phases__test": {
+    "cpu_count": 3,
+    "memory_kb": 262144,
+    "p95_cores": 2.65,
+    "p99_peak_bytes": 193957888,
+    "peak_bytes": 291209216,
+    "samples": 1881
+  },
+  "//crates/lash-durable-test:turn_round_crash_matrix__test": {
+    "cpu_count": 3,
+    "memory_kb": 262144,
+    "p95_cores": 3.06,
+    "p99_peak_bytes": 121659392,
+    "peak_bytes": 166416384,
+    "samples": 255
+  },
+  "//crates/lash-durable-test:turn_terminal_refusals__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.05,
+    "p99_peak_bytes": 164052992,
+    "peak_bytes": 173547520,
+    "samples": 286
+  },
+  "//crates/lash-durable-test:turn_trace_scope_laws__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.4,
+    "p99_peak_bytes": 285155328,
+    "peak_bytes": 296591360,
+    "samples": 298
+  },
+  "//crates/lash-durable-test:vertical_crash_proof__test": {
+    "cpu_count": 4,
+    "memory_kb": 1048576,
+    "p95_cores": 3.26,
+    "p99_peak_bytes": 659296256,
+    "peak_bytes": 864448512,
+    "samples": 2592
+  },
+  "//crates/lash-durable-test:worker_crashes__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.38,
+    "p99_peak_bytes": 329965568,
+    "peak_bytes": 346423296,
+    "samples": 303
+  },
+  "//crates/lash-durable:lash-durable__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13717504,
+    "peak_bytes": 13717504,
+    "samples": 159
+  },
+  "//crates/lash-e2e:e2e__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 15273984,
+    "peak_bytes": 15290368,
+    "samples": 214
+  },
+  "//crates/lash-e2e:lash-e2e__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 14798848,
+    "peak_bytes": 14958592,
+    "samples": 181
+  },
+  "//crates/lash-ext-date-ecma:lash-ext-date-ecma__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 13717504,
+    "peak_bytes": 13717504,
+    "samples": 7
+  },
+  "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 1.34,
+    "p99_peak_bytes": 15020032,
+    "peak_bytes": 15020032,
+    "samples": 44
+  },
+  "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.89,
+    "p99_peak_bytes": 13668352,
+    "peak_bytes": 13668352,
+    "samples": 7
+  },
+  "//crates/lash-helper-labels:lash-helper-labels__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.0,
+    "p99_peak_bytes": 13307904,
+    "peak_bytes": 13307904,
+    "samples": 15
   },
   "//crates/lash-http-transport:lash-http-transport__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.82,
-    "p99_peak_bytes": 23355392,
-    "peak_bytes": 23355392,
-    "samples": 24
+    "p95_cores": 0.7,
+    "p99_peak_bytes": 18317312,
+    "peak_bytes": 18317312,
+    "samples": 66
+  },
+  "//crates/lash-kernel-check:lash-kernel-check__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 13918208,
+    "peak_bytes": 15249408,
+    "samples": 113
   },
   "//crates/lash-kernel-conformance:lash-kernel-conformance__unit_test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.82,
+    "p95_cores": 1.84,
     "p99_peak_bytes": 18370560,
-    "peak_bytes": 18370560,
+    "peak_bytes": 20819968,
+    "samples": 241
+  },
+  "//crates/lash-kernel-dialect:lash-kernel-dialect__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 14061568,
+    "peak_bytes": 14237696,
+    "samples": 106
+  },
+  "//crates/lash-kernel-doc:document_example__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.0,
+    "p99_peak_bytes": 12746752,
+    "peak_bytes": 12746752,
+    "samples": 4
+  },
+  "//crates/lash-kernel-doc:lash-kernel-doc__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 14254080,
+    "peak_bytes": 14254080,
+    "samples": 55
+  },
+  "//crates/lash-kernel-doc:test_batch": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.03,
+    "p99_peak_bytes": 23986176,
+    "peak_bytes": 23986176,
+    "samples": 46
+  },
+  "//crates/lash-kernel-edit:lash-kernel-edit__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.0,
+    "p99_peak_bytes": 14798848,
+    "peak_bytes": 14798848,
+    "samples": 69
+  },
+  "//crates/lash-kernel-edit:test_batch": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.04,
+    "p99_peak_bytes": 23859200,
+    "peak_bytes": 23859200,
+    "samples": 80
+  },
+  "//crates/lash-kernel-exec:lash-kernel-exec__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 13733888,
+    "peak_bytes": 13733888,
     "samples": 26
   },
   "//crates/lash-kernel-lib:lash-kernel-lib__unit_test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.65,
-    "p99_peak_bytes": 89182208,
-    "peak_bytes": 89182208,
-    "samples": 24
+    "p95_cores": 1.83,
+    "p99_peak_bytes": 93900800,
+    "peak_bytes": 106967040,
+    "samples": 167
+  },
+  "//crates/lash-kernel-migrate:lash-kernel-migrate__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13721600,
+    "peak_bytes": 13721600,
+    "samples": 20
   },
   "//crates/lash-kernel-state:lash-kernel-state__unit_test": {
     "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.94,
+    "p99_peak_bytes": 362819584,
+    "peak_bytes": 410578944,
+    "samples": 174
+  },
+  "//crates/lash-kernel-view:lash-kernel-view__unit_test": {
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.92,
-    "p99_peak_bytes": 171708416,
-    "peak_bytes": 171708416,
-    "samples": 41
+    "p95_cores": 0.87,
+    "p99_peak_bytes": 13709312,
+    "peak_bytes": 13709312,
+    "samples": 17
+  },
+  "//crates/lash-kernel-view:test_batch": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.05,
+    "p99_peak_bytes": 23871488,
+    "peak_bytes": 23871488,
+    "samples": 8
+  },
+  "//crates/lash-kernel-vm:lash-kernel-vm__unit_test": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 1.96,
+    "p99_peak_bytes": 207364096,
+    "peak_bytes": 301895680,
+    "samples": 312
   },
   "//crates/lash-llm-tools:lash-llm-tools__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 17481728,
-    "peak_bytes": 19677184,
-    "samples": 170
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13717504,
+    "peak_bytes": 13725696,
+    "samples": 158
   },
   "//crates/lash-llm-transport:lash-llm-transport__unit_test": {
     "cpu_count": 1,
@@ -328,196 +952,324 @@
     "samples": 9
   },
   "//crates/lash-llm-transport:test_batch": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.03,
+    "p99_peak_bytes": 23941120,
+    "peak_bytes": 23961600,
+    "samples": 162
+  },
+  "//crates/lash-perf:durable-substrate__bin__unit_test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.2,
+    "p99_peak_bytes": 288829440,
+    "peak_bytes": 289071104,
+    "samples": 192
+  },
+  "//crates/lash-perf:durable-substrate__bin__unit_test__fv_4ce5e013": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.27,
+    "p99_peak_bytes": 244846592,
+    "peak_bytes": 244846592,
+    "samples": 3
+  },
+  "//crates/lash-perf:durable_substrate__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.51,
-    "p99_peak_bytes": 25419776,
-    "peak_bytes": 26439680,
-    "samples": 141
+    "p95_cores": 1.28,
+    "p99_peak_bytes": 148021248,
+    "peak_bytes": 148160512,
+    "samples": 190
   },
   "//crates/lash-perf:lash-perf__bin__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 15142912,
-    "peak_bytes": 15151104,
-    "samples": 146
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 13705216,
+    "peak_bytes": 13733888,
+    "samples": 228
   },
   "//crates/lash-perf:lash-perf__unit_test": {
     "cpu_count": 1,
     "memory_kb": 786432,
-    "p95_cores": 1.16,
-    "p99_peak_bytes": 588406784,
-    "peak_bytes": 600285184,
-    "samples": 190
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 520286208,
+    "peak_bytes": 1007054848,
+    "samples": 282
+  },
+  "//crates/lash-perf:latency__test": {
+    "cpu_count": 2,
+    "memory_kb": 786432,
+    "p95_cores": 1.74,
+    "p99_peak_bytes": 498364416,
+    "peak_bytes": 513421312,
+    "samples": 230
+  },
+  "//crates/lash-perf:replay__test": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 244039680,
+    "peak_bytes": 254332928,
+    "samples": 155
   },
   "//crates/lash-perf:workload__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.32,
-    "p99_peak_bytes": 36573184,
-    "peak_bytes": 36925440,
-    "samples": 159
+    "p95_cores": 1.22,
+    "p99_peak_bytes": 28475392,
+    "peak_bytes": 29229056,
+    "samples": 225
   },
   "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test": {
     "cpu_count": 3,
     "memory_kb": 524288,
-    "p95_cores": 2.56,
-    "p99_peak_bytes": 279117824,
-    "peak_bytes": 343969792,
-    "samples": 324
+    "p95_cores": 2.39,
+    "p99_peak_bytes": 360640512,
+    "peak_bytes": 366374912,
+    "samples": 241
   },
   "//crates/lash-plugin-process-controls:lash-plugin-process-controls__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 17293312,
-    "peak_bytes": 17727488,
-    "samples": 147
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 58159104,
+    "peak_bytes": 58290176,
+    "samples": 171
   },
   "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 17842176,
-    "peak_bytes": 17920000,
-    "samples": 161
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 59973632,
+    "peak_bytes": 60080128,
+    "samples": 171
   },
   "//crates/lash-postgres-store:conformance__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.85,
-    "p99_peak_bytes": 161525760,
-    "peak_bytes": 161525760,
-    "samples": 72
+    "p95_cores": 1.63,
+    "p99_peak_bytes": 134057984,
+    "peak_bytes": 161181696,
+    "samples": 1917
+  },
+  "//crates/lash-postgres-store:conformance__test__fv_3963cf8d": {
+    "cpu_count": 3,
+    "memory_kb": 262144,
+    "p95_cores": 2.48,
+    "p99_peak_bytes": 138915840,
+    "peak_bytes": 138915840,
+    "samples": 12
+  },
+  "//crates/lash-postgres-store:conformance__test__fv_3d565924": {
+    "cpu_count": 3,
+    "memory_kb": 262144,
+    "p95_cores": 2.82,
+    "p99_peak_bytes": 131448832,
+    "peak_bytes": 131448832,
+    "samples": 12
+  },
+  "//crates/lash-postgres-store:conformance__test__fv_926a45b7": {
+    "cpu_count": 3,
+    "memory_kb": 262144,
+    "p95_cores": 2.31,
+    "p99_peak_bytes": 124592128,
+    "peak_bytes": 124592128,
+    "samples": 12
   },
   "//crates/lash-postgres-store:durable_read_fixture__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.98,
-    "p99_peak_bytes": 42459136,
-    "peak_bytes": 42459136,
-    "samples": 12
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 48263168,
+    "peak_bytes": 49065984,
+    "samples": 261
   },
   "//crates/lash-postgres-store:host_provisioned_rollout__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 40148992,
-    "peak_bytes": 40148992,
-    "samples": 12
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 40304640,
+    "peak_bytes": 41992192,
+    "samples": 252
   },
   "//crates/lash-postgres-store:integration__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.4,
-    "p99_peak_bytes": 86110208,
-    "peak_bytes": 86110208,
-    "samples": 24
+    "p95_cores": 1.55,
+    "p99_peak_bytes": 102756352,
+    "peak_bytes": 111075328,
+    "samples": 542
+  },
+  "//crates/lash-postgres-store:integration__test__fv_3963cf8d": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 1.99,
+    "p99_peak_bytes": 109015040,
+    "peak_bytes": 109015040,
+    "samples": 4
+  },
+  "//crates/lash-postgres-store:integration__test__fv_3d565924": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 2.17,
+    "p99_peak_bytes": 106631168,
+    "peak_bytes": 106631168,
+    "samples": 4
+  },
+  "//crates/lash-postgres-store:integration__test__fv_926a45b7": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 1.95,
+    "p99_peak_bytes": 105177088,
+    "peak_bytes": 105177088,
+    "samples": 4
   },
   "//crates/lash-postgres-store:lash-postgres-store__unit_test": {
     "cpu_count": 2,
+    "memory_kb": 786432,
+    "p95_cores": 1.5,
+    "p99_peak_bytes": 523235328,
+    "peak_bytes": 754151424,
+    "samples": 408
+  },
+  "//crates/lash-postgres-store:live_replay__test": {
+    "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.55,
-    "p99_peak_bytes": 60030976,
-    "peak_bytes": 60030976,
-    "samples": 12
+    "p95_cores": 1.6,
+    "p99_peak_bytes": 112443392,
+    "peak_bytes": 127954944,
+    "samples": 283
   },
   "//crates/lash-postgres-store:migrate__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.52,
-    "p99_peak_bytes": 41664512,
-    "peak_bytes": 41664512,
-    "samples": 12
+    "p95_cores": 0.37,
+    "p99_peak_bytes": 43253760,
+    "peak_bytes": 44843008,
+    "samples": 253
   },
   "//crates/lash-postgres-store:preflight_durable_walk__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.26,
-    "p99_peak_bytes": 40062976,
-    "peak_bytes": 40062976,
-    "samples": 12
+    "p95_cores": 1.24,
+    "p99_peak_bytes": 48398336,
+    "peak_bytes": 54628352,
+    "samples": 260
   },
   "//crates/lash-postgres-store:preflight_schema_status__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.44,
-    "p99_peak_bytes": 43659264,
-    "peak_bytes": 43659264,
-    "samples": 12
+    "p95_cores": 1.43,
+    "p99_peak_bytes": 54435840,
+    "peak_bytes": 54849536,
+    "samples": 246
+  },
+  "//crates/lash-postgres-store:process_replay__test": {
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 1.63,
+    "p99_peak_bytes": 117739520,
+    "peak_bytes": 122408960,
+    "samples": 282
   },
   "//crates/lash-postgres-store:schema_constraints__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 38023168,
-    "peak_bytes": 38023168,
-    "samples": 12
+    "p95_cores": 0.66,
+    "p99_peak_bytes": 47570944,
+    "peak_bytes": 54521856,
+    "samples": 252
   },
   "//crates/lash-postgres-store:schema_drift__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.48,
-    "p99_peak_bytes": 42393600,
-    "peak_bytes": 42393600,
-    "samples": 12
+    "p95_cores": 1.46,
+    "p99_peak_bytes": 55894016,
+    "peak_bytes": 301875200,
+    "samples": 257
   },
   "//crates/lash-postgres-workers:failover__test": {
     "cpu_count": 1,
     "memory_kb": 524288,
-    "p95_cores": 0.63,
-    "p99_peak_bytes": 211644416,
-    "peak_bytes": 211644416,
-    "samples": 21
+    "p95_cores": 0.7,
+    "p99_peak_bytes": 218845184,
+    "peak_bytes": 316620800,
+    "samples": 201
+  },
+  "//crates/lash-postgres-workers:lash-postgres-workers__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13729792,
+    "peak_bytes": 13733888,
+    "samples": 210
   },
   "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test": {
     "cpu_count": 2,
-    "memory_kb": 262144,
-    "p95_cores": 1.73,
-    "p99_peak_bytes": 180781056,
-    "peak_bytes": 213356544,
-    "samples": 3708
+    "memory_kb": 1048576,
+    "p95_cores": 1.66,
+    "p99_peak_bytes": 813346816,
+    "peak_bytes": 1255063552,
+    "samples": 3962
+  },
+  "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_5881ecfa": {
+    "cpu_count": 3,
+    "memory_kb": 524288,
+    "p95_cores": 2.71,
+    "p99_peak_bytes": 258842624,
+    "peak_bytes": 258842624,
+    "samples": 8
+  },
+  "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_b1878990": {
+    "cpu_count": 3,
+    "memory_kb": 524288,
+    "p95_cores": 2.47,
+    "p99_peak_bytes": 248160256,
+    "peak_bytes": 248160256,
+    "samples": 8
   },
   "//crates/lash-protocol-rlm:protocol_drivers__test": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.51,
-    "p99_peak_bytes": 70762496,
-    "peak_bytes": 186425344,
-    "samples": 199
+    "p95_cores": 1.03,
+    "p99_peak_bytes": 15818752,
+    "peak_bytes": 15970304,
+    "samples": 224
   },
   "//crates/lash-protocol-standard:embedded_builder__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 20738048,
-    "peak_bytes": 20738048,
-    "samples": 8
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 18919424,
+    "peak_bytes": 18919424,
+    "samples": 59
   },
   "//crates/lash-protocol-standard:lash-protocol-standard__unit_test": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.56,
-    "p99_peak_bytes": 47456256,
-    "peak_bytes": 47456256,
-    "samples": 72
+    "p95_cores": 1.12,
+    "p99_peak_bytes": 62238720,
+    "peak_bytes": 62238720,
+    "samples": 95
   },
   "//crates/lash-protocol-standard:native_tools__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 15040512,
-    "peak_bytes": 15040512,
-    "samples": 11
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 13688832,
+    "peak_bytes": 13688832,
+    "samples": 60
   },
   "//crates/lash-protocol-standard:protocol_scenarios__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.04,
-    "p99_peak_bytes": 30740480,
-    "peak_bytes": 30740480,
-    "samples": 5
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 13725696,
+    "peak_bytes": 13725696,
+    "samples": 70
   },
   "//crates/lash-provider-anthropic:charge_safety__test": {
     "cpu_count": 1,
@@ -530,50 +1282,58 @@
   "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.0,
-    "p99_peak_bytes": 15450112,
-    "peak_bytes": 15450112,
-    "samples": 3
+    "p95_cores": 1.07,
+    "p99_peak_bytes": 15818752,
+    "peak_bytes": 15818752,
+    "samples": 10
   },
   "//crates/lash-provider-anthropic:test_batch": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.34,
-    "p99_peak_bytes": 27181056,
-    "peak_bytes": 27992064,
-    "samples": 140
+    "p95_cores": 1.05,
+    "p99_peak_bytes": 24014848,
+    "peak_bytes": 24031232,
+    "samples": 159
   },
   "//crates/lash-provider-google:block_identity__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.01,
-    "p99_peak_bytes": 15327232,
-    "peak_bytes": 17244160,
-    "samples": 147
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 13709312,
+    "peak_bytes": 13709312,
+    "samples": 195
   },
   "//crates/lash-provider-google:charge_safety__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.03,
-    "p99_peak_bytes": 18628608,
-    "peak_bytes": 18853888,
-    "samples": 145
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13897728,
+    "peak_bytes": 13901824,
+    "samples": 195
+  },
+  "//crates/lash-provider-google:delivery_scope__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 17379328,
+    "peak_bytes": 17494016,
+    "samples": 201
   },
   "//crates/lash-provider-google:lash-provider-google__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.01,
-    "p99_peak_bytes": 34267136,
-    "peak_bytes": 36495360,
-    "samples": 171
+    "p95_cores": 0.92,
+    "p99_peak_bytes": 54751232,
+    "peak_bytes": 56430592,
+    "samples": 221
   },
   "//crates/lash-provider-openai:lash-provider-openai__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.73,
-    "p99_peak_bytes": 74211328,
-    "peak_bytes": 77979648,
-    "samples": 208
+    "p95_cores": 0.66,
+    "p99_peak_bytes": 70266880,
+    "peak_bytes": 74059776,
+    "samples": 233
   },
   "//crates/lash-regress:integration__test__fv_419bd085": {
     "cpu_count": 1,
@@ -616,19 +1376,19 @@
     "samples": 7
   },
   "//crates/lash-regress:test_batch": {
-    "cpu_count": 3,
-    "memory_kb": 1048576,
-    "p95_cores": 2.31,
-    "p99_peak_bytes": 39124992,
-    "peak_bytes": 39124992,
-    "samples": 3
+    "cpu_count": 2,
+    "memory_kb": 262144,
+    "p95_cores": 2.11,
+    "p99_peak_bytes": 31764480,
+    "peak_bytes": 31764480,
+    "samples": 4
   },
   "//crates/lash-regress:unicode_property_escapes__test": {
     "cpu_count": 2,
-    "memory_kb": 1048576,
-    "p95_cores": 1.5,
-    "p99_peak_bytes": 16809984,
-    "peak_bytes": 16809984,
+    "memory_kb": 262144,
+    "p95_cores": 1.62,
+    "p99_peak_bytes": 13635584,
+    "peak_bytes": 13635584,
     "samples": 3
   },
   "//crates/lash-regress:unicode_property_escapes__test__fv_419bd085": {
@@ -641,19 +1401,19 @@
   },
   "//crates/lash-regress:unicode_property_escapes__test__fv_7f10c809": {
     "cpu_count": 2,
-    "memory_kb": 1048576,
-    "p95_cores": 1.57,
-    "p99_peak_bytes": 18972672,
-    "peak_bytes": 18972672,
-    "samples": 7
+    "memory_kb": 262144,
+    "p95_cores": 1.29,
+    "p99_peak_bytes": 13688832,
+    "peak_bytes": 13688832,
+    "samples": 3
   },
   "//crates/lash-regress:unicodesets__test": {
     "cpu_count": 2,
-    "memory_kb": 1048576,
-    "p95_cores": 1.74,
-    "p99_peak_bytes": 20152320,
-    "peak_bytes": 20152320,
-    "samples": 8
+    "memory_kb": 262144,
+    "p95_cores": 1.54,
+    "p99_peak_bytes": 18845696,
+    "peak_bytes": 18845696,
+    "samples": 5
   },
   "//crates/lash-render:render__test": {
     "cpu_count": 1,
@@ -666,18 +1426,18 @@
   "//crates/lash-render:test_batch": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.98,
-    "p99_peak_bytes": 25505792,
-    "peak_bytes": 25505792,
-    "samples": 5
+    "p95_cores": 0.0,
+    "p99_peak_bytes": 23834624,
+    "peak_bytes": 23834624,
+    "samples": 6
   },
   "//crates/lash-rlm-types:lash-rlm-types__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.08,
-    "p99_peak_bytes": 16216064,
-    "peak_bytes": 16216064,
-    "samples": 40
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 13717504,
+    "peak_bytes": 13717504,
+    "samples": 75
   },
   "//crates/lash-s3-store:lash-s3-store__unit_test": {
     "cpu_count": 1,
@@ -690,130 +1450,234 @@
   "//crates/lash-sansio:lash-sansio__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.96,
-    "p99_peak_bytes": 18292736,
-    "peak_bytes": 69234688,
-    "samples": 314
+    "p95_cores": 0.94,
+    "p99_peak_bytes": 19443712,
+    "peak_bytes": 21876736,
+    "samples": 295
+  },
+  "//crates/lash-sansio:lash-sansio__unit_test__fv_95add2ee": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.95,
+    "p99_peak_bytes": 18493440,
+    "peak_bytes": 18493440,
+    "samples": 28
+  },
+  "//crates/lash-sansio:lash-sansio__unit_test__fv_a18efb18": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.87,
+    "p99_peak_bytes": 18448384,
+    "peak_bytes": 18448384,
+    "samples": 28
+  },
+  "//crates/lash-sim:chaos_soak__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.04,
+    "p99_peak_bytes": 112340992,
+    "peak_bytes": 156479488,
+    "samples": 227
+  },
+  "//crates/lash-sim:crash_matrix__test": {
+    "cpu_count": 4,
+    "memory_kb": 786432,
+    "p95_cores": 3.59,
+    "p99_peak_bytes": 442236928,
+    "peak_bytes": 690798592,
+    "samples": 2391
   },
   "//crates/lash-sim:cross_backend_store_differential__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.08,
-    "p99_peak_bytes": 27590656,
-    "peak_bytes": 27803648,
-    "samples": 186
+    "p95_cores": 1.15,
+    "p99_peak_bytes": 32350208,
+    "peak_bytes": 33599488,
+    "samples": 246
   },
   "//crates/lash-sim:lash-sim__bin__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.03,
-    "p99_peak_bytes": 16044032,
-    "peak_bytes": 16216064,
-    "samples": 172
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 13713408,
+    "peak_bytes": 16388096,
+    "samples": 220
   },
   "//crates/lash-sim:lash-sim__unit_test": {
     "cpu_count": 3,
     "memory_kb": 3670016,
-    "p95_cores": 2.31,
-    "p99_peak_bytes": 1906679808,
-    "peak_bytes": 2429485056,
-    "samples": 3060
+    "p95_cores": 2.38,
+    "p99_peak_bytes": 680505344,
+    "peak_bytes": 925618176,
+    "samples": 2104
+  },
+  "//crates/lash-sim:logical_turn__test": {
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 2.11,
+    "p99_peak_bytes": 249651200,
+    "peak_bytes": 275378176,
+    "samples": 236
   },
   "//crates/lash-sim:stack_policy__test": {
     "cpu_count": 3,
-    "memory_kb": 262144,
-    "p95_cores": 2.48,
-    "p99_peak_bytes": 106635264,
-    "peak_bytes": 164225024,
-    "samples": 179
+    "memory_kb": 786432,
+    "p95_cores": 3.09,
+    "p99_peak_bytes": 532779008,
+    "peak_bytes": 638570496,
+    "samples": 226
   },
   "//crates/lash-sqlite-store:conformance__test": {
-    "cpu_count": 3,
-    "memory_kb": 1048576,
-    "p95_cores": 2.83,
-    "p99_peak_bytes": 709259264,
-    "peak_bytes": 906268672,
-    "samples": 565
+    "cpu_count": 2,
+    "memory_kb": 524288,
+    "p95_cores": 1.99,
+    "p99_peak_bytes": 337424384,
+    "peak_bytes": 342056960,
+    "samples": 244
   },
   "//crates/lash-sqlite-store:conformance_memory__test": {
     "cpu_count": 2,
-    "memory_kb": 1048576,
-    "p95_cores": 1.87,
-    "p99_peak_bytes": 841932800,
-    "peak_bytes": 864559104,
-    "samples": 590
+    "memory_kb": 786432,
+    "p95_cores": 1.55,
+    "p99_peak_bytes": 537145344,
+    "peak_bytes": 559611904,
+    "samples": 255
   },
   "//crates/lash-sqlite-store:durable_read_fixture__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.03,
-    "p99_peak_bytes": 29155328,
-    "peak_bytes": 32538624,
-    "samples": 160
+    "p95_cores": 0.88,
+    "p99_peak_bytes": 19247104,
+    "peak_bytes": 28598272,
+    "samples": 216
   },
   "//crates/lash-sqlite-store:integration__test": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.31,
-    "p99_peak_bytes": 52592640,
-    "peak_bytes": 53272576,
-    "samples": 178
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 55427072,
+    "peak_bytes": 57266176,
+    "samples": 222
   },
   "//crates/lash-sqlite-store:lash-sqlite-store__unit_test": {
-    "cpu_count": 2,
-    "memory_kb": 262144,
-    "p95_cores": 1.96,
-    "p99_peak_bytes": 137261056,
-    "peak_bytes": 142086144,
-    "samples": 354
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.19,
+    "p99_peak_bytes": 237051904,
+    "peak_bytes": 290115584,
+    "samples": 426
   },
   "//crates/lash-sqlite-store:process_change_horizon__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.03,
-    "p99_peak_bytes": 24944640,
-    "peak_bytes": 26345472,
-    "samples": 179
+    "p95_cores": 0.89,
+    "p99_peak_bytes": 21372928,
+    "peak_bytes": 23076864,
+    "samples": 216
   },
   "//crates/lash-store-sql:lash-store-sql__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 16248832,
-    "peak_bytes": 16248832,
-    "samples": 39
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13709312,
+    "peak_bytes": 13709312,
+    "samples": 48
+  },
+  "//crates/lash-tool-presenter-python:lash-tool-presenter-python__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13729792,
+    "peak_bytes": 13729792,
+    "samples": 6
+  },
+  "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13877248,
+    "peak_bytes": 13877248,
+    "samples": 15
+  },
+  "//crates/lash-tool-presenter-typescript:lash-tool-presenter-typescript__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13688832,
+    "peak_bytes": 13688832,
+    "samples": 8
+  },
+  "//crates/lash-tool-shape:lash-tool-shape__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.94,
+    "p99_peak_bytes": 13729792,
+    "peak_bytes": 13729792,
+    "samples": 7
   },
   "//crates/lash-tool-support:lash-tool-support__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.03,
-    "p99_peak_bytes": 17149952,
-    "peak_bytes": 17149952,
-    "samples": 4
+    "p95_cores": 1.0,
+    "p99_peak_bytes": 55734272,
+    "peak_bytes": 55734272,
+    "samples": 77
   },
   "//crates/lash-trace:lash-trace__unit_test": {
     "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 22208512,
-    "peak_bytes": 22208512,
-    "samples": 9
+    "memory_kb": 1048576,
+    "p95_cores": 1.0,
+    "p99_peak_bytes": 830087168,
+    "peak_bytes": 830087168,
+    "samples": 48
+  },
+  "//crates/lash-trace:lash-trace__unit_test__fv_6912bae8": {
+    "cpu_count": 2,
+    "memory_kb": 1048576,
+    "p95_cores": 1.51,
+    "p99_peak_bytes": 812359680,
+    "peak_bytes": 812359680,
+    "samples": 27
+  },
+  "//crates/lash-trace:lash-trace__unit_test__fv_8414cca6": {
+    "cpu_count": 2,
+    "memory_kb": 1048576,
+    "p95_cores": 1.59,
+    "p99_peak_bytes": 810905600,
+    "peak_bytes": 810905600,
+    "samples": 30
   },
   "//crates/lash-trace:schema__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 14974976,
-    "peak_bytes": 14974976,
-    "samples": 27
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 17879040,
+    "peak_bytes": 17879040,
+    "samples": 33
+  },
+  "//crates/lash-trace:schema__test__fv_6912bae8": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 16809984,
+    "peak_bytes": 16809984,
+    "samples": 28
+  },
+  "//crates/lash-trace:schema__test__fv_8414cca6": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 18350080,
+    "peak_bytes": 18350080,
+    "samples": 28
   },
   "//crates/lash-trace:test_batch": {
     "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 1.09,
-    "p99_peak_bytes": 46362624,
-    "peak_bytes": 46362624,
-    "samples": 46
+    "memory_kb": 1048576,
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 813649920,
+    "peak_bytes": 813649920,
+    "samples": 88
   },
   "//crates/lash-trace:trace_schema_generator__bin__unit_test": {
     "cpu_count": 1,
@@ -823,189 +1687,413 @@
     "peak_bytes": 13676544,
     "samples": 3
   },
+  "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_6912bae8": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 13729792,
+    "peak_bytes": 13729792,
+    "samples": 19
+  },
+  "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_8414cca6": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13742080,
+    "peak_bytes": 13742080,
+    "samples": 19
+  },
   "//crates/lash-vm-broker:lash-vm-broker__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.93,
-    "p99_peak_bytes": 16601088,
-    "peak_bytes": 17817600,
-    "samples": 166
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 34045952,
+    "peak_bytes": 34078720,
+    "samples": 224
   },
   "//crates/lash-vm-client:lash-vm-client__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.0,
-    "p99_peak_bytes": 17002496,
-    "peak_bytes": 17432576,
-    "samples": 162
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 14667776,
+    "peak_bytes": 14675968,
+    "samples": 219
   },
   "//crates/lash-vm-client:wire_schema__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 19144704,
-    "peak_bytes": 21565440,
-    "samples": 143
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13815808,
+    "peak_bytes": 13938688,
+    "samples": 221
+  },
+  "//crates/lash-vm-client:worker_wire_schema_generator__bin__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 11984896,
+    "peak_bytes": 11984896,
+    "samples": 3
+  },
+  "//crates/lash-vm-library:lash-vm-library__unit_test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.54,
+    "p99_peak_bytes": 13713408,
+    "peak_bytes": 13713408,
+    "samples": 68
   },
   "//crates/lash-vm-protocol:codec_bounds__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 19861504,
-    "peak_bytes": 19861504,
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13725696,
+    "peak_bytes": 13725696,
     "samples": 12
   },
   "//crates/lash-vm-protocol:lash-vm-protocol__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.09,
-    "p99_peak_bytes": 102952960,
-    "peak_bytes": 102952960,
-    "samples": 20
+    "p95_cores": 0.99,
+    "p99_peak_bytes": 99364864,
+    "peak_bytes": 99364864,
+    "samples": 10
+  },
+  "//crates/lash-vm-protocol:lash-vm-protocol__unit_test__fv_1c9379b8": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 1.0,
+    "p99_peak_bytes": 110182400,
+    "peak_bytes": 110182400,
+    "samples": 23
   },
   "//crates/lash-vm-protocol:test_batch": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.08,
-    "p99_peak_bytes": 103452672,
-    "peak_bytes": 103452672,
-    "samples": 33
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 109621248,
+    "peak_bytes": 109621248,
+    "samples": 76
   },
   "//crates/lash-vm-releases:lash-vm-releases__unit_test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.46,
+    "p95_cores": 1.41,
     "p99_peak_bytes": 73654272,
     "peak_bytes": 73654272,
-    "samples": 24
+    "samples": 94
   },
   "//crates/lash-vm-runtime:lash-vm-runtime__unit_test": {
-    "cpu_count": 2,
+    "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.63,
-    "p99_peak_bytes": 107356160,
-    "peak_bytes": 107433984,
-    "samples": 296
+    "p95_cores": 1.12,
+    "p99_peak_bytes": 47996928,
+    "peak_bytes": 49664000,
+    "samples": 283
+  },
+  "//crates/lash-vm-runtime:lash-vm-runtime__unit_test__fv_598ff3f7": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.79,
+    "p99_peak_bytes": 40148992,
+    "peak_bytes": 40148992,
+    "samples": 4
+  },
+  "//crates/lash-vm-worker:fresh_embedding__test": {
+    "cpu_count": 1,
+    "memory_kb": 524288,
+    "p95_cores": 1.01,
+    "p99_peak_bytes": 250961920,
+    "peak_bytes": 250961920,
+    "samples": 4
   },
   "//crates/lash-vm-worker:lash-vm-worker__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 21975040,
-    "peak_bytes": 22851584,
-    "samples": 164
+    "p95_cores": 1.0,
+    "p99_peak_bytes": 120180736,
+    "peak_bytes": 251334656,
+    "samples": 282
+  },
+  "//crates/lash-vm-worker:park_matrix__test": {
+    "cpu_count": 3,
+    "memory_kb": 524288,
+    "p95_cores": 2.77,
+    "p99_peak_bytes": 402169856,
+    "peak_bytes": 433803264,
+    "samples": 114
   },
   "//crates/lash-vm-worker:pool_laws__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.25,
-    "p99_peak_bytes": 67866624,
-    "peak_bytes": 93216768,
-    "samples": 232
+    "p95_cores": 1.83,
+    "p99_peak_bytes": 174940160,
+    "peak_bytes": 214511616,
+    "samples": 251
   },
   "//crates/lash:artifact_referrers_evidence__test": {
     "cpu_count": 2,
-    "memory_kb": 262144,
+    "memory_kb": 524288,
     "p95_cores": 1.51,
-    "p99_peak_bytes": 202899456,
-    "peak_bytes": 202899456,
-    "samples": 26
+    "p99_peak_bytes": 270749696,
+    "peak_bytes": 324694016,
+    "samples": 238
   },
   "//crates/lash:attachments_evidence__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.04,
-    "p99_peak_bytes": 15671296,
-    "peak_bytes": 16867328,
-    "samples": 164
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13709312,
+    "peak_bytes": 13713408,
+    "samples": 210
   },
   "//crates/lash:integration__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.53,
-    "p99_peak_bytes": 109228032,
-    "peak_bytes": 113438720,
-    "samples": 186
+    "p95_cores": 1.8,
+    "p99_peak_bytes": 195612672,
+    "peak_bytes": 198070272,
+    "samples": 243
+  },
+  "//crates/lash:kernel_two_build_claim__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13721600,
+    "peak_bytes": 13721600,
+    "samples": 200
   },
   "//crates/lash:lash__unit_test": {
+    "cpu_count": 2,
+    "memory_kb": 3932160,
+    "p95_cores": 2.05,
+    "p99_peak_bytes": 630284288,
+    "peak_bytes": 776437760,
+    "samples": 4409
+  },
+  "//crates/lash:lash__unit_test__fv_0cdd08c6": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.76,
+    "p99_peak_bytes": 304574464,
+    "peak_bytes": 304574464,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_1bcdaf34": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.33,
+    "p99_peak_bytes": 299970560,
+    "peak_bytes": 299970560,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_250a64d6": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.31,
+    "p99_peak_bytes": 290234368,
+    "peak_bytes": 290234368,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_2b6682ae": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.35,
+    "p99_peak_bytes": 323514368,
+    "peak_bytes": 323514368,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_7b730620": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.83,
+    "p99_peak_bytes": 308940800,
+    "peak_bytes": 308940800,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_84a16057": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.81,
+    "p99_peak_bytes": 855101440,
+    "peak_bytes": 855101440,
+    "samples": 5
+  },
+  "//crates/lash:lash__unit_test__fv_8617cc93": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 3.06,
+    "p99_peak_bytes": 292265984,
+    "peak_bytes": 292265984,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_8ed56158": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.4,
+    "p99_peak_bytes": 299724800,
+    "peak_bytes": 299724800,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_98a0b30e": {
+    "cpu_count": 2,
+    "memory_kb": 3932160,
+    "p95_cores": 2.18,
+    "p99_peak_bytes": 313516032,
+    "peak_bytes": 313516032,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_994c697e": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.43,
+    "p99_peak_bytes": 309833728,
+    "peak_bytes": 309833728,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_ad5f8c0a": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.87,
+    "p99_peak_bytes": 300138496,
+    "peak_bytes": 300138496,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_bc125339": {
     "cpu_count": 4,
     "memory_kb": 3932160,
-    "p95_cores": 3.28,
-    "p99_peak_bytes": 3000643584,
-    "peak_bytes": 3043880960,
-    "samples": 706
+    "p95_cores": 3.31,
+    "p99_peak_bytes": 593391616,
+    "peak_bytes": 593391616,
+    "samples": 5
+  },
+  "//crates/lash:lash__unit_test__fv_c4f1247c": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.67,
+    "p99_peak_bytes": 297099264,
+    "peak_bytes": 297099264,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_c5333479": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.59,
+    "p99_peak_bytes": 313556992,
+    "peak_bytes": 313556992,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_d97eb990": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.43,
+    "p99_peak_bytes": 293453824,
+    "peak_bytes": 293453824,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_e2d03d13": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.56,
+    "p99_peak_bytes": 294531072,
+    "peak_bytes": 294531072,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_fd71c265": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.74,
+    "p99_peak_bytes": 297332736,
+    "peak_bytes": 297332736,
+    "samples": 6
+  },
+  "//crates/lash:lash__unit_test__fv_ffbebf80": {
+    "cpu_count": 3,
+    "memory_kb": 3932160,
+    "p95_cores": 2.68,
+    "p99_peak_bytes": 826339328,
+    "peak_bytes": 826339328,
+    "samples": 5
+  },
+  "//crates/lash:llm_profiles__test": {
+    "cpu_count": 1,
+    "memory_kb": 262144,
+    "p95_cores": 0.76,
+    "p99_peak_bytes": 91463680,
+    "peak_bytes": 98783232,
+    "samples": 235
   },
   "//crates/lash:otel_trace_evidence__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.05,
-    "p99_peak_bytes": 16572416,
-    "peak_bytes": 17342464,
-    "samples": 163
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13754368,
+    "peak_bytes": 13754368,
+    "samples": 233
   },
   "//crates/lash:plugin_certification__test": {
     "cpu_count": 2,
     "memory_kb": 262144,
-    "p95_cores": 1.56,
-    "p99_peak_bytes": 157351936,
-    "peak_bytes": 157351936,
-    "samples": 23
+    "p95_cores": 1.54,
+    "p99_peak_bytes": 157458432,
+    "peak_bytes": 157458432,
+    "samples": 90
   },
   "//crates/lash:processes_evidence__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 16158720,
-    "peak_bytes": 17027072,
-    "samples": 171
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 144175104,
+    "peak_bytes": 171143168,
+    "samples": 238
   },
   "//crates/lash:processes_evidence_b__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.07,
-    "p99_peak_bytes": 16916480,
-    "peak_bytes": 16920576,
-    "samples": 166
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13709312,
+    "peak_bytes": 13721600,
+    "samples": 214
   },
   "//crates/lash:sessions_evidence__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 15179776,
-    "peak_bytes": 16252928,
-    "samples": 172
+    "p95_cores": 0.96,
+    "p99_peak_bytes": 13668352,
+    "peak_bytes": 13729792,
+    "samples": 211
   },
   "//crates/lash:workflow_laws__test": {
     "cpu_count": 2,
-    "memory_kb": 262144,
-    "p95_cores": 1.45,
-    "p99_peak_bytes": 190365696,
-    "peak_bytes": 190365696,
-    "samples": 48
+    "memory_kb": 524288,
+    "p95_cores": 1.51,
+    "p99_peak_bytes": 327319552,
+    "peak_bytes": 353390592,
+    "samples": 318
   },
   "//crates/lashctl:lashctl__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 17760256,
-    "peak_bytes": 18046976,
-    "samples": 175
+    "p95_cores": 0.98,
+    "p99_peak_bytes": 13746176,
+    "peak_bytes": 13766656,
+    "samples": 209
   },
   "//crates/lashctl:operator_json_contract__test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 0.99,
-    "p99_peak_bytes": 20905984,
-    "peak_bytes": 21622784,
-    "samples": 160
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 52187136,
+    "peak_bytes": 52391936,
+    "samples": 218
   },
   "//crates/transcript-contract:transcript-contract__unit_test": {
     "cpu_count": 1,
     "memory_kb": 262144,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 17104896,
-    "peak_bytes": 18087936,
-    "samples": 127
+    "p95_cores": 0.97,
+    "p99_peak_bytes": 13774848,
+    "peak_bytes": 16834560,
+    "samples": 116
   },
   "//examples/agent-workbench:agent-workbench__unit_test": {
     "cpu_count": 3,
