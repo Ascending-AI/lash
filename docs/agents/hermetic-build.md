@@ -595,9 +595,8 @@ commands on the same test binary with different filters.
   and no case outside the requested filters or behind a requested `--skip`.
   Otherwise the test is an `INFRA_FAILURE` whose message starts
   `Test report does not match its selection`. It never passes.
-- **`--jobs`.** Driver parallelism defaults to 32. The daemon's outstanding remote
-  requests are capped at `min(--jobs, REMOTE_JOBS_MAX)`; the positive integer
-  budget defaults to 16. `KILN_ADMISSION=off` keeps this cap.
+- **`--jobs`.** Driver parallelism defaults to 32. The remote limit is the driver's
+  jobs, clamped by Kiln's `REMOTE_JOBS_MAX` when set.
   A changed effective remote limit waits for every running command to finish
   before restarting the daemon. It never restarts under another command.
 - **Build and test together.** Both hold a shared lease on the daemon and run
@@ -607,11 +606,8 @@ commands on the same test binary with different filters.
 
 The driver logs effective remote and driver jobs on every invocation and writes
 that cap to Buck2's startup-only `buck2_re_client.execution_concurrency_limit`.
-`REMOTE_JOBS_MAX` sets the positive integer ceiling and defaults to 16 for all
-clients, including managed forks and CI. For compatibility, when
-`REMOTE_JOBS_MAX` is unset, `LASH_CI_REMOTE_JOBS` remains a CI-only fallback;
-hosts should migrate that setting to `REMOTE_JOBS_MAX`. The legacy variable is
-rejected unless `CI=true`.
+The remote limit is the driver's jobs, clamped by Kiln's `REMOTE_JOBS_MAX` when
+set; the ceiling must be a positive integer.
 
 When Kiln supplies `KILN_ADMISSION_COMMAND` and protocol version 1, the driver
 calls that executable with `admit --` around remote clients. Admission precedes

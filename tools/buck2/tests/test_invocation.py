@@ -329,32 +329,9 @@ os.execv(sys.argv[3], sys.argv[3:])
                 with self.assertRaisesRegex(ValueError, 'REMOTE_JOBS_MAX.*positive integer'):
                     invocation.remote_jobs(32)
 
-    def test_managed_fork_caps_remote_requests_at_sixteen(self):
+    def test_managed_fork_uses_driver_jobs_without_kiln_ceiling(self):
         with patch.dict(os.environ, {'KILN_REPO': 'lash'}, clear=True):
-            for jobs, expected in ((32, 16), (128, 16), (8, 8)):
-                with self.subTest(jobs=jobs):
-                    _, desired, _ = invocation.configuration(self.root, jobs)
-                    self.assertIn(f'execution_concurrency_limit = {expected}\n', desired)
-                    self.assertIn('engine_address = private-endpoint\n', desired)
-
-    def test_ci_remote_requests_require_an_explicit_override(self):
-        with patch.dict(os.environ, {'KILN_REPO': 'lash', 'CI': 'true'}, clear=True):
-            _, desired, _ = invocation.configuration(self.root, 32)
-            self.assertIn('execution_concurrency_limit = 16\n', desired)
-            os.environ['LASH_CI_REMOTE_JOBS'] = '32'
-            _, desired, _ = invocation.configuration(self.root, 32)
-            self.assertIn('execution_concurrency_limit = 32\n', desired)
-            _, desired, _ = invocation.configuration(self.root, 8)
-            self.assertIn('execution_concurrency_limit = 8\n', desired)
-            os.environ.pop('CI')
-            with self.assertRaisesRegex(ValueError, 'CI=true'):
-                invocation.configuration(self.root, 32)
-            os.environ['CI'] = 'true'
-            for value in ('0', '-1', 'not-a-number'):
-                with self.subTest(value=value):
-                    os.environ['LASH_CI_REMOTE_JOBS'] = value
-                    with self.assertRaisesRegex(ValueError, 'positive integer'):
-                        invocation.configuration(self.root, 32)
+            self.assertEqual(invocation.remote_jobs(32), 32)
 
     def test_links_back_into_the_project_never_survive_into_a_daemon(self):
         # A daemon that started while such a link existed watches the linked

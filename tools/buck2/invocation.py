@@ -15,24 +15,14 @@ import tempfile
 import time
 
 
-MANAGED_REMOTE_JOBS = 16
-CI_REMOTE_JOBS_VARIABLE = 'LASH_CI_REMOTE_JOBS'
 REMOTE_JOBS_MAX_VARIABLE = 'REMOTE_JOBS_MAX'
 
 
 def remote_jobs(jobs):
-    """Apply Kiln's remote budget even when phase admission is disabled."""
+    """Use driver jobs, clamped by Kiln's remote ceiling when set."""
     maximum = os.environ.get(REMOTE_JOBS_MAX_VARIABLE)
     if maximum is None:
-        legacy_override = os.environ.get(CI_REMOTE_JOBS_VARIABLE)
-        if legacy_override is not None:
-            if os.environ.get('CI') != 'true':
-                raise ValueError(f'{CI_REMOTE_JOBS_VARIABLE} requires CI=true')
-            if not re.fullmatch(r'[1-9][0-9]*', legacy_override):
-                raise ValueError(f'{CI_REMOTE_JOBS_VARIABLE} must be a positive integer')
-            maximum = legacy_override
-        else:
-            maximum = str(MANAGED_REMOTE_JOBS)
+        return jobs
     if not re.fullmatch(r'[1-9][0-9]*', maximum):
         raise ValueError(f'{REMOTE_JOBS_MAX_VARIABLE} must be a positive integer')
     return min(jobs, int(maximum))
