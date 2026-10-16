@@ -170,6 +170,9 @@ pub use import::{
 /// The kernel document: its statements, expressions, types, data, sites
 /// and identities, and its canonical encoding.
 ///
+/// [`DocumentDeclarationRefusal`] explains why the held library declarations
+/// do not match the functions a document uses.
+///
 /// # Kernel text
 ///
 /// A document is one whole workflow: the `kernel` and `numbers` header
@@ -190,18 +193,18 @@ pub mod document {
     // An explicit vocabulary keeps those names out of this module.
     pub use lash_kernel_doc::{
         ActExpr, ActKind, Action, Atom, Block, Bytes, Callee, Catch, CheckedDeclarations, Closure,
-        Correspondence, Datum, DeclarationRefusal, DecodeError, DecodeMismatch, Decoder, Document,
-        DocumentId, EffectIdentity, EffectName, Element, EncodeError, ErrorDatum, Expr,
-        FIRST_NATIVE_VERSION, FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, Float, Formula,
-        FrozenDatum, Function, FunctionBody, FunctionCatalog, FunctionDeclarations,
-        FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Guard, GuardExceeded,
-        Handle, IdentifiedDocument, Identity, Implementation, Integer, Invalid, InvalidBytes,
-        InvalidFloat, InvalidIdentity, InvalidInteger, InvalidNumberToken, InvalidQualifiedName,
-        InvalidReason, JoinMode, KERNEL_VERSION, KernelVersion, Label, Literal, LoopIteration,
-        MAX_DECODE_DEPTH, MAX_NESTING_DEPTH, Manifest, MapEntry, MapType, Measure, Member, Name,
-        NativeCall, NativeError, NativeFunction, NativeHeap, Node, NumberPolicy, NumberToken,
-        Object, Operand, Param, ParseError, ParseErrorReason, Place, PreparedNative,
-        ProjectionRead, QualifiedName, RecordEntry, RecordType, RecordTypeField,
+        Correspondence, Datum, DeclarationRefusal as DocumentDeclarationRefusal, DecodeError,
+        DecodeMismatch, Decoder, Document, DocumentId, EffectIdentity, EffectName, Element,
+        EncodeError, ErrorDatum, Expr, FIRST_NATIVE_VERSION, FROZEN_DATUM, FROZEN_JSON,
+        FROZEN_TOOL_VALUE, Float, Formula, FrozenDatum, Function, FunctionBody, FunctionCatalog,
+        FunctionDeclarations, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry,
+        Guard, GuardExceeded, Handle, IdentifiedDocument, Identity, Implementation, Integer,
+        Invalid, InvalidBytes, InvalidFloat, InvalidIdentity, InvalidInteger, InvalidNumberToken,
+        InvalidQualifiedName, InvalidReason, JoinMode, KERNEL_VERSION, KernelVersion, Label,
+        Literal, LoopIteration, MAX_DECODE_DEPTH, MAX_NESTING_DEPTH, Manifest, MapEntry, MapType,
+        Measure, Member, Name, NativeCall, NativeError, NativeFunction, NativeHeap, Node,
+        NumberPolicy, NumberToken, Object, Operand, Param, ParseError, ParseErrorReason, Place,
+        PreparedNative, ProjectionRead, QualifiedName, RecordEntry, RecordType, RecordTypeField,
         RegisteredFunction, RegistryError, Rhs, Signature, Site, SourceLanguage, SourceMap,
         SourceMapId, SourceMapRefusal, SourceSite, Span, SpawnIdentity, StatementForm,
         StatementRuleViolation, Stmt, Survivor, TaskId, TaskIdentity, Timestamp, TryStmt, Type,

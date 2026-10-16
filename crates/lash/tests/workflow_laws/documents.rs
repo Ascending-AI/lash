@@ -203,7 +203,7 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
 #[tokio::test]
 async fn an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_corrupt_one() {
     use lash::workflow::document::{
-        DeclarationRefusal, Formula, FunctionDeclarations, required_declarations,
+        DocumentDeclarationRefusal, Formula, FunctionDeclarations, required_declarations,
     };
     use lash::workflow::{WorkflowDocument, WorkflowDocumentError, WorkflowImport};
     let stores = Arc::new(
@@ -259,7 +259,7 @@ async fn an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_cor
     definition.charge = Formula::Constant(999_999);
     let function = *function;
     match WorkflowDocument::new(document.clone(), corrupt) {
-        Err(WorkflowDocumentError::Declarations(DeclarationRefusal::Identity {
+        Err(WorkflowDocumentError::Declarations(DocumentDeclarationRefusal::Identity {
             function: refused,
             ..
         })) => assert_eq!(refused, function),
@@ -271,7 +271,7 @@ async fn an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_cor
         matches!(
             WorkflowDocument::new(document, short),
             Err(WorkflowDocumentError::Declarations(
-                DeclarationRefusal::Missing { .. }
+                DocumentDeclarationRefusal::Missing { .. }
             ))
         ),
         "a missing declaration is refused before derivation"
