@@ -573,6 +573,83 @@ impl Renderer<'_> {
             k::Action::Yield => self.out.write("await yieldTask()"),
         }
     }
+    fn nested_action(&mut self, act: &k::ActExpr) {
+        self.out.write("(");
+        match &act.kind {
+            k::ActKind::Call(callee) | k::ActKind::Spawn(callee) => {
+                let spawn = matches!(act.kind, k::ActKind::Spawn(_));
+                self.out.write(if spawn { "spawn(" } else { "await " });
+                self.callee(callee);
+                self.out.write(if spawn { ", [" } else { "(" });
+                for (i, arg) in act.args.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.expr(arg);
+                }
+                self.out.write(if spawn { "])" } else { ")" });
+            }
+            k::ActKind::Perform {
+                effect,
+                result,
+                then_yield,
+            } => {
+                self.out.write(if *then_yield {
+                    "await await tools."
+                } else {
+                    "await tools."
+                });
+                self.out.write(effect.as_str());
+                self.out.write("(");
+                for (i, arg) in act.args.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.expr(arg);
+                }
+                self.out.write(")");
+                if *result != k::Type::Any {
+                    self.out.write(" as KernelType<");
+                    self.metadata(result);
+                    self.out.write(">");
+                }
+            }
+            kind => {
+                match kind {
+                    k::ActKind::Sleep { then_yield } => self.out.write(if *then_yield {
+                        "await await sleep("
+                    } else {
+                        "await sleep("
+                    }),
+                    k::ActKind::Join => self.out.write("await join("),
+                    k::ActKind::JoinMany(mode) => self.out.write(match mode {
+                        k::JoinMode::All => "await Promise.all(",
+                        k::JoinMode::AllSettled => "await Promise.allSettled(",
+                        k::JoinMode::Race => "await Promise.race(",
+                        k::JoinMode::Any => "await Promise.any(",
+                    }),
+                    k::ActKind::Await(policy) => {
+                        if self.operators.unique("ts.await") == Some(*policy) {
+                            self.out.write("await (");
+                        } else {
+                            self.out.write("await k.await(");
+                            self.helper(policy);
+                            self.out.write(", ");
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                for (i, arg) in act.args.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.expr(arg);
+                }
+                self.out.write(")");
+            }
+        }
+        self.out.write(")");
+    }
     fn expression(&mut self, expr: &k::Expr) {
         match expr {
             k::Expr::Literal(l) => self.literal(l),
@@ -708,13 +785,18 @@ impl Renderer<'_> {
                 self.out.write(")");
             }
             k::Expr::Let { name, value, body } => {
-                self.out.write("((");
+                let asynchronous = awaits_expression(body);
+                self.out.write(if asynchronous {
+                    "(await (async ("
+                } else {
+                    "(("
+                });
                 self.name(name);
                 self.out.write(") => (");
                 self.expr_at(body, 1);
                 self.out.write("))(");
                 self.expr_at(value, 0);
-                self.out.write(")");
+                self.out.write(if asynchronous { "))" } else { ")" });
             }
             k::Expr::Read(read) => {
                 self.out.write("projection.read(");
@@ -723,11 +805,18 @@ impl Renderer<'_> {
                 self.expr(&read.request);
                 self.out.write(")");
             }
-            // The front end writes no nested action yet, so its source has
-            // no spelling for one.
-            k::Expr::Act(_) => self.out.refuse(PrintError::Invalid(
-                "a nested action has no generated TypeScript spelling".into(),
-            )),
+            k::Expr::Act(act) => self.nested_action(act),
         }
     }
+}
+
+fn awaits_expression(expr: &k::Expr) -> bool {
+    fn node(value: k::Node<'_>) -> bool {
+        match value {
+            k::Node::Expr(k::Expr::Closure(_)) => false,
+            k::Node::Expr(k::Expr::Act(act)) if !matches!(act.kind, k::ActKind::Spawn(_)) => true,
+            _ => value.children().into_iter().any(node),
+        }
+    }
+    node(k::Node::Expr(expr))
 }

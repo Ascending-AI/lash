@@ -345,7 +345,17 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
             k::Expr::Read(_) => "Read",
             k::Expr::If { .. } => "IfExpression",
             k::Expr::Let { .. } => "LetExpression",
-            k::Expr::Act(_) => "NestedAction",
+            // The same exactness distinction belongs to an action whether
+            // it owns a statement or stands inside another expression.
+            k::Expr::Act(act) => match act.kind {
+                k::ActKind::Call(_) => "Call",
+                k::ActKind::Perform { .. } => "Perform",
+                k::ActKind::Sleep { .. } => "Sleep",
+                k::ActKind::Spawn(_) => "Spawn",
+                k::ActKind::Join => "Join",
+                k::ActKind::JoinMany(_) => "JoinMany",
+                k::ActKind::Await(_) => "Await",
+            },
         },
     }
 }
@@ -359,10 +369,24 @@ pub fn deep_research() -> Result<k::Document, Diagnostic> {
 
 const DEEP_RESEARCH: &str = r#"{"manifest":{"kernel":1,"effects":{"display.show_message":{"params":[{"name":"input","ty":{"record":{"fields":[{"name":"text","ty":"text"}]}}}],"result":"null"},"research.search":{"params":[{"name":"input","ty":{"record":{"fields":[{"name":"max_sources","ty":"int"},{"name":"topic","ty":"text"}]}}}],"result":{"record":{"fields":[{"name":"sources","ty":{"list":{"record":{"fields":[{"name":"excerpt","ty":"text"},{"name":"id","ty":"text"},{"name":"title","ty":"text"},{"name":"url","ty":"text"}],"rest":"any"}}}},{"name":"topic","ty":"text"}],"rest":"any"}}},"research.synthesize":{"params":[{"name":"input","ty":{"record":{"fields":[{"name":"sources","ty":{"list":{"record":{"fields":[{"name":"excerpt","ty":"text"},{"name":"id","ty":"text"},{"name":"title","ty":"text"},{"name":"url","ty":"text"}]}}}},{"name":"topic","ty":"text"}]}}}],"result":{"record":{"fields":[{"name":"citations","ty":{"list":{"record":{"fields":[{"name":"source_id","ty":"text"},{"name":"url","ty":"text"}],"rest":"any"}}}},{"name":"source_count","ty":"int"},{"name":"summary","ty":"text"},{"name":"title","ty":"text"}],"rest":"any"}}}},"numbers":"float"},"functions":{"deep_research":{"body":[{"let":{"name":"search_input","value":{"expr":{"record":[{"field":"topic","value":{"literal":{"text":"Reducing customer onboarding drop-off"}}},{"field":"max_sources","value":{"literal":{"int":"3"}}}]}}}},{"let":{"name":"evidence","value":{"action":{"perform":{"effect":"research.search","args":[{"variable":"search_input"}],"result":"any"}}}}},{"let":{"name":"synthesis_input","value":{"expr":{"record":[{"field":"topic","value":{"member":{"field":{"target":{"variable":"evidence"},"field":"topic"}}}},{"field":"sources","value":{"member":{"field":{"target":{"variable":"evidence"},"field":"sources"}}}}]}}}},{"let":{"name":"report","value":{"action":{"perform":{"effect":"research.synthesize","args":[{"variable":"synthesis_input"}],"result":"any"}}}}},{"let":{"name":"display_input","value":{"expr":{"record":[{"field":"text","value":{"member":{"field":{"target":{"variable":"report"},"field":"summary"}}}}]}}}},{"do":{"action":{"perform":{"effect":"display.show_message","args":[{"variable":"display_input"}],"result":"any"}}}},{"return":{"value":{"variable":"report"}}}]}},"entries":{"deep_research":{"result":"any"}},"main":[{"finish":{"value":{"literal":"null"}}}]}"#;
 
-/// Seven realistic shapes shared by all dialects. Helper identities are
+/// Realistic shapes shared by all dialects. Helper identities are
 /// deliberately foreign: decoding and readability require no installed library.
 pub fn corpus() -> Result<Vec<Case>, Diagnostic> {
     let programs = [
+        (
+            "nested_actions",
+            r#"effect echo(input: Any) -> Any
+fn worker(input) { return input }
+main {
+ let f = fn(input) { return input }
+ let answer = perform echo({text: "inline", values: [call worker({n: 1}), apply f([2])]}) as Any
+ let typed = [perform echo({n: 3}) as Text then yield]
+ let tasks = [spawn call worker({n: 4}), spawn apply f([5])]
+ let waits = [sleep (call worker(0)), sleep 1 then yield, join(tasks[0]), join all tasks, join settled tasks, join race tasks, join any tasks]
+ let field = perform echo({n: 6}) as Any
+ finish [answer, typed, waits, field]
+}"#,
+        ),
         (
             "three_effect_workflow",
             r#"effect research.search(input: Any) -> Any
@@ -445,6 +469,21 @@ main {
         .map(|(name, program)| {
             let mut document = k::parse_document(&format!("kernel 1\nnumbers float\n{program}\n"))
                 .map_err(|error| corpus_error(error.to_string()))?;
+            if name == "nested_actions" {
+                let k::Stmt::Let {
+                    value: k::Rhs::Expr(value),
+                    ..
+                } = &mut document.main[5]
+                else {
+                    return Err(corpus_error(
+                        "nested action fixture is missing its field target".into(),
+                    ));
+                };
+                *value = k::Expr::Member(Box::new(k::Member::Field {
+                    target: value.clone(),
+                    field: "n".into(),
+                }));
+            }
             if name == "recursion_with_helpers" {
                 let id = k::FunctionId::from_bytes([23; 32]);
                 document.manifest.functions.insert(

@@ -384,14 +384,7 @@ impl Renderer<'_> {
                 self.expr(&read.handle);
                 self.expr(&read.request);
             }
-            // The front end writes no nested action yet, so its source has
-            // no spelling for one.
-            k::Expr::Act(_) => {
-                self.out.refuse(PrintError::Invalid(
-                    "a nested action has no generated Python spelling".into(),
-                ));
-                return;
-            }
+            k::Expr::Act(act) => self.nested_action_suite(act),
         }
         self.indent -= 1;
     }
@@ -439,20 +432,13 @@ impl Renderer<'_> {
     }
     fn callee(&mut self, callee: &k::Callee) {
         match callee {
-            k::Callee::Declared(n) | k::Callee::Value(n) => {
-                self.out.write(if matches!(callee, k::Callee::Declared(_)) {
-                    "k.declared("
-                } else {
-                    "k.value("
-                });
-                self.out.json(n);
+            k::Callee::Declared(name) => {
+                self.out.write("declared.");
+                self.name(name);
             }
-            k::Callee::Library(id) => {
-                self.out.write("k.library(");
-                self.helper(id);
-            }
+            k::Callee::Value(name) => self.name(name),
+            k::Callee::Library(id) => self.helper(id),
         }
-        self.out.write(")");
     }
     fn action(&mut self, action: &k::Action) {
         match action {
@@ -559,23 +545,13 @@ impl Renderer<'_> {
                 return;
             }
             k::Action::Await { policy, value } => {
-                self.out.write("k.await_(");
+                self.out.write("await_by(");
                 self.helper(policy);
                 self.out.write(", ");
                 self.atom(value);
             }
-            k::Action::Spawn {
-                callee: k::Callee::Library(id),
-                args,
-            } => {
-                self.out.write("k.spawn(");
-                self.helper(id);
-                self.out.write("(");
-                self.call_atoms(args);
-                self.out.write(")");
-            }
             k::Action::Spawn { callee, args } => {
-                self.out.write("k.spawn(");
+                self.out.write("spawn(");
                 self.callee(callee);
                 self.out.write(", ");
                 self.atoms(args);
@@ -584,14 +560,14 @@ impl Renderer<'_> {
                 duration,
                 then_yield,
             } => {
-                self.out.write("k.sleep(");
+                self.out.write("await sleep(");
                 self.atom(duration);
                 if *then_yield {
                     self.out.write(", then_yield=True");
                 }
             }
             k::Action::Join { task } => {
-                self.out.write("k.join(");
+                self.out.write("await join(");
                 self.atom(task);
             }
             k::Action::Cancel { task } => {
@@ -599,14 +575,12 @@ impl Renderer<'_> {
                 self.atom(task);
             }
             k::Action::JoinMany { mode, tasks } => {
-                self.out.write("k.join_many(");
-                self.out.json(match mode {
-                    k::JoinMode::All => "all",
-                    k::JoinMode::AllSettled => "all_settled",
-                    k::JoinMode::Race => "race",
-                    k::JoinMode::Any => "any",
+                self.out.write(match mode {
+                    k::JoinMode::All => "await join_all(",
+                    k::JoinMode::AllSettled => "await join_all_settled(",
+                    k::JoinMode::Race => "await join_race(",
+                    k::JoinMode::Any => "await join_any(",
                 });
-                self.out.write(", ");
                 self.atom(tasks);
             }
             k::Action::Yield => self.out.write("k.yield_("),
@@ -654,6 +628,7 @@ impl InlinePlan {
                     }
                 },
                 k::Expr::Call { args, .. } => args.iter().all(|arg| self.contains(arg)),
+                k::Expr::Act(act) => act.args.iter().all(|arg| self.contains(arg)),
                 k::Expr::List(items) | k::Expr::Tuple(items) | k::Expr::Set(items) => {
                     items.iter().all(|e| self.contains(e))
                 }
@@ -674,8 +649,14 @@ impl InlinePlan {
 fn awaits(body: &k::Block) -> bool {
     fn node(node: k::Node<'_>) -> bool {
         match node {
+            k::Node::Expr(k::Expr::Act(act)) if !matches!(act.kind, k::ActKind::Spawn(_)) => true,
             k::Node::Action(
-                k::Action::Call { .. } | k::Action::Perform { .. } | k::Action::Await { .. },
+                k::Action::Call { .. }
+                | k::Action::Perform { .. }
+                | k::Action::Await { .. }
+                | k::Action::Sleep { .. }
+                | k::Action::Join { .. }
+                | k::Action::JoinMany { .. },
             ) => true,
             k::Node::Stmt(
                 k::Stmt::Let {

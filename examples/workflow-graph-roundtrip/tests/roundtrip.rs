@@ -306,12 +306,21 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
             && action["args"][0]["site"].is_object(),
         "the view lists the record argument with its site: {action}"
     );
-    // The TypeScript printer has no spelling yet for an action nested in an
-    // expression (FIG-6472), so the lens says so instead of showing code.
+    let source = workflow["source"]
+        .as_str()
+        .expect("the lens follows insert_effect");
+    assert!(workflow["sourceUnavailable"].is_null());
     assert!(
-        workflow["source"].is_null() && workflow["sourceUnavailable"].is_string(),
-        "the lens reports the nested action it cannot spell: {workflow}"
+        source.contains(
+            "await tools.display.show_message({text: \"Added through public authoring\"})"
+        ),
+        "{source}"
     );
+    let document: lash::workflow::document::Document =
+        serde_json::from_value(workflow["document"].clone()).expect("the edited document");
+    let decoded = lash::typescript::read(source, &document, Default::default())
+        .expect("the edited lens reads back exactly");
+    assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
 
     let events = run(&client, &base, json!({})).await;
     let sites: Vec<&Value> = workflow["view"]["execution_sites"]

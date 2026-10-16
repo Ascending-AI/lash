@@ -55,8 +55,8 @@ ordered tables and output uses the shared append-only writer.
 | Member Assign and Remove | `value.title = rhs`, `value[index] = rhs`, `del value[index]`; `setattr` and `delattr` preserve nonidentifier Field places | Literal target is grouped / target, index or RHS block expression requires a suite |
 | Expression helper call | `helper_name(expressions)` reconstructs Expr::Call with the full identity the base holds for that spelling | Foreign helper and empty args / a child block expression requires an invocation suite |
 | Operators and comparisons | Native operators with minimal parentheses by precedence reconstruct exactly one full identity through an unambiguous base manifest label | `add` becomes `x + y`, `eq` becomes `x == y`, `bool.not` becomes `not x`, `(a + b) * c` and `a ** (b ** c)` group only where precedence or associativity needs it, a negated numeric literal is `-(7)` / chained comparisons, an ungrouped unary base of `**` and ambiguous identities refuse or keep the helper call; `python_operators_print_minimal_parentheses_with_an_exact_inverse` |
-| Action Call | Builtins `len(x)`, `range(a, b)`, `abs`, `all`, `any`, `chr`, `dict`, `divmod`, `int`, `list`, `ord`, `repr`, `reversed`, `round`, `set`, `sum`, `tuple`; methods `xs.append(v)`, `"a b".split()`; slices `x[a:b:c]`; `type(x).__name__`; otherwise `await helper_name(atoms)`; `await declared.worker(atoms)`, `await closure_name(atoms)` retain Library, Declared and Value callees, distinct from expression calls. An authored spelling applies only when the base labels that helper once | All callee kinds / non-atomic operands refuse; Spawn remains a separate action |
-| Perform | `await tools.research.search(atoms)` preserves the effect name; unannotated it reads as `result: any`, which authored lowering stores; bracket names and `result=` cover other names or types | Ordinary tool, arbitrary effect and foreign result type / malformed metadata or non-atomic arguments refuse |
+| Action Call | Builtins `len(x)`, `range(a, b)`, `abs`, `all`, `any`, `chr`, `dict`, `divmod`, `int`, `list`, `ord`, `repr`, `reversed`, `round`, `set`, `sum`, `tuple`; methods `xs.append(v)`, `"a b".split()`; slices `x[a:b:c]`; `type(x).__name__`; otherwise `await helper_name(atoms)`; `await declared.worker(atoms)`, `await closure_name(atoms)` retain Library, Declared and Value callees, distinct from expression calls. An authored spelling applies only when the base labels that helper once | All callee kinds remain distinct; computed arguments reconstruct a nested action and Spawn remains separate |
+| Perform | `await tools.research.search(atoms)` preserves the effect name; unannotated it reads as `result: any`, which authored lowering stores; bracket names and `result=` cover other names or types | Ordinary tool, arbitrary effect and foreign result type / malformed metadata refuses; computed arguments retain their expression nodes |
 | If / Elif / Else | Direct clauses preserve both Blocks; elif is exactly one If in an else Block | Singleton nested If / extra statement requires an explicit else and nested if |
 | For / While | `for item in values:` and `while ready:` retain the exact binding, iterable, condition and body | List iteration and nested loops / a header block expression requires a suite |
 | Try / Except / Finally | `try:`, optional `except BaseException as error:`, optional `finally:` retain handler presence and empty blocks | Catch-only or finally-only / handlerless Try requires an explicit kernel form |
@@ -94,7 +94,7 @@ indentation and uses exactly `pass` when empty.
 | `handlerless-try` | `with k.try_(None, False):` | Python requires an except or finally clause; adding one would change handler presence |
 | `projection-read` | `with k.read():` with handle and request children | Kernel projection reads have no ordinary Python primitive and retain their dedicated expression kind |
 | `clock` / `random` | `k.clock()` / `k.random()` | Kernel nondeterministic expressions are distinct from library calls and Python's time/random APIs |
-| `task-action` | `k.spawn`, `k.sleep`, `k.join`, `k.join_many`, `k.cancel`, `k.yield_` | Kernel task actions, modes and timing units differ from Python coroutine/library operations; no spawn/join fusion is allowed |
+| `task-action` | `spawn(callee, [args])`, `await sleep(value)`, `await join(value)`, `await join_all/join_all_settled/join_race/join_any(value)`, `k.cancel`, `k.yield_` | Kernel task actions, modes and timing units differ from Python coroutine/library operations; their exact primitives retain every action without spawn/join fusion |
 
 The generic reader also accepts full explicit body-level variants for the
 readable forms (`k.int`, `k.float`, `k.bytes`, `k.function`, `k.call`,
@@ -163,3 +163,31 @@ A method call on a non-variable, non-text receiver, a slice of a non-variable
 and `float(...)` (whose `nan`/`inf` spellings are literal forms) also keep the
 helper call. A function whose body holds an authored builtin or method call
 prints as `async def`, because those calls are stored Actions.
+
+## Nested actions and child suites
+
+Nested actions use parenthesized native calls and effects with expression
+arguments: `(await declared.worker(record({"n": 1})))`,
+`(await tools.echo(record({"text": "inline"})))`,
+`(spawn(declared.worker, [record({"n": 1})]))`, and `(await sleep(value))`.
+Calls preserve Library, Declared and Value callees. Effects preserve `result=`
+and `then_yield=True`; sleep also retains `then_yield=True`. Joins retain their
+exact mode. The base's unique `py.await` uses `await (expression)`; any other
+policy uses `await_by(helper_policy, expression)`. Native task constructor
+names are reserved and receive reversible aliases when a binding collides.
+A complete RHS demotes to the statement Action only when every argument is an
+atom; nested expression positions retain Expr::Act and each argument Site.
+
+As for `with k.invoke` above, an argument without a native Python expression
+inverse requires a child suite. This applies to arbitrary Closure and Read
+nodes and the existing If/Let suites, including collections containing them.
+Only that inverse test selects the envelope: `with k.call(callee):`,
+`with k.spawn(callee):`, `with k.perform("effect", result_type, then_yield):`,
+`with k.sleep(then_yield):`, `with k.join():`,
+`with k.join_many("mode"):` or `with k.await_(helper_policy):`, followed by
+exactly the argument expression suites in order. Callees retain their native
+aliases and result types are structured literals. No argument is hoisted.
+The common inline path has no `k.*` calls or effects. The shared acceptance
+corpus proves that path; `nested_actions_use_child_suites_only_without_an_inline_inverse`
+proves the necessary envelope's exact re-import and complete source map.
+The old inline `k.spawn/sleep/join/join_many/await_` task decoder is removed.

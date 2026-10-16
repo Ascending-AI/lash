@@ -27,23 +27,67 @@ fn call(expr: &s::Expr) -> Result<(&s::Expr, Vec<&s::Expr>), Diagnostic> {
     Ok((callee, call_arguments(call)?))
 }
 
+pub(super) enum NativeAction {
+    Nested(k::ActExpr),
+    Statement(k::Action),
+}
+impl NativeAction {
+    pub(super) fn expression(self) -> Result<k::Expr, Diagnostic> {
+        match self {
+            Self::Nested(act) => Ok(k::Expr::Act(Box::new(act))),
+            Self::Statement(_) => Err(invalid("yield and cancel cannot nest", None)),
+        }
+    }
+    pub(super) fn rhs(self) -> k::Rhs {
+        match self {
+            Self::Nested(act) => match act.as_action() {
+                Some(action) => k::Rhs::Action(action),
+                None => k::Rhs::Expr(k::Expr::Act(Box::new(act))),
+            },
+            Self::Statement(action) => k::Rhs::Action(action),
+        }
+    }
+    fn statement(self) -> Result<k::Stmt, Diagnostic> {
+        match self.rhs() {
+            k::Rhs::Action(action) => Ok(k::Stmt::Do { action }),
+            _ => Err(invalid("a discarded nested action needs a binding", None)),
+        }
+    }
+}
 impl Reader {
     pub(super) fn native_action(
         &mut self,
         expr: &s::Expr,
-    ) -> Option<Result<k::Action, Diagnostic>> {
+    ) -> Option<Result<NativeAction, Diagnostic>> {
         let (expr, annotation) = if let s::Expr::TsAs(assertion) = expr {
             (&*assertion.expr, Some(&*assertion.type_ann))
         } else {
             (expr, None)
         };
         if let s::Expr::Await(awaited) = expr {
+            if super::expressions::async_scope(&awaited.arg) {
+                return None;
+            }
             return Some(self.awaited_action(&awaited.arg, annotation));
         }
         if annotation.is_none()
             && let Some(action) = self.authored_action(expr)
         {
-            return Some(action);
+            return Some(action.map(|action| {
+                let k::Action::Call { callee, args } = action else {
+                    unreachable!()
+                };
+                NativeAction::Nested(k::ActExpr {
+                    kind: k::ActKind::Call(callee),
+                    args: args
+                        .into_iter()
+                        .map(|atom| match atom {
+                            k::Atom::Variable(name) => k::Expr::Variable(name),
+                            k::Atom::Literal(value) => k::Expr::Literal(value),
+                        })
+                        .collect(),
+                })
+            }));
         }
         if matches!(expr, s::Expr::Call(call) if matches!(&call.callee, s::Callee::Expr(callee) if path(callee).as_deref() == Some("spawn")))
         {
@@ -57,14 +101,17 @@ impl Reader {
                 let (_, args) = call(expr)?;
                 let [callee, args] = args.as_slice() else {
                     return Err(invalid(
-                        "spawn names a callee and atomic argument array",
+                        "spawn names a callee and argument array",
                         Some(expr.span()),
                     ));
                 };
-                Ok(k::Action::Spawn {
-                    callee: self.native_callee(callee)?,
-                    args: self.atoms(args)?,
-                })
+                Ok(NativeAction::Nested(k::ActExpr {
+                    kind: k::ActKind::Spawn(self.native_callee(callee)?),
+                    args: array(args)?
+                        .into_iter()
+                        .map(|arg| self.expression(arg))
+                        .collect::<Result<_, _>>()?,
+                }))
             })());
         }
         None
@@ -139,36 +186,29 @@ impl Reader {
         &mut self,
         expr: &s::Expr,
         annotation: Option<&s::TsType>,
-    ) -> Result<k::Action, Diagnostic> {
-        // A tool call or a `sleep` awaited twice takes one more turn once
-        // its outcome is in.
+    ) -> Result<NativeAction, Diagnostic> {
         if let s::Expr::Await(inner) = expr {
-            return match self.awaited_action(&inner.arg, annotation)? {
-                k::Action::Perform {
-                    effect,
-                    args,
-                    result,
-                    then_yield: false,
-                } => Ok(k::Action::Perform {
-                    effect,
-                    args,
-                    result,
-                    then_yield: true,
-                }),
-                k::Action::Sleep {
-                    duration,
-                    then_yield: false,
-                } => Ok(k::Action::Sleep {
-                    duration,
-                    then_yield: true,
-                }),
-                _ => Err(invalid(
-                    "only a tool call or `sleep` is awaited twice",
+            let NativeAction::Nested(mut act) = self.awaited_action(&inner.arg, annotation)? else {
+                return Err(invalid(
+                    "only a tool call or sleep is awaited twice",
                     Some(expr.span()),
-                )),
+                ));
             };
+            match &mut act.kind {
+                k::ActKind::Perform { then_yield, .. } | k::ActKind::Sleep { then_yield }
+                    if !*then_yield =>
+                {
+                    *then_yield = true
+                }
+                _ => {
+                    return Err(invalid(
+                        "only a tool call or sleep is awaited twice",
+                        Some(expr.span()),
+                    ));
+                }
+            }
+            return Ok(NativeAction::Nested(act));
         }
-        // `await value` awaits by the base's `ts.await`.
         if !matches!(expr, s::Expr::Call(_)) {
             if annotation.is_some() {
                 return Err(invalid(
@@ -182,14 +222,13 @@ impl Reader {
                     Some(expr.span()),
                 )
             })?;
-            return Ok(k::Action::Await {
-                policy,
-                value: self.atom(expr)?,
-            });
+            return Ok(NativeAction::Nested(k::ActExpr {
+                kind: k::ActKind::Await(policy),
+                args: vec![self.expression(expr)?],
+            }));
         }
         let (callee, args) = call(expr)?;
         let spelling = path(callee);
-        // An `await` by a policy other than the base's `ts.await`.
         if spelling.as_deref() == Some("k.await") {
             let [policy, value] = args.as_slice() else {
                 return Err(invalid("wrong native action arity", Some(expr.span())));
@@ -200,14 +239,14 @@ impl Reader {
                     Some(expr.span()),
                 ));
             }
-            return Ok(k::Action::Await {
-                policy: self.id(policy)?,
-                value: self.atom(value)?,
-            });
+            return Ok(NativeAction::Nested(k::ActExpr {
+                kind: k::ActKind::Await(self.id(policy)?),
+                args: vec![self.expression(value)?],
+            }));
         }
-        let args_atoms = args
+        let arguments = args
             .iter()
-            .map(|arg| self.atom(arg))
+            .map(|arg| self.expression(arg))
             .collect::<Result<Vec<_>, _>>()?;
         if let Some(effect) = spelling
             .as_deref()
@@ -215,17 +254,18 @@ impl Reader {
         {
             let effect = k::EffectName::new(effect)
                 .map_err(|e| invalid(e.to_string(), Some(expr.span())))?;
-            // An unannotated tool call is what authored lowering stores: `any`.
             let result = match annotation {
                 Some(annotation) => decode_type(annotation, self.limits)?,
                 None => k::Type::Any,
             };
-            return Ok(k::Action::Perform {
-                effect,
-                args: args_atoms,
-                result,
-                then_yield: false,
-            });
+            return Ok(NativeAction::Nested(k::ActExpr {
+                kind: k::ActKind::Perform {
+                    effect,
+                    result,
+                    then_yield: false,
+                },
+                args: arguments,
+            }));
         }
         if annotation.is_some() {
             return Err(invalid(
@@ -233,40 +273,39 @@ impl Reader {
                 Some(expr.span()),
             ));
         }
-        Ok(match (spelling.as_deref(), args_atoms.as_slice()) {
-            (Some("sleep"), [duration]) => k::Action::Sleep {
-                duration: duration.clone(),
-                then_yield: false,
-            },
-            (Some("join"), [task]) => k::Action::Join { task: task.clone() },
-            (Some("cancel"), [task]) => k::Action::Cancel { task: task.clone() },
-            (Some("yieldTask"), []) => k::Action::Yield,
+        let kind = match (spelling.as_deref(), arguments.as_slice()) {
+            (Some("sleep"), [_]) => k::ActKind::Sleep { then_yield: false },
+            (Some("join"), [_]) => k::ActKind::Join,
+            (Some("cancel"), [_]) => {
+                return Ok(NativeAction::Statement(k::Action::Cancel {
+                    task: self.atom(args[0])?,
+                }));
+            }
+            (Some("yieldTask"), []) => return Ok(NativeAction::Statement(k::Action::Yield)),
             (
                 Some(
                     name @ ("Promise.all" | "Promise.allSettled" | "Promise.race" | "Promise.any"),
                 ),
-                [tasks],
-            ) => k::Action::JoinMany {
-                mode: match name {
-                    "Promise.all" => k::JoinMode::All,
-                    "Promise.allSettled" => k::JoinMode::AllSettled,
-                    "Promise.race" => k::JoinMode::Race,
-                    _ => k::JoinMode::Any,
-                },
-                tasks: tasks.clone(),
-            },
+                [_],
+            ) => k::ActKind::JoinMany(match name {
+                "Promise.all" => k::JoinMode::All,
+                "Promise.allSettled" => k::JoinMode::AllSettled,
+                "Promise.race" => k::JoinMode::Race,
+                _ => k::JoinMode::Any,
+            }),
             (
                 Some(
-                    "sleep" | "join" | "cancel" | "yieldTask" | "k.await" | "Promise.all"
+                    "sleep" | "join" | "cancel" | "yieldTask" | "Promise.all"
                     | "Promise.allSettled" | "Promise.race" | "Promise.any",
                 ),
                 _,
             ) => return Err(invalid("wrong native action arity", Some(expr.span()))),
-            _ => k::Action::Call {
-                callee: self.native_callee(callee)?,
-                args: args_atoms,
-            },
-        })
+            _ => k::ActKind::Call(self.native_callee(callee)?),
+        };
+        Ok(NativeAction::Nested(k::ActExpr {
+            kind,
+            args: arguments,
+        }))
     }
     pub(super) fn native_statement(
         &mut self,
@@ -303,7 +342,7 @@ impl Reader {
             })());
         }
         self.native_action(expr)
-            .map(|action| action.map(|action| k::Stmt::Do { action }))
+            .map(|action| action.and_then(NativeAction::statement))
     }
     pub(super) fn native_expression(
         &mut self,

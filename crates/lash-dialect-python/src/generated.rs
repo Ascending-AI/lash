@@ -21,6 +21,7 @@ fn error(code: Code, message: impl Into<String>) -> Diagnostic {
         repairs: vec![],
     }
 }
+mod actions;
 mod inline;
 
 type Result<T> = std::result::Result<T, Diagnostic>;
@@ -384,17 +385,21 @@ impl<'a> Reader<'a> {
     }
     fn inline_rhs(&self, c: &mut Cursor<'_>, depth: usize) -> Result<k::Rhs> {
         self.depth(depth)?;
-        if c.take("await ") {
-            return self.await_call(c).map(k::Rhs::Action);
-        }
-        if Self::action_form(c.text) {
+        if c.text.trim_start().starts_with("k.") && Self::action_form(c.text) {
             return self.action_cursor(c).map(k::Rhs::Action);
         }
         if let Some(action) = self.authored_call(c)? {
             return Ok(k::Rhs::Action(action));
         }
-        self.inline(c, depth).map(k::Rhs::Expr)
+        self.inline(c, depth).map(|expr| match expr {
+            k::Expr::Act(act) => match act.as_action() {
+                Some(action) => k::Rhs::Action(action),
+                None => k::Rhs::Expr(k::Expr::Act(act)),
+            },
+            expr => k::Rhs::Expr(expr),
+        })
     }
+
     /// A library action spelled as an author writes it: a builtin call or a
     /// method of a variable ([`crate::generated_operators::Authored`]). None
     /// when the text is not one; the base document must hold its helper once.
@@ -501,91 +506,10 @@ impl<'a> Reader<'a> {
         }))
     }
     fn await_call(&self, c: &mut Cursor<'_>) -> Result<k::Action> {
-        if c.text.trim_start().starts_with("tools.") || c.text.trim_start().starts_with("tools[") {
-            c.expect("tools")?;
-            let name = if c.take("[") {
-                let name = c.string()?;
-                c.expect("]")?;
-                name
-            } else {
-                c.expect(".")?;
-                let mut name = c.word()?.to_owned();
-                while c.take(".") {
-                    name.push('.');
-                    name.push_str(c.word()?);
-                }
-                name
-            };
-            let effect = k::EffectName::new(name).map_err(|e| invalid(e.to_string()))?;
-            let mut result = None;
-            let mut then_yield = false;
-            c.expect("(")?;
-            let mut args = vec![];
-            if !c.take(")") {
-                loop {
-                    if c.take("then_yield=True") {
-                        then_yield = true;
-                        c.expect(")")?;
-                        break;
-                    }
-                    if result.is_none() && c.take("result=") {
-                        result = Some(c.metadata()?);
-                        if c.take(")") {
-                            break;
-                        }
-                        c.expect(",")?;
-                        continue;
-                    }
-                    if result.is_some() {
-                        return Err(invalid("a tool call's arguments come before `result=`"));
-                    }
-                    args.push(self.atom(c)?);
-                    if c.take(")") {
-                        break;
-                    }
-                    c.expect(",")?;
-                }
-            }
-            // An unannotated tool call is what authored lowering stores: `any`.
-            let result = result.unwrap_or(k::Type::Any);
-            return Ok(k::Action::Perform {
-                effect,
-                args,
-                result,
-                then_yield,
-            });
-        }
-        let callee = if c.take("declared.") {
-            k::Callee::Declared(self.name(c)?)
-        } else if c.text.trim_start().starts_with("helper_") {
-            k::Callee::Library(self.id(c)?)
-        } else {
-            let name = self.name(c)?;
-            // `await name` awaits by the base's `py.await`.
-            if !c.text.trim_start().starts_with('(') {
-                let policy = self
-                    .operators
-                    .unique("py.await")
-                    .ok_or_else(|| invalid("`await` of a value needs the base's one `py.await`"))?;
-                return Ok(k::Action::Await {
-                    policy,
-                    value: k::Atom::Variable(name),
-                });
-            }
-            k::Callee::Value(name)
-        };
-        c.expect("(")?;
-        let mut args = vec![];
-        if !c.take(")") {
-            loop {
-                args.push(self.atom(c)?);
-                if c.take(")") {
-                    break;
-                }
-                c.expect(",")?;
-            }
-        }
-        Ok(k::Action::Call { callee, args })
+        self.awaited_expr(c, 0)?
+            .0
+            .as_action()
+            .ok_or_else(|| invalid("a discarded nested action needs a binding"))
     }
     fn names(&self, c: &mut Cursor<'_>) -> Result<Vec<k::Name>> {
         c.expect("[")?;
@@ -841,20 +765,9 @@ impl<'a> Reader<'a> {
             return true;
         }
         let mut probe = Cursor::new(text);
-        probe.operation().is_ok_and(|op| {
-            matches!(
-                op,
-                "call"
-                    | "spawn"
-                    | "perform"
-                    | "sleep"
-                    | "join"
-                    | "join_many"
-                    | "cancel"
-                    | "yield_"
-                    | "await_"
-            )
-        })
+        probe
+            .operation()
+            .is_ok_and(|op| matches!(op, "call" | "perform" | "cancel" | "yield_"))
     }
     fn readable_statement(
         &mut self,
@@ -1025,6 +938,15 @@ impl<'a> Reader<'a> {
             } else {
                 k::Stmt::Continue
             }
+        } else if c.text.starts_with("spawn(") || c.text.starts_with("await_by(") {
+            let k::Expr::Act(act) = self.inline(&mut c, depth + 1)? else {
+                return Err(invalid("expected a task action"));
+            };
+            let action = act
+                .as_action()
+                .ok_or_else(|| invalid("a discarded nested action needs a binding"))?;
+            c.finish()?;
+            k::Stmt::Do { action }
         } else if let Some(action) = self.authored_call(&mut c)? {
             self.depth(depth + 1)?;
             c.finish()?;
@@ -1115,7 +1037,13 @@ impl<'a> Reader<'a> {
         if action {
             self.action_line(indent, depth).map(k::Rhs::Action)
         } else {
-            self.expr(indent, depth).map(k::Rhs::Expr)
+            self.expr(indent, depth).map(|expr| match expr {
+                k::Expr::Act(act) => match act.as_action() {
+                    Some(action) => k::Rhs::Action(action),
+                    None => k::Rhs::Expr(k::Expr::Act(act)),
+                },
+                expr => k::Rhs::Expr(expr),
+            })
         }
     }
     fn expr(&mut self, indent: usize, depth: usize) -> Result<k::Expr> {
@@ -1130,6 +1058,9 @@ impl<'a> Reader<'a> {
         let i = indent + 1;
         let d = depth + 1;
         let expr = match op {
+            "call" | "spawn" | "perform" | "sleep" | "join" | "join_many" | "await_" => {
+                self.nested_action_suite(op, &mut c, i, d)?
+            }
             "field" | "index" => {
                 k::Expr::Member(Box::new(self.member(op == "field", &mut c, i, d)?))
             }
@@ -1279,10 +1210,6 @@ impl<'a> Reader<'a> {
                 let (callee, args) = self.action_operands(c)?;
                 k::Action::Call { callee, args }
             }
-            "spawn" => {
-                let (callee, args) = self.action_operands(c)?;
-                k::Action::Spawn { callee, args }
-            }
             "perform" => {
                 let effect = k::EffectName::new(c.string()?).map_err(|e| invalid(e.to_string()))?;
                 c.expect(",")?;
@@ -1300,45 +1227,9 @@ impl<'a> Reader<'a> {
                     then_yield: false,
                 }
             }
-            "sleep" => {
-                let duration = self.atom(c)?;
-                let then_yield = c.take(",") && {
-                    c.expect("then_yield=True")?;
-                    true
-                };
-                k::Action::Sleep {
-                    duration,
-                    then_yield,
-                }
-            }
-            "await_" => {
-                let policy = self.id(c)?;
-                c.expect(",")?;
-                k::Action::Await {
-                    policy,
-                    value: self.atom(c)?,
-                }
-            }
-            "join" => k::Action::Join {
-                task: self.atom(c)?,
-            },
             "cancel" => k::Action::Cancel {
                 task: self.atom(c)?,
             },
-            "join_many" => {
-                let mode = match c.string()?.as_str() {
-                    "all" => k::JoinMode::All,
-                    "all_settled" => k::JoinMode::AllSettled,
-                    "race" => k::JoinMode::Race,
-                    "any" => k::JoinMode::Any,
-                    _ => return Err(invalid("unknown join mode")),
-                };
-                c.expect(",")?;
-                k::Action::JoinMany {
-                    mode,
-                    tasks: self.atom(c)?,
-                }
-            }
             "yield_" => k::Action::Yield,
             _ => return Err(invalid("unknown action form")),
         };

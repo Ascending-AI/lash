@@ -102,6 +102,7 @@ impl Renderer<'_> {
     pub(super) fn inline_body(&mut self, expr: &k::Expr) {
         match expr {
             k::Expr::Literal(l) => self.literal(l),
+            k::Expr::Act(act) => self.nested_action(act),
             k::Expr::Variable(n) => self.name(n),
             k::Expr::Clock => self.out.write("k.clock()"),
             k::Expr::Random => self.out.write("k.random()"),
@@ -224,6 +225,153 @@ impl Renderer<'_> {
                 .out
                 .refuse(PrintError::Invalid("ineligible inline expression".into())),
         }
+    }
+    /// As for a helper call, only a child with no native expression inverse
+    /// requires a suite; no argument is hoisted or replaced by a temporary.
+    pub(super) fn nested_action_suite(&mut self, act: &k::ActExpr) {
+        self.out.write("with k.");
+        match &act.kind {
+            k::ActKind::Call(callee) | k::ActKind::Spawn(callee) => {
+                self.out.write(if matches!(act.kind, k::ActKind::Call(_)) {
+                    "call("
+                } else {
+                    "spawn("
+                });
+                self.callee(callee);
+            }
+            k::ActKind::Perform {
+                effect,
+                result,
+                then_yield,
+            } => {
+                self.out.write("perform(");
+                self.out.json(effect);
+                self.out.write(", ");
+                self.metadata(result);
+                self.out
+                    .write(if *then_yield { ", True" } else { ", False" });
+            }
+            k::ActKind::Sleep { then_yield } => self.out.write(if *then_yield {
+                "sleep(True"
+            } else {
+                "sleep(False"
+            }),
+            k::ActKind::Join => self.out.write("join("),
+            k::ActKind::JoinMany(mode) => {
+                self.out.write("join_many(");
+                self.out.json(match mode {
+                    k::JoinMode::All => "all",
+                    k::JoinMode::AllSettled => "all_settled",
+                    k::JoinMode::Race => "race",
+                    k::JoinMode::Any => "any",
+                });
+            }
+            k::ActKind::Await(policy) => {
+                self.out.write("await_(");
+                self.helper(policy);
+            }
+        }
+        self.suite();
+        if act.args.is_empty() {
+            self.empty();
+        }
+        for arg in &act.args {
+            self.expr(arg);
+        }
+    }
+    fn nested_action(&mut self, act: &k::ActExpr) {
+        self.out.write("(");
+        match &act.kind {
+            k::ActKind::Call(callee) | k::ActKind::Spawn(callee) => {
+                let spawn = matches!(act.kind, k::ActKind::Spawn(_));
+                self.out.write(if spawn { "spawn(" } else { "await " });
+                match callee {
+                    k::Callee::Declared(name) => {
+                        self.out.write("declared.");
+                        self.name(name);
+                    }
+                    k::Callee::Value(name) => self.name(name),
+                    k::Callee::Library(id) => self.helper(id),
+                }
+                self.out.write(if spawn { ", [" } else { "(" });
+                for (i, arg) in act.args.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.inline_expr(arg);
+                }
+                self.out.write(if spawn { "])" } else { ")" });
+            }
+            k::ActKind::Perform {
+                effect,
+                result,
+                then_yield,
+            } => {
+                self.out.write("await tools");
+                if effect.as_str().split('.').all(attribute_identifier) {
+                    self.out.write(".");
+                    self.out.write(effect.as_str());
+                } else {
+                    self.out.write("[");
+                    self.out.json(effect);
+                    self.out.write("]");
+                }
+                self.out.write("(");
+                for (i, arg) in act.args.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.inline_expr(arg);
+                }
+                if *result != k::Type::Any {
+                    if !act.args.is_empty() {
+                        self.out.write(", ");
+                    }
+                    self.out.write("result=");
+                    self.metadata(result);
+                }
+                if *then_yield {
+                    if !act.args.is_empty() || *result != k::Type::Any {
+                        self.out.write(", ");
+                    }
+                    self.out.write("then_yield=True");
+                }
+                self.out.write(")");
+            }
+            kind => {
+                match kind {
+                    k::ActKind::Sleep { .. } => self.out.write("await sleep("),
+                    k::ActKind::Join => self.out.write("await join("),
+                    k::ActKind::JoinMany(mode) => self.out.write(match mode {
+                        k::JoinMode::All => "await join_all(",
+                        k::JoinMode::AllSettled => "await join_all_settled(",
+                        k::JoinMode::Race => "await join_race(",
+                        k::JoinMode::Any => "await join_any(",
+                    }),
+                    k::ActKind::Await(policy) => {
+                        if self.operators.unique("py.await") == Some(*policy) {
+                            self.out.write("await (");
+                        } else {
+                            self.out.write("await_by(");
+                            self.helper(policy);
+                            self.out.write(", ");
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                for (i, arg) in act.args.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.inline_expr(arg);
+                }
+                if matches!(kind, k::ActKind::Sleep { then_yield: true }) {
+                    self.out.write(", then_yield=True");
+                }
+                self.out.write(")");
+            }
+        }
+        self.out.write(")");
     }
     // The caller owns the block's indentation and any clause label. Empty
     // suites spell pass, so every real block has a nonempty final-text range.

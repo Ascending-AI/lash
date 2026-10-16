@@ -3,8 +3,12 @@ use super::k;
 use lash_kernel_dialect::readability::{self, Case, Dialect, Unavoidable};
 
 fn block_expression(node: k::Node<'_>) -> bool {
-    matches!(node, k::Node::Expr(k::Expr::Closure(_) | k::Expr::Read(_)))
-        || node.children().into_iter().any(block_expression)
+    matches!(
+        node,
+        k::Node::Expr(
+            k::Expr::Closure(_) | k::Expr::Read(_) | k::Expr::If { .. } | k::Expr::Let { .. }
+        )
+    ) || node.children().into_iter().any(block_expression)
 }
 fn generic(node: k::Node<'_>, source: &str) -> Option<&'static str> {
     let source = source.trim_start();
@@ -144,7 +148,7 @@ fn shared_ordinary_corpus_has_only_named_distinctions_and_exact_bytes() {
     let rules = unavoidable();
     let report = readability::check(&cases, &[dialect(&rules)]);
     report.assert_passed();
-    assert_eq!(report.documents, 7);
+    assert_eq!(report.documents, 8);
     eprintln!(
         "shared Python: documents={} fallbacks={:?}",
         report.documents, report.generic_forms
@@ -224,6 +228,15 @@ fn unavoidable() -> Vec<Unavoidable> {
         "Record",
         "Member",
         "ExpressionCall",
+        "IfExpression",
+        "LetExpression",
+        "Call",
+        "Perform",
+        "Spawn",
+        "Sleep",
+        "Join",
+        "JoinMany",
+        "Await",
     ] {
         rules.push(Unavoidable {
             rule: "expression-child-suite",
@@ -248,6 +261,11 @@ fn unavoidable() -> Vec<Unavoidable> {
             reason: "Kernel task modes, timing units and actions differ from Python coroutines",
         });
     }
+    rules.push(Unavoidable {
+        rule: "declared-callee",
+        node_kind: "Spawn",
+        reason: "A declared kernel callee is distinct from a variable with the same name",
+    });
     for node_kind in ["Call", "Perform"] {
         rules.push(Unavoidable {
             rule: "absent-atom",
@@ -533,4 +551,73 @@ fn exported_python_corpora_compile_under_cpython() {
         String::from_utf8_lossy(&result.stderr)
     );
     eprintln!("CPython compiled {} corpus documents", sources.len());
+}
+
+/// G-SOURCE-EXACT: only a missing argument inverse permits a child suite.
+#[test]
+fn nested_actions_use_child_suites_only_without_an_inline_inverse() {
+    let id = k::FunctionId::from_bytes([91; 32]);
+    let closure = k::Expr::Closure(Box::new(k::Closure {
+        params: vec![],
+        body: vec![k::Stmt::Return {
+            value: k::Expr::Literal(k::Literal::Null),
+        }],
+    }));
+    let argument = k::Expr::If {
+        cond: Box::new(k::Expr::Literal(k::Literal::Bool(true))),
+        then: Box::new(k::Expr::Literal(k::Literal::Int(0.into()))),
+        r#else: Box::new(k::Expr::Literal(k::Literal::Int(1.into()))),
+    };
+    let kinds = [
+        k::ActKind::Call(k::Callee::Declared("worker".into())),
+        k::ActKind::Call(k::Callee::Value("f".into())),
+        k::ActKind::Call(k::Callee::Library(id)),
+        k::ActKind::Spawn(k::Callee::Declared("worker".into())),
+        k::ActKind::Spawn(k::Callee::Library(id)),
+        k::ActKind::Perform {
+            effect: k::EffectName::new("echo").unwrap(),
+            result: k::Type::Text,
+            then_yield: true,
+        },
+        k::ActKind::Sleep { then_yield: true },
+        k::ActKind::Join,
+        k::ActKind::JoinMany(k::JoinMode::AllSettled),
+        k::ActKind::Await(id),
+    ];
+    let mut cases = vec![];
+    for kind in kinds {
+        let args = match &kind {
+            k::ActKind::Call(_) => vec![closure.clone()],
+            k::ActKind::Perform { .. } => vec![k::Expr::Record(vec![k::RecordEntry {
+                field: "projection".into(),
+                value: k::Expr::Read(Box::new(k::ProjectionRead {
+                    handle: k::Expr::Variable("handle".into()),
+                    request: k::Expr::Literal(k::Literal::Null),
+                })),
+            }])],
+            k::ActKind::Await(_) => vec![k::Expr::Let {
+                name: "scoped".into(),
+                value: Box::new(argument.clone()),
+                body: Box::new(k::Expr::Variable("scoped".into())),
+            }],
+            _ => vec![argument.clone()],
+        };
+        let mut document = k::Document::new(
+            k::NumberPolicy::BySpelling,
+            vec![k::Stmt::Finish {
+                value: k::Expr::Act(Box::new(k::ActExpr { kind, args })),
+            }],
+        );
+        document
+            .manifest
+            .functions
+            .insert(id, k::FunctionName::new("foreign.identity").unwrap());
+        let printed = super::roundtrip(&document, true);
+        assert!(printed.source.contains("with k."), "{}", printed.source);
+        cases.push(Case {
+            name: "argument_without_inline_inverse",
+            document,
+        });
+    }
+    readability::check(&cases, &[dialect(&unavoidable())]).assert_passed();
 }

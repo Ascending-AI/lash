@@ -224,7 +224,6 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
             } else {
                 k::Action::Call { callee, args }
             };
-            let op = if spawn { "spawn" } else { "call" };
             let expected = if !spawn {
                 if library {
                     "await helper_function(3)".to_owned()
@@ -232,9 +231,9 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
                     "await kernel_name_1(3)".to_owned()
                 }
             } else if library {
-                format!("k.{op}(helper_function(3))")
+                "spawn(helper_function, [3])".to_owned()
             } else {
-                format!("k.{op}(k.value(\"helper_function\"), [3])")
+                "spawn(kernel_name_1, [3])".to_owned()
             };
             spelling(k::Stmt::Do { action }, &expected);
         }
@@ -1178,4 +1177,47 @@ fn normalization_collisions_receive_distinct_reversible_aliases() {
     );
     let printed = roundtrip(&doc, true);
     assert!(!printed.source.contains("ﬁle"), "{}", printed.source);
+}
+
+/// G-SOURCE-EXACT: nested callees and policies retain their identities and children.
+#[test]
+fn nested_library_actions_and_await_policies_have_exact_expression_inverses() {
+    let helper = k::FunctionId::from_bytes([92; 32]);
+    let policy = k::FunctionId::from_bytes([93; 32]);
+    for label in ["py.await", "foreign.await"] {
+        let arg = k::Expr::List(vec![k::Expr::Literal(k::Literal::Int(1.into()))]);
+        let mut document = k::Document::new(
+            k::NumberPolicy::BySpelling,
+            vec![k::Stmt::Finish {
+                value: k::Expr::List(vec![
+                    k::Expr::Act(Box::new(k::ActExpr {
+                        kind: k::ActKind::Call(k::Callee::Library(helper)),
+                        args: vec![arg.clone()],
+                    })),
+                    k::Expr::Act(Box::new(k::ActExpr {
+                        kind: k::ActKind::Spawn(k::Callee::Library(helper)),
+                        args: vec![arg.clone()],
+                    })),
+                    k::Expr::Act(Box::new(k::ActExpr {
+                        kind: k::ActKind::Await(policy),
+                        args: vec![arg],
+                    })),
+                ]),
+            }],
+        );
+        document
+            .manifest
+            .functions
+            .insert(helper, k::FunctionName::new("foreign.identity").unwrap());
+        document
+            .manifest
+            .functions
+            .insert(policy, k::FunctionName::new(label).unwrap());
+        let printed = roundtrip(&document, true);
+        assert!(
+            !printed.source.contains("k.call") && !printed.source.contains("k.perform"),
+            "{}",
+            printed.source
+        );
+    }
 }

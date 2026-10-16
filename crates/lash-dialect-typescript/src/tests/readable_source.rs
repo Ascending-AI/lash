@@ -684,7 +684,7 @@ fn shared_realistic_corpus_has_only_named_distinctions_and_exact_typescript() {
         report.failures
     );
     report.assert_passed();
-    assert_eq!(report.documents, 7);
+    assert_eq!(report.documents, 8);
     assert!(
         report
             .generic_forms
@@ -860,7 +860,6 @@ fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
     let missing = roundtrip(&document, true).source;
     assert_eq!(missing, printed, "{missing}");
     for expression in [
-        "await tools.research.search([1])",
         "await sleep()",
         "await tools.research.search() as string",
         "await (first + second)()",
@@ -888,6 +887,59 @@ fn typed_authored_arithmetic_and_comparison_export_native_operators() {
         assert!(
             !printed.contains("helper_num_") && !printed.contains("helper_text_concat"),
             "{printed}"
+        );
+    }
+}
+
+/// G-SOURCE-EXACT: nested callees and policies retain their identities and children.
+#[test]
+fn nested_library_actions_and_await_policies_have_exact_expression_inverses() {
+    let helper = k::FunctionId::from_bytes([92; 32]);
+    let policy = k::FunctionId::from_bytes([93; 32]);
+    for label in ["ts.await", "foreign.await"] {
+        let arg = k::Expr::List(vec![k::Expr::Literal(k::Literal::Int(1.into()))]);
+        let mut document = k::Document::new(
+            k::NumberPolicy::BySpelling,
+            vec![k::Stmt::Finish {
+                value: k::Expr::List(vec![
+                    k::Expr::Act(Box::new(k::ActExpr {
+                        kind: k::ActKind::Call(k::Callee::Library(helper)),
+                        args: vec![arg.clone()],
+                    })),
+                    k::Expr::Act(Box::new(k::ActExpr {
+                        kind: k::ActKind::Spawn(k::Callee::Library(helper)),
+                        args: vec![arg.clone()],
+                    })),
+                    k::Expr::Act(Box::new(k::ActExpr {
+                        kind: k::ActKind::Await(policy),
+                        args: vec![arg.clone()],
+                    })),
+                ]),
+            }],
+        );
+        if let k::Stmt::Finish {
+            value: k::Expr::List(items),
+        } = &mut document.main[0]
+        {
+            items[0] = k::Expr::Let {
+                name: "scoped".into(),
+                value: Box::new(arg.clone()),
+                body: Box::new(items[0].clone()),
+            };
+        }
+        document
+            .manifest
+            .functions
+            .insert(helper, k::FunctionName::new("foreign.identity").unwrap());
+        document
+            .manifest
+            .functions
+            .insert(policy, k::FunctionName::new(label).unwrap());
+        let printed = roundtrip(&document, true);
+        assert!(
+            !printed.source.contains("k.call") && !printed.source.contains("k.perform"),
+            "{}",
+            printed.source
         );
     }
 }

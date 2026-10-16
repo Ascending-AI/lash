@@ -55,6 +55,18 @@ impl NamePlan {
                     k::Node::Expr(k::Expr::Call { function, .. }) => {
                         ids.insert(*function);
                     }
+                    k::Node::Expr(k::Expr::Act(act)) => match &act.kind {
+                        k::ActKind::Call(callee) | k::ActKind::Spawn(callee) => match callee {
+                            k::Callee::Declared(name) | k::Callee::Value(name) => add(name),
+                            k::Callee::Library(id) => {
+                                ids.insert(*id);
+                            }
+                        },
+                        k::ActKind::Await(policy) => {
+                            ids.insert(*policy);
+                        }
+                        _ => {}
+                    },
                     k::Node::Action(action) => {
                         let awaited;
                         let (callee, atoms): (Option<&k::Callee>, Vec<&k::Atom>) = match action {

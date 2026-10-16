@@ -2,7 +2,7 @@ use lash_kernel_doc as k;
 use swc_common::Spanned;
 use swc_ecma_ast as s;
 
-use super::{Reader, array, invalid, string};
+use super::{Reader, invalid, string};
 use crate::Diagnostic;
 
 impl Reader {
@@ -56,6 +56,14 @@ impl Reader {
         Ok(k::Function { params, body })
     }
     pub(super) fn expression(&mut self, expr: &s::Expr) -> Result<k::Expr, Diagnostic> {
+        if let s::Expr::Await(awaited) = expr
+            && async_scope(&awaited.arg)
+        {
+            return self.expression(&awaited.arg);
+        }
+        if let Some(action) = self.native_action(expr) {
+            return action.and_then(super::native::NativeAction::expression);
+        }
         if let Some(native) = self.native_expression(expr) {
             return native;
         }
@@ -127,14 +135,33 @@ impl Reader {
             )),
         }
     }
-    pub(super) fn atoms(&mut self, expr: &s::Expr) -> Result<Vec<k::Atom>, Diagnostic> {
-        array(expr)?.iter().map(|expr| self.atom(expr)).collect()
-    }
     pub(super) fn rhs(&mut self, expr: &s::Expr) -> Result<k::Rhs, Diagnostic> {
         if let Some(action) = self.native_action(expr) {
-            action.map(k::Rhs::Action)
+            action.map(super::native::NativeAction::rhs)
         } else {
-            self.expression(expr).map(k::Rhs::Expr)
+            self.expression(expr).map(|expr| match expr {
+                k::Expr::Act(act) => match act.as_action() {
+                    Some(action) => k::Rhs::Action(action),
+                    None => k::Rhs::Expr(k::Expr::Act(act)),
+                },
+                expr => k::Rhs::Expr(expr),
+            })
         }
     }
+}
+
+/// An awaited async scoped-expression wrapper is syntax for Expr::Let,
+/// rather than another kernel action.
+pub(super) fn async_scope(expr: &s::Expr) -> bool {
+    let s::Expr::Call(call) = expr else {
+        return false;
+    };
+    let s::Callee::Expr(callee) = &call.callee else {
+        return false;
+    };
+    let mut callee = callee.as_ref();
+    while let s::Expr::Paren(paren) = callee {
+        callee = &paren.expr;
+    }
+    matches!(callee, s::Expr::Arrow(arrow) if arrow.is_async)
 }

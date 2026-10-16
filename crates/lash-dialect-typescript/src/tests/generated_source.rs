@@ -389,13 +389,6 @@ fn malformed_exported_modules_refuse_with_typed_diagnostics() {
             "",
         ),
         (
-            HAND_WRITTEN.replace(
-                "let kernel_name_1 = -0.0;",
-                "let kernel_name_1 = await sleep([1]);",
-            ),
-            "",
-        ),
-        (
             "let x = 1;".to_owned(),
             "expected native function declarations and main",
         ),

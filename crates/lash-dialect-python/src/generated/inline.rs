@@ -109,7 +109,36 @@ impl Reader<'_> {
         Ok((k::Expr::Call { function, args }, height + 1))
     }
     fn primary(&self, c: &mut Cursor<'_>, nesting: usize) -> Result<(k::Expr, usize)> {
-        let (mut expr, mut height) = if c.take("getattr(") {
+        let (mut expr, mut height) = if c.take("await ") {
+            let (act, height) = self.awaited_expr(c, nesting + 1)?;
+            (k::Expr::Act(Box::new(act)), height)
+        } else if c.take("spawn(") {
+            let callee = self.nested_callee(c)?;
+            c.expect(",")?;
+            c.expect("[")?;
+            let (args, height) = self.inline_items(c, "]", nesting + 1)?;
+            c.expect(")")?;
+            (
+                k::Expr::Act(Box::new(k::ActExpr {
+                    kind: k::ActKind::Spawn(callee),
+                    args,
+                })),
+                height,
+            )
+        } else if c.take("await_by(") {
+            let policy = self.id(c)?;
+            c.expect(",")?;
+            let (value, h) = self.inline_value(c, nesting + 1)?;
+            c.expect(")")?;
+            self.depth(h)?;
+            (
+                k::Expr::Act(Box::new(k::ActExpr {
+                    kind: k::ActKind::Await(policy),
+                    args: vec![value],
+                })),
+                h + 1,
+            )
+        } else if c.take("getattr(") {
             let (target, h) = self.inline_value(c, nesting + 1)?;
             c.expect(",")?;
             let field = c.string()?;
