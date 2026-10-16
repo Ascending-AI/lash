@@ -189,7 +189,7 @@ async fn helper_session(
     }
     let runtime: Arc<dyn lash_core::store::RuntimeStore> = backend.session_store_factory();
     let store = lash_core::store::SessionStore::new(runtime, session.clone())?;
-    let mut saved = Vec::new();
+    let mut saved = false;
     let loaded = lash_core::store::load_session_window_state(
         &store,
         lash_core::store::WindowSelector::Current,
@@ -201,14 +201,10 @@ async fn helper_session(
         .flatten()
         && let Ok(pins) = lash_protocol_rlm::saved_function_pins(&hydrated)
     {
-        saved.extend(
-            pins.into_iter()
-                .filter(|(_, pinned)| reaches(pinned.clone()))
-                .map(|(name, _)| name),
-        );
+        saved = reaches(pins);
     }
     Ok(
-        (!cells.is_empty() || !saved.is_empty()).then_some(HelperDependentSession {
+        (!cells.is_empty() || saved).then_some(HelperDependentSession {
             session,
             cells,
             saved,

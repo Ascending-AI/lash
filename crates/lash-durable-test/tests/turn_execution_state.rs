@@ -94,10 +94,7 @@ impl lash_core::plugin::CodeExecutorPlugin for Executor {
         graph: &lash_core::plugin::HydratedExecutionGraph,
         _purpose: lash_core::plugin::ExecutionGraphPurpose,
     ) -> Result<(), lash_core::SessionError> {
-        self.restored
-            .lock()
-            .unwrap()
-            .push(state_of(graph.root, &graph.nodes));
+        self.restored.lock().unwrap().push(state_of(graph));
         Ok(())
     }
 }
@@ -109,21 +106,19 @@ fn graph_of(state: &[u8]) -> lash_core::plugin::ExecutionGraphCapture {
     )
 }
 
-/// The state root `root` holds, read back from `nodes`.
-fn state_of(
-    root: lash_core::durable_port::domain::checkpoint_graph::NodeId,
-    nodes: &std::collections::BTreeMap<
-        lash_core::durable_port::domain::checkpoint_graph::NodeId,
-        lash_core::durable_port::domain::checkpoint_graph::EncodedNode,
-    >,
-) -> Vec<u8> {
+/// The state the descriptor `graph` holds.
+fn state_of(graph: &lash_core::plugin::HydratedExecutionGraph) -> Vec<u8> {
     use lash_core::durable_port::domain::checkpoint_graph::node::direct_logical;
     use lash_core::durable_port::domain::checkpoint_graph::{
         DecodeLimits, TokenReader, check_envelope,
     };
-    let node = nodes.get(&root).expect("the law's root is among its nodes");
-    let envelope = check_envelope(&node.bytes, root, &DecodeLimits::within_total(1 << 20))
-        .expect("the law's root frames");
+    let root = graph.root;
+    let envelope = check_envelope(
+        &graph.descriptor,
+        root,
+        &DecodeLimits::within_total(1 << 20),
+    )
+    .expect("the law's root frames");
     let logical = direct_logical(&envelope, root).expect("the law's root is canonical");
     TokenReader::new(&logical)
         .text()
@@ -150,12 +145,11 @@ impl lash_core::plugin::ProtocolSessionPlugin for Restores {
                 source,
             })?
             .unwrap_or_else(|| {
-                let lash_core::plugin::ExecutionGraphCapture::Replace { root, nodes } =
-                    graph_of(FRESH)
+                let lash_core::plugin::ExecutionGraphCapture::Replace(graph) = graph_of(FRESH)
                 else {
                     unreachable!("a state stages a root")
                 };
-                lash_core::plugin::HydratedExecutionGraph { root, nodes }
+                graph
             });
         lash_core::plugin::CodeExecutorPlugin::restore_execution_graph(
             self.0.as_ref(),
@@ -236,7 +230,7 @@ async fn head_state(world: &World, session: &lash::DurableSession) -> Option<Vec
         .state
         .execution_state_hydration()
         .unwrap()
-        .map(|graph| state_of(graph.root, &graph.nodes))
+        .map(|graph| state_of(&graph))
 }
 
 /// Wait until `session` has committed `count` turns.

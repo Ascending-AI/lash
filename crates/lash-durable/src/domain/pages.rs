@@ -96,6 +96,13 @@ pub enum CandidateOwner {
         run: RunSeq,
         ordinal: Ordinal,
     },
+    /// The session's execution root: a turn's working state
+    /// ([`TurnWrite::Working`](super::TurnWrite::Working)) or a head
+    /// commit's checkpoint
+    /// ([`SessionCommitWrite::execution`](super::SessionCommitWrite::execution)).
+    /// The root is the candidate's own semantic root, the session
+    /// descriptor; the manifest has no base (FIG-6418).
+    Session(lash_sansio::SessionId),
 }
 
 /// A candidate published by the owner commit it travels with.

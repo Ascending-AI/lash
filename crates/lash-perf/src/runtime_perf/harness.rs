@@ -911,14 +911,16 @@ async fn in_process_lane() -> anyhow::Result<InProcessLane> {
 }
 
 /// A decorated root session store on a SQLite memory store set of its own,
-/// for the store-level scenarios that execute no engine.
+/// for the store-level scenarios, beside a backend over the same set: the
+/// cells run there, and a capture's pages are published through its session
+/// actor before a checkpoint names them (FIG-6418).
 pub(crate) async fn memory_perf_store(
     session_id: &SessionId,
-) -> anyhow::Result<Arc<RuntimePerfStore>> {
-    let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
-        sqlite_memory_stores().await?.session_store_factory(),
-    );
-    Ok(factory.root_store(session_id).await?)
+) -> anyhow::Result<(Arc<RuntimePerfStore>, lash_core::Backend)> {
+    let raw: Arc<dyn lash_core::StoreSet> = Arc::new(sqlite_memory_stores().await?);
+    let factory =
+        RuntimePerfStoreFactory::decorating_without_commit_measurement(raw.session_store_factory());
+    Ok((factory.root_store(session_id).await?, durable_backend(raw)?))
 }
 
 pub(crate) async fn build_embed_core(
@@ -1079,35 +1081,54 @@ pub(crate) async fn build_runtime(
     })
 }
 
+/// A decorated session store factory over a SQLite file store set, beside
+/// a backend over the same set: the cells run there, and a capture's pages
+/// are published through its session actor before a checkpoint names them
+/// (FIG-6418).
 pub(crate) async fn durable_sqlite_session_store_factory_without_commit_measurement(
     sessions_root: PathBuf,
     _process_registry_path: &std::path::Path,
 ) -> anyhow::Result<(
     Arc<dyn lash_core::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
+    lash_core::Backend,
 )> {
     let sqlite = lash_sqlite_store::SqliteStoreSet::open(
         sessions_root.join("lash.db"),
         lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
+    lash_core::testing::process_execution_env_fixture(sqlite.process_env_store().as_ref()).await;
+    let sqlite: Arc<dyn lash_core::StoreSet> = Arc::new(sqlite);
     let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
         sqlite.session_store_factory(),
     );
     let metrics = factory.metrics();
-    Ok((Arc::new(factory), metrics))
+    Ok((Arc::new(factory), metrics, durable_backend(sqlite)?))
 }
 
-pub(crate) fn durable_postgres_session_store_factory_without_commit_measurement(
+/// [`durable_sqlite_session_store_factory_without_commit_measurement`] over
+/// a PostgreSQL database.
+pub(crate) async fn durable_postgres_session_store_factory_without_commit_measurement(
     postgres: &lash_postgres_store::PostgresStorage,
-) -> (
+) -> anyhow::Result<(
     Arc<dyn lash_core::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
-) {
+    lash_core::Backend,
+)> {
     let factory =
         RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(postgres.store()));
     let metrics = factory.metrics();
-    (Arc::new(factory), metrics)
+    let stores = lash_postgres_store::PostgresStoreSet::new(
+        postgres,
+        Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+    );
+    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    Ok((
+        Arc::new(factory),
+        metrics,
+        durable_backend(Arc::new(stores))?,
+    ))
 }
 
 pub(crate) async fn build_runtime_with_sqlite_store(

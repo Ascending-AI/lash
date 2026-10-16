@@ -362,7 +362,6 @@ store_error_samples! {
         record_kind: "Sampled".to_string(),
         message: "sampled".to_string(),
     },
-    ExecutionStateBodiesReleased => StoreError::ExecutionStateBodiesReleased,
     StoredDataCorrupt { .. } => StoreError::StoredDataCorrupt {
         record_kind: "Sampled",
         message: "sampled".to_string(),

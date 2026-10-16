@@ -5,7 +5,8 @@
 //!
 //! The caller builds the head commit. [`commit`] writes it as the session's
 //! own head commit ([`DomainWrite::SessionCommit`], the shape `turn.commit`
-//! writes) on the session actor's fenced transaction, under the caller's
+//! writes), the heap pages of the execution root it names as its candidate
+//! (FIG-6418), on the session actor's fenced transaction, under the caller's
 //! label (`session.command`, `pressure.frame`): an owner whose epoch is
 //! stale commits nothing, the store takes it as the session's own head
 //! write whatever run owns the head, and the crash matrix cuts the commit
@@ -14,6 +15,9 @@
 use lash_durable::domain::{DomainRefusal, SessionCommitWrite};
 use lash_durable::{CommitLabel, DomainWrite, DurableError};
 
+use std::sync::Arc;
+
+use crate::plugin::CodeExecutorPlugin;
 use crate::store::RuntimeCommit;
 use crate::{ActorContext, RuntimeError, RuntimeErrorCode, StoreError};
 
@@ -47,31 +51,39 @@ impl HeadCommitError {
 }
 
 /// Writes `commit` in `tx` as the session's head commit over
-/// `expected_head`: the execution nodes it carries staged beside it, and its
-/// execution root required when the store already holds it, so the commit
-/// refuses with nothing written when the root is in neither.
+/// `expected_head`: its execution's descriptor staged beside it when the
+/// runtime holds it, and its execution root required otherwise, so the
+/// commit refuses with nothing written when the root is in neither the
+/// store nor the commit. The heap pages under the root are the commit's
+/// candidate ([`super::session_publication`]).
 pub(crate) fn write_session_commit(
     tx: &mut lash_durable::ActorTx,
     session: &crate::SessionId,
     expected_head: u64,
     commit: crate::store::EncodedSessionCommit,
 ) {
-    if let Some(root) = commit.execution
-        && !commit.nodes.iter().any(|node| node.id == root)
-    {
-        tx.require(root);
+    match commit.descriptor {
+        Some(descriptor) => {
+            tx.stage([descriptor]);
+        }
+        None => {
+            if let Some(root) = commit.execution {
+                tx.require(root);
+            }
+        }
     }
-    tx.stage(commit.nodes);
     tx.write(DomainWrite::SessionCommit(SessionCommitWrite {
         session: session.clone(),
         expected_head,
         commit_json: commit.json,
+        execution: commit.execution,
     }));
 }
 
 /// Commit `commit`, a head commit of the session actor `owner`, on its
 /// fenced transaction under `label`, after admitting it against its commit
-/// budget.
+/// budget: the pages `executor`, the session's code executor, staged under
+/// the execution root it names published with it.
 ///
 /// # Errors
 ///
@@ -82,11 +94,12 @@ pub(crate) fn write_session_commit(
 /// [`HeadCommitError::Owner`] when the transaction failed.
 pub(crate) async fn commit(
     owner: &ActorContext,
+    executor: Option<&Arc<dyn CodeExecutorPlugin>>,
     commit: RuntimeCommit,
     label: CommitLabel,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<(), HeadCommitError> {
-    commit_in(owner, commit, label, metrics, None, None).await
+    commit_in(owner, executor, commit, label, metrics, None, None).await
 }
 
 /// [`commit`], recording in the same transaction that the session's state
@@ -102,6 +115,7 @@ pub(crate) async fn commit(
 /// [`HeadCommitError::Owner`].
 pub(crate) async fn commit_in(
     owner: &ActorContext,
+    executor: Option<&Arc<dyn CodeExecutorPlugin>>,
     commit: RuntimeCommit,
     label: CommitLabel,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
@@ -132,7 +146,9 @@ pub(crate) async fn commit_in(
     if let Some(formats) = formats {
         tx.stamp_formats(formats);
     }
-    let committed = owner.commit(tx, label).await;
+    let committed =
+        super::session_publication::commit(owner, executor, &commit.session_id, tx, label, None)
+            .await;
     if let Err(DurableError::Domain(refusal)) = &committed
         && let Some(error) = refusal.session_commit_refusal()
     {

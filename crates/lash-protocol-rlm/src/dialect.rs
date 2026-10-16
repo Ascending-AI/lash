@@ -5,6 +5,7 @@ mod typescript_types;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use lash_core::plugin::SessionPages;
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError};
 use lash_kernel_doc::NumberPolicy;
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
@@ -811,12 +812,21 @@ impl DialectSession {
         Ok(response)
     }
 
-    pub(crate) fn session_names(&self) -> BTreeSet<String> {
+    /// Every name the session binds, loading the binding tree first:
+    /// the live catalog check reads it before any turn (FIG-5824).
+    pub(crate) async fn session_names(&mut self) -> Result<BTreeSet<String>, SessionError> {
         self.state
-            .names()
-            .into_iter()
-            .map(|name| name.to_string())
-            .collect()
+            .session_names()
+            .await
+            .map_err(|error| SessionError::Protocol(error.to_string()))
+            .map(|names| names.into_iter().map(|name| name.to_string()).collect())
+    }
+
+    /// Takes `pages` as where the session's committed state stands, so a
+    /// host read of it (the names a catalog check loads) reaches the
+    /// store.
+    pub(crate) fn note_pages(&mut self, pages: Option<&SessionPages>) {
+        self.state.note_pages(pages);
     }
 
     pub(crate) fn execution_state_dirty(&self) -> bool {
@@ -830,8 +840,16 @@ impl DialectSession {
         self.state.capture_execution_graph(purpose).await
     }
 
-    pub(crate) async fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state.probe_execution_state_capture().await
+    pub(crate) async fn execution_candidate(
+        &mut self,
+        root: lash_core_store::checkpoint_graph::NodeId,
+        commit: lash_core_store::checkpoint_graph::CommitId,
+        tx: &mut lash_durable::ActorTx,
+        reads: &dyn lash_durable::DurableReads,
+    ) -> Result<Option<lash_core::plugin::ExecutionCandidate>, SessionError> {
+        self.state
+            .execution_candidate(root, commit, tx, reads)
+            .await
     }
 
     pub(crate) async fn hydrated_execution_graph(

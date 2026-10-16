@@ -76,9 +76,9 @@ pub(crate) fn checkpoint_curve_points(config: &CheckpointCurveConfig) -> Vec<Che
         .collect()
 }
 
-/// What a capture stages, and what its commit carries: the execution
-/// nodes no earlier commit installed, and among them the text leaves that
-/// hold the bindings' large values.
+/// What a capture's publication carries: the execution pages no earlier
+/// commit installed, and among them the heap payload leaves that hold the
+/// bindings' large texts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct CheckpointArtifactShape {
     staged_node_count: u64,
@@ -94,38 +94,36 @@ impl CheckpointArtifactShape {
         for node in nodes {
             shape.staged_node_count += 1;
             shape.staged_node_bytes += node.bytes.len() as u64;
-            if node.envelope()?.kind == lash_core_store::checkpoint_graph::NodeKind::TEXT_LEAF {
+            if node.envelope()?.kind == lash_core_store::checkpoint_graph::NodeKind::PAYLOAD_LEAF {
                 shape.staged_leaf_bytes += node.bytes.len() as u64;
             }
         }
         Ok(shape)
     }
 
-    fn from_snapshot(snapshot: &lash_core::plugin::ExecutionGraphCapture) -> anyhow::Result<Self> {
-        match snapshot {
-            lash_core::plugin::ExecutionGraphCapture::Replace { nodes, .. } => {
-                Self::of(nodes.values())
-            }
-            lash_core::plugin::ExecutionGraphCapture::Clear => {
-                anyhow::bail!("checkpoint curve capture omitted its root")
-            }
-        }
+    fn from_publication(
+        published: &[lash_core_store::checkpoint_graph::EncodedNode],
+    ) -> anyhow::Result<Self> {
+        Self::of(published.iter())
     }
+}
 
-    fn from_commit(commit: &RuntimeCommit) -> anyhow::Result<Self> {
-        Self::of(
-            commit
-                .checkpoint
-                .execution
-                .iter()
-                .flat_map(|execution| execution.nodes.values()),
-        )
+/// The execution root `capture` names.
+fn captured_root(
+    capture: &lash_core::plugin::ExecutionGraphCapture,
+) -> anyhow::Result<lash_core_store::checkpoint_graph::NodeId> {
+    match capture {
+        lash_core::plugin::ExecutionGraphCapture::Replace(graph) => Ok(graph.root),
+        lash_core::plugin::ExecutionGraphCapture::Clear => {
+            anyhow::bail!("checkpoint curve capture omitted its root")
+        }
     }
 }
 
 struct DurableCheckpointCurveFixture {
     point: CheckpointCurvePoint,
     fixture: CheckpointBindingFixture,
+    publisher: lash_protocol_rlm::CodeModeCheckpointPerfPublisher,
     runtime_state: RuntimeSessionState,
     store: Arc<dyn lash_core::RuntimeStore>,
 }
@@ -154,7 +152,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
     let sqlite_root = (!scenario.uses_postgres())
         .then(|| make_temp_bench_dir(&format!("lash-runtime-perf-{}", scenario.name())))
         .transpose()?;
-    let (store_factory, store_metrics) = if scenario.uses_postgres() {
+    let (store_factory, store_metrics, backend) = if scenario.uses_postgres() {
         let database = postgres_database
             .as_ref()
             .expect("PostgreSQL database created for PostgreSQL scenario");
@@ -162,7 +160,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             .await
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         crate::perf_support::require_durable_postgres(postgres.pool()).await?;
-        durable_postgres_session_store_factory_without_commit_measurement(&postgres)
+        durable_postgres_session_store_factory_without_commit_measurement(&postgres).await?
     } else {
         let root = sqlite_root.as_ref().expect("SQLite checkpoint curve root");
         durable_sqlite_session_store_factory_without_commit_measurement(
@@ -180,8 +178,9 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
     let seed_before_alloc = allocator_stats();
     let seed_started = Instant::now();
     let mut fixtures = Vec::with_capacity(points.len());
-    // The fixtures' cells run on the production effect controller over
-    // independent memory store sets; their captured state is what the curve measures.
+    // The fixtures' cells run on the production effect controller over the
+    // store set the curve commits to; their captured state is what the curve
+    // measures.
     for point in points {
         let session_id = SessionId::fixture(format!(
             "runtime-perf-{}-{run_id}-{}-{}",
@@ -197,22 +196,12 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             lash_protocol_rlm::CellDialect::typescript(),
             point.component_count,
             point.transcript_bytes,
+            backend.clone(),
         )
         .await?;
         let initial_snapshot = fixture.capture().await?;
-        // Every binding's large value is staged by the first capture, each
-        // in its own leaves.
-        let initial_shape = CheckpointArtifactShape::from_snapshot(&initial_snapshot)?;
-        if initial_shape.staged_leaf_bytes < (point.component_count * point.transcript_bytes) as u64
-        {
-            anyhow::bail!(
-                "{} seeded {} leaf bytes, fewer than its {} bindings of {} bytes",
-                point.prefix(),
-                initial_shape.staged_leaf_bytes,
-                point.component_count,
-                point.transcript_bytes
-            );
-        }
+        let mut publisher =
+            lash_protocol_rlm::CodeModeCheckpointPerfPublisher::open(&backend, &session_id).await?;
         let mut runtime_state = RuntimeSessionState {
             session_id,
             ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
@@ -229,12 +218,28 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 CHECKPOINT_CURVE_COMMIT_ROWS,
             ),
         );
-        let seed_result = store.commit_runtime_state(seed_commit).await?;
-        runtime_state.apply_persisted_commit_result(seed_result);
-        fixture.acknowledge_capture().await;
+        // Every binding's large value is published by the first commit,
+        // each in its own leaves.
+        let initial_shape = CheckpointArtifactShape::from_publication(
+            &fixture.commit(&mut publisher, &seed_commit).await?,
+        )?;
+        if initial_shape.staged_leaf_bytes < (point.component_count * point.transcript_bytes) as u64
+        {
+            anyhow::bail!(
+                "{} seeded {} leaf bytes, fewer than its {} bindings of {} bytes",
+                point.prefix(),
+                initial_shape.staged_leaf_bytes,
+                point.component_count,
+                point.transcript_bytes
+            );
+        }
+        let runtime_state =
+            super::checkpoint::reloaded(store.clone(), &runtime_state.session_id).await?;
+        fixture.read_head(&publisher, &runtime_state).await?;
         fixtures.push(DurableCheckpointCurveFixture {
             point,
             fixture,
+            publisher,
             runtime_state,
             store,
         });
@@ -269,16 +274,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 async { fixture.fixture.capture().await.map_err(anyhow::Error::from) },
             ))
             .await?;
-            let snapshot_shape = CheckpointArtifactShape::from_snapshot(&snapshot)?;
-            // The reassigned binding keeps its large value: what an earlier
-            // commit installed is never staged again (PC-LARGE-ONCE).
-            if snapshot_shape.staged_leaf_bytes >= fixture.point.transcript_bytes as u64 {
-                anyhow::bail!(
-                    "{prefix} restaged {} leaf bytes, as much as a binding's {}-byte value",
-                    snapshot_shape.staged_leaf_bytes,
-                    fixture.point.transcript_bytes
-                );
-            }
+            let root = captured_root(&snapshot)?;
             let (serialized, serialize_phase) = measure_runtime_perf_phase(
                 "checkpoint_curve.serialize",
                 || {
@@ -290,10 +286,14 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                             CHECKPOINT_CURVE_COMMIT_ROWS,
                         ),
                     );
-                    let commit_shape = CheckpointArtifactShape::from_commit(&commit)?;
-                    if commit_shape != snapshot_shape {
+                    let committed = commit
+                        .checkpoint
+                        .execution
+                        .as_ref()
+                        .map(|execution| execution.root);
+                    if committed != Some(root) {
                         anyhow::bail!(
-                            "{prefix} snapshot/commit shape diverged: {snapshot_shape:?} versus {commit_shape:?}"
+                            "{prefix} commit names execution {committed:?}, not the published {root}"
                         );
                     }
                     commit.turn_commit_hash()?;
@@ -304,21 +304,30 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                             fixture.point.graph_rows
                         );
                     }
-                    Ok((commit, commit_shape))
+                    Ok(commit)
                 },
             )?;
-            let (commit, shape) = serialized;
-            let (_, commit_phase) =
+            let commit = serialized;
+            let (published, commit_phase) =
                 measure_runtime_perf_async_phase("checkpoint_curve.commit", async {
                     fixture
-                        .store
-                        .commit_runtime_state(commit)
+                        .fixture
+                        .commit(&mut fixture.publisher, &commit)
                         .await
                         .map_err(anyhow::Error::from)
                 })
                 .await?;
-            fixture.fixture.acknowledge_capture().await;
-            let ((loaded_state, reachable), load_phase) =
+            let shape = CheckpointArtifactShape::from_publication(&published)?;
+            // The reassigned binding keeps its large value: what an earlier
+            // commit installed is never published again (PC-LARGE-ONCE).
+            if shape.staged_leaf_bytes >= fixture.point.transcript_bytes as u64 {
+                anyhow::bail!(
+                    "{prefix} restaged {} leaf bytes, as much as a binding's {}-byte value",
+                    shape.staged_leaf_bytes,
+                    fixture.point.transcript_bytes
+                );
+            }
+            let (loaded_state, load_phase) =
                 measure_runtime_perf_async_phase("checkpoint_curve.load", async {
                     let loaded_state = lash::persistence::load_session_window_state(
                         &lash::persistence::SessionStore::new(
@@ -339,12 +348,25 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                     )
                     .await
                     .map_err(anyhow::Error::from)?;
-                    Ok((loaded_state, execution_state.nodes.len() as u64))
+                    Ok(loaded_state)
                 })
+                .await?;
+            fixture
+                .fixture
+                .read_head(&fixture.publisher, &loaded_state)
                 .await?;
             fixture.runtime_state = loaded_state;
             let work: lash_core::perf_witness::Snapshot = work_collector.snapshot();
             drop(work_collector);
+            // What the committed head reaches, read after the measured work.
+            let reachable = fixture
+                .publisher
+                .reachable(
+                    &fixture.runtime_state.session_id,
+                    fixture.runtime_state.head_revision,
+                    super::checkpoint::head_checkpoint(&fixture.runtime_state)?,
+                )
+                .await?;
 
             for (name, phase) in [
                 ("capture", capture_phase.1),

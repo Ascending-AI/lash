@@ -248,9 +248,16 @@ type CommitRefusal = Arc<
 pub type CommitObserver = Arc<dyn Fn(CommitLabel, &lash_durable::ActorTx) + Send + Sync>;
 
 /// What a law observes of every candidate publication before it enters
-/// the store: its label and the fresh pages its manifest supplies.
-pub type CandidateObserver =
-    Arc<dyn Fn(CommitLabel, &[lash_core_store::checkpoint_graph::EncodedNode]) + Send + Sync>;
+/// the store: its label, the manifest's summary and the fresh pages the
+/// manifest supplies.
+pub type CandidateObserver = Arc<
+    dyn Fn(
+            CommitLabel,
+            lash_core_store::checkpoint_graph::stage::ManifestSummary,
+            &[lash_core_store::checkpoint_graph::EncodedNode],
+        ) + Send
+        + Sync,
+>;
 
 type ActorReceiptObserver =
     Arc<dyn Fn(CommitLabel, &lash_durable::ActorTx, &lash_durable::ActorCommit) + Send + Sync>;
@@ -323,6 +330,7 @@ impl Shared {
         let Some(observer) = observer else {
             return;
         };
+        let summary = manifest.summary();
         let mut fresh = Vec::new();
         let mut after = None;
         while let Ok(entries) = manifest.entries(after, 256) {
@@ -338,7 +346,7 @@ impl Shared {
                 ManifestEntry::External(_) => None,
             }));
         }
-        observer(label, &fresh);
+        observer(label, summary, &fresh);
     }
 
     /// Number one write, record it, and answer the fault an armed rule

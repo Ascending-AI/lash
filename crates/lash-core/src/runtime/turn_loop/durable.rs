@@ -504,17 +504,10 @@ fn committed_session_pages(
     cx: &ActorContext,
     state: &crate::RuntimeSessionState,
 ) -> Option<crate::plugin::SessionPages> {
-    let store = cx.pages().ok()?;
-    let root =
-        lash_core_store::checkpoint_graph::NodeId::from_hex(&state.checkpoint_ref.as_ref()?.0)?;
-    Some(crate::plugin::SessionPages {
-        store,
+    crate::plugin::SessionPageReader {
+        store: cx.pages().ok()?,
         actor: cx.actor().clone(),
         epoch: cx.epoch(),
-        owner: lash_durable::domain::graph::RootOwner::SessionRevision {
-            session: state.session_id.clone(),
-            revision: state.head_revision,
-        },
-        root,
-    })
+    }
+    .session_pages(state)
 }

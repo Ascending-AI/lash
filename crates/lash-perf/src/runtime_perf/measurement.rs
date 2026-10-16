@@ -13,11 +13,11 @@ use lash_core::store::GraphAppend;
 use lash_core::{
     AttachmentWrite, DriverAction, DriverContextView, Effect, ExecResponse, LiveReplayOutcome,
     LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole, Part, ProtocolTurnOptions,
-    RuntimeCommit, RuntimeSessionState, SessionCatalogStore, SessionCommitStore,
-    SessionHistoryStore, SessionObservationEventPayload, SessionRevision, ToolCallOutput,
-    ToolCancellation, ToolFailure, ToolFailureClass, TurnInput, TurnMachine, TurnMachineConfig,
-    facade_support::ModelToolReturn, facade_support::Response, facade_support::TurnFinish,
-    facade_support::TurnOutcome, facade_support::shared_parts,
+    RuntimeCommit, RuntimeSessionState, SessionCatalogStore, SessionHistoryStore,
+    SessionObservationEventPayload, SessionRevision, ToolCallOutput, ToolCancellation, ToolFailure,
+    ToolFailureClass, TurnInput, TurnMachine, TurnMachineConfig, facade_support::ModelToolReturn,
+    facade_support::Response, facade_support::TurnFinish, facade_support::TurnOutcome,
+    facade_support::shared_parts,
 };
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
@@ -33,7 +33,7 @@ use crate::perf_support::time::{elapsed_ms, round3};
 
 use super::harness::{
     RuntimePerfTraceConfig, TurnEntry, build_embed_core, build_runtime,
-    build_runtime_with_sqlite_store, durable_backend,
+    build_runtime_with_sqlite_store,
     durable_postgres_session_store_factory_without_commit_measurement,
     durable_sqlite_session_store_factory_without_commit_measurement, memory_perf_store,
     seed_runtime_state, sqlite_memory_stores, validate_runtime_perf_turn,

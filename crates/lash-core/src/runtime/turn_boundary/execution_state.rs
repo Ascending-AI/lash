@@ -1,5 +1,5 @@
-//! How a turn's protocol-owned execution-state capture is probed, taken,
-//! applied, and settled, and what a frame open carries out of the frame it
+//! How a turn's protocol-owned execution-state capture is taken, applied,
+//! and settled, and what a frame open carries out of the frame it
 //! leaves.
 
 use crate::{Session, SessionError, StoreError};
@@ -183,42 +183,13 @@ pub(in crate::runtime) async fn capture_execution_state_update(
         )
         .await?;
     Ok(match capture {
-        capture @ crate::plugin::ExecutionGraphCapture::Replace { .. } => {
+        capture @ crate::plugin::ExecutionGraphCapture::Replace(_) => {
             ExecutionStateUpdate::Replace(capture)
         }
         crate::plugin::ExecutionGraphCapture::Clear => ExecutionStateUpdate::Clear {
             carries: SeedCarries::none(),
         },
     })
-}
-
-/// Ask whether the turn's eventual capture would fail, *before* the turn spends
-/// a provider round trip.
-///
-/// Because the final commit is the only capture boundary, a dirty-capture
-/// failure discovered there has already burned the model call and the turn's
-/// tool work, and the successful response it aborts is thrown away — the retry
-/// then asks the provider for the next response instead of reusing it. Every
-/// prompt-resume-safe boundary that precedes a provider call therefore asks the
-/// executor whether the capture is possible and fails the turn there instead.
-/// The probe stages no checkpoint state, so this keeps the "only the final
-/// commit captures" rule intact.
-pub(super) async fn probe_execution_state_capture(
-    session: &mut Session,
-) -> Result<(), SessionError> {
-    let Some(code_executor) = session.plugins().code_executor() else {
-        return Ok(());
-    };
-    if !code_executor.execution_state_dirty() {
-        return Ok(());
-    }
-    let session_id = session.session_id().clone();
-    code_executor
-        .probe_execution_state_capture(crate::plugin::ProtocolSessionContext::new(
-            &session_id,
-            session.fleet_format(),
-        ))
-        .await
 }
 
 /// Whether the store already holds `frame`'s open.

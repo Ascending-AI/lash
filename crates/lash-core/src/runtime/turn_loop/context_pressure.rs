@@ -350,6 +350,7 @@ impl LashRuntime {
         .map_err(super::runtime_error_from_store_commit)?;
         crate::runtime::durable::head_commit::commit(
             committing,
+            self.code_executor().as_ref(),
             commit.clone(),
             lash_durable::CommitLabel::PRESSURE_FRAME,
             self.host.core.tracing.metrics(),

@@ -14,6 +14,32 @@ impl LashRuntime {
         &self.state
     }
 
+    /// The session actor's page reader the durable actor set on this
+    /// runtime under its claim (FIG-6418); none where no claim activated
+    /// it or the store publishes no heap pages.
+    pub(in crate::runtime) fn page_reader(&self) -> Option<&crate::plugin::SessionPageReader> {
+        self.page_reader.as_ref()
+    }
+
+    /// Takes `reader` as the session actor's page reader for this
+    /// activation of the runtime under `claim`'s epoch.
+    pub(in crate::runtime) fn note_page_reader(
+        &mut self,
+        reader: Option<crate::plugin::SessionPageReader>,
+    ) {
+        self.page_reader = reader;
+    }
+
+    /// The resident session's code executor: what publishes the heap
+    /// pages of the execution root a head commit names (FIG-6418).
+    pub(in crate::runtime) fn code_executor(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::plugin::CodeExecutorPlugin>> {
+        self.session
+            .as_ref()
+            .and_then(|session| session.plugins().code_executor())
+    }
+
     /// Stamp the live plugin state onto the resident state.
     ///
     /// # Errors
@@ -1245,6 +1271,7 @@ impl LashRuntime {
         commit.applied_commands = Some(completion);
         let committed = super::durable::head_commit::commit(
             owner,
+            self.code_executor().as_ref(),
             commit,
             lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),

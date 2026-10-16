@@ -18,6 +18,10 @@ use cell_outputs::record_cell_outputs;
 mod cell_run;
 pub(crate) mod envelope;
 mod host;
+#[cfg(feature = "testing")]
+mod perf_fixture;
+#[cfg(feature = "testing")]
+pub use perf_fixture::{CodeModeCheckpointPerfFixture, CodeModeCheckpointPerfPublisher};
 pub(crate) mod host_graph;
 mod pages;
 mod processes;
@@ -34,6 +38,7 @@ pub(crate) use envelope::{
 pub(crate) use host::site_label;
 pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
 pub use session::{CodeModeExecutionState, saved_function_pins};
+pub(crate) use session::{stored_binding_roots, stored_session_descriptor};
 pub use snapshot::{CODEMODE_SNAPSHOT_VERSION, SessionOpenError};
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1514,110 +1519,6 @@ fn step_trace(
             },
         )
     });
-}
-
-/// Feature-gated fixture that lets the repository's performance harness
-/// shift the production code mode execution-state capture without exposing
-/// executor internals as public protocol API.
-#[cfg(feature = "testing")]
-pub struct CodeModeCheckpointPerfFixture {
-    services: CellServices,
-    state: CodeModeExecutionState,
-    binding_count: usize,
-    payload_bytes: usize,
-}
-
-#[cfg(feature = "testing")]
-impl CodeModeCheckpointPerfFixture {
-    /// A fixture whose session holds `binding_count` bindings of
-    /// `payload_bytes` each.
-    pub async fn new(
-        dialect: &crate::CellDialect,
-        workers: lash_vm_client::service::Service,
-        binding_count: usize,
-        payload_bytes: usize,
-    ) -> Result<Self, lash_core::SessionError> {
-        let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers())
-            .staging(workers.spools());
-        let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
-        for index in 0..binding_count {
-            patch.set_default.insert(
-                format!("mid_{index}"),
-                serde_json::json!([format!("binding-{index}-{}", "x".repeat(payload_bytes))]),
-            );
-        }
-        state.patch_globals(&patch, &BTreeSet::new()).await?;
-        Ok(Self {
-            services: CellServices {
-                events: Arc::default(),
-                workers,
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                channel: crate::plugin::RlmChannel::Cell,
-                code_renderer: crate::render::CodeRendererSlot::default(),
-                prompts: dialect.prompts(),
-                helpers: None,
-            },
-            state,
-            binding_count,
-            payload_bytes,
-        })
-    }
-
-    pub async fn capture(
-        &mut self,
-    ) -> Result<lash_core::plugin::ExecutionGraphCapture, lash_core::SessionError> {
-        self.state
-            .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Final)
-            .await
-    }
-
-    pub async fn acknowledge_capture(&mut self) {
-        self.state.acknowledge_execution_state_capture().await;
-    }
-
-    /// Run the edit under the backend's scoped controller and this cell's
-    /// invocation: one binding is rebound per turn, at the same order of
-    /// bytes.
-    pub async fn assign_one(
-        &mut self,
-        index: usize,
-        turn: usize,
-        ctx: RuntimeExecutionContext<'_>,
-    ) -> Result<(), lash_core::SessionError> {
-        let binding = index % self.binding_count.max(1);
-        let code = format!(
-            "mid_{binding} = [\"binding-{binding}-{}\", \"turn-{turn}-{}\"];",
-            "x".repeat(self.payload_bytes),
-            "y".repeat(self.payload_bytes / 8)
-        );
-        let response = execute_cell(
-            &mut self.state,
-            ctx,
-            ExecRequest { code },
-            &self.services,
-            CodeModeProjectedBindings::default(),
-        )
-        .await;
-        self.state.accept_code_execution();
-        if let Some(error) = response.error() {
-            return Err(lash_core::SessionError::Protocol(format!(
-                "code mode checkpoint perf assignment failed: {}",
-                error.message,
-            )));
-        }
-        Ok(())
-    }
-
-    pub async fn restore(
-        dialect: &crate::CellDialect,
-        state: &lash_core::plugin::HydratedExecutionGraph,
-    ) -> Result<(), lash_core::SessionError> {
-        let mut restored = CodeModeExecutionState::new(dialect.name(), dialect.numbers())
-            .staging(lash_vm_client::service::Service::default().spools());
-        restored
-            .restore_execution_graph(state, lash_core::plugin::ExecutionGraphPurpose::Final)
-            .map_err(lash_core::SessionError::from)
-    }
 }
 
 #[cfg(test)]

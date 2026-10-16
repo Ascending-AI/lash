@@ -203,6 +203,7 @@ impl LashRuntime {
             && let Err(error) = super::config_ops::validate_config_tool_catalog(
                 self.services.plugins.host(),
                 &self.state,
+                self.page_reader(),
                 &candidate,
                 self.session
                     .as_ref()
@@ -423,6 +424,7 @@ impl LashRuntime {
         ) {
             Ok((commit, _)) => super::durable::head_commit::commit(
                 owner,
+                self.code_executor().as_ref(),
                 commit,
                 lash_durable::CommitLabel::SESSION_COMMAND,
                 self.host.core.tracing.metrics(),
@@ -468,6 +470,7 @@ impl LashRuntime {
             format!("config-transaction:{}", transaction.id),
         );
         let runner = ResolveConfigTransactionRunner {
+            page_reader: self.page_reader().cloned(),
             catalog_host: self.services.plugins.host().clone(),
             state: self.state.clone(),
             registry,
@@ -530,6 +533,11 @@ fn publish_config_resolution(
 /// records the result. None of it enters the envelope, which names only the
 /// session and the transaction.
 struct ResolveConfigTransactionRunner {
+    /// The session actor's page reader captured at the step's boundary: a
+    /// stored bindings check inside `execute` reads the committed head's
+    /// pages under the claim it ran from (FIG-6418). Stale across a claim
+    /// change — its lease then refuses and the check errors, never passes.
+    page_reader: Option<crate::plugin::SessionPageReader>,
     catalog_host: crate::PluginHost,
     state: crate::RuntimeSessionState,
     registry: Arc<crate::ConfigRegistry>,
@@ -608,6 +616,7 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
             && let Err(error) = super::config_ops::validate_config_tool_catalog(
                 &self.catalog_host,
                 &self.state,
+                self.page_reader.as_ref(),
                 &candidate,
                 None,
             )

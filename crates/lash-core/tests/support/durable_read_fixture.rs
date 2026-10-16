@@ -591,16 +591,15 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         serde_json::to_value(fixture_plugin_state()).expect("encode expected plugin snapshot"),
         "durable fixture semantic drift: plugin snapshot content changed"
     );
-    let lash_core::plugin::ExecutionGraphCapture::Replace { root, nodes } = fixture_execution()
-    else {
+    let lash_core::plugin::ExecutionGraphCapture::Replace(graph) = fixture_execution() else {
         unreachable!("the fixture stages a root")
     };
     assert_eq!(
         checkpoint
             .execution
             .as_ref()
-            .map(|execution| (execution.root, &execution.nodes)),
-        Some((root, &nodes)),
+            .map(|execution| (execution.root, execution.descriptor.clone())),
+        Some((graph.root, Some(graph.descriptor))),
         "durable fixture semantic drift: execution state changed"
     );
 

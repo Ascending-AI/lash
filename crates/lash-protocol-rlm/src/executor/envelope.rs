@@ -238,13 +238,7 @@ pub(super) fn load_cell(
                 .ok_or("an ended cell root omits its session's descriptor")?;
             let session = lash_core_store::execution_state::HydratedExecutionGraph {
                 root: end.session,
-                nodes: BTreeMap::from([(
-                    end.session,
-                    lash_core_store::checkpoint_graph::EncodedNode {
-                        id: end.session,
-                        bytes: descriptor.bytes.into(),
-                    },
-                )]),
+                descriptor: descriptor.bytes.into(),
             };
             (end.host, end.envelope, Some(session))
         }

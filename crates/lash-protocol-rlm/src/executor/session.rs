@@ -10,8 +10,9 @@
 //!
 //! The cells of a turn stage what they seal in the turn's one spool. A
 //! cell's end is staged there under a new descriptor; a capture is that
-//! descriptor with every page the spool holds under it, and its
-//! acknowledgement settles them. A binding a cell left that the session
+//! descriptor, the commit that names it publishes every page the spool
+//! holds under it as its candidate (FIG-6418), and its acknowledgement
+//! settles them. A binding a cell left that the session
 //! does not carry (`K-SES-003`) is listed by name with why, until a later
 //! cell binds the name again.
 
@@ -21,7 +22,7 @@ use std::sync::Arc;
 use lash_core::SessionError;
 use lash_core::plugin::SessionPages;
 use lash_core_store::checkpoint_graph::stage::{ManifestEntry, StageFault, StageSpool};
-use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId};
+use lash_core_store::checkpoint_graph::{CommitId, NodeId};
 use lash_core_store::execution_state::{
     ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
 };
@@ -37,6 +38,7 @@ use super::pages::{PageAccessError, SessionPageAccess};
 use super::snapshot::SessionOpenError;
 
 mod graph;
+mod notes;
 
 /// The reserved binding the history projection answers; no cell binds it.
 pub(crate) const HISTORY_BINDING: &str = "history";
@@ -46,7 +48,7 @@ const MANIFEST_BATCH: usize = 1024;
 
 /// One version of the session: its descriptor and what the descriptor
 /// states.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct Version {
     /// The descriptor page; none for a session that holds nothing.
     descriptor: Option<NodeId>,
@@ -54,9 +56,34 @@ struct Version {
     bytes: Option<Arc<[u8]>>,
     session: Option<SessionRoot>,
     cells: u64,
-    names: BTreeSet<Name>,
-    not_carried: BTreeMap<Name, String>,
-    functions: BTreeMap<Name, (u64, BTreeSet<FunctionId>)>,
+    /// The session's notes tree, keyed by name beside the bindings
+    /// (`notes`): unbounded data lives on pages, never in the descriptor.
+    notes: KeyedRoot,
+    /// The library functions the session's saved functions pin, together
+    /// (FIG-5799): bounded by the build's library, never by the session.
+    pins: BTreeSet<FunctionId>,
+}
+
+impl Default for Version {
+    fn default() -> Self {
+        Self {
+            notes: KeyedRoot::Empty,
+            ..Self::zeroed()
+        }
+    }
+}
+
+impl Version {
+    fn zeroed() -> Self {
+        Self {
+            descriptor: None,
+            bytes: None,
+            session: None,
+            cells: 0,
+            notes: KeyedRoot::Empty,
+            pins: BTreeSet::new(),
+        }
+    }
 }
 
 /// What the parent read of a version, kept until a cell changes it.
@@ -70,6 +97,12 @@ struct View {
     /// The saved functions this build's kernel does not carry, with why:
     /// listed as not carried and never lowered.
     refused: BTreeMap<Name, String>,
+    /// Every name the session binds, loaded from the binding tree: `Some`
+    /// once read or known (a fresh session binds nothing), `None` after a
+    /// restore until a call loads it.
+    names: Option<BTreeSet<Name>>,
+    /// Each name's notes, loaded with the names.
+    notes: Option<BTreeMap<Name, notes::Note>>,
 }
 
 /// The session as it stood before the active cell.
@@ -83,11 +116,10 @@ struct Active {
 #[derive(Clone, Debug)]
 struct Pending {
     root: NodeId,
-    /// The spool candidate the capture's nodes came from, when the spool
-    /// held the descriptor.
+    /// The spool candidate built for the capture's commit, once one was.
     commit: Option<CommitId>,
     purpose: ExecutionGraphPurpose,
-    /// The helper releases whose closures the capture sends.
+    /// The helper releases the capture's commit pins.
     releases: BTreeSet<NodeId>,
     /// The held runs whose carries the capture owns once committed.
     runs: usize,
@@ -162,7 +194,11 @@ impl CodeModeExecutionState {
             response_returned: false,
             defaults: BTreeMap::new(),
             protected: BTreeSet::from([Name::new(HISTORY_BINDING)]),
-            view: View::default(),
+            view: View {
+                names: Some(BTreeSet::new()),
+                notes: Some(BTreeMap::new()),
+                ..View::default()
+            },
             pages: SessionPageAccess::default(),
             spools: None,
             kernel: super::KernelCarry::default(),
@@ -255,34 +291,93 @@ impl CodeModeExecutionState {
     }
 
     /// Every name the session binds, data or function, a host default
-    /// included: what a cell is lowered against.
+    /// included: what a cell is lowered against. Reads the loaded names
+    /// cache: callers that may follow a restore load it first
+    /// ([`Self::load_names`]).
     pub(crate) fn names(&self) -> BTreeSet<Name> {
-        self.current
+        self.view
             .names
             .iter()
+            .flatten()
             .chain(self.defaults.keys())
             .filter(|name| !self.protected.contains(*name))
             .cloned()
             .collect()
     }
 
+    /// Every name the session binds, loading the names cache first: the
+    /// live catalog check reads it before any turn (FIG-5824).
+    ///
+    /// # Errors
+    ///
+    /// The store's faults reading the session's pages.
+    pub(crate) async fn session_names(&mut self) -> Result<BTreeSet<Name>, PageAccessError> {
+        self.load_names().await?;
+        Ok(self.names())
+    }
+
     /// The bindings not carried, each with why.
     pub(crate) fn not_carried(&self) -> BTreeMap<Name, String> {
-        let mut not_carried = self.current.not_carried.clone();
+        let mut not_carried: BTreeMap<Name, String> = self
+            .view
+            .notes
+            .iter()
+            .flatten()
+            .filter_map(|(name, note)| {
+                note.not_carried
+                    .as_ref()
+                    .map(|why| (name.clone(), why.clone()))
+            })
+            .collect();
         not_carried.extend(self.view.refused.clone());
         not_carried
     }
 
-    /// Every name a stored state binds: what catalog admission checks a
-    /// tool's namespace against (FIG-5824).
-    pub(crate) fn persisted_binding_names(
-        state: &HydratedExecutionGraph,
-    ) -> Result<BTreeSet<String>, SessionOpenError> {
-        Ok(stored_descriptor(state)?
+    /// Whether the session binds `name` in its stored state: the names
+    /// cache, loaded or not.
+    fn bound(&self, name: &Name) -> bool {
+        self.view
             .names
-            .into_iter()
-            .map(|name| name.to_string())
-            .collect())
+            .as_ref()
+            .is_some_and(|names| names.contains(name))
+    }
+
+    /// The binding tree's index pages breadth-first into the read cache,
+    /// in [`FETCH_BATCH`] batches: loading `names` then costs O(tree
+    /// depth) store round trips, never one per page.
+    async fn prefetch_binding_tree(&mut self) -> Result<(), PageAccessError> {
+        let Some(page) = self
+            .current
+            .session
+            .as_ref()
+            .and_then(|session| session.bindings.page())
+        else {
+            return Ok(());
+        };
+        self.pages.prefetch_tree(NodeId(page.id.0)).await
+    }
+
+    /// Loads the names and notes caches from the session's pages: a row
+    /// per name an earlier cell's not-carried reason or a saved function's
+    /// freezing cell is recorded for.
+    async fn load_names(&mut self) -> Result<(), PageAccessError> {
+        if self.view.names.is_some() && self.view.notes.is_some() {
+            return Ok(());
+        }
+        self.prefetch_binding_tree().await?;
+        let session = self.current.session;
+        let notes_root = self.current.notes;
+        let names = self
+            .pages
+            .read(move |source| SessionEditor::open(session.as_ref(), source)?.names())
+            .await?;
+        let notes = self
+            .pages
+            .read(move |source| notes::read(&notes_root, source))
+            .await?;
+        self.view.names = Some(names);
+        self.view.notes = Some(notes);
+        Ok(())
     }
 
     /// Seals the host's pending defaults into the session, each only where
@@ -320,9 +415,37 @@ impl CodeModeExecutionState {
         if let Some(sealed) = sealed {
             let mut next = self.current.clone();
             next.session = Some(sealed);
-            for name in bound {
-                next.not_carried.remove(&name);
-                next.names.insert(name);
+            if let Some(names) = &mut self.view.names {
+                names.extend(bound.iter().cloned());
+            }
+            // A name a default binds is carried now: its not-carried note
+            // dies.
+            if !bound.is_empty() {
+                let root = self.current.notes;
+                let carried = bound.clone();
+                next.notes = self
+                    .pages
+                    .read(move |source| {
+                        notes::edit(&root, source, |edit| {
+                            for name in &carried {
+                                edit.note(name, |record| {
+                                    record.not_carried = None;
+                                })?;
+                            }
+                            Ok(())
+                        })
+                    })
+                    .await?;
+                if let Some(notes) = &mut self.view.notes {
+                    for name in &bound {
+                        if let Some(note) = notes.get_mut(name) {
+                            note.not_carried = None;
+                            if note.saved.is_none() {
+                                notes.remove(name);
+                            }
+                        }
+                    }
+                }
             }
             self.current = self.seal_descriptor(next, spool)?;
         }
@@ -347,9 +470,8 @@ impl CodeModeExecutionState {
                 kernel: KERNEL_VERSION,
                 cells: version.cells,
                 session,
-                names: version.names.clone(),
-                not_carried: version.not_carried.clone(),
-                functions: version.functions.clone(),
+                notes: version.notes,
+                pins: version.pins.clone(),
             },
         )?;
         let id = NodeId(page.id.0);
@@ -367,6 +489,7 @@ impl CodeModeExecutionState {
     ) -> Result<(), PageAccessError> {
         self.note_pages(pages);
         self.seal_defaults().await?;
+        self.load_names().await?;
         self.load_functions().await
     }
 
@@ -517,58 +640,119 @@ impl CodeModeExecutionState {
             ..self.current.clone()
         };
         let mut changes = lash_core::BindingChanges::default();
-        for (name, (was, is)) in bindings {
-            self.view.values.remove(&name);
+        let names = &mut self.view.names;
+        for (name, (was, is)) in &bindings {
+            self.view.values.remove(name);
             match (was, is) {
                 (false, true) => changes.added.push(name.to_string()),
                 (true, true) => changes.changed.push(name.to_string()),
                 (true, false) => changes.removed.push(name.to_string()),
                 (false, false) => continue,
             }
-            if is {
-                next.names.insert(name.clone());
-                next.not_carried.remove(&name);
-            } else {
-                next.names.remove(&name);
+            if let Some(names) = names {
+                if *is {
+                    names.insert(name.clone());
+                } else {
+                    names.remove(name);
+                }
             }
         }
+        let mut not_carried_notes = Vec::new();
         for (name, why) in not_carried {
-            if !next.names.contains(&name) {
+            if !self.bound(&name) {
                 changes.not_carried.push(name.to_string());
                 // A name the session bound before and not now was not
                 // carried, never removed.
                 changes
                     .removed
                     .retain(|removed| removed.as_str() != name.as_str());
-                next.not_carried.insert(name, why);
+                not_carried_notes.push((name, why));
             }
         }
+        let mut saved_notes = Vec::new();
         for (name, meta) in functions {
             self.view.refused.remove(&name);
             let lowered = meta.map(|meta| self.lower_function(&name, &meta));
             let view = self.view.functions.get_or_insert_with(BTreeMap::new);
             match lowered {
                 Some(Ok(function)) => {
-                    let pins = function
-                        .document
-                        .manifest
-                        .functions
-                        .keys()
-                        .copied()
-                        .collect();
-                    next.functions.insert(name.clone(), (cells, pins));
+                    saved_notes.push((name.clone(), Some(cells)));
                     view.insert(name, function);
                 }
                 Some(Err(why)) => {
-                    next.functions.remove(&name);
+                    saved_notes.push((name.clone(), None));
                     view.remove(&name);
                     self.view.refused.insert(name, why);
                 }
                 None => {
-                    next.functions.remove(&name);
+                    saved_notes.push((name.clone(), None));
                     view.remove(&name);
                 }
             }
+        }
+        // The notes tree, edited beside the bindings: a bound name's
+        // not-carried note dies, a not-carried name records why, a saved
+        // function records the cell that froze it.
+        let notes_root = self.current.notes;
+        let bound_names: Vec<Name> = bindings
+            .iter()
+            .filter(|(_, (_, is))| *is)
+            .map(|(name, _)| name.clone())
+            .collect();
+        let edit_bound = bound_names.clone();
+        let edit_not_carried = not_carried_notes.clone();
+        let edit_saved = saved_notes.clone();
+        next.notes = self
+            .pages
+            .read(move |source| {
+                notes::edit(&notes_root, source, |edit| {
+                    for name in &edit_bound {
+                        edit.note(name, |record| {
+                            record.not_carried = None;
+                        })?;
+                    }
+                    for (name, why) in &edit_not_carried {
+                        let why = edit.name_text(why)?;
+                        edit.note(name, |record| {
+                            record.not_carried = Some(why.clone());
+                        })?;
+                    }
+                    for (name, saved) in &edit_saved {
+                        edit.note(name, |record| {
+                            record.saved = *saved;
+                        })?;
+                    }
+                    Ok(())
+                })
+            })
+            .await?;
+        if let Some(notes) = &mut self.view.notes {
+            for name in &bound_names {
+                if let Some(note) = notes.get_mut(name) {
+                    note.not_carried = None;
+                    if note.saved.is_none() {
+                        notes.remove(name);
+                    }
+                }
+            }
+            for (name, why) in &not_carried_notes {
+                notes.entry(name.clone()).or_default().not_carried = Some(why.clone());
+            }
+            for (name, saved) in &saved_notes {
+                let note = notes.entry(name.clone()).or_default();
+                note.saved = *saved;
+                if note.saved.is_none() && note.not_carried.is_none() {
+                    notes.remove(name);
+                }
+            }
+        }
+        // The next descriptor's pins are the union over the lowered
+        // functions' libraries (FIG-5799).
+        if let Some(functions) = &self.view.functions {
+            next.pins = functions
+                .values()
+                .flat_map(|function| function.document.manifest.functions.keys().copied())
+                .collect();
         }
         self.current = self.seal_descriptor(next, spool)?;
         if self.current.descriptor.is_none() {
@@ -608,66 +792,75 @@ impl CodeModeExecutionState {
             || !self.defaults.is_empty()
     }
 
-    /// The session's state as one capture (FIG-6193): its descriptor, and
-    /// every page the turn's spool holds under it. A descriptor the store
-    /// holds already is sent alone. Its pages stay staged until the
-    /// capture is acknowledged; a refused commit is answered by the next
-    /// capture with the same pages.
+    /// The session's state as one capture (FIG-6193): its descriptor. The
+    /// pages the turn's spool holds under it are the candidate of the
+    /// commit that names it ([`Self::execution_candidate`]); they stay
+    /// staged until the capture is acknowledged, and a refused commit
+    /// publishes them with the next capture.
     pub async fn capture_execution_graph(
         &mut self,
         purpose: ExecutionGraphPurpose,
     ) -> Result<ExecutionGraphCapture, SessionError> {
         self.seal_defaults().await.map_err(protocol)?;
         self.withdraw_pending();
-        let Some(root) = self.current.descriptor else {
+        let Some(graph) = self.descriptor() else {
             return Ok(ExecutionGraphCapture::Clear);
         };
-        let (mut nodes, commit, named) = self.staged_under(root).map_err(protocol)?;
-        let mut releases = BTreeSet::new();
-        for release in named.difference(&self.releases) {
-            if let Some((_, closure)) = held_releases().and_then(|held| held.pinned(*release)) {
-                nodes.extend(closure);
-                releases.insert(*release);
-            }
-        }
         self.pending = Some(Pending {
-            root,
-            commit,
+            root: graph.root,
+            commit: None,
             purpose,
-            releases,
+            releases: BTreeSet::new(),
             runs: self.pages.held(),
         });
-        Ok(ExecutionGraphCapture::Replace { root, nodes })
+        Ok(ExecutionGraphCapture::Replace(graph))
     }
 
-    /// Every page the turn's spool holds under `root`, with the candidate
-    /// they were read as and the pages they name outside it; none when the
-    /// spool does not hold `root`.
-    #[expect(clippy::type_complexity, reason = "one candidate, in its parts")]
-    fn staged_under(
+    /// The session's descriptor as it stands, if it holds one.
+    fn descriptor(&self) -> Option<HydratedExecutionGraph> {
+        match (self.current.descriptor, self.current.bytes.clone()) {
+            (Some(root), Some(descriptor)) => Some(HydratedExecutionGraph { root, descriptor }),
+            _ => None,
+        }
+    }
+
+    /// The candidate that publishes the pending capture's pages under
+    /// `commit` (FIG-6418), when the capture is `root`'s and the turn's
+    /// spool holds it: a candidate of the same capture built before is
+    /// withdrawn first. Every helper release the pages name that no
+    /// acknowledged capture installed is pinned in `tx`, after `reads` of
+    /// whether the store pins it already. None when the store holds
+    /// `root`'s pages.
+    ///
+    /// # Errors
+    ///
+    /// The spool's faults, or a release the pages name that this build
+    /// does not hold.
+    pub(crate) async fn execution_candidate(
         &mut self,
         root: NodeId,
-    ) -> Result<
-        (
-            BTreeMap<NodeId, EncodedNode>,
-            Option<CommitId>,
-            BTreeSet<NodeId>,
-        ),
-        PageAccessError,
-    > {
+        commit: CommitId,
+        tx: &mut lash_durable::ActorTx,
+        reads: &dyn lash_durable::DurableReads,
+    ) -> Result<Option<lash_core::plugin::ExecutionCandidate>, SessionError> {
         let Some(mut spool) = self.pages.staged().cloned() else {
-            return Ok((BTreeMap::new(), None, BTreeSet::new()));
+            return Ok(None);
+        };
+        let Some(pending) = self.pending.as_mut().filter(|pending| pending.root == root) else {
+            return Ok(None);
         };
         if !spool.contains(&root) {
-            return Ok((BTreeMap::new(), None, BTreeSet::new()));
+            return Ok(None);
         }
-        let commit = CommitId::mint();
-        let mut manifest = spool.candidate(root, None, commit)?;
-        let mut nodes = BTreeMap::new();
-        let mut external = BTreeSet::new();
+        if let Some(previous) = pending.commit.take() {
+            let _ = spool.withdraw(previous);
+        }
+        let mut manifest = spool.candidate(root, None, commit).map_err(protocol)?;
+        pending.commit = Some(commit);
+        let mut named = BTreeSet::new();
         let mut after = None;
         loop {
-            let entries = manifest.entries(after, MANIFEST_BATCH)?;
+            let entries = manifest.entries(after, MANIFEST_BATCH).map_err(protocol)?;
             let Some(last) = entries.last() else {
                 break;
             };
@@ -675,38 +868,34 @@ impl CodeModeExecutionState {
                 ManifestEntry::External(id) => *id,
                 ManifestEntry::Fresh(node) => node.id,
             });
-            for entry in entries {
-                match entry {
-                    ManifestEntry::Fresh(node) => {
-                        nodes.insert(node.id, node);
-                    }
-                    ManifestEntry::External(id) => {
-                        external.insert(id);
-                    }
+            named.extend(entries.into_iter().filter_map(|entry| match entry {
+                ManifestEntry::External(id) => Some(id),
+                ManifestEntry::Fresh(_) => None,
+            }));
+        }
+        let mut releases = BTreeSet::new();
+        if let Some(held) = held_releases() {
+            for release in named.difference(&self.releases) {
+                if held.pinned(*release).is_none() {
+                    continue;
                 }
+                held.pin(reads, tx, *release, true)
+                    .await
+                    .map_err(protocol)?;
+                releases.insert(*release);
             }
         }
-        Ok((nodes, Some(commit), external))
-    }
-
-    /// Whether the capture [`Self::capture_execution_graph`] would take
-    /// now can be built, without staging it.
-    pub async fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        Ok(())
+        if let Some(pending) = self.pending.as_mut() {
+            pending.releases = releases;
+        }
+        Ok(Some(lash_core::plugin::ExecutionCandidate { manifest }))
     }
 
     /// The session's descriptor, alone: its pages are the store's or the
     /// turn's, and read where a host asks for them.
     pub async fn hydrated_execution_graph(&self) -> Result<HydratedExecutionGraph, SessionError> {
-        let (Some(root), Some(bytes)) = (self.current.descriptor, self.current.bytes.clone())
-        else {
-            return Err(SessionError::Protocol(
-                "the code mode session holds no execution state".to_owned(),
-            ));
-        };
-        Ok(HydratedExecutionGraph {
-            root,
-            nodes: BTreeMap::from([(root, EncodedNode { id: root, bytes })]),
+        self.descriptor().ok_or_else(|| {
+            SessionError::Protocol("the code mode session holds no execution state".to_owned())
         })
     }
 
@@ -782,23 +971,15 @@ impl CodeModeExecutionState {
                 found: read.kernel,
             });
         }
-        self.pages.preload(
-            graph
-                .nodes
-                .values()
-                .map(|node| (node.id, Arc::clone(&node.bytes))),
-        );
+        self.pages
+            .preload([(graph.root, Arc::clone(&graph.descriptor))]);
         self.current = Version {
             descriptor: Some(graph.root),
-            bytes: graph
-                .nodes
-                .get(&graph.root)
-                .map(|node| Arc::clone(&node.bytes)),
+            bytes: Some(Arc::clone(&graph.descriptor)),
             session: Some(read.session),
             cells: read.cells,
-            names: read.names,
-            not_carried: read.not_carried,
-            functions: read.functions,
+            notes: read.notes,
+            pins: read.pins,
         };
         self.installed = Some(graph.root);
         self.final_owed = purpose == ExecutionGraphPurpose::Working;
@@ -845,7 +1026,7 @@ impl CodeModeExecutionState {
         }
         for (key, value) in &patch.set_default {
             let name = Name::new(key.as_str());
-            if self.current.names.contains(&name) || self.defaults.contains_key(&name) {
+            if self.bound(&name) || self.defaults.contains_key(&name) {
                 continue;
             }
             let datum = crate::cell_value::json_datum(value, self.numbers);
@@ -864,19 +1045,18 @@ impl CodeModeExecutionState {
         pages: Option<&SessionPages>,
     ) -> Result<Vec<(String, crate::session_globals::SessionGlobalKind)>, SessionError> {
         self.note_pages(pages);
+        self.load_names().await.map_err(protocol)?;
         self.load_functions().await.map_err(protocol)?;
         let listed: Vec<Name> = self
             .names()
             .into_iter()
-            .filter(|name| {
-                !exclude.contains(name.as_str()) && !self.current.functions.contains_key(name)
-            })
+            .filter(|name| !exclude.contains(name.as_str()) && !self.saved_function(name))
             .collect();
+        // A name the store binds is read: its own value lists before any
+        // pending default of the name.
         let unread: Vec<Name> = listed
             .iter()
-            .filter(|name| {
-                !self.view.values.contains_key(*name) && !self.defaults.contains_key(*name)
-            })
+            .filter(|name| !self.view.values.contains_key(*name) && self.bound(name))
             .cloned()
             .collect();
         if !unread.is_empty()
@@ -901,9 +1081,12 @@ impl CodeModeExecutionState {
         Ok(listed
             .into_iter()
             .filter_map(|name| {
-                let value = match self.defaults.get(&name) {
-                    Some(datum) => SessionValue::Data(datum.clone()),
-                    None => self.view.values.get(&name)?.clone(),
+                let value = match self.view.values.get(&name) {
+                    Some(value) => value.clone(),
+                    None => match self.defaults.get(&name) {
+                        Some(datum) => SessionValue::Data(datum.clone()),
+                        None => return None,
+                    },
                 };
                 let kind = match value {
                     SessionValue::Data(Datum::Handle(handle)) => {
@@ -922,21 +1105,31 @@ impl CodeModeExecutionState {
             .collect())
     }
 
+    /// Whether `name` is a saved function of the session's.
+    fn saved_function(&self, name: &Name) -> bool {
+        self.view
+            .notes
+            .as_ref()
+            .and_then(|notes| notes.get(name))
+            .is_some_and(|note| note.saved.is_some())
+    }
+
     /// Each saved function the session holds, with its signature and the
     /// cell whose end froze what it reads.
     pub(crate) fn held_functions(&self) -> Vec<(String, String, Option<u64>)> {
         let described = self.view.functions.as_ref();
-        self.current
-            .functions
+        self.view
+            .notes
             .iter()
-            .filter(|(name, _)| !self.protected.contains(*name))
-            .map(|(name, (cell, _))| {
+            .flatten()
+            .filter(|(name, note)| note.saved.is_some() && !self.protected.contains(*name))
+            .map(|(name, note)| {
                 let signature = described
                     .and_then(|functions| functions.get(name))
                     .and_then(|function| function.written.as_ref())
                     .map(|written| written.signature.clone())
                     .unwrap_or_else(|| "(...)".to_owned());
-                (name.to_string(), signature, Some(*cell))
+                (name.to_string(), signature, note.saved)
             })
             .collect()
     }
@@ -962,7 +1155,7 @@ impl PageSource for SpoolSeal {
 fn stored_descriptor(
     graph: &HydratedExecutionGraph,
 ) -> Result<graph::SessionDescriptor, SessionOpenError> {
-    let mut source = StoredPages(&graph.nodes);
+    let mut source = StoredPages(graph);
     Ok(graph::read(
         &mut source,
         PageRef {
@@ -972,19 +1165,18 @@ fn stored_descriptor(
     )?)
 }
 
-/// The pages of a stored state the host was handed, read as they are.
-struct StoredPages<'a>(&'a BTreeMap<NodeId, EncodedNode>);
+/// The descriptor of a stored state the host was handed, read as it is.
+struct StoredPages<'a>(&'a HydratedExecutionGraph);
 
 impl PageSource for StoredPages<'_> {
     fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
         pages
             .iter()
             .map(|page| {
-                let node = self
-                    .0
-                    .get(&NodeId(page.id.0))
-                    .ok_or(HeapFault::Missing { page: page.id })?;
-                answer_page(*page, &node.bytes, |_| Ok(PageGrant::NONE))
+                if NodeId(page.id.0) != self.0.root {
+                    return Err(HeapFault::Missing { page: page.id });
+                }
+                answer_page(*page, &self.0.descriptor, |_| Ok(PageGrant::NONE))
             })
             .collect()
     }
@@ -997,22 +1189,27 @@ impl PageSource for StoredPages<'_> {
     }
 }
 
-/// The library functions each function a session saved pins, by the
-/// name it is declared under, read from `state`, the stored execution state
-/// of the session (FIG-5799): what a build that drops a helper release asks
-/// of an idle session.
+/// The library functions the session's saved functions pin, together:
+/// the union `state`, the stored execution state of the session, records
+/// (FIG-5799): what a build that drops a helper release asks of an idle
+/// session.
 ///
 /// # Errors
 ///
 /// The refusal of a state that is not one this build reads.
 pub fn saved_function_pins(
     state: &HydratedExecutionGraph,
-) -> Result<BTreeMap<String, BTreeSet<FunctionId>>, SessionOpenError> {
-    Ok(stored_descriptor(state)?
-        .functions
-        .into_iter()
-        .map(|(name, (_, pins))| (name.to_string(), pins))
-        .collect())
+) -> Result<BTreeSet<FunctionId>, SessionOpenError> {
+    Ok(stored_descriptor(state)?.pins)
+}
+
+/// The stored binding tree's root, of the execution state a stored
+/// session's descriptor names: what a catalog check looks a tool's
+/// namespace root up in (FIG-5824).
+pub(crate) fn stored_session_descriptor(
+    state: &HydratedExecutionGraph,
+) -> Result<KeyedRoot, SessionOpenError> {
+    Ok(stored_descriptor(state)?.session.bindings)
 }
 
 /// The helper releases this build holds, read once: a build's releases
@@ -1022,4 +1219,55 @@ fn held_releases() -> Option<&'static lash_vm_broker::kernel::state::ReleaseGrap
         std::sync::OnceLock::new();
     HELD.get_or_init(|| lash_vm_broker::kernel::state::release_manifests().ok())
         .as_ref()
+}
+
+/// The stored check (FIG-5824): which of `roots` the stored binding tree
+/// `bindings` binds, read through `pages`, the committed head's: a point
+/// lookup per root, never a full listing. A page the store cannot answer
+/// fails the check, never passes it.
+///
+/// # Errors
+///
+/// The store's faults leasing or reading the head's pages, or the heap's
+/// reading the tree's.
+pub(crate) async fn stored_binding_roots(
+    pages: &SessionPages,
+    bindings: &KeyedRoot,
+    roots: &[String],
+) -> Result<BTreeSet<String>, PageAccessError> {
+    use lash_kernel_state::paged::metadata::metadata_key;
+    use lash_kernel_state::paged::tree::{Access, Tree};
+
+    let mut bound = BTreeSet::new();
+    if roots.is_empty() || bindings.is_empty() {
+        return Ok(bound);
+    }
+    let mut access = SessionPageAccess::default();
+    access.note(Some(pages));
+    let bindings = *bindings;
+    let roots = roots.to_vec();
+    let found = access
+        .read(move |source| {
+            let access = Access::new(source);
+            let tree = Tree::<lash_kernel_state::paged::BindingRecord>::of_keyed(&bindings);
+            let mut bound = BTreeSet::new();
+            for root in &roots {
+                if tree
+                    .get(&metadata_key(&Name::new(root.as_str())), &access)?
+                    .is_some()
+                {
+                    bound.insert(root.clone());
+                }
+            }
+            Ok(bound)
+        })
+        .await;
+    access.release().await;
+    match found {
+        Ok(found) => {
+            bound.extend(found);
+            Ok(bound)
+        }
+        Err(error) => Err(error),
+    }
 }

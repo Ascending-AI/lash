@@ -221,7 +221,7 @@ fn earlier_checkpoint_item(session: &str) -> DurableItem {
 /// A session's SessionExecution root: the execution state this build
 /// writes, which carries no version of its own.
 fn execution_state_item(session: &str) -> DurableItem {
-    let lash_core::plugin::ExecutionGraphCapture::Replace { root, nodes } =
+    let lash_core::plugin::ExecutionGraphCapture::Replace(graph) =
         lash_core::testing::store_fixtures::execution_graph("rlm")
     else {
         unreachable!("the fixture stages a root")
@@ -233,7 +233,7 @@ fn execution_state_item(session: &str) -> DurableItem {
         session_id: Some(SessionId::fixture(session.to_string())),
         status: None,
         owner_record: None,
-        payload: DurablePayload::GraphNode(nodes[&root].bytes.to_vec()),
+        payload: DurablePayload::GraphNode(graph.descriptor.to_vec()),
     }
 }
 

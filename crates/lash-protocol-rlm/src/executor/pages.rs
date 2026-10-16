@@ -337,6 +337,43 @@ impl SessionPageAccess {
 /// The most pages one store read asks for.
 const FETCH_BATCH: usize = 512;
 
+impl SessionPageAccess {
+    /// Fetches every page of the tree `root` opens breadth-first into the
+    /// read cache, in [`FETCH_BATCH`] batches: an index page's children are
+    /// tree pages and read with it; a leaf's are not and stop there.
+    /// Loading a tree's rows then costs O(tree depth) store round trips,
+    /// never one per page.
+    ///
+    /// # Errors
+    ///
+    /// The store's faults, or no store where the tree's pages live.
+    pub(crate) async fn prefetch_tree(&mut self, root: NodeId) -> Result<(), PageAccessError> {
+        let mut frontier = vec![root];
+        while !frontier.is_empty() {
+            frontier.retain(|id| !self.cache.contains(id));
+            frontier.sort();
+            frontier.dedup();
+            if frontier.is_empty() {
+                return Ok(());
+            }
+            let mut next = Vec::new();
+            for batch in frontier.chunks(FETCH_BATCH) {
+                let fetched = self.fetch_batch(batch).await?;
+                for (id, bytes) in &fetched {
+                    if let Ok(envelope) = parse_envelope(bytes, Some(*id))
+                        && envelope.kind.0 == PageKind::KEYED_INDEX.0
+                    {
+                        next.extend(envelope.children.iter());
+                    }
+                }
+                self.cache.keep(fetched);
+            }
+            frontier = next;
+        }
+        Ok(())
+    }
+}
+
 /// The children of `bytes` when it frames a payload index; a page that
 /// does not frame is left for the read that answers it to refuse.
 fn payload_children(id: NodeId, bytes: &[u8]) -> Vec<NodeId> {

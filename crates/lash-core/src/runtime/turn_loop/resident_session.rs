@@ -348,6 +348,7 @@ impl LashRuntime {
         durable_state: &mut crate::RuntimeSessionState,
     ) -> Result<(), (ResidentReloadStage, RuntimeError)> {
         let has_store = self.services.store.is_some();
+        let page_reader = self.page_reader().cloned();
         let session = self.session.as_mut().ok_or_else(|| {
             (
                 ResidentReloadStage::SessionAvailability,
@@ -374,10 +375,13 @@ impl LashRuntime {
         session.refresh_tool_catalog();
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = durable_state.session_id.clone();
+        let view =
+            crate::plugin::ProtocolSessionRestoreView::new(durable_state, page_reader.as_ref());
         protocol_session
             .restore_session(
-                crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
-                crate::plugin::ProtocolSessionRestoreView::new(durable_state),
+                crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format())
+                    .with_session_pages(view.pages.clone()),
+                view,
             )
             .await
             .map_err(|err| {

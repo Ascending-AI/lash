@@ -82,6 +82,7 @@ impl LashRuntime {
             .map_err(super::runtime_error_from_store_commit)?;
         let committed = super::durable::head_commit::commit_in(
             owner,
+            self.code_executor().as_ref(),
             commit,
             lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),

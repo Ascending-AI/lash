@@ -203,12 +203,6 @@ impl CodeExecutorPlugin for Integrator {
     ) -> Result<Vec<ArtifactName>, SessionError> {
         unreachable!("external signature witness")
     }
-    async fn probe_execution_state_capture(
-        &self,
-        _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<(), SessionError> {
-        unreachable!("external signature witness")
-    }
     async fn hydrated_execution_graph(
         &self,
         _ctx: ProtocolSessionContext<'_>,

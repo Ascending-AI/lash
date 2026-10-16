@@ -42,45 +42,31 @@ impl RlmRuntimeState {
 
     /// Both ordinary bindings and saved functions occupy the session's
     /// top-level namespace. Projected seed names occupy it too.
+    ///
+    /// For a stored check (`state` named), each tool's namespace root is
+    /// looked up in the stored binding tree — a point lookup, never a
+    /// full listing — through the committed head's pages `state` carries,
+    /// beside the names its history events state (FIG-5824). A lookup
+    /// that cannot read its page is a hard error, never a pass.
     pub(crate) async fn validate_tool_catalog(
         &self,
         catalog: &lash_core::ToolCatalog,
         state: Option<&lash_core::plugin::ProtocolSessionRestoreView>,
     ) -> Result<(), lash_core::PluginError> {
-        let mut names = if let Some(state) = state {
-            let snapshot = state.execution_state.as_ref().map_err(|error| {
-                lash_core::PluginError::Session(format!("cannot read session bindings: {error}"))
-            })?;
-            let mut names = snapshot
-                .as_ref()
-                .map(crate::executor::CodeModeExecutionState::persisted_binding_names)
-                .transpose()
-                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
-                .unwrap_or_default();
-            for event in &state.active_events {
-                if let SessionHistoryRecord::Protocol(event) = event
-                    && let Some(event) = decode_rlm_protocol_event(event)
-                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
-                {
-                    match event {
-                        RlmProtocolEvent::RlmGlobalsPatch(patch) => {
-                            names.extend(patch.set_default.keys().cloned())
-                        }
-                        RlmProtocolEvent::RlmSeed(seed) => {
-                            names.extend(seed.globals.keys().cloned());
-                            names.extend(seed.projected.entries.into_iter().map(|(name, _)| name));
-                        }
-                        _ => {}
-                    }
-                }
+        let names = match state {
+            Some(state) => self.stored_check_names(catalog, state).await?,
+            None => {
+                let mut names = self
+                    .execution
+                    .lock()
+                    .await
+                    .session_names()
+                    .await
+                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+                names.extend(self.protected_projected_binding_names().await);
+                names
             }
-            names
-        } else {
-            self.execution.lock().await.session_names()
         };
-        if state.is_none() {
-            names.extend(self.protected_projected_binding_names().await);
-        }
         for tool in &catalog.tools {
             let binding = lash_vm_runtime::required_tool_executable(&tool.manifest)
                 .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
@@ -104,6 +90,72 @@ impl RlmRuntimeState {
             }
         }
         Ok(())
+    }
+
+    /// The names `state`'s session binds: each tool root's point lookup
+    /// in the stored binding tree, plus the names the history events
+    /// state.
+    async fn stored_check_names(
+        &self,
+        catalog: &lash_core::ToolCatalog,
+        state: &lash_core::plugin::ProtocolSessionRestoreView,
+    ) -> Result<BTreeSet<String>, lash_core::PluginError> {
+        let snapshot = state.execution_state.as_ref().map_err(|error| {
+            lash_core::PluginError::Session(format!("cannot read session bindings: {error}"))
+        })?;
+        let mut names = BTreeSet::new();
+        for event in &state.active_events {
+            if let SessionHistoryRecord::Protocol(event) = event
+                && let Some(event) = decode_rlm_protocol_event(event)
+                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
+            {
+                match event {
+                    RlmProtocolEvent::RlmGlobalsPatch(patch) => {
+                        names.extend(patch.set_default.keys().cloned())
+                    }
+                    RlmProtocolEvent::RlmSeed(seed) => {
+                        names.extend(seed.globals.keys().cloned());
+                        names.extend(seed.projected.entries.into_iter().map(|(name, _)| name));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let Some(bindings) = snapshot
+            .as_ref()
+            .map(crate::executor::stored_session_descriptor)
+            .transpose()
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
+        else {
+            return Ok(names);
+        };
+        let roots: Vec<String> = catalog
+            .tools
+            .iter()
+            .map(|tool| {
+                lash_vm_runtime::required_tool_executable(&tool.manifest)
+                    .map(|binding| binding.module_path.first().cloned())
+                    .map_err(|error| lash_core::PluginError::Session(error.to_string()))
+            })
+            .collect::<Result<Vec<Option<String>>, _>>()?
+            .into_iter()
+            .flatten()
+            .filter(|root| !names.contains(root))
+            .collect();
+        if roots.is_empty() {
+            return Ok(names);
+        }
+        let pages = state.pages.as_ref().ok_or_else(|| {
+            lash_core::PluginError::Session(
+                "the stored bindings check cannot read the session's pages".to_owned(),
+            )
+        })?;
+        names.extend(
+            crate::executor::stored_binding_roots(pages, &bindings, &roots)
+                .await
+                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?,
+        );
+        Ok(names)
     }
 
     /// The declaration of the session's read-only variables, as its system
@@ -201,6 +253,7 @@ impl RlmRuntimeState {
         *execution = self.dialect.create_session();
         *self.session_projected_bindings.lock().await = CodeModeProjectedBindings::new();
         let protected_names = self.protected_projected_binding_names().await;
+        execution.note_pages(state.pages.as_ref());
         if let Some(snapshot) = snapshot {
             execution.restore_execution_graph(
                 &snapshot,
@@ -278,11 +331,17 @@ impl RlmRuntimeState {
         Ok(capture)
     }
 
-    pub(crate) async fn probe_execution_state_capture(&self) -> Result<(), SessionError> {
+    pub(crate) async fn execution_candidate(
+        &self,
+        root: lash_core_store::checkpoint_graph::NodeId,
+        commit: lash_core_store::checkpoint_graph::CommitId,
+        tx: &mut lash_durable::ActorTx,
+        reads: &dyn lash_durable::DurableReads,
+    ) -> Result<Option<lash_core::plugin::ExecutionCandidate>, SessionError> {
         self.execution
             .lock()
             .await
-            .probe_execution_state_capture()
+            .execution_candidate(root, commit, tx, reads)
             .await
     }
 
@@ -491,11 +550,16 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         Some(crate::executor::cell_generation())
     }
 
-    async fn probe_execution_state_capture(
+    async fn execution_candidate(
         &self,
-        _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<(), SessionError> {
-        self.state.probe_execution_state_capture().await
+        root: lash_core_store::checkpoint_graph::NodeId,
+        commit: lash_core_store::checkpoint_graph::CommitId,
+        tx: &mut lash_durable::ActorTx,
+        reads: &dyn lash_durable::DurableReads,
+    ) -> Result<Option<lash_core::plugin::ExecutionCandidate>, SessionError> {
+        self.state
+            .execution_candidate(root, commit, tx, reads)
+            .await
     }
 
     async fn hydrated_execution_graph(
@@ -703,7 +767,7 @@ mod tests {
                 assert!(
                     matches!(
                         capture,
-                        lash_core::plugin::ExecutionGraphCapture::Replace { .. }
+                        lash_core::plugin::ExecutionGraphCapture::Replace(_)
                     ),
                     "the capture carries the execution state"
                 );
@@ -753,8 +817,27 @@ mod tests {
             .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Working)
             .await
             .expect("the session's state captures");
-        host.commit_working(&capture).await;
+        host.commit_working(&capture, &mut Executor(state)).await;
         state.acknowledge_execution_state_capture().await;
+    }
+
+    /// The session's executor as a working commit publishes its pages.
+    struct Executor<'a>(&'a RlmRuntimeState);
+
+    #[async_trait::async_trait]
+    impl crate::testing::Candidates for Executor<'_> {
+        async fn candidate(
+            &mut self,
+            root: lash_core_store::checkpoint_graph::NodeId,
+            commit: lash_core_store::checkpoint_graph::CommitId,
+            tx: &mut lash_durable::ActorTx,
+            reads: &dyn lash_durable::DurableReads,
+        ) -> Option<lash_core::plugin::ExecutionCandidate> {
+            self.0
+                .execution_candidate(root, commit, tx, reads)
+                .await
+                .expect("the capture's candidate builds")
+        }
     }
 
     /// The scope [`admitted_context`] claims.
@@ -950,6 +1033,7 @@ mod tests {
                     other => panic!("seed nodes are protocol events: {other:?}"),
                 })
                 .collect(),
+            pages: None,
         }
     }
 

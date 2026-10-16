@@ -473,11 +473,15 @@ pub async fn run_phases(
                         iteration: current,
                     }));
                     let released = cx.draining();
-                    let committed = if released {
-                        cx.commit_draining(tx, label, Release::Ready).await?
-                    } else {
-                        cx.commit(tx, label).await?
-                    };
+                    let committed = super::session_publication::commit(
+                        cx,
+                        drive.code_executor().as_ref(),
+                        &session,
+                        tx,
+                        label,
+                        released.then_some(Release::Ready),
+                    )
+                    .await?;
                     boundary.committed(cx, drive.as_mut()).await?;
                     stored.committed(drive.as_mut());
                     drive.run_changes_committed(&written);
@@ -598,10 +602,22 @@ pub async fn run_phases(
                     if holds && drive.hold_response(response.clone()) {
                         held = Some((response, after));
                     } else {
-                        response
-                            .commit_alone(cx)
+                        // A response this drive holds for no cell
+                        // commits on its own, with the working state it
+                        // consumed and that state's pages (FIG-6418).
+                        if let Some(writes) = response.writes() {
+                            super::session_publication::commit(
+                                cx,
+                                drive.code_executor().as_ref(),
+                                &session,
+                                writes,
+                                CommitLabel::MODEL_DONE,
+                                None,
+                            )
                             .await
                             .map_err(TurnError::Durable)?;
+                            response.committed(CommitLabel::MODEL_DONE);
+                        }
                         unsettled = false;
                         after.committed(drive.as_mut()).await;
                         tool_round::release_cell_emissions(
@@ -706,7 +722,7 @@ pub async fn run_phases(
                     present: &mut carry,
                     unsettled: &mut unsettled,
                 };
-                match tool_round::run(cx, drive.as_mut(), &row, id, calls, done).await? {
+                match Box::pin(tool_round::run(cx, drive.as_mut(), &row, id, calls, done)).await? {
                     RoundExit::Answered { present, outcome } => {
                         carry = present;
                         boundary.set(outcome);
@@ -768,7 +784,15 @@ pub async fn run_phases(
                 if std::mem::take(&mut unsettled) {
                     settle_model_calls(&mut tx, &session, &run, None);
                 }
-                cx.commit(tx, CommitLabel::MODEL_DONE).await?;
+                super::session_publication::commit(
+                    cx,
+                    drive.code_executor().as_ref(),
+                    &session,
+                    tx,
+                    CommitLabel::MODEL_DONE,
+                    None,
+                )
+                .await?;
                 stored.committed(drive.as_mut());
                 drive.run_changes_committed(&written);
                 drive.phase_committed().await;
@@ -896,7 +920,7 @@ pub async fn run_phases(
                     turn_trace::input(cx, services.tracing(), &row, &drive.delivered_inputs())
                         .await;
                 let released = cx.draining();
-                let committed = if released {
+                let release = released.then(|| {
                     let more = tx.domain().iter().any(|write| {
                         matches!(
                             write,
@@ -908,12 +932,17 @@ pub async fn run_phases(
                             )
                         )
                     });
-                    let release = if more { Release::Ready } else { Release::Idle };
-                    cx.commit_draining(tx, CommitLabel::TURN_COMMIT, release)
-                        .await
-                } else {
-                    cx.commit(tx, CommitLabel::TURN_COMMIT).await
-                };
+                    if more { Release::Ready } else { Release::Idle }
+                });
+                let committed = super::session_publication::commit(
+                    cx,
+                    drive.code_executor().as_ref(),
+                    &session,
+                    tx,
+                    CommitLabel::TURN_COMMIT,
+                    release,
+                )
+                .await;
                 committed.map_err(|error| {
                     let refusal = match &error {
                         DurableError::Domain(refusal) => refusal.session_commit_refusal(),

@@ -266,6 +266,7 @@ impl LashRuntime {
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe,
             resident_session,
+            page_reader: None,
         };
         runtime.bind_plugin_services()?;
         if let Some(bytes) = runtime.state.plugin_admission_snapshot() {
@@ -280,9 +281,14 @@ impl LashRuntime {
             ) {
                 Ok(()) => {
                     runtime.services.plugins.materialize()?;
+                    let page_reader = runtime.page_reader().cloned();
                     runtime.session = Some(
-                        Self::restore_constructed_session(&runtime.services, &mut runtime.state)
-                            .await?,
+                        Self::restore_constructed_session(
+                            &runtime.services,
+                            &mut runtime.state,
+                            page_reader.as_ref(),
+                        )
+                        .await?,
                     );
                 }
                 Err(crate::PluginError::Format(_)) => {}
@@ -306,6 +312,7 @@ impl LashRuntime {
     pub(in crate::runtime) async fn restore_constructed_session(
         services: &RuntimeServices,
         state: &mut RuntimeSessionState,
+        page_reader: Option<&crate::plugin::SessionPageReader>,
     ) -> Result<Session, SessionError> {
         let mut session = Session::new(services.clone(), &state.session_id).await?;
         let catalog = session.resolved_tool_catalog()?;
@@ -314,16 +321,21 @@ impl LashRuntime {
             .protocol_session()
             .validate_tool_catalog(
                 &catalog,
-                Some(&crate::plugin::ProtocolSessionRestoreView::new(state)),
+                Some(&crate::plugin::ProtocolSessionRestoreView::new(
+                    state,
+                    page_reader,
+                )),
             )
             .await?;
         session.refresh_tool_catalog();
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = state.session_id.clone();
+        let view = crate::plugin::ProtocolSessionRestoreView::new(state, page_reader);
         protocol_session
             .restore_session(
-                crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
-                crate::plugin::ProtocolSessionRestoreView::new(state),
+                crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format())
+                    .with_session_pages(view.pages.clone()),
+                view,
             )
             .await?;
         if services.store.is_some() {
@@ -350,8 +362,13 @@ impl LashRuntime {
         self.bind_plugin_services()?;
         self.services.plugins.materialize()?;
         if self.session.is_none() {
-            let session =
-                Self::restore_constructed_session(&self.services, &mut self.state).await?;
+            let page_reader = self.page_reader().cloned();
+            let session = Self::restore_constructed_session(
+                &self.services,
+                &mut self.state,
+                page_reader.as_ref(),
+            )
+            .await?;
             self.session = Some(session);
         }
         Ok(())

@@ -1149,14 +1149,10 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         ..crate::RuntimeSessionState::fixture(source_request.config.session_policy())
     };
     let execution = lash_core::testing::store_fixtures::execution_graph("fork continuation");
-    let crate::plugin::ExecutionGraphCapture::Replace {
-        root: execution_root,
-        ..
-    } = &execution
-    else {
+    let crate::plugin::ExecutionGraphCapture::Replace(graph) = &execution else {
         unreachable!("the fixture stages a root")
     };
-    let execution_root = *execution_root;
+    let execution_root = graph.root;
     state.set_execution_graph(execution);
     state.ensure_agent_frame_initialized();
     let root_ids = state

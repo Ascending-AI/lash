@@ -459,21 +459,20 @@ pub struct HydratedSessionCheckpoint {
     pub execution: Option<CheckpointExecution>,
 }
 
-/// A session checkpoint's execution state: its descriptor page and the
-/// heap pages it stages (ADR 0145 §9).
+/// A session checkpoint's execution state: its descriptor page (ADR 0145
+/// §9). The heap pages under it are published by the commit's candidate
+/// (FIG-6418), never carried here.
 ///
-/// Committed, `nodes` are the nodes the root needs that the store may not
-/// hold yet: a store installs them with the manifest, and refuses the
-/// commit when a node the root reaches is in neither. Read back, `nodes`
-/// is every node the root reaches.
+/// Built by the runtime and read back from a store, `descriptor` is the
+/// descriptor page's bytes: a store installs it with the manifest, and
+/// refuses the commit when a node it names is in neither the store nor the
+/// commit. A session commit decoded from its transaction carries none: the
+/// descriptor was staged in that transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckpointExecution {
     /// A SessionExecution node.
     pub root: crate::checkpoint_graph::NodeId,
-    pub nodes: std::collections::BTreeMap<
-        crate::checkpoint_graph::NodeId,
-        crate::checkpoint_graph::EncodedNode,
-    >,
+    pub descriptor: Option<std::sync::Arc<[u8]>>,
 }
 
 impl CheckpointExecution {
@@ -483,10 +482,15 @@ impl CheckpointExecution {
         BlobRef(self.root.to_hex())
     }
 
-    /// The graph's encoded bytes a commit carries.
+    /// The descriptor as the node a commit stages, when it is held.
     #[must_use]
-    pub fn node_bytes(&self) -> usize {
-        self.nodes.values().map(|node| node.bytes.len()).sum()
+    pub fn node(&self) -> Option<crate::checkpoint_graph::EncodedNode> {
+        self.descriptor
+            .as_ref()
+            .map(|bytes| crate::checkpoint_graph::EncodedNode {
+                id: self.root,
+                bytes: std::sync::Arc::clone(bytes),
+            })
     }
 }
 

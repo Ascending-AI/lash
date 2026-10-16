@@ -95,6 +95,7 @@ impl LashRuntime {
             super::config_ops::validate_config_tool_catalog(
                 plugins.host(),
                 &self.state,
+                self.page_reader(),
                 resolved.config(),
                 live.as_ref(),
             )

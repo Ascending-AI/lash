@@ -462,17 +462,22 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
     let scope = lash_durable::domain::ScopeKey::Turn(owned.session.clone(), run.clone());
     let (_, trips) = round_trips(async {
         let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
-        if let Some(root) = encoded.execution
-            && !encoded.nodes.iter().any(|node| node.id == root)
-        {
-            tx.require(root);
+        match encoded.descriptor {
+            Some(descriptor) => {
+                tx.stage([descriptor]);
+            }
+            None => {
+                if let Some(root) = encoded.execution {
+                    tx.require(root);
+                }
+            }
         }
-        tx.stage(encoded.nodes);
         tx.write(DomainWrite::SessionCommit(
             lash_durable::domain::SessionCommitWrite {
                 session: owned.session.clone(),
                 expected_head,
                 commit_json: encoded.json,
+                execution: encoded.execution,
             },
         ));
         tx.write(DomainWrite::Turn(TurnWrite::Terminal {

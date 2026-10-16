@@ -261,7 +261,15 @@ pub(super) async fn run(
                     .map_err(exec)?;
                 }
             }
-            cx.commit(tx, CommitLabel::MODEL_DONE).await?;
+            super::session_publication::commit(
+                cx,
+                drive.code_executor().as_ref(),
+                &session,
+                tx,
+                CommitLabel::MODEL_DONE,
+                None,
+            )
+            .await?;
             *unsettled = false;
             stored.committed(&mut *drive);
             drive.run_changes_committed(&written);

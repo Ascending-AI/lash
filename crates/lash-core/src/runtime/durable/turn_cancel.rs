@@ -591,15 +591,23 @@ async fn end(
         .map(|drive| drive.delivered_inputs())
         .unwrap_or_default();
     let input = super::turn_trace::input(cx, services.tracing(), row, &delivered).await;
-    cx.commit(tx, CommitLabel::TURN_CANCEL)
-        .await
-        .map_err(|error| {
-            let refusal = match &error {
-                DurableError::Domain(refusal) => refusal.session_commit_refusal(),
-                _ => None,
-            };
-            refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
-        })?;
+    let executor = drive.as_ref().and_then(|drive| drive.code_executor());
+    super::session_publication::commit(
+        cx,
+        executor.as_ref(),
+        &row.session,
+        tx,
+        CommitLabel::TURN_CANCEL,
+        None,
+    )
+    .await
+    .map_err(|error| {
+        let refusal = match &error {
+            DurableError::Domain(refusal) => refusal.session_commit_refusal(),
+            _ => None,
+        };
+        refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
+    })?;
     super::turn_trace::members_ended(
         services.tracing(),
         row,

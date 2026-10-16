@@ -192,6 +192,13 @@ pub trait TurnDrive: Send {
     /// is installed.
     async fn phase_committed(&mut self) {}
 
+    /// The session's code executor: what publishes the heap pages of the
+    /// execution root a phase commit names (FIG-6418). None for a drive
+    /// whose session holds none.
+    fn code_executor(&self) -> Option<std::sync::Arc<dyn crate::plugin::CodeExecutorPlugin>> {
+        None
+    }
+
     /// Where the session's live replay stands now, encoded for a model
     /// pin: a fresh call pins it before its first attempt streams, and a
     /// re-send reads back what the earlier attempts streamed after it

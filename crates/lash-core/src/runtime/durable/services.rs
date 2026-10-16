@@ -278,6 +278,7 @@ impl RuntimeTurnServices {
         recorded: Option<RecordedPreparation>,
     ) -> Result<(DurableTurn, DriveParts), TurnError> {
         let mut runtime = self.runtimes.open(&row.session).await?;
+        note_page_reader(&mut runtime, cx);
         let _prepared = crate::runtime::turn_driver::TurnPhaseSpan::begin(
             runtime.turn_phase_probe.clone(),
             crate::runtime::RuntimeTurnPhase::PreparedTurn,
@@ -292,16 +293,15 @@ impl RuntimeTurnServices {
         // changes from here is what its phases record (FIG-5301).
         runtime.services.plugins.begin_run();
         let admitted_trace = row.admission.trace().cloned();
-        let turn = runtime
-            .prepare_durable_turn(
-                &controller,
-                &row.run,
-                admissions,
-                recorded,
-                admitted_trace,
-                &observer,
-            )
-            .await?;
+        let turn = Box::pin(runtime.prepare_durable_turn(
+            &controller,
+            &row.run,
+            admissions,
+            recorded,
+            admitted_trace,
+            &observer,
+        ))
+        .await?;
         // The turn's commit settles its inputs and queued work from the
         // driver once it finishes: those its run took, the inputs with the
         // application evidence preparation recorded (FIG-5288), and those
@@ -359,6 +359,7 @@ impl TurnServices for RuntimeTurnServices {
         let session = SessionId::parse(cx.actor().id())
             .map_err(|error| TurnError::Exec(format!("session actor id: {error}")))?;
         let mut runtime = self.runtimes.open(&session).await?;
+        note_page_reader(&mut runtime, cx);
         let controller = cx.scoped(AdmittedScope::session_operation(
             session.clone(),
             "session-command",
@@ -391,6 +392,7 @@ impl TurnServices for RuntimeTurnServices {
 
     async fn carry_session(&self, cx: &ActorContext, session: &SessionId) -> Result<(), TurnError> {
         let mut runtime = self.runtimes.open(session).await?;
+        note_page_reader(&mut runtime, cx);
         let controller = cx.scoped(AdmittedScope::session_operation(
             session.clone(),
             "session-carry",
@@ -519,11 +521,12 @@ impl InputBatching for RuntimeTurnServices {
         _cx: &ActorContext,
         session: &SessionId,
     ) -> Result<Option<InputAdmission>, SessionMailError> {
-        let runtime = self
+        let mut runtime = self
             .runtimes
             .open(session)
             .await
             .map_err(|error| SessionMailError::Batching(error.to_string()))?;
+        note_page_reader(&mut runtime, _cx);
         Ok(runtime.input_admission())
     }
 }
@@ -643,4 +646,19 @@ impl LiveActivity {
             tracing::warn!(session_id = %self.session, %error, "a turn's live activity was not published");
         }
     }
+}
+
+/// Sets the session actor's page reader on `runtime` for this activation
+/// under `cx`'s claim: the committed-head pages a stored-state check
+/// reads (FIG-6418). None where the store publishes no heap pages.
+fn note_page_reader(runtime: &mut LashRuntime, cx: &ActorContext) {
+    runtime.note_page_reader(
+        cx.pages()
+            .ok()
+            .map(|store| crate::plugin::SessionPageReader {
+                store,
+                actor: cx.actor().clone(),
+                epoch: cx.epoch(),
+            }),
+    );
 }

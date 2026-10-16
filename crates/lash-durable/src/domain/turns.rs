@@ -489,6 +489,10 @@ pub struct SessionCommitWrite {
     /// [`DomainRefusal::SessionCommitBlocked`](super::DomainRefusal::SessionCommitBlocked)
     /// when it refuses it for the deployment or the state it holds.
     pub commit_json: String,
+    /// The execution root the commit's checkpoint names, if any: what a
+    /// session candidate publishing its pages owns
+    /// ([`CandidateOwner::Session`](super::pages::CandidateOwner::Session)).
+    pub execution: Option<NodeId>,
 }
 
 /// A request to cancel one of a session's turns (L3).

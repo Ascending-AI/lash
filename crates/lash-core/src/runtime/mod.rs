@@ -448,6 +448,11 @@ pub struct LashRuntime {
     /// last commit ran under. Its reload and invalidation rules are methods on
     /// [`ResidentSessionContinuity`].
     pub resident_session: ResidentSessionContinuity,
+    /// The session actor's page reader, set by the durable actor every
+    /// activation of this runtime under a claim (the epoch changes per
+    /// claim): a stored-state check reads the head's pages through it
+    /// (FIG-6418).
+    page_reader: Option<crate::plugin::SessionPageReader>,
 }
 
 #[doc(hidden)]

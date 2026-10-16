@@ -620,6 +620,32 @@ impl ActorContext {
         .await
     }
 
+    /// [`Self::commit_candidate_owing`] owing nothing, with the claimed
+    /// actor given up as `release`: a draining activation's phase commit
+    /// that publishes a candidate and releases the actor itself, as
+    /// [`Self::commit_draining`] does.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::commit_candidate_owing`]; unavailable for a context that
+    /// owns no claim.
+    pub async fn commit_candidate_draining(
+        &self,
+        tx: ActorTx,
+        candidate: lash_durable::domain::pages::CandidatePublication,
+        label: CommitLabel,
+        release: lash_durable::Release,
+    ) -> Result<ActorCommit, DurableError> {
+        let drain = self.claimed_drain()?;
+        let pages = self.pages()?;
+        self.with_obligations(tx, None, |tx| async move {
+            drain
+                .release_candidate_with(pages.as_ref(), tx, candidate, label, release)
+                .await
+        })
+        .await
+    }
+
     /// This context's store's heap page publication (S6).
     ///
     /// # Errors

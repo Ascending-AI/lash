@@ -306,12 +306,12 @@ fn execution_root_node() -> (
     lash_core::durable_port::domain::checkpoint_graph::NodeId,
     Vec<u8>,
 ) {
-    let lash_core_execution::plugin::ExecutionGraphCapture::Replace { root, nodes } =
+    let lash_core_execution::plugin::ExecutionGraphCapture::Replace(graph) =
         lash_core::testing::store_fixtures::execution_graph("execution state")
     else {
         unreachable!("the fixture stages a root")
     };
-    (root, nodes[&root].bytes.to_vec())
+    (graph.root, graph.descriptor.to_vec())
 }
 
 /// Seeds the session past the foreign keys: a dangling checkpoint root is

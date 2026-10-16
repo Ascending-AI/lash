@@ -48,12 +48,19 @@ async fn restored(host: &DurableHost, state: &CodeModeExecutionState) -> CodeMod
     restored
 }
 
-/// The root and node count a capture sends.
-fn sent(capture: &ExecutionGraphCapture) -> (lash_core_store::checkpoint_graph::NodeId, usize) {
-    let ExecutionGraphCapture::Replace { root, nodes } = capture else {
+/// The root a working commit names and how many pages it published.
+fn sent(
+    (capture, published): &(ExecutionGraphCapture, u64),
+) -> (lash_core_store::checkpoint_graph::NodeId, u64) {
+    (root_of(capture), *published)
+}
+
+/// The root a capture names.
+fn root_of(capture: &ExecutionGraphCapture) -> lash_core_store::checkpoint_graph::NodeId {
+    let ExecutionGraphCapture::Replace(graph) = capture else {
         panic!("a session with bindings captures a root");
     };
-    (*root, nodes.len())
+    graph.root
 }
 
 /// Frozen captures and session carry: a function saved in one cell keeps
@@ -123,12 +130,25 @@ async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_it
         .await
         .expect("capture");
     assert_eq!(
-        adopted,
-        ExecutionGraphCapture::Replace {
-            root: working,
-            nodes: Default::default(),
-        },
-        "the restored state is the working state, every page already committed"
+        root_of(&adopted),
+        working,
+        "the restored state is the working state"
+    );
+    let mut probe = host.context().begin().await.expect("open a transaction");
+    assert!(
+        state
+            .execution_candidate(
+                working,
+                lash_core_store::checkpoint_graph::CommitId::mint(),
+                &mut probe,
+                host.context()
+                    .durable_reads()
+                    .expect("the host's store reads"),
+            )
+            .await
+            .expect("the candidate builds")
+            .is_none(),
+        "every page of the restored working state is already committed"
     );
     state.acknowledge_execution_state_capture().await;
 
@@ -144,7 +164,7 @@ async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_it
     .await;
     assert!(speculative.error().is_none(), "{:?}", speculative.error());
     state.mark_code_execution_response_returned();
-    let (root, _) = sent(
+    let root = root_of(
         &state
             .capture_execution_graph(ExecutionGraphPurpose::Working)
             .await
@@ -154,14 +174,13 @@ async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_it
     state.terminate_code_execution();
 
     assert_eq!(
-        state
-            .capture_execution_graph(ExecutionGraphPurpose::Working)
-            .await
-            .expect("capture"),
-        ExecutionGraphCapture::Replace {
-            root: working,
-            nodes: Default::default(),
-        },
+        root_of(
+            &state
+                .capture_execution_graph(ExecutionGraphPurpose::Working)
+                .await
+                .expect("capture")
+        ),
+        working,
         "the cancelled cell's captured heap is not the session's"
     );
     assert!(
@@ -348,5 +367,136 @@ async fn a_projection_larger_than_the_page_cache_fetches_each_page_once() {
         listing.expect("a 1 MiB cache lists the session"),
         expected,
         "the listing is the unbounded cache's"
+    );
+}
+
+/// The session descriptor is bounded (FIG-6418 L1): a session that binds
+/// ten thousand names, one of them 200 KiB, still seals its descriptor,
+/// restores cold from it and reads a binding in a cell.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_with_ten_thousand_bindings_and_a_200_kib_name_seals_reopens_and_runs_a_cell() {
+    let host = open_host().await;
+    let mut state = typescript_state();
+    let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
+    for index in 0..10_000 {
+        patch
+            .set_default
+            .insert(format!("b{index}"), serde_json::json!(index));
+    }
+    patch
+        .set_default
+        .insert("n".repeat(200 * 1024), serde_json::json!("wide"));
+    state
+        .patch_globals(&patch, &std::collections::BTreeSet::new())
+        .await
+        .expect("the host's defaults apply");
+    commit_working(&mut state, &host).await;
+    let mut cold = restored(&host, &state).await;
+    drop(state);
+    let read = cell(
+        &mut cold,
+        &host,
+        "exec-code:0",
+        "await control.finish(b42);",
+    )
+    .await;
+    assert_eq!(finish_of(&read), serde_json::json!(42));
+}
+
+/// A no-op cell writes the same pages and bytes whatever the session's
+/// binding count (FIG-6418 L2): the state a session holds never enters the
+/// descriptor, so a cell that binds nothing commits a descriptor and the
+/// pages its cell changed — none — not the session's names. The large
+/// session holds 50,000 bindings: a cell's lowering request names every
+/// binding, and the worker frame decodes at most 100,000 values.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count() {
+    async fn session_with_bindings(host: &DurableHost, count: usize) -> CodeModeExecutionState {
+        let mut state = typescript_state();
+        let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
+        for index in 0..count {
+            patch
+                .set_default
+                .insert(format!("b{index}"), serde_json::json!(index));
+        }
+        state
+            .patch_globals(&patch, &std::collections::BTreeSet::new())
+            .await
+            .expect("the host's defaults apply");
+        commit_working(&mut state, host).await;
+        state
+    }
+
+    /// The store traffic of `code`'s cell plus its working commit.
+    async fn measured(
+        state: &mut CodeModeExecutionState,
+        host: &DurableHost,
+        key: &'static str,
+        code: &str,
+    ) -> lash_core::operational_metrics::sql::Receipt {
+        let ((), receipt) =
+            lash_core::operational_metrics::sql::collect("fig6418-l2", "sqlite", async {
+                cell(state, host, key, code).await;
+                commit_working(state, host).await;
+            })
+            .await;
+        receipt
+    }
+
+    let small_host = open_host().await;
+    let mut small = session_with_bindings(&small_host, 1_000).await;
+
+    // The measurement is live: a cell that binds a value installs its
+    // pages, and the window sees them.
+    let bound = measured(
+        &mut small,
+        &small_host,
+        "exec-code:live",
+        "const bound = 7;",
+    )
+    .await;
+    assert!(
+        bound.newly_installed_graph_bytes > 0,
+        "a cell that binds a value installs graph bytes: {bound:?}"
+    );
+
+    let large_host = open_host().await;
+    let mut large = session_with_bindings(&large_host, 50_000).await;
+
+    let small_noop = measured(
+        &mut small,
+        &small_host,
+        "exec-code:noop",
+        "await control.finish(1);",
+    )
+    .await;
+    let large_noop = measured(
+        &mut large,
+        &large_host,
+        "exec-code:noop",
+        "await control.finish(1);",
+    )
+    .await;
+
+    // A no-op cell commits its descriptor and the pages it changed; neither
+    // carries the session's names. The slack is constant — envelope and
+    // counter encoding drift of a commit that writes O(1) nodes — and does
+    // not scale with the binding count.
+    const SLACK_BYTES: u64 = 4 * 1024;
+    const SLACK_ROWS: u64 = 8;
+    assert!(
+        large_noop
+            .newly_installed_graph_bytes
+            .abs_diff(small_noop.newly_installed_graph_bytes)
+            <= SLACK_BYTES,
+        "the no-op cell's installed bytes grow with the binding count: {} (1,000 bindings) vs {} (50,000)",
+        small_noop.newly_installed_graph_bytes,
+        large_noop.newly_installed_graph_bytes
+    );
+    assert!(
+        large_noop.rows_affected.abs_diff(small_noop.rows_affected) <= SLACK_ROWS,
+        "the no-op cell's store writes grow with the binding count: {} (1,000 bindings) vs {} (50,000) rows",
+        small_noop.rows_affected,
+        large_noop.rows_affected
     );
 }

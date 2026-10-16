@@ -14,6 +14,8 @@
 //! - `head_commit`: the session's head commits outside `turn.commit`, a
 //!   session command's (`session.command`, FIG-5230) and a context-pressure
 //!   frame's open (`pressure.frame`, FIG-5355), on its fenced transaction.
+//! - `session_publication`: every commit that may publish the session's
+//!   execution root, its heap pages as the commit's candidate (FIG-6418).
 //! - [`turn_scope`]: a turn's scope ending with its commit or cancel, the
 //!   cascade's cursor work and the bounded wait for its children (L6b).
 
@@ -31,6 +33,7 @@ pub mod services;
 pub mod session;
 pub mod session_close;
 pub mod session_mail;
+pub(crate) mod session_publication;
 mod tool_round;
 mod turn_cancel;
 pub mod turn_scope;

@@ -26,17 +26,16 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
         ))
         .expect("admit the fixture's turn scope");
     let (observer, _observations) = TurnObserver::unread();
-    let turn = runtime
-        .prepare_durable_turn(
-            &controller,
-            &run,
-            crate::runtime::logical_turn::LogicalTurnAdmissions::new(Vec::new()),
-            None,
-            None,
-            &observer,
-        )
-        .await
-        .expect("prepare the fixture's turn");
+    let turn = Box::pin(runtime.prepare_durable_turn(
+        &controller,
+        &run,
+        crate::runtime::logical_turn::LogicalTurnAdmissions::new(Vec::new()),
+        None,
+        None,
+        &observer,
+    ))
+    .await
+    .expect("prepare the fixture's turn");
     let mut driver = turn.driver;
     let mut machine = driver.turn_machine(turn.window, turn.messages);
     // Warm the session projection and executor's fixed setup before either

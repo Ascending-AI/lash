@@ -223,8 +223,8 @@ pub fn execution_graph(state: &str) -> crate::plugin::ExecutionGraphCapture {
     body.text(state);
     let root = frame_direct(NodeKind::SESSION_ROOT, &body.into_bytes(), MAX_NODE_BYTES)
         .expect("a text body frames");
-    crate::plugin::ExecutionGraphCapture::Replace {
+    crate::plugin::ExecutionGraphCapture::Replace(crate::plugin::HydratedExecutionGraph {
         root: root.id,
-        nodes: [(root.id, root)].into(),
-    }
+        descriptor: root.bytes,
+    })
 }

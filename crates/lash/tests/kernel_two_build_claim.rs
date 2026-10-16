@@ -1022,7 +1022,7 @@ async fn a_saved_function_holding_an_earlier_helper_identity_is_called_in_a_new_
     let listed = survey(&new_backend).await;
     assert_eq!(
         listed["helper_sessions"],
-        serde_json::json!([{"session": SESSION, "saved": ["evens"]}]),
+        serde_json::json!([{"session": SESSION, "saved": true}]),
         "{listed}"
     );
     let called = tokio::time::timeout(
@@ -1111,7 +1111,7 @@ async fn a_rolling_fleet_never_hands_later_helper_work_to_a_node_that_holds_only
     let listed = survey(&new_backend).await;
     assert_eq!(
         listed["helper_sessions"],
-        serde_json::json!([{"session": DURING, "saved": ["evens"]}]),
+        serde_json::json!([{"session": DURING, "saved": true}]),
         "only the session written while build N served holds the earlier helpers: {listed}"
     );
 }

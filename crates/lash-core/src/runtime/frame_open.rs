@@ -161,15 +161,19 @@ impl LashRuntime {
     pub(in crate::runtime) async fn restore_protocol_session_after_frame_open(
         &mut self,
     ) -> Result<(), RuntimeError> {
+        let page_reader = self.page_reader().cloned();
         let Some(session) = self.session.as_mut() else {
             return Ok(());
         };
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = self.state.session_id.clone();
+        let view =
+            crate::plugin::ProtocolSessionRestoreView::new(&self.state, page_reader.as_ref());
         let restored = protocol_session
             .restore_session(
-                crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format()),
-                crate::plugin::ProtocolSessionRestoreView::new(&self.state),
+                crate::plugin::ProtocolSessionContext::new(&session_id, session.fleet_format())
+                    .with_session_pages(view.pages.clone()),
+                view,
             )
             .await;
         restored.map_err(|err| {

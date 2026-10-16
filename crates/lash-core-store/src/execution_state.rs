@@ -45,30 +45,36 @@ pub enum ExecutionGraphPurpose {
 /// A capture of a session's execution state (ADR 0145 §9): its session
 /// descriptor page, which names the carried heap, binding and function
 /// roots. Never a delta over an earlier root: the descriptor names the
-/// complete state, and shares every unchanged heap page by reference.
+/// complete state, and shares every unchanged heap page by reference. The
+/// heap pages under it are the executor's to publish, with the commit that
+/// names the root (FIG-6418); a capture carries none.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ExecutionGraphCapture {
     /// The session holds no execution state.
     #[default]
     Clear,
-    Replace {
-        /// The session descriptor page.
-        root: crate::checkpoint_graph::NodeId,
-        /// Nodes the root needs that no acknowledged root is known to have
-        /// installed. A commit that finds a reference missing refuses, and
-        /// the executor resends the node's retained bytes; staged nodes are
-        /// kept until the capture is acknowledged.
-        nodes: BTreeMap<crate::checkpoint_graph::NodeId, crate::checkpoint_graph::EncodedNode>,
-    },
+    /// The session's descriptor.
+    Replace(HydratedExecutionGraph),
 }
 
-/// A session's execution state as a host graph read returns it: the
-/// descriptor page. A hydrate never descends into heap pages (ADR 0145
-/// §10); a binding's pages are read on demand under a root lease.
+/// A session's execution state as a host holds it: its descriptor page's
+/// id and bytes. A hydrate never descends into heap pages (ADR 0145 §10);
+/// a binding's pages are read on demand under a root lease.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HydratedExecutionGraph {
     pub root: crate::checkpoint_graph::NodeId,
-    pub nodes: BTreeMap<crate::checkpoint_graph::NodeId, crate::checkpoint_graph::EncodedNode>,
+    pub descriptor: Arc<[u8]>,
+}
+
+impl HydratedExecutionGraph {
+    /// The descriptor as the node a commit stages.
+    #[must_use]
+    pub fn node(&self) -> crate::checkpoint_graph::EncodedNode {
+        crate::checkpoint_graph::EncodedNode {
+            id: self.root,
+            bytes: Arc::clone(&self.descriptor),
+        }
+    }
 }
 
 /// A session's recorded plugin configuration (FIG-4379): each installed

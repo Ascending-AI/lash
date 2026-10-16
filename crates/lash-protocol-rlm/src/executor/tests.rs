@@ -268,10 +268,9 @@ async fn a_corrupt_descriptor_refuses_the_restore_with_a_typed_cause() {
         .hydrated_execution_graph()
         .await
         .expect("the session's descriptor");
-    let descriptor = saved.nodes.get_mut(&saved.root).expect("the descriptor");
-    let mut corrupt = descriptor.bytes.to_vec();
+    let mut corrupt = saved.descriptor.to_vec();
     corrupt.push(b' ');
-    descriptor.bytes = corrupt.into();
+    saved.descriptor = corrupt.into();
 
     let mut restored = typescript_state();
     let error = restored

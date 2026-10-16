@@ -668,12 +668,15 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
 
 /// The execution graph the body commit stages: one SessionExecution root.
 fn differential_execution() -> lash_core::store::CheckpointExecution {
-    let lash_core::plugin::ExecutionGraphCapture::Replace { root, nodes } =
+    let lash_core::plugin::ExecutionGraphCapture::Replace(graph) =
         lash_core::testing::store_fixtures::execution_graph("differential-execution")
     else {
         unreachable!("the fixture stages a root")
     };
-    lash_core::store::CheckpointExecution { root, nodes }
+    lash_core::store::CheckpointExecution {
+        root: graph.root,
+        descriptor: Some(graph.descriptor),
+    }
 }
 
 #[expect(
@@ -705,7 +708,7 @@ fn checkpoint_from_spec(
                 components,
                 execution: Some(lash_core::store::CheckpointExecution {
                     root: differential_execution().root,
-                    nodes: std::collections::BTreeMap::new(),
+                    descriptor: None,
                 }),
             }
         }
@@ -733,7 +736,7 @@ fn checkpoint_from_spec(
                     "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                 )
                 .expect("a node reference"),
-                nodes: std::collections::BTreeMap::new(),
+                descriptor: None,
             }),
             ..Default::default()
         },

@@ -118,10 +118,11 @@ pub use hooks::{
 };
 pub use protocol::{
     AssistantProseProjectorPlugin, CellCallReferences, CheckpointComponentKey,
-    CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture, ExecutionGraphPurpose,
-    HydratedExecutionGraph, PluginOptions, ProtocolBeforeLlmCallContext, ProtocolDriverPlugin,
-    ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
-    ProtocolSessionRestoreView, SessionPages, StoredCell, TranscriptDecoderPlugin,
+    CodeExecutionOutcome, CodeExecutorPlugin, ExecutionCandidate, ExecutionGraphCapture,
+    ExecutionGraphPurpose, HydratedExecutionGraph, PluginOptions, ProtocolBeforeLlmCallContext,
+    ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
+    ProtocolSessionRestoreView, SessionPageReader, SessionPages, StoredCell,
+    TranscriptDecoderPlugin,
 };
 mod recipe;
 pub mod registries;

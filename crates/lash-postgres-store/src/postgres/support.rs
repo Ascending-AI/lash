@@ -440,11 +440,15 @@ fn checkpoint_graph_parts(
 ) -> Result<CheckpointParts, StoreError> {
     // The manifest is a SessionManifest node over its components' opaque
     // blobs and its SessionExecution root, staged and installed with its
-    // edges once every component exists, beside the execution nodes no
-    // earlier commit installed: a missing component is refused as one.
+    // edges once every component exists, beside the execution's descriptor
+    // when the checkpoint holds it: a missing component is refused as one.
     let (root, mut nodes) = manifest.to_graph().map_err(graph_store_error)?;
-    if let Some(execution) = &checkpoint.execution {
-        nodes.extend(execution.nodes.iter().map(|(id, node)| (*id, node.clone())));
+    if let Some(node) = checkpoint
+        .execution
+        .as_ref()
+        .and_then(lash_core_execution::store::CheckpointExecution::node)
+    {
+        nodes.insert(node.id, node);
     }
     Ok(CheckpointParts {
         checkpoint_ref: BlobRef(root.to_hex()),
@@ -548,13 +552,19 @@ pub(crate) async fn get_checkpoint_tx(
                     record_kind: "SessionCheckpoint",
                     message: format!("`{root}` is not a node reference"),
                 })?;
-            let nodes = lash_core_store::checkpoint_graph::closure(
-                &closure,
+            // The descriptor alone: its heap pages are read on demand
+            // under a root lease (ADR 0145 §10).
+            let descriptor = lash_core_store::checkpoint_graph::NodeSource::fetch(&closure, &root)
+                .map(|node| std::sync::Arc::from(node.bytes))
+                .ok_or_else(|| {
+                    graph_store_error(
+                        lash_core_store::checkpoint_graph::GraphRefusal::MissingNode(root),
+                    )
+                })?;
+            Ok::<_, StoreError>(lash_core_execution::store::CheckpointExecution {
                 root,
-                &lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32),
-            )
-            .map_err(graph_store_error)?;
-            Ok::<_, StoreError>(lash_core_execution::store::CheckpointExecution { root, nodes })
+                descriptor: Some(descriptor),
+            })
         })
         .transpose()?;
     let bodies = checkpoint_component_bodies_tx(tx, &manifest, chunk_size).await?;

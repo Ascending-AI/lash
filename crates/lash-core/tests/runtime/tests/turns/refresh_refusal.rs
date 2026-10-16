@@ -78,14 +78,10 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         .await
         .expect("adopt the recorded initial frame");
     let old_frame_globals = lash_core::testing::store_fixtures::execution_graph("old-frame-root");
-    let lash_core::plugin::ExecutionGraphCapture::Replace {
-        root: old_frame_root,
-        ..
-    } = &old_frame_globals
-    else {
+    let lash_core::plugin::ExecutionGraphCapture::Replace(graph) = &old_frame_globals else {
         unreachable!("the fixture stages a root")
     };
-    let old_frame_root = *old_frame_root;
+    let old_frame_root = graph.root;
     runtime.edit_resident_state_for_test(|state| {
         state.set_execution_graph(old_frame_globals);
     });

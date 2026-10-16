@@ -42,7 +42,7 @@ pub(super) fn colliding(commit: TurnCommit) -> Result<TurnCommit, TurnError> {
     Ok(TurnCommit {
         expected_head: commit.expected_head,
         commit: lash_core_store::store::EncodedSessionCommit {
-            nodes: commit.commit.nodes,
+            descriptor: commit.commit.descriptor,
             ..lash_core_store::store::encode_session_commit(&runtime).map_err(store)?
         },
     })
@@ -74,7 +74,7 @@ pub(super) fn outside_writer_range(commit: TurnCommit) -> Result<TurnCommit, Tur
     Ok(TurnCommit {
         expected_head: commit.expected_head,
         commit: lash_core_store::store::EncodedSessionCommit {
-            nodes: commit.commit.nodes,
+            descriptor: commit.commit.descriptor,
             ..lash_core_store::store::encode_session_commit(&runtime).map_err(store)?
         },
     })

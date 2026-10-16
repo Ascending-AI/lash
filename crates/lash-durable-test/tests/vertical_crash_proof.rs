@@ -145,6 +145,10 @@ enum Protocol {
     /// [`Protocol::Code`] whose cell's prints are retained out of history
     /// as one archive.
     Archived,
+    /// The session-capture law (FIG-6418 L3): a host-set default global,
+    /// a first turn binding it and a second turn's cell reading it. Its
+    /// calls are scripted by ordinal, not by [`Protocol::rounds`].
+    Defaults,
     /// A code cell that keeps a large text across every await of its
     /// operation (PC-LARGE-ONCE).
     Large(Pad),
@@ -172,6 +176,18 @@ fn carried() -> String {
 /// Cell A: binds [`carried`] and a function, then calls the operation,
 /// whatever its answer.
 const WORKING_FIRST_CELL: &str = "<typescript>\nlet carried_text = 'carried '.repeat(250);\nfunction twice_of(n) { return n * 2; }\nlet written = null;\ntry { written = await tools.ext_write({ x: 7 }); } catch (error) { written = String(error); }\nconsole.log(written);\n</typescript>";
+
+/// The session global the host binds before [`Protocol::Defaults`]' turns
+/// (FIG-6418 L3).
+const HOST_DEFAULT: &str = "fig6418_default";
+/// [`Protocol::Defaults`]' first turn's cell: binds the host's default.
+const DEFAULTS_FIRST_CELL: &str =
+    "<typescript>\nconst bound_first = fig6418_default;\nconsole.log(bound_first);\n</typescript>";
+/// Its second turn's cell: writes the default to the outside world and
+/// finishes with it.
+const DEFAULTS_SECOND_CELL: &str = "<typescript>\nconst seen = fig6418_default;\nawait tools.ext_write({ x: seen });\nawait control.finish(seen);\n</typescript>";
+/// The turn [`RUN_TWO`] is sent under.
+const RUN_TWO: &str = "v0-turn-2";
 
 /// Cell B, as [`Second`] says.
 fn working_second_cell(second: Second) -> &'static str {
@@ -225,6 +241,8 @@ impl Protocol {
             | Self::Archived
             | Self::Large(_) => 1,
             Self::NotedTwice | Self::Working(_) => 2,
+            // Defaults scripts every call by its ordinal itself.
+            Self::Defaults => usize::MAX,
         }
     }
 }
@@ -314,37 +332,47 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                     .iter()
                     .filter(|message| message.role == lash_core::llm::types::LlmRole::Assistant)
                     .count();
-                let response = match (called >= protocol.rounds(), protocol) {
-                    (true, _) => {
-                        let told = if rendered.contains(WROTE) {
-                            "the write completed"
-                        } else {
-                            "the write did not complete"
-                        };
-                        text(&request, &format!("{FINAL}{told}"))
-                    }
-                    (false, Protocol::ImageCell(source, _)) => text(&request, source),
-                    (false, Protocol::Code) => text(&request, CELL),
-                    (false, Protocol::Archived) => text(&request, ARCHIVED_CELL),
-                    (false, Protocol::Large(pad)) => text(&request, &pad.cell()),
-                    (false, Protocol::Working(second)) => match called {
-                        0 => text(&request, WORKING_FIRST_CELL),
-                        _ => text(&request, working_second_cell(second)),
-                    },
-                    (false, Protocol::Tools | Protocol::Noted | Protocol::NotedTwice) => {
-                        LlmResponse {
-                            parts: vec![LlmOutputPart::ToolCall {
-                                call_id: match called {
-                                    0 => "v0-call".to_owned(),
-                                    round => format!("v0-call-{round}"),
-                                },
-                                tool_name: TOOL.to_owned(),
-                                input_json: r#"{"x":7}"#.to_owned(),
-                                replay: None,
-                            }],
-                            ..LlmResponse::default()
+                let response = match (protocol, called) {
+                    // Turn one's cell binds the host's default; the second
+                    // send's cell reads it back after the armed cut lands.
+                    (Protocol::Defaults, 0) => text(&request, DEFAULTS_FIRST_CELL),
+                    (Protocol::Defaults, 2) => text(&request, DEFAULTS_SECOND_CELL),
+                    (Protocol::Defaults, _) => text(&request, "the session answered"),
+                    _ => match (called >= protocol.rounds(), protocol) {
+                        (true, _) => {
+                            let told = if rendered.contains(WROTE) {
+                                "the write completed"
+                            } else {
+                                "the write did not complete"
+                            };
+                            text(&request, &format!("{FINAL}{told}"))
                         }
-                    }
+                        (false, Protocol::ImageCell(source, _)) => text(&request, source),
+                        (false, Protocol::Code) => text(&request, CELL),
+                        (false, Protocol::Archived) => text(&request, ARCHIVED_CELL),
+                        (false, Protocol::Large(pad)) => text(&request, &pad.cell()),
+                        (false, Protocol::Working(second)) => match called {
+                            0 => text(&request, WORKING_FIRST_CELL),
+                            _ => text(&request, working_second_cell(second)),
+                        },
+                        (false, Protocol::Tools | Protocol::Noted | Protocol::NotedTwice) => {
+                            LlmResponse {
+                                parts: vec![LlmOutputPart::ToolCall {
+                                    call_id: match called {
+                                        0 => "v0-call".to_owned(),
+                                        round => format!("v0-call-{round}"),
+                                    },
+                                    tool_name: TOOL.to_owned(),
+                                    input_json: r#"{"x":7}"#.to_owned(),
+                                    replay: None,
+                                }],
+                                ..LlmResponse::default()
+                            }
+                        }
+                        (_, Protocol::Defaults) => {
+                            unreachable!("Defaults scripts every call by ordinal")
+                        }
+                    },
                 };
                 Ok(response)
             }
@@ -392,6 +420,7 @@ fn core(
         Protocol::Code
         | Protocol::ImageCell(_, _)
         | Protocol::Archived
+        | Protocol::Defaults
         | Protocol::Large(_)
         | Protocol::Working(_) => lash::LashCore::rlm_builder(
             backend.clone(),
@@ -579,9 +608,11 @@ impl Scenario for V0 {
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
         let published = Arc::clone(&self.published);
-        nodes.script().observe_candidates(Arc::new(move |_, pages| {
-            published.lock_recover().insert(pages);
-        }));
+        nodes
+            .script()
+            .observe_candidates(Arc::new(move |_, _, pages| {
+                published.lock_recover().insert(pages);
+            }));
         let published = Arc::clone(&self.published);
         nodes.script().observe_commits(Arc::new(move |_, tx| {
             let staged: Vec<_> = tx.graph().values().cloned().collect();
@@ -929,12 +960,10 @@ impl V0 {
         };
         // The heap pages its texts out of its root: they are read through
         // the pages the committed nodes reach.
-        let pages = self.published.lock_recover().reached(&execution.nodes);
+        let descriptor = BTreeMap::from([(execution.root, execution.node())]);
+        let pages = self.published.lock_recover().reached(&descriptor);
         let holds = |needle: &str| {
-            execution
-                .nodes
-                .values()
-                .map(|node| &node.bytes)
+            std::iter::once(&execution.descriptor)
                 .chain(&pages)
                 .any(|bytes| {
                     bytes
@@ -969,8 +998,7 @@ impl V0 {
                 })
                 .count();
             violations.push(format!(
-                "PC-WORKING: the committed execution lost A's text: its {} nodes reach {} of {} published pages, {anywhere} of which hold it",
-                execution.nodes.len(),
+                "PC-WORKING: the committed execution lost A's text: its descriptor reaches {} of {} published pages, {anywhere} of which hold it",
                 pages.len(),
                 published.0.len(),
             ));
@@ -1154,6 +1182,7 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::SESSION_RELEASE,
         ],
         Protocol::Large(_) => unreachable!("the large-value law runs its turn uncut"),
+        Protocol::Defaults => unreachable!("the session-capture law runs its turns uncut"),
         // The second cell never saves: the response that asked for it
         // commits with the model start that consumes its answer (FIG-6000).
         Protocol::Working(_) => vec![
@@ -1793,173 +1822,14 @@ impl Transmissions {
     }
 }
 
-/// PC-LARGE-ONCE (FIG-5887 §11, the FIG-5880 amplification): a cell keeps a
-/// [`PAD`]-byte text across each of [`AWAITS`] awaits. Every park installs
-/// what changed since the last, never again the large text an earlier one
-/// installed: a repeated text is installed once, a fresh one once per
-/// await, and no park transmits an earlier park's large text again. After
-/// the turn and an immediate collection, the session's execution state
-/// hydrates whole.
-async fn large_values_install_once(pad: Pad) {
-    let uncut = V0::new(Protocol::Large(pad), Dialect::SqliteMemory, None);
-    let clock = SimClock::new();
-    let database = uncut.database(Arc::clone(&clock)).await;
-    let script = Script::new();
-    let installs = Arc::new(Mutex::new(Transmissions::new(pad)));
-    script.observe_commits({
-        let installs = Arc::clone(&installs);
-        Arc::new(move |label, tx| installs.lock_recover().observe(label, tx))
-    });
-    script.observe_candidates({
-        let installs = Arc::clone(&installs);
-        Arc::new(move |_, pages| installs.lock_recover().observe_candidate(pages))
-    });
-    let nodes = SimNodes::new(
-        Arc::clone(&database),
-        Arc::clone(&clock),
-        script,
-        uncut.config(),
-        uncut.activation(),
-    );
-    uncut.send().await.expect("the turn is sent");
-    nodes.start("a");
-    let horizon = clock.logical_ms() + 600_000;
-    while !uncut.done(&nodes).await {
-        if let Ok(Some(snapshot)) = database.actor(&actor()).await
-            && snapshot.state == ActorState::Parked
-        {
-            panic!(
-                "{pad:?}: the session parked: {:?}\n{}",
-                facade_park(&uncut).await,
-                nodes.script().rendered_trace()
-            );
-        }
-        assert!(
-            clock.logical_ms() < horizon && nodes.step().await.is_some(),
-            "{pad:?}: the turn stalled:\n{}",
-            nodes.script().rendered_trace()
-        );
-    }
-    nodes.quiesce().await;
-
-    let (parks, literal, large, payload) = {
-        let sent = installs.lock_recover();
-        (
-            sent.parks.clone(),
-            sent.literal.clone(),
-            sent.large.clone(),
-            sent.payload.clone(),
-        )
-    };
-    // The cell's source holds the pad once; the heap pages each text the
-    // cell keeps: the pad itself, or each pad+i, including the last one
-    // captured at the cell's end after its final await.
-    assert_eq!(
-        literal.len(),
-        1,
-        "{pad:?}: the cell's program stages its literal text: {literal:?}"
-    );
-    let expected_large = if pad == Pad::Repeated { 1 } else { AWAITS };
-    assert_eq!(
-        large.len(),
-        expected_large,
-        "{pad:?}: the heap pages its known large texts: {large:?}"
-    );
-    assert!(
-        literal
-            .values()
-            .chain(large.values())
-            .all(|commits| commits.len() == 1),
-        "{pad:?}: each large text is transmitted once, including non-park commits: {literal:?} {large:?}"
-    );
-    assert!(
-        payload.values().all(|commits| commits.len() == 1),
-        "{pad:?}: each page of a paged text is transmitted once: {payload:?}"
-    );
-    assert_eq!(
-        parks.len(),
-        AWAITS,
-        "{pad:?}: one park per await: {parks:?}"
-    );
-    assert!(
-        parks[0].1 >= PAD,
-        "{pad:?}: the first park installs the large text: {parks:?}"
-    );
-    // A later park installs its new admission, the host's summary and the
-    // heap pages the await dirtied, each up to a leaf's target size, plus,
-    // for a fresh text, that one text: the pages the earlier texts do not
-    // share. It stays under one large text, so it never holds an earlier
-    // park's large text again.
-    let bound = match pad {
-        Pad::Repeated => PAD,
-        Pad::Fresh => PAD + PAD / 2,
-    };
-    for (index, (commit, bytes)) in parks.iter().enumerate().skip(1) {
-        assert!(
-            *bytes < bound,
-            "{pad:?}: park {} installs {bytes} bytes, not under {bound}: an earlier park's large text again: {parks:?}",
-            index + 1
-        );
-        if pad == Pad::Fresh {
-            assert!(
-                large
-                    .values()
-                    .any(|commits| commits.iter().any(|(_, at)| at == commit)),
-                "{pad:?}: park {} installs its fresh text: {parks:?} {large:?}",
-                index + 1
-            );
-        }
-    }
-
-    let catalog = uncut.backend().session_store_factory();
-    let execution = |when: &'static str| {
-        let catalog = Arc::clone(&catalog);
-        async move {
-            let view = lash_core::store::SessionStore::new(catalog, session())
-                .expect("the session's store");
-            lash_core::store::load_session_window_state(
-                &view,
-                lash_core::store::WindowSelector::Current,
-            )
-            .await
-            .unwrap_or_else(|error| panic!("{pad:?}: the head loads {when}: {error:?}"))
-            .expect("the session has a head")
-            .state
-            .execution_state_hydration()
-            .unwrap_or_else(|error| {
-                panic!("{pad:?}: the execution state hydrates {when}: {error:?}")
-            })
-        }
-    };
-    let before_gc = execution("after the turn").await;
-    assert!(
-        before_gc.is_some(),
-        "{pad:?}: the cell's globals are the session's execution state"
-    );
-    lash_core::StoreMaintenance::gc_unreachable(catalog.as_ref())
-        .await
-        .expect("the collection runs");
-    assert_eq!(
-        execution("after an immediate collection").await,
-        before_gc,
-        "{pad:?}: collection preserves the pre-GC execution state",
-    );
-}
-
-#[tokio::test]
-async fn a_repeated_large_text_kept_across_awaits_is_written_once() {
-    large_values_install_once(Pad::Repeated).await;
-}
-
-#[tokio::test]
-async fn a_fresh_large_text_per_await_is_written_once_per_await() {
-    large_values_install_once(Pad::Fresh).await;
-}
-
 #[path = "vertical_crash_proof/corpus.rs"]
 mod corpus;
 #[path = "support/kernel_images.rs"]
 mod kernel_images;
+#[path = "vertical_crash_proof/large_values.rs"]
+mod large_values;
+#[path = "vertical_crash_proof/session_capture.rs"]
+mod session_capture;
 #[path = "vertical_crash_proof/images.rs"]
 mod session_images;
 

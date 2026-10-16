@@ -332,6 +332,7 @@ impl LashRuntime {
             }
             let committed = super::durable::head_commit::commit(
                 owner,
+                self.code_executor().as_ref(),
                 commit,
                 lash_durable::CommitLabel::SESSION_COMMAND,
                 self.host.core.tracing.metrics(),

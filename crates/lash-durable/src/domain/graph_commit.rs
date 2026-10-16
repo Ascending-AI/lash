@@ -523,7 +523,10 @@ pub fn stage_refusal(fault: &StageFault) -> GraphRefusal {
 /// (`summary.base` is the row's `expected_root`, a wrapper too) and its
 /// row records the candidate's commit identity, which is how an ambiguous
 /// publication resolves against the row ([`PageStore::candidate_state`]).
-/// A step outcome's manifest has no base.
+/// A step outcome's manifest has no base. A session's candidate is owned
+/// by the one write that names the session's execution root (a turn's
+/// working state or a head commit's checkpoint), and that root is the
+/// candidate's own: the session descriptor, with no base (FIG-6418).
 ///
 /// # Errors
 ///
@@ -536,6 +539,9 @@ pub fn check_candidate(
     owner: &CandidateOwner,
     summary: &ManifestSummary,
 ) -> Result<(), GraphRefusal> {
+    if let CandidateOwner::Session(session) = owner {
+        return check_session_candidate(writes, session, summary);
+    }
     let mut owned = writes.iter().filter_map(|write| match (owner, write) {
         (
             CandidateOwner::ExecRootPut(exec),
@@ -571,6 +577,36 @@ pub fn check_candidate(
         && base == summary.base
         && row_commit.is_none_or(|commit| commit == summary.commit)
     {
+        Ok(())
+    } else {
+        Err(GraphRefusal::PublicationMismatch)
+    }
+}
+
+/// [`check_candidate`] for a session's candidate: exactly one write names
+/// the session's execution root, and it is the candidate's root.
+fn check_session_candidate(
+    writes: &[DomainWrite],
+    session: &lash_sansio::SessionId,
+    summary: &ManifestSummary,
+) -> Result<(), GraphRefusal> {
+    let mut owned = writes.iter().filter_map(|write| match write {
+        DomainWrite::Turn(super::TurnWrite::Working {
+            session: wrote,
+            working: Some(root),
+            ..
+        })
+        | DomainWrite::SessionCommit(super::SessionCommitWrite {
+            session: wrote,
+            execution: Some(root),
+            ..
+        }) if wrote == session => Some(*root),
+        _ => None,
+    });
+    let (Some(root), None) = (owned.next(), owned.next()) else {
+        return Err(GraphRefusal::PublicationMismatch);
+    };
+    if root == summary.root && summary.base.is_none() {
         Ok(())
     } else {
         Err(GraphRefusal::PublicationMismatch)

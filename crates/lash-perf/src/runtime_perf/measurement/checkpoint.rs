@@ -157,12 +157,14 @@ impl lash_core::plugin::PluginOperation for AssignCheckpointBinding {
 impl lash_core::plugin::PluginTask for AssignCheckpointBinding {}
 
 impl CheckpointBindingFixture {
+    /// A fixture whose cells run on `backend`, the store its captures
+    /// publish to.
     pub(super) async fn new(
         dialect: lash_protocol_rlm::CellDialect,
         bindings: usize,
         bytes: usize,
+        backend: lash::Backend,
     ) -> anyhow::Result<Self> {
-        let backend = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
         let fixture = Arc::new(tokio::sync::Mutex::new(
             lash_protocol_rlm::CodeModeCheckpointPerfFixture::new(
                 &dialect,
@@ -273,8 +275,30 @@ impl CheckpointBindingFixture {
         self.fixture.lock().await.capture().await
     }
 
-    pub(super) async fn acknowledge_capture(&self) {
-        self.fixture.lock().await.acknowledge_capture().await;
+    /// Commits `commit` through `publisher`'s session actor, as the turn's
+    /// head commit does: the pages it published.
+    pub(super) async fn commit(
+        &self,
+        publisher: &mut lash_protocol_rlm::CodeModeCheckpointPerfPublisher,
+        commit: &RuntimeCommit,
+    ) -> Result<Vec<lash_core_store::checkpoint_graph::EncodedNode>, lash_core::SessionError> {
+        self.fixture.lock().await.commit(publisher, commit).await
+    }
+
+    /// Reads, from the next cell on, the head `state` reloaded after a
+    /// commit through `publisher`.
+    pub(super) async fn read_head(
+        &self,
+        publisher: &lash_protocol_rlm::CodeModeCheckpointPerfPublisher,
+        state: &RuntimeSessionState,
+    ) -> anyhow::Result<()> {
+        self.fixture.lock().await.read_head(
+            publisher,
+            &state.session_id,
+            state.head_revision,
+            head_checkpoint(state)?,
+        )?;
+        Ok(())
     }
 }
 
@@ -284,16 +308,8 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
     let scenario = RuntimePerfScenario::CheckpointStateHotPaths;
     let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let (fixture, store, mut runtime_state) = run
+    let (fixture, store, mut publisher, mut runtime_state) = run
         .build(async {
-            // Cells run on the production effect controller over a memory
-            // store set; their captured state is what is measured.
-            let fixture = CheckpointBindingFixture::new(
-                lash_protocol_rlm::CellDialect::typescript(),
-                CHECKPOINT_STATE_BINDINGS,
-                CHECKPOINT_STATE_BODY_BYTES,
-            )
-            .await?;
             let runtime_state = RuntimeSessionState {
                 session_id: SessionId::from("runtime-perf-checkpoint-state"),
                 ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
@@ -302,13 +318,28 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                     lash_core::NoProgressBudget::bounded(12),
                 ))
             };
-            let store = memory_perf_store(&runtime_state.session_id).await?;
+            let (store, backend) = memory_perf_store(&runtime_state.session_id).await?;
+            // Cells run on the production effect controller over the memory
+            // store set the checkpoint commits to; their captured state is
+            // what is measured.
+            let fixture = CheckpointBindingFixture::new(
+                lash_protocol_rlm::CellDialect::typescript(),
+                CHECKPOINT_STATE_BINDINGS,
+                CHECKPOINT_STATE_BODY_BYTES,
+                backend.clone(),
+            )
+            .await?;
             store
                 .admit_session(&runtime_perf_session_create_request(
                     &runtime_state.session_id,
                 ))
                 .await?;
-            Ok((fixture, store, runtime_state))
+            let publisher = lash_protocol_rlm::CodeModeCheckpointPerfPublisher::open(
+                &backend,
+                &runtime_state.session_id,
+            )
+            .await?;
+            Ok((fixture, store, publisher, runtime_state))
         })
         .await?;
 
@@ -318,8 +349,14 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 measure_runtime_perf_async_phase("checkpoint_state.initial_capture", async {
                     fixture.capture().await.map_err(anyhow::Error::from)
                 }).await?;
-            let (initial_component_count, initial_bytes) = staged_nodes(&initial_snapshot)?;
-            // Every binding's value is captured once: none was installed
+            lash_core::testing::stage_execution_graph(&mut runtime_state, initial_snapshot);
+            let initial_commit = RuntimeCommit::persisted_state_for_test_with_budget(
+                &runtime_state,
+                lash_core::CommitBudget::bounded(8 * 1024 * 1024, 2_048),
+            );
+            let published = fixture.commit(&mut publisher, &initial_commit).await?;
+            let (initial_component_count, initial_bytes) = staged_nodes(&published)?;
+            // Every binding's value is published once: none was installed
             // before.
             if initial_component_count != CHECKPOINT_STATE_BINDINGS
                 || initial_bytes < CHECKPOINT_STATE_BINDINGS * CHECKPOINT_STATE_BODY_BYTES
@@ -329,14 +366,8 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                      expected {CHECKPOINT_STATE_BINDINGS} of {CHECKPOINT_STATE_BODY_BYTES} bytes"
                 );
             }
-            lash_core::testing::stage_execution_graph(&mut runtime_state, initial_snapshot.clone());
-            let initial_commit = RuntimeCommit::persisted_state_for_test_with_budget(
-                &runtime_state,
-                lash_core::CommitBudget::bounded(8 * 1024 * 1024, 2_048),
-            );
-            let initial_result = store.commit_runtime_state(initial_commit).await?;
-            runtime_state.apply_persisted_commit_result(initial_result);
-            fixture.acknowledge_capture().await;
+            runtime_state = reloaded(store.clone(), &runtime_state.session_id).await?;
+            fixture.read_head(&publisher, &runtime_state).await?;
             Ok((initial_component_count, initial_capture_phase))
         })
         .await?;
@@ -362,17 +393,6 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 fixture.capture().await.map_err(anyhow::Error::from)
             }).await?;
         phase_profile.insert(phase.0, phase.1);
-        fixture.acknowledge_capture().await;
-        // One binding was reassigned: the capture stages its value, and
-        // every other binding's value stays where an earlier commit
-        // installed it (PC-LARGE-ONCE).
-        let (new_leaves, _) = staged_nodes(&snapshot)?;
-        last_changed_components = new_leaves as u64;
-        if new_leaves != 1 {
-            anyhow::bail!(
-                "incremental checkpoint staged {new_leaves} value leaves, expected its one reassigned binding's"
-            );
-        }
         lash_core::testing::stage_execution_graph(&mut runtime_state, snapshot);
         let commit = RuntimeCommit::persisted_state_for_test_with_budget(
             &runtime_state,
@@ -387,16 +407,27 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         phase_profile.insert(phase.0, phase.1);
         last_checkpoint_bytes = budget_measurement.checkpoint_bytes as u64;
 
-        let (commit_result, phase) =
+        let (published, phase) =
             measure_runtime_perf_async_phase("checkpoint_state.component_commit", async {
-                store
-                    .commit_runtime_state(commit)
+                fixture
+                    .commit(&mut publisher, &commit)
                     .await
                     .map_err(anyhow::Error::from)
             })
             .await?;
         phase_profile.insert(phase.0, phase.1);
-        runtime_state.apply_persisted_commit_result(commit_result);
+        runtime_state = reloaded(store.clone(), &runtime_state.session_id).await?;
+        fixture.read_head(&publisher, &runtime_state).await?;
+        // One binding was reassigned: the commit publishes its new text, and
+        // every binding's large value, the reassigned one's too, stays
+        // where an earlier commit installed it (PC-LARGE-ONCE).
+        let (new_leaves, _) = staged_nodes(&published)?;
+        last_changed_components = new_leaves as u64;
+        if new_leaves != 1 {
+            anyhow::bail!(
+                "incremental checkpoint published {new_leaves} value leaves, expected its one reassigned binding's"
+            );
+        }
 
         let (loaded_execution_state, phase) =
             measure_runtime_perf_async_phase("checkpoint_state.component_load", async {
@@ -416,11 +447,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             })
             .await?;
         phase_profile.insert(phase.0, phase.1);
-        last_hydrated_bytes = loaded_execution_state
-            .nodes
-            .values()
-            .map(|node| node.bytes.len())
-            .sum::<usize>() as u64;
+        last_hydrated_bytes = loaded_execution_state.descriptor.len() as u64;
 
         let (_, phase) = measure_runtime_perf_async_phase("checkpoint_state.execution_restore", async {
             lash_protocol_rlm::CodeModeCheckpointPerfFixture::restore(&lash_protocol_rlm::CellDialect::typescript(), &loaded_execution_state).await
@@ -470,23 +497,47 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
     }))
 }
 
-/// The text leaves `capture` stages, and their encoded bytes: each binding's
-/// large value is one leaf, and a leaf an earlier commit installed is never
-/// staged again.
+/// The payload leaves a commit published, and their encoded bytes: each
+/// binding's large text is one heap payload leaf, and a leaf an earlier
+/// commit installed is never published again.
 fn staged_nodes(
-    capture: &lash_core::plugin::ExecutionGraphCapture,
+    published: &[lash_core_store::checkpoint_graph::EncodedNode],
 ) -> anyhow::Result<(usize, usize)> {
-    let lash_core::plugin::ExecutionGraphCapture::Replace { nodes, .. } = capture else {
-        anyhow::bail!("checkpoint-state capture omitted its root");
-    };
     let mut leaves = (0, 0);
-    for node in nodes.values() {
-        if node.envelope()?.kind == lash_core_store::checkpoint_graph::NodeKind::TEXT_LEAF {
+    for node in published {
+        if node.envelope()?.kind == lash_core_store::checkpoint_graph::NodeKind::PAYLOAD_LEAF {
             leaves.0 += 1;
             leaves.1 += node.bytes.len();
         }
     }
     Ok(leaves)
+}
+
+/// The root of `state`'s head revision: its checkpoint.
+pub(super) fn head_checkpoint(
+    state: &RuntimeSessionState,
+) -> anyhow::Result<lash_core_store::checkpoint_graph::NodeId> {
+    state
+        .checkpoint_ref
+        .as_ref()
+        .and_then(|checkpoint| {
+            lash_core_store::checkpoint_graph::NodeId::from_hex(checkpoint.as_str())
+        })
+        .ok_or_else(|| anyhow::anyhow!("the session's head names no checkpoint"))
+}
+
+/// `session_id`'s state as `store` holds it after a head commit.
+pub(super) async fn reloaded(
+    store: Arc<dyn lash_core::RuntimeStore>,
+    session_id: &SessionId,
+) -> anyhow::Result<RuntimeSessionState> {
+    lash::persistence::load_session_window_state(
+        &lash::persistence::SessionStore::new(store, session_id.clone())?,
+        lash::persistence::WindowSelector::Current,
+    )
+    .await?
+    .map(|loaded| loaded.state)
+    .ok_or_else(|| anyhow::anyhow!("session {session_id} was not loadable"))
 }
 
 fn execution_state_from_checkpoint(
@@ -498,7 +549,10 @@ fn execution_state_from_checkpoint(
         .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted its execution state"))?;
     Ok(lash_core::plugin::HydratedExecutionGraph {
         root: execution.root,
-        nodes: execution.nodes.clone(),
+        descriptor: execution
+            .descriptor
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("hydrated checkpoint omitted its descriptor"))?,
     })
 }
 

@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 mod execution_state;
 mod materialize;
-use execution_state::*;
 pub(in crate::runtime) use execution_state::{
     ExecutionStateUpdate, SeedCarries, capture_execution_state_update, committed_frame_transition,
     derive_seed_carries,
@@ -281,17 +280,11 @@ impl TurnBoundary {
         policy: SessionPolicy,
         turn_index: usize,
         messages: &MessageSequence,
-        mut session: Option<&mut Session>,
+        session: Option<&mut Session>,
     ) -> Result<(), StoreError> {
         let fleet_format = self.fleet_format;
         if !crate::messages_are_prompt_resume_safe(messages.iter()) {
             return Ok(());
-        }
-
-        if let Some(session) = session.as_deref_mut() {
-            probe_execution_state_capture(session)
-                .await
-                .map_err(execution_state_capture_error)?;
         }
         self.apply_prepared_messages(messages);
         let plugins = session
@@ -318,11 +311,6 @@ impl TurnBoundary {
         messages: MessageSequence,
         event_delta: Vec<SessionHistoryRecord>,
     ) -> Result<ProgressBoundaryResult, RuntimeError> {
-        probe_execution_state_capture(session)
-            .await
-            .map_err(|err| {
-                super::runtime_error_from_store_commit(execution_state_capture_error(err))
-            })?;
         let plugins = Arc::clone(session.plugins());
         self.progress_boundary_with_snapshot(ProgressBoundarySnapshot {
             policy,

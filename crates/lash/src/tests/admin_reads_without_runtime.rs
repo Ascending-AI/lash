@@ -91,10 +91,10 @@ async fn every_admin_read_answers_from_durable_state_without_an_activated_runtim
         let reopened_core = rlm_core(backend, false)?;
         let reopened = reopened_core.session(session_id.clone()).open().await?;
         let reads = read_every_admin_surface(&reopened).await?;
-        let execution = reads
-            .execution
-            .expect("the head records the run's execution state");
-        assert!(execution.nodes.contains_key(&execution.root));
+        assert!(
+            reads.execution.is_some(),
+            "the head records the run's execution state"
+        );
         Ok(())
     }
 }

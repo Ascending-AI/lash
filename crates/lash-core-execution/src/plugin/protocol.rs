@@ -106,14 +106,62 @@ pub struct ProtocolSessionRestoreView {
     pub execution_state: Result<Option<HydratedExecutionGraph>, crate::StoreError>,
     /// Active history to replay protocol seed and globals events.
     pub active_events: Vec<crate::SessionHistoryRecord>,
+    /// Where the session's committed head holds its execution state, when
+    /// the caller reads it over a store: a stored-state check looks a
+    /// tool's namespace root up in the stored binding tree through these
+    /// pages (FIG-6418).
+    pub pages: Option<SessionPages>,
+}
+
+/// The reader a session actor's pages are read through: its store and the
+/// claim (actor, epoch) the read stands under. The durable session actor
+/// sets it on a runtime every activation; a runtime not under a claim
+/// holds none.
+#[derive(Clone)]
+pub struct SessionPageReader {
+    pub store: Arc<dyn lash_durable::domain::pages::PageStore>,
+    pub actor: lash_durable::ActorKey,
+    pub epoch: lash_durable::Epoch,
+}
+
+impl std::fmt::Debug for SessionPageReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionPageReader")
+            .field("actor", &self.actor)
+            .field("epoch", &self.epoch)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SessionPageReader {
+    /// Where `state`'s committed head holds the session's execution state:
+    /// the head revision's row, at its checkpoint. None for a session that
+    /// committed no checkpoint yet.
+    pub fn session_pages(&self, state: &RuntimeSessionState) -> Option<SessionPages> {
+        let root =
+            lash_core_store::checkpoint_graph::NodeId::from_hex(&state.checkpoint_ref.as_ref()?.0)?;
+        Some(SessionPages {
+            store: Arc::clone(&self.store),
+            actor: self.actor.clone(),
+            epoch: self.epoch,
+            owner: lash_durable::domain::graph::RootOwner::SessionRevision {
+                session: state.session_id.clone(),
+                revision: state.head_revision,
+            },
+            root,
+        })
+    }
 }
 
 impl ProtocolSessionRestoreView {
-    pub fn new(state: &RuntimeSessionState) -> Self {
+    /// The view `state` builds, its stored-state pages read through
+    /// `reader` — none where the session actor's claim does not reach.
+    pub fn new(state: &RuntimeSessionState, reader: Option<&SessionPageReader>) -> Self {
         Self {
             current_frame_node_id: state.current_frame_node_id.clone(),
             execution_state: state.execution_state_hydration(),
             active_events: state.read_model().active_events.to_vec(),
+            pages: reader.and_then(|reader| reader.session_pages(state)),
         }
     }
 }
@@ -377,29 +425,9 @@ pub trait CodeExecutorPlugin: Send + Sync {
         initial_nodes: &[crate::SessionAppendNode],
     ) -> Result<Vec<crate::ArtifactName>, crate::SessionError>;
 
-    /// Report whether a dirty execution-state capture *would* succeed, staging
-    /// nothing.
-    ///
-    /// Only the final turn commit stages a capture, so a capture failure
-    /// discovered there has already spent the turn's provider round trip and
-    /// tool work. The runtime therefore asks this question at every
-    /// prompt-resume-safe boundary before a provider call, and aborts the turn
-    /// there if the answer is an error. An implementation must not stage,
-    /// acknowledge, or roll back anything: it answers only whether the same
-    /// capture attempted at this instant would fail. An executor that
-    /// implements [`CodeExecutorPlugin::capture_execution_graph`] with
-    /// fallible encoding should implement this too; the default answers "no
-    /// known obstacle".
-    async fn probe_execution_state_capture(
-        &self,
-        _ctx: ProtocolSessionContext<'_>,
-    ) -> Result<(), crate::SessionError> {
-        Ok(())
-    }
-
-    /// The session's whole SessionExecution graph, every node's body
-    /// present, built from live state and staging nothing: what an explicit
-    /// administrative snapshot reads. `None` means the executor holds no
+    /// The session's descriptor as live state holds it, staging nothing:
+    /// what an explicit administrative snapshot reads. Its heap pages are
+    /// the store's or the turn's. `None` means the executor holds no
     /// execution state.
     async fn hydrated_execution_graph(
         &self,
@@ -408,9 +436,45 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(None)
     }
 
+    /// The candidate that publishes `root`'s pages, staged under the
+    /// pending capture, under `commit` (FIG-6418): what they name beyond
+    /// the heap that the store may not hold (a helper release) is pinned in
+    /// `tx`, after `reads` of whether the store pins it already. `None`
+    /// when no pending capture stages `root`: the store holds its pages.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::SessionError`] when the staged pages do not stream or a
+    /// release they name is not held.
+    async fn execution_candidate(
+        &self,
+        _root: lash_core_store::checkpoint_graph::NodeId,
+        _commit: lash_core_store::checkpoint_graph::CommitId,
+        _tx: &mut lash_durable::ActorTx,
+        _reads: &dyn lash_durable::DurableReads,
+    ) -> Result<Option<ExecutionCandidate>, crate::SessionError> {
+        Ok(None)
+    }
+
+    /// The pending capture's commit was acknowledged: the pages it
+    /// published leave the turn's staging.
     async fn acknowledge_execution_state_capture(&self) {}
 
+    /// The pending capture's commit was not made: its pages stay staged for
+    /// the next capture.
     async fn abort_execution_state_capture(&self) {}
+
+    /// Resolves the pending capture whose commit's acknowledgement was
+    /// lost: `committed` when the store recorded its publication. A
+    /// committed capture is acknowledged; another is withdrawn, its pages
+    /// kept staged for the next capture.
+    async fn resolve_execution_state_capture(&self, committed: bool) {
+        if committed {
+            self.acknowledge_execution_state_capture().await;
+        } else {
+            self.abort_execution_state_capture().await;
+        }
+    }
 
     /// Settle a code response, or discard its continuation at logical termination.
     ///
@@ -429,13 +493,14 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(())
     }
 
-    /// The session's execution state for `purpose`, its descriptor page and
-    /// the heap pages staged under it (ADR 0145 §9), built from live state:
-    /// a working capture after each successful cell, a final capture for
-    /// the turn's commit. Its staged nodes are kept until
+    /// The session's execution state for `purpose`, its descriptor page
+    /// (ADR 0145 §9), built from live state: a working capture after each
+    /// successful cell, a final capture for the turn's commit. The heap
+    /// pages staged under it are the commit's candidate
+    /// ([`Self::execution_candidate`]), kept staged until
     /// [`Self::acknowledge_execution_state_capture`]; a refused commit
-    /// resends them. An executor that holds no execution state keeps the
-    /// default.
+    /// publishes them with the next capture. An executor that holds no
+    /// execution state keeps the default.
     async fn capture_execution_graph(
         &self,
         _ctx: ProtocolSessionContext<'_>,
@@ -455,6 +520,20 @@ pub trait CodeExecutorPlugin: Send + Sync {
         _purpose: ExecutionGraphPurpose,
     ) -> Result<(), crate::SessionError> {
         Ok(())
+    }
+}
+
+/// The candidate that publishes a session capture's heap pages with the
+/// commit that names its root (FIG-6418).
+pub struct ExecutionCandidate {
+    pub manifest: Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>,
+}
+
+impl std::fmt::Debug for ExecutionCandidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutionCandidate")
+            .field("summary", &self.manifest.summary())
+            .finish()
     }
 }
 

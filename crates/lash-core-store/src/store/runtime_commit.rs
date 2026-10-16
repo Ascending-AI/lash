@@ -1007,14 +1007,15 @@ struct SessionCommitEnvelope {
 }
 
 /// A session head commit encoded for the session actor's fenced head
-/// commit: its text, the checkpoint's execution root, and the execution
-/// nodes the store may not hold yet, which the commit's transaction stages
-/// beside it.
+/// commit: its text, the checkpoint's execution root, and its descriptor
+/// node when the runtime holds it, which the commit's transaction stages
+/// beside it. The heap pages under the root travel in the commit's
+/// candidate (FIG-6418).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EncodedSessionCommit {
     pub json: String,
     pub execution: Option<crate::checkpoint_graph::NodeId>,
-    pub nodes: Vec<crate::checkpoint_graph::EncodedNode>,
+    pub descriptor: Option<crate::checkpoint_graph::EncodedNode>,
 }
 
 /// A [`FrameTransition`] as the envelope carries it.
@@ -1095,9 +1096,7 @@ pub fn encode_session_commit(commit: &RuntimeCommit) -> Result<EncodedSessionCom
     Ok(EncodedSessionCommit {
         json,
         execution: execution.map(|execution| execution.root),
-        nodes: execution
-            .map(|execution| execution.nodes.values().cloned().collect())
-            .unwrap_or_default(),
+        descriptor: execution.and_then(super::CheckpointExecution::node),
     })
 }
 
@@ -1137,8 +1136,8 @@ pub fn session_commit_undelivered_change(
 /// # Errors
 ///
 /// [`StoreError::Backend`] when `encoded` is not one. Its checkpoint's
-/// execution names its root alone: the nodes were staged in the commit's
-/// transaction.
+/// execution names its root alone: the descriptor was staged in the
+/// commit's transaction.
 pub fn decode_session_commit(encoded: &str) -> Result<RuntimeCommit, StoreError> {
     let SessionCommitEnvelope {
         mut commit,
@@ -1155,7 +1154,7 @@ pub fn decode_session_commit(encoded: &str) -> Result<RuntimeCommit, StoreError>
             crate::checkpoint_graph::NodeId::from_hex(root.as_str())
                 .map(|root| super::CheckpointExecution {
                     root,
-                    nodes: std::collections::BTreeMap::new(),
+                    descriptor: None,
                 })
                 .ok_or_else(|| {
                     StoreError::Backend(format!(

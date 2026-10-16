@@ -68,13 +68,13 @@ pub use dialect::{
     TypescriptPrompts,
 };
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
-#[cfg(feature = "testing")]
-pub use executor::CodeModeCheckpointPerfFixture;
 pub use executor::{
     CODEMODE_SNAPSHOT_VERSION, CONTROL_REFUSED, SessionOpenError, TOOL_ARGUMENTS, TOOL_CALL_LIMIT,
     TOOL_FAILED, UNKNOWN_EFFECT, cell_migration_refusal, cell_snapshot_functions,
     saved_function_pins,
 };
+#[cfg(feature = "testing")]
+pub use executor::{CodeModeCheckpointPerfFixture, CodeModeCheckpointPerfPublisher};
 /// The kernel's typed snapshot validation causes.
 pub mod snapshot {
     pub use lash_core_store::checkpoint_graph::{

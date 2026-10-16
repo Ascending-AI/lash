@@ -353,13 +353,6 @@ async fn restore_working(
         .into_iter()
         .next()
         .ok_or_else(|| undecodable("the turn's working root was not read".to_owned()))?;
-    let nodes = std::collections::BTreeMap::from([(
-        root,
-        lash_core_store::checkpoint_graph::EncodedNode {
-            id: root,
-            bytes: page.bytes,
-        },
-    )]);
     code_executor
         .restore_execution_graph(
             crate::plugin::ProtocolSessionContext::new(
@@ -367,7 +360,10 @@ async fn restore_working(
                 driver.session.fleet_format(),
             )
             .with_session_pages(pages),
-            &crate::plugin::HydratedExecutionGraph { root, nodes },
+            &crate::plugin::HydratedExecutionGraph {
+                root,
+                descriptor: page.bytes,
+            },
             crate::plugin::ExecutionGraphPurpose::Working,
         )
         .await
@@ -909,11 +905,10 @@ impl TurnDrive for RuntimeDrive {
                 )
                 .await
                 .map_err(|error| TurnError::Exec(error.to_string()))?;
+            // The heap pages under the root are the commit's candidate,
+            // which the phase's commit builds (FIG-6418).
             let staged = match capture {
-                crate::plugin::ExecutionGraphCapture::Replace { root, nodes } => {
-                    tx.stage(nodes.into_values());
-                    Some(root)
-                }
+                crate::plugin::ExecutionGraphCapture::Replace(graph) => Some(graph.root),
                 crate::plugin::ExecutionGraphCapture::Clear => None,
             };
             if staged != self.working {
@@ -987,6 +982,10 @@ impl TurnDrive for RuntimeDrive {
         if let Some(code_executor) = self.driver.session.plugins().code_executor() {
             code_executor.acknowledge_execution_state_capture().await;
         }
+    }
+
+    fn code_executor(&self) -> Option<std::sync::Arc<dyn crate::plugin::CodeExecutorPlugin>> {
+        self.driver.session.plugins().code_executor()
     }
 
     fn live_stream_cursor(&self) -> String {

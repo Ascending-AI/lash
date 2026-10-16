@@ -50,14 +50,10 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
         .session_graph
         .agent_frame_records(&SessionId::from("root"));
     let execution = lash_core::testing::store_fixtures::execution_graph("frame-vm");
-    let crate::plugin::ExecutionGraphCapture::Replace {
-        root: execution_root,
-        ..
-    } = &execution
-    else {
+    let crate::plugin::ExecutionGraphCapture::Replace(graph) = &execution else {
         unreachable!("the fixture stages a root")
     };
-    let execution_root = *execution_root;
+    let execution_root = graph.root;
     state.set_execution_graph(execution);
 
     let commit = RuntimeCommit::persisted_state_for_test(&state);

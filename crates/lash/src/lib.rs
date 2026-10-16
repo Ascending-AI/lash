@@ -790,14 +790,15 @@ pub mod plugins {
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
         AfterTurnDecisions, CellCallReferences, CheckpointApplication, CheckpointComponentKey,
-        CodeExecutionOutcome, CodeExecutorPlugin, ExecutionGraphCapture, ExecutionGraphPurpose,
-        HydratedExecutionGraph, NamespaceEntry, NamespaceValues, PluginAbort, PluginNamespaceState,
-        PluginSessionMaterializationRequest, PluginSessionRequest, PluginState, PluginStateEffect,
-        PluginTransitionBase, PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+        CodeExecutionOutcome, CodeExecutorPlugin, ExecutionCandidate, ExecutionGraphCapture,
+        ExecutionGraphPurpose, HydratedExecutionGraph, NamespaceEntry, NamespaceValues,
+        PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
+        PluginSessionRequest, PluginState, PluginStateEffect, PluginTransitionBase,
+        PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
         ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
         ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
-        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, SessionPages,
-        StoredCell, TurnPreparation,
+        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext,
+        SessionPageReader, SessionPages, StoredCell, TurnPreparation,
     };
     /// The attachment-omission history policy (ADR 0133): a plugin names the
     /// attachments of a turn's projected history its request omits, and core

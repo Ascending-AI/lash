@@ -505,21 +505,20 @@ mod walk {
         let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
-        let lash_core_execution::plugin::ExecutionGraphCapture::Replace {
-            root: execution_root,
-            nodes,
-        } = lash_core_store::testing::store_fixtures::execution_graph("execution state")
+        let lash_core_execution::plugin::ExecutionGraphCapture::Replace(graph) =
+            lash_core_store::testing::store_fixtures::execution_graph("execution state")
         else {
             unreachable!("the fixture stages a root")
         };
-        let execution_bytes = nodes[&execution_root].bytes.to_vec();
+        let execution_root = graph.root;
+        let execution_bytes = graph.descriptor.to_vec();
         let stored = store
             .put_checkpoint(&lash_core_execution::HydratedSessionCheckpoint {
                 turn_state: lash_core_execution::PersistedTurnState::default(),
                 components: std::collections::BTreeMap::new(),
                 execution: Some(lash_core_execution::store::CheckpointExecution {
                     root: execution_root,
-                    nodes,
+                    descriptor: Some(graph.descriptor),
                 }),
             })
             .await

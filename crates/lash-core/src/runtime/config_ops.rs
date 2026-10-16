@@ -31,6 +31,7 @@ impl LashRuntime {
 pub(super) async fn validate_config_tool_catalog(
     host: &crate::PluginHost,
     state: &crate::RuntimeSessionState,
+    page_reader: Option<&crate::plugin::SessionPageReader>,
     config: &crate::PersistedSessionConfig,
     live: Option<&std::sync::Arc<dyn crate::plugin::ProtocolSessionPlugin>>,
 ) -> Result<(), crate::PluginError> {
@@ -50,7 +51,7 @@ pub(super) async fn validate_config_tool_catalog(
     };
     host.validate_session_tool_catalog(
         request,
-        &crate::plugin::ProtocolSessionRestoreView::new(state),
+        &crate::plugin::ProtocolSessionRestoreView::new(state, page_reader),
         live,
     )
     .await

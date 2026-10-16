@@ -73,9 +73,9 @@ pub(super) fn checkpoint_observation(
         (
             execution.root.to_hex(),
             execution
-                .nodes
-                .iter()
-                .map(|(id, node)| (id.to_hex(), node.bytes.to_vec()))
+                .node()
+                .into_iter()
+                .map(|node| (node.id.to_hex(), node.bytes.to_vec()))
                 .collect(),
         )
     });

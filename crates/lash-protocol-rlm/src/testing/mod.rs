@@ -1,6 +1,6 @@
 mod durable_host;
 
-pub(crate) use durable_host::DurableHost;
+pub(crate) use durable_host::{Candidates, DurableHost};
 
 use std::sync::Arc;
 
@@ -115,18 +115,18 @@ pub(crate) async fn run_cell(
 
 /// Captures `state` as its turn's working state and commits it on `host`,
 /// as the turn phase commit after a cell would, the capture acknowledged.
-/// Answers the capture.
+/// Answers the capture and how many pages its commit published.
 pub(crate) async fn commit_working(
     state: &mut crate::executor::CodeModeExecutionState,
     host: &DurableHost,
-) -> lash_core_store::execution_state::ExecutionGraphCapture {
+) -> (lash_core_store::execution_state::ExecutionGraphCapture, u64) {
     let capture = state
         .capture_execution_graph(lash_core_store::execution_state::ExecutionGraphPurpose::Working)
         .await
         .expect("the session's state captures");
-    host.commit_working(&capture).await;
+    let published = host.commit_working(&capture, state).await;
     state.acknowledge_execution_state_capture().await;
-    capture
+    (capture, published)
 }
 
 /// The context of the cell `replay_key` of `session`'s turn `turn`, with

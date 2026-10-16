@@ -19,6 +19,37 @@ use lash_core::durable_port::{
 /// The format set the host's nodes decode and its actor is created in.
 const FORMATS: &str = "rlm-cell-law/1";
 
+/// What publishes a capture's staged pages with the host's working commit,
+/// as the session's executor does for a turn's (FIG-6418).
+#[async_trait::async_trait]
+pub(crate) trait Candidates: Send {
+    /// The candidate of the pending capture of `root` under `commit`, its
+    /// releases pinned in `tx` after `reads`; none when the store holds its
+    /// pages.
+    async fn candidate(
+        &mut self,
+        root: lash_core_store::checkpoint_graph::NodeId,
+        commit: lash_core_store::checkpoint_graph::CommitId,
+        tx: &mut lash_durable::ActorTx,
+        reads: &dyn lash_durable::DurableReads,
+    ) -> Option<lash_core::plugin::ExecutionCandidate>;
+}
+
+#[async_trait::async_trait]
+impl Candidates for crate::executor::CodeModeExecutionState {
+    async fn candidate(
+        &mut self,
+        root: lash_core_store::checkpoint_graph::NodeId,
+        commit: lash_core_store::checkpoint_graph::CommitId,
+        tx: &mut lash_durable::ActorTx,
+        reads: &dyn lash_durable::DurableReads,
+    ) -> Option<lash_core::plugin::ExecutionCandidate> {
+        self.execution_candidate(root, commit, tx, reads)
+            .await
+            .expect("the capture's candidate builds")
+    }
+}
+
 /// A session actor claimed on a SQLite memory durable store.
 pub(crate) struct DurableHost {
     backend: lash_core::Backend,
@@ -93,20 +124,22 @@ impl DurableHost {
     }
 
     /// Commits `capture` as the working state of the host's turn, as the
-    /// turn phase commit that captured it would: its nodes, under the turn
-    /// row's working root. Answers where the session's state stands now,
-    /// which a later cell's context names.
+    /// turn phase commit that captured it would: under the turn row's
+    /// working root, its staged pages the candidate `candidates` builds,
+    /// owned by the session (FIG-6418). Answers how many pages the commit
+    /// published.
     pub(crate) async fn commit_working(
         &self,
         capture: &lash_core_store::execution_state::ExecutionGraphCapture,
-    ) -> Option<lash_core::plugin::SessionPages> {
+        candidates: &mut dyn Candidates,
+    ) -> u64 {
         use lash_core::durable_port::DomainWrite;
         use lash_core::durable_port::domain::turns::TurnWrite;
-        let lash_core_store::execution_state::ExecutionGraphCapture::Replace { root, nodes } =
-            capture
+        let lash_core_store::execution_state::ExecutionGraphCapture::Replace(graph) = capture
         else {
-            return self.session_pages();
+            return 0;
         };
+        let root = &graph.root;
         let lash_core::ExecutionScope::Turn {
             session_id,
             turn_id,
@@ -115,7 +148,6 @@ impl DurableHost {
             panic!("a law's working state belongs to a turn");
         };
         let mut tx = self.context.begin().await.expect("open the working commit");
-        tx.stage(nodes.values().cloned());
         let expected = {
             let mut working = self
                 .working
@@ -141,16 +173,47 @@ impl DurableHost {
             expected
         };
         tx.write(DomainWrite::Turn(TurnWrite::Working {
-            session: session_id,
+            session: session_id.clone(),
             run: turn_id,
             expected,
             working: Some(*root),
         }));
-        self.context
-            .commit(tx, CommitLabel::new("law.working"))
-            .await
-            .expect("commit the working state");
-        self.session_pages()
+        let commit = lash_core_store::checkpoint_graph::CommitId::mint();
+        let label = CommitLabel::new("law.working");
+        let candidate = candidates
+            .candidate(
+                *root,
+                commit,
+                &mut tx,
+                self.context
+                    .durable_reads()
+                    .expect("the host's store reads"),
+            )
+            .await;
+        let published = candidate
+            .as_ref()
+            .map_or(0, |candidate| candidate.manifest.summary().fresh_nodes);
+        match candidate {
+            Some(candidate) => self
+                .context
+                .commit_candidate_owing(
+                    tx,
+                    lash_durable::domain::pages::CandidatePublication {
+                        owner: lash_durable::domain::pages::CandidateOwner::Session(session_id),
+                        manifest: candidate.manifest,
+                    },
+                    label,
+                    None,
+                )
+                .await
+                .map(|_| ()),
+            None => {
+                tx.stage([graph.node()]);
+                self.context.commit(tx, label).await.map(|_| ())
+            }
+        }
+        .expect("commit the working state");
+        published
     }
 
     /// Where the host's session's committed state stands: its turn's

@@ -201,6 +201,32 @@ impl Drain {
         Ok(commit)
     }
 
+    /// [`Self::release_with`] for a commit that publishes `candidate`
+    /// through `pages` (S6): its heap pages, its owner write and `tx`'s own
+    /// rows in one fenced transaction that also gives up the actor.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal; nothing is recorded.
+    pub async fn release_candidate_with(
+        &self,
+        pages: &dyn crate::domain::pages::PageStore,
+        mut tx: ActorTx,
+        candidate: crate::domain::pages::CandidatePublication,
+        label: CommitLabel,
+        release: Release,
+    ) -> Result<ActorCommit, DurableError> {
+        let actor = tx.actor().clone();
+        tx.give_up(release);
+        let commit = pages.commit_candidate(tx, candidate, label).await?.actor;
+        self.inner
+            .released
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(actor);
+        Ok(commit)
+    }
+
     /// The actors this drain released, in commit order: each one whose
     /// releasing commit was acknowledged.
     #[must_use]

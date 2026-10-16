@@ -17,16 +17,6 @@ fn recorded_llm_profile(key: &str) -> crate::LlmProfileConfig {
     ))
 }
 
-/// Encoded bytes of the execution nodes the next commit installs.
-fn resident_install_bytes(state: &RuntimeSessionState) -> usize {
-    match &state.checkpoint_components.execution {
-        ResidentExecution::None => 0,
-        ResidentExecution::Held { install, .. } => {
-            install.values().map(|node| node.bytes.len()).sum()
-        }
-    }
-}
-
 /// A SessionExecution graph whose root holds `value`, a text past the
 /// inline bound: a leaf beneath the root, as a large binding is.
 fn execution(
@@ -37,10 +27,10 @@ fn execution(
 ) {
     let capture =
         crate::testing::store_fixtures::execution_graph(&format!("{value}{}", "x".repeat(1024)));
-    let crate::plugin::ExecutionGraphCapture::Replace { root, .. } = &capture else {
+    let crate::plugin::ExecutionGraphCapture::Replace(graph) = &capture else {
         unreachable!("the fixture stages a root")
     };
-    (*root, capture)
+    (graph.root, capture)
 }
 
 fn ambient() -> RuntimeSessionState {
@@ -105,7 +95,7 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
     );
 
     let (recovered_root, recovered) = execution("recovered");
-    let crate::plugin::ExecutionGraphCapture::Replace { nodes, .. } = recovered.clone() else {
+    let crate::plugin::ExecutionGraphCapture::Replace(graph) = recovered.clone() else {
         unreachable!("the fixture stages a root")
     };
     resident.set_execution_graph(recovered);
@@ -114,58 +104,7 @@ fn commit_result_mismatch_remains_sticky_until_execution_state_staging() {
         .expect("fresh execution-state staging recovers hydration")
         .expect("fresh execution-state staging restores a run");
     assert_eq!(hydrated.root, recovered_root);
-    assert_eq!(hydrated.nodes, nodes);
-}
-
-#[test]
-fn committing_execution_state_releases_its_resident_nodes() {
-    let mut state = ambient();
-    let (_, staged) = execution("first");
-    let crate::plugin::ExecutionGraphCapture::Replace { nodes, .. } = &staged else {
-        unreachable!("the fixture stages a root")
-    };
-    let staged_bytes: usize = nodes.values().map(|node| node.bytes.len()).sum();
-    state.set_execution_graph(staged);
-    assert_eq!(
-        resident_install_bytes(&state),
-        staged_bytes,
-        "uncommitted nodes are the next commit's only source, so they stay resident"
-    );
-
-    let result = commit_result_for(&state);
-    assert!(result.manifest.execution_ref.is_some());
-    state.apply_persisted_commit_result(result);
-    assert_eq!(
-        resident_install_bytes(&state),
-        0,
-        "committed nodes are a second resident copy of state the protocol already holds"
-    );
-    assert!(
-        state.execution_state_ref().is_some(),
-        "the committed root stays authoritative after its nodes are released"
-    );
-    assert!(
-        matches!(
-            state.execution_state_hydration(),
-            Err(crate::StoreError::ExecutionStateBodiesReleased)
-        ),
-        "a released run backed by a store refuses hydration instead of reading as no execution (FIG-2521)"
-    );
-
-    // The next turn's capture sends nodes no commit installed: a body
-    // discard must leave them alone.
-    let (_, next) = execution("second");
-    state.set_execution_graph(next);
-    let next_bytes = resident_install_bytes(&state);
-    assert!(next_bytes > 0);
-    state
-        .checkpoint_components
-        .discard_known_bodies(true, AcceptedExecutionRetention::DurableHead);
-    assert_eq!(
-        resident_install_bytes(&state),
-        next_bytes,
-        "uncommitted nodes must survive a body discard"
-    );
+    assert_eq!(hydrated, graph);
 }
 
 /// A storeless commit keeps the accepted execution graph resident: the
@@ -204,7 +143,6 @@ fn storeless_body_release_keeps_the_accepted_execution_for_restore() {
         .expect("resident")
         .expect("the next commit's execution is resident");
     assert_eq!(superseded.root, second_root);
-    assert!(!superseded.nodes.contains_key(&first_root));
 
     // A frame switch clears the execution: nothing is kept and nothing is
     // refused, because the session no longer holds a run at all.
@@ -215,76 +153,6 @@ fn storeless_body_release_keeps_the_accepted_execution_for_restore() {
             .execution_state_hydration()
             .expect("no run is not corrupt"),
         None
-    );
-}
-
-/// A store-backed release keeps nothing in process: hydrating the released
-/// run is a typed refusal, never "no execution", while a session that never
-/// held a run still hydrates to `None` (FIG-2521).
-#[test]
-fn released_execution_bodies_without_a_retained_snapshot_refuse_hydration() {
-    let mut state = ambient();
-    state.set_execution_graph(execution("released").1);
-    let result = commit_result_for(&state);
-    state.apply_persisted_commit_result(result);
-    assert!(
-        matches!(
-            state.execution_state_hydration(),
-            Err(crate::StoreError::ExecutionStateBodiesReleased)
-        ),
-        "the released run must refuse hydration"
-    );
-    state.discard_runtime_snapshots();
-    assert!(
-        matches!(
-            state.execution_state_hydration(),
-            Err(crate::StoreError::ExecutionStateBodiesReleased)
-        ),
-        "a later store-backed release must not launder the refusal into no execution"
-    );
-
-    let mut rootless = ambient();
-    rootless.discard_runtime_snapshots();
-    assert_eq!(
-        rootless
-            .execution_state_hydration()
-            .expect("a session that never held execution is not refused"),
-        None
-    );
-}
-
-/// A restored graph is staged whole over a committed one: the next
-/// checkpoint names the restored root and sends every node it reaches, and
-/// the store installs those it does not hold (FIG-2521).
-#[test]
-fn restoring_a_graph_stages_its_root_and_every_node() {
-    let mut state = ambient();
-    state.set_execution_graph(execution("durable").1);
-    let result = commit_result_for(&state);
-    state.apply_persisted_commit_result(result);
-
-    let (restored_root, restored) = execution("restored");
-    let crate::plugin::ExecutionGraphCapture::Replace { nodes, .. } = restored else {
-        unreachable!("the fixture stages a root")
-    };
-    state.stage_restored_execution_graph(crate::plugin::HydratedExecutionGraph {
-        root: restored_root,
-        nodes: nodes.clone(),
-    });
-
-    let checkpoint = state
-        .checkpoint_components
-        .build_checkpoint(
-            crate::PersistedTurnState::default(),
-            crate::store::FleetFormat::current(),
-        )
-        .expect("build the next commit's checkpoint");
-    let execution = checkpoint.execution.expect("the restored root is staged");
-    assert_eq!(execution.root, restored_root);
-    assert_eq!(execution.nodes, nodes, "every restored node is sent");
-    assert_eq!(
-        state.execution_state_ref(),
-        Some(crate::store::BlobRef(restored_root.to_hex()))
     );
 }
 

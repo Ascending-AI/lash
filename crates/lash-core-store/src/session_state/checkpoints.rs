@@ -125,7 +125,7 @@ impl RuntimeSessionState {
     }
 
     /// [`Self::discard_runtime_snapshots`] for a session no store backs: the
-    /// accepted execution bodies stay resident, replaced at the next commit,
+    /// accepted component bodies stay resident, replaced at the next commit,
     /// so a same-frame restore rebuilds from them instead of from nothing
     /// (FIG-2521).
     pub fn discard_runtime_snapshots_retaining_accepted_execution(&mut self) {
@@ -147,28 +147,26 @@ impl RuntimeSessionState {
         self.checkpoint_components.set_execution_graph(capture);
     }
 
-    /// Stages a complete graph the protocol session was just restored to
-    /// (FIG-2521): every node is sent, and the store installs those it does
-    /// not hold. The root is staged as changed: a capture may carry
-    /// appended seed globals the durable root does not.
+    /// Stages the descriptor the protocol session was just restored to
+    /// (FIG-2521) as the head's execution state. The root is staged as
+    /// changed: a capture may carry appended seed globals the durable root
+    /// does not.
     pub fn stage_restored_execution_graph(
         &mut self,
         restored: crate::plugin::HydratedExecutionGraph,
     ) {
-        self.set_execution_graph(crate::plugin::ExecutionGraphCapture::Replace {
-            root: restored.root,
-            nodes: restored.nodes,
-        });
+        self.set_execution_graph(crate::plugin::ExecutionGraphCapture::Replace(restored));
     }
 
-    /// The SessionExecution graph the next checkpoint names, every node
-    /// present; `None` when the session holds no execution state.
+    /// The session descriptor the next checkpoint names; `None` when the
+    /// session holds no execution state.
     ///
     /// # Errors
     ///
-    /// [`crate::StoreError::ExecutionStateBodiesReleased`] when a commit
-    /// released the graph for the durable head to supply, or a stored-data
-    /// error when the last commit's result disagreed with its intent.
+    /// [`crate::StoreError::IncompleteCheckpointComponentSet`] when resident
+    /// state knows the root without its descriptor (the durable head
+    /// supplies it), or a stored-data error when the last commit's result
+    /// disagreed with its intent.
     pub fn execution_state_hydration(
         &self,
     ) -> Result<Option<crate::plugin::HydratedExecutionGraph>, crate::StoreError> {

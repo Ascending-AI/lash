@@ -463,8 +463,8 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
     // Execution state is a SessionExecution graph the engine owns, recorded as
     // written without a size: its encoded bytes shift whenever an embedded
     // identifier changes, which made transcripts flaky on cosmetic churn while
-    // staying blind to real payload differences. A commit that sends nodes
-    // stores it; one that sends none references the root it names.
+    // staying blind to real payload differences. A commit that holds the
+    // descriptor stores it; one that holds none references the root it names.
     // `lash-sim`'s contract support omits its size for the same reason.
     let execution_ref = checkpoint
         .execution
@@ -477,7 +477,7 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
         checkpoint
             .execution
             .as_ref()
-            .filter(|execution| !execution.nodes.is_empty())
+            .filter(|execution| execution.descriptor.is_some())
             .map(|_| None),
     );
     CheckpointWriteEvent {

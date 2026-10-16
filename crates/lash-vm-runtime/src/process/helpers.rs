@@ -217,10 +217,9 @@ pub struct HelperDependentSession {
     /// The cells of its open turn that reach one.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cells: Vec<String>,
-    /// The functions it saved that reach one, by the binding each is
-    /// called through.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub saved: Vec<String>,
+    /// Whether a function it saved reaches one.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub saved: bool,
 }
 
 /// Every unfinished kernel process of `backend`, started or not, whose

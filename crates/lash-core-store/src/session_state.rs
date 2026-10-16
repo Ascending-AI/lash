@@ -31,35 +31,28 @@ enum ExecutionStateBodyResidency {
     CommitResultMismatch,
 }
 
-type GraphNodes = std::collections::BTreeMap<
-    crate::checkpoint_graph::NodeId,
-    crate::checkpoint_graph::EncodedNode,
->;
-
 /// The session's execution state, its descriptor page, as resident state
-/// holds it (ADR 0145 §9).
+/// holds it (ADR 0145 §9). The heap pages under it are the executor's,
+/// published with the commit that names the root (FIG-6418).
 #[derive(Clone, Debug, Default)]
 enum ResidentExecution {
     /// The session holds no execution state.
     #[default]
     None,
-    Held {
-        /// The session descriptor page.
-        root: crate::checkpoint_graph::NodeId,
-        /// The nodes the next commit installs: the capture's nodes no
-        /// commit has installed. Empty once a commit adopted the root.
-        install: std::sync::Arc<GraphNodes>,
-        /// Every node the root reaches while resident; `None` once a
-        /// commit released them for the durable head to supply.
-        graph: Option<std::sync::Arc<GraphNodes>>,
-    },
+    /// The descriptor the next commit names.
+    Held(crate::plugin::HydratedExecutionGraph),
+    /// A root known without its descriptor: a public snapshot's
+    /// projection, or a committed root no capture handed resident state.
+    /// The store holds it; a hydrate of it is refused.
+    Named(crate::checkpoint_graph::NodeId),
 }
 
 impl ResidentExecution {
     fn root(&self) -> Option<crate::checkpoint_graph::NodeId> {
         match self {
             Self::None => None,
-            Self::Held { root, .. } => Some(*root),
+            Self::Held(graph) => Some(graph.root),
+            Self::Named(root) => Some(*root),
         }
     }
 }
@@ -68,9 +61,9 @@ impl ResidentExecution {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AcceptedExecutionRetention {
     /// A store holds the committed checkpoint: a restore rehydrates from it,
-    /// and the released execution bodies are a second resident copy.
+    /// and the released component bodies are a second resident copy.
     DurableHead,
-    /// No store can supply the committed execution: the accepted execution
+    /// No store can supply the committed checkpoint: the accepted component
     /// bodies stay resident until the next commit supersedes them (FIG-2521).
     Resident,
 }
@@ -186,11 +179,7 @@ impl RuntimeCheckpointComponents {
             .as_ref()
             .and_then(|root| crate::checkpoint_graph::NodeId::from_hex(root.as_str()))
         {
-            result.execution = ResidentExecution::Held {
-                root,
-                install: std::sync::Arc::default(),
-                graph: None,
-            };
+            result.execution = ResidentExecution::Named(root);
         }
         result
     }
@@ -262,10 +251,14 @@ impl RuntimeCheckpointComponents {
         }
         let execution = match &checkpoint.execution {
             None => ResidentExecution::None,
-            Some(execution) => ResidentExecution::Held {
-                root: execution.root,
-                install: std::sync::Arc::default(),
-                graph: Some(std::sync::Arc::new(execution.nodes.clone())),
+            Some(execution) => match &execution.descriptor {
+                Some(descriptor) => {
+                    ResidentExecution::Held(crate::plugin::HydratedExecutionGraph {
+                        root: execution.root,
+                        descriptor: std::sync::Arc::clone(descriptor),
+                    })
+                }
+                None => ResidentExecution::Named(execution.root),
             },
         };
         Ok(Self {
@@ -334,12 +327,14 @@ impl RuntimeCheckpointComponents {
         }
         let execution = match &self.execution {
             ResidentExecution::None => None,
-            ResidentExecution::Held { root, install, .. } => {
-                Some(crate::store::CheckpointExecution {
-                    root: *root,
-                    nodes: install.as_ref().clone(),
-                })
-            }
+            ResidentExecution::Held(graph) => Some(crate::store::CheckpointExecution {
+                root: graph.root,
+                descriptor: Some(std::sync::Arc::clone(&graph.descriptor)),
+            }),
+            ResidentExecution::Named(root) => Some(crate::store::CheckpointExecution {
+                root: *root,
+                descriptor: None,
+            }),
         };
         Ok(crate::store::HydratedSessionCheckpoint {
             turn_state,
@@ -491,34 +486,12 @@ impl RuntimeCheckpointComponents {
     }
 
     /// Takes `capture`, a complete SessionExecution root, as the head's
-    /// execution state: the next commit installs the nodes it sends. The
-    /// resident graph is the root's closure over what is resident and what
-    /// it sent; a capture that leans on nodes a commit released leaves the
-    /// durable head to supply the graph.
+    /// execution state: the next commit names its descriptor.
     fn set_execution_graph(&mut self, capture: crate::plugin::ExecutionGraphCapture) {
         self.execution_state_body_residency = ExecutionStateBodyResidency::Resident;
-        let crate::plugin::ExecutionGraphCapture::Replace { root, nodes } = capture else {
-            self.execution = ResidentExecution::None;
-            return;
-        };
-        let mut known = match &self.execution {
-            ResidentExecution::Held {
-                graph: Some(graph), ..
-            } => graph.as_ref().clone(),
-            _ => GraphNodes::new(),
-        };
-        known.extend(nodes.iter().map(|(id, node)| (*id, node.clone())));
-        let graph = crate::checkpoint_graph::closure(
-            &known,
-            root,
-            &crate::checkpoint_graph::DecodeLimits::within_total(u64::MAX),
-        )
-        .ok()
-        .map(std::sync::Arc::new);
-        self.execution = ResidentExecution::Held {
-            root,
-            install: std::sync::Arc::new(nodes),
-            graph,
+        self.execution = match capture {
+            crate::plugin::ExecutionGraphCapture::Clear => ResidentExecution::None,
+            crate::plugin::ExecutionGraphCapture::Replace(graph) => ResidentExecution::Held(graph),
         };
     }
 
@@ -535,19 +508,10 @@ impl RuntimeCheckpointComponents {
         }
         match &self.execution {
             ResidentExecution::None => Ok(None),
-            // A released graph is never "no execution" (FIG-2521): the
-            // durable head must be hydrated instead.
-            ResidentExecution::Held { graph: None, .. } => {
-                Err(crate::StoreError::ExecutionStateBodiesReleased)
-            }
-            ResidentExecution::Held {
-                root,
-                graph: Some(graph),
-                ..
-            } => Ok(Some(crate::plugin::HydratedExecutionGraph {
-                root: *root,
-                nodes: graph.as_ref().clone(),
-            })),
+            ResidentExecution::Held(graph) => Ok(Some(graph.clone())),
+            // A root known without its descriptor is never "no execution":
+            // the durable head must be hydrated instead.
+            ResidentExecution::Named(_) => Err(crate::StoreError::IncompleteCheckpointComponentSet),
         }
     }
 
@@ -574,11 +538,11 @@ impl RuntimeCheckpointComponents {
         committed_components_match: bool,
         retention: AcceptedExecutionRetention,
     ) {
-        // With no store to rehydrate from, the resident execution bodies are
-        // the accepted execution itself (FIG-2521): they stay in place, the
+        // With no store to rehydrate from, the resident component bodies are
+        // the accepted state itself (FIG-2521): they stay in place, the
         // residency proof is untouched, and only the tool and plugin snapshots
-        // — re-exported from the live plugins — are released. A set without a
-        // run holds no execution to keep and is released like any other.
+        // — re-exported from the live plugins — are released. A set without
+        // an execution holds no state to keep and is released like any other.
         if retention == AcceptedExecutionRetention::Resident && self.execution_root().is_some() {
             self.entries
                 .retain(|_, component| component.release_typed_snapshot());
@@ -597,12 +561,6 @@ impl RuntimeCheckpointComponents {
             (_, false) => ExecutionStateBodyResidency::CommitResultMismatch,
         };
         self.entries.retain(|_, component| component.release_body());
-        // Nodes no commit installed yet are the retry's only source and stay.
-        if let ResidentExecution::Held { install, graph, .. } = &mut self.execution
-            && install.is_empty()
-        {
-            *graph = None;
-        }
     }
 
     fn adopt_manifest(&mut self, manifest: &crate::store::SessionCheckpoint) {
@@ -627,20 +585,10 @@ impl RuntimeCheckpointComponents {
             .execution_ref
             .as_ref()
             .and_then(|root| crate::checkpoint_graph::NodeId::from_hex(root.as_str()));
-        match (&mut self.execution, committed) {
-            (ResidentExecution::Held { root, install, .. }, Some(committed))
-                if *root == committed =>
-            {
-                *install = std::sync::Arc::default();
-            }
-            (_, Some(committed)) => {
-                self.execution = ResidentExecution::Held {
-                    root: committed,
-                    install: std::sync::Arc::default(),
-                    graph: None,
-                };
-            }
-            (_, None) => self.execution = ResidentExecution::None,
+        match committed {
+            Some(committed) if self.execution.root() == Some(committed) => {}
+            Some(committed) => self.execution = ResidentExecution::Named(committed),
+            None => self.execution = ResidentExecution::None,
         }
         self.completeness = CheckpointComponentCompleteness::Complete;
     }
