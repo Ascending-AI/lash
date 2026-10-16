@@ -95,6 +95,7 @@ main {{
   let now = clock
   let roll = random
   let seen = read(f, {{path: ["a", 0]}})
+  let nested = [call start(1, "a"), sleep 0]
   finish seen
   fail "unreachable"
 }}
@@ -201,6 +202,7 @@ fn kernel_text_round_trips_documents_that_use_every_form() {
         "callee:declared",
         "callee:library",
         "callee:value",
+        "expr:act",
         "expr:call",
         "expr:clock",
         "expr:closure",
@@ -326,6 +328,7 @@ fn collect_forms(node: Node<'_>, forms: &mut std::collections::BTreeSet<&'static
                 Expr::Clock => "expr:clock",
                 Expr::Random => "expr:random",
                 Expr::Read(_) => "expr:read",
+                Expr::Act(_) => "expr:act",
             });
         }
     }
@@ -418,33 +421,24 @@ fn statement_rule_admits_a_nested_native_call_and_refuses_a_nested_body_only_cal
     assert_eq!(validate_document(&hoisted, &catalog), Ok(()));
 }
 
-/// `K-STMT-001`: `perform`, `spawn` and every other statement form have no
-/// place inside an expression. Kernel text refuses each with a typed error
-/// at the form; the tree has no node that could hold one.
+/// `K-STMT-001`: the forms that only run as statement actions — `spawn`,
+/// `join`, `yield`, `cancel`, `apply` — have no place inside an
+/// expression; `call`, `invoke`, `perform` and `sleep` there are
+/// expression actions. Kernel text refuses each statement form with a
+/// typed error at the form; the tree has no node that could hold one.
 #[test]
 fn statement_rule_refuses_statement_forms_nested_in_an_expression() {
     let cases = [
-        (
-            "let y = num.neg(perform fetch(\"u\") as Any)",
-            StatementForm::Perform,
-            (8, 17),
-        ),
         (
             "let y = [spawn call declared(1)]",
             StatementForm::Spawn,
             (8, 10),
         ),
         (
-            "let y = num.neg(call declared(1))",
-            StatementForm::Call,
-            (8, 17),
-        ),
-        (
             "let h = 1\nlet y = {v: join h}",
             StatementForm::Join,
             (9, 13),
         ),
-        ("let y = (sleep 1,)", StatementForm::Sleep, (8, 10)),
         ("let y = map{1: yield}", StatementForm::Yield, (8, 16)),
         (
             "let h = 1\nlet y = set{cancel h}",
@@ -465,8 +459,9 @@ fn statement_rule_refuses_statement_forms_nested_in_an_expression() {
             "{statements}: {error}"
         );
     }
-    // An argument of a statement form is a variable or a literal.
-    let error = parse_document(&main_of("let y = call declared(num.neg(1))")).unwrap_err();
+    // An argument of a statement-only form is a variable or a literal;
+    // a call with a computed argument is an expression action instead.
+    let error = parse_document(&main_of("let h = spawn call declared(num.neg(1))")).unwrap_err();
     assert_eq!(error.reason, ParseErrorReason::ArgumentNotAtom);
     // The JSON encoding has no spelling for a nested wait either.
     let nested = r#"{"manifest":{"kernel":1,"numbers":"float"},"main":[{"let":{"name":"y","value":{"expr":{"list":[{"spawn":{"callee":{"declared":"f"},"args":[]}}]}}}}]}"#;

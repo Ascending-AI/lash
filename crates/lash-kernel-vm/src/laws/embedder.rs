@@ -367,7 +367,7 @@ pub(crate) struct Embedder {
     pub(crate) source: Source,
 }
 
-fn wait_of(request: &Request) -> WaitId {
+pub(crate) fn wait_of(request: &Request) -> WaitId {
     match request {
         Request::Effect(effect) => effect.wait,
         Request::Sleep(sleep) => sleep.wait,
@@ -387,7 +387,7 @@ pub(crate) fn label(request: &Request) -> String {
 }
 
 /// The table effects are answered from.
-fn answer(request: &Request) -> Outcome {
+pub(crate) fn answer(request: &Request) -> Outcome {
     let Request::Effect(effect) = request else {
         return Outcome::Elapsed;
     };
@@ -413,9 +413,19 @@ impl Embedder {
     }
 
     pub(crate) fn with(text: &str, setup: Setup) -> Self {
+        let text = format!(
+            "numbers {}\n{}{text}",
+            setup.numbers,
+            library(setup.native_twice).header
+        );
+        Self::try_with(&text, setup).unwrap_or_else(|error| panic!("{error}\n{text}"))
+    }
+
+    /// [`with`] that gives the start error instead of panicking: a bound
+    /// the machine cannot start under.
+    pub(crate) fn try_with(text: &str, setup: Setup) -> Result<Self, crate::StartError> {
         let library = library(setup.native_twice);
-        let text = format!("numbers {}\n{}{text}", setup.numbers, library.header);
-        let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+        let document = parse_document(text).unwrap_or_else(|error| panic!("{error}\n{text}"));
         let document = Arc::new(document);
         let program = Program {
             release: PageId([8; 32]),
@@ -430,9 +440,8 @@ impl Embedder {
             setup.layout,
             Box::new(source.clone()),
             census(setup.bounds.memory),
-        )
-        .unwrap_or_else(|error| panic!("{error}\n{text}"));
-        Self {
+        )?;
+        Ok(Self {
             machine,
             world: World::default(),
             library,
@@ -443,7 +452,7 @@ impl Embedder {
             slice: setup.slice,
             bounds: setup.bounds,
             source,
-        }
+        })
     }
 
     /// The run's document with a registry built afresh, in which
@@ -495,6 +504,43 @@ impl Embedder {
         let (root, certificate) = self.checkpoint();
         self.open_at(&root, certificate, layout, native_twice);
         root
+    }
+
+    /// [`reopen`] that gives the seal or open error instead of panicking:
+    /// a bound a law runs under can refuse mid-seal or at open.
+    pub(crate) fn try_reopen(&mut self, layout: Layout, native_twice: bool) -> Result<(), String> {
+        let sealed = self
+            .machine
+            .seal(SealBudget {
+                pages: u64::MAX,
+                bytes: u64::MAX,
+            })
+            .map_err(|error| format!("{error:?}"))?
+            .ok_or_else(|| "nothing to seal".to_string())?;
+        let certificate = self.machine.accounting();
+        let root: CheckpointRoot = lash_kernel_doc::graph_tokens::decode_body(
+            &lash_kernel_doc::graph_tokens::encode_body(&sealed.root),
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        let (program, library) = self.program(native_twice);
+        self.machine = KernelMachine::open_with_layout(
+            program,
+            self.bounds,
+            &root,
+            Vec::new(),
+            Box::new(self.source.clone()),
+            Box::new(
+                lash_kernel_state::paged::census_impl::Census::restore(
+                    certificate,
+                    LogicalBytes(self.bounds.memory),
+                )
+                .map_err(|error| format!("{error:?}"))?,
+            ),
+            layout,
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        self.library = library;
+        Ok(())
     }
 
     /// Seals the run whole, as a node commits it, leaving it running: the

@@ -290,6 +290,12 @@ impl KernelMachine {
                 }
                 return Ok(None);
             }
+            Op::Nested { act, args } => {
+                if self.nested_act(task, host, exe, running, act, base, args)? == Flow::Step {
+                    return Ok(Some(Ran::Step));
+                }
+                return Ok(None);
+            }
             Op::BindShared { local, src } => {
                 let value = self.take(at(base, src));
                 self.bind(task, local.at, true, value)?;

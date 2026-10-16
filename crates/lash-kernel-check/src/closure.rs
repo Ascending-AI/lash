@@ -421,7 +421,7 @@ fn targets_of(
             };
             targets_of(graph, *target, targets)
         }
-        NodeKind::Expr(ExprNode::Call { args, .. }) => union(args),
+        NodeKind::Expr(ExprNode::Call { args, .. } | ExprNode::Act { args }) => union(args),
         NodeKind::Action(ActionNode::Call { args, .. } | ActionNode::Spawn { args, .. }) => args
             .iter()
             .flat_map(|arg| targets_of_atom(arg, targets))

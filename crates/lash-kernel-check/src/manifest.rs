@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    Action, Atom, Block, Callee, Document, EffectName, Expr, FunctionCatalog, FunctionId,
+    ActKind, Action, Atom, Block, Callee, Document, EffectName, Expr, FunctionCatalog, FunctionId,
     FunctionName, InvalidReason, Literal, Name, Node,
 };
 
@@ -53,6 +53,19 @@ fn scan(
                 | Expr::Clock
                 | Expr::Random
                 | Expr::Read(_) => {}
+                Expr::Act(act) => match &act.kind {
+                    ActKind::Call(Callee::Declared(name)) => {
+                        declared.insert(name.clone());
+                    }
+                    ActKind::Call(Callee::Library(function)) => {
+                        functions.insert(*function);
+                    }
+                    ActKind::Call(Callee::Value(_)) => {}
+                    ActKind::Perform { effect, .. } => {
+                        effects.insert(effect.clone());
+                    }
+                    ActKind::Sleep => {}
+                },
             },
             Node::Action(action) => {
                 let args: &[Atom] = match action {

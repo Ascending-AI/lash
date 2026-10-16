@@ -44,7 +44,7 @@ mod session_editor;
 #[cfg(test)]
 mod laws;
 
-pub use compile::{Layout, PreparedLibrary};
+pub use compile::{Layout, PreparedLibrary, p0_compile};
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;
 pub use observe::{Observe, RanDelta};

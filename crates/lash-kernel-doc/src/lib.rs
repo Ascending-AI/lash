@@ -21,6 +21,7 @@ mod source_map_tests;
 pub use correspondence::{Correspondence, Survivor};
 pub use source_map::{SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span};
 mod codec_variants;
+mod continuation;
 mod data_limits;
 mod decode;
 pub use decode::{DecodeMismatch, Decoder};
@@ -50,10 +51,12 @@ mod version;
 mod tests;
 
 pub use ast::{
-    Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode, Literal, MapEntry,
-    Member, Node, Place, ProjectionRead, RecordEntry, Rhs, Site, Stmt, TryStmt, Unit,
+    ActExpr, ActKind, Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode,
+    Literal, MapEntry, Member, Node, Place, ProjectionRead, RecordEntry, Rhs, Site, Stmt, TryStmt,
+    Unit,
 };
 pub use canonical::EncodeError;
+pub use continuation::{LiveRolesError, live_roles};
 pub use document::{
     Annotations, DecodeError, Document, KERNEL_VERSION, Label, MAX_NESTING_DEPTH, Manifest,
     NodeAnnotation,

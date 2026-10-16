@@ -116,6 +116,7 @@ impl<'a> NodeMut<'a> {
                 Expr::Member(member) => push_member(member, &mut out),
                 Expr::Closure(closure) => out.push(NodeMut::Block(&mut closure.body)),
                 Expr::Call { args, .. } => out.extend(args.iter_mut().map(NodeMut::Expr)),
+                Expr::Act(act) => out.extend(act.args.iter_mut().map(NodeMut::Expr)),
                 Expr::Read(read) => {
                     out.push(NodeMut::Expr(&mut read.handle));
                     out.push(NodeMut::Expr(&mut read.request));

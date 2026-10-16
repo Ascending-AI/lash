@@ -32,8 +32,8 @@ use lash_kernel_doc::{
     PreparedNative, Site, Type, Unit,
 };
 use lash_kernel_exec::{
-    BoundaryKind, KirError, LocalRef, Op, OpRange, StepEdge, StmtRanges, Tables as StreamTables,
-    verify_stream,
+    ActIx, BoundaryKind, KirError, LocalRef, Op, OpRange, Reg, StepEdge, StmtRanges,
+    Tables as StreamTables, verify_stream,
 };
 
 use crate::functions::{MachineFunction, machine_function};
@@ -140,6 +140,7 @@ impl Tables {
             codes,
             blocks,
             libs,
+            nested: stream.nested.len(),
         };
         verify_stream(&stream.ops, &stmts, &sizes)?;
         Ok(stmts.len())
@@ -625,6 +626,45 @@ pub(crate) struct Stream {
     pub(crate) names: Vec<Name>,
     pub(crate) fields: Vec<String>,
     pub(crate) field_lists: Vec<Box<[String]>>,
+    /// The nested actions of the stream's statements, by [`ActIx`]: each
+    /// one's continuation for a resume that finds its registers cleared.
+    pub(crate) nested: Vec<Nested>,
+}
+
+/// A nested action (`Expr::Act`) of a statement: what the machine needs
+/// to issue it and to resume the statement at the op after it.
+pub(crate) struct Nested {
+    /// The action's site, which its waits and calls identify.
+    pub(crate) site: Site,
+    /// The length of its statement's site path: continuation sites are
+    /// saved as the suffix under it.
+    pub(crate) depth: u32,
+    /// What the action does.
+    pub(crate) kind: NestedKind,
+    /// The op of its statement's range the resume runs from, as an offset
+    /// from the range's start: the op after the nested op itself.
+    pub(crate) resume: u32,
+    /// The register the action's value goes to.
+    pub(crate) dst: Reg,
+    /// The operands the statement already evaluated, each named by the
+    /// site of the expression that produced it, in `live_roles` order:
+    /// the roles a frame parked at the action saves and a resume loads
+    /// back into these registers (`K-EVAL-006`).
+    pub(crate) roles: Vec<(Site, Reg)>,
+}
+
+/// What a nested action does.
+pub(crate) enum NestedKind {
+    /// `call` or `invoke`: enters a frame, the caller resuming with the
+    /// value the callee returns.
+    Call(Callee),
+    /// `perform`: a wait whose outcome is decoded as `result`.
+    Perform {
+        effect: doc::EffectName,
+        result: Type,
+    },
+    /// `sleep`: a wait for the duration its argument evaluates to.
+    Sleep,
 }
 
 /// One statement: its ops in its stream, how many registers they use, and
@@ -642,6 +682,19 @@ pub(crate) struct Stmt {
     pub(crate) ops: OpRange,
     pub(crate) regs: u32,
     pub(crate) form: Form,
+}
+
+impl Stmt {
+    /// The nested actions of the statement's own expressions, in issue
+    /// order: the `Nested` ops of its range. A closure's statements have
+    /// ranges of their own.
+    pub(crate) fn nested<'s>(&self, stream: &'s Stream) -> impl Iterator<Item = ActIx> + 's {
+        let range = self.ops.start as usize..(self.ops.start + self.ops.len) as usize;
+        stream.ops[range].iter().filter_map(|op| match op {
+            Op::Nested { act, .. } => Some(*act),
+            _ => None,
+        })
+    }
 }
 
 pub(crate) enum Form {
@@ -844,6 +897,14 @@ struct Compiler<'a> {
     scopes: Vec<Scopes>,
     unit: Unit,
     path: Vec<u32>,
+    /// The operand values already evaluated of the expression being
+    /// compiled, each by its parent's path length, its child index and
+    /// its register: what a nested action's continuation saves. The
+    /// parent is an ancestor of whatever is compiled while it is live,
+    /// so `path` still holds its prefix.
+    live: Vec<(u32, u32, Reg)>,
+    /// The site path length of the statement being compiled.
+    stmt_depth: u32,
 }
 
 enum UnitSource<'a> {
@@ -953,6 +1014,8 @@ impl<'a> Compiler<'a> {
             scopes: Vec::new(),
             unit: Unit::Main,
             path: Vec::new(),
+            live: Vec::new(),
+            stmt_depth: 0,
         }
     }
 
@@ -1078,6 +1141,9 @@ impl Compiler<'_> {
         free: bool,
     ) -> Code {
         let site = self.site();
+        // A closure body's statements have their own continuation roles:
+        // the enclosing expression's operands mean nothing inside it.
+        let enclosing = std::mem::take(&mut self.live);
         self.scopes.push(Scopes {
             main,
             body: site.clone(),
@@ -1095,6 +1161,7 @@ impl Compiler<'_> {
             captures: Vec::new(),
             free: None,
         });
+        self.live = enclosing;
         let mut positions: Vec<u32> = (0..scopes.slots.len() as u32).collect();
         self.shuffler.shuffle(self.layout, &mut positions);
         let placer = Placer {
@@ -1448,4 +1515,12 @@ impl Placer<'_> {
             }
         }
     }
+}
+
+/// P0 measurement hook (FIG-6417): compiles `document`'s own code against
+/// `library`, bypassing the library's document cache, and keeps the
+/// compiled tables alive in the box for the caller to size.
+#[doc(hidden)]
+pub fn p0_compile(document: &Document, library: &PreparedLibrary) -> Box<dyn std::any::Any> {
+    Box::new(compile_document(document, library).ok())
 }

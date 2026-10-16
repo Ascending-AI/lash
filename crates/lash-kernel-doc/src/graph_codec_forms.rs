@@ -7,11 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{invalid, variant};
 use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
 use crate::{
-    Action, Annotations, Atom, Bytes, Callee, Catch, Closure, Document, DocumentId, Expr, Float,
-    Formula, Function, FunctionBody, FunctionDefinition, FunctionId, Guard, Implementation,
-    Integer, JoinMode, Label, Literal, Manifest, MapEntry, MapType, Member, Name, NodeAnnotation,
-    NumberPolicy, Operand, Param, Place, ProjectionRead, QualifiedName, RecordEntry, RecordType,
-    RecordTypeField, Rhs, Signature, Site, Stmt, TryStmt, Type,
+    ActExpr, ActKind, Action, Annotations, Atom, Bytes, Callee, Catch, Closure, Document,
+    DocumentId, Expr, Float, Formula, Function, FunctionBody, FunctionDefinition, FunctionId,
+    Guard, Implementation, Integer, JoinMode, Label, Literal, Manifest, MapEntry, MapType, Member,
+    Name, NodeAnnotation, NumberPolicy, Operand, Param, Place, ProjectionRead, QualifiedName,
+    RecordEntry, RecordType, RecordTypeField, Rhs, Signature, Site, Stmt, TryStmt, Type,
 };
 
 // Types and signatures.
@@ -460,6 +460,58 @@ impl TokenCodec for Closure {
     }
 }
 
+impl TokenCodec for ActKind {
+    fn encode(&self, out: &mut TokenWriter) {
+        let number = self.codec_variant();
+        match self {
+            Self::Call(callee) => {
+                out.sum(number, 1);
+                callee.encode(out);
+            }
+            Self::Perform { effect, result } => {
+                out.sum(number, 2);
+                effect.encode(out);
+                result.encode(out);
+            }
+            Self::Sleep => out.sum(number, 0),
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(
+            match variant(input, |variant| match variant {
+                0 => Some(1),
+                1 => Some(2),
+                2 => Some(0),
+                _ => None,
+            })? {
+                0 => Self::Call(Callee::decode(input)?),
+                1 => Self::Perform {
+                    effect: QualifiedName::decode(input)?,
+                    result: Type::decode(input)?,
+                },
+                _ => Self::Sleep,
+            },
+        )
+    }
+}
+
+impl TokenCodec for ActExpr {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.kind.encode(out);
+        self.args.encode(out);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            kind: ActKind::decode(input)?,
+            args: Vec::decode(input)?,
+        })
+    }
+}
+
 impl TokenCodec for Expr {
     fn encode(&self, out: &mut TokenWriter) {
         let number = self.codec_variant();
@@ -502,13 +554,17 @@ impl TokenCodec for Expr {
                 out.sum(number, 1);
                 read.encode(out);
             }
+            Self::Act(act) => {
+                out.sum(number, 1);
+                act.encode(out);
+            }
         }
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.nested(|input| {
             let number = variant(input, |variant| match variant {
-                0..=8 | 12 => Some(1),
+                0..=8 | 12 | 13 => Some(1),
                 9 => Some(2),
                 10 | 11 => Some(0),
                 _ => None,
@@ -529,7 +585,8 @@ impl TokenCodec for Expr {
                 },
                 10 => Self::Clock,
                 11 => Self::Random,
-                _ => Self::Read(Box::decode(input)?),
+                12 => Self::Read(Box::decode(input)?),
+                _ => Self::Act(Box::decode(input)?),
             })
         })
     }

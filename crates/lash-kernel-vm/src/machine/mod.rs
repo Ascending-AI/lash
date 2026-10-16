@@ -39,6 +39,7 @@ use lash_kernel_state::paged::{
     SemanticHeap, TableCursor, TaskStateRecord as TaskState, WaitPhase, WaitRecord,
 };
 use session::{keyed, open_tree};
+use stream::Ran;
 
 /// What a frame is accounted before its variables.
 const FRAME_BYTES: u64 = 64;
@@ -251,6 +252,10 @@ struct Frame {
     control: Vec<Control>,
     /// The statement whose action this frame waits on.
     awaiting: Option<StmtId>,
+    /// The nested action of the awaited statement this frame parked at:
+    /// the index of its continuation entry in the statement's stream, as
+    /// [`Op::Nested`] holds it. `None` waits in a whole-statement action.
+    nested: Option<u32>,
     /// The library call this frame is the body of, charged when it ends.
     library: Option<LibraryCall>,
     /// The frame was called from inside an expression and runs to its end
@@ -672,10 +677,28 @@ impl KernelMachine {
                     // The value is in no variable until the statement binds
                     // it.
                     self.put(0, value);
-                    self.pin(0)?;
-                    let stmt = self.finish_action(task, host, exe, 0)?;
-                    self.take_edge_of(task, exe, stmt)?;
-                    Ok(Completion::Normal)
+                    // A nested action moves the value to its own
+                    // register and pins it there; a statement's value
+                    // stays in register 0.
+                    if self.frame(task)?.nested.is_none() {
+                        self.pin(0)?;
+                    }
+                    match self.finish_action(task, host, exe, 0)? {
+                        (stmt, Ran::Done) => {
+                            self.take_edge_of(task, exe, stmt)?;
+                            Ok(Completion::Normal)
+                        }
+                        (_, Ran::Step) => {
+                            if self.steps.verify {
+                                self.verify_no_edge(task, exe)?;
+                            }
+                            Ok(Completion::Normal)
+                        }
+                        (_, Ran::Depart(completion)) => Ok(completion),
+                        (_, Ran::Tested(_)) => {
+                            Err(fault("a statement ended as a loop's test").into())
+                        }
+                    }
                 })
             }
             None => self.advance(task, host, exe),
@@ -1000,6 +1023,108 @@ fn machine_error(halt: Halt) -> MachineError {
         other => MachineError::Fault {
             problem: format!("{other:?}"),
         },
+    }
+}
+
+#[cfg(test)]
+impl KernelMachine {
+    /// The executable the machine admitted, under its layout: what a
+    /// continuation law reads a statement's resume entries from.
+    pub(crate) fn executable(&self) -> &Executable {
+        &self.exe
+    }
+
+    /// Sets `task`'s cached task record state, which the next seal
+    /// publishes: what a continuation law tampers to plant a task state
+    /// the grammar refuses.
+    pub(crate) fn tamper_task_state(
+        &mut self,
+        task: TaskId,
+        state: lash_kernel_state::paged::TaskStateRecord,
+    ) -> Result<(), Halt> {
+        self.task(task)?.record.state = state;
+        Ok(())
+    }
+
+    /// Every frame row's pending continuation phase, by task and frame
+    /// index: what the continuation laws check at a checkpoint.
+    pub(crate) fn pending_phases(
+        &mut self,
+    ) -> Vec<(TaskId, usize, lash_kernel_state::paged::PhaseRecord)> {
+        let mut phases = Vec::new();
+        let access = self.heap.access.clone();
+        let _ = self.publish_holdings();
+        let _ = self.tasks.visit(&mut |id, task| {
+            for index in 0..task.frames.len() {
+                if let Ok(Some((_, frame))) = task.frames.rank_get(index, &access)
+                    && let Some(pending) = &frame.pending
+                {
+                    phases.push((id, index as usize, pending.phase));
+                }
+            }
+            true
+        });
+        phases
+    }
+
+    /// Every published frame row, by task and frame index, with its
+    /// continuation's roles in order: what the P0 measurement encodes to
+    /// size a parked frame and its continuation.
+    pub(crate) fn frame_rows(
+        &mut self,
+    ) -> Vec<(
+        TaskId,
+        usize,
+        lash_kernel_state::paged::FrameRecord,
+        Vec<lash_kernel_state::paged::RoleRecord>,
+    )> {
+        let mut rows = Vec::new();
+        let access = self.heap.access.clone();
+        let _ = self.publish_holdings();
+        let _ = self.tasks.visit(&mut |id, task| {
+            for index in 0..task.frames.len() {
+                if let Ok(Some((_, frame))) = task.frames.rank_get(index, &access) {
+                    let mut roles = Vec::new();
+                    if let Some(pending) = &frame.pending {
+                        let mut key = None;
+                        while let Ok(Some((next, role))) =
+                            pending.roles.after(key.as_deref(), &access)
+                        {
+                            roles.push(role);
+                            key = Some(next);
+                        }
+                    }
+                    rows.push((id, index as usize, frame.clone(), roles));
+                }
+            }
+            true
+        });
+        rows
+    }
+
+    /// Applies `edit` to the pending-continuation slot of `task`'s frame
+    /// `frame_index`: the continuation laws' grammar tamper hook.
+    pub(crate) fn tamper_pending(
+        &mut self,
+        task: TaskId,
+        frame_index: usize,
+        edit: impl FnOnce(
+            &mut Option<lash_kernel_state::paged::PendingRecord>,
+            &lash_kernel_state::paged::tree::Access<'_>,
+        ),
+    ) -> Result<(), String> {
+        let task = self.task(task).map_err(|halt| format!("{halt:?}"))?;
+        let mut edit = Some(edit);
+        if !task
+            .frames
+            .pending_mut(frame_index as u64, &mut |pending, access| {
+                edit.take().expect("one edit")(pending, access)
+            })
+            .map_err(|error| format!("{error:?}"))?
+        {
+            return Err("the frame has no row".to_string());
+        }
+        Ok(())
     }
 }
 

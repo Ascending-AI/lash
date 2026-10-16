@@ -2,11 +2,11 @@
 //!
 //! The statement rule is carried by the types where that is cheap. A form
 //! that may pause a task, or that calls anything but a native library
-//! function, is an [`Action`]: it is the whole right-hand side of a
-//! statement and its arguments are [`Atom`]s. An [`Expr`] holds no action,
-//! so "a wait nested in an expression" has no representation. What the types
-//! cannot say, that an [`Expr::Call`] names a function with a native
-//! implementation, is checked by validation (`K-STMT-002`).
+//! function, is an [`Action`]: the whole right-hand side of a statement,
+//! with [`Atom`] arguments, or an [`Expr::Act`] nested in an expression,
+//! with expression arguments. What the types cannot say, that an
+//! [`Expr::Call`] names a function with a native implementation, is
+//! checked by validation (`K-STMT-002`).
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -207,6 +207,61 @@ pub enum Expr {
     Random,
     /// Reads through a projection handle.
     Read(Box<ProjectionRead>),
+    /// An action nested inside the expression: the statement may pause at
+    /// it, the operands already evaluated kept as its continuation's roles.
+    Act(Box<ActExpr>),
+}
+
+/// An action inside an expression: the forms an [`Action`] has that may
+/// nest, their arguments expressions.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ActExpr {
+    pub kind: ActKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<Expr>,
+}
+
+/// What an [`Expr::Act`] does.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ActKind {
+    /// Calls a declared function or a library function.
+    Call(Callee),
+    /// Runs one effect and yields its result, decoded as `result`.
+    Perform { effect: EffectName, result: Type },
+    /// Waits for a number of milliseconds; the one argument is the duration.
+    Sleep,
+}
+
+impl ActExpr {
+    /// The statement's [`Action`] this nested action spells when every
+    /// argument is an atom: a variable or a literal.
+    pub fn into_action(self) -> Option<Action> {
+        fn atom(expr: Expr) -> Option<Atom> {
+            match expr {
+                Expr::Variable(name) => Some(Atom::Variable(name)),
+                Expr::Literal(literal) => Some(Atom::Literal(literal)),
+                _ => None,
+            }
+        }
+        let args: Option<Vec<Atom>> = self.args.into_iter().map(atom).collect();
+        let args = args?;
+        match self.kind {
+            ActKind::Call(callee) => Some(Action::Call { callee, args }),
+            ActKind::Perform { effect, result } => Some(Action::Perform {
+                effect,
+                args,
+                result,
+            }),
+            ActKind::Sleep => match args.as_slice() {
+                [duration] => Some(Action::Sleep {
+                    duration: duration.clone(),
+                }),
+                _ => None,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -415,6 +470,7 @@ impl<'a> Node<'a> {
                     out.push(Node::Expr(&read.handle));
                     out.push(Node::Expr(&read.request));
                 }
+                Expr::Act(act) => out.extend(act.args.iter().map(Node::Expr)),
             },
         }
         out

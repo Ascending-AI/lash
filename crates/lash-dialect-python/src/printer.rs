@@ -370,6 +370,13 @@ impl Renderer<'_> {
                 self.expr(&read.handle);
                 self.expr(&read.request);
             }
+            k::Expr::Act(act) => {
+                self.out.write("with k.act(");
+                self.suite();
+                for arg in &act.args {
+                    self.expr(arg);
+                }
+            }
         }
         self.indent -= 1;
     }

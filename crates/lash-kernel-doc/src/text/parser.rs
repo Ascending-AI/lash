@@ -7,8 +7,8 @@ use num_traits::ToPrimitive;
 use super::lexer::{Spanned, Token, lex};
 use super::{ParseError, ParseErrorReason, is_keyword};
 use crate::ast::{
-    Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode, Literal, MapEntry,
-    Member, Place, ProjectionRead, RecordEntry, Rhs, Stmt, TryStmt,
+    ActExpr, ActKind, Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode,
+    Literal, MapEntry, Member, Place, ProjectionRead, RecordEntry, Rhs, Stmt, TryStmt,
 };
 use crate::document::{Document, Manifest};
 use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Operand};
@@ -588,10 +588,68 @@ impl Parser {
     }
 
     fn rhs(&mut self) -> Parsed<Rhs> {
-        Ok(match self.action()? {
-            Some(action) => Rhs::Action(action),
-            None => Rhs::Expr(self.expr()?),
+        Ok(match self.act_expr()? {
+            Some(act) => match act.clone().into_action() {
+                Some(action) => Rhs::Action(action),
+                None => Rhs::Expr(Expr::Act(Box::new(act))),
+            },
+            None => match self.action()? {
+                Some(action) => Rhs::Action(action),
+                None => Rhs::Expr(self.expr()?),
+            },
         })
+    }
+
+    /// An action nested in an expression, when the next word begins one:
+    /// `call name(…)`, `invoke function(…)`, `perform effect(…) as Type`
+    /// or `sleep <expr>`. A call by value (`apply`) and the other statement
+    /// forms stay statement-only.
+    fn act_expr(&mut self) -> Parsed<Option<ActExpr>> {
+        let Token::Word(word) = self.peek() else {
+            return Ok(None);
+        };
+        let kind = match word.as_str() {
+            "call" => {
+                self.position += 1;
+                ActKind::Call(Callee::Declared(self.name()?))
+            }
+            "invoke" => {
+                self.position += 1;
+                ActKind::Call(Callee::Library(self.function_reference()?))
+            }
+            "perform" => {
+                self.position += 1;
+                let effect = self.qualified_name()?;
+                self.expect(&Token::LParen)?;
+                let args = self.exprs(&Token::RParen)?;
+                self.expect_keyword("as")?;
+                return Ok(Some(ActExpr {
+                    kind: ActKind::Perform {
+                        effect,
+                        result: self.ty()?,
+                    },
+                    args,
+                }));
+            }
+            "sleep" => {
+                self.position += 1;
+                ActKind::Sleep
+            }
+            _ => return Ok(None),
+        };
+        match &kind {
+            ActKind::Sleep => Ok(Some(ActExpr {
+                kind,
+                args: vec![self.expr()?],
+            })),
+            _ => {
+                self.expect(&Token::LParen)?;
+                Ok(Some(ActExpr {
+                    kind,
+                    args: self.exprs(&Token::RParen)?,
+                }))
+            }
+        }
     }
 
     /// The statement form the next word begins, if it begins one.
@@ -841,6 +899,9 @@ impl Parser {
                 function,
                 args: self.exprs(&Token::RParen)?,
             });
+        }
+        if let Some(act) = self.act_expr()? {
+            return Ok(Expr::Act(Box::new(act)));
         }
         if let Some(form) = self.statement_form() {
             return Err(self.error(ParseErrorReason::StatementForm { form }));

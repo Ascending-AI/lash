@@ -247,6 +247,10 @@ impl Typer<'_> {
                 self.value(request);
                 Type::Any
             }
+            ExprNode::Act { args } => {
+                self.values(&args);
+                Type::Any
+            }
         }
     }
 

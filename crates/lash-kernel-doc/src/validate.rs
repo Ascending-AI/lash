@@ -9,13 +9,14 @@
 use std::collections::BTreeSet;
 
 use crate::ast::{
-    Action, Atom, Block, Callee, Closure, Expr, Literal, Member, Node, Place, Rhs, Site, Stmt, Unit,
+    ActKind, Action, Atom, Block, Callee, Closure, Expr, Literal, Member, Node, Place, Rhs, Site,
+    Stmt, Unit,
 };
 use crate::document::{Annotations, Document};
 use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
 use crate::name::{EffectName, FunctionId, FunctionName, Name};
 use crate::native::FunctionCatalog;
-use crate::types::{Signature, Type};
+use crate::types::{Param, Signature, Type};
 use crate::version::KernelVersion;
 
 /// Why a document or a definition is refused, and the node at fault.
@@ -158,6 +159,9 @@ pub enum InvalidReason {
     /// cannot wait.
     #[error("the body stands beside a native implementation, so it cannot `{}`", .form.keyword())]
     NativeBodyMayWait { form: StatementForm },
+    /// An action nested in an expression stands where none may.
+    #[error("an action cannot be nested in {position}")]
+    NestedActionPosition { position: &'static str },
     #[error("these annotate document {annotated}, not {document}")]
     AnnotationsOfAnotherDocument {
         annotated: crate::name::DocumentId,
@@ -497,7 +501,19 @@ impl Scope<'_> {
             Stmt::Assign { place, value } => {
                 match place {
                     Place::Variable(name) => check_name(name, Some(site))?,
-                    Place::Member(member) => self.check_member(member, &mut child)?,
+                    Place::Member(member) => match member {
+                        Member::Field { target, .. } => {
+                            self.check_expr_position(target, &child(), Some("an assignment place"))?
+                        }
+                        Member::Index { target, index } => {
+                            self.check_expr_position(
+                                target,
+                                &child(),
+                                Some("an assignment place"),
+                            )?;
+                            self.check_expr_position(index, &child(), Some("an assignment place"))?;
+                        }
+                    },
                 }
                 self.check_rhs(value, &child())
             }
@@ -522,7 +538,7 @@ impl Scope<'_> {
                 self.check_block(body, &child(), true)
             }
             Stmt::While { condition, body } => {
-                self.check_expr(condition, &child())?;
+                self.check_expr_position(condition, &child(), Some("a `while` condition"))?;
                 self.check_block(body, &child(), true)
             }
             Stmt::Break => loop_control(in_loop, "break", site),
@@ -708,17 +724,47 @@ impl Scope<'_> {
         }
     }
 
-    fn check_expr(&self, expr: &Expr, site: &Site) -> Result<(), Invalid> {
+    /// [`Self::check_expr`] with a position a nested action may not stand
+    /// in: a `while` condition or an assignment place.
+    fn check_expr_position(
+        &self,
+        expr: &Expr,
+        site: &Site,
+        position: Option<&'static str>,
+    ) -> Result<(), Invalid> {
+        match expr {
+            Expr::Act(act) => {
+                if let Some(position) = position {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::NestedActionPosition { position },
+                    ));
+                }
+                self.check_act(act, site)
+            }
+            Expr::Closure(closure) => self.check_closure(closure, site),
+            _ => self.check_expr_children(expr, site, position),
+        }
+    }
+
+    fn check_expr_children(
+        &self,
+        expr: &Expr,
+        site: &Site,
+        position: Option<&'static str>,
+    ) -> Result<(), Invalid> {
+        let check = |expr: &Expr, site: &Site| self.check_expr_position(expr, site, position);
         match expr {
             Expr::Literal(literal) => self.check_literal(literal, site),
             Expr::Variable(name) => check_name(name, Some(site)),
             Expr::Clock | Expr::Random => Ok(()),
             Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
-                self.check_exprs(items.iter(), site)
+                self.check_exprs_at(items.iter(), site, check)
             }
-            Expr::Map(entries) => self.check_exprs(
+            Expr::Map(entries) => self.check_exprs_at(
                 entries.iter().flat_map(|entry| [&entry.key, &entry.value]),
                 site,
+                check,
             ),
             Expr::Record(entries) => {
                 let mut seen = BTreeSet::new();
@@ -732,13 +778,13 @@ impl Scope<'_> {
                         ));
                     }
                 }
-                self.check_exprs(entries.iter().map(|entry| &entry.value), site)
+                self.check_exprs_at(entries.iter().map(|entry| &entry.value), site, check)
             }
             Expr::Member(member) => match member.as_ref() {
-                Member::Field { target, .. } => self.check_expr(target, &site.child(0)),
+                Member::Field { target, .. } => check(target, &site.child(0)),
                 Member::Index { target, index } => {
-                    self.check_expr(target, &site.child(0))?;
-                    self.check_expr(index, &site.child(1))
+                    check(target, &site.child(0))?;
+                    check(index, &site.child(1))
                 }
             },
             Expr::Closure(closure) => self.check_closure(closure, site),
@@ -759,24 +805,131 @@ impl Scope<'_> {
                     &definition.signature,
                     site,
                 )?;
-                self.check_exprs(args.iter(), site)
+                self.check_exprs_at(args.iter(), site, check)
             }
             Expr::Read(read) => {
-                self.check_expr(&read.handle, &site.child(0))?;
-                self.check_expr(&read.request, &site.child(1))
+                check(&read.handle, &site.child(0))?;
+                check(&read.request, &site.child(1))
             }
+            Expr::Act(_) => unreachable!("Expr::Act is handled by check_expr_position"),
         }
     }
 
-    fn check_exprs<'e>(
+    fn check_exprs_at<'e>(
         &self,
         exprs: impl Iterator<Item = &'e Expr>,
         site: &Site,
+        check: impl Fn(&Expr, &Site) -> Result<(), Invalid>,
     ) -> Result<(), Invalid> {
         for (index, expr) in (0u32..).zip(exprs) {
-            self.check_expr(expr, &site.child(index))?;
+            check(expr, &site.child(index))?;
         }
         Ok(())
+    }
+
+    /// An action nested in an expression (`K-STMT-001` relaxed): admitted
+    /// in document code only, its callee, effect and arguments checked as
+    /// the statement form's are.
+    fn check_act(&self, act: &crate::ast::ActExpr, site: &Site) -> Result<(), Invalid> {
+        if self.document.is_none() {
+            return Err(invalid(
+                Some(site),
+                InvalidReason::NestedActionPosition {
+                    position: "a library body",
+                },
+            ));
+        }
+        let native_callee = matches!(
+            &act.kind,
+            ActKind::Call(Callee::Library(function))
+                if self.catalog.definition(function).is_some_and(FunctionDefinition::has_native)
+        );
+        if self.native_body && !native_callee {
+            let form = match &act.kind {
+                ActKind::Call(_) => StatementForm::Call,
+                ActKind::Perform { .. } => StatementForm::Perform,
+                ActKind::Sleep => StatementForm::Sleep,
+            };
+            return Err(invalid(
+                Some(site),
+                InvalidReason::NativeBodyMayWait { form },
+            ));
+        }
+        match &act.kind {
+            ActKind::Call(Callee::Declared(name)) => {
+                let params = self.declared(name, site)?;
+                if act.args.len() > params {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::CallArity {
+                            name: name.to_string(),
+                            given: act.args.len(),
+                            required: 0,
+                            accepted: params,
+                        },
+                    ));
+                }
+            }
+            ActKind::Call(Callee::Library(function)) => {
+                let definition = self.listed(function, site)?;
+                check_arity(
+                    definition.name.as_str(),
+                    act.args.len(),
+                    &definition.signature,
+                    site,
+                )?;
+            }
+            ActKind::Call(Callee::Value(_)) => {
+                return Err(invalid(
+                    Some(site),
+                    InvalidReason::NestedActionPosition {
+                        position: "a call by value",
+                    },
+                ));
+            }
+            ActKind::Perform { effect, result, .. } => {
+                let Some(document) = self.document else {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::PerformInLibrary {
+                            effect: effect.clone(),
+                        },
+                    ));
+                };
+                let Some(signature) = document.manifest.effects.get(effect) else {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::EffectNotListed {
+                            effect: effect.clone(),
+                        },
+                    ));
+                };
+                check_arity(effect.as_str(), act.args.len(), signature, site)?;
+                check_type(result).map_err(|reason| invalid(Some(site), reason))?;
+            }
+            ActKind::Sleep => {
+                check_arity(
+                    "sleep",
+                    act.args.len(),
+                    &Signature {
+                        params: vec![Param {
+                            name: Name::new("duration"),
+                            ty: Type::Any,
+                            optional: false,
+                        }],
+                        result: Type::Any,
+                    },
+                    site,
+                )?;
+            }
+        }
+        self.check_exprs_at(act.args.iter(), site, |expr, site| {
+            self.check_expr_position(expr, site, None)
+        })
+    }
+
+    fn check_expr(&self, expr: &Expr, site: &Site) -> Result<(), Invalid> {
+        self.check_expr_position(expr, site, None)
     }
 
     fn check_closure(&self, closure: &Closure, site: &Site) -> Result<(), Invalid> {

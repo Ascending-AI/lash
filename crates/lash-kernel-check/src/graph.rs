@@ -366,6 +366,10 @@ pub enum ExprNode {
         handle: NodeId,
         request: NodeId,
     },
+    /// An action nested in an expression; the arguments it evaluated.
+    Act {
+        args: Vec<NodeId>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -447,6 +451,7 @@ impl GraphNode {
                 ExprNode::Closure { body, .. } => out.push(*body),
                 ExprNode::Call { args, .. } => out.extend(args),
                 ExprNode::Read { handle, request } => out.extend([*handle, *request]),
+                ExprNode::Act { args } => out.extend(args),
             },
         }
         out

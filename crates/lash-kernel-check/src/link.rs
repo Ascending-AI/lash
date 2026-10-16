@@ -483,6 +483,9 @@ impl Linker {
                 handle: self.expr(&read.handle, slots.take(), id, scope),
                 request: self.expr(&read.request, slots.take(), id, scope),
             },
+            Expr::Act(act) => ExprNode::Act {
+                args: self.exprs(act.args.iter(), &mut slots, id, scope),
+            },
         };
         self.set(id, NodeKind::Expr(node))
     }

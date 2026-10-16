@@ -546,7 +546,8 @@ impl<'a> Walk<'a> {
                     | ExprNode::Call { .. }
                     | ExprNode::Clock
                     | ExprNode::Random
-                    | ExprNode::Read { .. } => {}
+                    | ExprNode::Read { .. }
+                    | ExprNode::Act { .. } => {}
                 }
             }
             (
@@ -790,7 +791,8 @@ fn direct_references(kind: &NodeKind) -> Vec<BindingId> {
             | ExprNode::Call { .. }
             | ExprNode::Clock
             | ExprNode::Random
-            | ExprNode::Read { .. } => Vec::new(),
+            | ExprNode::Read { .. }
+            | ExprNode::Act { .. } => Vec::new(),
         },
         NodeKind::Action(action) => {
             let callee = match action {

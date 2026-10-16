@@ -118,24 +118,37 @@ impl Machine for KernelMachine {
             }
             Outcome::Completed(datum) => {
                 let task = pending.task;
-                let (effect, ty) = self
-                    .frame(task)
-                    .map_err(|error| {
-                        DeliverError::Heap(HeapFault::Malformed(format!("{error:?}")))
-                    })?
-                    .awaiting
-                    .and_then(|stmt| match &self.exe.stmt(stmt).form {
-                        crate::compile::Form::Action(action) => match &action.kind {
-                            crate::compile::ActionKind::Perform { effect, result, .. } => {
+                let frame = self.frame(task).map_err(|error| {
+                    DeliverError::Heap(HeapFault::Malformed(format!("{error:?}")))
+                })?;
+                let (effect, ty) = match frame.nested {
+                    Some(ix) => frame
+                        .awaiting
+                        .and_then(|stmt| {
+                            let (stream, _, _) = self.exe.statement(stmt);
+                            stream.nested.get(ix as usize)
+                        })
+                        .and_then(|entry| match &entry.kind {
+                            crate::compile::NestedKind::Perform { effect, result } => {
                                 Some((effect, result))
                             }
                             _ => None,
-                        },
-                        _ => None,
-                    })
-                    .ok_or_else(|| {
-                        DeliverError::Heap(HeapFault::Malformed("outcome has no perform".into()))
-                    })?;
+                        }),
+                    None => frame
+                        .awaiting
+                        .and_then(|stmt| match &self.exe.stmt(stmt).form {
+                            crate::compile::Form::Action(action) => match &action.kind {
+                                crate::compile::ActionKind::Perform { effect, result, .. } => {
+                                    Some((effect, result))
+                                }
+                                _ => None,
+                            },
+                            _ => None,
+                        }),
+                }
+                .ok_or_else(|| {
+                    DeliverError::Heap(HeapFault::Malformed("outcome has no perform".into()))
+                })?;
                 match decoder.decode(&datum, ty) {
                     Ok(datum) => CommittedOutcomeRecord::Completed(
                         self.heap.freeze_datum(&datum).map_err(delivery_error)?,

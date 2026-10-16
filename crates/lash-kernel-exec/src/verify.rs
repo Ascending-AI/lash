@@ -70,6 +70,8 @@ pub struct Tables {
     pub codes: usize,
     pub libs: usize,
     pub blocks: usize,
+    /// The nested-action table's length.
+    pub nested: usize,
 }
 
 /// Why a stream is rejected: the statement, by its position in the
@@ -191,6 +193,7 @@ fn fits(operand: Operand, regs: u32, frame: usize, tables: &Tables) -> bool {
         Operand::Code(code) => code.ix() < tables.codes,
         Operand::Lib(lib) => lib.ix() < tables.libs,
         Operand::Block(block) => block.ix() < tables.blocks,
+        Operand::Nested(nested) => nested.ix() < tables.nested,
     }
 }
 

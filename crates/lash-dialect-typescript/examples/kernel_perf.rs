@@ -452,6 +452,48 @@ fn main() -> Result<(), String> {
         bindings: &BTreeSet::new(),
         functions: &BTreeMap::new(),
     };
+    if let Ok(reps) = std::env::var("KERNEL_PERF_COMPILE") {
+        let reps: usize = reps
+            .parse()
+            .map_err(|error| format!("KERNEL_PERF_COMPILE: {error}"))?;
+        let mut documents = Vec::new();
+        for (name, source) in &programs {
+            let lowered = if name.ends_with(".py") {
+                lash_dialect_python::lower(source, &environment)
+                    .map(|lowered| lowered.document)
+                    .map_err(|error| format!("{error:?}"))
+            } else {
+                lash_dialect_typescript::lower(source, &environment)
+                    .map(|lowered| lowered.document)
+                    .map_err(|error| format!("{error:?}"))
+            }
+            .map_err(|error| format!("{name}: refused: {error}"))?;
+            documents.push((name.clone(), lowered));
+        }
+        if let Ok(dir) = std::env::var("KERNEL_PERF_CATALOG") {
+            let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+                .map_err(|error| format!("{dir}: {error}"))?
+                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                .filter(|path| path.extension().is_some_and(|ext| ext == "kernel"))
+                .collect();
+            paths.sort();
+            for path in paths {
+                let mut text =
+                    std::fs::read_to_string(&path).map_err(|error| format!("{path:?}: {error}"))?;
+                for (function, registered) in registry.iter() {
+                    text = text.replace(
+                        &format!("@{{{}}}", registered.definition().name),
+                        &format!("@{function}"),
+                    );
+                }
+                let document = lash_kernel_doc::parse_document(&text)
+                    .map_err(|error| format!("{path:?}: {error:?}"))?;
+                documents.push((format!("catalog/{}", path.display()), document));
+            }
+        }
+        compile_costs(reps, &registry, &documents);
+        return Ok(());
+    }
     if matches!(mode, Mode::Time) {
         println!(
             "program\tfunctions\titerations\tns_start_and_run\tns_run\tcharged\trun_calls\thelper_charge\tlibrary_body_charge\tprogram_charge\ttop_helpers\tsplit_helper_wall_share\tsplit_slowest_helpers\tsplit_library_body_wall_share\tsplit_program_wall_share\tresult\treceipt"
@@ -936,5 +978,52 @@ fn describe(frame: &str, symbols: &GuestSymbols) -> (String, String, String) {
             code.site.to_string(),
         ),
         None => ("marker".to_string(), "-".to_string(), "-".to_string()),
+    }
+}
+
+/// The R-7 instrument (FIG-6417): per unit, the minimum and median wall
+/// time of its compile and the heap bytes its compiled tables keep alive.
+#[expect(clippy::print_stdout, reason = "benchmark output")]
+fn compile_costs(
+    reps: usize,
+    registry: &Arc<FunctionRegistry>,
+    documents: &[(String, lash_kernel_doc::Document)],
+) {
+    let prepared = PreparedLibrary::new(Arc::clone(registry));
+    let mut times: Vec<Vec<u128>> = vec![Vec::new(); documents.len() + 1];
+    let mut kept: Vec<isize> = vec![0; documents.len() + 1];
+    let mut allocations: Vec<usize> = vec![0; documents.len() + 1];
+    for _ in 0..reps {
+        for unit in 0..=documents.len() {
+            let region = stats_alloc::Region::new(ALLOCATOR);
+            let began = Instant::now();
+            let compiled: Box<dyn std::any::Any> = if unit == 0 {
+                Box::new(PreparedLibrary::new(Arc::clone(registry)))
+            } else {
+                lash_kernel_vm::p0_compile(&documents[unit - 1].1, &prepared)
+            };
+            times[unit].push(began.elapsed().as_nanos());
+            let change = region.change();
+            kept[unit] = change.bytes_allocated as isize - change.bytes_deallocated as isize
+                + change.bytes_reallocated;
+            allocations[unit] = change.allocations;
+            drop(compiled);
+        }
+    }
+    println!("unit\tns_min\tns_median\tkept_bytes\tallocations");
+    for (unit, samples) in times.iter_mut().enumerate() {
+        samples.sort_unstable();
+        let name = if unit == 0 {
+            "library"
+        } else {
+            documents[unit - 1].0.as_str()
+        };
+        println!(
+            "{name}\t{}\t{}\t{}\t{}",
+            samples[0],
+            samples[samples.len() / 2],
+            kept[unit],
+            allocations[unit]
+        );
     }
 }

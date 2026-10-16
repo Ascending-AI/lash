@@ -669,6 +669,16 @@ impl Renderer<'_> {
                 self.expr(&read.request);
                 self.out.write(")");
             }
+            k::Expr::Act(act) => {
+                self.out.write("k.act(");
+                for (i, arg) in act.args.iter().enumerate() {
+                    if i > 0 {
+                        self.out.write(", ");
+                    }
+                    self.expr(arg);
+                }
+                self.out.write(")");
+            }
         }
     }
 }

@@ -201,6 +201,11 @@ fn replace_in_expr(expr: &mut Expr, functions: &BTreeMap<FunctionId, FunctionId>
             replace_in_expr(&mut read.handle, functions);
             replace_in_expr(&mut read.request, functions);
         }
+        Expr::Act(act) => {
+            for arg in &mut act.args {
+                replace_in_expr(arg, functions);
+            }
+        }
     }
 }
 

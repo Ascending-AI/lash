@@ -269,6 +269,7 @@ fn form(kind: &NodeKind) -> &'static str {
             ExprNode::Clock => "expr:clock",
             ExprNode::Random => "expr:random",
             ExprNode::Read { .. } => "expr:read",
+            ExprNode::Act { .. } => "expr:act",
         },
     }
 }

@@ -30,8 +30,8 @@ mod verify;
 
 pub use boundary::{BoundaryKind, StepEdge};
 pub use kir::{
-    BlockIx, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx, Op, OpKind, OpRange,
-    Operand, Reg, RegRange,
+    ActIx, BlockIx, CodeIx, ConstIx, FieldIx, FieldListIx, LibIx, LocalRef, NameIx, Op, OpKind,
+    OpRange, Operand, Reg, RegRange,
 };
 pub use sem::{ChargeEvent, OpSpec, SEMANTICS};
 pub use verify::{CoverageError, KirError, StmtRanges, Tables, verify_semantics, verify_stream};

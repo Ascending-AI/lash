@@ -51,6 +51,8 @@ index! {
     LibIx;
     /// A kernel block of the executable.
     BlockIx;
+    /// A nested action of the stream's continuation table.
+    ActIx;
 }
 
 impl Reg {
@@ -209,6 +211,15 @@ pub enum Op {
     /// step, and the next op is where the statement resumes, its value in
     /// register 0.
     Act,
+    /// An action nested in an expression: its arguments are the `args`
+    /// registers, its continuation entry in the stream's nested table.
+    /// One that completes at once leaves its value in `args.start` and goes
+    /// on; one that waits or enters a frame ends the step, and the resume
+    /// entry loads the roles it saved and goes on from the op after this.
+    Nested {
+        act: ActIx,
+        args: RegRange,
+    },
     /// Declares a variable with its first value (`K-FORM-004`).
     Bind {
         local: LocalRef,
@@ -322,6 +333,7 @@ pub enum OpKind {
     HostRead,
     Pin,
     Act,
+    Nested,
     Bind,
     BindShared,
     BindSession,
@@ -372,6 +384,7 @@ impl OpKind {
         Self::HostRead,
         Self::Pin,
         Self::Act,
+        Self::Nested,
         Self::Bind,
         Self::BindShared,
         Self::BindSession,
@@ -423,6 +436,7 @@ impl OpKind {
                 | Self::HostRead
                 | Self::Pin
                 | Self::Act
+                | Self::Nested
         )
     }
 }
@@ -440,6 +454,7 @@ pub enum Operand {
     Code(CodeIx),
     Lib(LibIx),
     Block(BlockIx),
+    Nested(ActIx),
 }
 
 impl Op {
@@ -466,6 +481,7 @@ impl Op {
             Self::HostRead { .. } => OpKind::HostRead,
             Self::Pin { .. } => OpKind::Pin,
             Self::Act => OpKind::Act,
+            Self::Nested { .. } => OpKind::Nested,
             Self::Bind { .. } => OpKind::Bind,
             Self::BindShared { .. } => OpKind::BindShared,
             Self::BindSession { .. } => OpKind::BindSession,
@@ -502,7 +518,8 @@ impl Op {
             | Self::MakeSet { items }
             | Self::MakeMap { entries: items }
             | Self::MakeRecord { values: items, .. }
-            | Self::Call { args: items, .. } => items.regs().collect(),
+            | Self::Call { args: items, .. }
+            | Self::Nested { args: items, .. } => items.regs().collect(),
             Self::Pin { src }
             | Self::Bind { src, .. }
             | Self::BindShared { src, .. }
@@ -558,7 +575,8 @@ impl Op {
             | Self::MakeSet { items }
             | Self::MakeMap { entries: items }
             | Self::MakeRecord { values: items, .. }
-            | Self::Call { args: items, .. } => Some(items.start),
+            | Self::Call { args: items, .. }
+            | Self::Nested { args: items, .. } => Some(items.start),
             Self::Act => Some(Reg(0)),
             _ => None,
         }
@@ -585,6 +603,7 @@ impl Op {
             Self::MakeRecord { fields, .. } => vec![O::FieldList(fields)],
             Self::Closure { code, .. } => vec![O::Code(code)],
             Self::Call { lib, .. } => vec![O::Lib(lib)],
+            Self::Nested { act, .. } => vec![O::Nested(act)],
             Self::Branch { then_, else_, .. } => vec![O::Block(then_), O::Block(else_)],
             Self::Try { body } => vec![O::Block(body)],
             _ => Vec::new(),
@@ -595,7 +614,8 @@ impl Op {
             | Self::MakeSet { items }
             | Self::MakeMap { entries: items }
             | Self::MakeRecord { values: items, .. }
-            | Self::Call { args: items, .. } => out.push(O::Regs(items)),
+            | Self::Call { args: items, .. }
+            | Self::Nested { args: items, .. } => out.push(O::Regs(items)),
             _ => {
                 out.extend(self.reads().into_iter().map(O::Reg));
                 out.extend(self.writes().map(O::Reg));

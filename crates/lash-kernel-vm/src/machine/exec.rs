@@ -250,6 +250,8 @@ impl KernelMachine {
             let frame = self.frame(task)?;
             // The statement the call stood in is left behind.
             frame.awaiting = None;
+            frame.nested = None;
+            frame.record.pending = None;
             // A return or a raise that no `try` of the frame can take leaves
             // the frame at once: ending the frame ends all its variables.
             if matches!(departure, Completion::Return(_) | Completion::Throw(_))
@@ -355,11 +357,25 @@ impl KernelMachine {
                 // The value is in no variable until the statement binds it.
                 let base = self.top;
                 self.put(base, value);
-                self.pin(base)?;
+                // A nested action moves the value to its own register
+                // and pins it there; a statement's value stays at base.
+                if self.frame(task)?.nested.is_none() {
+                    self.pin(base)?;
+                }
                 match self.finish_action(task, host, exe, base) {
-                    Ok(stmt) => {
+                    Ok((stmt, Ran::Done)) => {
                         self.take_edge_of(task, exe, stmt)?;
                         None
+                    }
+                    Ok((_, Ran::Step)) => {
+                        if self.steps.verify {
+                            self.verify_no_edge(task, exe)?;
+                        }
+                        None
+                    }
+                    Ok((_, Ran::Depart(completion))) => Some(completion),
+                    Ok((_, Ran::Tested(_))) => {
+                        return Err(fault("a statement ended as a loop's test"));
                     }
                     Err(Interrupt::Raise(value)) => Some(Completion::Throw(*value)),
                     Err(Interrupt::Halt(halt)) => return Err(halt),
@@ -535,6 +551,7 @@ impl KernelMachine {
             exe: Arc::clone(&self.exe),
             control,
             awaiting: None,
+            nested: None,
             library: None,
             inline,
             published: None,
@@ -776,21 +793,61 @@ impl KernelMachine {
     /// Completes the statement the top frame waits in with the value its
     /// action yielded, in register `base`: runs the statement on from its
     /// action, which binds, writes or drops the value (`K-EVAL-003`). Gives
-    /// the statement.
+    /// the statement and how its range ended: a nested action the rest of
+    /// the statement issues parks the task again, and a `return` departs.
     pub(super) fn finish_action(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
         base: Reg,
-    ) -> Eval<StmtId> {
-        let Some(id) = self.frame(task)?.awaiting.take() else {
+    ) -> Eval<(StmtId, Ran)> {
+        let frame = self.frame(task)?;
+        let Some(id) = frame.awaiting.take() else {
             return Err(fault("a value arrived at no statement").into());
         };
+        let nested = frame.nested.take();
         let running = Running::new(task, exe, id);
-        match self.run(host, &running, running.stmt.resume(), base)? {
-            Ran::Done => Ok(id),
-            _ => Err(fault("an action's statement did not complete").into()),
+        let Some(ix) = nested else {
+            match self.run(host, &running, running.stmt.resume(), base)? {
+                Ran::Done => return Ok((id, Ran::Done)),
+                _ => return Err(fault("an action's statement did not complete").into()),
+            }
+        };
+        // The parked nested action: its roles come back to their registers
+        // through this layout's entry, its value to `dst`, and the
+        // statement goes on from the op after it (`K-EVAL-006`).
+        let entry = running
+            .stream
+            .nested
+            .get(ix as usize)
+            .ok_or_else(|| fault("a pending action has no resume entry"))?;
+        let Some(pending) = self.frame(task)?.record.pending.take() else {
+            return Err(fault("a resuming nested action has no saved roles").into());
+        };
+        let access = self.heap.access.clone();
+        let prefix = entry.depth as usize;
+        // The action's value is taken first: a role's register may be the
+        // one it was left in.
+        let value = self.take(base);
+        // One pass over the saved roles, then each loads by its site.
+        let mut saved = std::collections::BTreeMap::new();
+        let mut key = None;
+        while let Some((next, role)) = pending.roles.after(key.as_deref(), &access)? {
+            saved.insert(role.site, role.value);
+            key = Some(next);
         }
+        for (role_site, role_reg) in &entry.roles {
+            let value = saved
+                .remove(&role_site.path[prefix..])
+                .ok_or_else(|| fault("a saved continuation role is missing"))?;
+            self.put(base + role_reg.0 as usize, value);
+            self.pin(base + role_reg.0 as usize)?;
+        }
+        self.put(base + entry.dst.0 as usize, value);
+        self.pin(base + entry.dst.0 as usize)?;
+        let pc = running.stmt.ops.start as usize + entry.resume as usize;
+        let ran = self.run(host, &running, pc, base)?;
+        Ok((id, ran))
     }
 }

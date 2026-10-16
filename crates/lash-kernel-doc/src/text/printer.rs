@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use super::is_keyword;
 use super::lexer::write_quoted;
-use crate::ast::{Action, Atom, Block, Callee, Expr, JoinMode, Literal, Member, Place, Rhs, Stmt};
+use crate::ast::{
+    ActKind, Action, Atom, Block, Callee, Expr, JoinMode, Literal, Member, Place, Rhs, Stmt,
+};
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Operand};
 use crate::name::{FunctionId, FunctionName, Name, is_identifier};
@@ -485,6 +487,44 @@ impl<'a> Printer<'a> {
                 self.expr(&read.request);
                 self.out.push(')');
             }
+            Expr::Act(act) => match &act.kind {
+                ActKind::Call(callee) => match callee {
+                    Callee::Declared(name) => {
+                        self.out.push_str("call ");
+                        self.name(name);
+                        self.out.push('(');
+                        self.exprs(act.args.iter());
+                        self.out.push(')');
+                    }
+                    Callee::Value(name) => {
+                        self.out.push_str("apply ");
+                        self.name(name);
+                        self.out.push('(');
+                        self.exprs(act.args.iter());
+                        self.out.push(')');
+                    }
+                    Callee::Library(function) => {
+                        self.out.push_str("invoke ");
+                        self.function(function);
+                        self.out.push('(');
+                        self.exprs(act.args.iter());
+                        self.out.push(')');
+                    }
+                },
+                ActKind::Perform { effect, result } => {
+                    self.out.push_str(&format!("perform {effect}"));
+                    self.out.push('(');
+                    self.exprs(act.args.iter());
+                    self.out.push_str(") as ");
+                    self.ty(result);
+                }
+                ActKind::Sleep => {
+                    self.out.push_str("sleep ");
+                    if let [duration] = act.args.as_slice() {
+                        self.expr(duration);
+                    }
+                }
+            },
         }
     }
 

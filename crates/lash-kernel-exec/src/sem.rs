@@ -109,6 +109,11 @@ pub const SEMANTICS: &[OpSpec] = &[
         &[E::AtomArg, E::CopyOut, E::NativeFormula, E::BodyFormula],
         true,
     ),
+    spec(
+        K::Nested,
+        &[E::CopyOut, E::NativeFormula, E::BodyFormula],
+        true,
+    ),
     spec(K::Bind, &[], true),
     spec(K::BindShared, &[], true),
     spec(K::BindSession, &[], true),

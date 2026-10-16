@@ -1,5 +1,5 @@
 //! The canonical task table and its bounded execution-coordinate cache.
-use super::frames::Frames;
+use super::frames::{Frames, ParkKind};
 use super::{Task, Wait};
 use crate::compile::Executable;
 use lash_kernel_doc::TaskId;
@@ -107,18 +107,26 @@ impl Tasks {
             let Some(record) = self.rows.get(&ordinal_key(index), &self.access)? else {
                 return Ok(None);
             };
-            let continues = matches!(
-                record.state,
-                TaskStateRecord::Waiting(_)
-                    | TaskStateRecord::Joining(_)
-                    | TaskStateRecord::JoiningMany(_)
-                    | TaskStateRecord::Resuming(_)
-            );
+            let parked = match &record.state {
+                TaskStateRecord::Waiting(_) => ParkKind::Woken { request: true },
+                TaskStateRecord::Joining(_) | TaskStateRecord::JoiningMany(_) => {
+                    ParkKind::Woken { request: false }
+                }
+                TaskStateRecord::Resuming(incoming) => ParkKind::Woken {
+                    // A request outcome and a cancel's raise are incoming
+                    // outcomes; a delivered value or join is a return's.
+                    request: matches!(
+                        incoming,
+                        IncomingRecord::Outcome(_) | IncomingRecord::Raise(_)
+                    ),
+                },
+                _ => ParkKind::Fresh,
+            };
             let frames = Frames::open(
                 record.frames.clone(),
                 self.access.clone(),
                 Arc::clone(&self.exe),
-                continues,
+                parked,
             );
             self.cache.insert(
                 index,

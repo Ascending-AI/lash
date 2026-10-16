@@ -920,6 +920,11 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
                 let _ = (handle, request);
                 "read"
             }
+            k::Expr::Act(act) => {
+                let k::ActExpr { kind, args } = act.as_ref();
+                let _ = (kind, args);
+                "act"
+            }
         },
         k::Node::Action(action) => match action {
             k::Action::Call { callee, args } => {
