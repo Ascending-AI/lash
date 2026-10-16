@@ -230,6 +230,7 @@ impl Lowerer<'_> {
             lash_kernel_doc::Function {
                 params: params.iter().map(|param| param.name.clone()).collect(),
                 body,
+                start: None,
             },
         );
         self.entries
@@ -271,6 +272,7 @@ impl Lowerer<'_> {
                     .map(|param| param.name.clone())
                     .collect(),
                 body: body.stmts,
+                start: None,
             },
         );
         self.entries.insert(entry.clone(), signature);
@@ -295,6 +297,7 @@ impl Lowerer<'_> {
                 .map(|param| param.name.clone())
                 .collect(),
             body: body.stmts,
+            start: None,
         };
         // Only a module's lowering finds an entry (`module_entry`).
         if let Some(module) = self.module.as_mut() {

@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_dialect::{EffectControl, FunctionValues, Kept, Left, NotSaved};
+use lash_kernel_dialect::{EffectControl, Kept, Left, NotSaved};
 use lash_kernel_doc::heap::{HeapFault, NativeError, NativeHeap as _};
 use lash_kernel_doc::{EffectName, Site, Value};
 use lash_kernel_state::paged::{FunctionRecord, HeapWriteError, NameRef, PagedHeap};
@@ -15,7 +15,7 @@ use lash_vm_client::service::LowerFunction;
 /// How a cell of one dialect saves its functions.
 pub(crate) struct DialectSave {
     /// The dialect's function values; none keeps no function.
-    pub(crate) values: Option<FunctionValues>,
+    pub(crate) values: Option<lash_kernel_doc::FunctionRepresentation>,
     pub(crate) controls: BTreeMap<EffectName, BTreeSet<EffectControl>>,
     /// What the cell's source wrote of each function its document makes,
     /// by the site of its closure.

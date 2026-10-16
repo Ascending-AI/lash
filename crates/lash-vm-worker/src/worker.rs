@@ -723,6 +723,7 @@ impl<'embedding> Server<'embedding> {
     /// printed leaves first, in frames of its own.
     fn slice(&mut self, slice: u64, cancel: bool) -> Result<WorkerMessage, PoolError> {
         let wire = self.wire()?;
+        let crosses_functions = self.bootstrap.tuning.crosses_functions;
         let hosted = self.running()?;
         let mut host = WireHost {
             wire,
@@ -733,6 +734,7 @@ impl<'embedding> Server<'embedding> {
             sites: hosted
                 .observe_sites
                 .then(crate::host::EnteredSites::default),
+            crosses_functions,
         };
         hosted.sealed = None;
         let port = hosted.port.clone();

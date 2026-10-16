@@ -8,7 +8,11 @@
 //! effect's arguments: an integer as its decimal digits at any size, a float
 //! as [`Float::json_number`] spells it (a whole one below 2^53 as an
 //! integer). A kind JSON cannot carry is refused with a typed [`NotJson`],
-//! never approximated.
+//! never approximated. A function value is written in its transport form,
+//! `{"$lash_function": <FunctionValue>}` in canonical JSON, and a record key
+//! a guest wrote in that reserved prefix is escaped
+//! ([`lash_kernel_doc::escape_function_key`]): this encoder alone mints the
+//! tag.
 //!
 //! [`Float::json_number`]: lash_kernel_doc::Float::json_number
 
@@ -27,6 +31,8 @@ pub enum NotJson {
     MapKey,
     #[error("the value nests deeper than {limit}")]
     TooDeep { limit: usize },
+    #[error("a function value does not encode: {problem}")]
+    FunctionValue { problem: String },
 }
 
 /// The kinds of datum JSON has no spelling for.
@@ -126,6 +132,15 @@ fn write(
                 path: path.to_owned(),
             });
         }
+        Datum::FunctionValue(function) => {
+            let tagged =
+                function
+                    .canonical_tagged_bytes()
+                    .map_err(|error| NotJson::FunctionValue {
+                        problem: error.to_string(),
+                    })?;
+            out.push_str(&String::from_utf8_lossy(&tagged));
+        }
         Datum::Bytes(_) => return kind(JsonlessKind::Bytes),
         Datum::Timestamp(_) => return kind(JsonlessKind::Timestamp),
         Datum::Set(_) => return kind(JsonlessKind::Set),
@@ -148,7 +163,7 @@ fn write_object<'a>(
         if index > 0 {
             out.push(',');
         }
-        write_text(key, out);
+        write_text(&lash_kernel_doc::escape_function_key(key), out);
         out.push(':');
         let child = if key.chars().enumerate().all(|(i, c)| {
             c == '_' || c == '$' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit())

@@ -2,8 +2,8 @@
 
 use lash_kernel_dialect::{CallParam, CallShape, SavedFunction, Written};
 use lash_kernel_doc::{
-    Action, Atom, Callee, Expr, Function, Literal, MapEntry, Name, Param, Rhs, Signature,
-    SourceLanguage, Stmt, Type,
+    Action, Atom, Callee, Expr, Function, FunctionRepresentation, Literal, MapEntry, Name, Param,
+    Rhs, Signature, SourceLanguage, StartAdapter, StartConvention, Stmt, Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::Ranged;
@@ -153,11 +153,24 @@ impl Lowerer<'_> {
                     .map(|param| param.name.clone())
                     .collect(),
                 body,
+                start: None,
             },
         );
         self.entries.insert(entry.clone(), signature);
         Operand::literal(Literal::Function(entry), Ty::Unknown)
     }
+}
+
+/// How a function `written` describes is started when it crosses to a
+/// tool: called directly with the start's arguments (`K-CLO-004`). None
+/// for a closure that takes more parameters than its signature names.
+pub(super) fn start_adapter(written: &Written, params: usize) -> Option<StartAdapter> {
+    let signature = written.start.clone()?;
+    (signature.params.len() == params).then_some(StartAdapter {
+        signature,
+        representation: FunctionRepresentation::Bare,
+        convention: StartConvention::Direct,
+    })
 }
 
 /// Python's trusted scalar/container annotations as the durable entry types.

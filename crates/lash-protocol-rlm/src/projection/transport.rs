@@ -156,6 +156,9 @@ fn materialize_projected_json_with_keys(
         let CodeModeProjectedSeedEntry::Materialized(value) = entry;
         return materialize_projected_json_with_keys(value, key_mode);
     }
+    if is_function_value(&value) {
+        return Ok(value);
+    }
     match value {
         Value::Array(items) => items
             .into_iter()
@@ -262,10 +265,23 @@ fn unescape_projected_key(key: String) -> String {
     }
 }
 
+/// Whether `value` is a function value's transport form, which only the
+/// typed datum encoder writes (a guest key in its prefix is escaped): it is
+/// carried as it is, never read for projected values or escapes.
+fn is_function_value(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.len() == 1 && object.contains_key(lash_kernel_doc::FUNCTION_VALUE_TAG)
+    })
+}
+
 /// A value a cell computed, as the tool-argument transport carries plain
 /// data: every record key in the reserved prefix is escaped, so nothing a
-/// cell writes reads as a projected-value wrapper on the host side.
+/// cell writes reads as a projected-value wrapper on the host side. A
+/// function value's transport form is carried as it is.
 pub(crate) fn plain_json_for_transport(value: Value) -> Value {
+    if is_function_value(&value) {
+        return value;
+    }
     match value {
         Value::Array(values) => {
             Value::Array(values.into_iter().map(plain_json_for_transport).collect())

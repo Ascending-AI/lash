@@ -70,29 +70,6 @@ pub enum Mode<'a> {
     Module,
 }
 
-/// What a dialect's function value is, which is how a session keeps one
-/// between cells ([`crate::save`]) and makes it again in a later one
-/// ([`crate::SavedFunction::value`]).
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum FunctionValues {
-    /// The closure, or the reference to a declared function, itself.
-    Bare,
-    /// A token: a tuple whose first member is `tag` and that holds the
-    /// closure, or the reference, among constant data about the function.
-    Token { tag: String },
-}
-
-impl FunctionValues {
-    /// The tag of the token a function value is held in, if it is.
-    pub fn tag(&self) -> Option<&str> {
-        match self {
-            Self::Bare => None,
-            Self::Token { tag } => Some(tag),
-        }
-    }
-}
-
 /// A way an effect's call may end its caller's turn: what the host's tool
 /// declares, in terms no kernel form reads.
 #[derive(
@@ -174,10 +151,10 @@ pub struct Package {
     pub read: fn(&str, &Document, crate::GeneratedSourceLimits) -> Result<Document, Diagnostic>,
     /// Absent until the dialect ships its printer.
     pub printer: Option<Box<dyn Printer>>,
-    /// What the dialect's function values are, where a session of it keeps
-    /// the functions a cell binds for later cells; `None` for a dialect
-    /// whose sessions keep none ([`crate::NotSaved::Dialect`]).
-    pub function_values: Option<FunctionValues>,
+    /// How the dialect holds a function as a value, where a session of it
+    /// keeps the functions a cell binds for later cells; `None` for a
+    /// dialect whose sessions keep none ([`crate::NotSaved::Dialect`]).
+    pub function_values: Option<lash_kernel_doc::FunctionRepresentation>,
     /// The helpers and extension functions the front end emits calls to,
     /// each after every function its body calls, so an embedder registers
     /// them in this order.

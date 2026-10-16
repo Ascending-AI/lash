@@ -59,7 +59,7 @@ pub struct CellEnvelope {
     pub written: BTreeMap<Site, Written>,
     /// What the dialect's function values are, where its sessions keep the
     /// functions a cell binds ([`lash_kernel_dialect::Package::function_values`]).
-    pub function_values: Option<lash_kernel_dialect::FunctionValues>,
+    pub function_values: Option<lash_kernel_doc::FunctionRepresentation>,
     /// The effects the document was lowered against.
     pub effects: BTreeMap<EffectName, RecordedEffect>,
     /// The grants the cell's deferred resolutions recorded.
@@ -173,17 +173,6 @@ pub(super) fn cell_release(dialect: &str) -> Result<NodeId, String> {
         .ok_or_else(|| format!("the build holds no helper release of the dialect `{dialect}`"))
 }
 
-/// Each tool request read back through the projection it was frozen
-/// under, over the cell's document's entries.
-pub(super) struct EntryProjections<'a>(pub &'a super::processes::CellEntries);
-
-impl lash_vm_broker::kernel::graph::Projections for EntryProjections<'_> {
-    fn project(&self, projection: &str, args: &[Datum]) -> Result<serde_json::Value, String> {
-        use lash_vm_broker::kernel::graph::ArgumentProjection as _;
-        super::host::CellArgs::named(projection, self.0)?.project(args)
-    }
-}
-
 /// A cell as its execution root holds it: the envelope it runs on, its
 /// host's records, prints and started processes, and the host graph its
 /// next park builds on.
@@ -240,10 +229,7 @@ pub(super) fn load_cell(
     };
     let (cell, _) = CellEnvelope::load(&mut decoder, envelope).map_err(text)?;
     let state = HostState::load(&mut decoder, host).map_err(text)?;
-    let entries = super::processes::CellEntries {
-        document: cell.document.clone(),
-    };
-    let projections = EntryProjections(&entries);
+    let projections = super::host::DataProjections;
     let mut ledgers = CellHostLedgers {
         calls: Vec::with_capacity(state.calls.items().len()),
         tool_call_limit: state.tool_call_limit,
@@ -584,7 +570,7 @@ struct EnvelopeBody {
     document: NodeId,
     source_map: Option<NodeId>,
     written: NodeId,
-    function_values: Option<lash_kernel_dialect::FunctionValues>,
+    function_values: Option<lash_kernel_doc::FunctionRepresentation>,
     effects: NodeId,
     release: NodeId,
 }

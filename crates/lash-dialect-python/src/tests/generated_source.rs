@@ -56,6 +56,7 @@ fn hand_document() -> k::Document {
             body: vec![k::Stmt::Return {
                 value: k::Expr::Literal(k::Literal::Int(7.into())),
             }],
+            start: None,
         },
     );
     document.entries.insert(
@@ -103,6 +104,7 @@ fn independent_source_reads_its_environment_from_the_base_document() {
             body: vec![k::Stmt::Return {
                 value: k::Expr::Variable("param".into()),
             }],
+            start: None,
         },
     );
     controls.push(changed);
@@ -266,6 +268,7 @@ fn bounded_name_literal_control_domain_is_exact() {
                                 body: vec![k::Stmt::Return {
                                     value: k::Expr::Variable(name.into()),
                                 }],
+                                start: None,
                             })),
                         },
                     ],
@@ -662,6 +665,7 @@ fn inventory_document() -> k::Document {
                     body: vec![S::Return {
                         value: E::Variable("argument".into()),
                     }],
+                    start: None,
                 })),
                 E::Call {
                     function: id,
@@ -805,6 +809,7 @@ fn inventory_document() -> k::Document {
         k::Function {
             params: vec!["optional".into()],
             body: vec![S::Return { value: null }],
+            start: None,
         },
     );
     document.private_bindings.insert("value".into());
@@ -958,8 +963,14 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
                 "member"
             }
             k::Expr::Closure(closure) => {
-                let k::Closure { params, body } = closure.as_ref();
-                let _ = (params, body);
+                // Source spells no start adapter: the reader carries the
+                // base's (`carry_start_adapters`).
+                let k::Closure {
+                    params,
+                    body,
+                    start,
+                } = closure.as_ref();
+                let _ = (params, body, start);
                 "closure"
             }
             k::Expr::Call { function, args } => {
@@ -1149,8 +1160,13 @@ fn independent_inventory_covers_kernel_variants_and_stored_fields() {
     );
     let mut forms = BTreeSet::new();
     inventory_node(k::Node::Block(main), &mut forms);
-    for k::Function { params, body } in functions.values() {
-        let _ = params;
+    for k::Function {
+        params,
+        body,
+        start,
+    } in functions.values()
+    {
+        let _ = (params, start);
         inventory_node(k::Node::Block(body), &mut forms);
     }
     let expected = [

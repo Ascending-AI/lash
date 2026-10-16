@@ -1642,8 +1642,11 @@ body {
 # copied first: replacing absent slots must never fill the guest's holes
 # or change any guest alias. Each container of the copy is then visited
 # once, without recursion: a hole or absent array slot becomes null, a
-# function or built-in token anywhere is refused, and only a container is
-# visited further.
+# built-in object's token anywhere is refused, and only a container is
+# visited further. The token of a function the program made (its path is
+# empty) is left as it is: the run's copy-out crosses it as a function
+# value, or refuses it as no data (`K-EFF-002`). A built-in function's is
+# refused.
 function ts.boundary(value: Any) -> Any
 kernel 1
 errors "cyclic_value", "too_deep", "type_error", "not_data"
@@ -1654,8 +1657,11 @@ body {
   if same(k, "float") { return value }
   if same(k, "tuple") {
     if same(value, ()) { return value }
-    if same(value[0], "ts.function") { throw error.new("not_data", "A function or a built-in object is not data", null) }
-    if same(value[0], "ts.object") { throw error.new("not_data", "A function or a built-in object is not data", null) }
+    if same(value[0], "ts.function") {
+      if same(value[1], "") { return value }
+      throw error.new("not_data", "A built-in function or object is not data", null)
+    }
+    if same(value[0], "ts.object") { throw error.new("not_data", "A built-in function or object is not data", null) }
     return value
   }
   if same(k, "set") { return set.copy_deep(value) }
@@ -1691,8 +1697,10 @@ body {
       if same(ck, "float") {} else { if same(ck, "text") {} else {
         if same(ck, "tuple") {
           if same(child, ()) {} else {
-            if same(child[0], "ts.function") { throw error.new("not_data", "A function or a built-in object is not data", null) }
-            if same(child[0], "ts.object") { throw error.new("not_data", "A function or a built-in object is not data", null) }
+            if same(child[0], "ts.function") {
+              if same(child[1], "") {} else { throw error.new("not_data", "A built-in function or object is not data", null) }
+            }
+            if same(child[0], "ts.object") { throw error.new("not_data", "A built-in function or object is not data", null) }
           }
         } else {
           if same(ck, "list") { set pending[list.len(pending)] = child }

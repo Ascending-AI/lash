@@ -38,7 +38,7 @@ pub const BUILD_IDENTITY: (&str, &str) = (
     env!("KERNEL_PERF_BUILD_PROFILE"),
 );
 
-use lash_kernel_dialect::{Environment, FrontEnd, FunctionValues, Lowered, Mode};
+use lash_kernel_dialect::{Environment, FrontEnd, Lowered, Mode};
 use lash_kernel_doc::Span as SourceSpan;
 
 /// The tag of the token a TypeScript function value is: a tuple of the tag,
@@ -47,11 +47,15 @@ use lash_kernel_doc::Span as SourceSpan;
 /// (`lower/functions.rs`).
 pub(crate) const FUNCTION_TAG: &str = "ts.function";
 
+/// The slot of a TypeScript function token that holds its closure.
+pub(crate) const FUNCTION_CALLABLE: u32 = 4;
+
 /// What a TypeScript function value is, as the dialect's package declares
 /// it ([`lash_kernel_dialect::Package::function_values`]).
-pub fn function_values() -> FunctionValues {
-    FunctionValues::Token {
+pub fn function_values() -> lash_kernel_doc::FunctionRepresentation {
+    lash_kernel_doc::FunctionRepresentation::Token {
         tag: FUNCTION_TAG.to_owned(),
+        callable: FUNCTION_CALLABLE,
     }
 }
 

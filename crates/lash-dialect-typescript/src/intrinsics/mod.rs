@@ -148,7 +148,10 @@ pub fn read(
             .name("kernel-typescript-parse".into())
             .stack_size(stack_size)
             .spawn_scoped(scope, || {
-                let document = parse_module(source).and_then(|module| read_module(module, base))?;
+                let mut document =
+                    parse_module(source).and_then(|module| read_module(module, base))?;
+                // Source spells no start adapter: the base keeps them.
+                k::carry_start_adapters(base, &mut document);
                 check_document_depth(&document, limits).map_err(|error| {
                     Diagnostic::new(
                         match error {

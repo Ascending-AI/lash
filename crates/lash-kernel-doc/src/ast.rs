@@ -11,6 +11,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::function_value::StartAdapter;
 use crate::name::{EffectName, FunctionId, Name};
 use crate::number::{Float, Integer};
 use crate::types::Type;
@@ -430,6 +431,12 @@ pub struct Closure {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<Name>,
     pub body: Block,
+    /// How a value this closure makes is started when it crosses to a tool
+    /// as a [`crate::FunctionValue`] (`K-CLO-004`); `None` for one that
+    /// cannot be started. Executable behaviour: it is part of the
+    /// document's identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<StartAdapter>,
 }
 
 /// A declared function's parameters and body.
@@ -439,6 +446,12 @@ pub struct Function {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub params: Vec<Name>,
     pub body: Block,
+    /// How a reference to this function is started when it crosses to a
+    /// tool, as [`Closure::start`] says for a closure: a saved function
+    /// keeps the adapter of the closure it was saved from. An entry needs
+    /// none; its signature and kernel convention are its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<StartAdapter>,
 }
 
 /// The code a node belongs to.
@@ -635,5 +648,124 @@ fn push_member<'a>(member: &'a Member, out: &mut Vec<Node<'a>>) {
             out.push(Node::Expr(target));
             out.push(Node::Expr(index));
         }
+    }
+}
+
+/// Calls `visit` on every closure in `block`, outer before inner, in the
+/// order its statements are written.
+pub fn each_closure_mut(block: &mut [Stmt], visit: &mut dyn FnMut(&mut Closure)) {
+    for stmt in block {
+        stmt_closures(stmt, visit);
+    }
+}
+
+fn stmt_closures(stmt: &mut Stmt, visit: &mut dyn FnMut(&mut Closure)) {
+    match stmt {
+        Stmt::Let { value, .. } => rhs_closures(value, visit),
+        Stmt::Assign { place, value } => {
+            if let Place::Member(member) = place {
+                member_closures(member, visit);
+            }
+            rhs_closures(value, visit);
+        }
+        Stmt::Remove { member } => member_closures(member, visit),
+        Stmt::Do { .. } | Stmt::Break | Stmt::Continue => {}
+        Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            expr_closures(condition, visit);
+            each_closure_mut(then_block, visit);
+            each_closure_mut(else_block, visit);
+        }
+        Stmt::For {
+            iterable,
+            body,
+            else_block,
+            ..
+        } => {
+            expr_closures(iterable, visit);
+            each_closure_mut(body, visit);
+            each_closure_mut(else_block, visit);
+        }
+        Stmt::While {
+            condition,
+            body,
+            else_block,
+        } => {
+            expr_closures(condition, visit);
+            each_closure_mut(body, visit);
+            each_closure_mut(else_block, visit);
+        }
+        Stmt::Return { value }
+        | Stmt::Throw { value }
+        | Stmt::Print { value }
+        | Stmt::Finish { value }
+        | Stmt::Fail { value } => expr_closures(value, visit),
+        Stmt::Try(scope) => {
+            each_closure_mut(&mut scope.body, visit);
+            if let Some(catch) = &mut scope.catch {
+                each_closure_mut(&mut catch.body, visit);
+            }
+            if let Some(finally) = &mut scope.finally {
+                each_closure_mut(finally, visit);
+            }
+        }
+    }
+}
+
+fn rhs_closures(rhs: &mut Rhs, visit: &mut dyn FnMut(&mut Closure)) {
+    if let Rhs::Expr(expr) = rhs {
+        expr_closures(expr, visit);
+    }
+}
+
+fn member_closures(member: &mut Member, visit: &mut dyn FnMut(&mut Closure)) {
+    match member {
+        Member::Field { target, .. } => expr_closures(target, visit),
+        Member::Index { target, index } => {
+            expr_closures(target, visit);
+            expr_closures(index, visit);
+        }
+    }
+}
+
+fn expr_closures(expr: &mut Expr, visit: &mut dyn FnMut(&mut Closure)) {
+    match expr {
+        Expr::Literal(_) | Expr::Variable(_) | Expr::Clock | Expr::Random => {}
+        Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
+            items.iter_mut().for_each(|item| expr_closures(item, visit));
+        }
+        Expr::Map(entries) => entries.iter_mut().for_each(|entry| {
+            expr_closures(&mut entry.key, visit);
+            expr_closures(&mut entry.value, visit);
+        }),
+        Expr::Record(entries) => entries
+            .iter_mut()
+            .for_each(|entry| expr_closures(&mut entry.value, visit)),
+        Expr::Member(member) => member_closures(member, visit),
+        Expr::Closure(closure) => {
+            visit(closure);
+            each_closure_mut(&mut closure.body, visit);
+        }
+        Expr::Call { args, .. } => args.iter_mut().for_each(|arg| expr_closures(arg, visit)),
+        Expr::If { cond, then, r#else } => {
+            expr_closures(cond, visit);
+            expr_closures(then, visit);
+            expr_closures(r#else, visit);
+        }
+        Expr::Let { value, body, .. } => {
+            expr_closures(value, visit);
+            expr_closures(body, visit);
+        }
+        Expr::Read(read) => {
+            expr_closures(&mut read.handle, visit);
+            expr_closures(&mut read.request, visit);
+        }
+        Expr::Act(act) => act
+            .args
+            .iter_mut()
+            .for_each(|arg| expr_closures(arg, visit)),
     }
 }

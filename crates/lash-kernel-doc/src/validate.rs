@@ -179,6 +179,13 @@ pub enum InvalidReason {
         "an action that is the whole right-hand side with atom arguments is the statement's action"
     )]
     ActionAsExpression,
+    /// `K-CLO-004`: a direct start passes the signature's arguments as the
+    /// function's parameters, one for one.
+    #[error("a start adapter's signature has {signature} parameter(s) and its function {declared}")]
+    StartArity { signature: usize, declared: usize },
+    /// `K-CLO-004`: a token holds its tag first and its callable after it.
+    #[error("a start adapter's token has an empty tag or holds its callable in slot 0")]
+    StartToken,
 }
 
 fn invalid(site: Option<&Site>, reason: InvalidReason) -> Invalid {
@@ -274,6 +281,9 @@ pub fn validate_document_with_limits(
         let site = Site::new(Unit::Function(name.clone()), []);
         check_name(name, Some(&site))?;
         check_params(&function.params, &site)?;
+        if let Some(start) = &function.start {
+            scope.check_start(start, function.params.len(), &site)?;
+        }
         scope.check_unit(&function.body, site)?;
     }
     scope.check_unit(&document.main, Site::new(Unit::Main, []))
@@ -913,6 +923,9 @@ impl Scope<'_> {
 
     fn check_closure(&self, closure: &Closure, site: &Site) -> Result<(), Invalid> {
         check_params(&closure.params, site)?;
+        if let Some(start) = &closure.start {
+            self.check_start(start, closure.params.len(), site)?;
+        }
         // A closure body is a function body: an enclosing loop does not
         // reach into it.
         self.check_block(&closure.body, &site.child(0), false)
@@ -945,6 +958,53 @@ fn nested_action(expr: &Expr, site: &Site, position: &'static str) -> Result<(),
     Ok(())
 }
 
+impl Scope<'_> {
+    /// A start adapter (`K-CLO-004`): a valid signature, a direct start's
+    /// arity, a token's tag and slot, and the functions a TypeScript start
+    /// calls listed in the manifest.
+    fn check_start(
+        &self,
+        start: &crate::StartAdapter,
+        params: usize,
+        site: &Site,
+    ) -> Result<(), Invalid> {
+        check_signature(&start.signature).map_err(|error| Invalid {
+            site: Some(site.clone()),
+            reason: error.reason,
+        })?;
+        if let crate::FunctionRepresentation::Token { tag, callable } = &start.representation
+            && (tag.is_empty() || *callable == 0)
+        {
+            return Err(invalid(Some(site), InvalidReason::StartToken));
+        }
+        match &start.convention {
+            crate::StartConvention::Direct => {
+                if start.signature.params.len() != params {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::StartArity {
+                            signature: start.signature.params.len(),
+                            declared: params,
+                        },
+                    ));
+                }
+            }
+            crate::StartConvention::TsArgsList { await_fn, same_fn } => {
+                for function in [await_fn, same_fn] {
+                    if !self.functions.contains_key(function) {
+                        return Err(invalid(
+                            Some(site),
+                            InvalidReason::FunctionNotListed {
+                                function: *function,
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
 fn loop_control(in_loop: bool, keyword: &'static str, site: &Site) -> Result<(), Invalid> {
     if in_loop {
         Ok(())

@@ -6,12 +6,13 @@ use super::{lower, lower_in_session, main_text};
 use crate::DiagnosticCode;
 
 /// A function that ends without `return` gives `undefined`; the kernel's
-/// own default is null.
+/// own default is null. Its closure states how a tool starts it: the token's
+/// closure, with an absent `this` and the argument list.
 #[test]
 fn a_function_without_a_return_gives_undefined() {
     assert_eq!(
         main_text("function f() {}"),
-        "let t1 = fn(this1, args1) {\n  return absent\n}\nlet f = (\"ts.function\", \"\", \"f\", 0.0, t1, {})"
+        "let t1 = fn(this1, args1) start() -> Any token(\"ts.function\", 4) ts_args(ts.await, same) {\n  return absent\n}\nlet f = (\"ts.function\", \"\", \"f\", 0.0, t1, {})"
     );
 }
 

@@ -45,6 +45,9 @@ fn scan(
                     functions.insert(*function);
                 }
                 Expr::Literal(literal) => reference(literal, declared),
+                Expr::Closure(closure) => {
+                    functions.extend(closure.start.iter().flat_map(|start| start.functions()));
+                }
                 Expr::Variable(_)
                 | Expr::Tuple(_)
                 | Expr::List(_)
@@ -52,7 +55,6 @@ fn scan(
                 | Expr::Set(_)
                 | Expr::Record(_)
                 | Expr::Member(_)
-                | Expr::Closure(_)
                 | Expr::If { .. }
                 | Expr::Let { .. }
                 | Expr::Clock
@@ -191,9 +193,17 @@ pub(crate) fn reach(
     document: &Document,
     catalog: &dyn FunctionCatalog,
 ) -> (BTreeSet<EffectName>, Reached) {
-    reach_blocks(
+    // A declared function's start adapter calls its functions when the
+    // function is started: they are reached, with what they call.
+    let started = document
+        .functions
+        .values()
+        .filter_map(|function| function.start.as_ref())
+        .flat_map(lash_kernel_doc::StartAdapter::functions);
+    reach_from(
         std::iter::once(&document.main)
             .chain(document.functions.values().map(|function| &function.body)),
+        started,
         catalog,
     )
 }
@@ -202,8 +212,17 @@ pub(crate) fn reach_blocks<'a>(
     blocks: impl IntoIterator<Item = &'a Block>,
     catalog: &dyn FunctionCatalog,
 ) -> (BTreeSet<EffectName>, Reached) {
+    reach_from(blocks, std::iter::empty(), catalog)
+}
+
+/// What `blocks` reach, and `roots`, functions reached besides their code.
+fn reach_from<'a>(
+    blocks: impl IntoIterator<Item = &'a Block>,
+    roots: impl IntoIterator<Item = FunctionId>,
+    catalog: &dyn FunctionCatalog,
+) -> (BTreeSet<EffectName>, Reached) {
     let mut effects = BTreeSet::new();
-    let mut direct = BTreeSet::new();
+    let mut direct: BTreeSet<FunctionId> = roots.into_iter().collect();
     for block in blocks {
         scan(block, &mut effects, &mut direct, &mut BTreeSet::new());
     }

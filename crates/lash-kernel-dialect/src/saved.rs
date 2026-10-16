@@ -1,22 +1,29 @@
 //! Self-contained saved code with immutable page-backed captures.
-use crate::{FunctionValues, Written};
+//!
+//! A saved function is cut out of the cell's heap by the root-based
+//! snapshot every crossing function is cut by
+//! ([`lash_kernel_doc::snapshot`]): this module selects the bindings that
+//! qualify and freezes their captures as pages.
+use crate::Written;
 use lash_kernel_doc::heap::*;
+use lash_kernel_doc::snapshot::{
+    CodeReads, FrozenToken, SnapshotError, SnapshotHeap, SnapshotRefusal, closure_held,
+    freeze_token, gather, members, text_is, text_of, token_closure,
+};
 use lash_kernel_doc::{
-    ActKind, Action, Atom, Callee, Document, EffectName, Expr, Function, FunctionId, Literal,
-    Member, Name, Node, Place, Rhs, Signature, Site, Stmt, Unit, ValueKind,
+    Action, Callee, Document, EffectName, Expr, Function, FunctionId, FunctionRepresentation,
+    Literal, Name, NativeHeap, Rhs, Signature, Site, Stmt, Unit,
 };
-use lash_kernel_state::paged::{
-    ClosureView, FrozenRef, HeapLifecycle, HeapWriteError, PagedHeap, SemanticHeap,
-};
+use lash_kernel_state::paged::{FrozenRef, HeapLifecycle, HeapWriteError, PagedHeap, SemanticHeap};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::ControlFlow;
 mod graph;
 #[cfg(test)]
 mod laws;
 pub use graph::{
     Bundle, BundleBody, BundleRefusal, DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, MemberBody,
 };
+pub use lash_kernel_doc::snapshot::CaptureRefusal;
 
 #[derive(Clone, Debug)]
 pub struct SavedFunction {
@@ -29,11 +36,22 @@ pub struct SavedFunction {
     pub written: Option<Written>,
     pub token: Option<Token>,
 }
+/// The members of the token a saved function is held in, around its
+/// callable, frozen.
 #[derive(Clone, Debug)]
 pub struct Token {
     pub tag: String,
     pub before: Vec<FrozenRef>,
     pub after: Vec<FrozenRef>,
+}
+impl Token {
+    fn frozen(token: FrozenToken<FrozenRef>) -> Self {
+        Self {
+            tag: token.tag,
+            before: token.before,
+            after: token.after,
+        }
+    }
 }
 #[derive(Clone, Debug)]
 pub struct Kept {
@@ -86,24 +104,6 @@ pub enum NotSaved {
     Unreadable { problem: String },
 }
 
-/// Why one captured variable cannot be frozen.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum CaptureRefusal {
-    #[error("which holds a task or a pending promise")]
-    Task,
-    #[error("which holds a function that is bound to no name of its own")]
-    Function,
-    #[error("which holds data that contains itself")]
-    Cyclic,
-    /// Two of the functions it holds read different variables of this
-    /// name.
-    #[error("which names two different variables among the functions it holds")]
-    Conflict,
-    #[error("which holds a {kind:?} value, and no constant is written for one")]
-    NoConstant { kind: ValueKind },
-}
-
 /// The terminal cell's root values, read directly from its paged heap.
 #[derive(Clone, Copy)]
 pub struct Left<'a> {
@@ -114,7 +114,8 @@ pub struct Left<'a> {
     /// What the source wrote of each function the document makes, by the
     /// site of its closure ([`crate::Lowered::written`]).
     pub written: &'a BTreeMap<Site, Written>,
-    pub values: &'a FunctionValues,
+    /// How the dialect holds a function as a value.
+    pub values: &'a FunctionRepresentation,
     pub release: PageRef,
 }
 #[derive(Debug, thiserror::Error)]
@@ -130,7 +131,25 @@ fn unreadable(problem: &str) -> SaveError {
     }
     .into()
 }
-fn write_fault(error: HeapWriteError) -> SaveError {
+impl From<SnapshotError> for SaveError {
+    fn from(error: SnapshotError) -> Self {
+        match error {
+            SnapshotError::Heap(fault) => Self::Heap(fault),
+            SnapshotError::Refused(refusal) => Self::Refused(match refusal {
+                SnapshotRefusal::Capture { name, why } => NotSaved::Capture { name, why },
+                SnapshotRefusal::MadeByLibrary => NotSaved::MadeByLibrary,
+                SnapshotRefusal::Token => NotSaved::Token,
+                SnapshotRefusal::Unreadable { problem } => NotSaved::Unreadable { problem },
+                other @ (SnapshotRefusal::NoStartSignature | SnapshotRefusal::TooLarge { .. }) => {
+                    NotSaved::Unreadable {
+                        problem: other.to_string(),
+                    }
+                }
+            }),
+        }
+    }
+}
+fn write_fault(error: HeapWriteError) -> SnapshotError {
     match error {
         HeapWriteError::Fault(error) => error.into(),
         other => {
@@ -138,92 +157,61 @@ fn write_fault(error: HeapWriteError) -> SaveError {
         }
     }
 }
-fn members(heap: &PagedHeap, tuple: &TupleRef) -> Result<Vec<Value>, HeapFault> {
-    let mut values = Vec::new();
-    heap.tuple_visit(tuple, &mut |v| {
-        values.push(v.clone());
-        ControlFlow::Continue(())
-    })?;
-    Ok(values)
+/// The cell's heap as a saving reads it: a closure `main` made reads the
+/// bindings the cell left, and a capture freezes to pages.
+struct Saving<'a, 'h> {
+    heap: &'h mut PagedHeap,
+    left: &'a Left<'a>,
 }
-fn text_is(heap: &PagedHeap, value: &Value, text: &str) -> Result<bool, HeapFault> {
-    let Value::Text(t) = value else {
-        return Ok(false);
-    };
-    if t.summary.utf8_bytes != text.len() as u64 {
-        return Ok(false);
+impl SnapshotHeap for Saving<'_, '_> {
+    type Frozen = FrozenRef;
+
+    fn native(&self) -> &dyn NativeHeap {
+        self.heap
     }
-    let mut found = String::new();
-    heap.payload_visit(value, 0..t.summary.utf8_bytes, &mut |chunk| {
-        if let Chunk::Text(s) = chunk {
-            found.push_str(s);
+
+    fn closure_site(&self, id: EntityId) -> Result<std::sync::Arc<Site>, HeapFault> {
+        self.heap.closure(id)?.site.resolve(self.heap.pages())
+    }
+
+    fn closure_capture(&mut self, id: EntityId, name: &Name) -> Result<Option<Value>, HeapFault> {
+        let object = self.heap.closure(id)?;
+        match object.captures.get(
+            &lash_kernel_state::paged::metadata::metadata_key(name),
+            self.heap.pages(),
+        )? {
+            Some((_, cell)) => self.heap.variable_get(cell).map(Some),
+            None => Ok(None),
         }
-        ControlFlow::Continue(())
-    })?;
-    Ok(found == text)
-}
-fn token_closure(
-    heap: &PagedHeap,
-    value: &Value,
-    tag: Option<&str>,
-) -> Result<Option<(EntityId, usize)>, HeapFault> {
-    let (Some(tag), Value::Tuple(t)) = (tag, value) else {
-        return Ok(None);
-    };
-    let values = members(heap, t)?;
-    if !values
-        .first()
-        .map(|v| text_is(heap, v, tag))
-        .transpose()?
-        .unwrap_or(false)
-    {
-        return Ok(None);
     }
-    let mut closures = values.iter().enumerate().filter_map(|(at, value)| {
-        if let Value::Closure(id) = value {
-            Some((*id, at))
-        } else {
-            None
+
+    fn unit_binding(&mut self, unit: &Unit, name: &Name) -> Result<Option<Value>, HeapFault> {
+        // The bindings the cell left, whether or not they are among the
+        // bindings it drops.
+        match unit {
+            Unit::Main => match self.left.bindings.get(name) {
+                Some(value) => Ok(Some(value.clone())),
+                None => self.heap.session_binding(name),
+            },
+            _ => Ok(None),
         }
-    });
-    let first = closures.next();
-    Ok(if closures.next().is_none() {
-        first
-    } else {
-        None
-    })
-}
-fn closure_held(
-    heap: &PagedHeap,
-    value: &Value,
-    tag: Option<&str>,
-) -> Result<Option<EntityId>, HeapFault> {
-    match value {
-        Value::Closure(id) => Ok(Some(*id)),
-        _ => Ok(token_closure(heap, value, tag)?.map(|(id, _)| id)),
     }
-}
-fn function_name(heap: &PagedHeap, name: &TextRef) -> Result<Name, HeapFault> {
-    let mut text = String::new();
-    heap.payload_visit(
-        &Value::Text(name.clone()),
-        0..name.summary.utf8_bytes,
-        &mut |chunk| {
-            if let Chunk::Text(chunk) = chunk {
-                text.push_str(chunk);
-            }
-            ControlFlow::Continue(())
-        },
-    )?;
-    Ok(Name::new(text))
+
+    fn freeze(
+        &mut self,
+        value: &Value,
+        named: &BTreeMap<EntityId, Name>,
+    ) -> Result<(FrozenRef, BTreeSet<Name>), SnapshotError> {
+        self.heap.freeze_named(value, named).map_err(write_fault)
+    }
 }
 pub fn function_reference(
     heap: &PagedHeap,
     value: &Value,
-    values: &FunctionValues,
+    values: &FunctionRepresentation,
 ) -> Result<Option<Name>, HeapFault> {
     if let Value::Function(name) = value {
-        return function_name(heap, name).map(Some);
+        return text_of(heap, name).map(|name| Some(Name::new(name)));
     }
     let (Some(tag), Value::Tuple(t)) = (values.tag(), value) else {
         return Ok(None);
@@ -250,284 +238,8 @@ pub fn function_reference(
     }
     first
         .as_ref()
-        .map(|name| function_name(heap, name))
+        .map(|name| text_of(heap, name).map(Name::new))
         .transpose()
-}
-pub fn token_of(
-    heap: &mut PagedHeap,
-    value: &Value,
-    values: &FunctionValues,
-) -> Result<Option<Token>, HeapFault> {
-    let (Some(tag), Value::Tuple(t)) = (values.tag(), value) else {
-        return Ok(None);
-    };
-    let values = members(heap, t)?;
-    if !values
-        .first()
-        .map(|v| text_is(heap, v, tag))
-        .transpose()?
-        .unwrap_or(false)
-    {
-        return Ok(None);
-    }
-    let mut names = values
-        .iter()
-        .enumerate()
-        .filter_map(|(i, v)| matches!(v, Value::Function(_)).then_some(i));
-    let (Some(at), None) = (names.next(), names.next()) else {
-        return Ok(None);
-    };
-    freeze_token(heap, &values, at, tag, &BTreeMap::new())
-        .map(Some)
-        .map_err(|error| match error {
-            SaveError::Heap(e) => e,
-            SaveError::Refused(e) => HeapFault::Malformed(e.to_string()),
-        })
-}
-fn freeze_token(
-    heap: &mut PagedHeap,
-    values: &[Value],
-    at: usize,
-    tag: &str,
-    named: &BTreeMap<EntityId, Name>,
-) -> Result<Token, SaveError> {
-    let mut each = |values: &[Value]| -> Result<Vec<FrozenRef>, SaveError> {
-        values
-            .iter()
-            .map(|value| {
-                validate_capture(heap, value, &BTreeMap::new(), &mut BTreeSet::new())
-                    .map_err(|error| capture_error(&Name::new("token"), error))?;
-                heap.freeze_named(value, named)
-                    .map(|(frozen, _)| frozen)
-                    .map_err(write_fault)
-            })
-            .collect()
-    };
-    Ok(Token {
-        tag: tag.into(),
-        before: each(&values[1..at])?,
-        after: each(&values[at + 1..])?,
-    })
-}
-/// What a body reads of the world outside it.
-#[derive(Default)]
-struct Reads {
-    /// The variables it names and does not declare.
-    free: BTreeSet<Name>,
-    effects: BTreeSet<EffectName>,
-    library: BTreeSet<FunctionId>,
-    /// The declared functions it names.
-    declared: BTreeSet<Name>,
-}
-
-impl Reads {
-    fn name(&mut self, name: &Name, bound: &[Name]) {
-        if !bound.contains(name) {
-            self.free.insert(name.clone());
-        }
-    }
-
-    /// Walks a block in a scope of its own: what it declares ends with it.
-    fn block(&mut self, block: &[Stmt], bound: &mut Vec<Name>) {
-        let outer = bound.len();
-        for stmt in block {
-            self.stmt(stmt, bound);
-        }
-        bound.truncate(outer);
-    }
-
-    fn scoped(&mut self, binding: &Name, block: &[Stmt], bound: &mut Vec<Name>) {
-        bound.push(binding.clone());
-        self.block(block, bound);
-        bound.pop();
-    }
-
-    fn stmt(&mut self, stmt: &Stmt, bound: &mut Vec<Name>) {
-        match stmt {
-            Stmt::Let { name, value } => {
-                // The right-hand side does not see the variable it binds.
-                self.rhs(value, bound);
-                bound.push(name.clone());
-            }
-            Stmt::Assign { place, value } => {
-                match place {
-                    Place::Variable(name) => self.name(name, bound),
-                    Place::Member(member) => self.member(member, bound),
-                }
-                self.rhs(value, bound);
-            }
-            Stmt::Remove { member } => self.member(member, bound),
-            Stmt::Do { action } => self.action(action, bound),
-            Stmt::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                self.expr(condition, bound);
-                self.block(then_block, bound);
-                self.block(else_block, bound);
-            }
-            Stmt::For {
-                binding,
-                iterable,
-                body,
-                else_block,
-                ..
-            } => {
-                self.expr(iterable, bound);
-                self.scoped(binding, body, bound);
-                self.block(else_block, bound);
-            }
-            Stmt::While {
-                condition,
-                body,
-                else_block,
-            } => {
-                self.expr(condition, bound);
-                self.block(body, bound);
-                self.block(else_block, bound);
-            }
-            Stmt::Break | Stmt::Continue => {}
-            Stmt::Return { value }
-            | Stmt::Throw { value }
-            | Stmt::Print { value }
-            | Stmt::Finish { value }
-            | Stmt::Fail { value } => self.expr(value, bound),
-            Stmt::Try(scope) => {
-                self.block(&scope.body, bound);
-                if let Some(catch) = &scope.catch {
-                    self.scoped(&catch.binding, &catch.body, bound);
-                }
-                if let Some(finally) = &scope.finally {
-                    self.block(finally, bound);
-                }
-            }
-        }
-    }
-
-    fn rhs(&mut self, rhs: &Rhs, bound: &mut Vec<Name>) {
-        match rhs {
-            Rhs::Expr(expr) => self.expr(expr, bound),
-            Rhs::Action(action) => self.action(action, bound),
-        }
-    }
-
-    fn atom(&mut self, atom: &Atom, bound: &[Name]) {
-        match atom {
-            Atom::Variable(name) => self.name(name, bound),
-            Atom::Literal(Literal::Function(name)) => {
-                self.declared.insert(name.clone());
-            }
-            Atom::Literal(_) => {}
-        }
-    }
-
-    fn action(&mut self, action: &Action, bound: &[Name]) {
-        match action {
-            Action::Call { callee, args } | Action::Spawn { callee, args } => {
-                match callee {
-                    Callee::Declared(name) => {
-                        self.declared.insert(name.clone());
-                    }
-                    Callee::Value(name) => self.name(name, bound),
-                    Callee::Library(function) => {
-                        self.library.insert(*function);
-                    }
-                }
-                args.iter().for_each(|arg| self.atom(arg, bound));
-            }
-            Action::Perform { effect, args, .. } => {
-                self.effects.insert(effect.clone());
-                args.iter().for_each(|arg| self.atom(arg, bound));
-            }
-            Action::Await { policy, value } => {
-                self.library.insert(*policy);
-                self.atom(value, bound);
-            }
-            Action::Sleep { duration: atom, .. }
-            | Action::Join { task: atom }
-            | Action::JoinMany { tasks: atom, .. }
-            | Action::Cancel { task: atom } => self.atom(atom, bound),
-            Action::Yield => {}
-        }
-    }
-
-    fn member(&mut self, member: &Member, bound: &mut Vec<Name>) {
-        match member {
-            Member::Field { target, .. } => self.expr(target, bound),
-            Member::Index { target, index } => {
-                self.expr(target, bound);
-                self.expr(index, bound);
-            }
-        }
-    }
-
-    fn expr(&mut self, expr: &Expr, bound: &mut Vec<Name>) {
-        match expr {
-            Expr::Literal(Literal::Function(name)) => {
-                self.declared.insert(name.clone());
-            }
-            Expr::Literal(_) | Expr::Clock | Expr::Random => {}
-            Expr::Variable(name) => self.name(name, bound),
-            Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
-                items.iter().for_each(|item| self.expr(item, bound));
-            }
-            Expr::Map(entries) => entries.iter().for_each(|entry| {
-                self.expr(&entry.key, bound);
-                self.expr(&entry.value, bound);
-            }),
-            Expr::Record(entries) => entries
-                .iter()
-                .for_each(|entry| self.expr(&entry.value, bound)),
-            Expr::Member(member) => self.member(member, bound),
-            Expr::Closure(closure) => {
-                let outer = bound.len();
-                bound.extend(closure.params.iter().cloned());
-                self.block(&closure.body, bound);
-                bound.truncate(outer);
-            }
-            Expr::Call { function, args } => {
-                self.library.insert(*function);
-                args.iter().for_each(|arg| self.expr(arg, bound));
-            }
-            Expr::If { cond, then, r#else } => {
-                self.expr(cond, bound);
-                self.expr(then, bound);
-                self.expr(r#else, bound);
-            }
-            Expr::Let { name, value, body } => {
-                self.expr(value, bound);
-                bound.push(name.clone());
-                self.expr(body, bound);
-                bound.pop();
-            }
-            Expr::Read(read) => {
-                self.expr(&read.handle, bound);
-                self.expr(&read.request, bound);
-            }
-            Expr::Act(act) => {
-                match &act.kind {
-                    ActKind::Call(callee) | ActKind::Spawn(callee) => match callee {
-                        Callee::Declared(name) => {
-                            self.declared.insert(name.clone());
-                        }
-                        Callee::Value(name) => self.name(name, bound),
-                        Callee::Library(function) => {
-                            self.library.insert(*function);
-                        }
-                    },
-                    ActKind::Perform { effect, .. } => {
-                        self.effects.insert(effect.clone());
-                    }
-                    ActKind::Await(policy) => {
-                        self.library.insert(*policy);
-                    }
-                    ActKind::Sleep { .. } | ActKind::Join | ActKind::JoinMany(_) => {}
-                }
-                act.args.iter().for_each(|arg| self.expr(arg, bound));
-            }
-        }
-    }
 }
 
 /// Why a saved function cannot be used in an environment.
@@ -574,239 +286,6 @@ pub enum Unusable {
     Token { function: Name },
 }
 
-#[derive(Debug)]
-enum CaptureError {
-    Heap(HeapFault),
-    Refused(CaptureRefusal),
-}
-impl From<HeapFault> for CaptureError {
-    fn from(e: HeapFault) -> Self {
-        Self::Heap(e)
-    }
-}
-fn capture_error(name: &Name, error: CaptureError) -> SaveError {
-    match error {
-        CaptureError::Heap(e) => e.into(),
-        CaptureError::Refused(why) => NotSaved::Capture {
-            name: name.clone(),
-            why,
-        }
-        .into(),
-    }
-}
-fn validate_capture(
-    heap: &PagedHeap,
-    value: &Value,
-    named: &BTreeMap<EntityId, Name>,
-    active: &mut BTreeSet<EntityId>,
-) -> Result<(), CaptureError> {
-    match value {
-        Value::Closure(id) if !named.contains_key(id) => {
-            Err(CaptureError::Refused(CaptureRefusal::Function))
-        }
-        Value::Task(_) | Value::Ref(Identity::Task(_)) => {
-            Err(CaptureError::Refused(CaptureRefusal::Task))
-        }
-        Value::Timestamp(_) | Value::Error(_) | Value::Handle(_) | Value::Ref(_) => {
-            Err(CaptureError::Refused(CaptureRefusal::NoConstant {
-                kind: kind(value),
-            }))
-        }
-        Value::Tuple(t) => {
-            for value in members(heap, t)? {
-                validate_capture(heap, &value, named, active)?;
-            }
-            Ok(())
-        }
-        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
-            if !active.insert(*id) {
-                return Err(CaptureError::Refused(CaptureRefusal::Cyclic));
-            }
-            let mut result = Ok(());
-            heap.visit(*id, &mut |e| {
-                let values = match e {
-                    Element::Item(v) => vec![v],
-                    Element::Entry { key, value } => vec![key, value],
-                    Element::Field { value, .. } => vec![value],
-                };
-                for value in values {
-                    if let Err(e) = validate_capture(heap, value, named, active) {
-                        result = Err(e);
-                        return ControlFlow::Break(());
-                    }
-                }
-                ControlFlow::Continue(())
-            })?;
-            active.remove(id);
-            result
-        }
-        _ => Ok(()),
-    }
-}
-fn kind(value: &Value) -> ValueKind {
-    match value {
-        Value::Timestamp(_) => ValueKind::Timestamp,
-        Value::Error(_) => ValueKind::Error,
-        Value::Handle(_) => ValueKind::Handle,
-        Value::Ref(_) => ValueKind::Ref,
-        _ => ValueKind::Absent,
-    }
-}
-fn closure_at<'a>(body: &'a [Stmt], site: &Site) -> Option<&'a lash_kernel_doc::Closure> {
-    let mut node = Node::Block(body);
-    for step in &site.path {
-        node = node.children().into_iter().nth(*step as usize)?;
-    }
-    match node {
-        Node::Expr(Expr::Closure(closure)) => Some(closure),
-        _ => None,
-    }
-}
-fn closure_code<'a>(
-    heap: &PagedHeap,
-    left: &Left<'a>,
-    object: &ClosureView,
-) -> Result<&'a lash_kernel_doc::Closure, SaveError> {
-    let site = object.site.resolve(heap.pages())?;
-    let body = match &site.unit {
-        Unit::Main => &left.document.main,
-        Unit::Function(name) => {
-            &left
-                .document
-                .functions
-                .get(name)
-                .ok_or_else(|| unreadable("its unit is not declared"))?
-                .body
-        }
-        Unit::Library(_) => return Err(NotSaved::MadeByLibrary.into()),
-    };
-    closure_at(body, &site).ok_or_else(|| unreadable("its site is not a closure expression"))
-}
-fn captured_value(
-    heap: &PagedHeap,
-    left: &Left<'_>,
-    object: &ClosureView,
-    free: &Name,
-) -> Result<Option<Value>, SaveError> {
-    if let Some((_, cell)) = object.captures.get(
-        &lash_kernel_state::paged::metadata::metadata_key(free),
-        heap.pages(),
-    )? {
-        return heap.variable_get(cell).map(Some).map_err(Into::into);
-    }
-    // A closure `main` made reads the session's bindings: the ones the
-    // cell left, whether or not they are among the bindings it drops.
-    if object.site.resolve(heap.pages())?.unit == Unit::Main {
-        return match left.bindings.get(free) {
-            Some(value) => Ok(Some(value.clone())),
-            None => heap.session_binding(free).map_err(Into::into),
-        };
-    }
-    Ok(None)
-}
-enum Held {
-    Data(FrozenRef, Box<Value>),
-    Helper(EntityId),
-}
-struct Helper {
-    name: Name,
-    code: lash_kernel_doc::Closure,
-    token: Option<Token>,
-}
-struct Frozen<'a, 'h> {
-    left: &'a Left<'a>,
-    heap: &'h mut PagedHeap,
-    named: &'a BTreeMap<EntityId, Name>,
-    reads: Reads,
-    bound: BTreeMap<Name, Held>,
-    helpers: Vec<Helper>,
-    helper_owners: &'a BTreeMap<EntityId, BTreeSet<Name>>,
-    owners: BTreeSet<Name>,
-    references: BTreeSet<Name>,
-}
-impl<'a> Frozen<'a, '_> {
-    fn absorb(&mut self, object: &ClosureView) -> Result<&'a lash_kernel_doc::Closure, SaveError> {
-        let closure = closure_code(self.heap, self.left, object)?;
-        let mut reads = Reads::default();
-        reads.block(&closure.body, &mut closure.params.clone());
-        self.reads.effects.extend(reads.effects);
-        self.reads.library.extend(reads.library);
-        self.references.extend(reads.declared);
-        for free in &reads.free {
-            let Some(value) = captured_value(self.heap, self.left, object, free)? else {
-                continue;
-            };
-            if let Some(helper) = closure_held(self.heap, &value, self.left.values.tag())?
-                && !self.named.contains_key(&helper)
-            {
-                if let Some(owners) = self.helper_owners.get(&helper) {
-                    self.owners.extend(owners.iter().cloned());
-                }
-                match self.bound.get(free) {
-                    Some(Held::Helper(id)) if *id == helper => continue,
-                    Some(_) => {
-                        return Err(capture_error(
-                            free,
-                            CaptureError::Refused(CaptureRefusal::Conflict),
-                        ));
-                    }
-                    None => (),
-                }
-                let inner = self.heap.closure(helper)?;
-                let token = match (
-                    &value,
-                    token_closure(self.heap, &value, self.left.values.tag())?,
-                ) {
-                    (Value::Tuple(t), Some((_, at))) => {
-                        let values = members(self.heap, t)?;
-                        Some(freeze_token(
-                            self.heap,
-                            &values,
-                            at,
-                            self.left.values.tag().unwrap_or_default(),
-                            self.named,
-                        )?)
-                    }
-                    _ => None,
-                };
-                self.bound.insert(free.clone(), Held::Helper(helper));
-                let code = self.absorb(&inner)?.clone();
-                self.helpers.push(Helper {
-                    name: free.clone(),
-                    code,
-                    token,
-                });
-                continue;
-            }
-            if let Some(Held::Data(_, held)) = self.bound.get(free)
-                && self.heap.equal(held, &value)?
-            {
-                continue;
-            }
-            validate_capture(self.heap, &value, self.named, &mut BTreeSet::new())
-                .map_err(|e| capture_error(free, e))?;
-            let (frozen, functions) = self
-                .heap
-                .freeze_named(&value, self.named)
-                .map_err(write_fault)?;
-            self.references.extend(functions);
-            match self.bound.get(free) {
-                Some(Held::Data(held, _)) if held.root.id == frozen.root.id => (),
-                Some(_) => {
-                    return Err(capture_error(
-                        free,
-                        CaptureError::Refused(CaptureRefusal::Conflict),
-                    ));
-                }
-                None => {
-                    self.bound
-                        .insert(free.clone(), Held::Data(frozen, Box::new(value)));
-                }
-            }
-        }
-        Ok(closure)
-    }
-}
 fn save_closure(
     heap: &mut PagedHeap,
     left: &Left<'_>,
@@ -815,22 +294,17 @@ fn save_closure(
     named: &BTreeMap<EntityId, Name>,
     helper_owners: &BTreeMap<EntityId, BTreeSet<Name>>,
 ) -> Result<SavedFunction, SaveError> {
-    let object = heap.closure(id)?;
-    let mut frozen = Frozen {
-        left,
-        heap,
+    let mut saving = Saving { heap, left };
+    let gathered = gather(
+        &mut saving,
+        left.document,
+        left.values.tag(),
+        id,
         named,
-        reads: Reads::default(),
-        bound: BTreeMap::new(),
-        helpers: Vec::new(),
         helper_owners,
-        owners: BTreeSet::new(),
-        references: BTreeSet::new(),
-    };
-    let closure = frozen.absorb(&object)?.clone();
-    let mut document = Document::new(left.document.manifest.numbers, Vec::new());
-    if let Some(effect) = frozen
-        .reads
+        &|capture| left.bindings.contains_key(capture),
+    )?;
+    if let Some(effect) = gathered
         .effects
         .iter()
         .find(|effect| left.controls.contains_key(*effect))
@@ -840,7 +314,8 @@ fn save_closure(
         }
         .into());
     }
-    for effect in &frozen.reads.effects {
+    let mut document = Document::new(left.document.manifest.numbers, Vec::new());
+    for effect in &gathered.effects {
         document.manifest.effects.insert(
             effect.clone(),
             left.document
@@ -851,7 +326,17 @@ fn save_closure(
                 .clone(),
         );
     }
-    for function in &frozen.reads.library {
+    // The functions its code calls, and those the start adapters of its
+    // function and closures call.
+    let mut library = gathered.library.clone();
+    each_start(&gathered.function, &mut |start| {
+        if let lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn } =
+            &start.convention
+        {
+            library.extend([*await_fn, *same_fn]);
+        }
+    });
+    for function in &library {
         document.manifest.functions.insert(
             *function,
             left.document
@@ -862,80 +347,41 @@ fn save_closure(
                 .clone(),
         );
     }
-    let mut body = Vec::new();
-    for helper in &frozen.helpers {
-        body.push(Stmt::Let {
-            name: helper.name.clone(),
-            value: Rhs::Expr(Expr::Literal(Literal::Absent)),
-        });
-    }
-    // Token members stay captures, not AST constants. A private helper's code
-    // refers to private capture names chosen outside the document's names.
-    let mut captures: BTreeMap<Name, FrozenRef> = frozen
-        .bound
-        .into_iter()
-        .filter_map(|(name, held)| {
-            if let Held::Data(value, _) = held {
-                Some((name, value))
-            } else {
-                None
-            }
-        })
-        .collect();
-    for (index, helper) in frozen.helpers.into_iter().enumerate() {
-        let made = Expr::Closure(Box::new(helper.code));
-        let value = if let Some(token) = helper.token {
-            let mut values = vec![Expr::Literal(Literal::Text(token.tag))];
-            for (side, refs) in [("before", token.before), ("after", token.after)] {
-                if side == "after" {
-                    values.push(made.clone());
-                }
-                for (at, frozen) in refs.into_iter().enumerate() {
-                    let mut capture = Name::new(format!("__saved_token_{index}_{side}_{at}"));
-                    while captures.contains_key(&capture)
-                        || left.bindings.contains_key(&capture)
-                        || reads_name(&closure, &capture)
-                    {
-                        capture = Name::new(format!("_{}", capture.as_str()));
-                    }
-                    captures.insert(capture.clone(), frozen);
-                    values.push(Expr::Variable(capture));
-                }
-            }
-            Expr::Tuple(values)
-        } else {
-            made
-        };
-        body.push(Stmt::Assign {
-            place: Place::Variable(helper.name),
-            value: Rhs::Expr(value),
-        });
-    }
-    body.extend(closure.body);
-    document.functions.insert(
-        name.clone(),
-        Function {
-            params: closure.params,
-            body,
-        },
-    );
-    frozen.owners.remove(name);
-    let site = object.site.resolve(frozen.heap.pages())?;
+    document
+        .functions
+        .insert(name.clone(), gathered.function.clone());
+    let mut owners = gathered.owners;
+    owners.remove(name);
     Ok(SavedFunction {
         name: name.clone(),
         document,
-        captures,
+        captures: gathered.captures,
         release: left.release,
-        helper_owners: frozen.owners,
-        references: frozen.references,
-        written: left.written.get(&site).cloned(),
+        helper_owners: owners,
+        references: gathered.references,
+        written: left.written.get(&gathered.site).cloned(),
         token: None,
     })
 }
-fn reads_name(closure: &lash_kernel_doc::Closure, name: &Name) -> bool {
-    let mut reads = Reads::default();
-    reads.block(&closure.body, &mut closure.params.clone());
-    reads.free.contains(name)
+/// Each start adapter `function` and the closures in its body carry.
+fn each_start(function: &Function, visit: &mut dyn FnMut(&lash_kernel_doc::StartAdapter)) {
+    fn walk(
+        node: lash_kernel_doc::Node<'_>,
+        visit: &mut dyn FnMut(&lash_kernel_doc::StartAdapter),
+    ) {
+        if let lash_kernel_doc::Node::Expr(Expr::Closure(closure)) = node
+            && let Some(start) = &closure.start
+        {
+            visit(start);
+        }
+        for child in node.children() {
+            walk(child, visit);
+        }
+    }
+    if let Some(start) = &function.start {
+        visit(start);
+    }
+    walk(lash_kernel_doc::Node::Block(&function.body), visit);
 }
 /// The qualifying functions and the typed refusals of the other bindings.
 pub type SavedBindings = (BTreeMap<Name, Kept>, BTreeMap<Name, NotSaved>);
@@ -954,11 +400,13 @@ pub fn save(
     }
     let mut helper_owners: BTreeMap<EntityId, BTreeSet<Name>> = BTreeMap::new();
     for (id, owner) in &named {
-        let object = heap.closure(*id)?;
-        let closure = match closure_code(heap, &left, &object) {
-            Ok(c) => c,
-            Err(SaveError::Refused(_)) => continue,
-            Err(SaveError::Heap(e)) => return Err(e),
+        let mut saving = Saving {
+            heap: &mut *heap,
+            left: &left,
+        };
+        let site = saving.closure_site(*id)?;
+        let Some(closure) = lash_kernel_doc::snapshot::closure_at(left.document, &site) else {
+            continue;
         };
         let [
             ..,
@@ -980,8 +428,7 @@ pub fn save(
         if result != returned {
             continue;
         }
-        let mut reads = Reads::default();
-        reads.block(&closure.body, &mut closure.params.clone());
+        let reads = CodeReads::of(&closure.params, &closure.body);
         if !reads.effects.is_empty()
             || !reads.declared.is_empty()
             || reads.free.len() != 1
@@ -990,12 +437,13 @@ pub fn save(
             continue;
         }
         for free in &reads.free {
-            if let Some(value) =
-                captured_value(heap, &left, &object, free).map_err(|e| match e {
-                    SaveError::Heap(e) => e,
-                    SaveError::Refused(e) => HeapFault::Malformed(e.to_string()),
-                })?
-                && let Some(helper) = closure_held(heap, &value, left.values.tag())?
+            let value = match saving.closure_capture(*id, free)? {
+                Some(value) => Some(value),
+                None if site.unit == Unit::Main => saving.unit_binding(&Unit::Main, free)?,
+                None => None,
+            };
+            if let Some(value) = value
+                && let Some(helper) = closure_held(saving.heap, &value, left.values.tag())?
                 && !named.contains_key(&helper)
             {
                 helper_owners
@@ -1033,13 +481,17 @@ pub fn save(
                     && let Value::Tuple(t) = value
                 {
                     let values = members(heap, t)?;
-                    function.token = Some(freeze_token(
-                        heap,
+                    let mut saving = Saving {
+                        heap: &mut *heap,
+                        left: &left,
+                    };
+                    function.token = Some(Token::frozen(freeze_token(
+                        &mut saving,
                         &values,
                         at,
                         left.values.tag().unwrap_or_default(),
                         &named,
-                    )?);
+                    )?));
                 }
                 Ok(function)
             });
@@ -1115,8 +567,7 @@ impl SavedFunction {
             .cloned()
             .collect();
         if let Some(code) = self.definition() {
-            let mut reads = Reads::default();
-            reads.block(&code.body, &mut code.params.clone());
+            let reads = CodeReads::of(&code.params, &code.body);
             names.extend(reads.declared);
         }
         names
@@ -1193,7 +644,7 @@ pub fn install(
     document: &mut Document,
     functions: &BTreeMap<Name, SavedFunction>,
     roots: &BTreeSet<Name>,
-    values: &FunctionValues,
+    values: &FunctionRepresentation,
     effects: &BTreeMap<EffectName, Signature>,
     controls: &BTreeMap<EffectName, BTreeSet<crate::EffectControl>>,
     installed: &dyn Fn(&FunctionId) -> bool,
@@ -1297,8 +748,7 @@ pub fn reached_by_entries(document: &Document, saved: &BTreeSet<Name>) -> BTreeS
         if saved.contains(&name) {
             reached.insert(name);
         }
-        let mut reads = Reads::default();
-        reads.block(&code.body, &mut code.params.clone());
+        let reads = CodeReads::of(&code.params, &code.body);
         pending.extend(reads.declared);
     }
     reached
@@ -1381,7 +831,11 @@ fn constant(datum: &lash_kernel_doc::Datum) -> Option<Expr> {
                 })
                 .collect::<Option<_>>()?,
         ),
-        Datum::Number(_) | Datum::Timestamp(_) | Datum::Error(_) | Datum::Handle(_) => return None,
+        Datum::Number(_)
+        | Datum::Timestamp(_)
+        | Datum::Error(_)
+        | Datum::Handle(_)
+        | Datum::FunctionValue(_) => return None,
     })
 }
 

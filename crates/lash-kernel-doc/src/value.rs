@@ -156,6 +156,10 @@ pub enum Datum {
     Error(Box<ErrorDatum>),
     Function(Name),
     Handle(Handle),
+    /// A function a run handed to a tool, frozen as a self-contained
+    /// document (`K-EFF-002`). It only leaves a run: it is immutable
+    /// snapshot data, and nothing decodes it back into one.
+    FunctionValue(Box<crate::FunctionValue>),
 }
 
 /// An error value copied across the effect boundary.

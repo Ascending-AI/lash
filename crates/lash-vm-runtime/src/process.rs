@@ -45,8 +45,8 @@ pub use helpers::{
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
-    UnmigratedKernelSession, migrate_saved_function, migration_refusal, plan_migration,
-    survey_kernel_processes,
+    UnmigratedKernelSession, migrate_function_value, migrate_saved_function, migration_refusal,
+    plan_migration, survey_kernel_processes,
 };
 pub use replay::{
     ProcessReplayRequest, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,

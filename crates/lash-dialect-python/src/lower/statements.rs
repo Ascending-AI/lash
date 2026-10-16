@@ -977,6 +977,7 @@ impl Lowerer<'_> {
         )?;
         let written =
             self.function_written(Some(&def.parameters), def.is_async, def.returns.as_deref());
+        let start = super::saved::start_adapter(&written, params.len());
         let variable = self.written(name, def.name.range)?;
         self.span_of(def);
         self.push(
@@ -985,6 +986,7 @@ impl Lowerer<'_> {
                 value: Rhs::Expr(Expr::Closure(Box::new(Closure {
                     params,
                     body: body.stmts,
+                    start,
                 }))),
             },
             vec![body.notes],

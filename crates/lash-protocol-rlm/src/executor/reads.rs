@@ -74,11 +74,12 @@ impl CellReads {
         route: &lash_core::ReadRoute,
         args: &[Datum],
     ) -> Result<serde_json::Value, ErrorDatum> {
-        let projection = CellArgs {
-            entries: &self.entries,
-        };
-        let args = projection
-            .args(args)
+        let left = self
+            .entries
+            .leaving_args(args)
+            .map_err(|problem| super::host::ArgsRefusal::NotJson(problem).error(effect))?;
+        let args = CellArgs
+            .args(&left)
             .map_err(|refusal| refusal.error(effect))?;
         // The protocol's argument projection, as its transform applies it
         // to a recorded call's.

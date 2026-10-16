@@ -555,6 +555,10 @@ impl TokenCodec for Datum {
                 out.sum(number, 1);
                 handle.encode(out);
             }
+            Self::FunctionValue(value) => {
+                out.sum(number, 1);
+                value.encode(out);
+            }
         }
     }
 
@@ -562,7 +566,7 @@ impl TokenCodec for Datum {
         input.nested(|input| {
             let number = variant(input, |variant| match variant {
                 0 | 1 => Some(0),
-                2..=16 => Some(1),
+                2..=17 => Some(1),
                 _ => None,
             })?;
             Ok(match number {
@@ -582,7 +586,8 @@ impl TokenCodec for Datum {
                 13 => Self::Record(Vec::decode(input)?),
                 14 => Self::Error(Box::decode(input)?),
                 15 => Self::Function(Name::decode(input)?),
-                _ => Self::Handle(Handle::decode(input)?),
+                16 => Self::Handle(Handle::decode(input)?),
+                _ => Self::FunctionValue(Box::decode(input)?),
             })
         })
     }

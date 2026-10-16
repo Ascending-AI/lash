@@ -92,9 +92,14 @@ impl KernelMachine {
                 ..
             } => {
                 let values = self.atoms(task, exe, args)?;
+                let crosses = host.crosses_functions();
                 let mut copied = Vec::with_capacity(values.len());
                 for value in &values {
-                    copied.push(self.copy_out(value)?);
+                    copied.push(if crosses {
+                        self.copy_out_tool_arg(value)?
+                    } else {
+                        self.copy_out(value)?
+                    });
                 }
                 if self.effect_mode(effect)? == EffectMode::Read {
                     // A read completes here, inside its statement: no wait,

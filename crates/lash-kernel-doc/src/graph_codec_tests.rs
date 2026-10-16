@@ -233,3 +233,53 @@ fn independent_decoders_do_not_share_guest_depth() {
     });
     assert_eq!(result.unwrap(), TaskIdentity::Main);
 }
+
+/// FN-BOUND: a function value whose code and captures take exactly the
+/// standard bound reads back from its datum spelling, and checks; one byte
+/// more is refused before anything holds it.
+#[test]
+fn a_function_value_at_its_bound_round_trips_and_one_past_it_is_refused() {
+    let (catalog, _) = catalog();
+    let value = |length: usize| {
+        let mut document = crate::Document::new(NumberPolicy::Float, Vec::new());
+        let run = Name::new(crate::FUNCTION_VALUE_ENTRY);
+        document.functions.insert(
+            run.clone(),
+            crate::Function {
+                params: Vec::new(),
+                body: vec![crate::Stmt::Return {
+                    value: crate::Expr::Literal(crate::Literal::Text("x".repeat(length))),
+                }],
+                start: None,
+            },
+        );
+        document.entries.insert(
+            run.clone(),
+            crate::Signature {
+                params: Vec::new(),
+                result: crate::Type::Any,
+            },
+        );
+        crate::FunctionValue {
+            document,
+            entry: run,
+        }
+    };
+    let ceiling = crate::FunctionValueLimits::CEILING;
+    let base = value(0).counted_bytes().expect("the value's bytes");
+    let length = usize::try_from(ceiling - base).expect("a length");
+    let at = value(length);
+    assert_eq!(at.counted_bytes().expect("the value's bytes"), ceiling);
+    let limits = crate::FunctionValueLimits::standard();
+    let data = crate::KernelDataLimits::standard();
+    at.check(&catalog, limits, data)
+        .expect("a value at the bound checks");
+    round_trip(&Datum::FunctionValue(Box::new(at)));
+    assert_eq!(
+        value(length + 1).check(&catalog, limits, data),
+        Err(crate::FunctionValueRefusal::TooLarge {
+            bytes: ceiling + 1,
+            limit: ceiling,
+        })
+    );
+}

@@ -114,7 +114,7 @@ pub use lash_vm_runtime::{
     DocumentRefusal as KernelDocumentRefusal, DocumentStoreError as KernelDocumentStoreError,
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     ParkedRefusal as KernelParkedRefusal, RefusedKernelCell, RefusedKernelProcess,
-    UnmigratedKernelSession, standard_functions,
+    UnmigratedKernelSession, migrate_function_value, standard_functions,
 };
 /// What still pins a helper release before this build's own, and why a
 /// process's run would not carry onto the build's helpers (FIG-5799).

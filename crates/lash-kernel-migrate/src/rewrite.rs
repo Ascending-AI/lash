@@ -86,7 +86,27 @@ pub fn replace_functions(document: &mut Document, functions: &BTreeMap<FunctionI
         .collect();
     replace_in_block(&mut document.main, functions);
     for function in document.functions.values_mut() {
+        replace_in_start(function.start.as_mut(), functions);
         replace_in_block(&mut function.body, functions);
+    }
+}
+
+/// The library functions a start adapter's convention calls, replaced as
+/// the code that holds it is.
+fn replace_in_start(
+    start: Option<&mut lash_kernel_doc::StartAdapter>,
+    functions: &BTreeMap<FunctionId, FunctionId>,
+) {
+    if let Some(lash_kernel_doc::StartAdapter {
+        convention: lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn },
+        ..
+    }) = start
+    {
+        for function in [await_fn, same_fn] {
+            if let Some(to) = functions.get(function) {
+                *function = *to;
+            }
+        }
     }
 }
 
@@ -210,7 +230,10 @@ fn replace_in_expr(expr: &mut Expr, functions: &BTreeMap<FunctionId, FunctionId>
             }
         }
         Expr::Member(member) => replace_in_member(member, functions),
-        Expr::Closure(closure) => replace_in_block(&mut closure.body, functions),
+        Expr::Closure(closure) => {
+            replace_in_start(closure.start.as_mut(), functions);
+            replace_in_block(&mut closure.body, functions);
+        }
         Expr::Call { function, args } => {
             if let Some(to) = functions.get(function) {
                 *function = *to;

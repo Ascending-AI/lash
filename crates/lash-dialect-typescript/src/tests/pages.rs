@@ -175,6 +175,7 @@ pub(crate) fn decode(heap: &mut PagedHeap, datum: Datum) -> Value {
             heap.canonical_value(Value::Error(Arc::new(error))).unwrap()
         }
         Datum::Number(_) => panic!("corpus inputs have decoded numbers"),
+        Datum::FunctionValue(_) => panic!("a function value never enters a run"),
     }
 }
 

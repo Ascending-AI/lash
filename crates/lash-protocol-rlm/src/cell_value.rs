@@ -138,6 +138,7 @@ pub(crate) fn datum_json(value: &Datum) -> Json {
                 ("data", datum_json(&error.data)),
             ],
         ),
+        Datum::FunctionValue(function) => function.transport_json().unwrap_or(Json::Null),
         Datum::Function(name) => kinded("function", [("name", Json::String(name.to_string()))]),
         Datum::Handle(handle) => kinded(
             "handle",

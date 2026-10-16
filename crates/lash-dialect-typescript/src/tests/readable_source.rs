@@ -309,6 +309,7 @@ fn identifier_aliases_are_injective_across_shadowing_and_reserved_names() {
                         body: vec![k::Stmt::Return {
                             value: variable(original),
                         }],
+                        start: None,
                     }))),
                 },
                 k::Stmt::Print {
@@ -321,6 +322,7 @@ fn identifier_aliases_are_injective_across_shadowing_and_reserved_names() {
                         body: vec![k::Stmt::Return {
                             value: variable(original),
                         }],
+                        start: None,
                     }))),
                 },
             ],
@@ -332,6 +334,7 @@ fn identifier_aliases_are_injective_across_shadowing_and_reserved_names() {
                 body: vec![k::Stmt::Return {
                     value: variable(original),
                 }],
+                start: None,
             },
         );
         document.private_bindings.insert(name);

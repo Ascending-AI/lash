@@ -100,6 +100,13 @@ pub struct WorkerTuning {
     pub slice: u64,
     /// The worker's page residency on the persistent heap (FIG-6190).
     pub pages: PageBudgets,
+    /// Whether a function among a tool call's arguments crosses as a
+    /// function value (`K-EFF-002`, `K-CLO-004`) in every run the pool
+    /// hosts, cells and processes alike. Off, a closure in a tool call's
+    /// arguments raises `not_data`. Internal until the process tools take
+    /// function values: standard is off.
+    #[doc(hidden)]
+    pub crosses_functions: bool,
 }
 
 /// A worker's host budgets for heap pages (`D-CAP`): resident bytes, never
@@ -148,6 +155,7 @@ impl WorkerTuning {
             parser_stack_bytes_per_source_byte: 40_000,
             slice: 1_000_000,
             pages: PageBudgets::standard(),
+            crosses_functions: false,
         }
     }
 }

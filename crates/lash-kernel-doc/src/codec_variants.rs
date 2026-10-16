@@ -63,6 +63,7 @@ impl CodecVariant for Datum {
             Self::Error(..) => 14,
             Self::Function(..) => 15,
             Self::Handle(..) => 16,
+            Self::FunctionValue(..) => 17,
         }
     }
 }

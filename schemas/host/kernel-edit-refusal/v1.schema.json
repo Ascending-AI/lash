@@ -815,6 +815,41 @@
           "const": "action_as_expression",
           "description": "A right-hand side that is one action with variable and literal\narguments is the statement's action, not an expression: the one\nspelling kernel text reads back.",
           "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-CLO-004`: a direct start passes the signature's arguments as the\nfunction's parameters, one for one.",
+          "properties": {
+            "start_arity": {
+              "additionalProperties": false,
+              "properties": {
+                "declared": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "signature": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "signature",
+                "declared"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "start_arity"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "start_token",
+          "description": "`K-CLO-004`: a token holds its tag first and its callable after it.",
+          "type": "string"
         }
       ]
     },

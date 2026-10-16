@@ -9,6 +9,7 @@ use crate::ast::{
 };
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Operand};
+use crate::function_value::{FunctionRepresentation, StartAdapter, StartConvention};
 use crate::name::{FunctionId, FunctionName, Name, is_identifier};
 use crate::number::NumberPolicy;
 use crate::types::{Signature, Type};
@@ -54,6 +55,7 @@ pub fn print_document_with_ranges(
         printer.out.push('(');
         printer.names(function.params.iter());
         printer.out.push_str(") ");
+        printer.start(function.start.as_ref());
         printer.block(&function.body);
         printer.out.push('\n');
     }
@@ -556,6 +558,7 @@ impl<'a> Printer<'a> {
                 self.out.push_str("fn(");
                 self.names(closure.params.iter());
                 self.out.push_str(") ");
+                self.start(closure.start.as_ref());
                 self.block(&closure.body);
             }
             Expr::Call { function, args } => {
@@ -644,6 +647,33 @@ impl<'a> Printer<'a> {
                     self.function(policy);
                 }
             },
+        }
+    }
+
+    /// A start adapter after a function's parameters (`K-CLO-004`).
+    fn start(&mut self, start: Option<&StartAdapter>) {
+        let Some(start) = start else {
+            return;
+        };
+        self.out.push_str("start");
+        self.signature(&start.signature);
+        match &start.representation {
+            FunctionRepresentation::Bare => self.out.push_str(" bare"),
+            FunctionRepresentation::Token { tag, callable } => {
+                self.out.push_str(" token(");
+                write_quoted(tag, '"', &mut self.out);
+                self.out.push_str(&format!(", {callable})"));
+            }
+        }
+        match &start.convention {
+            StartConvention::Direct => self.out.push_str(" direct "),
+            StartConvention::TsArgsList { await_fn, same_fn } => {
+                self.out.push_str(" ts_args(");
+                self.function(await_fn);
+                self.out.push_str(", ");
+                self.function(same_fn);
+                self.out.push_str(") ");
+            }
         }
     }
 

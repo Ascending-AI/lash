@@ -127,6 +127,7 @@ fn kind(datum: &Datum) -> &'static str {
         Datum::Error(_) => "an error",
         Datum::Function(_) => "a function reference",
         Datum::Handle(_) => "a handle",
+        Datum::FunctionValue(_) => "a function value",
     }
 }
 
@@ -345,6 +346,11 @@ impl Decoder<'_> {
         Ok(match datum {
             Datum::Number(token) => self.bare(token)?,
             Datum::Function(name) => self.function(name, datum)?,
+            Datum::FunctionValue(_) => {
+                return Err(DecodeMismatch::new(
+                    "a function value leaves a run and never enters one",
+                ));
+            }
             Datum::Tuple(items) => Datum::Tuple(all(items)?),
             Datum::List(items) => Datum::List(all(items)?),
             Datum::Set(items) => Datum::Set(all(items)?),

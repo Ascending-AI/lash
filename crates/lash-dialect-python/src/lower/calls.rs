@@ -1001,7 +1001,7 @@ impl Lowerer<'_> {
             this.emit(Stmt::Return { value: result.expr });
             Ok(())
         })?;
-        let work = self.emit_closure(Vec::new(), body);
+        let work = self.emit_closure(Vec::new(), body, None);
         let run = self.function("py.task.run")?;
         let args = self.atoms(&[work]);
         Ok(self.let_rhs(

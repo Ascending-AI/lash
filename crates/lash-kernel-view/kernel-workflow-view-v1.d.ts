@@ -312,6 +312,13 @@ export type Catch = {
 export type Closure = {
   "body": Array<Stmt>;
   "params"?: Array<Name>;
+  /**
+   * How a value this closure makes is started when it crosses to a tool
+   * as a [`crate::FunctionValue`] (`K-CLO-004`); `None` for one that
+   * cannot be started. Executable behaviour: it is part of the
+   * document's identity.
+   */
+  "start"?: (StartAdapter | null);
 };
 
 /**
@@ -498,6 +505,16 @@ export type FlowTarget = (("leave" | "end") | {
 });
 
 export type FunctionId = string;
+
+/**
+ * How a dialect holds a function as a value.
+ */
+export type FunctionRepresentation = ("bare" | {
+  "token": {
+    "callable": number;
+    "tag": string;
+  };
+});
 
 export type HeaderRole = ("condition" | "iterable");
 
@@ -819,6 +836,27 @@ export type SpawnIdentity = {
    */
   "site": Site;
 };
+
+/**
+ * How a function a closure makes is started from outside its run: the
+ * signature it is started under, how the dialect holds the function as a
+ * value, and how the entry calls it.
+ */
+export type StartAdapter = {
+  "convention": StartConvention;
+  "representation": FunctionRepresentation;
+  "signature": Signature;
+};
+
+/**
+ * How the entry of a function value calls the function.
+ */
+export type StartConvention = ("direct" | {
+  "ts_args_list": {
+    "await_fn": FunctionId;
+    "same_fn": FunctionId;
+  };
+});
 
 /**
  * One exact statement, action or while-test coordinate and its observed count.

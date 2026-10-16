@@ -950,18 +950,38 @@ impl Lowerer<'_> {
     /// Binds a closure to a new temporary.
     fn emit_closure(&mut self, params: Vec<Name>, body: Buf) -> Operand {
         let name = self.temp();
+        let start = self
+            .written
+            .as_ref()
+            .and_then(|written| written.start.clone())
+            .and_then(|signature| self.start_adapter(signature));
         self.push(
             Stmt::Let {
                 name: name.clone(),
                 value: Rhs::Expr(Expr::Closure(Box::new(Closure {
                     params,
                     body: body.stmts,
+                    start,
                 }))),
             },
             vec![body.notes],
         );
         self.note_written();
         Operand::temp(name, Ty::Unknown)
+    }
+
+    /// How a function value of this signature is started when it crosses
+    /// to a tool (`K-CLO-004`): the token's closure, called with an absent
+    /// `this` and the list of the start's arguments, its promise awaited by
+    /// `ts.await`, and undefined ending the start with null.
+    fn start_adapter(&mut self, signature: Signature) -> Option<lash_kernel_doc::StartAdapter> {
+        let await_fn = self.function("ts.await").ok()?;
+        let same_fn = self.function("same").ok()?;
+        Some(lash_kernel_doc::StartAdapter {
+            signature,
+            representation: crate::function_values(),
+            convention: lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn },
+        })
     }
 
     /// Hands the last statement what is known of the function it binds.

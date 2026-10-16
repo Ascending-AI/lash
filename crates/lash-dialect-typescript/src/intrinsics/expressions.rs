@@ -53,7 +53,11 @@ impl Reader {
         let parent = std::mem::take(&mut self.types);
         let body = self.block(&body.stmts)?;
         self.types = parent;
-        Ok(k::Function { params, body })
+        Ok(k::Function {
+            params,
+            body,
+            start: None,
+        })
     }
     pub(super) fn expression(&mut self, expr: &s::Expr) -> Result<k::Expr, Diagnostic> {
         if let s::Expr::Await(awaited) = expr
@@ -112,6 +116,7 @@ impl Reader {
                 Ok(k::Expr::Closure(Box::new(k::Closure {
                     params: function.params,
                     body: function.body,
+                    start: None,
                 })))
             }
             s::Expr::Lit(s::Lit::Null(_)) => Ok(k::Expr::Literal(k::Literal::Null)),

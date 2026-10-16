@@ -101,7 +101,8 @@ impl Lowerer<'_> {
                     None,
                 )?;
                 let written = self.function_written(lambda.parameters.as_deref(), false, None);
-                let closure = self.emit_closure(params, body);
+                let start = super::saved::start_adapter(&written, params.len());
+                let closure = self.emit_closure(params, body, start);
                 if let Some(note) = self.buf.notes.last_mut() {
                     note.span = Some(diagnostics::span(lambda.range));
                     note.written = Some(written);

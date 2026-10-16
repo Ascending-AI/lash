@@ -30,8 +30,7 @@ mod tests;
 
 pub use diagnostic::{Diagnostic, DiagnosticKind};
 pub use dialect::{
-    CellEnvironment, EffectControl, Environment, FrontEnd, FunctionValues, Lowered, Mode, Package,
-    Printer,
+    CellEnvironment, EffectControl, Environment, FrontEnd, Lowered, Mode, Package, Printer,
 };
 /// The persistent heap saved functions are written to and read from.
 pub use lash_kernel_state::{WaitId, paged};
@@ -43,7 +42,7 @@ pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
     FUNCTION_BUNDLE_NODE_KIND, InstalledFunction, Kept, Left, MemberBody, NotSaved, SavedFunction,
     Token, Unusable, closure_of, declare_captures, function_reference, install, reached_by_entries,
-    save, token_of,
+    save,
 };
 pub use source::{SourceError, define_functions};
 pub use written::{CallParam, CallShape, Written, closure_site, written_table};

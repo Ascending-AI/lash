@@ -470,6 +470,17 @@
             "$ref": "#/$defs/Name"
           },
           "type": "array"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StartAdapter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How a value this closure makes is started when it crosses to a tool\nas a [`crate::FunctionValue`] (`K-CLO-004`); `None` for one that\ncannot be started. Executable behaviour: it is part of the\ndocument's identity."
         }
       },
       "required": [
@@ -910,6 +921,44 @@
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
+    },
+    "FunctionRepresentation": {
+      "description": "How a dialect holds a function as a value.",
+      "oneOf": [
+        {
+          "const": "bare",
+          "description": "The closure itself.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tuple whose first member is the text `tag` and whose member at\n`callable` is the closure. The tuple crosses as one function value.",
+          "properties": {
+            "token": {
+              "additionalProperties": false,
+              "properties": {
+                "callable": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "tag": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tag",
+                "callable"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "token"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Guard": {
       "additionalProperties": false,
@@ -1415,6 +1464,63 @@
         "result"
       ],
       "type": "object"
+    },
+    "StartAdapter": {
+      "additionalProperties": false,
+      "description": "How a function a closure makes is started from outside its run: the\nsignature it is started under, how the dialect holds the function as a\nvalue, and how the entry calls it.",
+      "properties": {
+        "convention": {
+          "$ref": "#/$defs/StartConvention"
+        },
+        "representation": {
+          "$ref": "#/$defs/FunctionRepresentation"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "signature",
+        "representation",
+        "convention"
+      ],
+      "type": "object"
+    },
+    "StartConvention": {
+      "description": "How the entry of a function value calls the function.",
+      "oneOf": [
+        {
+          "const": "direct",
+          "description": "With the start's arguments, in the signature's order, returning what\nthe function returns.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "With an absent `this` and the list of the start's arguments; the\nreturned value is awaited by `await_fn`, and an absent result\n(`same_fn` compares it with absent) ends the start with null.",
+          "properties": {
+            "ts_args_list": {
+              "additionalProperties": false,
+              "properties": {
+                "await_fn": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "same_fn": {
+                  "$ref": "#/$defs/FunctionId"
+                }
+              },
+              "required": [
+                "await_fn",
+                "same_fn"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "ts_args_list"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Stmt": {
       "oneOf": [

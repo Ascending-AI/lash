@@ -63,12 +63,14 @@ impl Lowerer<'_> {
             )?;
             let run = this.temp();
             this.span = span;
+            let start = super::saved::start_adapter(&written, closure_params.len());
             this.push(
                 Stmt::Let {
                     name: run.clone(),
                     value: Rhs::Expr(Expr::Closure(Box::new(Closure {
                         params: closure_params,
                         body: body.stmts,
+                        start,
                     }))),
                 },
                 vec![body.notes],
@@ -115,6 +117,7 @@ impl Lowerer<'_> {
                     function: Function {
                         params,
                         body: body.stmts,
+                        start: None,
                     },
                     signature,
                     notes: body.notes,

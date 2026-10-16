@@ -118,9 +118,16 @@ main {
 
 struct Echo;
 
+/// The arguments of every `tools.echo` call this binary made, in order.
+static ECHO_CALLS: std::sync::Mutex<Vec<serde_json::Value>> = std::sync::Mutex::new(Vec::new());
+
 #[lash::async_trait]
 impl lash::tools::StaticToolExecute for Echo {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        ECHO_CALLS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(call.args.clone());
         lash::tools::ToolOutcome::ok(call.args["value"].clone()).into()
     }
 }
@@ -211,9 +218,24 @@ async fn builder_with_process_tools(
     process_tools: bool,
     echo: EchoComponent,
 ) -> lash::LashCoreBuilder {
+    builder_on_workers(
+        stores,
+        process_tools,
+        echo,
+        lash::vm::WorkerService::default(),
+    )
+    .await
+}
+
+/// A node's builder over `stores` whose processes run on `workers`.
+async fn builder_on_workers(
+    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    process_tools: bool,
+    echo: EchoComponent,
+    workers: lash::vm::WorkerService,
+) -> lash::LashCoreBuilder {
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let backend = lash_conformance::backend_over(stores);
-    let workers = lash::vm::WorkerService::default();
     let bounds = lash::vm::RunBounds {
         charge: 1_000_000,
         memory: 64 * 1024 * 1024,
@@ -1796,3 +1818,7 @@ mod documents;
 
 #[path = "workflow_laws/coarse.rs"]
 mod coarse;
+
+#[cfg(feature = "typescript")]
+#[path = "workflow_laws/crossing.rs"]
+mod crossing;

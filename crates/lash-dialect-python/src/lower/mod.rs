@@ -393,7 +393,7 @@ pub(crate) fn lower_with_calls(
             &mut document,
             cell.functions,
             &lowerer.saved_used,
-            &lash_kernel_dialect::FunctionValues::Bare,
+            &lash_kernel_doc::FunctionRepresentation::Bare,
             environment.effects,
             environment.controls,
             &|function| catalog.definition(function).is_some(),
@@ -839,7 +839,12 @@ impl Lowerer<'_> {
     }
 
     /// Binds a new closure to a temporary.
-    fn emit_closure(&mut self, params: Vec<Name>, body: Buf) -> Operand {
+    fn emit_closure(
+        &mut self,
+        params: Vec<Name>,
+        body: Buf,
+        start: Option<lash_kernel_doc::StartAdapter>,
+    ) -> Operand {
         let name = self.temp();
         self.push(
             Stmt::Let {
@@ -847,6 +852,7 @@ impl Lowerer<'_> {
                 value: Rhs::Expr(Expr::Closure(Box::new(Closure {
                     params,
                     body: body.stmts,
+                    start,
                 }))),
             },
             vec![body.notes],

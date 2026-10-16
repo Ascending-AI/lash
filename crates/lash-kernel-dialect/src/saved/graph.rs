@@ -20,7 +20,7 @@ use lash_kernel_doc::graph_tokens::{
     encode_body,
 };
 use lash_kernel_doc::heap::PageRef;
-use lash_kernel_doc::{Document, EffectName, Name, Signature, ValueKind};
+use lash_kernel_doc::{Document, EffectName, Name, Signature};
 use lash_kernel_state::paged::FrozenRef;
 
 use super::{CaptureRefusal, NotSaved, SavedFunction, Token};
@@ -315,19 +315,6 @@ impl CodecVariant for NotSaved {
     }
 }
 
-#[doc(hidden)]
-impl CodecVariant for CaptureRefusal {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::Task => 0,
-            Self::Function => 1,
-            Self::Cyclic => 2,
-            Self::Conflict => 3,
-            Self::NoConstant { .. } => 4,
-        }
-    }
-}
-
 impl TokenCodec for NotSaved {
     fn encode(&self, out: &mut TokenWriter) {
         let variant = self.codec_variant();
@@ -406,91 +393,4 @@ impl TokenCodec for NotSaved {
             variant => return Err(TokenError::UnsupportedVariant { variant }),
         })
     }
-}
-
-impl TokenCodec for CaptureRefusal {
-    fn encode(&self, out: &mut TokenWriter) {
-        let variant = self.codec_variant();
-        match self {
-            Self::Task | Self::Function | Self::Cyclic | Self::Conflict => out.sum(variant, 0),
-            Self::NoConstant { kind } => {
-                out.sum(variant, 1);
-                out.sum(value_kind_variant(*kind), 0);
-            }
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        let (variant, fields) = input.sum()?;
-        let arity = |expected| TokenReader::expect_fields(fields, expected);
-        Ok(match variant {
-            0 => arity(0).map(|()| Self::Task)?,
-            1 => arity(0).map(|()| Self::Function)?,
-            2 => arity(0).map(|()| Self::Cyclic)?,
-            3 => arity(0).map(|()| Self::Conflict)?,
-            4 => {
-                arity(1)?;
-                let (kind, fields) = input.sum()?;
-                TokenReader::expect_fields(fields, 0)?;
-                Self::NoConstant {
-                    kind: value_kind(kind)?,
-                }
-            }
-            variant => return Err(TokenError::UnsupportedVariant { variant }),
-        })
-    }
-}
-
-/// [`ValueKind`]'s numbers: the Value discriminants of FIG-5887 §2.
-const VALUE_KINDS: [ValueKind; 19] = [
-    ValueKind::Null,
-    ValueKind::Absent,
-    ValueKind::Bool,
-    ValueKind::Int,
-    ValueKind::Float,
-    ValueKind::Text,
-    ValueKind::Bytes,
-    ValueKind::Timestamp,
-    ValueKind::Tuple,
-    ValueKind::List,
-    ValueKind::Map,
-    ValueKind::Set,
-    ValueKind::Record,
-    ValueKind::Closure,
-    ValueKind::Error,
-    ValueKind::Task,
-    ValueKind::Function,
-    ValueKind::Handle,
-    ValueKind::Ref,
-];
-
-fn value_kind_variant(kind: ValueKind) -> u32 {
-    match kind {
-        ValueKind::Null => 0,
-        ValueKind::Absent => 1,
-        ValueKind::Bool => 2,
-        ValueKind::Int => 3,
-        ValueKind::Float => 4,
-        ValueKind::Text => 5,
-        ValueKind::Bytes => 6,
-        ValueKind::Timestamp => 7,
-        ValueKind::Tuple => 8,
-        ValueKind::List => 9,
-        ValueKind::Map => 10,
-        ValueKind::Set => 11,
-        ValueKind::Record => 12,
-        ValueKind::Closure => 13,
-        ValueKind::Error => 14,
-        ValueKind::Task => 15,
-        ValueKind::Function => 16,
-        ValueKind::Handle => 17,
-        ValueKind::Ref => 18,
-    }
-}
-
-fn value_kind(variant: u32) -> Result<ValueKind, TokenError> {
-    usize::try_from(variant)
-        .ok()
-        .and_then(|at| VALUE_KINDS.get(at).copied())
-        .ok_or(TokenError::UnsupportedVariant { variant })
 }

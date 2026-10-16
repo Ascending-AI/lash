@@ -12,7 +12,8 @@
 //! build wrote; nothing here stores, commits or schedules.
 //!
 //! A saved function ([`saved_function`]) is a document of its own, so it is
-//! carried by the document rewrite alone.
+//! carried by the document rewrite alone, as a function value a host holds
+//! is ([`function_value`]).
 //!
 //! [`adopt`] is a rewrite within one version: a document's library
 //! functions replaced by others, as a build that stops retaining a helper
@@ -40,4 +41,4 @@ pub use migration::{
     Rewritten, migrate_registry, migration_from,
 };
 pub use rewrite::{Redeclared, redeclare, replace_functions, unchanged};
-pub use saved::saved_function;
+pub use saved::{function_value, saved_function};

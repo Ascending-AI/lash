@@ -553,6 +553,7 @@ fn nested_actions_use_child_suites_only_without_an_inline_inverse() {
         body: vec![k::Stmt::Return {
             value: k::Expr::Literal(k::Literal::Null),
         }],
+        start: None,
     }));
     let argument = k::Expr::If {
         cond: Box::new(k::Expr::Literal(k::Literal::Bool(true))),

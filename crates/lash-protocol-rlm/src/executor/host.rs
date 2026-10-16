@@ -295,16 +295,18 @@ impl CellHost<'_> {
                 format!("this session offers no `{}`", request.effect),
             )
         })?;
-        let projection = CellArgs {
-            entries: &self.entries,
-        };
-        let args = projection
-            .args(&request.args)
+        // The frozen request holds the arguments as they left the cell:
+        // data, each function in them already a function value.
+        let left = self
+            .entries
+            .leaving_args(&request.args)
+            .map_err(|problem| ArgsRefusal::NotJson(problem).error(&request.effect))?;
+        let args = CellArgs
+            .args(&left)
             .map_err(|refusal| refusal.error(&request.effect))?;
         let invocation = self.invocation(request, call, effect.tool.clone(), args);
-        let frozen =
-            FrozenRequest::tool(CellCall::of(&invocation), request.args.clone(), &projection)
-                .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
+        let frozen = FrozenRequest::tool(CellCall::of(&invocation), left, &CellArgs)
+            .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
         Ok((invocation, frozen))
     }
 
@@ -354,26 +356,22 @@ impl ArgsRefusal {
     }
 }
 
-/// How a cell's arguments become a tool call's JSON: the guest's one input
-/// record, leaving the cell as a cell's value always has, its whole numbers
-/// below 2^53 integers in either dialect (`Float::json_number`). A frozen
-/// request holds the guest's arguments under this projection's identity,
-/// never the JSON it makes (FIG-5887 §3).
-pub(super) struct CellArgs<'h> {
-    pub entries: &'h super::processes::CellEntries,
-}
+/// How a cell's arguments become a tool call's JSON: the one input record
+/// as it left the cell, its whole numbers below 2^53 integers in either
+/// dialect (`Float::json_number`) and each function value in its transport
+/// form. It reads data only: a frozen request holds the arguments that left
+/// the cell under this projection's identity, never the JSON it makes
+/// (FIG-5887 §3), and reads back the same on any later build.
+pub(super) struct CellArgs;
 
 /// The projection identity of a call's arguments.
 pub(super) const CALL_ARGS: &str = "lash-cell-args/v1";
 
-impl<'h> CellArgs<'h> {
-    /// The projection named `id`, over `entries`.
-    pub(super) fn named(
-        id: &str,
-        entries: &'h super::processes::CellEntries,
-    ) -> Result<Self, String> {
+impl CellArgs {
+    /// The projection named `id`.
+    pub(super) fn named(id: &str) -> Result<Self, String> {
         match id {
-            CALL_ARGS => Ok(Self { entries }),
+            CALL_ARGS => Ok(Self),
             other => Err(format!("no argument projection `{other}`")),
         }
     }
@@ -382,9 +380,8 @@ impl<'h> CellArgs<'h> {
         lash_vm_runtime::tool_input(
             args,
             |input| {
-                self.entries
-                    .leaving(input)
-                    .and_then(|input| datum_to_json(&input).map_err(|error| error.to_string()))
+                datum_to_json(input)
+                    .map_err(|error| error.to_string())
                     .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
                     .map(crate::projection::plain_json_for_transport)
                     .map_err(ArgsRefusal::NotJson)
@@ -394,7 +391,7 @@ impl<'h> CellArgs<'h> {
     }
 }
 
-impl lash_vm_broker::kernel::graph::ArgumentProjection for CellArgs<'_> {
+impl lash_vm_broker::kernel::graph::ArgumentProjection for CellArgs {
     fn id(&self) -> &str {
         CALL_ARGS
     }
@@ -741,8 +738,18 @@ impl KernelEffects for CellHost<'_> {
 
 impl Projections for CellHost<'_> {
     fn project(&self, projection: &str, args: &[Datum]) -> Result<serde_json::Value, String> {
+        DataProjections.project(projection, args)
+    }
+}
+
+/// Each frozen tool request read back through the data-only projection it
+/// was frozen under.
+pub(super) struct DataProjections;
+
+impl Projections for DataProjections {
+    fn project(&self, projection: &str, args: &[Datum]) -> Result<serde_json::Value, String> {
         use lash_vm_broker::kernel::graph::ArgumentProjection as _;
-        CellArgs::named(projection, &self.entries)?.project(args)
+        CellArgs::named(projection)?.project(args)
     }
 }
 

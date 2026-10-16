@@ -99,6 +99,7 @@ fn closure() -> k::Expr {
     k::Expr::Closure(Box::new(k::Closure {
         params: vec![],
         body: vec![],
+        start: None,
     }))
 }
 fn int(n: i64) -> k::Expr {
@@ -484,6 +485,7 @@ fn bounded_readable_interactions_preserve_exact_bytes_and_maps() {
                         _ => finish(k::Expr::Closure(Box::new(k::Closure {
                             params: vec![name.into()],
                             body,
+                            start: None,
                         }))),
                     };
                     let mut doc = document(stmt);
@@ -673,6 +675,7 @@ fn ordinary_python_body_uses_native_bindings_collections_and_definitions() {
             body: vec![k::Stmt::Return {
                 value: variable("incoming"),
             }],
+            start: None,
         },
     );
     doc.main.push(k::Stmt::Assign {
@@ -855,6 +858,7 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
                             value: variable("x"),
                         },
                     ],
+                    start: None,
                 }))),
             },
             k::Stmt::Assign {
@@ -879,6 +883,7 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
         k::Function {
             params: vec![],
             body: vec![finish(int(9))],
+            start: None,
         },
     );
     let printed = roundtrip(&doc, true);
@@ -910,6 +915,7 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
                 place: k::Place::Variable("x".into()),
                 value: k::Rhs::Expr(int(1)),
             }],
+            start: None,
         },
     );
     roundtrip(&doc, true);
@@ -1167,6 +1173,7 @@ def main():
                     value: variable("incoming"),
                 },
             ],
+            start: None,
         },
     );
     let decoded = crate::read(source, &doc, Default::default()).unwrap();

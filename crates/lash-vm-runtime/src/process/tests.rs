@@ -694,3 +694,103 @@ migration_refusal_law!(
     "parked",
     "state_not_carried"
 );
+
+/// FN-UPGRADE: a function value a host holds, written in the version
+/// before the synthetic successor, upgrades as a stored workflow's document
+/// does: its code is rewritten onto the successor's helpers and its
+/// identity follows. A value whose code calls a helper the build does not
+/// hold is refused, typed, rather than rebound to a helper of that name.
+#[cfg(feature = "synthetic-next")]
+#[test]
+fn a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refuses() {
+    use lash_kernel_doc::{
+        Document, Expr, Function, FunctionId, FunctionValue, Name, NumberPolicy, Param, Rhs,
+        Signature, Stmt, Type,
+    };
+    let functions = lash_vm_library::standard_functions().expect("the build's library");
+    let (abs, name) = functions
+        .iter()
+        .find(|(_, registered)| {
+            registered.definition().kernel == KernelVersion::One.number()
+                && registered.definition().name.as_str() == "num.abs"
+        })
+        .map(|(id, registered)| (*id, registered.definition().name.clone()))
+        .expect("the earlier version's num.abs");
+    let value = |function: FunctionId| {
+        let run = Name::new(lash_kernel_doc::FUNCTION_VALUE_ENTRY);
+        let mut document = Document::new(NumberPolicy::Float, Vec::new());
+        document.manifest.kernel = KernelVersion::One.number();
+        document.manifest.functions.insert(function, name.clone());
+        document.functions.insert(
+            run.clone(),
+            Function {
+                params: vec![Name::new("x")],
+                body: vec![
+                    Stmt::Let {
+                        name: Name::new("y"),
+                        value: Rhs::Expr(Expr::Call {
+                            function,
+                            args: vec![Expr::Variable(Name::new("x"))],
+                        }),
+                    },
+                    Stmt::Return {
+                        value: Expr::Variable(Name::new("y")),
+                    },
+                ],
+                start: None,
+            },
+        );
+        document.entries.insert(
+            run.clone(),
+            Signature {
+                params: vec![Param {
+                    name: Name::new("x"),
+                    ty: Type::Any,
+                    optional: false,
+                }],
+                result: Type::Any,
+            },
+        );
+        FunctionValue {
+            document,
+            entry: run,
+        }
+    };
+
+    let held = value(abs);
+    let upgraded = super::migrate_function_value(&held, &functions, KernelVersion::NEWEST)
+        .expect("the value upgrades")
+        .expect("an earlier version's value is carried");
+    let planned = super::plan_migration(&held.document, &functions)
+        .expect("the document upgrades")
+        .expect("an earlier version's document is carried");
+    assert_eq!(upgraded.document, planned.rewritten.document);
+    assert_eq!(upgraded.entry, held.entry);
+    assert_eq!(upgraded.signature(), held.signature());
+    assert_ne!(
+        upgraded.document.identity(),
+        held.document.identity(),
+        "the carried value is another document"
+    );
+    assert!(
+        super::migrate_function_value(&upgraded, &functions, KernelVersion::NEWEST)
+            .expect("a current value checks")
+            .is_none(),
+        "a value in the newest version is kept as it is"
+    );
+
+    // No helper hashes to this identity: it names one the build never held.
+    let unheld = FunctionId::from_bytes([7; 32]);
+    let refusal = super::migrate_function_value(&value(unheld), &functions, KernelVersion::NEWEST)
+        .expect_err("an unheld helper refuses");
+    assert!(
+        matches!(
+            refusal,
+            super::KernelMigrationRefusal::Document {
+                refusal: lash_kernel_migrate::DocumentRefusal::FunctionNotHeld { function },
+                ..
+            } if function == unheld
+        ),
+        "{refusal:?}"
+    );
+}

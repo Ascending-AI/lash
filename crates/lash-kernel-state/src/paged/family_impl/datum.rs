@@ -88,6 +88,12 @@ impl Freezer<'_> {
                 )
                 .into());
             }
+            Datum::FunctionValue(_) => {
+                return Err(HeapFault::Malformed(
+                    "a function value leaves a run and never enters one".into(),
+                )
+                .into());
+            }
             Datum::Text(v) => Value::Text(text(&self.heap.access, v)?),
             Datum::Bytes(v) => Value::Bytes(bytes(&self.heap.access, v.as_slice())?),
             Datum::Timestamp(v) => Value::Timestamp(v.clone()),

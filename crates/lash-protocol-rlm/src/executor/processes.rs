@@ -41,6 +41,15 @@ impl CellEntries {
         })
     }
 
+    /// [`Self::leaving`] of each of a call's arguments.
+    ///
+    /// # Errors
+    ///
+    /// A reference to a function that is not an entry.
+    pub(super) fn leaving_args(&self, args: &[Datum]) -> Result<Vec<Datum>, String> {
+        args.iter().map(|arg| self.leaving(arg)).collect()
+    }
+
     /// Each entry's definition, as a session binding that held the entry
     /// holds it once the cell ends.
     pub(super) fn definitions(&self) -> BTreeMap<Name, Datum> {

@@ -54,9 +54,17 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         let body = self.closure(function)?;
         // The function the source wrote is the one that starts the task,
-        // not the closure of its body.
+        // not the closure of its body: the body neither carries what the
+        // source wrote nor crosses on its own.
         if let Some(note) = self.buf.notes.last_mut() {
             note.written = None;
+        }
+        if let Some(Stmt::Let {
+            value: lash_kernel_doc::Rhs::Expr(Expr::Closure(closure)),
+            ..
+        }) = self.buf.stmts.last_mut()
+        {
+            closure.start = None;
         }
         let written = self.written(function);
         let this = self.fresh("this");

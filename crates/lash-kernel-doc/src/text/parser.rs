@@ -12,6 +12,7 @@ use crate::ast::{
 };
 use crate::document::{Document, Manifest};
 use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Operand};
+use crate::function_value::{FunctionRepresentation, StartAdapter, StartConvention};
 use crate::name::{FunctionId, FunctionName, Name, QualifiedName};
 use crate::number::{Float, NumberPolicy};
 use crate::types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
@@ -91,7 +92,9 @@ pub fn parse_document_with_limits(
             "fn" => {
                 let name = parser.name()?;
                 let params = parser.names()?;
-                bodies.push((Some(name), params, parser.position));
+                let start_at = parser.position;
+                parser.skip_start()?;
+                bodies.push((Some(name), params, start_at));
                 parser.skip_block()?;
             }
             "main" => {
@@ -103,13 +106,27 @@ pub fn parse_document_with_limits(
     }
     let end = parser.position;
     let mut functions = BTreeMap::new();
-    for (name, params, start) in bodies {
-        parser.position = start;
+    for (name, params, at) in bodies {
+        parser.position = at;
+        let start = match name {
+            Some(_) => parser.start()?,
+            None => None,
+        };
         let body = parser.block()?;
         match name {
             Some(name) => {
                 let item = format!("function `{name}`");
-                parser.once(functions.insert(name, Function { params, body }), &item)?;
+                parser.once(
+                    functions.insert(
+                        name,
+                        Function {
+                            params,
+                            body,
+                            start,
+                        },
+                    ),
+                    &item,
+                )?;
             }
             None => parser.once(main.replace(body), "`main`")?,
         }
@@ -1076,10 +1093,15 @@ impl Parser {
                     self.expect(&Token::RParen)?;
                     Ok(Expr::Read(Box::new(ProjectionRead { handle, request })))
                 }
-                "fn" => Ok(Expr::Closure(Box::new(Closure {
-                    params: self.names()?,
-                    body: self.block()?,
-                }))),
+                "fn" => {
+                    let params = self.names()?;
+                    let start = self.start()?;
+                    Ok(Expr::Closure(Box::new(Closure {
+                        params,
+                        body: self.block()?,
+                        start,
+                    })))
+                }
                 "map" => {
                     self.expect(&Token::LBrace)?;
                     let mut entries = Vec::new();
@@ -1143,6 +1165,56 @@ impl Parser {
             }
             _ => Err(self.unexpected_previous("an expression")),
         }
+    }
+
+    /// A start adapter, if one follows a function's parameters:
+    /// `start <signature> bare|token(<tag>, <slot>) direct|ts_args(<await>, <same>)`.
+    fn start(&mut self) -> Parsed<Option<StartAdapter>> {
+        if !self.is_word("start") {
+            return Ok(None);
+        }
+        self.position += 1;
+        let signature = self.signature()?;
+        let representation = match self.keyword("`bare` or `token`")?.as_str() {
+            "bare" => FunctionRepresentation::Bare,
+            "token" => {
+                self.expect(&Token::LParen)?;
+                let Token::Text(tag) = self.advance() else {
+                    return Err(self.unexpected_previous("a text tag"));
+                };
+                self.expect(&Token::Comma)?;
+                let callable = self.version()?;
+                self.expect(&Token::RParen)?;
+                FunctionRepresentation::Token { tag, callable }
+            }
+            _ => return Err(self.unexpected_previous("`bare` or `token`")),
+        };
+        let convention = match self.keyword("`direct` or `ts_args`")?.as_str() {
+            "direct" => StartConvention::Direct,
+            "ts_args" => {
+                self.expect(&Token::LParen)?;
+                let await_fn = self.function_reference()?;
+                self.expect(&Token::Comma)?;
+                let same_fn = self.function_reference()?;
+                self.expect(&Token::RParen)?;
+                StartConvention::TsArgsList { await_fn, same_fn }
+            }
+            _ => return Err(self.unexpected_previous("`direct` or `ts_args`")),
+        };
+        Ok(Some(StartAdapter {
+            signature,
+            representation,
+            convention,
+        }))
+    }
+
+    /// Steps over a start adapter before the bodies are read, when the
+    /// `use` lines its functions name may still follow.
+    fn skip_start(&mut self) -> Parsed<()> {
+        while !matches!(self.peek(), Token::LBrace | Token::End) {
+            self.position += 1;
+        }
+        Ok(())
     }
 
     fn signature(&mut self) -> Parsed<Signature> {

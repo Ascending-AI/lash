@@ -5,14 +5,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{invalid, unsupported, variant};
-use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
-use crate::{
-    ActExpr, ActKind, Action, Atom, Bytes, Callee, Catch, Closure, Document, Expr, Float, Formula,
-    Function, FunctionBody, FunctionDefinition, FunctionId, Guard, Implementation, Integer,
-    JoinMode, Literal, Manifest, MapEntry, MapType, Member, Name, NumberPolicy, Operand, Param,
-    Place, ProjectionRead, Protocol, QualifiedName, RecordEntry, RecordType, RecordTypeField, Rhs,
-    Signature, Stmt, TryStmt, Type,
+use crate::graph_tokens::{
+    CanonicalFault, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter,
 };
+use crate::{
+    ActExpr, ActKind, Action, Atom, Block, Bytes, Callee, Catch, Closure, Document, Expr, Float,
+    Formula, Function, FunctionBody, FunctionDefinition, FunctionId, Guard, Implementation,
+    Integer, JoinMode, Literal, Manifest, MapEntry, MapType, Member, Name, NumberPolicy, Operand,
+    Param, Place, ProjectionRead, Protocol, QualifiedName, RecordEntry, RecordType,
+    RecordTypeField, Rhs, Signature, Stmt, TryStmt, Type,
+};
+use crate::{FunctionRepresentation, FunctionValue, StartAdapter, StartConvention};
 
 // Types and signatures.
 
@@ -524,16 +527,149 @@ impl TokenCodec for ActExpr {
 
 impl TokenCodec for Closure {
     fn encode(&self, out: &mut TokenWriter) {
+        encode_code(out, &self.params, &self.body, self.start.as_ref());
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let (params, body, start) = decode_code(input)?;
+        Ok(Self {
+            params,
+            body,
+            start,
+        })
+    }
+}
+
+/// Code's parameters and body, then its start adapter only when it has
+/// one: code that states none keeps the identity it had (`K-CLO-004`), and
+/// each value has one encoding.
+fn encode_code(
+    out: &mut TokenWriter,
+    params: &impl TokenCodec,
+    body: &impl TokenCodec,
+    start: Option<&StartAdapter>,
+) {
+    out.seq(if start.is_some() { 3 } else { 2 });
+    params.encode(out);
+    body.encode(out);
+    if let Some(start) = start {
+        start.encode(out);
+    }
+}
+
+fn decode_code(
+    input: &mut TokenReader<'_>,
+) -> Result<(Vec<Name>, Block, Option<StartAdapter>), TokenError> {
+    let fields = input.seq()?;
+    if !matches!(fields, 2 | 3) {
+        return Err(CanonicalFault::FieldCount {
+            expected: 2,
+            found: fields,
+        }
+        .into());
+    }
+    let params = Vec::decode(input)?;
+    let body = Vec::decode(input)?;
+    let start = if fields == 3 {
+        Some(StartAdapter::decode(input)?)
+    } else {
+        None
+    };
+    Ok((params, body, start))
+}
+
+impl TokenCodec for StartAdapter {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(3);
+        self.signature.encode(out);
+        self.representation.encode(out);
+        self.convention.encode(out);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(3)?;
+        Ok(Self {
+            signature: Signature::decode(input)?,
+            representation: FunctionRepresentation::decode(input)?,
+            convention: StartConvention::decode(input)?,
+        })
+    }
+}
+
+/// Bare (0) or a token (1) of its tag and callable slot.
+impl TokenCodec for FunctionRepresentation {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Bare => out.sum(0, 0),
+            Self::Token { tag, callable } => {
+                out.sum(1, 2);
+                out.text(tag);
+                out.unsigned(u64::from(*callable));
+            }
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(
+            match variant(input, |v| match v {
+                0 => Some(0),
+                1 => Some(2),
+                _ => None,
+            })? {
+                0 => Self::Bare,
+                _ => Self::Token {
+                    tag: String::decode(input)?,
+                    callable: input.unsigned_u32()?,
+                },
+            },
+        )
+    }
+}
+
+/// Direct (0) or TypeScript's argument list (1) with its await and
+/// comparison functions.
+impl TokenCodec for StartConvention {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Direct => out.sum(0, 0),
+            Self::TsArgsList { await_fn, same_fn } => {
+                out.sum(1, 2);
+                await_fn.encode(out);
+                same_fn.encode(out);
+            }
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        Ok(
+            match variant(input, |v| match v {
+                0 => Some(0),
+                1 => Some(2),
+                _ => None,
+            })? {
+                0 => Self::Direct,
+                _ => Self::TsArgsList {
+                    await_fn: FunctionId::decode(input)?,
+                    same_fn: FunctionId::decode(input)?,
+                },
+            },
+        )
+    }
+}
+
+/// A function value: its document and its entry's name.
+impl TokenCodec for FunctionValue {
+    fn encode(&self, out: &mut TokenWriter) {
         out.seq(2);
-        self.params.encode(out);
-        self.body.encode(out);
+        self.document.encode(out);
+        self.entry.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(2)?;
         Ok(Self {
-            params: Vec::decode(input)?,
-            body: Vec::decode(input)?,
+            document: Document::decode(input)?,
+            entry: Name::decode(input)?,
         })
     }
 }
@@ -887,16 +1023,15 @@ impl TokenCodec for Stmt {
 
 impl TokenCodec for Function {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.params.encode(out);
-        self.body.encode(out);
+        encode_code(out, &self.params, &self.body, self.start.as_ref());
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        let (params, body, start) = decode_code(input)?;
         Ok(Self {
-            params: Vec::decode(input)?,
-            body: Vec::decode(input)?,
+            params,
+            body,
+            start,
         })
     }
 }
@@ -1038,9 +1173,7 @@ impl TokenCodec for serde_json::Value {
                             .as_ref()
                             .is_some_and(|last| last.as_bytes() >= key.as_bytes())
                         {
-                            return Err(
-                                crate::graph_tokens::CanonicalFault::UnsortedOrDuplicateKey.into(),
-                            );
+                            return Err(CanonicalFault::UnsortedOrDuplicateKey.into());
                         }
                         let value = serde_json::Value::decode(input)?;
                         last = Some(key.clone());

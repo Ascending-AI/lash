@@ -690,6 +690,32 @@ impl KernelMachine {
         Ok(copy_out(&self.heap, value)?)
     }
 
+    /// Copies an effect argument out of the run under the crossing
+    /// policy: a function in it crosses as a function value
+    /// ([`crate::crossing`]). The traversal is charged as a copy-out is,
+    /// and each byte of a function value's canonical form besides.
+    pub(super) fn copy_out_tool_arg(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
+        self.charge(deep_size(&self.heap, value)?)?;
+        let document = Arc::clone(&self.program.document);
+        let library = self.program.library.clone();
+        let mut heap = crate::crossing::CrossingHeap {
+            heap: &mut self.heap,
+            functions: &self.functions,
+            budget: lash_kernel_doc::snapshot::Budget::new(
+                lash_kernel_doc::FunctionValueLimits::CEILING,
+            ),
+        };
+        let mut run = crate::crossing::CrossingRun {
+            document: &document,
+            catalog: library.registry().as_ref(),
+            data: self.limits,
+            tag: None,
+        };
+        let datum = crate::crossing::copy_out_tool_arg(&mut heap, &mut run, value)?;
+        self.charge(crossed_bytes(&datum))?;
+        Ok(datum)
+    }
+
     /// What a task's pending statement resumes with (`K-TASK-009`,
     /// `K-EFF-005`, `K-EFF-009`).
     pub(super) fn resume(
@@ -915,5 +941,26 @@ impl KernelMachine {
                 Ok(Completion::Normal)
             }
         }
+    }
+}
+
+/// The canonical bytes of the function values in `datum`: what a crossing
+/// writes beyond a data copy.
+fn crossed_bytes(datum: &lash_kernel_doc::Datum) -> u64 {
+    use lash_kernel_doc::Datum;
+    match datum {
+        Datum::FunctionValue(value) => value
+            .canonical_tagged_bytes()
+            .map_or(0, |bytes| bytes.len() as u64),
+        Datum::Tuple(items) | Datum::List(items) | Datum::Set(items) => {
+            items.iter().map(crossed_bytes).sum()
+        }
+        Datum::Map(entries) => entries
+            .iter()
+            .map(|(key, value)| crossed_bytes(key) + crossed_bytes(value))
+            .sum(),
+        Datum::Record(fields) => fields.iter().map(|(_, value)| crossed_bytes(value)).sum(),
+        Datum::Error(error) => crossed_bytes(&error.data),
+        _ => 0,
     }
 }

@@ -101,14 +101,69 @@ pub fn migrate_saved_function(
     functions: &FunctionRegistry,
     writes: KernelVersion,
 ) -> Result<Option<lash_kernel_dialect::SavedFunction>, KernelMigrationRefusal> {
-    let mut carried: Option<lash_kernel_dialect::SavedFunction> = None;
+    carry_code(
+        function,
+        |function| &function.document,
+        |migration, function| lash_kernel_migrate::saved_function(migration, function, functions),
+        writes,
+    )
+}
+
+/// `value`, a function value a host holds, carried to kernel version
+/// `writes` as its saved counterpart is ([`migrate_saved_function`]), or
+/// `None` when it is written in `writes` already and runs on `functions`,
+/// the build's library, as it is. A carried value's identity follows its
+/// new document. A request that recorded the value keeps what it recorded.
+///
+/// # Errors
+///
+/// The typed refusal of a value that is not carried, and
+/// [`KernelMigrationRefusal::NotAdmitted`] for one whose code calls a
+/// library function the build does not hold, such as a helper of a release
+/// it retired: no helper is rebound by name.
+pub fn migrate_function_value(
+    value: &lash_kernel_doc::FunctionValue,
+    functions: &FunctionRegistry,
+    writes: KernelVersion,
+) -> Result<Option<lash_kernel_doc::FunctionValue>, KernelMigrationRefusal> {
+    let carried = carry_code(
+        value,
+        |value| &value.document,
+        |migration, value| lash_kernel_migrate::function_value(migration, value, functions),
+        writes,
+    )?;
+    let checked = carried.as_ref().unwrap_or(value);
+    let document = checked.document.identity();
+    checked
+        .check(
+            functions,
+            lash_kernel_doc::FunctionValueLimits::standard(),
+            lash_kernel_doc::KernelDataLimits::standard(),
+        )
+        .map_err(|refusal| KernelMigrationRefusal::NotAdmitted {
+            document,
+            reason: refusal.to_string(),
+        })?;
+    Ok(carried)
+}
+
+/// `code` carried to kernel version `writes` by `step`, each migration
+/// between the version its `document` is written in and that one, or
+/// `None` when it is written in `writes` already.
+fn carry_code<T>(
+    code: &T,
+    document: impl Fn(&T) -> &Document,
+    step: impl Fn(&lash_kernel_migrate::Migration, &T) -> Result<T, DocumentRefusal>,
+    writes: KernelVersion,
+) -> Result<Option<T>, KernelMigrationRefusal> {
+    let mut carried: Option<T> = None;
     loop {
-        let current = carried.as_ref().unwrap_or(function);
-        let found = current.document.manifest.kernel;
+        let current = carried.as_ref().unwrap_or(code);
+        let found = document(current).manifest.kernel;
         if found == writes.number() {
             return Ok(carried);
         }
-        let from = current.document.identity();
+        let from = document(current).identity();
         let refused = |refusal| KernelMigrationRefusal::Document {
             document: from,
             refusal,
@@ -122,9 +177,7 @@ pub fn migrate_saved_function(
                     from: writes.number(),
                 })
             })?;
-        carried = Some(
-            lash_kernel_migrate::saved_function(migration, current, functions).map_err(refused)?,
-        );
+        carried = Some(step(migration, current).map_err(refused)?);
     }
 }
 

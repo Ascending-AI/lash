@@ -185,7 +185,7 @@ pub fn package(functions: Vec<lash_kernel_doc::FunctionDefinition>) -> Package {
         front_end: Box::new(Python::default()),
         read,
         printer: Some(Box::new(Python::default())),
-        function_values: Some(lash_kernel_dialect::FunctionValues::Bare),
+        function_values: Some(lash_kernel_doc::FunctionRepresentation::Bare),
         functions,
     }
 }

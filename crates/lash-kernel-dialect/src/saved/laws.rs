@@ -77,6 +77,7 @@ fn saved(heap: &mut PagedHeap, live: EntityId) -> SavedFunction {
             body: vec![Stmt::Return {
                 value: Expr::Variable(Name::new("capture")),
             }],
+            start: None,
         },
     );
     SavedFunction {
@@ -173,7 +174,7 @@ fn installing_loads_no_capture_payload() {
         &mut document,
         &functions,
         &BTreeSet::from([Name::new("read")]),
-        &FunctionValues::Bare,
+        &lash_kernel_doc::FunctionRepresentation::Bare,
         &BTreeMap::new(),
         &BTreeMap::new(),
         &|_| true,
@@ -203,6 +204,7 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
                 Expr::Variable(Name::new("a")),
             ]),
         }],
+        start: None,
     };
     let document = Document::new(
         lash_kernel_doc::NumberPolicy::Float,
@@ -245,7 +247,7 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
                 not_carried: &dropped,
                 controls: &BTreeMap::new(),
                 written: &BTreeMap::new(),
-                values: &FunctionValues::Bare,
+                values: &lash_kernel_doc::FunctionRepresentation::Bare,
                 release: PageRef {
                     id: PageId([1; 32]),
                     grant: PageGrant::NONE,
@@ -283,6 +285,7 @@ fn calling(name: &str, calls: &[&str], owners: &[&str]) -> SavedFunction {
                     }),
                 })
                 .collect(),
+            start: None,
         },
     );
     SavedFunction {

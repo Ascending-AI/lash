@@ -32,6 +32,7 @@ mod document;
 pub use data_limits::KernelDataLimits;
 mod document_bytes;
 mod function;
+mod function_value;
 mod graph_codec;
 /// The canonical binary token grammar of checkpoint graph node bodies: a
 /// cross-crate seam for the kernel's and the store's binary codecs, not part
@@ -46,6 +47,9 @@ pub use document_bytes::{DOCUMENT_GRAMMAR_VERSION, DocumentBytes, DocumentBytesR
 pub use identified::{IdentifiedDocument, document_work};
 mod identity;
 mod observation;
+/// One root-based snapshot of live code: what a saved function and a
+/// crossing function share (`K-CLO-004`).
+pub mod snapshot;
 pub use observation::{RanCounts, ReplayPath, RunObservation, TaskPath};
 mod name;
 mod native;
@@ -63,7 +67,7 @@ mod tests;
 pub use ast::{
     ActExpr, ActKind, Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode,
     Literal, MapEntry, Member, Node, Place, ProjectionRead, Protocol, RecordEntry, Rhs, Site, Stmt,
-    TryStmt, Unit,
+    TryStmt, Unit, each_closure_mut,
 };
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
@@ -72,6 +76,11 @@ pub use document::{
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition, Guard,
     Implementation, Measure, Operand,
+};
+pub use function_value::{
+    FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, FunctionRepresentation, FunctionValue,
+    FunctionValueLimits, FunctionValueRefusal, StartAdapter, StartConvention, carry_start_adapters,
+    escape_function_key,
 };
 pub use graph_codec::{
     FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, FrozenDatum, MAX_DECODE_DEPTH,

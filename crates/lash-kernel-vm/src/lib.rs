@@ -28,6 +28,7 @@
 
 mod compile;
 mod costs;
+mod crossing;
 mod data;
 mod functions;
 mod heap;

@@ -59,7 +59,9 @@ pub fn read(
             .name("kernel-python-decode".into())
             .stack_size(8 * 1024 * 1024)
             .spawn_scoped(scope, || {
-                let document = Reader::new(source, base, limits)?.document(base)?;
+                let mut document = Reader::new(source, base, limits)?.document(base)?;
+                // Source spells no start adapter: the base keeps them.
+                k::carry_start_adapters(base, &mut document);
                 check_document_depth(&document, limits).map_err(|e| match e {
                     PrintError::Bytes { .. } => error(Code::GeneratedSourceBytes, e.to_string()),
                     PrintError::Depth { .. } => depth_error(),
@@ -552,7 +554,14 @@ impl<'a> Reader<'a> {
                 if let Some(name) = name {
                     if document
                         .functions
-                        .insert(name, k::Function { params, body })
+                        .insert(
+                            name,
+                            k::Function {
+                                params,
+                                body,
+                                start: None,
+                            },
+                        )
                         .is_some()
                     {
                         return Err(format_error("duplicate declaration"));
@@ -867,7 +876,11 @@ impl<'a> Reader<'a> {
             let body = self.readable_block(indent + 1, depth + 2)?;
             self.main = outer_main;
             self.scope = parent;
-            let value = k::Rhs::Expr(k::Expr::Closure(Box::new(k::Closure { params, body })));
+            let value = k::Rhs::Expr(k::Expr::Closure(Box::new(k::Closure {
+                params,
+                body,
+                start: None,
+            })));
             if declaration {
                 k::Stmt::Let { name, value }
             } else {
@@ -1148,7 +1161,11 @@ impl<'a> Reader<'a> {
                 let body = self.block(i, d)?;
                 self.main = outer_main;
                 self.scope = parent;
-                k::Expr::Closure(Box::new(k::Closure { params, body }))
+                k::Expr::Closure(Box::new(k::Closure {
+                    params,
+                    body,
+                    start: None,
+                }))
             }
             "choose" => {
                 c.end(true)?;
