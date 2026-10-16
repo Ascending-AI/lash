@@ -492,6 +492,7 @@ async fn assembled_prompt_fragments_with_projection(
             .await
             .expect("bound variables prompt")
             .render()
+            .expect("presentable bindings")
             .0
             .to_string(),
     ));
@@ -504,6 +505,7 @@ async fn assembled_prompt_fragments_with_projection(
         "read-only variables",
         dialect
             .read_only_variables_prompt(&projected)
+            .expect("presentable fixture")
             .unwrap_or_default(),
     ));
 
@@ -549,7 +551,12 @@ async fn assembled_prompt_fragments_with_projection(
             dialect.finalization_copy(termination, finishing, crate::plugin::RlmChannel::Cell),
         ));
     }
-    fragments.push(("history definition", dialect.history_item_definition(true)));
+    fragments.push((
+        "history definition",
+        dialect
+            .history_item_definition(true)
+            .expect("presentable fixture"),
+    ));
     fragments.push((
         "finish required",
         dialect.finish_required_copy(&[], crate::plugin::RlmChannel::Cell),

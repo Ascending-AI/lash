@@ -133,7 +133,7 @@ impl CodeModeProjectedBindings {
         self.bindings.keys().cloned()
     }
 
-    fn prompt_docs(&self) -> Vec<crate::rlm_support::ReadOnlyVariableDoc> {
+    pub(crate) fn prompt_docs(&self) -> Vec<crate::rlm_support::ReadOnlyVariableDoc> {
         self.bindings
             .iter()
             .map(|(name, value)| {
@@ -191,9 +191,11 @@ pub(crate) const READ_ONLY_VARIABLES_TITLE: &str = "Read-Only Variables";
 pub(crate) fn read_only_variables_prompt(
     bindings: &CodeModeProjectedBindings,
     dialect: &dyn crate::dialect::DialectPrompts,
-) -> Option<String> {
+) -> Result<Option<String>, lash_tool_presenter_api::PresentationRefusal> {
     let docs = bindings.prompt_docs();
-    (!docs.is_empty()).then(|| crate::rlm_support::render_read_only_variables(docs, dialect))
+    (!docs.is_empty())
+        .then(|| crate::rlm_support::render_read_only_variables(docs, dialect))
+        .transpose()
 }
 
 /// A session extension binding `bindings` as the session's read-only
@@ -360,6 +362,7 @@ mod tests {
             )
             .expect("bind task payload");
         let declaration = read_only_variables_prompt(&bindings, &crate::dialect::TypescriptPrompts)
+            .expect("presentable fixture")
             .expect("read-only variables declaration");
 
         assert!(

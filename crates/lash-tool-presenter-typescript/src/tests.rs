@@ -93,6 +93,8 @@ fn explicit_shared_enum_is_declared_once_across_six_operands_and_tools() {
         .collect::<Vec<_>>();
     let section = TypescriptToolPresenter
         .present(ToolPresentationRequest {
+            reserved_names: &[],
+            max_section_bytes: None,
             tools: &entries,
             config: &TypescriptToolPresenter
                 .admit_config(&json!({}))
@@ -256,4 +258,53 @@ fn a_referenced_document_root_emits_its_body_and_notes_once() {
     assert_eq!(text.matches("{ and: Array<Filter> }").count(), 1, "{text}");
     assert_eq!(text.matches("Root filter.").count(), 1, "{text}");
     assert!(text.contains("tools.select(Filter)"), "{text}");
+}
+
+/// FIG-6495: shared definition bodies and notes are charged at first use only.
+#[test]
+fn catalogue_budget_charges_a_shared_closure_once() {
+    let schema = json!({"$defs":{"Field":{"enum":["title","body"],"description":"Indexed field."}},
+        "type":"object","properties":{"field":{"$ref":"#/$defs/Field"}},
+        "required":["field"],"additionalProperties":false});
+    let tools = [
+        definition("first", schema.clone()),
+        definition("second", schema),
+    ];
+    let contracts = tools.iter().map(|tool| tool.contract()).collect::<Vec<_>>();
+    let entries = tools
+        .iter()
+        .zip(&contracts)
+        .map(|(tool, contract)| ToolPresentationEntry {
+            manifest: &tool.manifest,
+            contract,
+            call_path: &tool.manifest.name,
+            pinned: false,
+        })
+        .collect::<Vec<_>>();
+    let config = TypescriptToolPresenter
+        .admit_config(&json!({}))
+        .expect("config");
+    let full = TypescriptToolPresenter
+        .present(ToolPresentationRequest {
+            reserved_names: &[],
+            max_section_bytes: None,
+            tools: &entries,
+            config: &config,
+            disclosure: lash_tool_presenter_api::ToolDisclosure::Complete,
+        })
+        .expect("complete listing");
+    let budget = full.text.len() - 2; // Catalogue bytes exclude the inter-tool separator.
+    let limited = TypescriptToolPresenter
+        .present(ToolPresentationRequest {
+            reserved_names: &[],
+            max_section_bytes: None,
+            tools: &entries,
+            config: &config,
+            disclosure: lash_tool_presenter_api::ToolDisclosure::Budget {
+                catalogue_bytes: budget,
+            },
+        })
+        .expect("budget listing");
+    assert_eq!(limited.listed.len(), 2, "{}", limited.text);
+    assert_eq!(limited.text, full.text);
 }

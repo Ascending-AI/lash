@@ -84,15 +84,51 @@ impl ToolPresenter for StandardToolPresenter {
         request: ToolPresentationRequest<'_>,
     ) -> Result<PresentedToolSection, PresentationRefusal> {
         let config = Self::config(request.config)?;
-        let docs = request
+        let documents = request
             .tools
             .iter()
-            .map(|tool| {
-                compact_contract(tool.manifest, tool.contract, tool.call_path, &config)
-                    .map(|contract| contract.render_markdown())
-            })
+            .map(|tool| contract_documents(tool.contract, &config))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(listing::list(request.tools, docs, request.disclosure))
+        let reserved = request
+            .reserved_names
+            .iter()
+            .map(String::as_str)
+            .chain(request.tools.iter().flat_map(|tool| {
+                tool.call_path
+                    .split('.')
+                    .chain([tool.manifest.name.as_str()])
+            }))
+            .collect::<Vec<_>>();
+        let initial = |selected: &[bool]| {
+            let all_documents = documents
+                .iter()
+                .zip(selected)
+                .filter(|(_, selected)| **selected)
+                .flat_map(|(documents, _)| {
+                    [&documents.0, &documents.1]
+                        .into_iter()
+                        .chain(documents.2.iter())
+                })
+                .collect::<Vec<_>>();
+            listing::DefinitionPool::with_allocator(compact_name_allocator(
+                &all_documents,
+                &reserved,
+            ))
+        };
+        listing::plan(request, initial, |index, pool| {
+            let tool = &request.tools[index];
+            let (input, output, default) = &documents[index];
+            compact_contract_with_pool(
+                tool.manifest,
+                tool.contract,
+                tool.call_path,
+                &config,
+                (input.clone(), output.clone(), default.clone()),
+                pool,
+            )
+            .map(|contract| contract.render_markdown())
+        })
+        .map(|plan| plan.render(request.tools))
     }
 
     fn tool_doc(
@@ -189,6 +225,27 @@ pub fn compact_contract(
     signature_name: &str,
     config: &StandardPresenterConfig,
 ) -> Result<CompactToolContract, PresentationRefusal> {
+    let documents = contract_documents(contract, config)?;
+    let refs = [&documents.0, &documents.1]
+        .into_iter()
+        .chain(documents.2.iter())
+        .collect::<Vec<_>>();
+    let mut pool =
+        listing::DefinitionPool::with_allocator(compact_name_allocator(&refs, &[signature_name]));
+    compact_contract_with_pool(
+        manifest,
+        contract,
+        signature_name,
+        config,
+        documents,
+        &mut pool,
+    )
+}
+
+fn contract_documents(
+    contract: &ToolContract,
+    config: &StandardPresenterConfig,
+) -> Result<(SchemaDocument, SchemaDocument, Option<SchemaDocument>), PresentationRefusal> {
     let input = SchemaDocument::from_json_schema(
         contract.input_schema.canonical.as_value(),
         config.schema_depth,
@@ -207,30 +264,76 @@ pub fn compact_contract(
         )?),
         _ => None,
     };
-    let documents = [&input, &output]
-        .into_iter()
-        .chain(default.iter())
-        .collect::<Vec<_>>();
-    let mut names = compact_name_allocator(&documents, &[signature_name]);
-    let mut input = Document::allocate(input, &mut names);
-    let output = Document::allocate(output, &mut names);
+    Ok((input, output, default))
+}
+
+/// Project a compact contract with a listing-local pool. Its newly needed
+/// definitions and notes are part of the returned document's byte cost.
+///
+/// ```rust,ignore
+/// let contract = compact_contract_with_pool(manifest, contract, "lookup", &config,
+///     (input, output, None), &mut pool)?;
+/// ```
+///
+/// # Errors
+/// Refuses missing references or shapes compact notation cannot spell.
+pub fn compact_contract_with_pool(
+    manifest: &ToolManifest,
+    contract: &ToolContract,
+    signature_name: &str,
+    config: &StandardPresenterConfig,
+    (mut input_document, output_document, default): (
+        SchemaDocument,
+        SchemaDocument,
+        Option<SchemaDocument>,
+    ),
+    pool: &mut listing::DefinitionPool,
+) -> Result<CompactToolContract, PresentationRefusal> {
     let output_contract = &contract.output_contract;
     // Root references keep their named body, including the witness field.
-    if let ShapeKind::Ref(id) = input.document.roots[0].kind {
+    let mut projected = None;
+    if let ShapeKind::Ref(id) = input_document.roots[0].kind {
         let mut current = id;
         let mut visited = std::collections::BTreeSet::new();
         while visited.insert(current) {
-            let shape = &mut input.document.definitions[current.0].shape;
+            let shape = &mut input_document.definitions[current.0].shape;
             if let ShapeKind::Ref(next) = shape.kind {
                 current = next;
             } else {
-                *shape = witnessed_input(output_contract, shape);
+                let witnessed = witnessed_input(output_contract, shape);
+                if witnessed != *shape {
+                    projected = Some(current);
+                }
+                *shape = witnessed;
                 break;
             }
         }
     } else {
-        input.document.roots[0] = witnessed_input(output_contract, &input.root());
+        input_document.roots[0] = witnessed_input(output_contract, &input_document.roots[0]);
     }
+    let input = match (projected, output_contract) {
+        (Some(id), ToolOutputContract::FromInputSchema { input_field, .. }) => {
+            let prepared = pool.prepare_projected(
+                &input_document,
+                id,
+                &serde_json::json!({"output_witness":input_field}),
+            )?;
+            Document {
+                document: input_document,
+                names: prepared.names,
+                introduced: prepared.introduced,
+            }
+        }
+        _ => Document::prepare(input_document, pool)?,
+    };
+    let output = match output_contract {
+        ToolOutputContract::Static => Document::prepare(output_document, pool)?,
+        ToolOutputContract::FromInputSchema { .. } => Document {
+            document: output_document,
+            names: BTreeMap::new(),
+            introduced: Vec::new(),
+        },
+    };
     let mut definitions = input.definitions()?;
     let mut output_definitions = match output_contract {
         ToolOutputContract::Static => output.definitions()?,
@@ -242,7 +345,7 @@ pub fn compact_contract(
         ToolOutputContract::Static => (String::new(), compact_type(&output.root(), &output.names)?),
         ToolOutputContract::FromInputSchema { .. } => {
             let default = if let Some(document) = default {
-                let default = Document::allocate(document, &mut names);
+                let default = Document::prepare(document, pool)?;
                 for definition in default.definitions()? {
                     if !definitions.contains(&definition) {
                         definitions.push(definition);
@@ -281,6 +384,7 @@ pub fn compact_contract(
 struct Document {
     document: SchemaDocument,
     names: BTreeMap<DefinitionId, String>,
+    introduced: Vec<DefinitionId>,
 }
 
 /// Reserve compact notation words, tool names and the documents' host types
@@ -355,7 +459,24 @@ impl Document {
             .into_iter()
             .map(|id| (id, allocator.allocate(&document, id)))
             .collect();
-        Self { document, names }
+        let introduced = document.reachable_closure(&document.roots);
+        Self {
+            document,
+            names,
+            introduced,
+        }
+    }
+
+    fn prepare(
+        document: SchemaDocument,
+        pool: &mut listing::DefinitionPool,
+    ) -> Result<Self, PresentationRefusal> {
+        let prepared = pool.prepare(&document)?;
+        Ok(Self {
+            document,
+            names: prepared.names,
+            introduced: prepared.introduced,
+        })
     }
 
     fn root(&self) -> SchemaShape {
@@ -363,9 +484,9 @@ impl Document {
     }
 
     fn definitions(&self) -> Result<Vec<String>, PresentationRefusal> {
-        self.document
-            .reachable_closure(&self.document.roots)
-            .into_iter()
+        self.introduced
+            .iter()
+            .copied()
             .map(|id| compact_definition(&self.document, id, &self.names))
             .collect()
     }

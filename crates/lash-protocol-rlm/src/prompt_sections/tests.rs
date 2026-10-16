@@ -66,12 +66,14 @@ fn facts() -> RlmPromptFacts {
         .bind_json("current_query", serde_json::json!("open issues"))
         .expect("bind");
     RlmPromptFacts {
+        reserved_names: Vec::new(),
         history_binding: Arc::from(""),
         bound_variables: Arc::from(""),
         read_only_variables: crate::projection::read_only_variables_prompt(
             &bindings,
             &crate::dialect::TypescriptPrompts,
-        ),
+        )
+        .expect("presentable fixture"),
         globals: Default::default(),
     }
 }
@@ -317,6 +319,7 @@ fn bound_variables_render_late_in_name_order() {
         RlmSections::typescript(),
         Call {
             facts: Some(RlmPromptFacts {
+                reserved_names: Vec::new(),
                 history_binding: Arc::from(""),
                 bound_variables,
                 read_only_variables: None,
@@ -527,6 +530,7 @@ fn the_initial_instructions_are_stable_while_globals_change() {
             RlmSections::typescript(),
             Call {
                 facts: Some(RlmPromptFacts {
+                    reserved_names: Vec::new(),
                     history_binding: Arc::from(""),
                     bound_variables,
                     read_only_variables: None,
@@ -567,7 +571,10 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
             let schema = if structured {
                 format!(
                     "\n\nSchema:\n{}",
-                    sections.dialect.history_item_definition(images)
+                    sections
+                        .dialect
+                        .history_item_definition(images)
+                        .expect("presentable fixture")
                 )
             } else {
                 String::new()

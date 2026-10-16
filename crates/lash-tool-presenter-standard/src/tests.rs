@@ -545,3 +545,64 @@ fn dynamic_witness_and_default_closure_survive_a_referenced_input_root() {
     assert!(!docs.contains("Unused"), "{docs}");
     assert!(compact.return_fields.is_empty());
 }
+
+/// FIG-6495: a dynamic output witness changes the displayed input contract;
+/// its named body cannot share the static tool's unprojected closure.
+#[test]
+fn static_and_dynamic_witness_closures_have_distinct_definition_identities() {
+    let input = serde_json::json!({"$ref":"#/$defs/Input", "$defs":{"Input":{
+        "type":"object", "properties":{"output":{"type":"object"}}, "required":["output"]
+    }}});
+    let plain = ToolDefinition::raw(
+        "plain",
+        "plain",
+        "Static result",
+        input.clone(),
+        serde_json::json!({"type":"string"}),
+    )
+    .unwrap()
+    .with_execution(std::time::Duration::from_secs(30));
+    let dynamic = ToolDefinition::raw(
+        "dynamic",
+        "dynamic",
+        "Dynamic result",
+        input,
+        serde_json::json!({"type":"string"}),
+    )
+    .unwrap()
+    .with_execution(std::time::Duration::from_secs(30))
+    .with_output_from_input_schema("output", None);
+    let tools = [plain, dynamic];
+    let contracts = tools.iter().map(|tool| tool.contract()).collect::<Vec<_>>();
+    let entries = tools
+        .iter()
+        .zip(&contracts)
+        .map(|(tool, contract)| ToolPresentationEntry {
+            manifest: &tool.manifest,
+            contract,
+            call_path: &tool.manifest.name,
+            pinned: false,
+        })
+        .collect::<Vec<_>>();
+    let text = StandardToolPresenter
+        .present(ToolPresentationRequest {
+            tools: &entries,
+            config: &StandardToolPresenter
+                .admit_config(&serde_json::json!({}))
+                .unwrap(),
+            disclosure: lash_tool_presenter_api::ToolDisclosure::Complete,
+            reserved_names: &[],
+            max_section_bytes: None,
+        })
+        .unwrap()
+        .text;
+    assert!(
+        text.contains("type Input_2 = record{output: TypeSpec<T>}"),
+        "{text}"
+    );
+    assert!(text.contains("dynamic<T = any>(Input_2) -> T"), "{text}");
+    assert!(
+        !text.contains("type Input = record{output: TypeSpec<T>}"),
+        "{text}"
+    );
+}

@@ -85,6 +85,8 @@ impl ToolListing {
             })
             .collect::<Vec<_>>();
         let request = ToolPresentationRequest {
+            reserved_names: &dialect.reserved_names,
+            max_section_bytes: None,
             tools: &entries,
             config: dialect.tool_presentation(),
             disclosure: match discovery {
@@ -97,13 +99,13 @@ impl ToolListing {
         let presenter = dialect.tool_presenter().presenter();
         let section = presenter
             .present(request)
-            .map_err(|refusal| SessionError::Protocol(refusal.to_string()))?;
+            .map_err(|refusal| section_refused(presenter.id(), refusal))?;
         if !section.accounts_for(&request) {
-            return Err(SessionError::Protocol(
+            return Err(section_refused(
+                presenter.id(),
                 PresentationRefusal::Listing {
                     presenter: presenter.id().to_owned(),
-                }
-                .to_string(),
+                },
             ));
         }
         let names = |ids: &[lash_core::ToolId]| {
@@ -122,6 +124,15 @@ impl ToolListing {
             docs: section.text,
         })
     }
+}
+
+pub(crate) fn section_refused(presenter: &str, refusal: PresentationRefusal) -> SessionError {
+    SessionError::Plugin(lash_core::plugin::PluginError::ToolPresentationRefused {
+        plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_owned(),
+        presenter: presenter.to_owned(),
+        code: refusal.code().to_owned(),
+        message: refusal.to_string(),
+    })
 }
 
 /// Which tools a discovery session's prompt lists and which it leaves for
@@ -201,9 +212,9 @@ pub fn tool_catalogue_disclosure(
 }
 
 /// A discovered tool's signature from its binding and admitted schemas in the
-/// session's `dialect` and `tool_presentation`, without Markdown or
-/// documentation. This is the signature line shown when the tool is loaded
-/// into the prompt.
+/// session's `dialect` and `tool_presentation`: the complete bundle of named
+/// definitions and the final signature line, without Markdown or tool prose.
+/// Retain the complete bundle so every reference has its definition.
 ///
 /// # Errors
 ///

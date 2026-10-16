@@ -14,139 +14,338 @@ use crate::{PresentedToolSection, ToolDisclosure, ToolPresentationEntry};
 /// The heading of tools of no module listed after a module's tools.
 const UNGROUPED_HEADING: &str = "#### Ungrouped tools";
 
-/// `tools` listed under `disclosure`, each with its doc from `docs` (one per
-/// tool, in order).
+/// A selected catalogue, with each document carrying only the definitions first
+/// needed at its position. Headings and separators are outside catalogue cost.
 ///
 /// ```rust,ignore
-/// // A presenter that writes its own docs keeps the shared listing.
-/// let docs = request.tools.iter().map(|tool| my_doc(tool)).collect();
-/// Ok(listing::list(request.tools, docs, request.disclosure))
+/// let plan = listing::plan(request, |_| pool.clone(), |index, pool| render(index, pool))?;
+/// assert!(plan.catalogue_bytes() <= budget);
+/// let section = plan.render(request.tools);
 /// ```
-pub fn list(
-    tools: &[ToolPresentationEntry<'_>],
-    docs: Vec<String>,
-    disclosure: ToolDisclosure,
-) -> PresentedToolSection {
-    let docs = tools
-        .iter()
-        .zip(docs)
-        .map(|(entry, text)| ToolDoc { entry, text })
-        .collect::<Vec<_>>();
-    let listed = match disclosure {
-        ToolDisclosure::Complete => vec![true; docs.len()],
-        ToolDisclosure::Budget { catalogue_bytes } => select_within_budget(&docs, catalogue_bytes),
-    };
-    let ids = |want: bool| {
-        docs.iter()
-            .zip(&listed)
-            .filter(|(_, listed)| **listed == want)
-            .map(|(doc, _)| doc.entry.manifest.id.clone())
-            .collect()
-    };
-    PresentedToolSection {
-        text: render_docs(
-            docs.iter()
-                .zip(&listed)
-                .filter(|(_, listed)| **listed)
-                .map(|(doc, _)| doc),
-        ),
-        listed: ids(true),
-        omitted: ids(false),
-    }
+#[derive(Clone, Debug)]
+pub struct ListingPlan {
+    docs: Vec<Option<String>>,
 }
 
-/// One tool's doc.
-struct ToolDoc<'a> {
-    entry: &'a ToolPresentationEntry<'a>,
-    text: String,
-}
-
-impl ToolDoc<'_> {
-    /// The root of its call path: the namespace selection is fair across.
-    fn namespace(&self) -> &str {
-        self.entry
-            .call_path
-            .split_once('.')
-            .map_or(self.entry.call_path, |(root, _)| root)
+impl ListingPlan {
+    /// Bytes charged to the catalogue: tool text and newly emitted closures.
+    ///
+    /// ```rust,ignore
+    /// assert_eq!(plan.catalogue_bytes(), tool_bytes + new_definition_bytes);
+    /// ```
+    pub fn catalogue_bytes(&self) -> usize {
+        self.docs.iter().flatten().map(String::len).sum()
     }
 
-    fn module(&self) -> Option<&str> {
-        self.entry
-            .manifest
-            .module
-            .as_deref()
-            .map(|module| module.name.as_str())
+    /// A tool's exact charge, including its newly emitted closure. `None`
+    /// means the tool was omitted and costs nothing.
+    ///
+    /// ```rust,ignore
+    /// assert_eq!(plan.tool_bytes(omitted_index), None);
+    /// ```
+    pub fn tool_bytes(&self, index: usize) -> Option<usize> {
+        self.docs.get(index)?.as_ref().map(String::len)
     }
-}
 
-/// Which of `docs` a discovery session lists: the pinned ones (the discovery
-/// tool and the control tools), then rounds over the namespaces in the order
-/// the catalogue first names them, each round taking every namespace's next
-/// inline doc that still fits the budget. A namespace whose next doc does not
-/// fit is done, so a namespace's listed tools are always its first.
-fn select_within_budget(docs: &[ToolDoc<'_>], catalogue_bytes: usize) -> Vec<bool> {
-    let mut listed = docs.iter().map(|doc| doc.entry.pinned).collect::<Vec<_>>();
-    let mut used = docs
-        .iter()
-        .filter(|doc| doc.entry.pinned)
-        .map(|doc| doc.text.len())
-        .sum::<usize>();
-    let mut namespaces = Vec::<(&str, std::collections::VecDeque<usize>)>::new();
-    for (index, doc) in docs.iter().enumerate() {
-        if listed[index] || !doc.entry.manifest.inline {
-            continue;
-        }
-        match namespaces
-            .iter_mut()
-            .find(|(namespace, _)| *namespace == doc.namespace())
-        {
-            Some((_, queue)) => queue.push_back(index),
-            None => namespaces.push((doc.namespace(), [index].into())),
-        }
-    }
-    let mut progressed = true;
-    while progressed {
-        progressed = false;
-        for (_, queue) in &mut namespaces {
-            let Some(&index) = queue.front() else {
+    /// Join the selected documents under module headings. Supply the same
+    /// offered entries passed to [`plan`], in the same order.
+    ///
+    /// ```rust,ignore
+    /// let section = plan.render(request.tools);
+    /// ```
+    pub fn render(self, tools: &[ToolPresentationEntry<'_>]) -> PresentedToolSection {
+        let mut section = PresentedToolSection::default();
+        let mut parts = Vec::new();
+        let mut open: Option<Option<&str>> = None;
+        for (tool, doc) in tools.iter().zip(self.docs) {
+            let Some(doc) = doc else {
+                section.omitted.push(tool.manifest.id.clone());
                 continue;
             };
-            let bytes = docs[index].text.len();
-            if used.saturating_add(bytes) <= catalogue_bytes {
-                used += bytes;
-                listed[index] = true;
-                queue.pop_front();
-                progressed = true;
-            } else {
-                queue.clear();
+            section.listed.push(tool.manifest.id.clone());
+            let module = tool
+                .manifest
+                .module
+                .as_deref()
+                .map(|module| module.name.as_str());
+            match (module, open) {
+                (Some(name), current) if current != Some(Some(name)) => {
+                    parts.push(format!("#### {name}"));
+                    open = Some(Some(name));
+                }
+                (None, Some(Some(_))) => {
+                    parts.push(UNGROUPED_HEADING.to_string());
+                    open = Some(None);
+                }
+                _ => {}
             }
+            parts.push(doc);
         }
+        section.text = parts.join("\n\n");
+        section
     }
-    listed
 }
 
-/// `docs` in their order, a module's heading opening each run of its tools.
-fn render_docs<'a, 'b: 'a>(docs: impl Iterator<Item = &'a ToolDoc<'b>>) -> String {
-    let mut parts = Vec::new();
-    // The heading the last doc sat under: `None` before any, `Some(None)`
-    // under the ungrouped heading.
-    let mut open: Option<Option<&str>> = None;
-    for doc in docs {
-        let module = doc.module();
-        match (module, open) {
-            (Some(name), current) if current != Some(Some(name)) => {
-                parts.push(format!("#### {name}"));
-                open = Some(Some(name));
+/// Plan namespace rounds using the exact rendered cost of each candidate's
+/// selected closure. `initial` builds a fresh pool, reserving names from exactly the selected tools. Rendering always
+/// visits selected tools in catalogue order, including when a pinned tool comes
+/// last; rejected candidates never consume names, definitions or notes.
+///
+/// A trial replays the selected documents because inserting an earlier tool
+/// can transfer definition ownership and collision suffixes. Only selected
+/// closures allocate names; there is no global declaration prelude.
+///
+/// ```rust,ignore
+/// let plan = listing::plan(request, |_| TypescriptDefinitions::new(request.reserved_names),
+///     |index, pool| render_tool_doc(&request.tools[index], config, &inputs[index], &outputs[index], pool))?;
+/// let section = plan.render(request.tools);
+/// ```
+///
+/// # Errors
+/// Propagates rendering refusals and refuses an oversized hard section without
+/// truncating it, reporting the complete required byte count.
+pub fn plan<S>(
+    request: crate::ToolPresentationRequest<'_>,
+    mut initial: impl FnMut(&[bool]) -> S,
+    mut render: impl FnMut(usize, &mut S) -> Result<String, crate::PresentationRefusal>,
+) -> Result<ListingPlan, crate::PresentationRefusal> {
+    let mut selected = request
+        .tools
+        .iter()
+        .map(|tool| tool.pinned || matches!(request.disclosure, ToolDisclosure::Complete))
+        .collect::<Vec<_>>();
+    let mut price = |selected: &[bool]| {
+        let mut pool = initial(selected);
+        let docs = selected
+            .iter()
+            .enumerate()
+            .map(|(index, selected)| {
+                if *selected {
+                    render(index, &mut pool).map(Some)
+                } else {
+                    Ok(None)
+                }
+            })
+            .collect::<Result<Vec<_>, crate::PresentationRefusal>>()?;
+        Ok::<_, crate::PresentationRefusal>(ListingPlan { docs })
+    };
+    let mut planned = price(&selected)?;
+    if let ToolDisclosure::Budget { catalogue_bytes } = request.disclosure {
+        let mut namespaces = Vec::<(&str, std::collections::VecDeque<usize>)>::new();
+        for (index, tool) in request.tools.iter().enumerate() {
+            if selected[index] || !tool.manifest.inline {
+                continue;
             }
-            (None, Some(Some(_))) => {
-                parts.push(UNGROUPED_HEADING.to_string());
-                open = Some(None);
+            let namespace = tool
+                .call_path
+                .split_once('.')
+                .map_or(tool.call_path, |(root, _)| root);
+            if let Some((_, queue)) = namespaces.iter_mut().find(|(name, _)| *name == namespace) {
+                queue.push_back(index);
+            } else {
+                namespaces.push((namespace, [index].into()));
             }
-            _ => {}
         }
-        parts.push(doc.text.clone());
+        loop {
+            let mut progressed = false;
+            for (_, queue) in &mut namespaces {
+                let Some(&index) = queue.front() else {
+                    continue;
+                };
+                selected[index] = true;
+                let trial = price(&selected)?;
+                let within_section = request
+                    .max_section_bytes
+                    .is_none_or(|limit| trial.clone().render(request.tools).text.len() <= limit);
+                if trial.catalogue_bytes() <= catalogue_bytes && within_section {
+                    planned = trial;
+                    queue.pop_front();
+                    progressed = true;
+                } else {
+                    selected[index] = false;
+                    queue.clear();
+                }
+            }
+            if !progressed {
+                break;
+            }
+        }
     }
-    parts.join("\n\n")
+    if let Some(limit) = request.max_section_bytes {
+        let required = planned.clone().render(request.tools).text.len();
+        if required > limit {
+            return Err(crate::PresentationRefusal::SectionLimit { required, limit });
+        }
+    }
+    Ok(planned)
+}
+
+/// Names and already emitted canonical closures for one listing. A host can
+/// prepare a graph, spell the new definitions with its dialect's public helpers,
+/// and charge that text with [`plan`]. Clone for speculative budget accounting.
+///
+/// ```rust,ignore
+/// let mut pool = listing::DefinitionPool::new(["HistoryItem", "Filter"]);
+/// let prepared = pool.prepare(&document)?;
+/// for id in prepared.introduced { emit_definition(&document, id, &prepared.names)?; }
+/// ```
+#[derive(Clone, Debug)]
+pub struct DefinitionPool {
+    allocator: lash_tool_shape::ReadableNameAllocator,
+    emitted: std::collections::BTreeSet<(lash_tool_shape::CanonicalIdentity, Option<String>)>,
+    contexts:
+        std::collections::BTreeMap<Option<String>, (lash_tool_shape::ReadableNameAllocator, usize)>,
+    used_names: Vec<String>,
+}
+
+/// All reachable names and the definitions not yet emitted by a pool.
+#[derive(Clone, Debug)]
+pub struct PreparedDefinitions {
+    pub names: std::collections::BTreeMap<lash_tool_shape::DefinitionId, String>,
+    pub introduced: Vec<lash_tool_shape::DefinitionId>,
+}
+
+impl DefinitionPool {
+    /// Start with the mode, host, inferred and dialect names already reserved.
+    ///
+    /// ```rust,ignore
+    /// let pool = DefinitionPool::new(["HistoryItem", "Field"]);
+    /// ```
+    pub fn new(reserved: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        Self::with_allocator(lash_tool_shape::ReadableNameAllocator::new(reserved))
+    }
+
+    /// Use a dialect's allocator after reserving its keywords and host types.
+    ///
+    /// ```rust,ignore
+    /// let pool = DefinitionPool::with_allocator(compact_name_allocator(&[&input], &["Host"]));
+    /// ```
+    pub fn with_allocator(allocator: lash_tool_shape::ReadableNameAllocator) -> Self {
+        Self {
+            allocator,
+            emitted: Default::default(),
+            contexts: Default::default(),
+            used_names: Vec::new(),
+        }
+    }
+
+    /// Reserve a host name before preparing any graph.
+    ///
+    /// ```rust,ignore
+    /// pool.reserve("HostResult");
+    /// ```
+    pub fn reserve(&mut self, name: &str) {
+        self.allocator.reserve(name);
+        for (allocator, _) in self.contexts.values_mut() {
+            allocator.reserve(name);
+        }
+    }
+
+    /// Allocate the reachable closure before spelling any body. Definition IDs
+    /// are document-local; canonical identities deduplicate across documents.
+    ///
+    /// ```rust,ignore
+    /// let prepared = pool.prepare(&document)?;
+    /// assert!(pool.prepare(&document)?.introduced.is_empty());
+    /// ```
+    ///
+    /// # Errors
+    /// Refuses a dangling graph reference before allocating any names.
+    pub fn prepare(
+        &mut self,
+        document: &lash_tool_shape::SchemaDocument,
+    ) -> Result<PreparedDefinitions, crate::PresentationRefusal> {
+        self.prepare_document(document, None)
+    }
+
+    /// Prepare a graph after a semantic projection changes `changed`'s body.
+    /// The key describes the operation and its parameters, never rendered text.
+    /// Only closures reaching `changed` acquire the key; unaffected definitions
+    /// still share their canonical names. The calling dialect owns the projection.
+    ///
+    /// ```rust,ignore
+    /// // The input's output-schema field now spells TypeSpec<T>.
+    /// let prepared = pool.prepare_projected(&input, changed_id,
+    ///     &serde_json::json!({"output_witness": "output"}))?;
+    /// ```
+    ///
+    /// # Errors
+    /// Refuses a dangling graph reference or an absent projection target.
+    pub fn prepare_projected(
+        &mut self,
+        document: &lash_tool_shape::SchemaDocument,
+        changed: lash_tool_shape::DefinitionId,
+        projection: &serde_json::Value,
+    ) -> Result<PreparedDefinitions, crate::PresentationRefusal> {
+        self.prepare_document(document, Some((changed, projection.to_string())))
+    }
+
+    fn prepare_document(
+        &mut self,
+        document: &lash_tool_shape::SchemaDocument,
+        projection: Option<(lash_tool_shape::DefinitionId, String)>,
+    ) -> Result<PreparedDefinitions, crate::PresentationRefusal> {
+        // Check every edge before asking the graph's canonical identity and
+        // allocator helpers to traverse it. Imported graphs already satisfy
+        // this; custom presenters may construct or project graphs themselves.
+        let mut closure = Vec::new();
+        let mut pending = document
+            .roots
+            .iter()
+            .flat_map(lash_tool_shape::SchemaDocument::references)
+            .collect::<std::collections::VecDeque<_>>();
+        while let Some(id) = pending.pop_front() {
+            if closure.contains(&id) {
+                continue;
+            }
+            let definition = document.definition(id).ok_or_else(|| {
+                lash_tool_shape::ShapeImportRefusal::MissingReference {
+                    reference: format!("definition {}", id.0),
+                }
+            })?;
+            closure.push(id);
+            pending.extend(lash_tool_shape::SchemaDocument::references(
+                &definition.shape,
+            ));
+        }
+        if let Some((id, _)) = &projection
+            && document.definition(*id).is_none()
+        {
+            return Err(lash_tool_shape::ShapeImportRefusal::MissingReference {
+                reference: format!("definition {}", id.0),
+            }
+            .into());
+        }
+        let mut names = std::collections::BTreeMap::new();
+        let mut introduced = Vec::new();
+        for id in closure {
+            let context = projection
+                .as_ref()
+                .filter(|(changed, _)| {
+                    document
+                        .reachable_closure(&[lash_tool_shape::ShapeKind::Ref(id).into()])
+                        .contains(changed)
+                })
+                .map(|(_, key)| key.clone());
+            let key = (document.canonical_identity(id), context.clone());
+            let (allocator, reserved) = self
+                .contexts
+                .entry(context)
+                .or_insert_with(|| (self.allocator.clone(), 0));
+            for name in &self.used_names[*reserved..] {
+                allocator.reserve(name);
+            }
+            *reserved = self.used_names.len();
+            let name = allocator.allocate(document, id);
+            if self.emitted.insert(key) {
+                introduced.push(id);
+                self.used_names.push(name.clone());
+                *reserved = self.used_names.len();
+            }
+            names.insert(id, name);
+        }
+        Ok(PreparedDefinitions { names, introduced })
+    }
 }
 
 /// A tool's doc as a code-mode presenter lists it: its signature, its
@@ -257,11 +456,32 @@ pub fn discovery_text(
         &contract.input_schema.canonical,
         &contract.output_schema.canonical,
     ] {
-        for row in crate::inline_schema(schema.as_value(), schema_depth)?.rows() {
-            lines.push(match &row.shape.description {
-                Some(description) => format!("{}: {description}", row.path),
-                None => row.path,
-            });
+        let document =
+            lash_tool_shape::SchemaDocument::from_json_schema(schema.as_value(), schema_depth)?;
+        for (shape, prefix) in document
+            .roots
+            .iter()
+            .map(|root| (root, String::new()))
+            .chain(
+                document
+                    .reachable_closure(&document.roots)
+                    .into_iter()
+                    .map(|id| {
+                        let definition = &document.definitions[id.0];
+                        (&definition.shape, format!("{}.", definition.pointer))
+                    }),
+            )
+        {
+            if let Some(description) = &shape.description {
+                lines.push(format!("{prefix}: {description}"));
+            }
+            for row in shape.rows() {
+                let path = format!("{prefix}{}", row.path);
+                lines.push(match &row.shape.description {
+                    Some(description) => format!("{path}: {description}"),
+                    None => path,
+                });
+            }
         }
     }
     Ok(lines.join("\n"))

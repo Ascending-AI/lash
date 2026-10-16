@@ -66,6 +66,8 @@ async fn listing(
         .await
         .expect("render the session's globals")
         .render()
+        .map(|(text, facts, _)| (text, facts))
+        .expect("presentable bindings")
 }
 
 /// A global names the cell whose committed record last added, changed or

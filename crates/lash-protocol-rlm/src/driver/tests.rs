@@ -128,6 +128,7 @@ pub(crate) fn rendered_bound_variables(
         presentation.max_inline_keys,
         presentation.max_bound_variable_bytes,
     )
+    .expect("presentable fixture")
     .0
 }
 
@@ -201,6 +202,7 @@ pub(crate) fn projected_request_with_facts(
     let projection =
         lash_core::facade_support::ChronologicalProjection::from_turn_view(&events, &messages);
     let facts = crate::prompt_sections::RlmPromptFacts {
+        reserved_names: Vec::new(),
         history_binding: Arc::from(
             crate::prompt_sections::history_binding(
                 &dialect,

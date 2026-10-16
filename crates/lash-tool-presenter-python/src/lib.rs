@@ -56,24 +56,26 @@ impl PythonToolPresenter {
         tool: &ToolPresentationEntry<'_>,
         config: PythonPresenterConfig,
     ) -> Result<String, PresentationRefusal> {
-        let input = &tool.contract.input_schema.canonical;
-        let output = &tool.contract.output_schema.canonical;
-        let bundle = signature_bundle(tool.call_path, input, output, config.schema_depth, true)?;
-        let mut parts = bundle
-            .lines()
-            .map(|line| {
-                if line.starts_with("async def ") {
-                    format!("`{line}`")
-                } else {
-                    line.to_owned()
-                }
-            })
+        let input = SchemaDocument::from_json_schema(
+            tool.contract.input_schema.canonical.as_value(),
+            config.schema_depth,
+        )?;
+        let output = SchemaDocument::from_json_schema(
+            tool.contract.output_schema.canonical.as_value(),
+            config.schema_depth,
+        )?;
+        let reserved = tool
+            .call_path
+            .split('.')
+            .chain([tool.manifest.name.as_str()])
             .collect::<Vec<_>>();
-        let description = tool.manifest.description.trim();
-        if !description.is_empty() {
-            parts.push(description.to_owned());
-        }
-        Ok(parts.join("\n"))
+        let allocator = python_name_allocator(&[&input, &output], &reserved);
+        render_tool_doc(
+            tool,
+            &input,
+            &output,
+            &mut listing::DefinitionPool::with_allocator(allocator),
+        )
     }
 }
 
@@ -95,12 +97,46 @@ impl ToolPresenter for PythonToolPresenter {
         request: ToolPresentationRequest<'_>,
     ) -> Result<PresentedToolSection, PresentationRefusal> {
         let config = Self::config(request.config)?;
-        let docs = request
+        let documents = request
             .tools
             .iter()
-            .map(|tool| Self::doc(tool, config))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(listing::list(request.tools, docs, request.disclosure))
+            .map(|tool| {
+                Ok((
+                    SchemaDocument::from_json_schema(
+                        tool.contract.input_schema.canonical.as_value(),
+                        config.schema_depth,
+                    )?,
+                    SchemaDocument::from_json_schema(
+                        tool.contract.output_schema.canonical.as_value(),
+                        config.schema_depth,
+                    )?,
+                ))
+            })
+            .collect::<Result<Vec<_>, PresentationRefusal>>()?;
+        let reserved = request
+            .reserved_names
+            .iter()
+            .map(String::as_str)
+            .chain(request.tools.iter().flat_map(|tool| {
+                tool.call_path
+                    .split('.')
+                    .chain([tool.manifest.name.as_str()])
+            }))
+            .collect::<Vec<_>>();
+        let initial = |selected: &[bool]| {
+            let documents = documents
+                .iter()
+                .zip(selected)
+                .filter(|(_, selected)| **selected)
+                .flat_map(|((input, output), _)| [input, output])
+                .collect::<Vec<_>>();
+            listing::DefinitionPool::with_allocator(python_name_allocator(&documents, &reserved))
+        };
+        listing::plan(request, initial, |index, pool| {
+            let (input, output) = &documents[index];
+            render_tool_doc(&request.tools[index], input, output, pool)
+        })
+        .map(|plan| plan.render(request.tools))
     }
 
     fn tool_doc(
@@ -135,6 +171,38 @@ impl ToolPresenter for PythonToolPresenter {
     ) -> Result<String, PresentationRefusal> {
         listing::discovery_text(manifest, contract, Self::config(config)?.schema_depth)
     }
+}
+
+/// Reserve Python keywords, typing vocabulary and the selected documents' host
+/// references before allocating any definitions. Include the surrounding mode,
+/// tool and inferred names in `reserved`.
+///
+/// ```rust,ignore
+/// let allocator = python_name_allocator(&[&input, &output], &["HistoryItem", "Field"]);
+/// let mut pool = listing::DefinitionPool::with_allocator(allocator);
+/// ```
+pub fn python_name_allocator(
+    documents: &[&SchemaDocument],
+    reserved: &[&str],
+) -> ReadableNameAllocator {
+    let mut allocator = ReadableNameAllocator::new(
+        types::KEYWORDS
+            .iter()
+            .chain(types::RESERVED_NAMES)
+            .copied()
+            .chain(reserved.iter().copied()),
+    );
+    for document in documents {
+        for shape in document.roots.iter().chain(
+            document
+                .reachable_closure(&document.roots)
+                .into_iter()
+                .map(|id| &document.definitions[id.0].shape),
+        ) {
+            reserve_host_names(shape, &mut allocator);
+        }
+    }
+    allocator
 }
 
 /// Allocate every reachable definition against a listing's reserved names.
@@ -177,9 +245,42 @@ pub fn note_rows(
     root_label: &str,
     names: &BTreeMap<DefinitionId, String>,
 ) -> Vec<String> {
+    selected_note_rows(
+        document,
+        root_label,
+        names,
+        &document.reachable_closure(&document.roots),
+    )
+}
+
+fn selected_note_rows(
+    document: &SchemaDocument,
+    root_label: &str,
+    names: &BTreeMap<DefinitionId, String>,
+    introduced: &[DefinitionId],
+) -> Vec<String> {
     document
         .note_rows()
         .into_iter()
+        .filter(|row| {
+            if row.path.starts_with("$0") {
+                return !names.contains_key(&DefinitionId(0));
+            }
+            // A nested definition pointer may extend another pointer. Match
+            // the longest owner before deciding whether its notes are new.
+            document
+                .definitions
+                .iter()
+                .filter(|definition| {
+                    row.path
+                        .strip_prefix(&definition.pointer)
+                        .is_some_and(|suffix| {
+                            suffix.is_empty() || suffix.starts_with(['.', '[', '|', '('])
+                        })
+                })
+                .max_by_key(|definition| definition.pointer.len())
+                .is_some_and(|definition| introduced.contains(&definition.id))
+        })
         .map(|row| {
             let mut path = row.path;
             if let Some(suffix) = path.strip_prefix("$0") {
@@ -213,6 +314,62 @@ pub fn note_rows(
             line
         })
         .collect()
+}
+
+/// Render a tool using a listing-local pool. Reserve Python words, host and
+/// inferred names before the first call. A fresh pool produces standalone docs.
+///
+/// ```rust,ignore
+/// let text = render_tool_doc(&tool, &input, &output, &mut pool)?;
+/// ```
+///
+/// # Errors
+/// Refuses unbound references or unsupported shapes.
+pub fn render_tool_doc(
+    tool: &ToolPresentationEntry<'_>,
+    input: &SchemaDocument,
+    output: &SchemaDocument,
+    pool: &mut listing::DefinitionPool,
+) -> Result<String, PresentationRefusal> {
+    let mut parts = Vec::new();
+    let mut contexts = Vec::new();
+    for (document, label) in [(input, "input"), (output, "output")] {
+        let prepared = pool.prepare(document)?;
+        for id in &prepared.introduced {
+            parts.push(emit_definition(
+                &prepared.names[id],
+                &document.definitions[id.0].shape,
+                &prepared.names,
+            )?);
+        }
+        let rows = selected_note_rows(document, label, &prepared.names, &prepared.introduced);
+        contexts.push((prepared.names, rows));
+    }
+    let root = |document: &SchemaDocument, names: &BTreeMap<DefinitionId, String>| {
+        if names.contains_key(&DefinitionId(0)) {
+            lash_tool_shape::ShapeKind::Ref(DefinitionId(0)).into()
+        } else {
+            document.roots[0].clone()
+        }
+    };
+    parts.push(format!(
+        "`{}`",
+        emit_tool_signature(
+            tool.call_path,
+            &root(input, &contexts[0].0),
+            tool.contract.input_schema.canonical.accepts_empty_object(),
+            &contexts[0].0,
+            &root(output, &contexts[1].0),
+            &contexts[1].0
+        )?
+    ));
+    if !tool.manifest.description.trim().is_empty() {
+        parts.push(tool.manifest.description.trim().to_owned());
+    }
+    for (_, rows) in contexts {
+        parts.extend(rows);
+    }
+    Ok(parts.join("\n"))
 }
 
 fn signature_bundle(

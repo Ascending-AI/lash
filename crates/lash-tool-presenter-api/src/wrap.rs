@@ -126,10 +126,30 @@ impl ToolPresenter for WrappedToolPresenter {
             .iter()
             .partition(|tool| tool.pinned || self.filter.as_ref().is_none_or(|keep| keep(tool)));
         let kept = kept.into_iter().copied().collect::<Vec<_>>();
-        let mut section = self.inner.present(ToolPresentationRequest {
-            tools: &kept,
-            ..request
-        })?;
+        let decoration_bytes = [self.heading.as_deref(), self.appended.as_deref()]
+            .into_iter()
+            .flatten()
+            .filter(|text| !text.trim().is_empty())
+            .map(|text| text.len() + 2)
+            .sum::<usize>();
+        let mut section = self
+            .inner
+            .present(ToolPresentationRequest {
+                tools: &kept,
+                max_section_bytes: request
+                    .max_section_bytes
+                    .map(|limit| limit.saturating_sub(decoration_bytes)),
+                ..request
+            })
+            .map_err(|refusal| match (refusal, request.max_section_bytes) {
+                (PresentationRefusal::SectionLimit { required, .. }, Some(limit)) => {
+                    PresentationRefusal::SectionLimit {
+                        required: required + decoration_bytes,
+                        limit,
+                    }
+                }
+                (refusal, _) => refusal,
+            })?;
         section
             .omitted
             .extend(filtered.into_iter().map(|tool| tool.manifest.id.clone()));
@@ -150,6 +170,12 @@ impl ToolPresenter for WrappedToolPresenter {
         .filter(|part| !part.trim().is_empty())
         .collect::<Vec<_>>()
         .join("\n\n");
+        if let Some(limit) = request.max_section_bytes {
+            let required = section.text.len();
+            if required > limit {
+                return Err(PresentationRefusal::SectionLimit { required, limit });
+            }
+        }
         Ok(section)
     }
 

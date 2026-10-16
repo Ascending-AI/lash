@@ -122,41 +122,30 @@ impl ToolPresenter for TypescriptToolPresenter {
                 ))
             })
             .collect::<Result<Vec<_>, ShapeImportRefusal>>()?;
-        let mut pool = TypescriptDefinitions::new(request.tools.iter().flat_map(|tool| {
-            tool.call_path
-                .split('.')
-                .chain([tool.manifest.name.as_str()])
-        }));
-        for (input, output) in &documents {
-            pool.reserve_document(input);
-            pool.reserve_document(output);
-        }
-        // Selection owns budget accounting; only selected tools consume the
-        // actual listing's pool. A standalone doc always carries its closure.
-        let docs = request
-            .tools
-            .iter()
-            .map(|tool| Self::doc(tool, config))
-            .collect::<Result<Vec<_>, _>>()?;
-        let selected = listing::list(request.tools, docs, request.disclosure);
-        let tools = request
-            .tools
-            .iter()
-            .zip(&documents)
-            .filter(|(tool, _)| selected.listed.contains(&tool.manifest.id))
-            .collect::<Vec<_>>();
-        let docs = tools
-            .iter()
-            .map(|(tool, (input, output))| render_tool_doc(tool, config, input, output, &mut pool))
-            .collect::<Result<Vec<_>, _>>()?;
-        let entries = tools.iter().map(|(tool, _)| **tool).collect::<Vec<_>>();
-        let text = listing::list(
-            &entries,
-            docs,
-            lash_tool_presenter_api::ToolDisclosure::Complete,
-        )
-        .text;
-        Ok(PresentedToolSection { text, ..selected })
+        let initial = |selected: &[bool]| {
+            let mut pool = TypescriptDefinitions::new(
+                request.reserved_names.iter().map(String::as_str).chain(
+                    request.tools.iter().flat_map(|tool| {
+                        tool.call_path
+                            .split('.')
+                            .chain([tool.manifest.name.as_str()])
+                    }),
+                ),
+            );
+            for ((input, output), selected) in documents.iter().zip(selected) {
+                if !selected {
+                    continue;
+                }
+                pool.reserve_document(input);
+                pool.reserve_document(output);
+            }
+            pool
+        };
+        listing::plan(request, initial, |index, pool| {
+            let (input, output) = &documents[index];
+            render_tool_doc(&request.tools[index], config, input, output, pool)
+        })
+        .map(|plan| plan.render(request.tools))
     }
 
     fn tool_doc(

@@ -133,10 +133,23 @@ pub trait DialectPrompts: Send + Sync + 'static {
 
     /// A schema shape as a type, in this dialect's syntax. Shared code calls
     /// it wherever a prompt shows the type of a value or of a history item.
-    fn schema_type(&self, shape: &SchemaShape) -> String;
+    ///
+    /// # Errors
+    /// Refuses unbound references and shapes the dialect cannot represent.
+    fn schema_type(
+        &self,
+        shape: &SchemaShape,
+    ) -> Result<String, lash_tool_presenter_api::PresentationRefusal>;
 
     /// Defines a named inferred record using the same shape spelling as tools.
-    fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String;
+    ///
+    /// # Errors
+    /// Refuses unbound references, invalid names and unsupported shapes.
+    fn schema_definition(
+        &self,
+        name: &str,
+        shape: &SchemaShape,
+    ) -> Result<String, lash_tool_presenter_api::PresentationRefusal>;
 
     /// The words, tags and notation shared prompt fragments read.
     fn prompt_vocabulary(&self) -> DialectPromptVocabulary;
@@ -332,13 +345,14 @@ pub(crate) struct SessionDialect {
     dialect: CellDialect,
     services: CodeModeDialectServices,
     events: Arc<crate::projection::EventDecoder>,
+    pub(crate) reserved_names: Vec<String>,
 }
 
 impl SessionDialect {
     pub(crate) fn read_only_variables_prompt(
         &self,
         bindings: &crate::projection::CodeModeProjectedBindings,
-    ) -> Option<String> {
+    ) -> Result<Option<String>, lash_tool_presenter_api::PresentationRefusal> {
         crate::projection::read_only_variables_prompt(bindings, self.language())
     }
 
@@ -347,6 +361,7 @@ impl SessionDialect {
             dialect,
             services,
             events: Arc::default(),
+            reserved_names: Vec::new(),
         }
     }
 
@@ -361,6 +376,7 @@ impl SessionDialect {
             .unwrap_or_default();
         Self {
             dialect,
+            reserved_names: Vec::new(),
             events: Arc::default(),
             services: CodeModeDialectServices {
                 workers: lash_vm_client::service::Service::default(),
@@ -500,7 +516,10 @@ impl SessionDialect {
     /// The definition of one history item, shown where the prompt introduces
     /// the history collection: the dialect's spelling of the shape the item
     /// serializes as, which `lash-rlm-types` owns.
-    pub(crate) fn history_item_definition(&self, images: bool) -> String {
+    pub(crate) fn history_item_definition(
+        &self,
+        images: bool,
+    ) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
         self.language()
             .schema_definition(self.prompt_vocabulary().history_item_name, &{
                 let document = lash_rlm_types::history_item_document(images);
@@ -724,7 +743,14 @@ impl SessionDialect {
     }
 }
 
-type BoundVariables = (Arc<str>, crate::session_globals::SessionGlobals);
+type BoundVariables = Result<
+    (
+        Arc<str>,
+        crate::session_globals::SessionGlobals,
+        Vec<String>,
+    ),
+    lash_tool_presenter_api::PresentationRefusal,
+>;
 
 pub(crate) struct BoundVariablesPromptRender {
     render: Box<dyn FnOnce() -> BoundVariables + Send>,
@@ -962,7 +988,7 @@ impl DialectSession {
             let mut cache = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            render_bound_variables(
+            let (text, globals) = render_bound_variables(
                 &mut cache,
                 globals,
                 prompts.as_ref(),
@@ -970,7 +996,8 @@ impl DialectSession {
                 &params,
                 presentation.max_inline_keys,
                 presentation.max_bound_variable_bytes,
-            )
+            )?;
+            Ok((text, globals, cache.reserved_names.clone()))
         }))
     }
 }
@@ -999,13 +1026,19 @@ mod tests {
             Ok(binding.call_path())
         }
 
-        fn schema_type(&self, shape: &SchemaShape) -> String {
+        fn schema_type(
+            &self,
+            shape: &SchemaShape,
+        ) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
             lash_tool_presenter_standard::compact_type(shape, &Default::default())
-                .expect("fixture shape has no references")
         }
 
-        fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String {
-            format!("shape {name} = {}", self.schema_type(shape))
+        fn schema_definition(
+            &self,
+            name: &str,
+            shape: &SchemaShape,
+        ) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
+            Ok(format!("shape {name} = {}", self.schema_type(shape)?))
         }
 
         fn render_execution_section(
@@ -1040,7 +1073,7 @@ mod tests {
             )
             .await
             .expect("bind a value to render through the session");
-        let (prompt, _) = session
+        let (prompt, _, _) = session
             .prepare_bound_variables_prompt(
                 &BTreeSet::new(),
                 lash_render::RenderParams::default(),
@@ -1049,7 +1082,8 @@ mod tests {
             )
             .await
             .expect("render the extension session's bindings")
-            .render();
+            .render()
+            .expect("presentable bindings");
         assert!(prompt.contains("bound in Extension fixture"), "{prompt}");
         assert!(prompt.contains("`<fixture>`"), "{prompt}");
         assert!(!prompt.contains("TypeScript"), "{prompt}");
@@ -1076,7 +1110,8 @@ mod tests {
             &lash_render::RenderParams::preview(),
             presentation.max_inline_keys,
             presentation.max_bound_variable_bytes,
-        );
+        )
+        .expect("presentable fixture");
         let read_only = crate::rlm_support::render_read_only_variables(
             vec![crate::rlm_support::ReadOnlyVariableDoc {
                 name: "payload".to_string(),
@@ -1084,7 +1119,8 @@ mod tests {
                 value: Some(value),
             }],
             &ExtensionFixture,
-        );
+        )
+        .expect("presentable fixture");
         for prompt in [&*bound, &*read_only] {
             assert!(
                 prompt.contains("shape Payload = record{body: str,"),

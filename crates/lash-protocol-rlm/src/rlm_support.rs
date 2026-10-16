@@ -7,6 +7,7 @@ use crate::dialect::DialectPrompts;
 use crate::render::CodeRenderer;
 use lash_core::LlmUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue};
+use lash_tool_presenter_api::PresentationRefusal;
 use lash_tool_shape::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
 use serde_json::Value as FlowValue;
 
@@ -141,6 +142,7 @@ pub(crate) fn format_budget_suffix_with_vocabulary(
 /// previews.
 #[derive(Debug, Default)]
 pub(crate) struct BoundVariableRenderCache {
+    pub(crate) reserved_names: Vec<String>,
     entries: BTreeMap<String, BoundVariableRenderCacheEntry>,
 }
 
@@ -192,10 +194,25 @@ impl ReadOnlyVariableDoc {
     }
 }
 
+pub(crate) fn read_only_reserved_names(mut docs: Vec<ReadOnlyVariableDoc>) -> Vec<String> {
+    docs.sort_by(|left, right| left.name.cmp(&right.name));
+    let mut registry = SchemaRegistry::default();
+    for doc in &docs {
+        if let Some(value) = &doc.value {
+            registry.register_root(&doc.name, &infer_value_shape(value));
+        }
+    }
+    registry
+        .used_names
+        .into_iter()
+        .chain(docs.into_iter().map(|doc| doc.name))
+        .collect()
+}
+
 pub(crate) fn render_read_only_variables(
     mut docs: Vec<ReadOnlyVariableDoc>,
     dialect: &dyn DialectPrompts,
-) -> String {
+) -> Result<String, PresentationRefusal> {
     let vocabulary = dialect.prompt_vocabulary();
     docs.sort_by(|left, right| left.name.cmp(&right.name));
     let shapes = docs
@@ -222,16 +239,16 @@ pub(crate) fn render_read_only_variables(
             .get(&doc.name)
             .and_then(Option::as_ref)
             .map(|shape| dialect.schema_type(&registry.reference(shape)))
-            .unwrap_or_else(|| normalize_descriptor_type(&doc.descriptor_type, dialect));
+            .unwrap_or_else(|| normalize_descriptor_type(&doc.descriptor_type, dialect))?;
         lines.push(render_read_only_line(
             &doc.name,
             &type_text,
             &doc.descriptor_type,
             dialect,
-        ));
+        )?);
     }
-    append_schema_registry(&mut lines, &registry, dialect);
-    lines.join("\n")
+    append_schema_registry(&mut lines, &registry, dialect)?;
+    Ok(lines.join("\n"))
 }
 
 /// Renders the session's globals in name order, each with the cell that
@@ -249,7 +266,7 @@ pub(crate) fn render_bound_variables(
     params: &RenderParams,
     max_inline_keys: usize,
     max_bytes: usize,
-) -> (Arc<str>, crate::session_globals::SessionGlobals) {
+) -> Result<(Arc<str>, crate::session_globals::SessionGlobals), PresentationRefusal> {
     use crate::session_globals::{SessionGlobalKind, SessionGlobals};
     let vocabulary = dialect.prompt_vocabulary();
     globals.sort_by(|left, right| left.name.cmp(&right.name));
@@ -328,7 +345,7 @@ pub(crate) fn render_bound_variables(
                 if let Some(shape) = &row.shape {
                     grown.register_root(&row.name, shape);
                 }
-                let line = render_row_line(row, &grown, dialect);
+                let line = render_row_line(row, &grown, dialect)?;
                 trial = Some(grown);
                 line
             }
@@ -354,17 +371,20 @@ pub(crate) fn render_bound_variables(
             Some(cell) => format!("{line} — from {} `{cell}`", vocabulary.cell_noun),
             None => line,
         };
-        let introduced = trial.as_ref().map_or(0, |grown| {
-            grown.definitions[registry.definitions.len()..]
-                .iter()
-                .map(|(name, shape)| {
-                    dialect
-                        .schema_definition(name, &grown.definition(shape))
-                        .len()
-                        + 2
-                })
-                .sum::<usize>()
-        });
+        let introduced = trial
+            .as_ref()
+            .map(|grown| {
+                grown.definitions[registry.definitions.len()..]
+                    .iter()
+                    .map(|(name, shape)| {
+                        dialect
+                            .schema_definition(name, &grown.definition(shape))
+                            .map(|text| text.len() + 2)
+                    })
+                    .sum::<Result<usize, PresentationRefusal>>()
+            })
+            .transpose()?
+            .unwrap_or(0);
         let cost = line.len() + 1 + introduced;
         if used.saturating_add(cost) > max_bytes {
             break;
@@ -380,9 +400,15 @@ pub(crate) fn render_bound_variables(
     }
     let listed = listed_lines.len();
     let omitted = globals.len() - listed;
+    cache.reserved_names = registry
+        .used_names
+        .iter()
+        .cloned()
+        .chain(globals.iter().map(|global| global.name.clone()))
+        .collect();
     let facts = SessionGlobals::new(globals, listed, snapshot.finish());
     if facts.entries().is_empty() {
-        return (Arc::from(""), facts);
+        return Ok((Arc::from(""), facts));
     }
 
     let mut lines = vec![
@@ -416,17 +442,17 @@ pub(crate) fn render_bound_variables(
         if idx > 0 {
             lines.push(String::new());
         }
-        lines.push(dialect.schema_definition(name, &registry.definition(shape)));
+        lines.push(dialect.schema_definition(name, &registry.definition(shape))?);
     }
 
-    (Arc::from(lines.join("\n")), facts)
+    Ok((Arc::from(lines.join("\n")), facts))
 }
 
 fn append_schema_registry(
     lines: &mut Vec<String>,
     registry: &SchemaRegistry,
     dialect: &dyn DialectPrompts,
-) {
+) -> Result<(), PresentationRefusal> {
     if !registry.definitions.is_empty() {
         lines.push(String::new());
         lines.push("Schema:".to_string());
@@ -434,9 +460,10 @@ fn append_schema_registry(
             if idx > 0 {
                 lines.push(String::new());
             }
-            lines.push(dialect.schema_definition(name, &registry.definition(shape)));
+            lines.push(dialect.schema_definition(name, &registry.definition(shape))?);
         }
     }
+    Ok(())
 }
 
 fn render_read_only_line(
@@ -444,15 +471,18 @@ fn render_read_only_line(
     type_text: &str,
     descriptor_type: &str,
     dialect: &dyn DialectPrompts,
-) -> String {
-    format!(
+) -> Result<String, PresentationRefusal> {
+    Ok(format!(
         "- `{name}`: `{type_text}`, read-only (descriptor: `{}`)",
-        normalize_descriptor_type(descriptor_type, dialect)
-    )
+        normalize_descriptor_type(descriptor_type, dialect)?
+    ))
 }
 
 /// A value descriptor's type through the same shape spelling as tool schemas.
-fn normalize_descriptor_type(type_name: &str, dialect: &dyn DialectPrompts) -> String {
+fn normalize_descriptor_type(
+    type_name: &str,
+    dialect: &dyn DialectPrompts,
+) -> Result<String, PresentationRefusal> {
     let kind = match type_name {
         "string" => ShapeKind::Str,
         "number" => ShapeKind::Float,
@@ -464,7 +494,7 @@ fn normalize_descriptor_type(type_name: &str, dialect: &dyn DialectPrompts) -> S
         }),
         "array" | "list" => ShapeKind::List(Box::new(SchemaShape::unknown())),
         "null" => ShapeKind::Null,
-        other if !other.trim().is_empty() => return other.to_string(),
+        other if !other.trim().is_empty() => return Ok(other.to_string()),
         _ => ShapeKind::Unknown,
     };
     dialect.schema_type(&kind.into())
@@ -478,17 +508,17 @@ fn render_row_line(
     row: &WorkRow,
     registry: &SchemaRegistry,
     dialect: &dyn DialectPrompts,
-) -> String {
+) -> Result<String, PresentationRefusal> {
     let vocabulary = dialect.prompt_vocabulary();
     if let Some(inline) = &row.inline {
         // Value shown explicitly; no type/size hint needed.
-        return format!("- `{}` = {inline}", row.name);
+        return Ok(format!("- `{}` = {inline}", row.name));
     }
     let shape = row
         .shape
         .as_ref()
         .expect("hinted variable has an inferred shape");
-    let type_text = dialect.schema_type(&registry.reference(shape));
+    let type_text = dialect.schema_type(&registry.reference(shape))?;
     let mut line = match &row.size_hint {
         Some(size_hint) => format!("- `{}`: `{type_text}`, {size_hint}", row.name),
         None => format!("- `{}`: `{type_text}`", row.name),
@@ -504,7 +534,7 @@ fn render_row_line(
             vocabulary.print_statement(&row.name)
         ));
     }
-    line
+    Ok(line)
 }
 
 fn build_bound_variable_row(
@@ -956,7 +986,8 @@ mod bound_variable_tests {
                 value: Some(value["payload"].clone()),
             }],
             &crate::dialect::TypescriptPrompts,
-        );
+        )
+        .expect("presentable fixture");
         for prompt in [&*bound, &*read_only] {
             assert!(prompt.contains(r#""two words": string"#), "{prompt}");
             assert!(prompt.contains("Array<number | null>"), "{prompt}");
@@ -1013,6 +1044,7 @@ mod bound_variable_tests {
             presentation.max_inline_keys,
             presentation.max_bound_variable_bytes,
         )
+        .expect("presentable fixture")
         .0
         .to_string()
     }

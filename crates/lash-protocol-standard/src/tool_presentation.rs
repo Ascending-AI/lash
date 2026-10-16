@@ -36,6 +36,8 @@ impl StandardProtocolConfig {
         self.tool_presenter
             .presenter()
             .present(ToolPresentationRequest {
+                reserved_names: &[],
+                max_section_bytes: None,
                 tools: &entries,
                 config: &config,
                 disclosure: ToolDisclosure::Complete,

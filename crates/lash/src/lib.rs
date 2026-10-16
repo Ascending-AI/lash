@@ -195,8 +195,9 @@ pub mod standard {
     /// spelling of a shape.
     pub use lash_tool_presenter_standard::{
         CompactNoteRow, CompactToolContract, STANDARD_TOOL_PRESENTER_ID, StandardPresenterConfig,
-        StandardToolPresenter, compact_contract, compact_definition, compact_name_allocator,
-        compact_note_line, compact_note_rows, compact_signature, compact_type,
+        StandardToolPresenter, compact_contract, compact_contract_with_pool, compact_definition,
+        compact_name_allocator, compact_note_line, compact_note_rows, compact_signature,
+        compact_type,
     };
 }
 pub mod render {

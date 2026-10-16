@@ -33,6 +33,7 @@ pub mod section_keys {
 /// [`PromptInput::protocol_facts`](lash_core::plugin::prompt::PromptInput::protocol_facts).
 #[derive(Clone, Debug, Default)]
 pub struct RlmPromptFacts {
+    pub(crate) reserved_names: Vec<String>,
     /// The built-in history binding and, when structured, its item schema.
     pub(crate) history_binding: Arc<str>,
     /// The bound-variables view under the run's recorded render.
@@ -56,7 +57,7 @@ pub(crate) fn history_binding(
     dialect: &SessionDialect,
     history: &crate::projection::HistoryIndex,
     images: bool,
-) -> Result<String, lash_core::StoredDataCorruption> {
+) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
     let mut binding = format!(
         "- `history`: `{}`, read-only, {} {}",
         dialect.prompt_vocabulary().history_type,
@@ -69,7 +70,7 @@ pub(crate) fn history_binding(
     );
     if history.has_schema {
         binding.push_str("\n\nSchema:\n");
-        binding.push_str(&dialect.history_item_definition(images));
+        binding.push_str(&dialect.history_item_definition(images)?);
     }
     Ok(binding)
 }
@@ -83,6 +84,22 @@ pub(crate) struct RlmSectionBehaviour {
     pub(crate) discovery: Option<crate::plugin::RlmDiscovery>,
     /// The soft context budget the session's plugin was built with.
     pub(crate) budget_tokens: Option<usize>,
+}
+
+impl RlmSectionBehaviour {
+    fn with_reserved_names(&self, input: &PromptInput<'_>) -> Self {
+        let mut dialect = (*self.dialect).clone();
+        if let Some(facts) = input.protocol_facts::<RlmPromptFacts>() {
+            dialect.reserved_names.clone_from(&facts.reserved_names);
+        }
+        Self {
+            dialect: Arc::new(dialect),
+            channel: self.channel,
+            prompt_features: self.prompt_features,
+            discovery: self.discovery.clone(),
+            budget_tokens: self.budget_tokens,
+        }
+    }
 }
 
 /// The execution section a session on `behaviour.channel` renders over
@@ -140,7 +157,8 @@ fn execution(
     behaviour: &RlmSectionBehaviour,
     input: &PromptInput<'_>,
 ) -> Result<SectionText, PromptRenderError> {
-    let ExecutionSection { prose, .. } = execution_section(behaviour, input.offered().catalog())?;
+    let behaviour = behaviour.with_reserved_names(input);
+    let ExecutionSection { prose, .. } = execution_section(&behaviour, input.offered().catalog())?;
     let title = behaviour.dialect.prompt_vocabulary().execution_title;
     Ok(match text_or_omit(prose) {
         SectionText::Text(prose) => SectionText::Text(format!("## {title}\n\n{prose}")),
@@ -152,8 +170,10 @@ fn declarations(
     behaviour: &RlmSectionBehaviour,
     input: &PromptInput<'_>,
 ) -> Result<SectionText, PromptRenderError> {
-    let ExecutionSection { declarations, .. } =
-        execution_section(behaviour, input.offered().catalog())?;
+    let ExecutionSection { declarations, .. } = execution_section(
+        &behaviour.with_reserved_names(input),
+        input.offered().catalog(),
+    )?;
     let mut parts = Vec::new();
     let declarations = declarations.trim();
     if !declarations.is_empty() {

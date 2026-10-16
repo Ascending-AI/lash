@@ -56,21 +56,19 @@ impl DialectPrompts for PythonPrompts {
         Ok(name)
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "inferred and projected history shapes contain only supported reference-free types"
-    )]
-    fn schema_type(&self, shape: &SchemaShape) -> String {
-        render_shape(shape).expect("reference-free Python host type")
+    fn schema_type(
+        &self,
+        shape: &SchemaShape,
+    ) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
+        render_shape(shape)
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the mode supplies a valid host name and a supported reference-free shape"
-    )]
-    fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String {
+    fn schema_definition(
+        &self,
+        name: &str,
+        shape: &SchemaShape,
+    ) -> Result<String, lash_tool_presenter_api::PresentationRefusal> {
         lash_tool_presenter_python::schema_definition(name, shape)
-            .expect("reference-free Python host definition")
     }
 
     fn prompt_vocabulary(&self) -> DialectPromptVocabulary {

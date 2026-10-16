@@ -104,6 +104,18 @@ fn a_partial_catalogue_lists_namespaces_in_turn_and_counts_what_it_leaves_out() 
     assert_eq!(disclosure.omitted, ["big_c", "big_d"]);
     assert!(!disclosure.is_complete());
 
+    let selected = ToolListing::of(
+        &members,
+        &typescript_test_dialect(),
+        Default::default(),
+        Some(&discovery(budget)),
+    )
+    .expect("budgeted listing");
+    assert_eq!(
+        selected.docs.len(),
+        budget + 6,
+        "only the three blank separators are outside the catalogue budget"
+    );
     let rendered = declarations(&members, Some(&discovery(budget)));
     insta::assert_snapshot!(rendered, @r"
     ### Tools
@@ -152,6 +164,17 @@ fn a_catalogue_that_fits_its_budget_is_labelled_complete() {
         tool("tools", "search", None),
         tool("files", "grep", None),
     ]);
+    let complete = ToolListing::of(
+        &members,
+        &typescript_test_dialect(),
+        Default::default(),
+        Some(&discovery(usize::MAX)),
+    )
+    .expect("complete budget");
+    assert_eq!(
+        complete.docs,
+        rlm_prompt_tool_docs(&members, &typescript_test_dialect(), Default::default())
+    );
     let rendered = declarations(&members, Some(&discovery(usize::MAX)));
     assert!(
         rendered.ends_with("files.grep({ query: string }): Promise<string>`\nThe files grep operation.\n\nCatalogue: COMPLETE. All 2 tools are listed above."),
@@ -175,6 +198,17 @@ fn an_appended_tool_leaves_every_listed_byte_before_it_unchanged() {
     let mut after = before.clone();
     after.push(tool("alpha", "fetch", Some("alpha")));
     let (before, after) = (catalog(before), catalog(after));
+    let listing = |catalog| {
+        ToolListing::of(
+            catalog,
+            &typescript_test_dialect(),
+            Default::default(),
+            None,
+        )
+        .expect("complete catalogue")
+        .docs
+    };
+    assert!(listing(&after).starts_with(&listing(&before)));
 
     let (old, new) = (declarations(&before, None), declarations(&after, None));
     assert!(new.starts_with(&old), "{old}\n---\n{new}");
@@ -282,11 +316,12 @@ fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
         "tracker_search",
         "Search issues.",
         json!({
+            "$defs": { "Query": { "type": "string" } },
             "type": "object",
             "properties": {
                 "filter": {
                     "type": "object",
-                    "properties": { "query": { "type": "string" } },
+                    "properties": { "query": { "$ref": "#/$defs/Query" } },
                     "required": ["query"],
                     "additionalProperties": false
                 }
@@ -325,11 +360,18 @@ fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
         )
         .expect("an addressable tool");
         if dialect.name() == "typescript" {
-            insta::assert_snapshot!(signature, @r"tracker.issues.search({ filter: { query: string } }): Promise<{ issue: { title: string } }>");
+            assert!(
+                signature.starts_with("type Query = string;\n"),
+                "{signature}"
+            );
         }
         let doc = discovered_tool_doc(&dialect, &presentation, &tool).expect("an addressable tool");
-        let signature_line = format!("`{signature}`");
-        assert_eq!(doc.lines().next(), Some(signature_line.as_str()));
+        let mut bundle = signature.lines().collect::<Vec<_>>();
+        let signature_line = format!("`{}`", bundle.pop().expect("signature"));
+        for definition in &bundle {
+            assert!(doc.contains(definition), "{doc}");
+        }
+        assert!(doc.lines().any(|line| line == signature_line));
         let prompt = crate::dialect::SessionDialect::prompt_only(dialect)
             .render_execution_section(
                 Default::default(),

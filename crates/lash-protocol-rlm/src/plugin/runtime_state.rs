@@ -155,7 +155,9 @@ impl RlmRuntimeState {
     #[cfg(test)]
     pub(crate) async fn read_only_variables_prompt(&self) -> Option<String> {
         let bindings = self.session_projected_bindings.lock().await;
-        self.dialect.read_only_variables_prompt(&bindings)
+        self.dialect
+            .read_only_variables_prompt(&bindings)
+            .expect("presentable bindings")
     }
 
     /// The facts the session's prompt sections render (ADR 0133): the
@@ -176,9 +178,19 @@ impl RlmRuntimeState {
         let params: crate::render::ResolvedRlmRender =
             serde::Deserialize::deserialize(recorded.params.as_ref())
                 .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let read_only_variables = {
+        let (read_only_variables, mut reserved_names) = {
             let bindings = self.session_projected_bindings.lock().await;
-            self.dialect.read_only_variables_prompt(&bindings)
+            (
+                self.dialect
+                    .read_only_variables_prompt(&bindings)
+                    .map_err(|error| {
+                        crate::tool_catalog::section_refused(
+                            self.dialect.tool_presenter().presenter().id(),
+                            error,
+                        )
+                    })?,
+                crate::rlm_support::read_only_reserved_names(bindings.prompt_docs()),
+            )
         };
         let exclude = self.protected_projected_binding_names().await;
         let index = match history {
@@ -189,17 +201,37 @@ impl RlmRuntimeState {
             None => crate::projection::HistoryIndex::default(),
         };
         let provenance = index.provenance.clone();
-        let (bound_variables, globals) = self
+        let (bound_variables, globals, inferred_names) = self
             .execution
             .lock()
             .await
             .prepare_bound_variables_prompt(&exclude, params.preview, provenance, pages)
             .await?
-            .render();
+            .render()
+            .map_err(|error| {
+                crate::tool_catalog::section_refused(
+                    self.dialect.tool_presenter().presenter().id(),
+                    error,
+                )
+            })?;
+        reserved_names.extend(inferred_names);
+        reserved_names.push(
+            self.dialect
+                .prompt_vocabulary()
+                .history_item_name
+                .to_owned(),
+        );
         Ok(crate::prompt_sections::RlmPromptFacts {
+            reserved_names,
             history_binding: Arc::from(
-                crate::prompt_sections::history_binding(&self.dialect, &index, images)
-                    .map_err(history_corruption)?,
+                crate::prompt_sections::history_binding(&self.dialect, &index, images).map_err(
+                    |error| {
+                        crate::tool_catalog::section_refused(
+                            self.dialect.tool_presenter().presenter().id(),
+                            error,
+                        )
+                    },
+                )?,
             ),
             bound_variables,
             read_only_variables,

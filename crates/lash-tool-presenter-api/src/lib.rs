@@ -103,8 +103,9 @@ pub trait ToolPresenter: Send + Sync {
         config: &Value,
     ) -> Result<String, PresentationRefusal>;
 
-    /// The one-line signature of a tool called by `call_path` with these
-    /// admitted schemas, without documentation.
+    /// A standalone signature bundle for `call_path`: its signature together
+    /// with every definition needed to bind its names. Without references this
+    /// is one line; callers must retain the complete bundle.
     ///
     /// # Errors
     ///
@@ -159,6 +160,11 @@ pub struct ToolPresentationRequest<'a> {
     /// The complete config the session recorded.
     pub config: &'a Value,
     pub disclosure: ToolDisclosure,
+    /// Names already used by the mode, host and inferred variable registry.
+    pub reserved_names: &'a [String],
+    /// Hard limit for the complete section, including headings and separators.
+    /// Catalogue disclosure budgets count only tool and definition text.
+    pub max_section_bytes: Option<usize>,
 }
 
 /// A presented tools section.
@@ -209,6 +215,7 @@ impl PresentedToolSection {
 /// | `shape.resource_exhausted` | Another schema import resource is exhausted. |
 /// | `config.invalid` | The presenter cannot admit or read its config. |
 /// | `tool.unrepresentable` | The presenter cannot document a tool. |
+/// | `listing.section_limit` | The complete section exceeds its hard byte limit. |
 /// | `listing.incomplete` | The section fails to account for the offered tools. |
 ///
 /// Host presenters can return [`Self::Custom`] with their own stable, dotted
@@ -237,6 +244,9 @@ pub enum PresentationRefusal {
         tool: String,
         reason: String,
     },
+    /// The complete selected section exceeds its hard byte limit.
+    #[error("tool section needs {required} bytes, exceeding its {limit} byte limit")]
+    SectionLimit { required: usize, limit: usize },
     /// The section does not account for exactly the offered tools.
     #[error(
         "tool presenter `{presenter}` answered a listing that does not account for the offered tools"
@@ -265,6 +275,7 @@ impl PresentationRefusal {
             Self::Config { .. } => "config.invalid",
             Self::Tool { .. } => "tool.unrepresentable",
             Self::Listing { .. } => "listing.incomplete",
+            Self::SectionLimit { .. } => "listing.section_limit",
         }
     }
 
@@ -303,6 +314,18 @@ impl RecordedToolPresenter {
 
 /// A mode's physical presenter slot: bound live, compared by id, never
 /// stored.
+///
+/// A short custom presenter can reuse the default's closure planner and budget
+/// accounting, changing only its heading, selection and host note:
+///
+/// ```rust,ignore
+/// let slot = ToolPresenterSlot::new(
+///     WrappedToolPresenter::new("host.tools.v1", TypescriptToolPresenter)
+///         .with_heading("Host tools")
+///         .with_filter(|tool| tool.call_path != "drop")
+///         .with_appended("Host note."),
+/// );
+/// ```
 #[derive(Clone)]
 pub struct ToolPresenterSlot(pub Arc<dyn ToolPresenter>);
 
