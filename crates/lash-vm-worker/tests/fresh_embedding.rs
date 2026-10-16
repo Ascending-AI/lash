@@ -49,7 +49,6 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
     );
 
     let registry = embedding.registry().expect("the worker registry");
-    let mut expected = BTreeMap::new();
     let mut corpus = corpus::Corpus {
         releases: serde_json::from_str(recorded::RELEASES).expect("recorded releases"),
         ..Default::default()
@@ -73,10 +72,14 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
                     function.fingerprint.as_ref(),
                     fingerprints.get(&function.function)
                 );
-                expected.insert(function.function, function.definition);
             }
         }
     }
+    // The parent catalog holds retained releases plus changed helpers and
+    // every successor kernel declaration this feature resolution interprets.
+    let expected = lash_vm_library::standard_functions()
+        .expect("the complete interpreted release declarations")
+        .export_declarations();
     assert_eq!(
         registry.export_declarations(),
         expected,
