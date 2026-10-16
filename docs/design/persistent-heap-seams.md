@@ -1228,3 +1228,44 @@ scalars is one entity however long it is (FIG-6425).
 Replay measurement: `lash-perf replay` settles page retirement between
 rounds, outside each round's window, as it settles artifact cleanup; the
 node's background sweep is left idle for the run.
+
+### S1 amendment: working object heads (FIG-6465)
+
+An activation keeps a bounded directory of working object heads
+(`paged/working.rs`), owned by its `PagedHeap`. They mirror FIG-6435's
+working frames. The persistent directory B+ tree stays the publication
+representation, and no stored shape changes.
+
+- **Residency.** A read or an edit makes an entity's head working: from the
+  directory row, or for a family occurrence with no override from its
+  frozen base after membership is proved. A working head is the entity's
+  current version, and every heap read and the census see it first.
+  Membership is not checked again on a hit. A sweep drops the swept
+  entity's working head, and nothing else ends a member.
+- **Edits.** A list, map, set, record or variable write, and an allocation,
+  edits the working head in place: it neither locates nor re-encodes the
+  enclosing directory row. Reservation, census deltas and population counts
+  are applied at the write, against the working head's cost, exactly as
+  before. An entity owns a directory row when the directory holds one or
+  its working head holds an edit; only then does a write or a sweep move
+  its closure and task-edge populations.
+- **Bound.** At most 256 heads (`WORKING_HEADS`) stay working. Beyond that,
+  the least recently used half leaves, in identity order: a clean head is
+  dropped, and an edited head is first written to the directory. A read
+  never writes the directory, so when every head holds an edit, a read
+  does not keep what it loads. Order never derives from hashing.
+- **Flush.** Every edited head is written to the directory, in identity
+  order, before the census enumerates entities (`census_after`), at seal
+  (which then drops every working head), and at eviction. `heap_root`
+  refuses while a head holds an unflushed edit, just as it refuses
+  unsealed rows.
+- **Lifetime and copy-on-write.** A working head owns its nested trees. A
+  copy taken through `head`, or a retained or sealed version, keeps its
+  version: the next edit copies only the path it shares. A head loaded
+  from a dirty directory row shares that row's nodes until its first edit
+  copies its path. The written-back head replaces the row when it is
+  flushed.
+
+Leaf and index aggregates of a nested tree also change by the edited
+row's delta, not by re-summing the node (FIG-6465). Law:
+`paged::laws::heap::a_list_append_neither_locates_nor_reencodes_its_directory_row`.

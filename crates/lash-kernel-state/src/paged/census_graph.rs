@@ -9,6 +9,7 @@ use super::*;
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::*;
 use std::ops::ControlFlow;
+use std::rc::Rc;
 
 impl CensusGraph for PagedHeap {
     fn root_cost(&mut self) -> Result<LogicalBytes, HeapFault> {
@@ -84,7 +85,7 @@ impl CensusGraph for PagedHeap {
         })
     }
     fn entity_cost(&mut self, entity: EntityId) -> Result<Option<EntityCost>, HeapFault> {
-        Ok(self.head(entity)?.map(|head| EntityCost {
+        Ok(self.current_head(entity)?.map(|head| EntityCost {
             local: LogicalBytes(head.cost()),
             has_edges: true,
         }))
@@ -94,14 +95,14 @@ impl CensusGraph for PagedHeap {
         entity: EntityId,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
-        let Some(head) = self.head(entity)? else {
+        let Some(head) = self.current_head(entity)? else {
             return Ok(());
         };
         let mut error = None;
         #[cfg(test)]
         TRACED_ROWS.with(|rows| rows.set(rows.get() + head.body.rows()));
-        match head.body {
-            Body::Variable(v) => return self.stream_edges(&v, out),
+        match &head.body {
+            Body::Variable(v) => return self.stream_edges(v, out),
             Body::Closure { captures, .. } => captures.visit(
                 &self.access,
                 &mut |_, id| match out(Identity::Object(id.1)) {
@@ -158,7 +159,16 @@ impl CensusGraph for PagedHeap {
             if entity.family != FamilyId::PRIMARY {
                 self.sweep_family_member(*entity)?;
             }
-            if let Some(head) = self.directory.remove(&entity_key(*entity), &self.access)? {
+            // A working head is the entity's current version: when the
+            // entity owns a row, its populations are the head's.
+            let working = self.sweep_working(*entity);
+            let stored = self.directory.remove(&entity_key(*entity), &self.access)?;
+            let head = match (working, stored) {
+                (Some((head, true)), _) => Some(Rc::unwrap_or_clone(head)),
+                (Some((_, false)), _) => None,
+                (None, stored) => stored,
+            };
+            if let Some(head) = head {
                 self.population.closure_entities = self
                     .population
                     .closure_entities
@@ -207,6 +217,8 @@ impl CensusGraph for PagedHeap {
         after: Option<EntityId>,
         limit: usize,
     ) -> Result<Vec<EntityId>, HeapFault> {
+        // The census enumerates the directory: it receives every edit first.
+        self.flush_working()?;
         let mut entities = Vec::new();
         if after.is_none_or(|id| id.family == FamilyId::PRIMARY) {
             let mut key = after.map(entity_key);

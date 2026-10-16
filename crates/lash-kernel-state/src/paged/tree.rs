@@ -575,6 +575,8 @@ impl<T: Cell> Tree<T> {
         access: &Access<'_>,
         read: impl FnOnce(Option<&T>) -> R,
     ) -> Result<R, HeapFault> {
+        #[cfg(test)]
+        note_lookup::<T>();
         fn walk<T: Cell, R>(
             branch: &Branch<T>,
             key: &[u8],
@@ -610,6 +612,8 @@ impl<T: Cell> Tree<T> {
         rank: u64,
         access: &Access<'_>,
     ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
+        #[cfg(test)]
+        note_lookup::<T>();
         fn walk<T: Cell>(
             branch: &Branch<T>,
             mut rank: u64,
@@ -646,6 +650,8 @@ impl<T: Cell> Tree<T> {
         key: Option<&[u8]>,
         access: &Access<'_>,
     ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
+        #[cfg(test)]
+        note_lookup::<T>();
         fn walk<T: Cell>(
             branch: &Branch<T>,
             key: Option<&[u8]>,
@@ -677,6 +683,8 @@ impl<T: Cell> Tree<T> {
             .map_or(Ok(None), |r| walk(r, key, access, self.sequence))
     }
     pub fn passed(&self, key: &[u8], access: &Access<'_>) -> Result<u64, HeapFault> {
+        #[cfg(test)]
+        note_lookup::<T>();
         fn walk<T: Cell>(
             branch: &Branch<T>,
             key: &[u8],
@@ -700,6 +708,8 @@ impl<T: Cell> Tree<T> {
             .map_or(Ok(0), |r| walk(r, key, access, self.sequence))
     }
     pub fn write(&mut self, key: Vec<u8>, value: T, access: &Access<'_>) -> Result<(), HeapFault> {
+        #[cfg(test)]
+        note_lookup::<T>();
         fn edit<T: Cell>(
             branch: &mut Branch<T>,
             key: Key,
@@ -713,16 +723,18 @@ impl<T: Cell> Tree<T> {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
                     let encoded = access.encoded_len(&value);
-                    let (at, before) = match rows.binary_search_by(|(k, _)| k.cmp(&key)) {
+                    let added = Aggregate::of(&value);
+                    let (at, before, removed) = match rows.binary_search_by(|(k, _)| k.cmp(&key)) {
                         Ok(i) => {
                             let before =
                                 decoded::RowSize::of(&rows[i].0, access.encoded_len(&rows[i].1));
+                            let removed = Aggregate::of(&rows[i].1);
                             rows[i].1 = value;
-                            (i, Some(before))
+                            (i, Some(before), Some(removed))
                         }
                         Err(i) => {
                             rows.insert(i, (key, value));
-                            (i, None)
+                            (i, None, None)
                         }
                     };
                     let after = decoded::RowSize::of(&rows[at].0, encoded);
@@ -736,13 +748,35 @@ impl<T: Cell> Tree<T> {
                         access.track(&page, &node, seq);
                         return Ok(Some(dirty(Node::Leaf(right), access, seq)?));
                     }
-                    refresh(branch, &node)?;
+                    // One row changed: adjust the leaf's aggregates by it
+                    // instead of summing every row again (FIG-6465).
+                    if branch.tasks_known && branch.members_known {
+                        branch.encoded_bytes = None;
+                        branch.is_leaf = None;
+                        branch.summary = added.replace(branch.summary, removed)?;
+                        if at == 0 && branch.first != rows[0].0 {
+                            branch.first = rows[0].0.clone();
+                        }
+                    } else {
+                        refresh(branch, &node)?;
+                    }
                     return Ok(None);
                 }
                 Node::Index(rows) => {
                     let i = rows.partition_point(|r| r.first <= key).saturating_sub(1);
+                    let before = rows[i].summary;
                     if let Some(right) = edit(&mut rows[i], key, value, access, seq)? {
                         rows.insert(i + 1, right);
+                    } else if branch.tasks_known && branch.members_known {
+                        // One child changed: adjust by its delta (FIG-6465).
+                        branch.encoded_bytes = None;
+                        branch.is_leaf = None;
+                        branch.summary = Aggregate::delta(branch.summary, before, rows[i].summary)?;
+                        if i == 0 && branch.first != rows[0].first {
+                            branch.first = rows[0].first.clone();
+                        }
+                        access.track(&page, &node, seq);
+                        return Ok(None);
                     }
                     if rows.len() > INDEX_FANOUT as usize {
                         let right = rows.split_off(rows.len() / 2);
@@ -778,88 +812,9 @@ impl<T: Cell> Tree<T> {
         access.stage_pressure()?;
         Ok(())
     }
-    /// Edits a cell through its owning path. A caller that first clones the
-    /// cell would make its nested trees shared and copy their leaves on every
-    /// edit, even though no published version still needs them (FIG-6444).
-    /// The callback must preflight guest refusals; a fault aborts the edit.
-    pub(crate) fn update_existing(
-        &mut self,
-        key: &[u8],
-        access: &Access<'_>,
-        update: &mut impl FnMut(&mut T) -> Result<(), HeapFault>,
-    ) -> Result<(), HeapFault> {
-        fn edit<T: Cell>(
-            branch: &mut Branch<T>,
-            key: &[u8],
-            access: &Access<'_>,
-            seq: bool,
-            update: &mut impl FnMut(&mut T) -> Result<(), HeapFault>,
-        ) -> Result<Option<Branch<T>>, HeapFault> {
-            let page = make_dirty(branch, access, seq)?;
-            let mut node = page.borrow_mut();
-            match &mut *node {
-                Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => {
-                    let i = rows
-                        .binary_search_by(|(k, _)| k.as_slice().cmp(key))
-                        .map_err(|_| HeapFault::Malformed("updated cell is missing".into()))?;
-                    let before = decoded::RowSize::of(&rows[i].0, access.encoded_len(&rows[i].1));
-                    update(&mut rows[i].1)?;
-                    let after = decoded::RowSize::of(&rows[i].0, access.encoded_len(&rows[i].1));
-                    let bytes = access.track_row(&page, rows, seq, Some(before), after);
-                    if bytes > PAGE_TARGET_BYTES as usize {
-                        if rows.len() == 1 {
-                            return Err(HeapFault::Malformed("unbounded tree cell".into()));
-                        }
-                        let right = rows.split_off(rows.len() / 2);
-                        refresh(branch, &node)?;
-                        access.track(&page, &node, seq);
-                        return Ok(Some(dirty(Node::Leaf(right), access, seq)?));
-                    }
-                    refresh(branch, &node)?;
-                    return Ok(None);
-                }
-                Node::Index(rows) => {
-                    let i = rows
-                        .partition_point(|r| r.first.as_slice() <= key)
-                        .saturating_sub(1);
-                    if let Some(right) = edit(&mut rows[i], key, access, seq, update)? {
-                        rows.insert(i + 1, right);
-                    }
-                    if rows.len() > INDEX_FANOUT as usize {
-                        let right = rows.split_off(rows.len() / 2);
-                        refresh(branch, &node)?;
-                        access.track(&page, &node, seq);
-                        return Ok(Some(dirty(Node::Index(right), access, seq)?));
-                    }
-                }
-            }
-            refresh(branch, &node)?;
-            access.track(&page, &node, seq);
-            Ok(None)
-        }
-        // A nested edit can reach dirty pressure while the enclosing leaf is
-        // borrowed. Stage only after every enclosing edit releases its leaf.
-        let deferred = access.defer_staging();
-        let result = (|| {
-            let root = self
-                .root
-                .as_mut()
-                .ok_or_else(|| HeapFault::Malformed("updated tree is empty".into()))?;
-            if let Some(right) = edit(root, key, access, self.sequence, update)? {
-                self.root = Some(dirty(
-                    Node::Index(vec![root.clone(), right]),
-                    access,
-                    self.sequence,
-                )?);
-            }
-            Ok(())
-        })();
-        drop(deferred);
-        result?;
-        access.stage_pressure()
-    }
     pub fn remove(&mut self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
+        #[cfg(test)]
+        note_lookup::<T>();
         fn edit<T: Cell>(
             branch: &mut Branch<T>,
             key: &[u8],
@@ -1135,6 +1090,58 @@ fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFa
     };
     Ok(())
 }
+/// One cell's share of its leaf's aggregates.
+struct Aggregate {
+    cost: u64,
+    tasks: u64,
+    members: u64,
+}
+impl Aggregate {
+    fn of<T: Cell>(cell: &T) -> Self {
+        Self {
+            cost: cell.cost(),
+            tasks: cell.task_edges(),
+            members: cell.live_members(),
+        }
+    }
+    /// `summary` with one child's `before` summary replaced by `after`.
+    fn delta(summary: Summary, before: Summary, after: Summary) -> Result<Summary, HeapFault> {
+        let swap = |total: u64, out: u64, into: u64| {
+            total
+                .checked_sub(out)
+                .and_then(|total| total.checked_add(into))
+                .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))
+        };
+        Ok(Summary {
+            len: swap(summary.len, before.len, after.len)?,
+            cost: swap(summary.cost, before.cost, after.cost)?,
+            tasks: swap(summary.tasks, before.tasks, after.tasks)?,
+            members: swap(summary.members, before.members, after.members)?,
+        })
+    }
+    /// `summary` with this cell in place of `removed`, or added to it.
+    fn replace(self, summary: Summary, removed: Option<Self>) -> Result<Summary, HeapFault> {
+        let overflow = || HeapFault::Malformed("logical aggregate overflow".into());
+        let swap = |total: u64, out: u64, into: u64| {
+            total
+                .checked_sub(out)
+                .and_then(|total| total.checked_add(into))
+                .ok_or_else(overflow)
+        };
+        let len = u64::from(removed.is_none());
+        let removed = removed.unwrap_or(Self {
+            cost: 0,
+            tasks: 0,
+            members: 0,
+        });
+        Ok(Summary {
+            len: summary.len.checked_add(len).ok_or_else(overflow)?,
+            cost: swap(summary.cost, removed.cost, self.cost)?,
+            tasks: swap(summary.tasks, removed.tasks, self.tasks)?,
+            members: swap(summary.members, removed.members, self.members)?,
+        })
+    }
+}
 pub fn checked_sum(mut values: impl Iterator<Item = u64>) -> Result<u64, HeapFault> {
     values.try_fold(0u64, |a, b| {
         a.checked_add(b)
@@ -1186,10 +1193,22 @@ struct Key(Vec<u8>);
 #[cfg(test)]
 thread_local! {
     static KEY_COPIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static HEAD_LOOKUPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 #[cfg(test)]
 pub(crate) fn take_key_copies() -> u64 {
     KEY_COPIES.replace(0)
+}
+/// The descents into an object-head tree since the last call (FIG-6465).
+#[cfg(test)]
+pub(crate) fn take_head_lookups() -> u64 {
+    HEAD_LOOKUPS.replace(0)
+}
+#[cfg(test)]
+fn note_lookup<T: 'static>() {
+    if std::any::TypeId::of::<T>() == std::any::TypeId::of::<super::directory::ObjectHead>() {
+        HEAD_LOOKUPS.set(HEAD_LOOKUPS.get() + 1);
+    }
 }
 impl Clone for Key {
     fn clone(&self) -> Self {

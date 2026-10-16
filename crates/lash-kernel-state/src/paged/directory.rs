@@ -206,8 +206,19 @@ impl Cell for ObjectHead {
         Ok(())
     }
 }
+#[cfg(test)]
+thread_local! {
+    static HEAD_ENCODES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+/// The object-head encodings since the last call (FIG-6465).
+#[cfg(test)]
+pub(crate) fn take_head_encodes() -> u64 {
+    HEAD_ENCODES.replace(0)
+}
 impl TokenCodec for ObjectHead {
     fn encode(&self, out: &mut TokenWriter) {
+        #[cfg(test)]
+        HEAD_ENCODES.set(HEAD_ENCODES.get() + 1);
         out.seq(2);
         self.family.encode(out);
         match &self.body {

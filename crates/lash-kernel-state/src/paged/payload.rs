@@ -326,12 +326,13 @@ impl NativeHeap for PagedHeap {
         object: EntityId,
         visitor: &mut dyn FnMut(Element<'_>) -> ControlFlow<()>,
     ) -> Result<(), HeapFault> {
-        match self.head(object)?.map(|h| h.body) {
+        let head = self.current_head(object)?;
+        match head.as_deref().map(|h| &h.body) {
             Some(Body::List { rows, .. }) => rows.visit(&self.access, &mut |_, v| {
                 visitor(Element::Item(v)).is_continue()
             })?,
             Some(Body::Table { kind, rows, .. }) => rows.visit(&self.access, &mut |_, e| {
-                visitor(match kind {
+                visitor(match *kind {
                     ObjectKind::Set => Element::Item(&e.key),
                     ObjectKind::Record => match &e.key {
                         Value::Text(t) => Element::Field {

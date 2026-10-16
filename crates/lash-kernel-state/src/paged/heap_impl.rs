@@ -1,8 +1,7 @@
 //! The identity-addressed paged semantic heap. Collection edits update one
 //! bounded path and replace its directory head; no mutable container escapes.
 use super::directory::{
-    Body, Entry, ObjectHead, Ordinal, entity_bytes, entity_key, ordinal_key, value_cost,
-    value_has_edges,
+    Body, Entry, ObjectHead, Ordinal, ordinal_key, value_cost, value_has_edges,
 };
 use super::tree::{Access, Cell, SealWork, Tree, checked_sum};
 use super::*;
@@ -12,6 +11,7 @@ use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{integer_from_digits, integral_float, key_digest, text_summary};
 use std::cell::RefCell;
 use std::ops::{ControlFlow, Range};
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub struct PagedHeap {
@@ -36,6 +36,9 @@ pub struct PagedHeap {
     pub(super) joins: Tree<ListJoinRecord>,
     /// What the machine holds outside these trees.
     pub(super) holdings: super::publication::Holdings,
+    /// The heads this activation reads and edits; the directory receives
+    /// their edits when they are flushed (FIG-6465).
+    pub(super) working: RefCell<super::working::WorkingHeads>,
 }
 /// The heap root a heap-header page holds: a keyed leaf of one current
 /// header record.
@@ -114,6 +117,7 @@ impl PagedHeap {
             tasks: Tree::new(false),
             joins: Tree::new(false),
             holdings: super::publication::Holdings::default(),
+            working: Default::default(),
         })
     }
     pub fn set_data_limits(&mut self, limits: lash_kernel_doc::KernelDataLimits) {
@@ -168,8 +172,13 @@ impl PagedHeap {
     /// # Errors
     ///
     /// [`HeapFault::Malformed`] while the directory or the family table
-    /// holds unsealed rows.
+    /// holds unsealed rows, or a working head an unflushed edit.
     pub fn heap_root(&self) -> Result<HeapRoot, HeapFault> {
+        if self.working_dirty() {
+            return Err(HeapFault::Malformed(
+                "a working head holds an unflushed edit".into(),
+            ));
+        }
         Ok(HeapRoot {
             directory: keyed(&self.directory)?,
             families: keyed(&self.families)?,
@@ -179,78 +188,29 @@ impl PagedHeap {
             population: self.population,
         })
     }
+    /// The entity's current head, copied.
     pub(super) fn head(&self, entity: EntityId) -> Result<Option<ObjectHead>, HeapFault> {
-        let family = if entity.family == FamilyId::PRIMARY {
-            None
-        } else {
-            let Some(family) = self
-                .families
-                .get(&entity.family.0.to_be_bytes(), &self.access)?
-            else {
-                return Ok(None);
-            };
-            if entity.ordinal >= family.extent {
-                return Err(HeapFault::Corrupt {
-                    page: family.base.root.id,
-                    reason: "relative occurrence is outside its family extent".into(),
-                });
-            }
-            if !self.family_member(&family, entity.ordinal)? {
-                return Ok(None);
-            }
-            Some(family)
-        };
-        if let Some(head) = self.directory.get(&entity_bytes(entity), &self.access)? {
-            return Ok(Some(head));
-        }
-        let Some(family) = family else {
-            return Ok(None);
-        };
-        let mut base = self.family_base.borrow_mut();
-        let base = base
-            .as_mut()
-            .ok_or_else(|| HeapFault::Malformed("lazy family reader is not installed".into()))?;
-        let head = base
-            .base_object(entity, &family.base, &self.access)?
-            .ok_or_else(|| {
-                HeapFault::Malformed("a live family entity has no frozen body".into())
-            })?;
-        if head.family != entity.family {
-            return Err(HeapFault::Malformed(
-                "frozen head has another family context".into(),
-            ));
-        }
-        Ok(Some(head))
+        Ok(self.current_head(entity)?.map(Rc::unwrap_or_clone))
     }
     pub(super) fn read_head<R>(
         &self,
         entity: EntityId,
         read: impl FnOnce(Option<&ObjectHead>) -> Result<R, HeapFault>,
     ) -> Result<R, HeapFault> {
-        if entity.family == FamilyId::PRIMARY {
-            self.directory
-                .get_with(&entity_bytes(entity), &self.access, read)?
-        } else {
-            let head = self.head(entity)?;
-            read(head.as_ref())
-        }
+        let head = self.current_head(entity)?;
+        read(head.as_deref())
     }
-    fn required(&self, entity: EntityId, kind: ObjectKind) -> Result<ObjectHead, HeapWriteError> {
-        match self.head(entity)? {
+    fn required(
+        &self,
+        entity: EntityId,
+        kind: ObjectKind,
+    ) -> Result<Rc<ObjectHead>, HeapWriteError> {
+        match self.current_head(entity)? {
             Some(head) if head.kind() == kind => Ok(head),
             _ => Err(raised("type_error", "the object has another kind")),
         }
     }
-    fn publish(&mut self, entity: EntityId, head: ObjectHead) -> Result<(), HeapWriteError> {
-        self.change_head(
-            entity,
-            head.cost(),
-            head.kind() == ObjectKind::Closure,
-            head.task_edges(),
-            |heap| heap.directory.write(entity_key(entity), head, &heap.access),
-        )
-    }
-    /// Reserve before lending a directory cell to its edit, so a memory
+    /// Reserve before the edit changes the working head, so a memory
     /// refusal leaves it unchanged and nested trees retain unique ownership.
     fn change_head(
         &mut self,
@@ -260,7 +220,11 @@ impl PagedHeap {
         tasks: u64,
         edit: impl FnOnce(&mut Self) -> Result<(), HeapFault>,
     ) -> Result<(), HeapWriteError> {
-        let before = self.head(entity)?.map_or(0, |h| h.cost());
+        let taken = self.take_working(entity)?;
+        let before = taken.as_ref().map_or(0, |taken| taken.cost);
+        let (old_closures, old_tasks) = taken
+            .and_then(|taken| taken.owned)
+            .map_or((0, 0), |(closure, tasks)| (u64::from(closure), tasks));
         let mut census = self
             .census
             .take()
@@ -280,11 +244,6 @@ impl PagedHeap {
                 .changed(LogicalBytes(credit), LogicalBytes(0))
                 .map_err(census_fault)?;
             self.holdings.spend(credit);
-            let old = self.directory.get(&entity_bytes(entity), &self.access)?;
-            let old_closures =
-                old.as_ref()
-                    .is_some_and(|h| h.kind() == ObjectKind::Closure) as u64;
-            let old_tasks = old.as_ref().map_or(0, Cell::task_edges);
             self.population.closure_entities = self
                 .population
                 .closure_entities
@@ -297,7 +256,6 @@ impl PagedHeap {
                 .checked_sub(old_tasks)
                 .and_then(|v| v.checked_add(tasks))
                 .ok_or_else(|| HeapFault::Malformed("task-edge population overflow".into()))?;
-            drop(old);
             edit(self)?;
             self.header = None;
             if matches!(decision, ReservationDecision::NeedsPrecision(_)) {
@@ -563,6 +521,7 @@ impl SemanticHeap for PagedHeap {
             tasks: Tree::new(false),
             joins: Tree::new(false),
             holdings: super::publication::Holdings::default(),
+            working: Default::default(),
         }
     }
     fn open(
@@ -588,6 +547,7 @@ impl SemanticHeap for PagedHeap {
             tasks: Tree::new(false),
             joins: Tree::new(false),
             holdings: super::publication::Holdings::default(),
+            working: Default::default(),
         })
     }
     fn canonical_value(&mut self, value: Value) -> Result<Value, HeapWriteError> {
@@ -625,29 +585,27 @@ impl SemanticHeap for PagedHeap {
         table: EntityId,
         after: Option<TableCursor>,
     ) -> Result<Option<(TableCursor, Value)>, HeapFault> {
-        let Some(ObjectHead {
-            body: Body::Table { rows, .. },
-            ..
-        }) = self.head(table)?
-        else {
-            return Ok(None);
-        };
-        let key = after.map(|a| ordinal_key(a.0));
-        Ok(rows.after(key.as_deref(), &self.access)?.map(|(k, e)| {
-            (
-                TableCursor(u64::from_be_bytes(k.try_into().unwrap_or([0; 8]))),
-                e.key,
-            )
-        }))
+        self.read_head(table, |head| {
+            let Some(Body::Table { rows, .. }) = head.map(|h| &h.body) else {
+                return Ok(None);
+            };
+            let key = after.map(|a| ordinal_key(a.0));
+            Ok(rows.after(key.as_deref(), &self.access)?.map(|(k, e)| {
+                (
+                    TableCursor(u64::from_be_bytes(k.try_into().unwrap_or([0; 8]))),
+                    e.key,
+                )
+            }))
+        })
     }
     fn table_passed(&self, table: EntityId, last: Option<TableCursor>) -> Result<u64, HeapFault> {
         let Some(last) = last else {
             return Ok(0);
         };
-        match self.head(table)?.map(|h| h.body) {
+        self.read_head(table, |head| match head.map(|h| &h.body) {
             Some(Body::Table { rows, .. }) => rows.passed(&last.0.to_be_bytes(), &self.access),
             _ => Ok(0),
-        }
+        })
     }
     fn allocate_object(&mut self, init: ObjectInit) -> Result<EntityId, HeapWriteError> {
         let init = match init {
@@ -690,7 +648,13 @@ impl SemanticHeap for PagedHeap {
             .next_ordinal
             .checked_add(1)
             .ok_or_else(|| HeapFault::Malformed("identity ordinal overflow".into()))?;
-        self.publish(id, head)?;
+        self.change_head(
+            id,
+            head.cost(),
+            head.kind() == ObjectKind::Closure,
+            head.task_edges(),
+            |heap| heap.insert_working(id, head),
+        )?;
         self.next_ordinal = next;
         Ok(id)
     }
@@ -708,7 +672,7 @@ impl SemanticHeap for PagedHeap {
             ));
         }
         let value = self.canonical(value)?;
-        let (cost, tasks) = match &head.body {
+        let (old, cost, tasks) = match &head.body {
             Body::List { rows, next } => {
                 let old = if index == rows.len() {
                     next.checked_add(1)
@@ -717,85 +681,83 @@ impl SemanticHeap for PagedHeap {
                 } else {
                     Some(
                         rows.rank_get(index, &self.access)?
-                            .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?
-                            .1,
+                            .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?,
                     )
                 };
                 // Match the tree's checked aggregates before reservation. Add
                 // the head's minimum only after the row delta, as cost() does.
                 let cost = rows
                     .cost()
-                    .checked_sub(old.as_ref().map_or(0, value_cost))
+                    .checked_sub(old.as_ref().map_or(0, |(_, old)| value_cost(old)))
                     .and_then(|cost| cost.checked_add(value_cost(&value)))
                     .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))?;
                 let tasks = rows
                     .task_edges()
-                    .checked_sub(old.as_ref().map_or(0, Cell::task_edges))
+                    .checked_sub(old.as_ref().map_or(0, |(_, old)| old.task_edges()))
                     .and_then(|tasks| tasks.checked_add(value.task_edges()))
                     .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))?;
-                (cost, tasks)
+                (old, cost, tasks)
             }
             _ => unreachable!("required list"),
         };
         let after = census::MIN_ENTITY_COST.0.saturating_add(cost);
         drop(head);
         self.change_head(list, after, false, tasks, |heap| {
-            let mut value = Some(value);
-            let mut update = |head: &mut ObjectHead| {
+            heap.edit_working(list, |head, access| {
                 let Body::List { rows, next } = &mut head.body else {
                     unreachable!("required list")
                 };
-                let key = if index == rows.len() {
-                    let key = ordinal_key(*next);
-                    *next += 1;
-                    key
-                } else {
-                    rows.rank_get(index, &heap.access)?
-                        .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?
-                        .0
+                let key = match old {
+                    Some((key, _)) => key,
+                    None => {
+                        let key = ordinal_key(*next);
+                        *next += 1;
+                        key
+                    }
                 };
-                rows.write(
-                    key,
-                    value
-                        .take()
-                        .ok_or_else(|| HeapFault::Malformed("list edit repeated".into()))?,
-                    &heap.access,
-                )
-            };
-            let key = entity_key(list);
-            if heap.directory.get(&key, &heap.access)?.is_some() {
-                heap.directory
-                    .update_existing(&key, &heap.access, &mut update)
-            } else {
-                // The first write to an immutable family occurrence creates
-                // its sparse override; subsequent writes edit that owner.
-                let mut head = heap
-                    .head(list)?
-                    .ok_or_else(|| HeapFault::Malformed("list disappeared".into()))?;
-                update(&mut head)?;
-                heap.directory.write(key, head, &heap.access)
-            }
+                rows.write(key, value, access)
+            })
         })
     }
     fn list_remove(&mut self, list: EntityId, index: u64) -> Result<Value, HeapWriteError> {
-        let mut head = self.required(list, ObjectKind::List)?;
+        let head = self.required(list, ObjectKind::List)?;
         if index >= head.len() {
             return Err(raised(
                 "index_out_of_range",
                 "index exceeds the list length",
             ));
         }
-        let value = match &mut head.body {
-            Body::List { rows, .. } => {
-                let (key, _) = rows
-                    .rank_get(index, &self.access)?
-                    .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?;
-                rows.remove(&key, &self.access)?
-                    .ok_or_else(|| HeapFault::Malformed("list row missing".into()))?
-            }
-            _ => return Err(HeapFault::Malformed("list descriptor kind mismatch".into()).into()),
+        let Body::List { rows, .. } = &head.body else {
+            return Err(HeapFault::Malformed("list descriptor kind mismatch".into()).into());
         };
-        self.publish(list, head)?;
+        let (key, value) = rows
+            .rank_get(index, &self.access)?
+            .ok_or_else(|| HeapFault::Malformed("list rank missing".into()))?;
+        let cost = rows
+            .cost()
+            .checked_sub(value_cost(&value))
+            .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))?;
+        let tasks = rows
+            .task_edges()
+            .checked_sub(value.task_edges())
+            .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))?;
+        drop(head);
+        self.change_head(
+            list,
+            census::MIN_ENTITY_COST.0.saturating_add(cost),
+            false,
+            tasks,
+            |heap| {
+                heap.edit_working(list, |head, access| {
+                    let Body::List { rows, .. } = &mut head.body else {
+                        unreachable!("required list")
+                    };
+                    rows.remove(&key, access)?
+                        .ok_or_else(|| HeapFault::Malformed("list row missing".into()))?;
+                    Ok(())
+                })
+            },
+        )?;
         Ok(value)
     }
     fn map_write(&mut self, map: EntityId, key: Value, value: Value) -> Result<(), HeapWriteError> {
@@ -816,17 +778,41 @@ impl SemanticHeap for PagedHeap {
     }
     fn table_remove(&mut self, table: EntityId, key: &Value) -> Result<(), HeapWriteError> {
         let normal = self.key(key)?;
-        let Some(mut head) = self.head(table)? else {
+        let Some(head) = self.current_head(table)? else {
             return Err(raised("type_error", "expected a table"));
         };
-        let Body::Table { lookup, rows, .. } = &mut head.body else {
+        let Body::Table {
+            kind, lookup, rows, ..
+        } = &head.body
+        else {
             return Err(raised("type_error", "expected a table"));
         };
-        if let Some(Ordinal(ordinal)) = lookup.remove(&normal, &self.access)? {
-            rows.remove(&ordinal.to_be_bytes(), &self.access)?;
-            self.publish(table, head)?;
-        }
-        Ok(())
+        let Some(Ordinal(ordinal)) = lookup.get(&normal, &self.access)? else {
+            return Ok(());
+        };
+        let entry = rows.get(&ordinal.to_be_bytes(), &self.access)?;
+        let (cost, len, tasks) = match &entry {
+            Some(entry) => (
+                rows.cost().checked_sub(entry.cost()),
+                rows.len() - 1,
+                rows.task_edges().checked_sub(entry.task_edges()),
+            ),
+            None => (Some(rows.cost()), rows.len(), Some(rows.task_edges())),
+        };
+        let fault = || HeapFault::Malformed("logical aggregate overflow".into());
+        let after = table_cost(*kind, cost.ok_or_else(fault)?, len);
+        let tasks = tasks.ok_or_else(fault)?;
+        drop(head);
+        self.change_head(table, after, false, tasks, |heap| {
+            heap.edit_working(table, |head, access| {
+                let Body::Table { lookup, rows, .. } = &mut head.body else {
+                    unreachable!("required table")
+                };
+                lookup.remove(&normal, access)?;
+                rows.remove(&ordinal.to_be_bytes(), access)?;
+                Ok(())
+            })
+        })
     }
     fn record_write(
         &mut self,
@@ -855,13 +841,15 @@ impl SemanticHeap for PagedHeap {
     fn variable_write(&mut self, variable: EntityId, value: Value) -> Result<(), HeapWriteError> {
         self.required(variable, ObjectKind::Variable)?;
         let value = self.canonical(value)?;
-        self.publish(
-            variable,
-            ObjectHead {
-                body: Body::Variable(value),
-                family: variable.family,
-            },
-        )
+        let after = census::MIN_ENTITY_COST.0.saturating_add(value_cost(&value));
+        let tasks = value.task_edges();
+        self.change_head(variable, after, false, tasks, |heap| {
+            heap.edit_working(variable, |head, _| {
+                head.body = Body::Variable(value);
+                head.family = variable.family;
+                Ok(())
+            })
+        })
     }
     fn edges_of(&self, value: &Value, out: &mut Vec<Identity>) -> Result<(), HeapFault> {
         match value {
@@ -933,6 +921,8 @@ impl SemanticHeap for PagedHeap {
                 sealed_pages: 0,
             }));
         }
+        // The directory publishes every working head's edit (FIG-6465).
+        self.clear_working()?;
         let mut work = SealWork::new(budget);
         if !self.directory.seal(&self.access, &mut work)?
             || !self.families.seal(&self.access, &mut work)?
@@ -968,6 +958,7 @@ impl SemanticHeap for PagedHeap {
             pages: u64::MAX,
             bytes: u64::MAX,
         })?;
+        self.clear_working()?;
         self.access.clear();
         Ok(())
     }
@@ -984,30 +975,78 @@ impl PagedHeap {
         value: Value,
     ) -> Result<(), HeapWriteError> {
         let normal = self.key(&key)?;
-        let mut head = self.required(table, kind)?;
+        let head = self.required(table, kind)?;
         let key = self.canonical(key)?;
         let value = self.canonical(value)?;
-        if let Body::Table {
+        let Body::Table {
             lookup, rows, next, ..
-        } = &mut head.body
-        {
-            if let Some(Ordinal(ordinal)) = lookup.get(&normal, &self.access)? {
-                let mut e = rows
+        } = &head.body
+        else {
+            unreachable!("required table")
+        };
+        let fault = || HeapFault::Malformed("logical aggregate overflow".into());
+        let (slot, entry, cost, len, tasks) = match lookup.get(&normal, &self.access)? {
+            Some(Ordinal(ordinal)) => {
+                let old = rows
                     .get(&ordinal.to_be_bytes(), &self.access)?
                     .ok_or_else(|| HeapFault::Malformed("lookup points at no entry".into()))?;
-                e.value = value;
-                rows.write(ordinal_key(ordinal), e, &self.access)?;
-            } else {
-                let following = next
-                    .checked_add(1)
-                    .ok_or_else(|| HeapFault::Malformed("table ordinal overflow".into()))?;
-                rows.write(ordinal_key(*next), Entry { key, value }, &self.access)?;
-                lookup.write(normal, Ordinal(*next), &self.access)?;
-                *next = following;
+                let entry = Entry {
+                    key: old.key.clone(),
+                    value,
+                };
+                let cost = rows
+                    .cost()
+                    .checked_sub(old.cost())
+                    .and_then(|cost| cost.checked_add(entry.cost()))
+                    .ok_or_else(fault)?;
+                let tasks = rows
+                    .task_edges()
+                    .checked_sub(old.task_edges())
+                    .and_then(|tasks| tasks.checked_add(entry.task_edges()))
+                    .ok_or_else(fault)?;
+                (Some(ordinal), entry, cost, rows.len(), tasks)
             }
-        }
-        self.publish(table, head)
+            None => {
+                next.checked_add(1)
+                    .ok_or_else(|| HeapFault::Malformed("table ordinal overflow".into()))?;
+                let entry = Entry { key, value };
+                let cost = rows.cost().checked_add(entry.cost()).ok_or_else(fault)?;
+                let tasks = rows
+                    .task_edges()
+                    .checked_add(entry.task_edges())
+                    .ok_or_else(fault)?;
+                (None, entry, cost, rows.len() + 1, tasks)
+            }
+        };
+        drop(head);
+        self.change_head(table, table_cost(kind, cost, len), false, tasks, |heap| {
+            heap.edit_working(table, |head, access| {
+                let Body::Table {
+                    lookup, rows, next, ..
+                } = &mut head.body
+                else {
+                    unreachable!("required table")
+                };
+                match slot {
+                    Some(ordinal) => rows.write(ordinal_key(ordinal), entry, access),
+                    None => {
+                        rows.write(ordinal_key(*next), entry, access)?;
+                        lookup.write(normal, Ordinal(*next), access)?;
+                        *next += 1;
+                        Ok(())
+                    }
+                }
+            })
+        })
     }
+}
+/// What a table head costs once its rows cost `rows` (the cost
+/// `ObjectHead::cost` gives).
+fn table_cost(kind: ObjectKind, rows: u64, len: u64) -> u64 {
+    32u64.saturating_add(match kind {
+        ObjectKind::Record => rows.saturating_sub(len * 16),
+        _ => rows,
+    })
 }
 impl PagedHeap {
     pub(super) fn table_get(

@@ -65,25 +65,7 @@ pub(super) struct DirtyResidency {
     bytes: usize,
     staging: bool,
 }
-pub(super) struct DeferredStaging {
-    dirty: Rc<RefCell<DirtyResidency>>,
-    previous: bool,
-}
-impl Drop for DeferredStaging {
-    fn drop(&mut self) {
-        self.dirty.borrow_mut().staging = self.previous;
-    }
-}
 impl Access<'_> {
-    pub(super) fn defer_staging(&self) -> DeferredStaging {
-        let previous = self.dirty.borrow().staging;
-        self.dirty.borrow_mut().staging = true;
-        DeferredStaging {
-            dirty: Rc::clone(&self.dirty),
-            previous,
-        }
-    }
-
     pub(super) fn track<T: Cell>(
         &self,
         page: &Rc<RefCell<Node<T>>>,

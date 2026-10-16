@@ -717,6 +717,7 @@ fn population_summaries_follow_seeded_directory_edits() {
         }
         let mut closure_entities = 0;
         let mut task_edges = 0;
+        heap.flush_working().expect("flush working heads");
         heap.directory
             .visit(&heap.access, &mut |_, head| {
                 closure_entities += (head.kind() == ObjectKind::Closure) as u64;
@@ -954,8 +955,10 @@ fn a_shared_dirty_directory_keeps_its_prior_version() {
     let list = heap
         .allocate_object(ObjectInit::List(vec![int(1)]))
         .unwrap();
+    heap.flush_working().unwrap();
     let prior = heap.directory.clone();
     heap.list_write(list, 0, int(2)).unwrap();
+    heap.flush_working().unwrap();
     let head = prior
         .get(&super::super::directory::entity_key(list), &heap.access)
         .unwrap()
@@ -1423,6 +1426,38 @@ fn a_growing_list_does_not_copy_its_leaf_at_every_append() {
     ));
     assert!(is_int(
         heap.list_get(list, N).expect("last"),
+        (N - 1) as i64
+    ));
+}
+
+/// FIG-6465: JSON's fragment appends read the list's length and append to
+/// it. Both reach the activation's working head: no append locates the
+/// list in the directory or re-encodes its directory row.
+#[test]
+fn a_list_append_neither_locates_nor_reencodes_its_directory_row() {
+    const N: u64 = 1024;
+    let (mut heap, pages) = fresh();
+    let list = heap
+        .allocate_object(ObjectInit::List(Vec::new()))
+        .expect("list");
+    super::super::tree::take_head_lookups();
+    super::super::directory::take_head_encodes();
+    for i in 0..N {
+        let len = heap.len(list).expect("length");
+        heap.list_write(list, len, int(i as i64)).expect("append");
+    }
+    let lookups = super::super::tree::take_head_lookups();
+    let encodes = super::super::directory::take_head_encodes();
+    println!("list appends={N} directory lookups={lookups} head encodes={encodes}");
+    assert_eq!(
+        (lookups, encodes),
+        (0, 0),
+        "{N} appends located the directory row {lookups} times and re-encoded it {encodes} times"
+    );
+    let heap = reopen(&mut heap, &pages);
+    assert_eq!(heap.len(list).expect("published length"), N);
+    assert!(is_int(
+        heap.list_get(list, N - 1).expect("last"),
         (N - 1) as i64
     ));
 }

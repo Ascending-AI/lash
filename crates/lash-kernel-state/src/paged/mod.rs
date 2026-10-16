@@ -58,6 +58,7 @@ pub mod heap_impl;
 pub mod metadata;
 pub use metadata::{NameRef, SiteRef, TaskIdentityRef};
 pub mod payload;
+mod working;
 pub use heap_impl::{PagedHeap, heap_accounting};
 
 pub use directory::execution::{

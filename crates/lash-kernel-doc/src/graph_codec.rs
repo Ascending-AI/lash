@@ -1134,6 +1134,14 @@ pub mod heap_values {
         }
     }
     pub fn text_summary(text: &str) -> TextSummary {
+        if text.is_ascii() {
+            let len = text.len() as u64;
+            return TextSummary {
+                utf8_bytes: len,
+                chars: len,
+                utf16_units: len,
+            };
+        }
         TextSummary {
             utf8_bytes: text.len() as u64,
             chars: text.chars().count() as u64,
