@@ -427,11 +427,11 @@ fn field_row(row: &ShapeRow, schema_type: &dyn Fn(&SchemaShape) -> String) -> St
 
 /// The text a host's discovery search matches a tool against: its name, its
 /// description, and every input and output field's path with its
-/// description, imported `schema_depth` deep, one per line, so a query that
+/// description, imported completely, one per line, so a query that
 /// names what a field holds finds the tool (FIG-1435).
 ///
 /// ```rust,ignore
-/// let text = listing::discovery_text(&tool.manifest, &tool.contract, 8)?;
+/// let text = listing::discovery_text(&tool.manifest, &tool.contract)?;
 /// assert!(text.starts_with(&tool.manifest.name));
 /// ```
 ///
@@ -440,7 +440,6 @@ fn field_row(row: &ShapeRow, schema_type: &dyn Fn(&SchemaShape) -> String) -> St
 pub fn discovery_text(
     manifest: &ToolManifest,
     contract: &ToolContract,
-    schema_depth: usize,
 ) -> Result<String, crate::PresentationRefusal> {
     let mut lines = vec![manifest.name.clone()];
     let description = manifest.description.trim();
@@ -451,8 +450,7 @@ pub fn discovery_text(
         &contract.input_schema.canonical,
         &contract.output_schema.canonical,
     ] {
-        let document =
-            lash_tool_shape::SchemaDocument::from_json_schema(schema.as_value(), schema_depth)?;
+        let document = crate::import_schema(schema.as_value())?;
         for (shape, prefix) in document
             .roots
             .iter()

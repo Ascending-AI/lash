@@ -8,7 +8,7 @@
 use lash_sansio::{JsonSchema, ToolContract, ToolManifest};
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
-    ToolPresenter, listing,
+    ToolPresenter, import_schema, listing,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -21,25 +21,16 @@ pub use types::{emit_definition, emit_tool_signature, render_type, reserve_host_
 /// The Python presenter's id.
 pub const PYTHON_TOOL_PRESENTER_ID: &str = "lash.tools.python.v1";
 
-/// The Python presenter's import depth budget. Exceeding it refuses presentation;
-/// validation always reads the full schema.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// The Python presenter's configuration. Schemas are imported completely
+/// under the shared node budget; there is no projection-depth setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PythonPresenterConfig {
-    pub schema_depth: usize,
-}
-
-impl Default for PythonPresenterConfig {
-    fn default() -> Self {
-        Self::standard()
-    }
-}
+pub struct PythonPresenterConfig {}
 
 impl PythonPresenterConfig {
-    /// Standard preset: eight schema container levels. A historical budget with
-    /// no universal workload measurement.
+    /// Standard preset: complete schema presentation with no optional settings.
     pub const fn standard() -> Self {
-        Self { schema_depth: 8 }
+        Self {}
     }
 }
 
@@ -52,18 +43,9 @@ impl PythonToolPresenter {
         lash_tool_presenter_api::read_config(PYTHON_TOOL_PRESENTER_ID, config)
     }
 
-    fn doc(
-        tool: &ToolPresentationEntry<'_>,
-        config: PythonPresenterConfig,
-    ) -> Result<String, PresentationRefusal> {
-        let input = SchemaDocument::from_json_schema(
-            tool.contract.input_schema.canonical.as_value(),
-            config.schema_depth,
-        )?;
-        let output = SchemaDocument::from_json_schema(
-            tool.contract.output_schema.canonical.as_value(),
-            config.schema_depth,
-        )?;
+    fn doc(tool: &ToolPresentationEntry<'_>) -> Result<String, PresentationRefusal> {
+        let input = import_schema(tool.contract.input_schema.canonical.as_value())?;
+        let output = import_schema(tool.contract.output_schema.canonical.as_value())?;
         let reserved = tool
             .call_path
             .split('.')
@@ -96,20 +78,14 @@ impl ToolPresenter for PythonToolPresenter {
         &self,
         request: ToolPresentationRequest<'_>,
     ) -> Result<PresentedToolSection, PresentationRefusal> {
-        let config = Self::config(request.config)?;
+        Self::config(request.config)?;
         let documents = request
             .tools
             .iter()
             .map(|tool| {
                 Ok((
-                    SchemaDocument::from_json_schema(
-                        tool.contract.input_schema.canonical.as_value(),
-                        config.schema_depth,
-                    )?,
-                    SchemaDocument::from_json_schema(
-                        tool.contract.output_schema.canonical.as_value(),
-                        config.schema_depth,
-                    )?,
+                    import_schema(tool.contract.input_schema.canonical.as_value())?,
+                    import_schema(tool.contract.output_schema.canonical.as_value())?,
                 ))
             })
             .collect::<Result<Vec<_>, PresentationRefusal>>()?;
@@ -144,7 +120,8 @@ impl ToolPresenter for PythonToolPresenter {
         tool: &ToolPresentationEntry<'_>,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Self::doc(tool, Self::config(config)?)
+        Self::config(config)?;
+        Self::doc(tool)
     }
 
     fn tool_signature(
@@ -154,13 +131,8 @@ impl ToolPresenter for PythonToolPresenter {
         output: &JsonSchema,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        signature_bundle(
-            call_path,
-            input,
-            output,
-            Self::config(config)?.schema_depth,
-            false,
-        )
+        Self::config(config)?;
+        signature_bundle(call_path, input, output, false)
     }
 
     fn discovery_text(
@@ -169,7 +141,8 @@ impl ToolPresenter for PythonToolPresenter {
         contract: &ToolContract,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        listing::discovery_text(manifest, contract, Self::config(config)?.schema_depth)
+        Self::config(config)?;
+        listing::discovery_text(manifest, contract)
     }
 }
 
@@ -376,11 +349,10 @@ fn signature_bundle(
     call_path: &str,
     input: &JsonSchema,
     output: &JsonSchema,
-    depth: usize,
     with_notes: bool,
 ) -> Result<String, PresentationRefusal> {
-    let input_doc = SchemaDocument::from_json_schema(input.as_value(), depth)?;
-    let output_doc = SchemaDocument::from_json_schema(output.as_value(), depth)?;
+    let input_doc = import_schema(input.as_value())?;
+    let output_doc = import_schema(output.as_value())?;
     let mut allocator = ReadableNameAllocator::new([call_path]);
     // Reserve both documents' host names before allocating either closure.
     for document in [&input_doc, &output_doc] {
@@ -471,7 +443,7 @@ mod tests {
         .expect("valid recursive schema");
         let output = JsonSchema::admit(json!({"type": "null"})).expect("valid schema");
         let text = PythonToolPresenter
-            .tool_signature("walk", &input, &output, &json!({"schema_depth": 8}))
+            .tool_signature("walk", &input, &output, &json!({}))
             .expect("presentable recursive list");
         assert!(text.contains("Node = list[\"Node\"]"), "{text}");
         assert_eq!(text.matches("Node = ").count(), 1, "{text}");
@@ -485,7 +457,7 @@ mod tests {
         let input = JsonSchema::admit(input).expect("valid schema");
         let output = JsonSchema::admit(json!({"type": "null"})).expect("valid schema");
         PythonToolPresenter
-            .tool_signature("inspect", &input, &output, &json!({"schema_depth": 8}))
+            .tool_signature("inspect", &input, &output, &json!({}))
             .expect("presentable schema")
     }
 
@@ -569,7 +541,7 @@ mod tests {
             "A-B": {"type": "integer"}, "A_B": {"type": "string"}}}))
         .expect("valid schema");
         let text = PythonToolPresenter
-            .tool_signature("Kind", &schema, &schema, &json!({"schema_depth": 8}))
+            .tool_signature("Kind", &schema, &schema, &json!({}))
             .expect("presentable");
         assert_eq!(text.matches("Kind_2 = Literal").count(), 1, "{text}");
         assert!(text.contains("list_2 = int"), "{text}");
@@ -614,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn s1_unbound_references_unsupported_literals_and_import_exhaustion_refuse() {
+    fn s1_unbound_references_and_unsupported_literals_refuse() {
         assert!(matches!(
             render_shape(&lash_tool_shape::ShapeKind::Ref(DefinitionId(9)).into()),
             Err(PresentationRefusal::Shape {
@@ -629,20 +601,5 @@ mod tests {
                 })
             ));
         }
-        let input = JsonSchema::admit(
-            json!({"type": "array", "items": {"type": "array", "items": {"type": "string"}}}),
-        )
-        .expect("valid schema");
-        assert!(matches!(
-            PythonToolPresenter.tool_signature(
-                "inspect",
-                &input,
-                &input,
-                &json!({"schema_depth": 1})
-            ),
-            Err(PresentationRefusal::Shape {
-                cause: lash_tool_shape::ShapeImportRefusal::ResourceExhausted { .. }
-            })
-        ));
     }
 }

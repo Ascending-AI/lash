@@ -1566,7 +1566,7 @@
     "tests::plugin_operations::task_run_result_decodes_output_and_declared_error": 395,
     "tests::plugin_reopen::live_extension_data_changed_after_creation_does_not_rewrite_the_record": 1,
     "tests::plugin_stack::builder_configured_tools_and_hooks_are_never_discarded_on_sqlite": 830,
-    "tests::plugin_stack::facade_compact_and_catalogue_policies_change_the_rendered_view": 1,
+    "tests::plugin_stack::facade_catalogue_preview_honors_host_vocabulary_and_limits": 1,
     "tests::plugin_stack::facade_recorded_render_refuses_omitted_base_choices": 1,
     "tests::plugin_stack::facade_recording_preserves_per_tool_inheritance": 1,
     "tests::plugin_stack::facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn": 250,

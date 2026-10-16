@@ -12,7 +12,7 @@ mod compact;
 use lash_sansio::{JsonSchema, ToolContract, ToolManifest, ToolOutputContract};
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
-    ToolPresenter, listing,
+    ToolPresenter, import_schema, listing,
 };
 use lash_tool_shape::{
     DefinitionId, ReadableNameAllocator, SchemaDocument, SchemaShape, ShapeConstraints, ShapeKind,
@@ -28,25 +28,16 @@ pub use compact::{
 /// The standard presenter's id.
 pub const STANDARD_TOOL_PRESENTER_ID: &str = "lash.tools.compact.v1";
 
-/// The standard presenter's schema import budget. Exceeding it refuses
-/// presentation; validation always reads the full schema.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// The standard presenter's configuration. Schemas are imported completely
+/// under the shared node budget; there is no projection-depth setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StandardPresenterConfig {
-    pub schema_depth: usize,
-}
-
-impl Default for StandardPresenterConfig {
-    fn default() -> Self {
-        Self::standard()
-    }
-}
+pub struct StandardPresenterConfig {}
 
 impl StandardPresenterConfig {
-    /// Standard preset: eight schema container levels. A historical budget with
-    /// no universal workload measurement.
+    /// Standard preset: complete schema presentation with no optional settings.
     pub const fn standard() -> Self {
-        Self { schema_depth: 8 }
+        Self {}
     }
 }
 
@@ -77,11 +68,11 @@ impl ToolPresenter for StandardToolPresenter {
         &self,
         request: ToolPresentationRequest<'_>,
     ) -> Result<PresentedToolSection, PresentationRefusal> {
-        let config = Self::config(request.config)?;
+        Self::config(request.config)?;
         let documents = request
             .tools
             .iter()
-            .map(|tool| contract_documents(tool.contract, &config))
+            .map(|tool| contract_documents(tool.contract))
             .collect::<Result<Vec<_>, _>>()?;
         let reserved = request
             .reserved_names
@@ -145,9 +136,9 @@ impl ToolPresenter for StandardToolPresenter {
         output: &JsonSchema,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        let depth = Self::config(config)?.schema_depth;
-        let input = SchemaDocument::from_json_schema(input.as_value(), depth)?;
-        let output = SchemaDocument::from_json_schema(output.as_value(), depth)?;
+        Self::config(config)?;
+        let input = import_schema(input.as_value())?;
+        let output = import_schema(output.as_value())?;
         let mut names = compact_name_allocator(&[&input, &output], &[call_path]);
         let input = Document::allocate(input, &mut names);
         let output = Document::allocate(output, &mut names);
@@ -215,9 +206,9 @@ pub fn compact_contract(
     manifest: &ToolManifest,
     contract: &ToolContract,
     signature_name: &str,
-    config: &StandardPresenterConfig,
+    _config: &StandardPresenterConfig,
 ) -> Result<CompactToolContract, PresentationRefusal> {
-    let documents = contract_documents(contract, config)?;
+    let documents = contract_documents(contract)?;
     let refs = [&documents.0, &documents.1]
         .into_iter()
         .chain(documents.2.iter())
@@ -229,24 +220,14 @@ pub fn compact_contract(
 
 fn contract_documents(
     contract: &ToolContract,
-    config: &StandardPresenterConfig,
 ) -> Result<(SchemaDocument, SchemaDocument, Option<SchemaDocument>), PresentationRefusal> {
-    let input = SchemaDocument::from_json_schema(
-        contract.input_schema.canonical.as_value(),
-        config.schema_depth,
-    )?;
-    let output = SchemaDocument::from_json_schema(
-        contract.output_schema.canonical.as_value(),
-        config.schema_depth,
-    )?;
+    let input = import_schema(contract.input_schema.canonical.as_value())?;
+    let output = import_schema(contract.output_schema.canonical.as_value())?;
     let default = match &contract.output_contract {
         ToolOutputContract::FromInputSchema {
             default_schema: Some(schema),
             ..
-        } => Some(SchemaDocument::from_json_schema(
-            schema.as_value(),
-            config.schema_depth,
-        )?),
+        } => Some(import_schema(schema.as_value())?),
         _ => None,
     };
     Ok((input, output, default))

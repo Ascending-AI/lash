@@ -15,7 +15,7 @@ pub use notes::note_rows;
 use lash_sansio::{JsonSchema, ToolContract, ToolManifest};
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
-    ToolPresenter, listing,
+    ToolPresenter, import_schema, listing,
 };
 use lash_tool_shape::{SchemaDocument, SchemaShape, ShapeImportRefusal};
 use serde_json::Value;
@@ -28,25 +28,16 @@ pub use types::{
 /// The TypeScript presenter's id.
 pub const TYPESCRIPT_TOOL_PRESENTER_ID: &str = "lash.tools.typescript.v1";
 
-/// The TypeScript presenter's schema import budget. Exceeding it refuses
-/// presentation; validation always reads the full schema.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// The TypeScript presenter's configuration. Schemas are imported completely
+/// under the shared node budget; there is no projection-depth setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TypescriptPresenterConfig {
-    pub schema_depth: usize,
-}
-
-impl Default for TypescriptPresenterConfig {
-    fn default() -> Self {
-        Self::standard()
-    }
-}
+pub struct TypescriptPresenterConfig {}
 
 impl TypescriptPresenterConfig {
-    /// Standard preset: eight schema container levels. A historical budget with
-    /// no universal workload measurement.
+    /// Standard preset: complete schema presentation with no optional settings.
     pub const fn standard() -> Self {
-        Self { schema_depth: 8 }
+        Self {}
     }
 }
 
@@ -59,18 +50,9 @@ impl TypescriptToolPresenter {
         lash_tool_presenter_api::read_config(TYPESCRIPT_TOOL_PRESENTER_ID, config)
     }
 
-    fn doc(
-        tool: &ToolPresentationEntry<'_>,
-        config: TypescriptPresenterConfig,
-    ) -> Result<String, PresentationRefusal> {
-        let input = SchemaDocument::from_json_schema(
-            tool.contract.input_schema.canonical.as_value(),
-            config.schema_depth,
-        )?;
-        let output = SchemaDocument::from_json_schema(
-            tool.contract.output_schema.canonical.as_value(),
-            config.schema_depth,
-        )?;
+    fn doc(tool: &ToolPresentationEntry<'_>) -> Result<String, PresentationRefusal> {
+        let input = import_schema(tool.contract.input_schema.canonical.as_value())?;
+        let output = import_schema(tool.contract.output_schema.canonical.as_value())?;
         let mut pool = TypescriptDefinitions::new(
             tool.call_path
                 .split('.')
@@ -99,20 +81,14 @@ impl ToolPresenter for TypescriptToolPresenter {
         &self,
         request: ToolPresentationRequest<'_>,
     ) -> Result<PresentedToolSection, PresentationRefusal> {
-        let config = Self::config(request.config)?;
+        Self::config(request.config)?;
         let documents = request
             .tools
             .iter()
             .map(|tool| {
                 Ok((
-                    SchemaDocument::from_json_schema(
-                        tool.contract.input_schema.canonical.as_value(),
-                        config.schema_depth,
-                    )?,
-                    SchemaDocument::from_json_schema(
-                        tool.contract.output_schema.canonical.as_value(),
-                        config.schema_depth,
-                    )?,
+                    import_schema(tool.contract.input_schema.canonical.as_value())?,
+                    import_schema(tool.contract.output_schema.canonical.as_value())?,
                 ))
             })
             .collect::<Result<Vec<_>, ShapeImportRefusal>>()?;
@@ -147,7 +123,8 @@ impl ToolPresenter for TypescriptToolPresenter {
         tool: &ToolPresentationEntry<'_>,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Self::doc(tool, Self::config(config)?)
+        Self::config(config)?;
+        Self::doc(tool)
     }
 
     fn tool_signature(
@@ -157,7 +134,8 @@ impl ToolPresenter for TypescriptToolPresenter {
         output: &JsonSchema,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        signature(call_path, input, output, Self::config(config)?.schema_depth)
+        Self::config(config)?;
+        signature(call_path, input, output)
     }
 
     fn discovery_text(
@@ -166,7 +144,7 @@ impl ToolPresenter for TypescriptToolPresenter {
         contract: &ToolContract,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        let depth = Self::config(config)?.schema_depth;
+        Self::config(config)?;
         let mut lines = vec![
             manifest.name.clone(),
             manifest.description.trim().to_string(),
@@ -175,7 +153,7 @@ impl ToolPresenter for TypescriptToolPresenter {
             &contract.input_schema.canonical,
             &contract.output_schema.canonical,
         ] {
-            let document = SchemaDocument::from_json_schema(schema.as_value(), depth)?;
+            let document = import_schema(schema.as_value())?;
             for (shape, prefix) in document
                 .roots
                 .iter()
@@ -207,7 +185,7 @@ impl ToolPresenter for TypescriptToolPresenter {
 }
 
 /// Render a tool's document using a listing-local definition pool. Input and
-/// output graphs must have been imported under the admitted depth limit; reserve
+/// output graphs must have been imported under the shared node budget; reserve
 /// all surrounding host names before the first call. A fresh pool makes a
 /// discovery response self-contained.
 ///
@@ -263,10 +241,9 @@ fn signature(
     call_path: &str,
     input: &JsonSchema,
     output: &JsonSchema,
-    depth: usize,
 ) -> Result<String, PresentationRefusal> {
-    let input_document = SchemaDocument::from_json_schema(input.as_value(), depth)?;
-    let output_document = SchemaDocument::from_json_schema(output.as_value(), depth)?;
+    let input_document = import_schema(input.as_value())?;
+    let output_document = import_schema(output.as_value())?;
     let mut pool = TypescriptDefinitions::new(call_path.split('.'));
     pool.reserve_document(&input_document);
     pool.reserve_document(&output_document);

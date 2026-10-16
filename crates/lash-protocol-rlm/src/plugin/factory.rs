@@ -536,9 +536,7 @@ mod tests {
             behaviour.tool_presenter,
             lash_tool_presenter_api::RecordedToolPresenter {
                 id: "lash.tools.typescript.v1".to_owned(),
-                config: serde_json::json!({
-                    "schema_depth": 8
-                }),
+                config: serde_json::json!({}),
             },
             "the record is the admitted config whole, not the keys the host stated"
         );

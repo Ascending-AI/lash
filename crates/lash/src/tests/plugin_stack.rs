@@ -481,7 +481,7 @@ fn shipped_tool_presenters_have_no_authored_examples() {
                 .get("examples")
                 .is_none()
         );
-        for field in ["example_limit", "example_chars", "examples"] {
+        for field in ["example_limit", "example_chars", "examples", "schema_depth"] {
             let mut legacy = config.clone();
             legacy[field] = serde_json::json!(0);
             let refused = presenter
@@ -498,57 +498,25 @@ fn shipped_tool_presenters_have_no_authored_examples() {
     }
 }
 
-/// D-DEFAULTS2: a standard session's tool docs and catalogue advertisements
-/// use the host's non-default presentation values: the standard presenter's
-/// config, admitted over its standard one. Exhausted schema import budgets
-/// refuse with a typed cause instead of silently widening the contract.
+/// A host's catalogue vocabulary and zero disclosure limits are honored.
+#[cfg(feature = "rlm")]
 #[test]
-fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
-    let definition = crate::tools::ToolDefinition::raw(
-        "display", "display", "display contract",
-        serde_json::json!({"type":"object", "properties":{"nested":{"type":"object", "properties":{"deep":{"type":"string"}}}}}),
-        serde_json::json!({"type":"string"}),
-    ).expect("schemas").with_execution(std::time::Duration::from_secs(30));
-    let catalog = crate::plugins::ToolCatalog::from_tool_definitions(vec![definition]);
-    let mut host = crate::plugins::StandardProtocolConfig::standard();
-    host.tool_presentation = serde_json::json!({ "schema_depth": 4 });
-    host.tool_docs(&catalog).expect("the selected presentation");
-    assert_eq!(
-        host.recorded_behaviour()
-            .expect("the selected presentation admits")
-            .tool_presenter
-            .config,
-        host.tool_presentation
-    );
-    host.tool_presentation["schema_depth"] = serde_json::json!(0);
-    assert_eq!(
-        host.tool_docs(&catalog)
-            .expect_err("an exhausted import budget must refuse presentation"),
-        crate::tools::PresentationRefusal::Shape {
-            cause: crate::tools::ShapeImportRefusal::ResourceExhausted {
-                resource: "depth".into(),
-                limit: 0,
-            },
-        }
-    );
-    #[cfg(feature = "rlm")]
-    {
-        let preview = crate::tools::catalogue_preview(
-            [crate::tools::CataloguePreviewEntry::new(
-                ["tools", "hidden_module"],
-                "hidden_call",
-            )],
-            &crate::tools::CataloguePreviewOptions {
-                title: "Host catalogue".into(),
-                search_call_path: "tools.find".into(),
-                module_limit: 0,
-                call_name_limit: 0,
-            },
-        )
-        .expect("nonempty catalogue");
-        assert!(preview.contains("Host catalogue") && preview.contains("tools.find"));
-        assert!(!preview.contains("hidden_module") && !preview.contains("hidden_call"));
-    }
+fn facade_catalogue_preview_honors_host_vocabulary_and_limits() {
+    let preview = crate::tools::catalogue_preview(
+        [crate::tools::CataloguePreviewEntry::new(
+            ["tools", "hidden_module"],
+            "hidden_call",
+        )],
+        &crate::tools::CataloguePreviewOptions {
+            title: "Host catalogue".into(),
+            search_call_path: "tools.find".into(),
+            module_limit: 0,
+            call_name_limit: 0,
+        },
+    )
+    .expect("nonempty catalogue");
+    assert!(preview.contains("Host catalogue") && preview.contains("tools.find"));
+    assert!(!preview.contains("hidden_module") && !preview.contains("hidden_call"));
 }
 
 /// D-DEFAULTS2: the facade's RLM presentation reaches the running worker and

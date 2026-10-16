@@ -193,21 +193,18 @@ fn a_schema_presentation_refusal_keeps_its_presenter_and_code_when_recorded() {
             "tool:lookup",
             "lookup",
             "Find a record.",
-            serde_json::json!({"type": "object", "properties": {"query": {"type": "string"}}}),
+            serde_json::json!({"allOf": [{"type": "string"}, {"type": "number"}]}),
             serde_json::json!({"type": "string"}),
         )
         .expect("admitted schemas")
         .with_execution(std::time::Duration::from_secs(30)),
     ]);
-    let config = StandardProtocolConfig {
-        tool_presentation: serde_json::json!({"schema_depth": 0}),
-        ..StandardProtocolConfig::default()
-    };
+    let config = StandardProtocolConfig::default();
     let refusal = config
         .tool_docs(&catalog)
-        .expect_err("the schema exceeds the presenter's depth");
+        .expect_err("the presenter cannot represent this assertion");
     for (refusal, code) in [
-        (refusal, "shape.recursion_depth"),
+        (refusal, "shape.unsupported_construct"),
         (
             PresentationRefusal::Custom {
                 code: "host.policy.denied".to_owned(),

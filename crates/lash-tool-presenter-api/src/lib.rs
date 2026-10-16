@@ -33,6 +33,25 @@ pub use projection::{inline_schema, inline_shape};
 
 pub use wrap::WrappedToolPresenter;
 
+/// Import a complete tool schema for graph presentation. Named references stay
+/// edges; anonymous nesting never becomes an unconstrained type or a refusal
+/// merely because it crosses a projection depth. The existing 10,000-node
+/// import budget still refuses excessive work with `shape.node_limit`.
+///
+/// ```
+/// let document = lash_tool_presenter_api::import_schema(&serde_json::json!({"type":"string"}))?;
+/// assert_eq!(document.roots.len(), 1);
+/// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+/// ```
+///
+/// # Errors
+/// Returns the importer's typed refusal for unsupported schemas or node exhaustion.
+pub fn import_schema(
+    schema: &Value,
+) -> Result<lash_tool_shape::SchemaDocument, lash_tool_shape::ShapeImportRefusal> {
+    lash_tool_shape::SchemaDocument::from_json_schema(schema, usize::MAX)
+}
+
 /// The default one-line request notice for an attachment a model cannot read.
 /// Hosts may reuse this in their mode presenter, or supply their own wording.
 /// The label (or MIME when unlabelled) is flattened to keep the notice one line.
@@ -375,9 +394,9 @@ impl Eq for ToolPresenterSlot {}
 /// key. `raw` must be an object.
 ///
 /// ```rust,ignore
-/// // A presenter whose config is `{ schema_depth }`, standard 8.
+/// // A presenter whose config is `{ max_items }`, standard 8.
 /// let admitted = admit_over_standard("host.tools.v1", &MyConfig::standard(), &json!({}))?;
-/// assert_eq!(admitted, json!({ "schema_depth": 8 }));
+/// assert_eq!(admitted, json!({ "max_items": 8 }));
 /// ```
 ///
 /// # Errors
@@ -427,4 +446,36 @@ pub fn read_config<C: serde::de::DeserializeOwned>(
     config: &Value,
 ) -> Result<C, PresentationRefusal> {
     C::deserialize(config).map_err(|error| PresentationRefusal::config(presenter, error))
+}
+
+#[cfg(test)]
+mod tests {
+    /// S1: removing projection depth preserves the existing work bound and
+    /// refuses with the stable resource code instead of an unconstrained type.
+    #[test]
+    fn complete_schema_import_refuses_node_exhaustion_with_its_typed_code() {
+        let properties = (0..10_000)
+            .map(|index| {
+                (
+                    format!("field{index}"),
+                    serde_json::json!({"type": "string"}),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let refusal = super::import_schema(&serde_json::json!({
+            "type": "object", "properties": properties
+        }))
+        .expect_err("the root and fields exceed the existing node budget");
+        assert_eq!(
+            refusal,
+            lash_tool_shape::ShapeImportRefusal::ResourceExhausted {
+                resource: "nodes".into(),
+                limit: 10_000,
+            }
+        );
+        assert_eq!(
+            super::PresentationRefusal::from(refusal).code(),
+            "shape.node_limit"
+        );
+    }
 }

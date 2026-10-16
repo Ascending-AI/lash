@@ -386,3 +386,70 @@ fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
         );
     }
 }
+
+/// S1 / FIG-6552: select options ten containers deep keep their exact field
+/// types in discovered signatures, whether anonymous or behind a named edge.
+#[test]
+fn discovered_signatures_preserve_ten_level_select_options_in_every_dialect() {
+    use lash_tool_presenter_api::ToolPresenter;
+
+    for named in [false, true] {
+        let option = json!({
+            "type": "object",
+            "properties": {"value": {"type": "string"}, "label": {"type": "string"}},
+            "required": ["value", "label"],
+            "additionalProperties": false
+        });
+        let mut input = json!({"type": "array", "items": if named {
+            json!({"$ref": "#/$defs/Option"})
+        } else {
+            option.clone()
+        }});
+        for _ in 0..9 {
+            input = json!({
+                "type": "object", "properties": {"child": input},
+                "required": ["child"], "additionalProperties": false
+            });
+        }
+        if named {
+            input["$defs"] = json!({"Option": option});
+        }
+        let input = lash_core::JsonSchema::admit(input).expect("valid deep select options");
+        let output = lash_core::JsonSchema::admit(json!({"type": "string"})).unwrap();
+        for (dialect, field_type) in [
+            (crate::dialect::CellDialect::typescript(), "string"),
+            (crate::dialect::CellDialect::python(), "str"),
+        ] {
+            let signature = discovered_tool_signature(
+                &dialect,
+                &json!({}),
+                &ToolBinding::from_path("inbox.send_item"),
+                &input,
+                &output,
+            )
+            .expect("a deep schema is spelled completely");
+            for field in ["value", "label"] {
+                assert!(
+                    signature.contains(&format!("{field}: {field_type}"))
+                        || signature.contains(&format!("\"{field}\": {field_type}")),
+                    "{signature}"
+                );
+            }
+            assert!(!signature.contains("unknown"), "{signature}");
+            assert!(!signature.contains("Any"), "{signature}");
+        }
+        let presenter = lash_tool_presenter_standard::StandardToolPresenter;
+        let signature = presenter
+            .tool_signature(
+                "inbox.send_item",
+                &input,
+                &output,
+                &presenter.admit_config(&json!({})).unwrap(),
+            )
+            .expect("a deep compact signature is spelled completely");
+        for field in ["value", "label"] {
+            assert!(signature.contains(&format!("{field}: str")), "{signature}");
+        }
+        assert!(!signature.contains("any"), "{signature}");
+    }
+}
