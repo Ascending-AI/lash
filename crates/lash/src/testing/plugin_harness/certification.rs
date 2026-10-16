@@ -3,13 +3,15 @@ use super::*;
 use crate::plugins::diagnostics::*;
 use crate::plugins::{CallbackSlot, InstalledInventory, PluginCallbackIdentity, RegistryKind};
 
-/// The four durability contracts, reported independently for every callback.
+/// The applicable durability or observation contracts for each callback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PluginLaw {
     ReplayInvokesNoRecordedCallback,
     StateSurvivesReopen,
     UnservedIsUnclaimable,
     RecordedDecisionsStayAttributable,
+    /// An advisory observer completes the lifecycle scenario successfully.
+    LifecycleObserverCompletes,
 }
 impl std::fmt::Display for PluginLaw {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -18,6 +20,7 @@ impl std::fmt::Display for PluginLaw {
             Self::StateSurvivesReopen => "STATE-SURVIVES-REOPEN",
             Self::UnservedIsUnclaimable => "UNSERVED-IS-UNCLAIMABLE",
             Self::RecordedDecisionsStayAttributable => "RECORDED-DECISIONS-STAY-ATTRIBUTABLE",
+            Self::LifecycleObserverCompletes => "LIFECYCLE-OBSERVER-COMPLETES",
         })
     }
 }
@@ -139,6 +142,7 @@ pub trait PluginScenario: Send + Sync {
     fn input(&self) -> crate::TurnInput;
     fn responses(&self) -> Vec<crate::provider::LlmResponse>;
     /// Completed model answers before the crash cut at the next model call.
+    /// Lifecycle observer scenarios instead run through turn completion.
     fn pause_after_responses(&self) -> usize;
 }
 
@@ -193,6 +197,23 @@ pub async fn certify_plugin_with(
         let scenario = scenarios
             .iter()
             .find(|scenario| scenario.callback() == callback);
+        // Lifecycle observers are advisory, post-commit notifications. They
+        // publish no decision or state and have no recorded crash cut. Prove
+        // completion through the real engine instead of demanding replay
+        // evidence that their contract does not promise (ADR 0132 §4).
+        if slot == CallbackSlot::RuntimeEvent {
+            let result = if let Some(reason) = scenario.and_then(|s| s.availability().err()) {
+                unavailable(reason)
+            } else {
+                lifecycle_observer_law(Arc::clone(&factory), &policy, &callback, scenario).await
+            };
+            reports.push(PluginLawReport {
+                callback,
+                law: PluginLaw::LifecycleObserverCompletes,
+                result,
+            });
+            continue;
+        }
         if let Some(reason) = scenario.and_then(|scenario| scenario.availability().err()) {
             for law in [
                 PluginLaw::ReplayInvokesNoRecordedCallback,
@@ -379,6 +400,54 @@ pub async fn certify_plugin_with(
         });
     }
     Ok(PluginCertification { inventory, reports })
+}
+// Session materialization delivers SessionRestored, then the engine sends
+// TurnFinalized after committing a scripted turn. The caller's answer alone
+// is insufficient: wait for the counted observer's own completion receipt.
+async fn lifecycle_observer_law(
+    factory: Arc<dyn PluginFactory>,
+    policy: &HostPolicy,
+    callback: &PluginCallbackIdentity,
+    scenario: Option<&Arc<dyn PluginScenario>>,
+) -> PluginLawResult {
+    let outcome = tokio::time::timeout(policy.scenario_timeout, async {
+        let mut harness = PluginHarness::new(factory, policy.clone()).await?;
+        if let Some(scenario) = scenario {
+            scenario.prepare(&mut harness).await?;
+            // Setup turns may answer before their advisory observers finish.
+            // End that runtime before starting fresh completion evidence, so
+            // even a late setup notification cannot certify this turn.
+            harness.crash();
+            harness.counts = CallbackCounts::default();
+            harness.reopen().await?;
+            harness.script(scenario.responses());
+        } else {
+            harness
+                .create(crate::plugins::PluginOptions::default())
+                .await?;
+            harness.script([text_response("certified")]);
+        }
+        let input = scenario.map_or_else(
+            || crate::TurnInput::text("certify lifecycle observer"),
+            |scenario| scenario.input(),
+        );
+        harness.send(input).await?.output().await?;
+        harness
+            .counts
+            .lifecycle_completed(callback)
+            .await
+            .map_err(PluginHarnessError::Worker)
+    })
+    .await;
+    match outcome {
+        Ok(Ok(())) => PluginLawResult::Passed,
+        Ok(Err(error)) => PluginLawResult::Failed {
+            message: format!("lifecycle observer scenario failed: {error}"),
+        },
+        Err(_) => PluginLawResult::Failed {
+            message: "lifecycle observer did not complete within the host scenario timeout".into(),
+        },
+    }
 }
 // Resolver laws require resolution, not a callable placeholder under the same
 // provider identity. Check both counters for replay when it also executes tools.

@@ -35,14 +35,22 @@ assert_eq!(report.verdict(), lash::testing::PluginCertificationVerdict::Full);
 
 Enable the facade's `testing` feature in a development dependency.
 `certify_plugin` enumerates the factory's callbacks from `InstalledInventory`
-and reports each of these laws for each callback:
+and reports the applicable laws for each callback:
 
 | Law | Evidence |
 | --- | --- |
 | REPLAY-INVOKES-NO-RECORDED-CALLBACK | Counting adapters on the recipe's binders, a recorded cut, runtime destruction and continuation of the same accepted input. |
 | STATE-SURVIVES-REOPEN | Published namespaces, including unfinished-turn rows, compared after fresh materialization under the host's `RuntimeDataLimits`. |
 | UNSERVED-IS-UNCLAIMABLE | A session actor owing the declared callback token, a node lacking that registration, `plugin_diagnostics().explain_claimability` and the real SQL claim predicate. |
+| LIFECYCLE-OBSERVER-COMPLETES | An automatic SQLite session delivers restoration and finalized-turn events; an explicit completion receipt checks the observer returned successfully within the host scenario timeout. |
 | RECORDED-DECISIONS-STAY-ATTRIBUTABLE | `plugin_diagnostics().attribute` reads retained binding/presentation decisions after removing the factory. |
+
+A `lifecycle().on_event` observer receives the lifecycle completion law and
+UNSERVED-IS-UNCLAIMABLE. Its advisory notifications publish no recorded decision
+or state, so the replay, publication and attribution laws have no subject.
+No author scenario is required for observation; `certify_plugin_with` can supply
+one when the observer needs configuration or supporting services. Other
+contributions retain their scenario and publication requirements.
 
 An executed law is `Passed` or `Failed` with a readable message.
 `NotApplicable` has a typed reason for a law with no subject, while

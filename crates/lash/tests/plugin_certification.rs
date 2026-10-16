@@ -1,4 +1,4 @@
-//! FIG-6093's authoring gate: real SQLite sessions, four laws and explicit gaps.
+//! The authoring gate: real SQLite sessions, callback laws and explicit gaps.
 #[path = "../examples/plugin_authoring.rs"]
 mod examples;
 use lash::plugins::*;
@@ -877,6 +877,135 @@ fn http_lookup(stateless: bool) -> Result<Arc<dyn PluginFactory>, Box<dyn std::e
         },
     )))
 }
+/// FIG-6551: advisory lifecycle observers are exercised without weakening
+/// the recorded tool laws or requiring an author scenario for observation.
+#[tokio::test]
+async fn tools_with_a_lifecycle_observer_certify_full() {
+    use std::sync::Mutex;
+
+    struct Lookup;
+    #[lash::async_trait]
+    impl lash::tools::StaticToolExecute for Lookup {
+        async fn execute(&self, _: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+            lash::tools::ToolOutcome::ok(serde_json::json!("sunny")).into()
+        }
+    }
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let mut entries = PluginRegistrar::new("weather");
+    entries
+        .tools()
+        .provider(lash::tool_provider_key!("http"), |_, _| {
+            let definition = lash::tools::ToolDefinition::raw(
+                "lookup",
+                "lookup",
+                "Fetch the forecast",
+                serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+                serde_json::json!({"type":"string"}),
+            )
+            .unwrap()
+            .with_execution(std::time::Duration::from_secs(1));
+            Ok(Arc::new(lash::tools::StaticToolProvider::new(
+                vec![definition],
+                Lookup,
+            )))
+        })
+        .unwrap();
+    entries
+        .lifecycle()
+        .on_event(lash::hook_key!("settle"), {
+            let observed = Arc::clone(&observed);
+            move |_, _| {
+                let observed = Arc::clone(&observed);
+                Ok(Arc::new(move |event| {
+                    let observed = Arc::clone(&observed);
+                    Box::pin(async move {
+                        let name = match event {
+                            PluginLifecycleEvent::SessionRestored(_) => "restored",
+                            PluginLifecycleEvent::TurnFinalized(_) => "finalized",
+                            PluginLifecycleEvent::SessionConfigChanged(_) => "config-changed",
+                        };
+                        observed.lock().unwrap().push(name);
+                        Ok(())
+                    })
+                }))
+            }
+        })
+        .unwrap();
+    let factory = Arc::new(PluginRecipeFactory::new(
+        PluginDeclaration::initial("weather"),
+        PluginRecipe::from_registrar("weather", entries).stateless(),
+    ));
+    let scenario: Arc<dyn PluginScenario> = Arc::new(CallScenario {
+        callback: PluginCallbackIdentity::tool_provider("weather", "http"),
+        tool: "lookup",
+        args: serde_json::json!({}),
+        support: None,
+    });
+    let report = certify_plugin_with(factory, HostPolicy::standard(), &[scenario])
+        .await
+        .unwrap();
+    assert_eq!(
+        report.verdict(),
+        PluginCertificationVerdict::Full,
+        "{:#?}",
+        report.reports
+    );
+    assert!(
+        report.reports.iter().any(|law| {
+            law.callback.key == "runtime_event:settle"
+                && law.law == PluginLaw::LifecycleObserverCompletes
+                && law.result == PluginLawResult::Passed
+        }),
+        "the observer has its own completed certification law"
+    );
+    let observed = observed.lock().unwrap();
+    assert!(
+        observed.contains(&"restored"),
+        "the observer saw session materialization"
+    );
+    assert!(
+        observed.contains(&"finalized"),
+        "the observer completed a finalized turn"
+    );
+}
+
+/// LIFECYCLE-OBSERVER-COMPLETES: advisory runtime failures cannot veto a
+/// turn, but certification must report the observer's failure under its key.
+#[tokio::test]
+async fn a_failing_lifecycle_observer_fails_certification() {
+    let factory = Arc::new(StaticPluginFactory::new(
+        PluginDeclaration::initial("broken-observer"),
+        PluginSpec::new().with_runtime_event(
+            lash::hook_key!("settle"),
+            Arc::new(|event| {
+                Box::pin(async move {
+                    if matches!(event, PluginLifecycleEvent::TurnFinalized(_)) {
+                        tokio::task::yield_now().await;
+                        Err(PluginError::Session("settle sink unavailable".into()))
+                    } else {
+                        Ok(())
+                    }
+                })
+            }),
+        ),
+    ));
+    let report = certify_plugin(factory).await.unwrap();
+    assert_eq!(
+        report.verdict(),
+        PluginCertificationVerdict::Failed,
+        "{:#?}",
+        report.reports
+    );
+    let failure = report
+        .failures()
+        .next()
+        .expect("the observer failure is reported");
+    assert_eq!(failure.callback.owner, "broken-observer");
+    assert_eq!(failure.callback.key, "runtime_event:settle");
+    assert_eq!(failure.law, PluginLaw::LifecycleObserverCompletes);
+    assert!(failure.to_string().contains("settle sink unavailable"));
+}
+
 async fn certify_http_lookup(
     stateless: bool,
 ) -> Result<PluginCertification, Box<dyn std::error::Error>> {

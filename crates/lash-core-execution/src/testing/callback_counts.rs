@@ -10,24 +10,56 @@ use std::sync::{Arc, Mutex};
 
 /// Counts callback entries, not factory construction or metadata inspection.
 #[derive(Clone, Default)]
-pub struct CallbackCounts(Arc<Mutex<Entries>>);
+pub struct CallbackCounts(Arc<Counters>);
+#[derive(Default)]
+struct Counters {
+    entries: Mutex<Entries>,
+    lifecycle_completed: tokio::sync::Notify,
+}
+#[derive(Default)]
+struct LifecycleCompletion {
+    finalized: bool,
+    error: Option<String>,
+}
 #[derive(Default)]
 struct Entries {
     callbacks: BTreeMap<PluginCallbackIdentity, u64>,
     resolutions: BTreeMap<PluginCallbackIdentity, u64>,
+    lifecycle: BTreeMap<PluginCallbackIdentity, LifecycleCompletion>,
 }
 impl CallbackCounts {
     pub fn snapshot(&self) -> BTreeMap<PluginCallbackIdentity, u64> {
-        self.0.lock_recover().callbacks.clone()
+        self.0.entries.lock_recover().callbacks.clone()
     }
     /// Resolution entries, separate from prepare/execute on the selected provider.
     /// A registered resolver has a zero entry even before it is exercised.
     pub fn resolution_snapshot(&self) -> BTreeMap<PluginCallbackIdentity, u64> {
-        self.0.lock_recover().resolutions.clone()
+        self.0.entries.lock_recover().resolutions.clone()
+    }
+    /// Wait for this observer to complete a finalized-turn notification, or
+    /// return its first lifecycle failure. Entry alone is not completion;
+    /// advisory observers may still be running after the caller's answer.
+    pub async fn lifecycle_completed(
+        &self,
+        callback: &PluginCallbackIdentity,
+    ) -> Result<(), String> {
+        loop {
+            let notified = self.0.lifecycle_completed.notified();
+            if let Some(completion) = self.0.entries.lock_recover().lifecycle.get(callback) {
+                if let Some(error) = &completion.error {
+                    return Err(error.clone());
+                }
+                if completion.finalized {
+                    return Ok(());
+                }
+            }
+            notified.await;
+        }
     }
     fn entered(&self, callback: &PluginCallbackIdentity) {
         *self
             .0
+            .entries
             .lock_recover()
             .callbacks
             .entry(callback.clone())
@@ -59,10 +91,34 @@ impl CallbackCounts {
             assistant_stream_hooks,
             assistant_response_hooks,
             assistant_stream_finished_hooks,
-            runtime_event_hooks,
             presentation_steps,
             cell_failure_feedback
         );
+        for registered in &mut contributions.runtime_event_hooks {
+            let callback = registered.identity.clone();
+            let inner = Arc::clone(&registered.hook);
+            let counts = self.clone();
+            registered.hook = Arc::new(move |event| {
+                counts.entered(&callback);
+                let finalized = matches!(event, PluginLifecycleEvent::TurnFinalized(_));
+                let future = inner(event);
+                let callback = callback.clone();
+                let counts = counts.clone();
+                Box::pin(async move {
+                    let result = future.await;
+                    {
+                        let mut entries = counts.0.entries.lock_recover();
+                        let completion = entries.lifecycle.entry(callback).or_default();
+                        completion.finalized |= finalized;
+                        if let Err(error) = &result {
+                            completion.error.get_or_insert_with(|| error.to_string());
+                        }
+                    }
+                    counts.0.lifecycle_completed.notify_waiters();
+                    result
+                })
+            });
+        }
         if let Some(registered) = &mut contributions.presentation_presenter {
             let inner = Arc::clone(&registered.hook);
             let counts = self.clone();
@@ -82,6 +138,7 @@ impl CallbackCounts {
         if let Some(registered) = &mut contributions.deferred_provider {
             let callback = registered.identity.callback_identity();
             self.0
+                .entries
                 .lock_recover()
                 .resolutions
                 .entry(callback.clone())
@@ -180,6 +237,7 @@ impl crate::DeferredToolProvider for CountedProvider<dyn crate::DeferredToolProv
         *self
             .counts
             .0
+            .entries
             .lock_recover()
             .resolutions
             .entry(self.callback.clone())
