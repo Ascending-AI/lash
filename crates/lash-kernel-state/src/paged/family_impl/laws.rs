@@ -304,16 +304,27 @@ fn a_frozen_capture_ignores_later_live_writes() {
     );
 }
 #[test]
-fn a_swept_family_ordinal_never_resurrects() {
+fn a_swept_child_never_resurrects_while_its_family_stays_live() {
     let (mut heap, pages) = fresh();
-    let live = heap
+    let child = heap
         .allocate_object(ObjectInit::List(vec![int(1)]))
+        .expect("child");
+    let live = heap
+        .allocate_object(ObjectInit::List(vec![Value::List(child)]))
         .expect("live");
     let frozen = heap.freeze(&Value::List(live), true).expect("freeze");
-    let id = list(heap.instantiate(&frozen).expect("deliver"));
-    heap.list_write(id, 0, int(2)).expect("override");
+    let root = list(heap.instantiate(&frozen).expect("deliver"));
+    let child = list(
+        heap.list_get(root, 0)
+            .expect("child read")
+            .expect("child present"),
+    );
+    assert_eq!(root.family, child.family);
+    assert_ne!(root.ordinal, child.ordinal);
+    heap.list_write(child, 0, int(2)).expect("override child");
+    heap.list_write(root, 0, int(3)).expect("detach child");
     heap.sweep(&SweepSet {
-        entities: vec![id],
+        entities: vec![child],
         ended_task_results: Vec::new(),
     })
     .expect("sweep");
@@ -325,7 +336,14 @@ fn a_swept_family_ordinal_never_resurrects() {
     )
     .expect("open");
     reopened.set_family_base(Box::new(FrozenBase::default()));
-    assert_eq!(reopened.kind(id).expect("membership"), None);
+    assert_eq!(
+        reopened.kind(root).expect("live family root"),
+        Some(ObjectKind::List)
+    );
+    assert!(
+        matches!(reopened.list_get(root, 0).expect("retained override"), Some(Value::Int(IntRef::Inline(n))) if n == 3.into())
+    );
+    assert_eq!(reopened.kind(child).expect("dead child membership"), None);
 }
 #[test]
 fn a_lazy_result_length_read_instantiates_nothing() {

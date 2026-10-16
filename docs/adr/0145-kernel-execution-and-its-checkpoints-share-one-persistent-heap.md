@@ -407,7 +407,7 @@ Laws: `lash-kernel-state`'s `paged::family_impl::laws`
 (`a_noop_next_cell_copies_nothing`, `a_fork_isolates_later_mutations`,
 `a_frozen_capture_ignores_later_live_writes`,
 `a_lazy_result_length_read_instantiates_nothing`,
-`data_only_carry_reads_no_binding`), `paged::laws::census::a_swept_family_ordinal_never_resurrects`
+`data_only_carry_reads_no_binding`), `paged::laws::lifecycle::a_swept_child_never_resurrects_while_its_family_stays_live`
 and `lash-kernel-dialect`'s `saved::laws`.
 
 ### 10. Host graph reads stop at heap pages

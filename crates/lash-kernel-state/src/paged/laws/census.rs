@@ -1,7 +1,6 @@
-//! S7 laws: certified U, checked arithmetic and permanent family membership.
-use crate::paged::MembershipRun;
+//! S7 laws: certified U and checked arithmetic.
 use crate::paged::census::*;
-use crate::paged::census_impl::{Census, FamilyMembership, TraceLimits};
+use crate::paged::census_impl::{Census, TraceLimits};
 use lash_kernel_doc::TaskId;
 use lash_kernel_doc::heap::{EntityId, FamilyId, HeapFault, Identity, LogicalBytes, Value};
 
@@ -173,45 +172,4 @@ fn last_and_nonlast_alias_removal_keep_u_an_upper_bound() {
         RefinedDecision::Granted(_)
     ));
     assert!(!graph.present);
-}
-
-#[test]
-fn a_swept_family_ordinal_never_resurrects() {
-    let mut membership = FamilyMembership::fresh(8);
-    let fork = membership.clone();
-    for ordinal in [3, 2, 4, 0, 7, 3] {
-        membership.sweep(ordinal).unwrap();
-    }
-    let restored = FamilyMembership::from_runs(8, membership.runs().to_vec()).unwrap();
-    for ordinal in 0..9 {
-        assert_eq!(restored.member(ordinal), [1, 5, 6].contains(&ordinal));
-        assert_eq!(fork.member(ordinal), ordinal < 8);
-    }
-    // A frozen default is consulted only for members, across re-open too.
-    let mut defaults_read = 0;
-    for ordinal in 0..8 {
-        if restored.member(ordinal) {
-            defaults_read += 1;
-        }
-    }
-    assert_eq!(defaults_read, 3);
-    assert!(FamilyMembership::from_runs(1, vec![]).is_err());
-    assert!(
-        FamilyMembership::from_runs(
-            u64::MAX,
-            vec![
-                MembershipRun {
-                    start: 0,
-                    len: u64::MAX,
-                    live: true
-                },
-                MembershipRun {
-                    start: u64::MAX,
-                    len: 1,
-                    live: false
-                }
-            ]
-        )
-        .is_err()
-    );
 }

@@ -1,10 +1,8 @@
 //! Pressure-only accounting. A certificate certifies the allocated census,
 //! including garbage, rather than the cache or the last marked live set.
 
-mod membership;
 mod trace;
 
-pub use membership::FamilyMembership;
 pub use trace::{TraceLimits, TraceStats};
 
 use lash_kernel_doc::heap::LogicalBytes;

@@ -745,11 +745,11 @@ and `HeapFault`.
 
 Laws:
 
-- Kernel unit, `crates/lash-kernel-vm/src/laws/lifecycle.rs`:
+- Kernel unit, `crates/lash-kernel-state/src/paged/family_impl/laws.rs`:
   - `a_noop_next_cell_copies_nothing`
   - `a_fork_isolates_later_mutations`
   - `a_frozen_capture_ignores_later_live_writes`
-  - `a_swept_family_ordinal_never_resurrects`
+  - `a_swept_child_never_resurrects_while_its_family_stays_live`
   - `a_lazy_result_length_read_instantiates_nothing`
   - `data_only_carry_reads_no_binding`
 - Kernel unit, `crates/lash-kernel-dialect/src/saved/laws.rs`:
