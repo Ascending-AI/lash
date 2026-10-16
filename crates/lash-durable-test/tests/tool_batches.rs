@@ -1225,17 +1225,23 @@ fn rows(answered: &served::Answered) -> Vec<(u64, String, bool)> {
         .unwrap_or_default()
 }
 
-/// Protocol admission refusals present the projected failure object
-/// (FIG-6353); the call ledger retains the typed outcome (ADR 0071).
+/// Protocol admission refusals retain the typed failure independently of
+/// the mode's presented words (ADR 0071, FIG-6518).
 fn assert_runtime_refusal(
+    output: &lash::TurnOutput,
     answered: &served::Answered,
     class: lash_sansio::ToolFailureClass,
     code: &str,
 ) {
-    let failure: lash_sansio::ToolFailure = serde_json::from_value(answered.value())
-        .unwrap_or_else(|error| {
-            panic!("a runtime refusal projects its failure: {error}: {answered:?}")
-        });
+    let call = output
+        .result
+        .tool_calls
+        .iter()
+        .find(|call| Some(&call.call_id) == answered.call_id.as_ref())
+        .unwrap_or_else(|| panic!("the refusal has a typed call record: {answered:?}"));
+    let lash_core::ToolCallOutcome::Failure(failure) = &call.output.outcome else {
+        panic!("the refusal is a typed failure: {call:?}");
+    };
     assert_eq!(failure.class, class);
     assert_eq!(failure.code, code);
     assert_eq!(failure.source, lash_sansio::ToolFailureSource::Runtime);
@@ -1374,6 +1380,7 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
         let wrapper = answered_under(&view, refused);
         assert_eq!(wrapper.len(), 1, "{context}: `{refused}` answers once");
         assert_runtime_refusal(
+            &output,
             &wrapper[0],
             lash_sansio::ToolFailureClass::InvalidRequest,
             "invalid_batch",
@@ -1446,10 +1453,20 @@ async fn batch_admission_and_identity_contract(tier: Tier) {
     let wrapper = answered_under(&view, "w");
     assert_eq!(wrapper.len(), 1);
     // With no sugar, ordinary tool dispatch refuses the unavailable tool
-    // and presents its failure through ModelToolReturn::from_output.
-    assert_eq!(
-        wrapper[0].content,
-        "[Tool execution failed]\nTool is unavailable in this session",
+    // and records its typed failure independently of the presented words.
+    let status = view
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .find(|part| {
+            part.kind() == lash_core::PartKind::ToolResult
+                && part.call_id() == wrapper[0].call_id.as_ref()
+        })
+        .and_then(|part| part.tool_result_status())
+        .expect("typed wrapper result");
+    assert_eq!(status, lash_sansio::ToolCallStatus::Failure);
+    assert!(
+        matches!(&output.result.tool_calls[0].output.outcome, lash_core::ToolCallOutcome::Failure(failure) if failure.code == "tool_unavailable")
     );
     assert!(
         rows(&wrapper[0]).is_empty(),

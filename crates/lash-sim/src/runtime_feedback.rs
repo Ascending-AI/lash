@@ -497,6 +497,7 @@ fn feedback_tool_results(wire: Wire) {
             .collect::<Vec<_>>();
         let results = (0..count)
             .map(|i| B::ToolResult {
+                status: lash_sansio::ToolCallStatus::Success,
                 call_id: format!("call{i}"),
                 tool_name: Some("lookup".into()),
                 content: vec![lash_core::facade_support::ModelToolReturnPart::text(

@@ -1052,35 +1052,6 @@ fn reassemble_standard_response(
     (message_parts, calls)
 }
 
-/// Build the `CompletedToolCall` for a call refused before dispatch. The
-/// refusal is typed (`output`) and the model reads its projected JSON
-/// through `model_return`, retaining its code, message and projected evidence.
-fn refused_tool_call_completion(
-    call_id: lash_core::ToolCallId,
-    provider_call_id: Option<String>,
-    tool_name: String,
-    args: Value,
-    output: lash_core::ToolCallOutput,
-    replay: Option<ProviderReplayMeta>,
-) -> CompletedToolCall {
-    let model_return = lash_core::facade_support::ModelToolReturn {
-        tool_name: tool_name.clone(),
-        parts: vec![lash_core::facade_support::ModelToolReturnPart::Text {
-            text: output.value_for_projection().to_string(),
-        }],
-    };
-    CompletedToolCall {
-        call_id,
-        provider_call_id,
-        tool_name,
-        args,
-        output,
-        model_return,
-        intent_outcomes: Vec::new(),
-        replay,
-    }
-}
-
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         if let Err(refusal) = finish_available(&ctx) {
@@ -1229,16 +1200,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         let refused = round
             .refused
             .into_iter()
-            .map(|(call, output)| {
-                refused_tool_call_completion(
-                    call.call_id,
-                    call.provider_call_id,
-                    call.tool_name,
-                    call.args,
-                    output,
-                    call.replay,
-                )
-            })
+            .map(|(call, output)| round::refused_tool_call_completion(call, output))
             .collect::<Vec<_>>();
         if !refused.is_empty() {
             let completed = refused;
@@ -1295,7 +1257,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         // one, after its siblings, so the first is the only one.
         let mut candidate = None;
 
-        for outcome in completed {
+        for mut outcome in completed {
+            // The machine synthesizes this refusal after the tool-presenter boundary.
+            if matches!(&outcome.output.outcome, lash_core::ToolCallOutcome::Failure(failure)
+                if failure.cause.as_deref() == Some(&lash_core::ToolFailureCause::ControlSiblingFailed))
+            {
+                outcome.model_return =
+                    render::unexecuted_tool_return(outcome.tool_name.clone(), &outcome.output);
+            }
             if terminal_outcome.is_none() && outcome.output.is_success() {
                 match outcome.output.control.as_ref() {
                     Some(lash_core::ToolControl::Turn { control }) if candidate.is_none() => {
@@ -1569,7 +1538,13 @@ fn tool_result_part(
             )
         })
         .collect();
-    Part::tool_result(String::new(), content, call_id, model_return.tool_name)
+    Part::tool_result(
+        String::new(),
+        content,
+        call_id,
+        model_return.tool_name,
+        model_return.outcome.status(),
+    )
 }
 
 fn conversation_event(message: Message) -> SessionHistoryRecord {

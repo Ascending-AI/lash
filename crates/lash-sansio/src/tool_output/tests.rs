@@ -217,7 +217,7 @@ fn model_tool_return_preserves_attachment_position() {
 }
 
 #[test]
-fn tool_output_failure_projects_raw_attachments_after_failure_text() {
+fn tool_output_failure_carries_its_cause_and_raw_attachments() {
     let attachment = attachment_source("img");
     let output = ToolCallOutput::failure(ToolFailure {
         cause: None,
@@ -232,12 +232,11 @@ fn tool_output_failure_projects_raw_attachments_after_failure_text() {
         )]))),
     });
 
+    let returned = ModelToolReturn::from_output("tool".into(), &output);
+    assert_eq!(returned.outcome, ModelToolOutcome::from(&output.outcome));
     assert_eq!(
-        ModelToolReturn::from_output("tool".into(), &output).parts,
-        vec![
-            ModelToolReturnPart::text("[Tool execution failed]\nboom"),
-            ModelToolReturnPart::Attachment(attachment),
-        ]
+        returned.parts,
+        vec![ModelToolReturnPart::Attachment(attachment)]
     );
 }
 

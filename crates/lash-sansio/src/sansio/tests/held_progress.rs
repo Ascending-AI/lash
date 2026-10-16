@@ -89,6 +89,7 @@ impl ProtocolDriverHandle for MidCallNoteDriver {
                     vec![ModelToolReturnPart::text("ok")],
                     call.call_id,
                     call.tool_name,
+                    crate::ToolCallStatus::Success,
                 )
             })
             .collect::<Vec<_>>();

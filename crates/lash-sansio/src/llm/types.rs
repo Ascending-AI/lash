@@ -481,6 +481,8 @@ pub enum LlmContentBlock {
     /// native result for the call, interleaving attachments where the wire
     /// allows and degrading as documented where it does not.
     ToolResult {
+        /// Terminal execution tag; full failure and cancellation causes stay in the call record.
+        status: crate::ToolCallStatus,
         call_id: String,
         content: Vec<crate::ModelToolReturnPart>,
         /// Name of the tool that produced this result. Some provider replay

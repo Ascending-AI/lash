@@ -4,6 +4,8 @@
 
 - **Attachment Omission**: When the target model of a request cannot accept an attachment in its position, that request carries the mode's short notice in its place. The decision is made per request; history keeps the attachment. _Avoid_: placeholder in stored history, attachment_unavailable blob.
 
+- **Tool Call Outcome**: A tool call ends completed, failed (with a typed Tool Failure) or cancelled. That is a typed fact on the stored return. Model-facing words belong to the mode's presenter; error marking belongs to the provider adapter. _Avoid_: failure label, error text as stored state.
+
 - **Host Application**: Deployable product that selects Lash runtime crates, providers, plugins, Execution Modes, persistence, configuration, and presentation. A Host Application owns those composition choices and releases independently from Lash. _Avoid_: reference host (when repository or release ownership matters), Lash frontend.
 
 - **Session Binding**: Immutable facade-owned pairing created at session open between one exact session id, its admitted store handle, and the lifecycle services that own its controls, attachments, process environment and work ports. Park and resume preserve it; receiving-core provider, plugin, prompt, tracing, and policy configuration remain live. _Avoid_: backend label.

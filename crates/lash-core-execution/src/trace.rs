@@ -420,6 +420,7 @@ fn trace_content_block(block: &LlmContentBlock) -> TraceContentBlock {
             call_id,
             content,
             tool_name,
+            ..
         } => TraceContentBlock::ToolResult {
             call_id: Some(call_id.clone()),
             tool_name: tool_name.clone(),

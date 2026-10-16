@@ -261,6 +261,7 @@ fn final_response(endpoint: Endpoint) -> String {
 struct CaseResult {
     seen: Arc<Mutex<Vec<CapturedCall>>>,
     requests: Vec<Value>,
+    failed: bool,
 }
 
 async fn run_case(
@@ -298,6 +299,11 @@ async fn run_case(
     CaseResult {
         seen,
         requests: transport.request_bodies(),
+        failed: result
+            .result
+            .tool_calls
+            .iter()
+            .any(|call| matches!(&call.output.outcome, lash_core::ToolCallOutcome::Failure(_))),
     }
 }
 
@@ -421,7 +427,7 @@ async fn rejected_before_dispatch(endpoint: Endpoint, arguments: Value, field: &
     assert!(result.seen.lock_recover().is_empty());
     let follow_up = result.requests[1].to_string();
     assert!(
-        follow_up.contains(field) && follow_up.contains("Tool execution failed"),
+        follow_up.contains(field) && result.failed,
         "expected a validation error for {field}, got {follow_up}"
     );
 }
@@ -510,11 +516,7 @@ async fn non_strict_optional_null_is_rejected(endpoint: Endpoint) {
         recorded_arguments(endpoint, &result.requests[1])["limit"],
         Value::Null
     );
-    assert!(
-        result.requests[1]
-            .to_string()
-            .contains("Tool execution failed")
-    );
+    assert!(result.failed);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -213,6 +213,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for NotedDri
                     call.model_return.parts,
                     call.call_id,
                     call.tool_name,
+                    call.model_return.outcome.status(),
                 )
             })
             .collect();

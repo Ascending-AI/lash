@@ -59,10 +59,6 @@ fn a_recipe_rebuilds_exactly_the_recorded_presentation_or_refuses() {
             &appended,
             &failure,
             vec![
-                RecipePart::Text(vec![RecipeText::Slice {
-                    start: 0,
-                    len: "[Tool execution failed]\nthe disk is full".len() as u64,
-                }]),
                 RecipePart::Attachment(attachment()),
                 RecipePart::Text(vec![RecipeText::Literal("free some space".to_owned())]),
             ],
@@ -125,4 +121,32 @@ fn a_tool_output_has_one_canonical_encoding() {
     signed.signed(3);
     let bytes = signed.into_bytes();
     assert!(decode_json(&mut TokenReader::new(&bytes)).is_err());
+}
+
+/// FIG-6518: a stored derivation retains the failure independently of the presented words.
+#[test]
+fn a_stored_failure_derivation_retains_the_typed_cause() {
+    let output = ToolCallOutput::failure(ToolFailure::io("disk", "boom"));
+    let mut presented = ModelToolReturn::from_output("write".into(), &output);
+    presented.parts = vec![ModelToolReturnPart::text("boom")];
+    let recipe = PresentationRecipe::of(&presented, &output);
+    assert_eq!(
+        recipe.parts,
+        vec![RecipePart::Text(vec![RecipeText::Slice {
+            start: 0,
+            len: 4
+        }])]
+    );
+    let stored: PresentationRecipe = decode_body(&encode_body(&recipe)).unwrap();
+    let rebuilt = stored.rebuild(&output).unwrap();
+    let encoded = serde_json::to_value(&rebuilt).unwrap();
+    assert_eq!(encoded["outcome"]["status"], "failure");
+    assert_eq!(encoded["outcome"]["payload"]["code"], "disk");
+    assert_eq!(encoded["outcome"]["payload"]["message"], "boom");
+    assert_eq!(rebuilt.parts, presented.parts);
+    let different = ToolCallOutput::failure(ToolFailure::io("other", "boom"));
+    assert_eq!(
+        stored.rebuild(&different),
+        Err(PresentationRefusal::Mismatch)
+    );
 }

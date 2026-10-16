@@ -1201,6 +1201,7 @@ async fn pressure_retains_the_latest_physical_turn_with_its_tool_pair() {
         vec![lash_sansio::ModelToolReturnPart::text("tool result")],
         call_id,
         "read_file".into(),
+        lash_sansio::ToolCallStatus::Success,
     )]
     .into();
     let assistant = text_message("new-a", MessageRole::Assistant, "new answer");

@@ -238,6 +238,7 @@ impl GoogleOAuthProvider {
                         call_id,
                         content,
                         tool_name,
+                        status,
                     } => {
                         // One function response per call. Its text keeps
                         // `[Attachment N]` markers where attachments sat. On
@@ -249,7 +250,11 @@ impl GoogleOAuthProvider {
                         let mut function_response = TemplateJson::from(json!({
                             "id": call_id,
                             "name": tool_name.clone().unwrap_or_else(|| "tool".to_string()),
-                            "response": { "output": tool_result_text(content) },
+                            "response": if status.is_error() {
+                                json!({ "error": tool_result_text(content) })
+                            } else {
+                                json!({ "output": tool_result_text(content) })
+                            },
                         }));
                         let mut inside = Vec::new();
                         let mut after: Vec<TemplateJson> = Vec::new();

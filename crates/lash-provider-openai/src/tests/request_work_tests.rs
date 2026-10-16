@@ -68,3 +68,55 @@ async fn facade_provider_error_excerpt_policy_reaches_the_transport() {
         assert!(raw.contains("[body bytes:"), "{raw}");
     }
 }
+
+/// FIG-6518: replacing a presenter changes words, never the adapter's error signal.
+#[tokio::test]
+async fn a_host_presenter_replaces_the_body_without_losing_error_marking() {
+    use lash_core::facade_support::{
+        ModelToolReturn, ModelToolReturnPart, ToolPresentationFacts, ToolPresentationInput,
+        ToolPresentationPresenter, ToolResultProjectionContext,
+    };
+    let presenter: ToolPresentationPresenter = Arc::new(|mut input| {
+        Box::pin(async move {
+            input.previous.parts = vec![ModelToolReturnPart::text("host explains recovery")];
+            Ok(input.previous)
+        })
+    });
+    let output = lash_core::ToolCallOutput::failure(lash_core::ToolFailure::new("disk", "boom"));
+    let presented = presenter(ToolPresentationInput {
+        previous: ModelToolReturn::from_output("lookup".into(), &output),
+        facts: Arc::new(ToolPresentationFacts::default()),
+        context: ToolResultProjectionContext {
+            owner: lash_core::RuntimeOwner::Session("presenter".into()),
+            call_id: lash_core::ToolCallId::fixture("call-1"),
+            tool_id: lash_core::ToolId::new("lookup"),
+            tool_name: "lookup".into(),
+            render: None,
+            args: Value::Null,
+            output,
+            duration_ms: 0,
+            artifacts: Arc::new(lash_core::facade_support::NoPresentationArtifacts),
+        },
+    })
+    .await
+    .unwrap();
+    let mut encoded = serde_json::to_value(&presented).unwrap();
+    let fields = encoded.as_object_mut().unwrap();
+    fields.remove("outcome");
+    fields.insert("status".into(), json!(presented.outcome.status()));
+    fields.insert("call_id".into(), json!("call-1"));
+    let parts = fields.remove("parts").unwrap();
+    fields.insert("content".into(), parts);
+    let block = serde_json::from_value(json!({"ToolResult": encoded})).unwrap();
+    let body = OpenAiProvider::new("key")
+        .build_responses_request_body(
+            &request(vec![lash_core::llm::types::LlmMessage::new(
+                lash_core::llm::types::LlmRole::User,
+                vec![block],
+            )]),
+            false,
+        )
+        .unwrap();
+    assert_eq!(body["input"][0]["output"], "Error: host explains recovery");
+    assert!(!body.to_string().contains("[Tool execution failed]"));
+}

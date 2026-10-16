@@ -167,14 +167,21 @@ pub(crate) fn feedback_boundary(msg: &LlmMessage, item_count: usize, start: &mut
 /// result is text only, otherwise the content-item array with its text and
 /// attachments interleaved in the result's order, so an image stays the
 /// tool's output rather than a separate user turn.
-fn function_call_output(content: &[ModelToolReturnPart]) -> TemplateJson {
+fn function_call_output(content: &[ModelToolReturnPart], is_error: bool) -> TemplateJson {
     if content.iter().all(|block| block.attachment().is_none()) {
-        return Value::String(tool_result_text(content).into_owned()).into();
+        let text = tool_result_text(content);
+        return Value::String(if is_error {
+            format!("Error: {text}")
+        } else {
+            text.into_owned()
+        })
+        .into();
     }
+    let marker = is_error.then(|| json!({"type": "input_text", "text": "Error: "}).into());
     TemplateJson::Array(
-        content
-            .iter()
-            .filter_map(|block| match block {
+        marker
+            .into_iter()
+            .chain(content.iter().filter_map(|block| match block {
                 ModelToolReturnPart::Text { text } if text.is_empty() => None,
                 ModelToolReturnPart::Text { text } => {
                     Some(json!({"type": "input_text", "text": text}).into())
@@ -188,7 +195,7 @@ fn function_call_output(content: &[ModelToolReturnPart]) -> TemplateJson {
                     source,
                     lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult,
                 )),
-            })
+            }))
             .collect(),
     )
 }
@@ -368,7 +375,10 @@ fn build_input_group(req: &LlmRequest, group: std::ops::Range<usize>) -> Vec<Tem
                     input.push(item.into());
                 }
                 LlmContentBlock::ToolResult {
-                    call_id, content, ..
+                    call_id,
+                    content,
+                    status,
+                    ..
                 } => {
                     flush_pending_content(
                         &mut pending_content,
@@ -384,7 +394,7 @@ fn build_input_group(req: &LlmRequest, group: std::ops::Range<usize>) -> Vec<Tem
                         TemplateJson::object([
                             ("type", json!("function_call_output").into()),
                             ("call_id", json!(call_id).into()),
-                            ("output", function_call_output(content)),
+                            ("output", function_call_output(content, status.is_error())),
                         ]),
                         &mut feedback_start,
                     );

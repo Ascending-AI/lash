@@ -566,16 +566,13 @@ mod tests {
             .clone()
             .with_raw(serde_json::json!({ "detail": "provider evidence" }));
         assert_eq!(failure.model_text(), "x");
+        let output = crate::ToolCallOutput::failure(failure.clone());
+        let returned = crate::ModelToolReturn::from_output("tool".into(), &output);
         assert_eq!(
-            crate::ModelToolReturn::from_output(
-                "tool".into(),
-                &crate::ToolCallOutput::failure(failure),
-            )
-            .parts,
-            vec![crate::ModelToolReturnPart::text(
-                "[Tool execution failed]\nx"
-            )],
+            returned.outcome,
+            lash_sansio::ModelToolOutcome::Failure(failure)
         );
+        assert!(returned.parts.is_empty());
     }
 
     // -----------------------------------------------------------------------

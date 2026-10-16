@@ -215,6 +215,7 @@ impl OpenAiCompatibleProvider {
                         call_id,
                         content,
                         tool_name,
+                        status,
                     } => {
                         // A `tool` message carries text only: the result's
                         // text keeps `[Attachment N]` markers where its
@@ -243,7 +244,11 @@ impl OpenAiCompatibleProvider {
                         let mut tool_message = json!({
                             "role": "tool",
                             "tool_call_id": call_id,
-                            "content": tool_result_text(content),
+                            "content": if status.is_error() {
+                                format!("Error: {}", tool_result_text(content))
+                            } else {
+                                tool_result_text(content).into_owned()
+                            },
                         });
                         if let Some(name) = tool_name.as_deref()
                             && !name.is_empty()

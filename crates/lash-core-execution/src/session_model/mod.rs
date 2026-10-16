@@ -6,7 +6,31 @@ use crate::llm::types::{LlmEventSender, LlmStreamEvent};
 use crate::provider::{AttachmentCapabilitySnapshot, ProviderHandle, ReasoningSelection};
 use crate::{LlmProfileConfig, LlmProfileKey, LlmProfileUnavailable, LlmProfiles};
 
-pub use lash_sansio::format_tool_output_content;
+/// Formats a tool output for host display and transcripts only.
+/// Model prompts use the mode's presenter and the provider's error marking.
+pub fn format_tool_output_content(output: &crate::ToolCallOutput) -> String {
+    match &output.outcome {
+        crate::ToolCallOutcome::Success(_) => match output.value_for_projection() {
+            serde_json::Value::String(text) => text,
+            other => serde_json::to_string(&other).unwrap_or_else(|_| "null".to_string()),
+        },
+        crate::ToolCallOutcome::Failure(failure) => {
+            let message = failure.model_text();
+            if message.is_empty() {
+                "[Tool execution failed]".into()
+            } else {
+                format!("[Tool execution failed]\n{message}")
+            }
+        }
+        crate::ToolCallOutcome::Cancelled(cancellation) => {
+            if cancellation.message.is_empty() {
+                "[Tool execution cancelled]".into()
+            } else {
+                format!("[Tool execution cancelled]\n{}", cancellation.message)
+            }
+        }
+    }
+}
 pub use lash_sansio::session_model::{
     ConversationRecord, ErrorEnvelope, FailureCode, LlmUsage, MaxToolCalls, Message, MessageRole,
     Namespace, NoProgressBudget, Part, PartKind, ProtocolEvent, ProtocolPayload, RuntimeOutputCuts,

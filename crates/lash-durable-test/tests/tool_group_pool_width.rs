@@ -128,7 +128,7 @@ fn cell() -> String {
 
 /// The scripted model: it opens the group, and once the transcript holds
 /// its answers it ends the turn in prose. Each request it saw, rendered.
-fn model(protocol: Protocol, seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
+fn model(protocol: Protocol, seen: Arc<Mutex<Vec<(String, bool)>>>) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("pool-width-scripted")
         .requires_streaming(true)
@@ -136,7 +136,9 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Vec<String>>>) -> ProviderHandle {
             let seen = Arc::clone(&seen);
             async move {
                 let rendered = serde_json::to_string(&request.messages).expect("a request encodes");
-                seen.lock_recover().push(rendered);
+                let failed = request.messages.iter().flat_map(|message| message.blocks.iter())
+                    .any(|block| matches!(block, lash_core::llm::types::LlmContentBlock::ToolResult { status, .. } if status.is_error()));
+                seen.lock_recover().push((rendered, failed));
                 let answered = request
                     .messages
                     .iter()
@@ -202,7 +204,7 @@ fn untimed_workers() -> lash::vm::WorkerService {
 fn core(
     protocol: Protocol,
     backend: &Backend,
-    seen: &Arc<Mutex<Vec<String>>>,
+    seen: &Arc<Mutex<Vec<(String, bool)>>>,
     touched: &Arc<Mutex<Vec<u64>>>,
 ) -> lash::LashCore {
     let builder = match protocol {
@@ -276,7 +278,7 @@ async fn small_pool(
 struct Wide {
     protocol: Protocol,
     postgres_url: String,
-    seen: Arc<Mutex<Vec<String>>>,
+    seen: Arc<Mutex<Vec<(String, bool)>>>,
     touched: Arc<Mutex<Vec<u64>>>,
     backend: Mutex<Option<Backend>>,
     core: Mutex<Option<lash::LashCore>>,
@@ -397,15 +399,12 @@ impl Scenario for Wide {
             violations.push(format!("the bodies ran for {touched:?}"));
         }
         // The model was told every answer, and no member failed.
-        let told = self.seen.lock_recover().last().cloned().unwrap_or_default();
-        if !told.contains(TOUCHED)
-            || [
-                "Tool execution failed",
-                "tool was interrupted",
-                "\"outcome\":\"err\"",
-            ]
-            .iter()
-            .any(|failed| told.contains(failed))
+        let (told, failed) = self.seen.lock_recover().last().cloned().unwrap_or_default();
+        if failed
+            || !told.contains(TOUCHED)
+            || ["tool was interrupted", "\"outcome\":\"err\""]
+                .iter()
+                .any(|failed| told.contains(failed))
         {
             violations.push(format!("the model was told a failed group: {told}"));
         }

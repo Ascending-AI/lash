@@ -276,8 +276,9 @@ fn completed_tool(
         provider_call_id: None,
         tool_name: tool_name.to_string(),
         args,
-        output,
+        output: output.clone(),
         model_return: ModelToolReturn {
+            outcome: crate::ModelToolOutcome::from(&output.outcome),
             tool_name: tool_name.to_string(),
             parts: vec![ModelToolReturnPart::text(format!("{tool_name} result"))],
         },

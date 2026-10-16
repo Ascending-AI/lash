@@ -389,26 +389,19 @@ impl ToolCallOutput {
     }
 }
 
-pub fn format_tool_output_content(output: &ToolCallOutput) -> String {
-    match &output.outcome {
-        ToolCallOutcome::Success(_) => {
-            let value = output.value_for_projection();
-            match value {
-                Value::String(text) => text,
-                other => serde_json::to_string(&other).unwrap_or_else(|_| "null".to_string()),
-            }
-        }
-        ToolCallOutcome::Failure(failure) => format_failure_message(failure),
-        ToolCallOutcome::Cancelled(cancellation) => format_cancellation_message(cancellation),
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCallStatus {
     Success,
     Failure,
     Cancelled,
+}
+
+impl ToolCallStatus {
+    /// Whether the provider must mark the call's result as an error.
+    pub fn is_error(self) -> bool {
+        !matches!(self, Self::Success)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1081,45 +1074,73 @@ impl AttachmentMaterializationNotice {
     }
 }
 
+/// The execution fact on a tool return, independent of its presented body.
+/// Only failure and cancellation variants can carry their typed causes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", content = "payload", rename_all = "snake_case")]
+pub enum ModelToolOutcome {
+    Completed,
+    Failure(#[serde(serialize_with = "crate::durable_serde::serialize")] ToolFailure),
+    Cancelled(#[serde(serialize_with = "crate::durable_serde::serialize")] ToolCancellation),
+}
+
+impl From<&ToolCallOutcome> for ModelToolOutcome {
+    fn from(outcome: &ToolCallOutcome) -> Self {
+        match outcome {
+            ToolCallOutcome::Success(_) => Self::Completed,
+            ToolCallOutcome::Failure(failure) => Self::Failure(failure.clone()),
+            ToolCallOutcome::Cancelled(cancellation) => Self::Cancelled(cancellation.clone()),
+        }
+    }
+}
+
+impl ModelToolOutcome {
+    /// The bounded terminal tag projected into transcript and provider blocks.
+    /// Full causes remain in the recorded return and the presenter's input.
+    pub fn status(&self) -> ToolCallStatus {
+        match self {
+            Self::Completed => ToolCallStatus::Success,
+            Self::Failure(_) => ToolCallStatus::Failure,
+            Self::Cancelled(_) => ToolCallStatus::Cancelled,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelToolReturn {
     pub tool_name: String,
+    pub outcome: ModelToolOutcome,
     pub parts: Vec<ModelToolReturnPart>,
 }
 
 impl ModelToolReturn {
-    /// Presents complete model content, including failure markers and attachments.
-    /// Failure text comes from [`ToolFailure::model_text`], never a stringified
-    /// [`ToolCallOutput::value_for_projection`] object.
+    /// Carries the call's typed outcome and attachments without authoring failure
+    /// or cancellation text. The mode's presenter owns those words.
     pub fn from_output(tool_name: String, output: &ToolCallOutput) -> Self {
         let parts = match &output.outcome {
             ToolCallOutcome::Success(value) => Self::parts_from_value(value),
-            ToolCallOutcome::Failure(failure) => {
-                let mut parts = vec![ModelToolReturnPart::text(format_failure_message(failure))];
-                if let Some(raw) = &failure.raw {
-                    parts.extend(
-                        raw.attachments()
-                            .into_iter()
-                            .map(ModelToolReturnPart::Attachment),
-                    );
-                }
-                parts
-            }
-            ToolCallOutcome::Cancelled(cancellation) => {
-                let mut parts = vec![ModelToolReturnPart::text(format_cancellation_message(
-                    cancellation,
-                ))];
-                if let Some(raw) = &cancellation.raw {
-                    parts.extend(
-                        raw.attachments()
-                            .into_iter()
-                            .map(ModelToolReturnPart::Attachment),
-                    );
-                }
-                parts
-            }
+            ToolCallOutcome::Failure(failure) => failure
+                .raw
+                .as_ref()
+                .map(ToolValue::attachments)
+                .unwrap_or_default()
+                .into_iter()
+                .map(ModelToolReturnPart::Attachment)
+                .collect(),
+            ToolCallOutcome::Cancelled(cancellation) => cancellation
+                .raw
+                .as_ref()
+                .map(ToolValue::attachments)
+                .unwrap_or_default()
+                .into_iter()
+                .map(ModelToolReturnPart::Attachment)
+                .collect(),
         };
-        Self { tool_name, parts }
+        Self {
+            tool_name,
+            outcome: ModelToolOutcome::from(&output.outcome),
+            parts,
+        }
     }
 
     fn parts_from_value(value: &ToolValue) -> Vec<ModelToolReturnPart> {
@@ -1181,6 +1202,7 @@ impl ModelToolReturn {
     pub(crate) fn text(tool_name: String, content: impl Into<String>) -> Self {
         Self {
             tool_name,
+            outcome: ModelToolOutcome::Completed,
             parts: vec![ModelToolReturnPart::text(content)],
         }
     }
@@ -1264,23 +1286,6 @@ fn push_text_part(parts: &mut Vec<ModelToolReturnPart>, text: impl Into<String>)
         existing.push_str(&text);
     } else {
         parts.push(ModelToolReturnPart::text(text));
-    }
-}
-
-fn format_failure_message(failure: &ToolFailure) -> String {
-    let message = failure.model_text();
-    if message.is_empty() {
-        "[Tool execution failed]".to_string()
-    } else {
-        format!("[Tool execution failed]\n{message}")
-    }
-}
-
-fn format_cancellation_message(cancellation: &ToolCancellation) -> String {
-    if cancellation.message.is_empty() {
-        "[Tool execution cancelled]".to_string()
-    } else {
-        format!("[Tool execution cancelled]\n{}", cancellation.message)
     }
 }
 

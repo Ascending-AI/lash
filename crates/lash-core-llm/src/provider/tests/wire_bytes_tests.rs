@@ -6,7 +6,8 @@ use super::*;
 use lash_sansio::llm::attachment_delivery::{AttachmentPosition, DeliveryForms};
 use lash_sansio::llm::wire_corpus::{corpus_tool, digest_line, reuse_cases, wire_corpus};
 
-/// Digests recorded from the coalescing lowering at de7f61e3dc.
+/// Digests from the coalescing lowering at de7f61e3dc, refreshed for
+/// FIG-6518's explicit tool-result status in the canonical request shape.
 const RECORDED: &str = "
 base/prefix-01 4133e8067438e2dc3b415fe4
 instructed/prefix-01 d2feb7eea32bceb31f205d14
@@ -14,28 +15,28 @@ base/prefix-02 925bc853bab63ca57a477235
 instructed/prefix-02 3714360bcde2c07f03bd4f0a
 base/prefix-03 afac72799f7316f83050e74e
 instructed/prefix-03 8574c27a883a6ed19b763f3f
-base/prefix-04 9e5c3a2f91c0cf5d68979dd9
-instructed/prefix-04 c6032da82bdae6f205ecd374
-base/prefix-05 ef5ae301d7c3e1654e95ce4d
-instructed/prefix-05 824641ff05e27be2b63807d2
-base/prefix-06 5bc7a5d68069a4bc76caa382
-instructed/prefix-06 c37f7483febcea80c428c09f
-base/prefix-07 3baaa413d8f65000e5be5a55
-instructed/prefix-07 5d796238f8d0839ead57ac99
-base/prefix-08 494c1478ecbf564377cc2ffe
-instructed/prefix-08 1bf939949769a9f3f823cd47
-base/prefix-09 10759c578839777eeb1b26a5
-instructed/prefix-09 b6c53f87419255efde2dd916
-base/prefix-10 1b4d1b532a5b4c77dc57a7ba
-instructed/prefix-10 0587b6a4e98400d906593a02
-base/prefix-11 257742b95e4b5c5120fcc059
-instructed/prefix-11 982991ac5b1725602fcd221c
-base/prefix-12 3222f6b29e9be1394115cbac
-instructed/prefix-12 a69a66e02bd0adadd0db9236
-base/prefix-13 46605cd8ddfd16bff8ce06ac
-instructed/prefix-13 7dcf2f5f2d0eee1940ec1832
-base/prefix-14 5f40860a4583c046f79bcca8
-instructed/prefix-14 fcba5490a8bca0cd14a2f60f
+base/prefix-04 ef01a37e8ed3df3fc562846b
+instructed/prefix-04 9a4a3316420c2e417ac619e2
+base/prefix-05 a58ed31a5af632187b013988
+instructed/prefix-05 8a1a78ed2fd4964ba03efcec
+base/prefix-06 3f81f3213751bff01ae30d8f
+instructed/prefix-06 a6a9042c6eda519f5deb821f
+base/prefix-07 1115997b2c72b4edb2ea5172
+instructed/prefix-07 266b59cd1278a655b42e1884
+base/prefix-08 a7df48e2b8f25b69e54ad3e7
+instructed/prefix-08 8b11b045c328238000e93be3
+base/prefix-09 b3b47d19b3405b7d6c1f0f06
+instructed/prefix-09 f02d16351084e9d3448a9a55
+base/prefix-10 08b964779a535cd9f5499bf4
+instructed/prefix-10 dcd0c2980f31ba6005c5e44f
+base/prefix-11 e11e39cb42070fb20b864de0
+instructed/prefix-11 74b89a2b6661ddc66af27839
+base/prefix-12 64c5aeb59855ee1335f9577b
+instructed/prefix-12 d832b5953b4cb441f9a7edd3
+base/prefix-13 c138a36c5c2c49f0c58c2459
+instructed/prefix-13 a21f8cff2c83244975bcb4e8
+base/prefix-14 8d36bf67d8e078ce11fe2c44
+instructed/prefix-14 57195e50a349514d6a0ff7a6
 base/empty-history 86d1ec655f1b6b3983bdfa06
 instructed/empty-history 220c07ef000111e0705574ec
 base/only-feedback 7b1485bc41a8ff38059e47fc

@@ -349,7 +349,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312: the retention half is ported to crates/lash-core-execution/tests/store_backed/kernel/session/output_retention.rs::an_oversized_failure_is_retained_behind_a_bounded_witness; the verbatim replay under a changed policy was the journal's replay (5ad9641f9e; nothing replays, ADR 0132 §2)"
+note = "FIG-6518: failure text belongs to the mode presenter; render::tests::a_failed_call_is_cut_and_retained_like_a_success in lash-protocol-standard covers its bounded witness, and tests::output_retention::oversized_tool_output_is_retained_before_it_enters_history_on_sqlite in lash covers committed retention; the verbatim replay under a changed policy was the journal's replay (5ad9641f9e; nothing replays, ADR 0132 §2)"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/presentation_redrive.rs"

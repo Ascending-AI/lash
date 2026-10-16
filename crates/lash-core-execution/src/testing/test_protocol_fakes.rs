@@ -557,7 +557,8 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     .collect(),
                 outcome.call_id.clone(),
                 outcome.tool_name.clone(),
-            ));
+            outcome.model_return.outcome.status(),
+));
         }
         if !result_parts.is_empty() {
             let user_id = format!(

@@ -250,7 +250,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
     );
     assert_eq!(
         stored_text(&backend, &retained["bulk_fail"].reference).await,
-        format!("[Tool execution failed]\n{}", failure_text())
+        failure_text()
     );
     let appended = stored_text(&backend, &retained["small_ok"].reference).await;
     assert!(appended.contains("small"), "{}", &appended[..64]);

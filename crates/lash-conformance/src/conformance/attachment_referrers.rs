@@ -290,6 +290,7 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
             let artifacts =
                 lash_core::runtime::effect::SessionPresentationArtifacts::new(Arc::clone(&facade));
             let mut model_return = ModelToolReturn {
+                outcome: lash_sansio::ModelToolOutcome::Completed,
                 tool_name: "oversized".to_string(),
                 parts: vec![ModelToolReturnPart::text(text)],
             };

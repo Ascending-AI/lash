@@ -2040,3 +2040,46 @@ mod cache_emission_tests;
 mod epilogue;
 
 include!("failed_stream_metadata_tests.rs");
+
+// FIG-6518: provider error marking follows the typed fact, independently of body wording.
+#[test]
+fn failed_and_cancelled_results_keep_presenter_body_and_native_error_signal() {
+    for status in [
+        lash_sansio::ToolCallStatus::Failure,
+        lash_sansio::ToolCallStatus::Cancelled,
+    ] {
+        let result: LlmContentBlock = serde_json::from_value(json!({"ToolResult": {
+            "call_id": "call-1", "tool_name": "lookup",
+            "content": [{"type": "text", "text": "host presenter body"}],
+            "status": status,
+        }}))
+        .unwrap();
+        let messages = vec![
+            LlmMessage::new(
+                LlmRole::Assistant,
+                vec![LlmContentBlock::ToolCall {
+                    call_id: "call-1".into(),
+                    tool_name: "lookup".into(),
+                    input_json: "{}".into(),
+                    replay: None,
+                }],
+            ),
+            LlmMessage::new(LlmRole::User, vec![result]),
+        ];
+        let req = request(messages);
+        let (chat, _) = OpenAiCompatibleProvider::new("key", "https://example.invalid/v1")
+            .build_chat_request_body_with_diagnostics(&req, false)
+            .unwrap();
+        let chat = chat.redacted().body;
+        assert_eq!(chat["messages"][1]["content"], "Error: host presenter body");
+        let responses = OpenAiProvider::new("key")
+            .build_responses_request_body(&req, false)
+            .unwrap();
+        assert_eq!(
+            responses["input"][1]["output"],
+            "Error: host presenter body"
+        );
+        assert!(!chat.to_string().contains("[Tool execution failed]"));
+        assert!(!responses.to_string().contains("[Tool execution failed]"));
+    }
+}

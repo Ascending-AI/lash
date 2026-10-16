@@ -201,10 +201,11 @@ pub mod standard {
     };
 }
 pub mod render {
+    pub use lash_core::session_model::format_tool_output_content;
     pub use lash_protocol_standard::render::{
         AuthoredViewPolicy, BuiltinToolOutputRenderer, ResolvedStandardRenderConfig,
         StandardRenderConfig, ToolOutputRenderer, ToolOutputRendererSlot, ToolRenderParams,
-        ToolRenderPatch, resolve,
+        ToolRenderPatch, resolve, tool_failure_body,
     };
     #[cfg(feature = "rlm")]
     pub use lash_render::*;
@@ -735,8 +736,8 @@ pub mod plugins {
     pub use lash_sansio::{
         AttachmentMaterializationNotice, CheckpointResumeAction, CompletionCandidate,
         CompletionDisposition, DecidedCompletion, DegradedBinding, DriverAction, DriverContextView,
-        EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolReturn, PendingWork,
-        ProjectorContext, ResponseToolCalls, SessionStreamEvent, StreamMessageKind,
+        EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolOutcome, ModelToolReturn,
+        PendingWork, ProjectorContext, ResponseToolCalls, SessionStreamEvent, StreamMessageKind,
         ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan, ToolWave,
         TurnMachineConfig, TurnProtocol, UndecodableDriverState, UnitTurnProtocol, WriterFormats,
     };

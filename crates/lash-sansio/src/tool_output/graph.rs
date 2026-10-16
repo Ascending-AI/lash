@@ -27,9 +27,9 @@ use serde::de::DeserializeOwned;
 use serde_json::{Number, Value};
 
 use super::{
-    CancelOrigin, ModelToolReturn, ModelToolReturnPart, ToolCallOutcome, ToolCallOutput,
-    ToolCancellation, ToolControl, ToolFailure, ToolFailureClass, ToolFailureSource, ToolValue,
-    TurnControl,
+    CancelOrigin, ModelToolOutcome, ModelToolReturn, ModelToolReturnPart, ToolCallOutcome,
+    ToolCallOutput, ToolCancellation, ToolControl, ToolFailure, ToolFailureClass,
+    ToolFailureSource, ToolValue, TurnControl,
 };
 use crate::llm::attachment_delivery::AttachmentPosition;
 use crate::{AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType, RetainedOutput};
@@ -685,17 +685,55 @@ impl TokenCodec for ModelToolReturnPart {
     }
 }
 
+/// Model return outcomes: Completed 0, Failure 1, Cancelled 2.
+impl TokenCodec for ModelToolOutcome {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::Completed => out.sum(0, 0),
+            Self::Failure(failure) => {
+                out.sum(1, 1);
+                failure.encode(out);
+            }
+            Self::Cancelled(cancellation) => {
+                out.sum(2, 1);
+                cancellation.encode(out);
+            }
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let (variant, fields) = input.sum()?;
+        match variant {
+            0 => {
+                TokenReader::expect_fields(fields, 0)?;
+                Ok(Self::Completed)
+            }
+            1 => {
+                TokenReader::expect_fields(fields, 1)?;
+                ToolFailure::decode(input).map(Self::Failure)
+            }
+            2 => {
+                TokenReader::expect_fields(fields, 1)?;
+                ToolCancellation::decode(input).map(Self::Cancelled)
+            }
+            other => Err(unsupported(other)),
+        }
+    }
+}
+
 impl TokenCodec for ModelToolReturn {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
+        out.seq(3);
         out.text(&self.tool_name);
+        self.outcome.encode(out);
         self.parts.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        input.expect_struct(3)?;
         Ok(Self {
             tool_name: input.text()?.to_owned(),
+            outcome: ModelToolOutcome::decode(input)?,
             parts: Vec::decode(input)?,
         })
     }
@@ -731,7 +769,7 @@ fn decode_digest(input: &mut TokenReader<'_>) -> Result<[u8; 32], TokenError> {
 }
 
 /// One run of a presentation's text: literal text (0) or a byte slice of
-/// the renderer's text for the outcome (1).
+/// the typed outcome's text (1).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecipeText {
     Literal(String),
@@ -886,7 +924,15 @@ pub fn presentation_digest(presentation: &ModelToolReturn) -> ([u8; 32], u64) {
     (*blake3::hash(&bytes).as_bytes(), bytes.len() as u64)
 }
 
-/// The renderer's text: every text block it makes of `output`, joined.
+/// Slice source: the typed cause, or the renderer's joined success text.
+fn outcome_text(output: &ToolCallOutput, rendered: &[ModelToolReturnPart]) -> String {
+    match &output.outcome {
+        ToolCallOutcome::Success(_) => rendered_text(rendered),
+        ToolCallOutcome::Failure(failure) => failure.model_text().to_owned(),
+        ToolCallOutcome::Cancelled(cancellation) => cancellation.message.clone(),
+    }
+}
+
 fn rendered_text(rendered: &[ModelToolReturnPart]) -> String {
     rendered
         .iter()
@@ -959,7 +1005,7 @@ impl PresentationRecipe {
     #[must_use]
     pub fn of(presentation: &ModelToolReturn, output: &ToolCallOutput) -> Self {
         let rendered = ModelToolReturn::from_output(String::new(), output).parts;
-        let source = rendered_text(&rendered);
+        let source = outcome_text(output, &rendered);
         let parts = if presentation.parts == rendered {
             vec![RecipePart::Rendered]
         } else {
@@ -1002,7 +1048,7 @@ impl PresentationRecipe {
             return Err(PresentationRefusal::RendererUnavailable);
         }
         let rendered = ModelToolReturn::from_output(String::new(), output).parts;
-        let source = rendered_text(&rendered);
+        let source = outcome_text(output, &rendered);
         let mut parts = Vec::new();
         for part in &self.parts {
             match part {
@@ -1023,6 +1069,7 @@ impl PresentationRecipe {
         }
         let presentation = ModelToolReturn {
             tool_name: self.tool_name.clone(),
+            outcome: ModelToolOutcome::from(&output.outcome),
             parts,
         };
         if presentation_digest(&presentation) != (self.digest, self.bytes) {

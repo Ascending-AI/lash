@@ -17,7 +17,9 @@
 
 use std::num::NonZeroUsize;
 
-use lash_core::sansio::{ExpandedRow, ExpandedWrapper, PendingToolCall, ToolExpansionPlan};
+use lash_core::sansio::{
+    CompletedToolCall, ExpandedRow, ExpandedWrapper, PendingToolCall, ToolExpansionPlan,
+};
 use lash_core::{ToolCallOutput, ToolFailure, ToolFailureCause, ToolFailureClass};
 use serde_json::Value;
 
@@ -32,6 +34,25 @@ pub(crate) struct ResponseCall {
     /// it.
     pub(crate) input_json: String,
     pub(crate) parse_error: Option<String>,
+}
+
+/// Complete a planner refusal without executing the call. The typed outcome
+/// and the mode's model body travel together under the refused slot's identity.
+pub(crate) fn refused_tool_call_completion(
+    call: PendingToolCall,
+    output: ToolCallOutput,
+) -> CompletedToolCall {
+    let model_return = crate::render::unexecuted_tool_return(call.tool_name.clone(), &output);
+    CompletedToolCall {
+        call_id: call.call_id,
+        provider_call_id: call.provider_call_id,
+        tool_name: call.tool_name,
+        args: call.args,
+        output,
+        model_return,
+        intent_outcomes: Vec::new(),
+        replay: call.replay,
+    }
 }
 
 /// What a round is planned against.

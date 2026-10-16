@@ -19,6 +19,41 @@ pub use config::{AnthropicAuthScheme, AnthropicProvider, AnthropicStreamLimits, 
 
 #[cfg(test)]
 mod tests {
+    // FIG-6518: provider error marking follows the typed fact, independently of body wording.
+    #[test]
+    fn failed_and_cancelled_results_keep_presenter_body_and_native_error_signal() {
+        for status in [
+            lash_sansio::ToolCallStatus::Failure,
+            lash_sansio::ToolCallStatus::Cancelled,
+        ] {
+            let result: LlmContentBlock = serde_json::from_value(json!({"ToolResult": {
+                "call_id": "call-1", "tool_name": "lookup",
+                "content": [{"type": "text", "text": "host presenter body"}],
+                "status": status,
+            }}))
+            .unwrap();
+            let messages = vec![
+                LlmMessage::new(
+                    LlmRole::Assistant,
+                    vec![LlmContentBlock::ToolCall {
+                        call_id: "call-1".into(),
+                        tool_name: "lookup".into(),
+                        input_json: "{}".into(),
+                        replay: None,
+                    }],
+                ),
+                LlmMessage::new(LlmRole::User, vec![result]),
+            ];
+            let body = AnthropicProvider::new("key")
+                .build_request_body(&request(messages))
+                .unwrap();
+            let result = &body["messages"][1]["content"][0];
+            assert_eq!(result["is_error"], true);
+            assert_eq!(result["content"], "host presenter body");
+            assert!(!body.to_string().contains("[Tool execution failed]"));
+        }
+    }
+
     mod provider_file_rejection;
     mod request_support;
     use request_support::request;

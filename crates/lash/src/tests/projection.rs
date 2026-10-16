@@ -58,6 +58,7 @@ async fn presentation_step_only_changes_model_observation() -> Result<()> {
             crate::hook_key!("model-projection"),
             Arc::new(|input: lash_core::facade_support::ToolPresentationInput| {
                 let projected = lash_sansio::ModelToolReturn {
+                    outcome: lash_sansio::ModelToolOutcome::Completed,
                     tool_name: input.context.tool_name.clone(),
                     parts: vec![lash_sansio::ModelToolReturnPart::text("model projection")],
                 };

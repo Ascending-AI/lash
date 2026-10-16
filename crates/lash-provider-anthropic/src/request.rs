@@ -101,7 +101,10 @@ impl AnthropicProvider {
                 AttachmentPosition::Message,
             )),
             LlmContentBlock::ToolResult {
-                call_id, content, ..
+                call_id,
+                content,
+                status,
+                ..
             } => {
                 let mut result = TemplateJson::object([
                     ("type", json!("tool_result").into()),
@@ -110,6 +113,9 @@ impl AnthropicProvider {
                         json!(mapped_tool_call_id(call_id, tool_ids)?).into(),
                     ),
                 ]);
+                if status.is_error() {
+                    result.set("is_error", json!(true));
+                }
                 // One result per call: a lone text block is the plain string
                 // form; anything else is the ordered text/image/document
                 // array, each attachment a slot where its block sits.

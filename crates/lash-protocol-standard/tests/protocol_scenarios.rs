@@ -330,6 +330,7 @@ impl StandardToolResult {
             args: call.args.clone(),
             output: self.output.clone(),
             model_return: lash_core::facade_support::ModelToolReturn {
+                outcome: lash_sansio::ModelToolOutcome::from(&self.output.outcome),
                 tool_name: self.tool_name.to_string(),
                 parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                     self.model_return_text,

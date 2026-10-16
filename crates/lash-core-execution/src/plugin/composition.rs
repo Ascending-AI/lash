@@ -529,6 +529,7 @@ impl ExecutionComposition {
                 Err(err) => crate::ModelToolReturn::text(ctx.tool_name.clone(), err.to_string()),
             };
         }
+        model_return.outcome = lash_sansio::ModelToolOutcome::from(&ctx.output.outcome);
         let retention = ctx.artifacts.retention_policy();
         crate::runtime::effect::retain_oversized_return(
             &mut model_return,

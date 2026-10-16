@@ -158,6 +158,7 @@ fn runtime_feedback_result_order_preserves_explicit_cache_marker() {
         LlmMessage::new(
             LlmRole::User,
             vec![LlmContentBlock::ToolResult {
+                status: lash_sansio::ToolCallStatus::Success,
                 call_id: "call1".into(),
                 tool_name: Some("lookup".into()),
                 content: vec![lash_sansio::ModelToolReturnPart::text("RESULT")],

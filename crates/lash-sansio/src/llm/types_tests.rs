@@ -57,6 +57,7 @@ fn fig1123_client_side_retention_cuts_only_at_genuine_user_segments() {
         LlmMessage::new(
             LlmRole::User,
             vec![LlmContentBlock::ToolResult {
+                status: crate::ToolCallStatus::Success,
                 call_id: "call-1".to_string(),
                 content: vec![crate::ModelToolReturnPart::text("result")],
                 tool_name: Some("lookup".to_string()),

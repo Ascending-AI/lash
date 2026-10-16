@@ -243,3 +243,7 @@ roles = ["Assistant", "Event", "Tool", "User"]
 "examples/agent-workbench/src/eval/host.rs#worker" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "The FIG-763 operator evaluator exports persisted messages as evidence and checks typed reply markers; it does not choose a UI reply or reclassify the transcript." }
 
 "crates/lash-durable-test/tests/standard_turn_outcomes.rs#pdf_session_after_model_switch" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "FIG-6521 reads the committed tool parts to prove request omission never writes notice text into history." }
+
+"crates/lash-durable-test/tests/declared_start.rs#assert_refused_before_launch" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "FIG-6518 reads the correlated tool-result status to verify a declared start was refused, independently of presenter wording." }
+
+"crates/lash-durable-test/tests/tool_batches.rs#batch_admission_and_identity_contract" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "FIG-6518 reads the wrapper result status to verify disabled batch dispatch failed, independently of presenter wording." }

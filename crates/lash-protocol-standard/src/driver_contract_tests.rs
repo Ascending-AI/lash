@@ -150,8 +150,9 @@ fn completed_call(
         provider_call_id: call.provider_call_id.clone(),
         tool_name: call.tool_name.clone(),
         args: call.args.clone(),
-        output,
+        output: output.clone(),
         model_return: lash_core::facade_support::ModelToolReturn {
+            outcome: lash_sansio::ModelToolOutcome::from(&output.outcome),
             tool_name: call.tool_name.clone(),
             parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                 "result",
@@ -438,6 +439,15 @@ fn reported_causes(machine: &TurnMachine) -> String {
         .expect("events encode")
 }
 
+fn reported_failure(effects: &[Effect], code: &str) -> bool {
+    effects.iter().any(|effect| {
+        matches!(effect,
+        Effect::Emit(SessionStreamEvent::ToolCall { output, .. })
+            if matches!(&output.outcome, lash_core::ToolCallOutcome::Failure(failure)
+                if failure.code == code))
+    })
+}
+
 /// Law 8 (FIG-5781): a step's one control call runs after its siblings
 /// settled, and a second control call of the step is refused on its own
 /// while the rest of the step runs.
@@ -454,6 +464,7 @@ fn a_step_runs_its_control_call_after_its_siblings_and_refuses_a_second() {
             call("call-3", "switch"),
         ],
     );
+    assert!(reported_failure(&effects, "control_attempt_spent"));
     let (id, calls) = tool_calls(&effects).expect("the siblings' round");
     let names: Vec<_> = calls.iter().map(|call| call.tool_name.as_str()).collect();
     assert_eq!(names, ["probe"], "the control call waits for its sibling");
@@ -468,8 +479,6 @@ fn a_step_runs_its_control_call_after_its_siblings_and_refuses_a_second() {
     });
     let (_, kind) = checkpoint(&effects).expect("a completion checkpoint");
     assert_eq!(kind, CheckpointKind::BeforeCompletion);
-    let reported = reported_causes(&machine);
-    assert!(reported.contains("control_attempt_spent"), "{reported}");
 }
 
 /// Law 8 (FIG-5781): a sibling that failed refuses the step's control call
@@ -505,10 +514,7 @@ fn a_failed_sibling_refuses_the_control_call_before_it_runs() {
         2,
         "both calls are reported: {reported}"
     );
-    assert!(
-        reported.contains("another call of the same step failed"),
-        "{reported}"
-    );
+    assert!(reported_failure(&effects, "control_sibling_failed"));
 }
 
 /// The tool calls an answered round reported, by name, in slot order.
@@ -581,8 +587,8 @@ fn failed(_: &str) -> ToolCallOutput {
     ))
 }
 
-/// What the model reads of a control call a failed sibling refused.
-const SIBLING_FAILED: &str = "another call of the same step failed";
+/// The typed refusal of a control call whose sibling failed.
+const SIBLING_FAILED: &str = "control_sibling_failed";
 
 /// The step's control call never ran: no wave dispatched it, nothing ended
 /// the turn, the turn checkpoints after its work, and `cause` was reported.
@@ -594,8 +600,10 @@ fn assert_control_refused(effects: &[Effect], machine: &TurnMachine, cause: &str
     );
     assert_eq!(turn_outcomes(effects), Vec::new(), "{effects:?}");
     assert!(!machine.is_done());
-    let reported = reported_causes(machine);
-    assert!(reported.contains(cause), "{cause} is reported: {reported}");
+    assert!(
+        reported_failure(effects, cause),
+        "{cause} is reported: {effects:?}"
+    );
 }
 
 /// Law 8 (FIG-5801): a failing member of a `batch` is a failed sibling of
@@ -638,7 +646,7 @@ fn malformed_json_for_a_sibling_blocks_the_control() {
     );
     assert_control_refused(&effects, &machine, SIBLING_FAILED);
     assert!(
-        reported_causes(&machine).contains("invalid_tool_call_json"),
+        reported_failure(&effects, "invalid_tool_call_json"),
         "the malformed sibling is reported"
     );
 }
@@ -657,7 +665,7 @@ fn a_malformed_first_control_spends_the_slot() {
     );
     assert_control_refused(&effects, &machine, "control_attempt_spent");
     assert!(
-        reported_causes(&machine).contains("invalid_tool_call_json"),
+        reported_failure(&effects, "invalid_tool_call_json"),
         "the malformed control call is reported"
     );
 }

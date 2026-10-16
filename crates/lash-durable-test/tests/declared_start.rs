@@ -128,6 +128,7 @@ struct Script {
     child_probe: Option<Probe>,
     /// The tool results a child's answering step saw.
     child_saw: Mutex<Vec<String>>,
+    child_statuses: Mutex<Vec<lash_sansio::ToolCallStatus>>,
 }
 
 impl Script {
@@ -146,6 +147,7 @@ impl Script {
             parent_keeps_scope: false,
             child_probe: None,
             child_saw: Mutex::new(Vec::new()),
+            child_statuses: Mutex::new(Vec::new()),
         }
     }
 
@@ -255,6 +257,15 @@ impl Script {
             if seen.is_empty() {
                 return probe_step(0, probe);
             }
+            *self.child_statuses.lock_recover() = request
+                .messages
+                .iter()
+                .flat_map(|message| message.blocks.iter())
+                .filter_map(|block| match block {
+                    LlmContentBlock::ToolResult { status, .. } => Some(*status),
+                    _ => None,
+                })
+                .collect();
             *self.child_saw.lock_recover() = seen;
         }
         if self.producer == Producer::PromiseAll {
@@ -790,6 +801,7 @@ struct World {
     script: Arc<Script>,
     probe: Arc<DeclaringProbe>,
     facts: Arc<FactsFactory>,
+    failures: Arc<Mutex<std::collections::BTreeMap<lash_core::ToolCallId, lash_core::ToolFailure>>>,
 }
 
 /// The host's delegation tool (`examples/delegation`): children are created
@@ -823,10 +835,12 @@ impl World {
         let script = Arc::new(script);
         let probe = Arc::new(DeclaringProbe::default());
         let facts = Arc::new(FactsFactory::default());
+        let failures = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
         let served = {
             let script = Arc::clone(&script);
             let probe = Arc::clone(&probe);
             let facts = Arc::clone(&facts);
+            let failures = Arc::clone(&failures);
             served::World::with_model(
                 tier,
                 vec![Arc::new(lash_core_execution::testing::HeldProcessEngine)],
@@ -845,7 +859,23 @@ impl World {
                             shape.lifetimes,
                             shape.producer == Producer::PromiseAll,
                         ))
-                        .plugin(facts);
+                        .plugin(facts)
+                        .plugin(Arc::new(lash_core::plugin::StaticPluginFactory::new(
+                            lash_core::plugin::PluginDeclaration::initial("failure-facts"),
+                            lash_core::facade_support::PluginSpec::new().with_presentation_step(
+                                lash::hook_key!("failure-facts"),
+                                Arc::new(move |input| {
+                                    if let lash_core::ToolCallOutcome::Failure(failure) =
+                                        &input.context.output.outcome
+                                    {
+                                        failures
+                                            .lock_recover()
+                                            .insert(input.context.call_id.clone(), failure.clone());
+                                    }
+                                    Box::pin(async move { Ok(input.previous) })
+                                }),
+                            ),
+                        )));
                     if shape.producer == Producer::PromiseAll {
                         builder
                     } else {
@@ -875,6 +905,7 @@ impl World {
             script,
             probe,
             facts,
+            failures,
         })
     }
 
@@ -1476,10 +1507,21 @@ async fn declared_start_refusal_settles_the_call(tier: Tier) {
         1,
         "the child saw its probe's one result: {saw:?}"
     );
+    assert_eq!(
+        *world.script.child_statuses.lock_recover(),
+        [lash_sansio::ToolCallStatus::Failure]
+    );
+    let failures = world.failures.lock_recover().clone();
+    let refused = failures
+        .values()
+        .filter(|failure| failure.code == "process_parent_ended")
+        .collect::<Vec<_>>();
+    let [failure] = refused.as_slice() else {
+        panic!("the child has one closed-scope failure: {failures:?}");
+    };
+    let evidence = serde_json::to_string(&lash_sansio::durable_serde::Durable(*failure)).unwrap();
     assert!(
-        saw[0].contains("[Tool execution failed]")
-            && saw[0].contains("process_parent_ended")
-            && saw[0].contains(&ended.id().to_string()),
+        evidence.contains("process_parent_ended") && evidence.contains(&ended.id().to_string()),
         "the call settles as the closed-scope refusal naming the exact scope that closed ({}): \
          {saw:?}",
         ended.id()
@@ -1557,8 +1599,23 @@ async fn assert_refused_before_launch(world: &World, name: &str, call: &str, cod
         .into_iter()
         .find(|answered| answered.call_id.as_ref() == Some(&call_id))
         .unwrap_or_else(|| panic!("{name}: the forged call has a result"));
+    let status = view
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .find(|part| {
+            part.kind() == lash_core::PartKind::ToolResult && part.call_id() == Some(&call_id)
+        })
+        .and_then(|part| part.tool_result_status())
+        .expect("typed result");
+    assert_eq!(status, lash_sansio::ToolCallStatus::Failure);
+    let failures = world.failures.lock_recover().clone();
+    let failure = failures
+        .get(&call_id)
+        .expect("the presenter's typed failure");
+    let evidence = serde_json::to_string(&lash_sansio::durable_serde::Durable(failure)).unwrap();
     assert!(
-        answered.content.contains("[Tool execution failed]") && answered.content.contains(code),
+        evidence.contains(code),
         "{name}: the call settles as the start's typed refusal `{code}`: {answered:?}"
     );
     let registered = world.probes().await;

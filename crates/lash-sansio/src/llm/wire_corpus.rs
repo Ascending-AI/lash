@@ -65,6 +65,7 @@ fn tool_call(id: &str, name: &str, input: &str, route: &ProviderRouteIdentity) -
 
 fn tool_result(id: &str, content: Vec<ModelToolReturnPart>) -> LlmContentBlock {
     LlmContentBlock::ToolResult {
+        status: crate::ToolCallStatus::Success,
         call_id: id.into(),
         content,
         tool_name: Some("read_file".into()),
@@ -272,10 +273,12 @@ pub fn text_only(messages: Vec<LlmMessage>) -> Vec<LlmMessage> {
                 .filter(|block| !matches!(block, LlmContentBlock::Attachment { .. }))
                 .map(|block| match block {
                     LlmContentBlock::ToolResult {
+                        status,
                         call_id,
                         content,
                         tool_name,
                     } => LlmContentBlock::ToolResult {
+                        status: *status,
                         call_id: call_id.clone(),
                         content: content
                             .iter()

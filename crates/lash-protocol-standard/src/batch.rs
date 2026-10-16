@@ -246,6 +246,7 @@ fn fold_wrapper(
             ..ToolCallOutput::success(serde_json::json!({ "results": rows }))
         },
         model_return: ModelToolReturn {
+            outcome: lash_sansio::ModelToolOutcome::Completed,
             tool_name: wrapper.tool_name.clone(),
             parts,
         },

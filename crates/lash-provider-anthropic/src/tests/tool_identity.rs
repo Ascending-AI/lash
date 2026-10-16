@@ -12,6 +12,7 @@ fn call(id: &str) -> LlmContentBlock {
 
 fn result(id: &str) -> LlmContentBlock {
     LlmContentBlock::ToolResult {
+        status: lash_sansio::ToolCallStatus::Success,
         call_id: id.into(),
         tool_name: Some("lookup".into()),
         content: vec![lash_sansio::ModelToolReturnPart::text("found")],

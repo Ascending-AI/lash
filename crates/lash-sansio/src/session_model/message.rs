@@ -259,6 +259,7 @@ pub enum Part {
     /// with the paired call's correlation.
     ToolResult {
         id: String,
+        status: crate::ToolCallStatus,
         content: Vec<ModelToolReturnPart>,
         call_id: ToolCallId,
         tool_name: String,
@@ -312,6 +313,8 @@ struct FlatPart {
     #[serde(default)]
     blocks: Option<Vec<ModelToolReturnPart>>,
     #[serde(default)]
+    status: Option<crate::ToolCallStatus>,
+    #[serde(default)]
     attachment: Option<PartAttachment>,
     #[serde(default)]
     call_id: Option<ToolCallId>,
@@ -334,6 +337,7 @@ impl FlatPart {
         let tainted = [
             ("content", self.content.is_some(), self.kind != ToolResult),
             ("blocks", self.blocks.is_some(), self.kind == ToolResult),
+            ("status", self.status.is_some(), self.kind == ToolResult),
             (
                 "attachment",
                 self.attachment.is_some(),
@@ -436,6 +440,7 @@ impl FlatPart {
             PartKind::ToolResult => {
                 let (call_id, tool_name) = tool_pair(self.call_id, self.tool_name)?;
                 Part::ToolResult {
+                    status: self.status.ok_or_else(|| missing("missing:status"))?,
                     id: self.id,
                     content: self.blocks.ok_or_else(|| missing("missing:blocks"))?,
                     call_id,
@@ -464,6 +469,8 @@ struct FlatPartRef<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     blocks: Option<&'a [ModelToolReturnPart]>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<crate::ToolCallStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     attachment: Option<&'a PartAttachment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     call_id: Option<&'a ToolCallId>,
@@ -486,6 +493,7 @@ impl serde::Serialize for Part {
             kind: self.kind(),
             content: self.text_content(),
             blocks: self.tool_result_content(),
+            status: self.tool_result_status(),
             attachment: self.attachment(),
             call_id: self.call_id(),
             provider_call_id: self.provider_call_id(),
@@ -628,6 +636,7 @@ impl Part {
             },
             PartKind::ToolResult => Self::ToolResult {
                 id,
+                status: crate::ToolCallStatus::Success,
                 content: vec![ModelToolReturnPart::text(content)],
                 call_id: ToolCallId::fixture("base"),
                 tool_name: String::new(),
@@ -730,8 +739,15 @@ impl Part {
         }
     }
 
-    /// A tool result's ordered text and attachment blocks; `None` for every
-    /// other kind.
+    /// The terminal status on a tool result. Full causes stay in the recorded call.
+    pub fn tool_result_status(&self) -> Option<crate::ToolCallStatus> {
+        match self {
+            Self::ToolResult { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+
+    /// A tool result's ordered text and attachment blocks; `None` for every other kind.
     pub fn tool_result_content(&self) -> Option<&[ModelToolReturnPart]> {
         match self {
             Self::ToolResult { content, .. } => Some(content),
@@ -952,8 +968,10 @@ impl Part {
         content: Vec<ModelToolReturnPart>,
         call_id: ToolCallId,
         tool_name: String,
+        status: crate::ToolCallStatus,
     ) -> Self {
         Self::ToolResult {
+            status,
             id,
             content,
             call_id,
@@ -1335,7 +1353,11 @@ fn render_structured_message(
                 let Some(call_id) = part.call_id().and_then(&provider_call_id) else {
                     continue;
                 };
+                let Part::ToolResult { status, .. } = part else {
+                    continue;
+                };
                 blocks.push(LlmContentBlock::ToolResult {
+                    status: *status,
                     call_id,
                     content: part.tool_result_content().unwrap_or_default().to_vec(),
                     tool_name: part.tool_name().map(str::to_string),

@@ -390,7 +390,6 @@ pub mod facade_support {
     pub use lash_sansio::EffectId;
     pub use lash_sansio::ErrorEnvelope;
     pub use lash_sansio::MessageSequence;
-    pub use lash_sansio::ModelToolReturn;
     pub use lash_sansio::ModelToolReturnPart;
     pub use lash_sansio::ProviderSchemaCapabilities;
     pub use lash_sansio::ReportedFailure;
@@ -411,6 +410,7 @@ pub mod facade_support {
     pub use lash_sansio::resolve_schema;
     pub use lash_sansio::shared_parts;
     pub use lash_sansio::visible_response_text_from_parts;
+    pub use lash_sansio::{ModelToolOutcome, ModelToolReturn};
     pub use lash_sansio::{PluginStage, TurnErrorCause, TurnErrorCode, TurnStop};
     pub use lash_trace::TraceBranchSelection;
     pub use lash_trace::TraceDetailPolicy;

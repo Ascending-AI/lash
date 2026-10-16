@@ -250,12 +250,51 @@ impl PartialEq for ToolOutputRendererSlot {
 
 impl Eq for ToolOutputRendererSlot {}
 
+/// The standard presenter's body for a failed or cancelled tool call.
+/// Hosts can reuse this in their own [`ToolOutputRenderer`]. It adds no error
+/// marker: the provider adapter marks the typed outcome in its wire format.
+/// Completed calls have no failure body.
+pub fn tool_failure_body(outcome: &lash_core::facade_support::ModelToolOutcome) -> Option<&str> {
+    use lash_core::facade_support::ModelToolOutcome;
+    match outcome {
+        ModelToolOutcome::Completed => None,
+        ModelToolOutcome::Failure(failure) => Some(if failure.model_text().is_empty() {
+            "Tool failed."
+        } else {
+            failure.model_text()
+        }),
+        ModelToolOutcome::Cancelled(cancellation) => Some(if cancellation.message.is_empty() {
+            "Tool cancelled."
+        } else {
+            &cancellation.message
+        }),
+    }
+}
+
+/// Planner and machine refusals did not execute a tool or invoke its presenter.
+/// Their bodies belong to the mode, just like the default presenter's words.
+pub(crate) fn unexecuted_tool_return(
+    tool_name: String,
+    output: &ToolCallOutput,
+) -> ModelToolReturn {
+    let mut returned = ModelToolReturn::from_output(tool_name, output);
+    if let Some(text) = tool_failure_body(&returned.outcome) {
+        returned.parts.insert(0, ModelToolReturnPart::text(text));
+    }
+    returned
+}
+
 fn builtin_tool_output(
     output: &ToolCallOutput,
     params: &ToolRenderParams,
 ) -> Rendered<Vec<ModelToolReturnPart>> {
     if !matches!(output.outcome, ToolCallOutcome::Success(_)) {
-        let parts = ModelToolReturn::from_output(String::new(), output).parts;
+        let mut parts = ModelToolReturn::from_output(String::new(), output).parts;
+        if let Some(text) = tool_failure_body(&lash_core::facade_support::ModelToolOutcome::from(
+            &output.outcome,
+        )) {
+            parts.insert(0, ModelToolReturnPart::text(text));
+        }
         return Rendered {
             body: parts,
             cuts: CutReport::default(),
@@ -699,6 +738,45 @@ mod tests {
         ModelToolReturn::from_output(ctx.tool_name.clone(), &ctx.output)
     }
 
+    /// FIG-6518: wording is a presenter decision, including its empty-message defaults.
+    #[test]
+    fn the_default_presenter_owns_failure_and_cancellation_words() {
+        use lash_core::facade_support::ModelToolOutcome;
+        for (output, text) in [
+            (
+                ToolCallOutput::failure(lash_core::ToolFailure::new("disk", "boom")),
+                "boom",
+            ),
+            (
+                ToolCallOutput::failure(lash_core::ToolFailure::new("disk", "")),
+                "Tool failed.",
+            ),
+            (
+                ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime("stopped")),
+                "stopped",
+            ),
+            (
+                ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime("")),
+                "Tool cancelled.",
+            ),
+        ] {
+            let outcome = ModelToolOutcome::from(&output.outcome);
+            assert_eq!(tool_failure_body(&outcome), Some(text));
+            assert_eq!(
+                unexecuted_tool_return("tool".into(), &output).parts,
+                vec![ModelToolReturnPart::text(text)]
+            );
+            let rendered = builtin_tool_output(&output, &ToolRenderParams::default());
+            assert_eq!(rendered.body, vec![ModelToolReturnPart::text(text)]);
+            assert!(
+                ModelToolReturn::from_output("tool".into(), &output)
+                    .parts
+                    .is_empty()
+            );
+        }
+        assert_eq!(tool_failure_body(&ModelToolOutcome::Completed), None);
+    }
+
     #[test]
     fn per_tool_params_overlay_fieldwise_and_batch_depth_is_built_in() {
         let id = ToolId::new("tool:test");
@@ -1033,14 +1111,16 @@ mod tests {
         let [ModelToolReturnPart::Retained(retained)] = result.parts.as_slice() else {
             panic!("the cut failure is one retained block: {:?}", result.parts);
         };
-        assert!(retained.witness.contains("[Tool execution failed]"));
+        assert!(matches!(
+            result.outcome,
+            lash_core::facade_support::ModelToolOutcome::Failure(_)
+        ));
         assert!(retained.witness.contains(
             "attachment 52f54a5f27d6fc4c02d7c5fb426577c919a3bc73d058c243f0abba21823f5b26"
         ));
         let retained_text = artifacts.text.lock().expect("test mutex").clone();
         assert_eq!(retained_text.len(), 1);
-        assert!(retained_text[0].starts_with("[Tool execution failed]"));
-        assert!(retained_text[0].ends_with(&message));
+        assert_eq!(retained_text[0], message);
     }
 
     #[tokio::test]

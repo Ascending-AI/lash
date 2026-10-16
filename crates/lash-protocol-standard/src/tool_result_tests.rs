@@ -49,9 +49,24 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
             &ToolCallOutput::success_tool_value(ToolValue::String(String::new())),
         ),
         ModelToolReturn::from_output("shot".to_string(), &ToolCallOutput::success("ok")),
+        ModelToolReturn::from_output(
+            "shot".into(),
+            &ToolCallOutput::failure(lash_core::ToolFailure::new("disk", "boom")),
+        ),
+        ModelToolReturn::from_output(
+            "shot".into(),
+            &ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime("stopped")),
+        ),
     ];
 
-    let labels = ["call-array", "call-object", "call-empty", "call-text"];
+    let labels = [
+        "call-array",
+        "call-object",
+        "call-empty",
+        "call-text",
+        "call-failed",
+        "call-cancelled",
+    ];
     let calls = returns
         .iter()
         .zip(labels)
@@ -91,6 +106,8 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         },
     ];
 
+    let transcript: Vec<Message> =
+        serde_json::from_value(serde_json::to_value(&transcript).unwrap()).unwrap();
     assert!(lash_sansio::messages_are_prompt_resume_safe(&transcript));
     let rendered = lash_sansio::session_model::message::render_prompt(&transcript);
     let result_blocks: Vec<_> = rendered.messages[1]
@@ -98,8 +115,11 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         .iter()
         .filter_map(|block| match block {
             lash_sansio::llm::types::LlmContentBlock::ToolResult {
-                call_id, content, ..
-            } => Some((call_id.clone(), content.clone())),
+                call_id,
+                content,
+                status,
+                ..
+            } => Some((call_id.clone(), content.clone(), *status)),
             _ => None,
         })
         .collect();
@@ -123,10 +143,13 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         ),
         ("call-empty", vec![]),
         ("call-text", vec![ModelToolReturnPart::text("\"ok\"")]),
+        ("call-failed", vec![]),
+        ("call-cancelled", vec![]),
     ];
-    for ((call_id, content), (expected_call_id, expected_content)) in
-        result_blocks.iter().zip(&expected_blocks)
+    for (((call_id, content, status), (expected_call_id, expected_content)), model_return) in
+        result_blocks.iter().zip(&expected_blocks).zip(&returns)
     {
+        assert_eq!(*status, model_return.outcome.status());
         assert_eq!(call_id, expected_call_id);
         assert_eq!(
             content, expected_content,
