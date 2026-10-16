@@ -45,10 +45,14 @@ impl LashCoreBuilder {
                 .attachment_store
                 .reconfigured_reclamation_retry(self.attachment_reclamation_retry),
         );
+        #[cfg(feature = "testing")]
         if let Some(runtime) = self.trace_runtime.take() {
             core.tracing = runtime;
         }
         let mut tracing = core.tracing.clone();
+        for observer in std::mem::take(&mut self.trace_product_observers) {
+            tracing = tracing.with_product_observer(observer);
+        }
         if let Some(limits) = self.trace_limits.take() {
             tracing = tracing.with_limits(limits);
         }
@@ -167,6 +171,11 @@ pub(super) mod tests {
         )
     }
     pub(in crate::core) struct Sink(pub(in crate::core) AtomicUsize);
+    impl lash_trace::ProductObservationSink for Sink {
+        fn observe(&self, _: &lash_trace::TraceRecord) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
     impl lash_trace::TraceSink for Sink {
         fn append(
             &self,
@@ -187,7 +196,11 @@ pub(super) mod tests {
         let metrics = Arc::new(AtomicUsize::new(0));
         let first = Arc::new(Sink(AtomicUsize::new(0)));
         let second = Arc::new(Sink(AtomicUsize::new(0)));
+        let product = Arc::new(Sink(AtomicUsize::new(0)));
+        let other_product = Arc::new(Sink(AtomicUsize::new(0)));
         let mut builder = crate::tests::explicit_ephemeral_facets(LashCore::builder(backend))
+            .trace_product_observer(product.clone())
+            .trace_product_observer(other_product.clone())
             .telemetry(telemetry(old_metrics.clone()))
             .trace_sink(first.clone())
             .telemetry(telemetry(metrics.clone()))
@@ -224,6 +237,23 @@ pub(super) mod tests {
                 )
             },
         );
+        config
+            .tracing
+            .emitter()
+            .observe_product(|| lash_trace::TraceRecord {
+                schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+                id: "product".into(),
+                timestamp: lash_trace::TraceTimestamp::from_unix_ms(2),
+                content: Default::default(),
+                context: Default::default(),
+                position: None,
+                omissions: Default::default(),
+                event: lash_trace::TraceEvent::TurnStarted {
+                    metadata: Default::default(),
+                },
+            });
+        assert_eq!(product.0.load(Ordering::Relaxed), 1);
+        assert_eq!(other_product.0.load(Ordering::Relaxed), 1);
         assert_eq!(first.0.load(Ordering::Relaxed), 1);
         assert_eq!(second.0.load(Ordering::Relaxed), 1);
     }

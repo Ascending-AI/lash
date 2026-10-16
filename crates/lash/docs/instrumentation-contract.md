@@ -4,6 +4,12 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 
 `TurnCompleted.output` carries the settled assistant answer under `OutputMessages` consent; its closer alone supplies `gen_ai.output.messages` on `invoke_agent`. An assistant message supplies its text; a declared finish control supplies one assistant text part, with string values verbatim and other values as compact JSON. Content is omitted by default and passes through the content hook and bounds. Model decorators read the logical chat span from `LlmRequestScope.trace_carrier` (absent when no model span is built). Content hooks identify tool records through `ContentView.tool_name`.
 
+Openers carry no content: `LlmCallStarted` always carries an omitted request; hosts read request content from `LlmCallCompleted` or `LlmCallFailed`. `ResponseMetadata` is a separate consent category for record sinks, not an OTel-exported content attribute.
+
+`ContentLimits::standard()` cuts parts at 16 KiB, which truncates typical agent system prompts. Hosts wanting the full prompt raise `max_part_bytes` (Figments uses 64 KiB parts and 256 KiB attributes).
+
+Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response` and `reasoning`. Laminar reads `result`/`thinking` and semconv messages only on LLM spans. Hosts map these themselves; for example, map an agent span's `gen_ai.output.messages` into the host agent-output representation and translate nested tool response/reasoning parts for that renderer.
+
 | Span name or prefix | Kind | Ownership | Semconv type |
 |---|---|---|---|
 | `lash.send` | Producer | Live | — |

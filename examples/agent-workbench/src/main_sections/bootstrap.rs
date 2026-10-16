@@ -399,14 +399,12 @@ pub(crate) async fn build_workbench_core(
     let host_backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
         .build()
         .context("build the durable backend")?;
-    let mut trace_runtime = lash::runtime::TraceRuntime::new(host_backend.clock());
-    if let Some(export) = tracing.lash_vm_execution_sink {
-        trace_runtime = trace_runtime.with_product_observer(export);
-    }
-    let builder =
+    let mut builder =
         workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins).await?;
+    if let Some(export) = tracing.lash_vm_execution_sink {
+        builder = builder.trace_product_observer(export);
+    }
     builder
-        .trace_runtime(trace_runtime)
         .trace_sink(tracing.trace_sink)
         .trace_detail(TraceDetailPolicy::extended_models())
         // A development host: its trace is the debugging record of what the

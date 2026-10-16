@@ -190,9 +190,9 @@ A `TraceSink` receives records; lash ships no file writer, so a host that
 keeps records on disk writes its own sink
 ([Writing records to a file](architecture/tracing.md#writing-records-to-a-file)).
 Ordinary passive tracing is installed through `LashCoreBuilder::trace_sink`.
-To keep the language execution records, install a sink with
-`TraceRuntime::with_product_observer` and pass that runtime through
-`LashCoreBuilder::trace_runtime`. This export is a recording. The graphs a
+To keep the language execution records, install a `ProductObservationSink` with
+`LashCoreBuilder::trace_product_observer`. The core supplies the runtime and
+clock. This export is a recording. The graphs a
 host shows live come from the feeds described below, never from it.
 
 The concrete example is

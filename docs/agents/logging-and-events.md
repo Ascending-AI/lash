@@ -32,8 +32,8 @@ namespaced and raw vendor evidence remains raw.
 Carry known owner IDs on diagnostics of dropped work. Keep high-cardinality IDs
 out of metric dimensions and span names. Map domain identifiers to OpenTelemetry
 attributes centrally in the adapter; do not equate host metadata with durable
-ownership. Host metadata from `TraceContext.run_id` appears as `host_run_id`
-in diagnostics.
+ownership. Hosts keep their own metadata outside Lash and map it through
+`TraceIds` when enriching spans.
 
 Hosts install a Rust `tracing` subscriber or logging export layer separately from
 `LashCoreBuilder::telemetry`. That adapter projects retained domain observations;
@@ -112,3 +112,20 @@ Plugin factories read the deployment ceiling through
 `PluginSessionContext::content_policy()`. Telemetry consent is host policy on
 reopen and is never persisted as session execution configuration. See the
 [tracing contract](../architecture/tracing.md).
+
+## Hosts that read this
+
+A commit that stops a record kind carrying content says so in its body under
+**Hosts that read this**, naming the record and where readers find that content
+now. Since FIG-6302, `LlmCallStarted` always carries an omitted request: hosts
+read request content from `LlmCallCompleted` or `LlmCallFailed`. Openers carry
+no content. `ResponseMetadata` is its own consent category and is not exported
+by the OTel exporter; it matters to record sinks.
+
+An OpenTelemetry dependency upgrade has an **OTel version** paragraph in its
+commit body naming the API, SDK and OTLP versions and what hosts must align.
+The current pins are `opentelemetry`, `opentelemetry_sdk` and
+`opentelemetry-otlp` 0.33. Keep the instrumentation contract generated from the
+registry and the tracing guide's Configuration section generated from policy
+rustdoc; their exact-path laws and recorder commands live in
+`crates/lash/tests/otel_trace_evidence.rs`.

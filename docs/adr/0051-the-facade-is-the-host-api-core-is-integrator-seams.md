@@ -90,7 +90,7 @@ runs only when the host captures the `extension` category. Telemetry privacy
 is an operational setting, not recorded execution configuration. Hosts can
 filter extension spans with a wrapping `TraceSink` at their exporter, or skip
 their kinds by export policy, as shown in the
-[tracing contract](../architecture/tracing.md#extension-spans-and-host-filtering).
+[tracing contract](../architecture/tracing.md#extensions-and-ambient-context).
 
 ### Callback deadlines
 
@@ -165,3 +165,15 @@ superseded by `PluginSessionContext::content_policy()` and
 field is governed centrally before all sinks, including OTel; the host uses
 `ContentHook` for redaction or offload and `CaptureSelector` to narrow consent
 before building. Callback policy and returned references are never persisted.
+
+## Addendum: one production tracing installation path (FIG-6307)
+
+Hosts install OpenTelemetry through `LashCoreBuilder::telemetry`, supplying
+`OtelTelemetry` over a host-built `LashTracerProvider`. Record sinks are additive
+through `trace_sink`; content, selection and limits use their facade policy
+installers. Composed runtime injection belongs only to the `testing` feature.
+`TraceRuntime` remains a cross-crate support type, not another production host
+installation path. Callback attribution and scope follow the canonical slot
+table, and host meaning is derived from `TraceIds`, never persisted as user or
+tenant identity. The [tracing guide](../architecture/tracing.md) defines the
+two explicit third-party contract exceptions (OTel and JSON).

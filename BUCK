@@ -5115,6 +5115,17 @@ filegroup(
 )
 
 filegroup(
+    name = "tracing_docs",
+    srcs = glob(["docs/**/*.md"]) + [
+        "README.md",
+        "scripts/check_facade_only_examples.py",
+        "scripts/check_feature_coverage.py",
+    ],
+    copy = False,
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
     name = "cargo_metadata",
     srcs = ["Cargo.lock", "Cargo.toml"],
     copy = False,

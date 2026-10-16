@@ -17,7 +17,7 @@ mod recovery;
 mod retired_observers;
 mod runtime_host_config;
 mod session_deletion;
-mod trace_content;
+mod trace_config;
 pub use session_deletion::SessionDeleteCompletion;
 mod tool_live;
 mod work_drivers;
@@ -729,7 +729,9 @@ pub struct LashCoreBuilder {
     provider_file_cache: lash_core::attachments::ProviderFileCacheLimits,
     delivery_fetch_horizon: crate::attachments::DeliveryFetchHorizon,
     // Core fields applied over the config the backend's ports assemble.
+    #[cfg(feature = "testing")]
     trace_runtime: Option<lash_core::runtime::TraceRuntime>,
+    trace_product_observers: Vec<Arc<dyn lash_trace::ProductObservationSink>>,
     trace_sinks: Vec<Arc<dyn lash_trace::TraceSink>>,
     #[cfg(feature = "otel-trace")]
     telemetry: Option<lash_trace::otel::OtelTelemetry>,
@@ -812,7 +814,9 @@ impl LashCoreBuilder {
             provider_file_uploaders: Vec::new(),
             provider_file_cache: Default::default(),
             delivery_fetch_horizon: Default::default(),
+            #[cfg(feature = "testing")]
             trace_runtime: None,
+            trace_product_observers: Vec::new(),
             trace_sinks: Vec::new(),
             #[cfg(feature = "otel-trace")]
             telemetry: None,
@@ -1024,72 +1028,6 @@ impl LashCoreBuilder {
 
     pub fn configure_plugins(mut self, configure: impl FnOnce(&mut PluginStack)) -> Self {
         configure(&mut self.plugin_stack);
-        self
-    }
-
-    /// Install the shared tracing runtime used by the engine and every plugin.
-    pub fn trace_runtime(mut self, runtime: lash_core::runtime::TraceRuntime) -> Self {
-        self.trace_runtime = Some(runtime);
-        self
-    }
-
-    /// Installs the runtime's OpenTelemetry adapter: the identity that
-    /// decides each trace at its producer, a sink beside the others, and
-    /// the metrics. Replaces the previously configured adapter.
-    #[cfg(feature = "otel-trace")]
-    pub fn telemetry(mut self, telemetry: lash_trace::otel::OtelTelemetry) -> Self {
-        self.telemetry = Some(telemetry);
-        self
-    }
-
-    /// Add a record sink beside the sinks configured already: each sees
-    /// every record, under its own panic containment.
-    ///
-    /// Lash ships no trace writer: a host that wants records in a file or on a console
-    /// implements [`TraceSink`](lash_trace::TraceSink) itself.
-    pub fn trace_sink(mut self, trace_sink: Arc<dyn lash_trace::TraceSink>) -> Self {
-        self.trace_sinks.push(trace_sink);
-        self
-    }
-
-    /// Select what lash builds for each span kind, for every sink and the
-    /// exporter. Defaults to
-    /// [`TraceDetailPolicy::standard`](crate::tracing::TraceDetailPolicy::standard).
-    /// Building refuses, with [`EmbedError::TracePolicy`], trace limits that
-    /// turn extension spans off (`extension_spans = 0`) while this policy
-    /// still builds model calls or their attempts.
-    pub fn trace_detail(mut self, detail: crate::tracing::TraceDetailPolicy) -> Self {
-        self.trace_detail = Some(detail);
-        self
-    }
-
-    /// Select the tracing seam's admission and buffering bounds. Defaults to
-    /// [`TraceLimits::standard`](crate::tracing::TraceLimits::standard). No
-    /// sink is installed.
-    pub fn trace_limits(mut self, limits: crate::tracing::TraceLimits) -> Self {
-        self.trace_limits = Some(limits);
-        self
-    }
-
-    /// Select the bounds on the execution evidence lash records: tool
-    /// attempt streams, effect diffs, failed generations and process effect
-    /// occurrences. Defaults to [`EvidenceLimits::standard`](crate::EvidenceLimits::standard).
-    pub fn evidence_limits(mut self, limits: crate::EvidenceLimits) -> Self {
-        self.evidence_limits = Some(limits);
-        self
-    }
-
-    /// Select how much of a diagnostic lash keeps and when a plugin's state
-    /// size warns. Defaults to [`DiagnosticLimits::standard`](crate::DiagnosticLimits::standard).
-    pub fn diagnostic_limits(mut self, limits: crate::DiagnosticLimits) -> Self {
-        self.diagnostic_limits = Some(limits);
-        self
-    }
-
-    /// Select how much tool-composition history the runtime remembers.
-    /// Defaults to [`CompositionCacheLimits::standard`](crate::CompositionCacheLimits::standard).
-    pub fn composition_cache_limits(mut self, limits: crate::CompositionCacheLimits) -> Self {
-        self.composition_cache_limits = Some(limits);
         self
     }
 

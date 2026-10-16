@@ -715,3 +715,21 @@ message_schema_fixtures = { srcs = [
 packages = ["lash-helper-labels"]
 kinds = ["lib", "unit-test"]
 compile_data = ["//crates/lash-helper-labels:package_files"]
+
+# Documentation laws read the host guide and linked policy/slot sources.
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["test"]
+targets = ["otel_trace_evidence"]
+data = [
+  "//:tracing_docs",
+  "//docs/kernel:package_files",
+  "//crates/lash:package_files",
+  "//crates/lash:rust_sources",
+  "//crates/lash-core:rust_sources",
+  "//crates/lash-core-execution:rust_sources",
+  "//crates/lash-core-store:rust_sources",
+  "//crates/lash-conformance:rust_sources",
+  "//crates/lash-http-transport:rust_sources",
+  "//crates/lash-trace:rust_sources",
+]

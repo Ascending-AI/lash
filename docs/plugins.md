@@ -178,27 +178,26 @@ trusted plugin code.
 
 ## Tracing an extension
 
-Every callback lash runs for a plugin is handed an `ExtensionTrace`: a tool
+Execution callbacks receive a registration-bound `ExtensionTrace`: a tool
 body through `call.context.trace()`, a hook through its context's `trace`
 field, a plugin operation through its context's `trace()`. Lash binds it
 from the callback's registration, so every span it opens carries the
 registered `plugin_id` and `lash.plugin.callback`; nothing the plugin
-passes can change them. The slot table says where each callback's spans go:
-
-| Callback | Spans are children of |
-|---|---|
-| Tool provider body, tool hooks | the call's `execute_tool` span |
-| Turn hooks (`before_turn`, `after_turn`, `checkpoint`, compaction, context pressure) | the turn's span |
-| Code executor | the running cell's span |
-| Plugin operation | the producer span of the host call that ran it |
-| `tool_reads` and other decision-only readers | nothing: `is_recording()` is false |
+passes can change them. The canonical callback slot table declares one trace
+scope per slot; the [generated slot scopes](architecture/tracing.md#callback-slot-scopes)
+list every slot without a separate API inventory. `Attempt` and `Call` mean the
+call's tool span, `Turn` the agent span, `Executing` the running cell (otherwise
+the turn), and `Producer` the operation's host-call producer. `Untraced` readers
+and decision-only slots receive no recording capability. `ProcessEngine::advance`
+is a pure state machine and receives none; plugin factories read deployment
+policy without a position.
 
 ```rust
 async fn execute(&self, call: lash::ToolCall<'_>) -> lash::ToolAttemptOutcome {
     let trace = call.context.trace();
     let mut span = trace.span("index.lookup");
     span.attr("index.shard", 3_i64)
-        .content("query", || call.args["query"].clone());
+        .content("query", || call.args["query"].clone().into());
     let hits = span.trace().instrument(self.lookup(&call.args)).await;
     span.trace().event("index.hit", |attrs| {
         attrs.set("index.hits", hits.len() as i64);
@@ -212,7 +211,7 @@ async fn execute(&self, call: lash::ToolCall<'_>) -> lash::ToolAttemptOutcome {
   or when its handle drops (`lash.span.ended_by = "drop"`). The callback's
   exit revokes the capability: spans still open are closed `body_exit`, or
   `cancelled` or `panic` when the body was dropped or panicked, and a later
-  `end()` from a task the body spawned emits nothing and is counted
+  `end()` or mutation from a task the body spawned emits nothing and is counted
   `Late`. Record what matters before the body returns.
 - **Replay.** Spans are emitted only by a body that really runs. A body the
   journal serves emits none; a body that runs again after a crash emits its
@@ -235,14 +234,15 @@ async fn execute(&self, call: lash::ToolCall<'_>) -> lash::ToolAttemptOutcome {
   the ambient context, and `in_scope(f)` runs `f` under it: OpenTelemetry
   instrumentation (an HTTP client, a database driver) and `tracing` spans
   exported through `tracing-opentelemetry` at its default
-  `context_activation` nest under the span, and a direct model completion
+  `context_activation = true` nest under the span, and a direct model completion
   made inside nests its `chat` span there. Lash runs every callback under
   its capability's position already; use `instrument` for work under a span
   of your own and for every task the body spawns. These third-party spans
   are the host SDK's: lash's content policy does not reach them, and a body
   that runs again emits them again. With the `otel-trace` feature,
   `ExtensionTraceOtelExt::otel_context()` hands a library that takes an
-  explicit context the position's.
+  explicit context the position's. Disabling context activation is unsupported: it
+  makes the layer choose tracing-span data instead of Lash's attached position.
 - **The tool span.** A tool body annotates its own `execute_tool` span with
   `call.context.tool_span().set(key, value)`, through the same bounded
   writer, for the `mcp.*`, `jsonrpc.*`, `rpc.*`, `network.*` and `server.*`
@@ -257,7 +257,8 @@ async fn execute(&self, call: lash::ToolCall<'_>) -> lash::ToolAttemptOutcome {
 - **Propagation.** `position()` is the W3C context of the position, equal to
   the exported span's, for an outbound carrier: a queue message, an HTTP
   header. `as_parent()` is the anchored container, for work lash admits on
-  the plugin's behalf.
+  the plugin's behalf. Even through `span.trace()`, admitted durable work uses
+  that anchored container, never the execution-local extension span.
 
 The MCP plugin propagates for you: each `tools/call` sends the tool span's
 `traceparent` and `tracestate` in `params._meta`, beside `lash.dev/*`, and

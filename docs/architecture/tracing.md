@@ -1,295 +1,246 @@
 # Durable tracing
 
-Recovery and external-effect guarantees follow [What survives a crash](../../README.md#what-survives-a-crash).
-
-Hosts install `lash::tracing::OtelTelemetry` through
-`LashCoreBuilder::telemetry`, over a `LashTracerProvider` built with
-`LashTracerProvider::new(builder, sampler, id_fallback)` and a meter
-provider. The adapter uses OpenTelemetry SDK 0.33. Hosts own resources,
-export, provider flush and shutdown; their sampler decides once per trace,
-at the producer, and every lash span below follows that decision
-(`RecordOnly` and `Drop` both leave a trace unsampled). Lash accepts one
-adapter per core, and it is both a record sink and the runtime's span
-identity. Each `trace_sink` call adds a record consumer: every sink sees
-every record the adapter sees, with the same W3C position, and a sink that
-fails or panics affects only itself. The shared runtime also supplies every
-plugin with its clock, scope, emitter and metric instruments.
+Lash emits one `TraceRecord` model through one `TraceSink` seam. Every sink,
+including `OtelTelemetry`, receives the same records, W3C positions and stable
+ids. Sinks are additive: each `LashCoreBuilder::trace_sink` installs another
+consumer. `LashCoreBuilder::trace_product_observer` separately installs a
+product observer that also sees reconstruction, using the core's clock and
+runtime. `LashCoreBuilder::telemetry` installs the OTel adapter as the identity,
+ambient context, metrics and one sink together. A sink-only host still gets
+lash-minted W3C ids through `LashIdentity`.
 
 The [instrumentation contract](../../crates/lash/docs/instrumentation-contract.md)
-lists the registered spans, attributes and metrics. Every trace record,
-span and operational metric lash declares has a production producer; an
-entry without one is deleted, not left registered (FIG-5658).
+is generated from the span, attribute and metric registry. The
+[Configuration](#configuration) reference below is generated from policy rustdoc
+and the numeric field registry. [What survives a crash](../../README.md#what-survives-a-crash)
+is the execution durability contract.
 
-## Telemetry content
+## The host seam
 
-One host setting, `LashCoreBuilder::telemetry_content`, states whether built-in
-telemetry carries content: prompts and model responses, rendered instructions
-and tool contracts, tool arguments and results, executed code and its output,
-raw provider and protocol-step payloads, and diagnostic or provider text. It
-defaults to
-`TelemetryContent::Omitted`. The runtime applies it to every record before a
-`TraceSink` (a tee, a host's own sink) or the adapter sees it,
-so every path shares the choice.
+Lash supplies mechanism and identity; hosts supply meaning and policy. Lash
+carries no user, tenant, experiment or other host identity. Hosts map
+`TraceIds` to their own data in an enricher, selector or sink. Resource,
+sampling policy, processors, exporters, metric views, histogram buckets,
+cardinality, flush and shutdown belong to the host.
 
-| | `Omitted` (default) | `Captured` |
-| --- | --- | --- |
-| Record marker | `"content": "omitted"` | `"content": "captured"` |
-| Identities, statuses, counts, hashes, durations, usage | kept | kept |
-| Content fields | empty (`""`, `null`, `[]`); offered tools keep their names | original text within the trace limits, never scrubbed |
-| Raw provider bodies and envelope diff values | absent, with the omission reason `content_policy` | present, or their size or parse reason |
-| A failed or cancelled tool outcome | its class, code, source and origin | the whole failure record |
-| Adapter span | `lash.content.omitted = true`, no `lash.payload.json` | `lash.payload.json`, cut at 4 KiB |
+Lash owns no file format or output destination. A host writes its own
+[record sink](#writing-records-to-a-file). Nothing persisted for tracing contains
+host-supplied content beyond what execution needs: retained causes, scope ids,
+start/end times and the workflow's structural `trace_nodes` choice are lash
+facts. Enrichment, tool annotations, sampler attributes, hook references and
+selector results stay in memory.
 
-Omitted request, response, instruction, tool and code payloads are not built:
-the runtime does not clone, render or serialize them. The setting is consent
-and nothing else. `TraceDetailPolicy` still
-chooses which records exist, sampling stays with the host's provider, and
-`ContentLimits` and `TraceLimits` still bound what is captured. The same records exist under either value.
+Public boundaries use lash-owned types: `TraceCarrier`, `TracePosition`,
+`TraceTimestamp`, `TraceIds`, `TraceValue`, `ContentPolicy` and `ExtensionTrace`.
+There are exactly two versioned contract exceptions:
 
-The setting governs telemetry only. Durable requests and results, session
-history, product observations (the process and language graph) and the
-responses a host's own calls return keep their contracts.
-`DirectLlmClient` is its own telemetry path with the same default
-(`with_telemetry_content`).
+- The OTel API and SDK at the installer, enricher and explicit OTel context
+  accessor, behind `otel-trace`. Lash pins `opentelemetry` 0.33 and
+  `opentelemetry_sdk` 0.33; the in-tree OTLP exporter is `opentelemetry-otlp`
+  0.33. Hosts must align those crates and their instrumentation bridges with
+  lash's versions. Changing the declared OTel API/SDK version is a breaking
+  facade change. An OTel upgrade is announced in its commit body under
+  **OTel version**, including what hosts must align.
+- JSON is `serde_json::Value` 1.x, also spelled `lash::JsonValue`. It is the
+  facade's shared JSON contract, including `ContentValue::Json`,
+  `TraceValue::Json` and record fields. A serde_json major change breaks the
+  facade contract.
 
-### Extension spans and host filtering
+Lash does not install a global provider or diagnostic subscriber. Rust
+`tracing` diagnostics remain the host's separate logging channel; see
+[logging and event practice](../agents/logging-and-events.md).
 
-The policy covers extension spans too. A plugin records through the
-capability lash binds for the callback it runs (`ExtensionTrace`; see
-[the plugin guide](../plugins.md#tracing-an-extension)): spans and points
-whose names, attributes and events are bounded by `TraceLimits`, and whose
-content values go through `ExtensionSpan::content(key, || value)`. A content
-builder runs only when the `extension` category is captured, the selector
-kept it and the span records, so a plugin never inspects the policy itself;
-`ExtensionTrace::content_policy()` reads it for content a plugin builds
-elsewhere. Each span is one `extension_span` record, emitted whole when it
-ends, attributed to the registered `plugin_id` and `lash.plugin.callback`
-of the callback that opened it, and positioned under the span that callback
-ran in. There is no free-form plugin payload record.
+## Installing OpenTelemetry and sampling
 
-The host has the final say at its trace exporter. Wrap the export sink and
-install the wrapper with `LashCoreBuilder::trace_sink(...)`. The wrapper can
-drop extension records, or clone and redact them, before forwarding to the
-inner sink. For example, a host that exports no spans of one plugin can use:
+Enable the facade's `otel-trace` feature. The host builds a provider through
+`LashTracerProvider`; `OtelTelemetry::new` requires that wrapper by type.
 
 ```rust
-use std::sync::Arc;
-use lash::tracing::{TraceEvent, TraceRecord, TraceSink, TraceSinkError};
+use lash::tracing::{LashTracerProvider, OtelOptions, OtelTelemetry};
+use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler, SdkTracerProvider};
 
-struct DropPlugin {
-    plugin_id: &'static str,
-    inner: Arc<dyn TraceSink>,
-}
-
-impl TraceSink for DropPlugin {
-    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        if matches!(
-            &record.event,
-            TraceEvent::ExtensionSpan(span) if span.plugin_id == self.plugin_id
-        ) {
-            return Ok(());
-        }
-        self.inner.append(record)
-    }
-
-    fn flush(&self) -> Result<(), TraceSinkError> {
-        self.inner.flush()
-    }
-}
-
-// `builder` and `exporter` are the host's core builder and export sink.
-let builder = builder.trace_sink(Arc::new(DropPlugin {
-    plugin_id: "my_plugin",
-    inner: exporter,
-}));
+// Configure the host's resource, processors, exporters and span limits here.
+let provider = LashTracerProvider::new(
+    SdkTracerProvider::builder(),
+    Sampler::ParentBased(Box::new(Sampler::AlwaysOn)),
+    RandomIdGenerator::default(), // id_fallback
+);
+// `meter` and `builder` are the host's meter provider and LashCoreBuilder.
+let builder = builder.telemetry(OtelTelemetry::new(
+    &provider, &meter, OtelOptions::standard(),
+));
+// The host retains `provider` for force_flush() and shutdown().
 ```
 
-A dropped extension span orphans the spans opened under it, so a filter
-that drops one should drop its descendants, or skip the kinds instead:
-`TraceExportPolicy` skipping `Extension` (with `Point`, `Model` and
-`ModelAttempt`, which it can parent) keeps every record in the sinks and
-exports none of them, and a `CaptureSelector` that skips the same kinds for
-a call builds none of them. Place the wrapper before any sink fan-out whose
-exporters require this filtering. It governs the sinks it wraps; a
-separately installed telemetry adapter or sink retains its own export
-policy.
+Both `sampler` and `id_fallback` are required; lash chooses neither. The example
+copies the SDK's defaults. They replace any sampler or id generator previously
+set on the SDK builder. `id_fallback` supplies producer, leaf and non-lash span
+ids. Private wrappers preset lash's ids and decisions for each synchronous SDK
+span start, consuming a preset before a processor can open another span.
 
-### Writing records to a file
+**Sampler limits (D7):** the host sampler decides at the producer, after
+producer enrichment, once per trace. It is never consulted for lash spans
+below that producer. `RecordOnly` and `Drop` both become unsampled: no lash SDK
+span is built, and processors never see a recording-but-unsampled lash span.
+The sampler cannot select individual lash spans by name or attribute. Use
+`TraceExportPolicy` to select optional kinds, or a host `SpanProcessor` for
+further filtering. Non-lash spans still use the host sampler normally.
 
-Lash ships no trace file or console writer. `TraceSink` is the seam: a host
-that wants records on disk or on stderr writes its own sink, choosing the format, rotation and
-durability, and installs it with `LashCoreBuilder::trace_sink(...)`. A JSON
-Lines sink is a few lines; write each record and its newline in one call so a
-concurrent writer cannot split a line:
+The decision and tracestate travel in every retained carrier, so a resumed
+owner follows the original decision even with a different sampler. Sinks still
+receive unsampled records and decide for themselves. The carrier handed to a
+sink, child, extension body or MCP server has the same trace id, span id,
+sampled flag and tracestate as the exported span. Metrics remain independent
+of sampling and export selection; removing a record through detail selection
+also removes that record's metric sample.
 
-```rust
-use std::{fs::File, io::Write, path::PathBuf, sync::Mutex};
-use lash::tracing::{TraceRecord, TraceSink, TraceSinkError};
+## Identity and causality
 
-struct JsonlFile { path: PathBuf, file: Mutex<File> }
+`TraceRecord.context.ids()` exposes `TraceIds`: session, turn, send, batch,
+process, tool intent, call, cell, workflow node and model call where known.
+They are lash identities, stable across owners. Producer enrichment sees ids
+known at open; acceptance adds the send id only to its settling record.
+`LlmRequestScope.llm_call_id` joins a provider decorator to the logical `chat`;
+`LlmRequestScope.trace_carrier` is that chat's carrier when built. Request
+digests and business identities do not cover trace provenance.
 
-impl TraceSink for JsonlFile {
-    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        let mut line = serde_json::to_string(record)?;
-        line.push('\n');
-        let mut file = self.file.lock().unwrap_or_else(|poison| poison.into_inner());
-        file.write_all(line.as_bytes())
-            .map_err(|source| TraceSinkError::Write { path: self.path.clone(), source })
-    }
-}
-```
+A scoped record's `TracePosition` carries its span, parent, links, kind, role,
+real start/end, scope and optional substrate-attempt link. `Opens` and `Event`
+are live hints, which do not promise a close. `Closes` and `Whole` publish a
+span; the adapter starts and ends the SDK span synchronously from that record's
+retained times. No SDK span stays open across an await, suspension or takeover.
+Unobserved admissions and unscoped diagnostics have no position. Installing a
+sink later does not invent provenance for an unobserved admission.
 
-Override `TraceSink::flush` to `fsync` when the host needs records on disk
-before exit. Tests read typed records from `lash::testing::RecordingTraceSink`.
+| Entry | Producer | Admitted work's parent |
+|---|---|---|
+| Send | `lash.send` | that producer |
+| Batch send | `lash.send.batch` | the head input's producer; other inputs are links |
+| Host process start | `lash.process.start` | that producer |
+| Tool-intent submission | `lash.tool_intent.submit` | that producer |
+| Admin plugin operation | `lash.plugin.invoke` | that producer |
+| Standalone direct completion | `lash.direct` | that producer |
 
-The [logging and event practice](../agents/logging-and-events.md) defines diagnostic
-fields, failure ownership, levels and correlation with domain observations.
+A producer captures the explicit `trace_context(carrier)`, otherwise the
+ambient caller, before its first await. `trace_context_none()` detaches from
+the ambient caller. `trace_link_mode(TraceLinkMode::Parent)` is the default;
+`Link` opens a new root linking the caller. Admitted work still parents to the
+producer. Settlement publishes one `Whole` producer record (`selected`,
+`reused`, `refused` or `abandoned`); a retry that reused an earlier acceptance
+has its own producer with no newly admitted child.
 
-The 1.0 export baseline includes conversation, durable run, process and model-call
-identities as span attributes, even with payload export off (FIG-5529).
-`gen_ai.conversation.id` and `lash.session.id` name the session. Scope ownership
-supplies `lash.run.id` and `lash.process.id`; record context supplies
-`lash.llm_call.id`, the id a provider decorator also reads from its request
-scope. A physical turn's id does not imply its logical run's id. These
-identities do not enter default span names or metric dimensions.
+A turn parents to the head admitted input's producer. Other admitted inputs
+and inputs delivered at its checkpoints are deduplicated links, in that order,
+under `TraceLimits::links`; delivery retains their causes for the closer on
+any owner. A consumed input never changes a turn's fixed parent. A follow-on
+turn parents to the switching turn; a child-session turn to its process.
+Each continuation can therefore add another agent level. Resolving a wait or
+timer keeps the receiving scope's parent. A substrate attempt is a link.
 
-A code cell exports as `execute_tool {language}` (`gen_ai.tool.type =
-function`, `lash.cell.id` its graph key, `lash.cell.language`,
-`lash.cell.tool_calls` once it answered and `lash.outcome`). When a model
-reply has text after its first complete cell, `lash.cell.trailing_discarded`
-reports the discarded byte count even with content capture disabled. The
-turn's RLM extraction diagnostic records the typed `discarded_after_cell`
-note (`bytes`, `reason: predicted_continuation`); the tail never enters the
-next model request. It is its turn's
-child and the parent of the tool calls it makes, and it spans from its first
-start, which the `Tools` phase that holds the cell retains, to the end of
-the execution that answered it, across suspensions and re-runs. A failed
-code cell exports Error status and its closed execution reason, or its cell
-failure kind when the executor returned a cell failure; a cell its turn's
-terminal discards exports `lash.outcome = discarded` with no error. A recovered
-outer turn keeps its own successful status. Tool failures export the terminal
-outcome's typed class, using the last attempt's class when the terminal payload
-has no class. Turn failures export their stop reason as `error.type`.
-Missing typed tool failure evidence exports `unknown`. Model failures retain
-their provider code or normalized class. Human-readable failure detail remains
-subject to the payload policy.
+Containers derive ids with `derive_span(parent, key)` from retained identities:
+`TraceScopeId` for turns, calls, processes and intents; graph key for cells;
+the whole `EffectIdentity` for workflow occurrences. Loops, recursion and
+concurrent occurrences stay distinct. Leaves (model calls and attempts,
+extensions and points) draw random ids at open; every real re-execution is a
+new leaf. Restoring a scope reads its retained position without minting one.
 
-## Required durability contract
+## Closure and publication
 
-Admission retains a typed cause and the original start time beside
-business data. The scope's span is derived from that cause and the scope's
-durable identity (`derive_span`), so every owner names the same span. The first accepted write wins,
-including an untraced admission. A retry under another context reads the
-winner. Trace provenance does not change business submission hashes,
-effect identities, tool-call identities or graph-node identities.
+Only the owner whose acknowledged commit wrote a container's terminal closes
+it, after that acknowledgement, from retained times. A retained read, resend,
+redrive or successor folding an already committed result emits no close.
+Tracing adds no commit and creates no export obligation.
 
-Every admission has a parent, or it is unobserved: no admission makes a
-root. A host call that admits work opens a producer span first (`lash.send`,
-`lash.send.batch`, `lash.process.start`, `lash.tool_intent.submit` or
-`lash.plugin.invoke`), as the caller's child or, with
-`TraceLinkMode::Link`, as a new root that links the caller, and the work it
-admits retains that producer as its parent (FIG-6298). A turn joins its head
-input's producer and links the other inputs of its batch. A child-session
-turn joins its process, and a follow-on turn joins the turn that
-switched to it. An input a running turn consumes at a checkpoint is linked
-from the turn's completion and never becomes a second parent; the turn's
-checkpoint retains the delivered input's cause, so an owner that resumes
-the turn links it too. The receiving scope keeps its parent when a host
-completion resolves a wait. A current execution attempt is an optional
-link, supplied through the engine interface; it never replaces the retained
-parent.
+| Container | Anchored by | Own-terminal closer | Parent-terminal closer | End time |
+|---|---|---|---|---|
+| Turn, `invoke_agent` | `turn.admit` | owner of the committed run terminal: completion, cancellation, unserved end or refusal | session close's cancellation of that turn | retained terminal `at_ms` |
+| Tool, `execute_tool` | round or process-step admission retaining its scope | owner committing its member outcome (`round.outcome`, fused form, `step.outcome`, or a no-body settlement) | terminal owner settles unfinished members cancelled or discarded according to its terminal facts | outcome `ended_at_ms`, or terminal time for discard |
+| Cell, `execute_tool {language}` | first `model.done…` or `cell.snapshot…` retaining its first start | owner of the commit consuming its answer | turn terminal owner discards the stopped cell and its calls with no outcome | answering execution's end, or terminal time |
+| Process, `lash.process` / `invoke_workflow` | `process.register` | owner of `process.terminal` | each process has its own terminal | retained `occurred_at_ms` |
+| Workflow node, `lash.workflow.node {site}` | occurrence's `step.start` or starting `process.advance` | owner committing the occurrence's completed, failed or cancelled fact | process terminal owner cancels open occurrences | fact's commit time |
+| Tool intent, `lash.tool_intent` | ingress ledger row | submission first retaining settlement | — | retained settlement time |
 
-Lash mints every span id. A container (a turn, a tool call, a process, a
-tool intent) takes its derived span; a leaf (a model call) takes a random id
-from the identity's id generator when it opens; a producer takes ids from
-the same generator and the host sampler's decision. Every record carries
-its `TracePosition`: its span, parent, links, role and kind. A container's
-children name it as their parent from its start, and the container is built
-once, from its closing record, at its retained start and end. No SDK span or
-event buffer stays open across suspension.
+Every cause that ends an admitted turn, including an operator cancel and a
+fork, emits `turn_completed`. A deleted-session read response and a command
+run end no admitted turn. A tool call runs in memory within the execution that
+makes it durable. Its scope stays with that admission: each execution that
+reaches the call observes its start, and `execute_tool` closes once on the
+owner whose commit retained its outcome.
 
-Only a newly committed lifecycle transition emits a logical completion.
-Only an executed body emits a live attempt observation. Loading a committed
-result or reading a retained terminal grants neither permission.
-Product process and language graphs reconstruct through a separate observer
-on replay, without exporting another lifecycle observation. The
-[process observation guide](../observing-processes.md) explains the durable
-facts, node execution telemetry and host persistence needed to replay a path.
+Anchored containers can publish children before their own close because their
+terminal path owns the eventual close. An execution-local parent (model call,
+extension span, or cell before anchoring) holds children until it publishes,
+parent first. A crash discards unpublished holds. A cell's tools are admitted
+only by `cell.snapshot+admit`, after the cell is anchored.
 
-A container closes exactly once: on the owner whose acknowledged commit
-wrote its terminal, after that acknowledgement, from retained times (P1).
-A turn closes on the owner of `turn.commit`, a cancel, a session close's
-cancel or a refusal end. A tool call closes on the owner whose commit
-retained the member's outcome, at the `ended_at_ms` that commit retained:
-an owner that takes a round over closes only the members whose outcomes
-its own commits write. A member a turn's terminal settles `Cancelled` (a
-cancel or a refusal of a turn whose round no live owner settled) closes
-on that terminal's owner, `cancelled`; one a session close's cancel leaves
-with no outcome closes there, `discarded`. A code cell closes on the owner
-whose commit consumes its answer (the next model call's start, the next
-step's `model.done` or the turn's commit); a cell its turn's terminal stops
-before it answered closes on that terminal's owner, `discarded`, with the
-calls it admitted that have no outcome. A cell that suspends closes nothing
-until an activation answers it. A process closes on the owner of
-`process.terminal`, and a tool intent on the submission that first retains
-its settlement. A successor that folds a committed terminal, a resend, a
-redrive and a reader of a retained terminal close nothing. Tracing adds no
-commit: there is no admission export to record.
+All holds of one body execution share one `publication_hold` record/byte
+account, including serialized records and fixed entry overhead. Pressure
+finalizes the gating extension ancestors outermost first, then the oldest
+remaining parents as necessary, with `lash.span.ended_by = hold_pressure`.
+It releases every billed model close; later writes to finalized handles count
+`Late`. Parents can end before children. An unanchored cell cannot finalize
+early: over its cap it sheds the arriving live hint or an entire extension
+subtree, counting `PublicationHold`. It never drops a lash closing record.
+Its first anchoring commit releases the kept hold in order. Per body memory is
+bounded by `extension_bytes + publication_hold.bytes`.
+
+| Situation | Observation |
+|---|---|
+| Journal answers a reconstructed step | none; speculative shift observations are dropped |
+| Read of a retained scope or terminal | none; no emission permit |
+| A body's owner dies before committing its outcome; another runs it | one tool close from the committing owner; distinct extension/model leaves per actual execution |
+| Successor takes over a partially settled round | closes only members its own acknowledged commits settle |
+| Cell re-executes before its answer is consumed | one cell close with the first retained start; ledger-served tools emit nothing new |
+| A admits and B completes a turn | B closes the same derived `invoke_agent` |
+| Start hint is lost | close still builds the full span |
+| Terminal commit lands but acknowledgement or publishing owner is lost | that container can be missing; published children become an orphan subtree |
 
 ### Publication, acceptance and delivery
 
-Container publication is at most once, and the owner whose acknowledged
-commit wrote the container's terminal owns it (P1). It is never repeated
-and never deduplicated: an at-least-once export would retain an obligation
-in the terminal commit and discharge it with one more commit per
-container, and an owner that died between publishing and discharging would
-export a second span with the same id, a second duration and a second
-metric sample. Lash keeps loss rather than duplication, and tracing adds no
-commit.
+Container publication is **at most once** (D4), and the owner whose
+acknowledged commit wrote the terminal owns the one call into the emitter. It
+is never repeated or deduplicated: at-least-once export would retain an
+obligation in the terminal commit and discharge it with another commit per
+container. An owner that died between publishing and discharging that
+obligation could export a second span with the same id, duration and metric
+sample. Lash keeps loss rather than duplication, and tracing adds no commit.
 
-- **Publication** is the owner's one call into the emitter for the closing
-  record. The engine's close path has no `.await` between the commit's
-  acknowledgement and that call. Publication still runs host code
-  synchronously: every sink's `append`, the flight recorder's snapshot
-  callback, and under `OtelTelemetry` the host's `SpanEnricher` and
-  the SDK's span processors. Host code has no wall-clock bound, so
-  publication has none either.
+The close path has no `.await` between the terminal commit's acknowledgement
+and publication. Publication still runs host code synchronously: every sink's
+`append`, the flight recorder's snapshot callback, and, under `OtelTelemetry`,
+the host's `SpanEnricher` and the SDK's span processors. Host code has no
+wall-clock bound, so publication has none either.
+
 - **Sink acceptance** is per sink. Each `append` runs under its own panic
-  containment and counts its own failures, so a record one sink accepted
-  may be missing from another.
-- **Delivery** past a sink (an SDK batch processor, an exporter, a
-  backend) is the host's pipeline. Lash observes none of it.
+  containment and counts its own failures, so one sink may accept a record
+  another sink misses.
+- **Delivery** past a sink (an SDK batch processor, exporter or backend) is the
+  host's pipeline. Lash observes no delivery acknowledgement.
 
-A container is lost in three cases:
+A container can be lost in three cases:
 - its owner loses the terminal commit's acknowledgement;
-- its owner dies after the commit and before or during publication,
-  including while a host callback runs;
-- one consumer fails after publication: its own `append` fails or panics,
-  or the host pipeline drops the span. Each consumer fails independently.
+- its owner dies after the commit and before or during publication, including
+  while a host callback runs;
+- a consumer fails after publication: its `append` fails or panics, or the
+  host pipeline drops the span. Each consumer fails independently.
 
-In the first two cases the next owner finds the terminal written and
-closes nothing. The container's published children keep a parent id that no span carries, and
-show as an orphan subtree. A crash after a commit and before an emission
-can lose an observation in the same way. There is no telemetry outbox, and
-trace delivery does not decide control flow or billing. A body that exports
-before its result commits can execute again, and then exports a distinct
-attempt.
+In the first two cases, the next owner finds the terminal written and closes
+nothing. Published children keep a parent id that no span carries and appear
+as an orphan subtree. A crash after a commit and before emission can lose an
+observation the same way. There is no telemetry outbox, and trace delivery
+does not decide control flow or billing. A body that exports before its result
+commits can execute again and then export a distinct attempt.
 
-Host callbacks (sinks, the flight recorder's callback and the enricher)
-run with no engine lock held. They must not block on the engine or call
-back into the session or core that called them: no `send`, no admin call
-and no store read. A host that needs I/O hands the record to
-its own bounded queue.
+### Measured crash matrix
 
-The tool crash laws (`crates/lash-durable-test/tests/tool_crash_laws.rs`,
-`publication_loss.rs`) measure the window. They cut a traced turn at its
-commits under every fault, resume it on the other node, and report per
-terminal label what each cut lost (L1(f)). Only a cut that lands a terminal
-commit and then loses its owner's acknowledgement (`ack-hidden`) or its
-life (`commit-then-abort`) loses anything, and it loses only the container
-that commit closes. A cut that fails before the commit, aborts before it,
-or pauses the owner as a zombie loses nothing: the successor writes the
-terminal and publishes. Measured on SQLite:
+The tool crash laws (`crates/lash-durable-test/tests/tool_crash_laws.rs` and
+`publication_loss.rs`) cut a traced turn at its commits under every fault,
+resume it on another node, and report per terminal label what each cut lost
+(L1(f)). Only a cut that lands a terminal commit and then loses its owner's
+acknowledgement (`ack-hidden`) or life (`commit-then-abort`) loses anything,
+and it loses only the container that commit closes. A cut that fails before
+the commit, aborts before it, or pauses the owner as a zombie loses nothing:
+the successor writes the terminal and publishes. Measured on SQLite:
 
 | Terminal label | Lossy cut | Lost | Orphaned published spans |
 | --- | --- | --- | --- |
@@ -297,220 +248,583 @@ terminal and publishes. Measured on SQLite:
 | `round.outcome+present+model.start` (a native call) | `ack-hidden`, `commit-then-abort` | the call's `execute_tool` | none |
 | `round.outcome` (a cell's call) | `ack-hidden`, `commit-then-abort` | the call's `execute_tool` | none |
 
-A code cell closes on the commit that consumes its answer (the next
-`model.start`, `model.done` or `turn.commit`), so the matrix lets a lossy cut
-of that commit lose the cell's `execute_tool {language}` span, orphaning the
-calls the cell made, and nothing else; a cell that re-runs after any other
-cut publishes its span once. `process.terminal` (a process) and a tool intent's
+A cell span still publishes from the execution that ran it, so no cut in this
+matrix loses it. Once a cell closes on the commit that consumes its answer,
+that commit joins the table. `process.terminal` (a process) and a tool intent's
 settlement follow the same rule, but this matrix does not cut them.
 
-## Tracing policies
+Every host callback runs outside engine locks. The capture selector, content
+hook, sink, enricher and flight-recorder callback must not block on or re-enter
+the calling engine: no `send`, admin call or store read. Hand I/O work to a
+host-owned bounded queue. The rules apply individually to each callback below.
 
-Every tracing knob is a sealed policy with a documented default and range.
-A value outside its range is refused at build with
-`TracePolicyError::Range { field, value, min, max }`; a value that breaks a
-documented relation with another with `TracePolicyError::Relation`, naming
-both operands and both values; a selection the model forbids with
-`TracePolicyError::Structural`. A core reports what is in effect through
-`LashCore::trace_policy()`.
+## Content and selection
 
-- **What lash builds.** `TraceDetailPolicy` (`LashCoreBuilder::trace_detail`)
-  sets one `TraceDetail` per `TraceSpanKind`. A kind that is `Off` is never
-  built: its records are not constructed, for any sink. Containers cannot be
-  off, and only model calls (provider and stream event records) and
-  workflows (node spans) have `Extended` detail. A workflow's choice is
-  retained on the process at registration (`trace_nodes`), so every owner
-  that runs it makes the same one.
-- **What the exporter exports.** `TraceExportPolicy`, on `OtelOptions`,
-  skips kinds from the OpenTelemetry export only: their records still reach
-  every sink. `TraceMetrics` chooses the runtime and GenAI metric families.
-- **The off rule.** No kind is off or skipped while a kind in its
-  `TraceSpanKind::children()` is on, so no exported span names a parent that
-  was not exported. `extension_spans = 0` turns extension and point spans
-  off, and so requires model calls and their attempts off.
-- **Bounds.** `TraceLimits` holds the seam's admission and buffering
-  bounds (held records, links, extension spans, attributes, events, bytes,
-  references, the publication hold). `ContentLimits` bounds captured
-  provider bodies. Execution evidence, diagnostics and composition memory
-  are not telemetry and have their own policies: `EvidenceLimits`,
-  `DiagnosticLimits`, `CompositionCacheLimits`. `TraceStateLimits` and
-  `FlightRecorderSettings` are sealed the same way.
+`LashCoreBuilder::content_policy(ContentPolicy)` sets the node's capture ceiling.
+Every category defaults to `Omitted`. Identity, typed status, failure classes,
+counts, hashes, sizes, durations, usage, model and tool names remain available.
+The policy governs telemetry only; durable requests/results, session history,
+product observations and returned host answers keep their execution contracts.
+`DirectLlmClient::with_content_policy` follows the same default.
 
-### The bounded writer and omissions
+| Category | Content |
+|---|---|
+| `SystemInstructions` | rendered instructions and system prompts |
+| `InputMessages` | history messages, nested tool-call/results, protocol history |
+| `OutputMessages` | responses, stream text/tool parts, settled assistant answer on agent close |
+| `Reasoning` | reasoning parts, also requiring their input/output direction's consent |
+| `ToolDefinitions` | descriptions and schemas; tool names are structural |
+| `OutputSchema` | request output schema; output type/name remain structural |
+| `ToolArguments`, `ToolResults` | standalone tool args/results and failure text |
+| `Code`, `CodeOutput` | cell source and output/error text |
+| `ProviderPayloads` | raw provider bodies and envelope-diff values |
+| `ResponseMetadata` | allowlisted response metadata, a separate record-sink category |
+| `DiagnosticsText` | provider/program/store diagnostic prose |
+| `Extension` | values passed through extension `content()` |
 
-Every host or plugin contribution to a span passes one writer. It charges
-one attribute and `key.len() + encoded_len(value)` bytes before it buffers,
-against the span's one budget: `attributes_per_span` less the registry's
-`attribute_reserve(kind)` for lash's own attributes, and
-`span_contribution_bytes`. Lash's attributes always fit, so an SDK whose
-`max_attributes_per_span` is at least a kind's reserve drops contributions
-first and never a lash attribute. A refusal is a typed `TraceOmission`
-(`Attributes`, `SpanBytes`, `ValueTooLarge`, `ReservedKey`, `UseReplace`,
-...): the writer returns it, the span carries `lash.trace.omitted` and
-`lash.trace.omitted.count`, and `LashCore::trace_omissions()` counts it by
-site kind and reason. A string over `attribute_value_bytes` is cut at a
-UTF-8 boundary; a JSON value over it is refused whole.
+Nested tool parts follow their message's direction, rather than the standalone
+tool categories. Reasoning needs both the direction's and `Reasoning` consent;
+encrypted/redacted reasoning is absent. `ResponseMetadata` is not exported by
+the OTel exporter. It matters to record sinks; a host enricher may explicitly
+read it to add its own attributes. ADR 0038's operational allowlist and telemetry
+consent are separate gates.
 
-### The enricher
+**Openers carry no content.** Since FIG-6302, `LlmCallStarted` always carries an
+omitted request. Hosts read request content from `LlmCallCompleted` or
+`LlmCallFailed`, and output from closers. Content-bearing changes follow the
+[Hosts that read this](../agents/logging-and-events.md#hosts-that-read-this) rule.
 
-`OtelOptions::enricher` installs one `SpanEnricher`. Lash calls it once for
-every span it exports, before the SDK builds the span, with a `SpanView`
-holding the span's kind, stable ids (`TraceIds`, the same on every owner),
-position, record, lash's attributes and the policies in effect. A
-producer's enricher runs before the host sampler decides, so the sampler
-sees what it derived; the sampler's result attributes are written through
-the same writer and exported on the producer span only. Neither is ever
-persisted. `SpanEnrichment::set` adds host keys (never `lash.` keys or keys
-the registry declares), `rename` renames the span, and `replace` replaces
-a registered semantic default such as `gen_ai.provider.name`
-(`RefinableKey`); metric labels keep lash's values. A panicking enricher
-leaves the span with lash's attributes, counted as `EnricherFailed`.
+`CaptureSelector::select` runs before construction with `SelectorView.ids`, kind
+and policy. Install one with `capture_selector`; compose host policies yourself.
+It can omit categories and skip optional leaves only. Skip children first:
+`ModelAttempt` before `Model`, and `Point`, `ModelAttempt`, `Model` before
+`Extension`. A container cannot be skipped. Narrowing is inherited beneath
+leaves, even through skipped no-op handles; children cannot widen it. A record
+directly beneath a container starts at the core ceiling. Selector results are
+never stored; resumed owners call it with the same ids. A panic fails closed
+for content, preserves detail and counts `SelectorFailed`. This synchronous
+callback must not block, do I/O or re-enter the engine.
 
-A `lash.model.attempt` span's view shares the logical call's closing record
-as `record`; `SpanView::attempt` names the attempt it decorates (`None` on
-every other span), and `SpanView::usage()` is the summed usage lash
-exported as `gen_ai.usage.*` on the logical `chat` span, from the same
-fold. Enrichers use `attempt` and `usage()` instead of re-deriving either
-from `record`.
+Policy-aware builders use `policy.capture(category, || build())`, so an omitted
+category is never cloned, rendered or serialized. `TraceDetailPolicy` selects
+what records are built for every consumer; `TraceExportPolicy` selects which
+records become OTel spans. Containers cannot be off. An optional kind cannot
+be off while a kind it can parent stays on: models with attempts; extensions
+with points, models and attempts. `extension_spans = 0` requires model and
+attempt detail off. Invalid combinations return typed policy errors; nothing
+is reparented. Workflow `Extended` retains `trace_nodes` at registration so
+all owners agree about node spans.
 
-## Integration status
+### Redaction and offload
 
-Production admission retains its scope, and with it its span, before it
-dispatches children. Model attempts report the provider's actual responses. Each logical record is emitted by the owner whose commit
-was acknowledged, which is the record's first-writer receipt:
+One `ContentHook::on_content` sees every captured field via
+`RecordContent::for_each`, with its category, typed path and text/JSON value.
+Conveniences access system instructions, input messages and output parts.
+Install it with `content_hook`. Order is policy, hook, then truncation, for
+every sink and regardless of sampling. The hook must not block, perform I/O or
+re-enter the engine.
 
-| Record | Span or metric | Producer | Time |
-| --- | --- | --- | --- |
-| `turn_started` | opens `invoke_agent` (a live hint; the span is built from its close) | the session actor, after `turn.admit` | the scope's retained start |
-| `turn_completed` | `invoke_agent` | the session actor, after the commit that writes the turn's terminal (`turn.commit`, a refusal, a cancel, a session close) | the owner's clock at the acknowledgement |
-| `domain_completed` (process) | `lash.process {kind}` or `invoke_workflow {name}` | the process actor, after `process.terminal` | the terminal's retained `occurred_at_ms` |
-| `domain_completed` (workflow node) | `lash.workflow.node {site}` | the process actor, after the `process.advance` that hands the occurrence's step outcome to the engine, or after `process.terminal` for an occurrence still open | that commit's store clock |
-| `domain_completed` (tool intent) | `lash.tool_intent`, `lash.tool_intent.executed`, `lash.tool_intent.refused` | the host ingress, after the ledger retains the settlement | the settlement's retained time |
-| none | `lash.parked_work.parks` | the session or process actor, after the commit that parks it | not timed |
+To offload without exporting inline content:
 
-An owner that dies between its commit and the emission loses that record:
-there is no telemetry outbox. The next owner finds the terminal already
-written and emits nothing, so a resend, a redrive or a takeover never
-exports a second logical completion. Every cause that ends an admitted
-turn, an operator's cancel and a fork included, writes its `turn_completed`;
-a deleted session's read answer and a command run end no admitted turn.
+1. Capture the required categories at the core ceiling.
+2. In the hook, enqueue owned content in the host's bounded upload queue under
+   a host-generated key, without awaiting or uploading inline.
+3. Add `content.reference("app.content.ref".into(), key.into())`; handle a typed
+   refusal. References charge their sub-cap and the span contribution budget.
+4. Call `content.omit(category)` for the offloaded category.
 
-Lash emits no wait, timer, tool-receipt or journaled-effect record, and no
-run or process-segment span. A wait is not the unit an operator acts on:
-the tool call or process that waited carries the outcome, and a parked
-actor is counted by `lash.parked_work.parks`. A host reads how many actors
-are parked, and for how long, from the parked-work reads of `lash::admin`,
-not from a gauge.
+References commit only if the hook returns normally. A panic empties all
+captured content, discards this call's references, sets
+`ContentMarks.hook_failed` and counts `HookFailed`. It cannot retract work
+already handed to the host's queue; that queue and access policy are the host's.
 
-Core tracing names no plugin, durable substrate, store backend or LLM
-provider. Events, scopes and instruments use the engine's typed vocabulary.
-For example, a protocol plugin reports compile/link evidence as
-`program_step`, and every backend uses the neutral `lash.store.pool.*`
-instruments through its `StoreObserver`.
+`ContentLimits::standard()` cuts prose parts at **16 KiB**, which truncates
+typical agent system prompts. Hosts wanting the full prompt raise
+`max_part_bytes`; Figments uses 64 KiB parts and 256 KiB attributes:
+`ContentLimits::new(64 * 1024, 256 * 1024, 2048)?`.
+Strings are cut at UTF-8 boundaries; tool/extension JSON string leaves are cut
+structurally. Old input messages are dropped whole until the attribute fits.
+Schemas, provider bodies and response metadata stay atomic. Any field or
+serialized content attribute still exceeding `max_attribute_bytes` is omitted
+whole. JSON text is never cut mid-document. `ContentMarks` distinguishes
+capture, omitted fields, truncation, oversize and hook failure.
 
-A tool call runs in memory inside the admitted execution that makes it
-durable (ADR 0132 §5), and nothing replays it. Its trace scope is
-retained by that admission, so the call is admitted once however many
-attempts or owners run it. Its start and completion are live observations
-under that scope: each execution that reaches the call observes its start,
-and its `execute_tool` span closes once, on the owner whose commit retained
-its outcome.
+### Semantic content and vendor rendering
 
-A host-submitted tool intent retains its scope on its ledger row, under
-its submission's producer. The submission
-that first retains the settlement exports `lash.tool_intent` and counts the
-outcome; a redelivery of the key finds the settlement and exports nothing.
+Lash follows GenAI semconv snapshot `07794021`: messages have `role` and `parts`,
+system instructions are a parts array, tool args/results are JSON objects
+(non-objects wrapped under `value`), and span attribute values are serialized
+JSON. Tool response parts use `tool_call_response.response`; reasoning parts
+use `reasoning`. Laminar's renderer reads `result`/`thinking` and semconv
+messages only on LLM spans. A Laminar host maps these itself: for example, map
+an agent's `invoke_agent` closing `gen_ai.output.messages` into the host's agent
+output representation, and map nested tool response `response` to `result`
+and `reasoning` to `thinking` where its renderer expects those spellings.
+Lash's records and semconv contract keep their own shapes.
 
-A process's tool step is admitted with its trace scope, so its call is an
-`execute_tool` span opened by the admitting owner and closed by the owner
-whose `step.outcome` retained the outcome. Its parent is the process span,
-or, when the process retained `trace_nodes`, the span of the workflow
-occurrence that issued it: `lash.workflow.node {site}`, whose id is derived
-from the process span and the occurrence's whole `EffectIdentity` (task,
-site, occurrence and loop iterations), so a loop, a recursion or spawned
-tasks running one site are distinct nodes and every owner names the same
-one. A node starts at its step's admission, which retains that start in the
-step's tool scope, and closes once, as `lash.outcome` of its step's answer,
-on the owner whose `process.advance` handed that answer to the engine; an
-occurrence still open when the process ends closes `cancelled` with its
-terminal. It carries `lash.workflow.node.site` and
-`lash.workflow.node.occurrence` (the identity's canonical JSON). Whether a
-process has node spans is the `trace_nodes` its registration retained,
-never the closing owner's own policy. A `call_dynamic` resolution step
-stays under the process span; the call of its matched tool starts the node.
-The SQL commit wrapper owns the Live permit for its physical budget
-validation and histogram observation.
+## Enrichment and Laminar
 
-Recorded model usage and provider responses remain result data. Lash has no
-billing ledger, and tracing never resends a provider request.
+`OtelOptions::enricher` installs one `SpanEnricher`. It runs once per exported
+span before SDK creation; producers run it before sampling. Its `SpanView`
+contains kind, default name, `TraceIds`, position, closing/whole record,
+attributes and effective policy. On an attempt, `record` is the shared logical
+call closer: use `view.attempt` for that attempt, and `view.usage()` for the
+folded logical usage where available. No host identity is retained by lash.
+The enricher must not block, do I/O or re-enter the engine; use a host-owned
+lookup snapshot. A panic discards enrichment, exports lash's attributes and
+counts `EnricherFailed`.
 
-## GenAI projection contract (FIG-6301)
+`set` adds host keys, `rename` changes the name, and `replace(RefinableKey, ..)`
+refines a registered semantic default. Provenance is immutable. `set` on a
+refinable key refuses `UseReplace`; refinement order is lash, body, host.
+Metric labels retain lash's defaults. Every method returns a typed omission
+on refusal and charges the bounded writer before buffering.
 
-The default projection follows
-`open-telemetry/semantic-conventions-genai@07794021bfe46e1c241408b6f55cb4354bd28318`.
-A turn is `invoke_agent`; each logical model operation is one `chat {model}`,
-with `lash.model.attempt` children published only from its closing ledger.
-The detail and export policies independently select those children. Attempt
-spans carry diagnostic usage under `lash.usage.*`; only the logical chat carries
-`gen_ai.usage.*`, summed over every attempt that reported usage. Input tokens
-include fresh, cache-read and cache-write tokens. A sum that overflows exports
-no `gen_ai.usage.*` counter; an input total that overflows omits
-`gen_ai.usage.input_tokens`; either sets `lash.usage.overflow`. Reasoning tokens use
-`gen_ai.usage.reasoning.output_tokens` and remain a subset of output tokens. A
-call whose usage never arrived, because the attempt that ended it was cut short
-after a response was observed, sets `lash.usage.unknown`: its missing
-`gen_ai.usage.*` counters are unknown, not zero (ADR 0031).
+Laminar is host code, using the same ids as every sink. This example's
+`session_labels` and `upstreams` are host-owned maps populated outside callbacks:
 
-Adapter defaults are `openai` for `openai`, `openai-compatible` and `codex`,
-`anthropic` for `anthropic`, and `gcp.gen_ai` for the `google_oauth` adapter's
-Code Assist endpoint. The enricher can replace `RefinableKey::GenAiProviderName`; runtime
-retry labels keep the semantic provider default. Successful provider evidence
-supplies the response model, response id and finish reasons. Failed calls keep
-the request facts and billed usage as well.
+```rust
+use std::collections::HashMap;
+use lash::tracing::{RefinableKey, SpanEnricher, SpanEnrichment, SpanView, TraceSpanKind};
 
-Process engines explicitly declare `ProcessTraceClass`; the VM
-engine declares `Workflow`. The first registration records that choice, and
-every terminal reads it, including cancellation on a node without the engine.
-Workflows use the recorded label (the VM's definition entry name); an unavailable
-name is omitted. Internal processes have no model attributes or GenAI usage.
+struct Laminar {
+    // session id -> (agent name, host user id)
+    session_labels: HashMap<String, (String, String)>,
+    upstreams: HashMap<String, String>, // llm_call id -> routed provider
+}
+impl SpanEnricher for Laminar {
+    fn enrich(&self, span: &SpanView<'_>, out: &mut SpanEnrichment) {
+        let kind = match span.kind {
+            TraceSpanKind::Model => "LLM",
+            TraceSpanKind::Tool | TraceSpanKind::Cell => "TOOL",
+            _ => "DEFAULT",
+        };
+        let _ = out.set("lmnr.span.type", kind);
+        if let Some(session) = &span.ids.session {
+            let _ = out.set("lmnr.association.properties.session_id", session.to_string());
+            if let Some((agent, user)) = self.session_labels.get(&session.to_string()) {
+                let _ = out.set("lmnr.association.properties.user_id", user.clone());
+                if span.kind == TraceSpanKind::Agent {
+                    let _ = out.set("gen_ai.agent.name", agent.clone());
+                    let _ = out.rename(format!("invoke_agent {agent}"));
+                }
+            }
+        }
+        if let Some(provider) = span.ids.llm_call.as_ref().and_then(|id| self.upstreams.get(id)) {
+            let _ = out.replace(RefinableKey::GenAiProviderName, provider.clone());
+            let _ = out.set("gen_ai.system", provider.clone());
+        }
+        if let Some(usage) = span.usage() {
+            let _ = out.set("gen_ai.usage.cache_read_input_tokens", usage.cache_read_input_tokens);
+            let _ = out.set("gen_ai.usage.cache_creation_input_tokens", usage.cache_write_input_tokens);
+        }
+    }
+}
+```
 
-Hosts that store this: `ProcessRegistration` and `ProcessRecord` gain required
-`trace_class: "internal" | "workflow"` beside the retained execution facts.
-Trace-record schema 38 adds the workflow node subject of a
-`domain_completed`. Schema 37 changed in place to add operational model facts,
-trace-owned attempt metadata, typed process/workflow subjects and the turn's
-admitted-input count;
-it removes model/provider/usage fields from domain completions. The stored
-execution attempt ledger keeps its existing shape. The generated
-[instrumentation contract](../../crates/lash/docs/instrumentation-contract.md)
-lists the exact exported attributes and span type ids.
+Unmapped providers can copy the default `gen_ai.provider.name` from
+`SpanView.attributes` into Laminar's `gen_ai.system`. Cost is host policy:
+price the folded usage or look up a ledger by `TraceIds.llm_call`. To use a
+provider-reported cost, allowlist it under ADR 0038, capture
+`ResponseMetadata`, and read the closing record. Lash has no price table or
+typed cost field. Set neither `lmnr.span.path` nor `ids_path` unless the host
+supplies both; parent ids already describe the tree. Monitor omissions rather
+than silently assuming the example's ignored results succeeded.
 
-## GenAI metrics (FIG-6306)
+## Extensions and ambient context
 
-Installing `OtelTelemetry` records both families by default.
-`OtelOptions::metrics` selects `Off`, `Runtime`, `GenAi` or `All`; each disabled
-family uses no-op instruments. The generated instrumentation contract lists
-the names, types and units. Hosts own histogram views, cardinality limits and
-exporters through their meter provider.
+Plugins receive a registration-bound `ExtensionTrace`, never caller-supplied
+plugin attribution. `span`, `span_with`, `event`, `position`, `as_parent`,
+`content_policy`, `remaining` and `omissions` are the extension API.
+`SpanSpec` offers internal/client/producer/consumer spans and embeddings or
+retrieval presets. `ExtensionSpan` supports attributes, lazy content, events,
+failures, children, `trace()` and explicit `end()`; dropping it ends it too.
+`trace.event` emits a zero-duration point span; `span.event` buffers an event
+on that span. Plain attributes are never a place for prompts, documents or secrets. Use
+`content(key, || value)` so capture, hook and bounds apply.
 
-GenAI durations, token counters and per-call token histograms come from the
-same closing records as their spans. They retain the projection's default
-labels, before host enrichment, and include no session, turn or call ids.
-Sampling and span export selection do not suppress metrics. Removing a leaf's
-record through detail selection also removes its metrics. First-chunk timing
-observes streamed output or usage, excluding request evidence and retry notices.
-`lash.trace.omissions{reason}` belongs to `Runtime` and records at the omission
-ledger, including omissions with no published record.
+The [plugin authoring guide](../plugins.md#tracing-an-extension) covers body
+lifetime, revocation, the tool annotation allowlist and tool-live joins. The
+[generated slot scopes](#callback-slot-scopes) come from the canonical callback
+slot table. `Attempt` and `Call` stand at the tool span, `Turn` at the agent,
+`Executing` at the cell or turn, `Producer` at the operation's producer;
+`Untraced` grants no recording capability. `ProcessEngine::advance` remains a
+pure state machine; plugin factories receive policy with no position.
 
-The agent's closing record carries its admitted inference and tool counts,
-including failed calls. Tool admissions update their counter with the admission
-facts, so replay and takeover do not count a call again. The live owner's close
-uses its loaded row plus acknowledged appends; cold terminals use the stored
-row. A refusal reloads that row once on its exceptional path.
+A body owns its emission right. Normal return, cancellation and unwind close
+its open spans and revoke every clone. Late mutations are counted no-ops.
+Journal-served reconstruction emits nothing. Children of unpublished extension
+parents stay held; runtime span-budget refusal mints no span and leaves nested
+work at the nearest minted ancestor. Work lash durably admits uses
+`as_parent()`, the anchored container, even through an extension's `trace()`.
+It never retains an execution-local extension parent.
 
-Hosts that store this: the baseline `turn_phases` table gains nonnegative
-`tool_calls`, default zero (`INTEGER` on SQLite, `BIGINT` on PostgreSQL), beside
-`model_calls`. The canonical admission writer stages `TurnWrite::AddToolCalls`
-with each new turn or cell round. A cell belonging to a session operation has
-no turn row to update. Trace-record schema 37 adds optional `inference_calls`
-and `tool_calls` to `TurnCompleted` in place, without a version bump.
+`trace.instrument(future)` enters the position on every poll; `in_scope` does so
+synchronously. Lash wraps its own callbacks and provider dispatch. Use
+`span.trace().instrument(work())` for nested library work and
+`spawn(trace.instrument(work()))` for each spawned task. With `otel-trace`,
+`ExtensionTraceOtelExt::otel_context()` supplies an explicit OTel context.
+
+The supported `tracing-opentelemetry` 0.33 configuration has its default
+`context_activation = true`. Lash attaches its context as the innermost poll
+wrapper, after an outer Rust tracing span enters, so instrumented libraries
+parent to the current tool or extension position. With activation disabled the
+layer consults tracing-span data instead, so lash cannot steer those parents.
+Third-party spans use the host sampler and bypass lash's capture policy and
+emission permit; re-executing a body emits them again. The plugin author owns
+content-bearing third-party instrumentation.
+
+## Model provider propagation
+
+Lash injects no HTTP trace headers. Wrap the host's `LlmHttpTransport`; its
+`send(request, timeout)` reads the current OTel context while polled under the
+`chat`, injects W3C `traceparent` and `tracestate` into `request.headers` using
+`HttpHeaderValue::new`, then delegates to the inner transport. An
+`opentelemetry_sdk::propagation::TraceContextPropagator` with a host
+`Injector` over that header vector handles formatting. Pass the wrapper to the
+provider constructor:
+
+| Provider | Transport constructor |
+|---|---|
+| `OpenAiCompatibleProvider` | `with_transport(Arc<dyn LlmHttpTransport>)` |
+| `OpenAiProvider` | `with_transport(Arc<dyn LlmHttpTransport>)` |
+| `AnthropicProvider` | `with_transport`; `with_client` wraps the client in the same transport |
+| `GoogleOAuthProvider` | `with_transport`; `with_client` likewise |
+| `CodexProvider` | `with_http_transport`, HTTP/SSE only |
+
+`CodexProvider` defaults to Auto transport, trying a cached WebSocket connection
+before SSE. WebSockets bypass `LlmHttpTransport` and do not carry per-request
+headers. Hosts requiring per-request propagation call **`force_sse_transport()`**
+as well as installing the HTTP wrapper. The [transport contract](../../crates/lash-http-transport/src/http.rs)
+defines the request and typed headers.
+
+MCP propagation is destination policy instead: `McpServerConfig.trace_propagation`
+defaults to `W3c`. Each `tools/call` puts the tool span's `traceparent` and
+`tracestate` in `params._meta`, beside `lash.dev/*`. `Off` omits those two keys
+without suppressing the tool span. Third-party clients propagate according to
+their own instrumentation.
+
+## Budgets and omission diagnostics
+
+Every optional contribution charges one per-span budget before buffering:
+`attributes_per_span - attribute_reserve(kind)` attributes and
+`span_contribution_bytes` bytes. Body annotations, extension attributes/events,
+hook references, enrichment and producer sampler attributes share it in arrival
+order; source sub-caps also apply. Replacing a reserved default charges bytes,
+not another attribute slot. A string exceeding `attribute_value_bytes` is cut
+at a UTF-8 boundary (`ValueTruncated`); JSON is refused whole
+(`ValueTooLarge`); non-finite floats are refused (`NonFinite`).
+
+The [reserve table](#registry-attribute-reserves) is generated per kind. Lash's
+attributes precede contributions in the SDK. The SDK is a **second stage**:
+with `max_attributes_per_span >= attributes_per_span` it loses nothing to its
+count bound; a lower SDK bound drops contributions first and preserves every
+lash attribute while at least `attribute_reserve(kind)` slots remain.
+
+Omissions do not fail execution. They are visible at four levels:
+
+- Writer methods return `TraceOmission`; chainable extension methods expose
+  counts via `ExtensionSpan::omissions()` and `ExtensionTrace::omissions()`.
+- Each affected record keeps its omission counts with its id/position. Body
+  exit emits one `BodyOmissions` diagnostic at its callback, span, call and
+  attempt address. Two bodies of the same callback stay distinguishable.
+- Spans carry `lash.trace.omitted` reasons and `lash.trace.omitted.count`.
+- `LashCore::trace_omissions()` aggregates by site kind and reason;
+  `lash.trace.omissions{reason}` is a runtime metric without identity labels.
+
+Sites distinguish body, record, span, shift, admission and cell. Key/namespace,
+name, count/byte, reference, hold, link, late-write and callback failures have
+typed reasons. The content marker separately names truncated/oversize paths.
+Logs report degradation episodes without repeating full payloads.
+
+## Configuration
+
+Policies are sealed and validated. `TracePolicyError::Range` names field,
+value and bounds; `Relation` names both operands and values, including
+`Reserve(kind)` or `Remaining(kind)`; `Structural` names an invalid selection.
+The facade returns `EmbedError::TracePolicy`. `LashCore::trace_policy()` reports
+the effective policies. `OtelOptions.metrics` selects `TraceMetrics::Off`,
+`Runtime`, `GenAi` or the default `All`. A deployment ceiling is node-local, not session config;
+only `trace_nodes` is retained as a structural cross-owner choice.
+
+| Level | Installation and default |
+|---|---|
+| Core ceiling | `content_policy` (omitted), `trace_detail` (Standard), `trace_limits`, `content_limits` (standard bounds) |
+| Core, per-record narrowing | `capture_selector` (none); can only narrow content and optional leaves |
+| Core hook | `content_hook` (none); one, host-composed |
+| Exporter | `OtelOptions`: all built kinds, all metrics, no enricher |
+| Per call | `trace_context` / `trace_context_none` (otherwise ambient), `trace_link_mode` (Parent) |
+| Destination | MCP `trace_propagation` (W3c); model headers in a host transport (none injected by lash) |
+| Host provider | required sampler and `id_fallback`; host resource, limits, pipeline and lifecycle |
+| Host ingress | `TraceCarrier::parse_w3c_with` and `TraceStateLimits` (W3C ceilings); invalid data is `InvalidTraceCarrier` |
+| Host sink | `FlightRecorderSettings`, inner sink and snapshot callback; callback must not block or re-enter |
+
+`EvidenceLimits`, `DiagnosticLimits` and `CompositionCacheLimits` bound
+execution evidence, diagnostics and working memory, rather than export. Their
+facade installers and defaults are in the
+[hosting limits reference](../operations/durable-hosting.md).
+
+Regenerate the section below with:
+
+```sh
+kiln test //crates/lash:otel_trace_evidence__test --local-test-execution \
+  --test_arg=--ignored --test_arg=--exact \
+  --test_arg=tracing_configuration_is_regenerated \
+  --test_env=BUILD_WORKSPACE_DIRECTORY=$PWD
+```
+
+<!-- BEGIN GENERATED CONFIGURATION -->
+
+Generated from policy rustdoc and its numeric field registry by
+`tracing_configuration_is_regenerated` in `otel_trace_evidence.rs`.
+Numeric sizes are bytes, durations milliseconds, other values counts.
+
+### ContentPolicy (core ceiling)
+
+The node's ceiling: all categories omitted by default. A selector can only narrow it.
+
+### CaptureSelector (core, per record)
+
+Runs before a record or optional leaf is built. It must not block or re-enter.
+
+### ContentHook (core)
+
+One synchronous host hook. It must not block, do I/O or re-enter the engine.
+
+### ContentLimits (core)
+
+The bounds lash puts on the content a record carries.
+
+Sealed: built through `ContentLimits::new`, which refuses a value
+outside its range.
+
+### ContentLimits defaults
+
+16 KiB parts, 128 KiB attributes and a 2048-byte provider request body.
+
+### ContentLimits bounds and relations
+
+Part: 1 KiB..=1 MiB; attribute: 1 KiB..=8 MiB; provider: 0..=8 MiB.
+Parts and provider bodies must each fit the attribute bound.
+
+### TraceDetailPolicy (core)
+
+What lash builds for each span kind: one `TraceDetail` per kind.
+
+A container (producer, turn, tool, cell, process, workflow, node, tool
+intent) cannot be off, and only a model call and a workflow have
+extended detail. A leaf can be off only with every kind it can parent:
+a model call with its attempts, an extension span with points, model
+calls and their attempts.
+
+### TraceDetailPolicy refusals
+
+Refuses, in kind order, a container turned off, extended detail for a
+kind that has none, and any workflow node setting but `Standard`
+(`Structural`); then a leaf turned off while a kind it can parent is
+on (`Relation`, `ParentOffChildOn`).
+
+### TraceExportPolicy (exporter)
+
+Which kinds the OpenTelemetry exporter turns into spans. A skipped kind's
+records still reach every sink, and its metrics are still recorded.
+
+A container is always exported, and a leaf may be skipped only with every
+kind it can parent, so no exported span names a parent that was not.
+
+### TraceMetrics (exporter)
+
+Which metric families the exporter records.
+
+### OtelOptions (exporter)
+
+The exporter's host choices.
+
+### OtelOptions defaults
+
+No enricher, every kind exported, every metric family recorded.
+Export remains opt-in through installing the exporter.
+
+### TraceLimits (core)
+
+The admission and buffering bounds of the tracing seam: how much a
+shift holds, how many links a span keeps, and what every host or
+plugin contribution to a span may take.
+
+Sealed: built only through `TraceLimits::builder`, which checks
+every row against its documented range and then the relations
+between rows. Each accessor documents its default and range.
+
+### TraceStateLimits (host ingress)
+
+A host's narrowing of the W3C `tracestate` ceilings, for carriers it
+parses from its own transport (`TraceCarrier::parse_w3c_with`). The W3C
+maxima are the defaults and the hard ceilings: a host narrows them, never
+raises them.
+
+Sealed: built through `TraceStateLimits::new`, which refuses a value
+over its ceiling.
+
+### TraceStateLimits defaults
+
+The W3C ceilings: 32 members, 512 characters, 256-byte keys, 241-byte
+tenant and 14-byte system parts of a multi-tenant key, and 256-byte
+values.
+
+### FlightRecorderSettings (host sink)
+
+Host policy for retention and snapshot frequency, independent of content
+policy.
+
+Sealed: built through `FlightRecorderSettings::new`, which refuses a
+value outside its range.
+
+### FlightRecorderSettings defaults
+
+256 records, a 5 s slow threshold, a 60 s minimum interval, and
+snapshots on failure.
+
+### FlightRecorderSettings bounds
+
+Settings that retain at most `capacity` records, including a
+snapshot's triggering record (`flight_recorder.capacity`: 1..=16384);
+snapshot when a reported duration strictly exceeds `slow_threshold`,
+or never on duration when it is `None`
+(`flight_recorder.slow_threshold_ms`: 1 ms..=24 h); accept triggers at
+least `minimum_interval` apart in record time, older timestamps
+suppressed even at zero (`flight_recorder.minimum_interval_ms`:
+0..=24 h); and snapshot records whose typed outcome is a failure when
+`snapshot_on_failure` is set.
+
+### TraceLimits field contracts
+
+- Records a shift holds behind its journal frontier, lash's and extensions' alike; the overflow is dropped and counted (`trace_limits.held_observations`: default 256, 0..=4096).
+- Links one span keeps, at its admission and at its close; the overflow is counted in `lash.links.omitted` (`trace_limits.links`: default 64, 0..=128).
+- Extension and point spans one body execution opens; 0 turns both off, which requires model calls and their attempts off too (`trace_limits.extension_spans`: default 256, 0..=4096).
+- Attributes of one assembled span, lash's included; contributions share what the registry's reserve for the kind leaves. Also the attributes of one event (`trace_limits.attributes_per_span`: default 128, 1..=1024, at least every kind's reserve).
+- Events per extension span (`trace_limits.events_per_span`: default 64, 0..=256).
+- Bytes of one contributed value: a longer string is cut, a longer JSON value refused (`trace_limits.attribute_value_bytes`: default 4 KiB, 64 B..=64 KiB, at most `span_contribution_bytes`).
+- Every byte one body's contributions charge: names, keys, values and events (`trace_limits.extension_bytes`: default 1 MiB, 4 KiB..=16 MiB, at least `attribute_value_bytes`).
+- Annotations a tool body sets on its tool span (`trace_limits.tool_span_attributes`: default 16, 0..=64, at most `attributes_per_span` less the tool kind's reserve).
+- Bytes of one span, event or error-type name a plugin or the enricher supplies (`trace_limits.name_bytes`: default 1 KiB, 16 B..=16 KiB).
+- Bytes of one contributed key (`trace_limits.attribute_key_bytes`: default 128 B, 16 B..=1 KiB).
+- Every byte the optional sources contribute to one span: body annotations, extension attributes and events, hook references, the sampler's attributes and enrichment (`trace_limits.span_contribution_bytes`: default 256 KiB, 4 KiB..=8 MiB).
+- Content-hook references per record (`trace_limits.references`: default 16, 0..=64, at most `attributes_per_span` less the largest content-bearing kind's reserve).
+- Content-hook reference keys and values per record (`trace_limits.reference_bytes`: default 64 KiB, 0..=1 MiB, at most `span_contribution_bytes`).
+
+### Numeric defaults and inclusive bounds
+
+| Field | Default | Min | Max |
+|---|---|---|---|
+| `content_limits.max_part_bytes` | 16384 | 1024 | 1048576 |
+| `content_limits.max_attribute_bytes` | 131072 | 1024 | 8388608 |
+| `content_limits.max_provider_body_bytes` | 2048 | 0 | 8388608 |
+| `trace_limits.held_observations` | 256 | 0 | 4096 |
+| `trace_limits.links` | 64 | 0 | 128 |
+| `trace_limits.extension_spans` | 256 | 0 | 4096 |
+| `trace_limits.attributes_per_span` | 128 | 1 | 1024 |
+| `trace_limits.events_per_span` | 64 | 0 | 256 |
+| `trace_limits.attribute_value_bytes` | 4096 | 64 | 65536 |
+| `trace_limits.extension_bytes` | 1048576 | 4096 | 16777216 |
+| `trace_limits.tool_span_attributes` | 16 | 0 | 64 |
+| `trace_limits.name_bytes` | 1024 | 16 | 16384 |
+| `trace_limits.attribute_key_bytes` | 128 | 16 | 1024 |
+| `trace_limits.span_contribution_bytes` | 262144 | 4096 | 8388608 |
+| `trace_limits.references` | 16 | 0 | 64 |
+| `trace_limits.reference_bytes` | 65536 | 0 | 1048576 |
+| `trace_limits.publication_hold.records` | 256 | 1 | 4096 |
+| `trace_limits.publication_hold.bytes` | 8388608 | 131072 | 67108864 |
+| `tracestate_limits.members` | 32 | 0 | 32 |
+| `tracestate_limits.chars` | 512 | 0 | 512 |
+| `tracestate_limits.key_bytes` | 256 | 0 | 256 |
+| `tracestate_limits.tenant_bytes` | 241 | 0 | 241 |
+| `tracestate_limits.system_bytes` | 14 | 0 | 14 |
+| `tracestate_limits.value_bytes` | 256 | 0 | 256 |
+| `flight_recorder.capacity` | 256 | 1 | 16384 |
+| `flight_recorder.slow_threshold_ms` | 5000 | 1 | 86400000 |
+| `flight_recorder.minimum_interval_ms` | 60000 | 0 | 86400000 |
+
+### Registry attribute reserves
+
+| Span kind | attribute_reserve |
+|---|---|
+| `producer` | 20 |
+| `agent` | 25 |
+| `model` | 46 |
+| `model_attempt` | 28 |
+| `tool` | 31 |
+| `cell` | 29 |
+| `process` | 26 |
+| `workflow` | 24 |
+| `workflow_node` | 22 |
+| `tool_intent` | 24 |
+| `extension` | 26 |
+| `point` | 22 |
+
+### Callback slot scopes
+
+Generated from `callback_slots!` in `lash-core-store/src/tool_run/state_command.rs`.
+
+| Slot | Scope |
+|---|---|
+| `ToolProvider` | `Attempt` |
+| `ToolReads` | `Untraced` |
+| `ToolCatalog` | `Untraced` |
+| `BeforeTurn` | `Turn` |
+| `ToolArgsTransform` | `Call` |
+| `ToolArgsCheck` | `Call` |
+| `ToolResultTransform` | `Call` |
+| `ToolResultCheck` | `Call` |
+| `AfterTurn` | `Turn` |
+| `Checkpoint` | `Turn` |
+| `AssistantStream` | `Turn` |
+| `AssistantResponse` | `Turn` |
+| `AssistantStreamFinished` | `Turn` |
+| `PresentationStep` | `Untraced` |
+| `PresentationPresenter` | `Untraced` |
+| `RuntimeEvent` | `Untraced` |
+| `Operation` | `Producer` |
+| `AttachmentOmission` | `Untraced` |
+| `ContextCompactor` | `Turn` |
+| `ContextPressure` | `Turn` |
+| `ProtocolSession` | `Executing` |
+| `ProtocolDriver` | `Executing` |
+| `CodeExecutor` | `Executing` |
+| `AssistantProseProjector` | `Untraced` |
+| `CellFailureFeedback` | `Untraced` |
+
+<!-- END GENERATED CONFIGURATION -->
+
+## Writing records to a file
+
+Lash ships no file or console writer. Hosts choose format, rotation, queues and
+durability with their own `TraceSink`, then install it through `trace_sink`.
+`append` and a flight-recorder snapshot callback run synchronously outside
+engine locks and must not block on or re-enter the engine. A production sink
+can enqueue into a bounded writer queue; this minimal synchronous file example
+illustrates the record serialization seam:
+
+```rust
+use std::{fs::File, io::Write, path::PathBuf, sync::Mutex};
+use lash::tracing::{TraceRecord, TraceSink, TraceSinkError};
+
+struct JsonlFile { path: PathBuf, file: Mutex<File> }
+impl TraceSink for JsonlFile {
+    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
+        let mut line = serde_json::to_vec(record)?;
+        line.push(b'\n');
+        let mut file = self.file.lock().unwrap_or_else(|p| p.into_inner());
+        file.write_all(&line)
+            .map_err(|source| TraceSinkError::Write { path: self.path.clone(), source })
+    }
+}
+```
+
+Serialize each record and newline as one locked write so concurrent writers
+cannot interleave lines. Override `flush` for the host's durability contract
+(`sync_all` when required). Tests read typed records through
+`lash::testing::RecordingTraceSink`. The
+[flight recorder](../perf/instruments/flight-recorder.md) is a bounded metadata
+ring and host callback, with no output destination of its own. The
+[process observation guide](../observing-processes.md) explains product graphs,
+which reconstruct on replay through a separate `ProductObservationSink`.
