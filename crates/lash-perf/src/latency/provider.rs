@@ -230,6 +230,7 @@ pub(super) fn response(parts: Vec<LlmOutputPart>) -> LlmResponse {
         cache_read_input_tokens: 512,
         cache_write_input_tokens: 0,
         reasoning_output_tokens: 48,
+        unknown_calls: 0,
     };
     LlmResponse {
         parts,
@@ -280,6 +281,7 @@ impl LatencyProviderKind {
             cache_read_input_tokens: 512,
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 48,
+            unknown_calls: 0,
         }));
     }
 }

@@ -121,6 +121,7 @@ fn token_usage_sample() -> LlmUsage {
         cache_read_input_tokens: 1,
         cache_write_input_tokens: 2,
         reasoning_output_tokens: 3,
+        unknown_calls: 0,
     }
 }
 

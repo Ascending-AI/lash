@@ -318,6 +318,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         cache_read_input_tokens: 5,
         cache_write_input_tokens: 3,
         reasoning_output_tokens: 2,
+        unknown_calls: 0,
     };
     loaded.set_plugin_state(Some(fixture_plugin_state()));
     loaded.set_execution_graph(fixture_execution());
@@ -556,6 +557,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             cache_read_input_tokens: 5,
             cache_write_input_tokens: 3,
             reasoning_output_tokens: 2,
+            unknown_calls: 0,
         },
         "durable fixture semantic drift: checkpoint token usage changed"
     );

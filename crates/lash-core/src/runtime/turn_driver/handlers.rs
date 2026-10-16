@@ -24,20 +24,67 @@ impl RuntimeTurnDriver<'_> {
         machine: &mut TurnMachine,
         response: Response,
     ) -> Result<(), RuntimeError> {
-        machine.try_handle_response(response).map_err(|overflow| {
-            crate::runtime::runtime_error_from_store_commit(
-                crate::StoreError::TokenUsageAccountingOverflow {
-                    usage_source: "turn".to_string(),
-                    model: self
-                        .policy
-                        .llm_profile_config()
-                        .model
-                        .wire_model()
-                        .to_string(),
-                    counter: overflow.counter(),
-                },
-            )
-        })
+        machine
+            .try_handle_response(response)
+            .map_err(|overflow| self.usage_overflow(overflow))
+    }
+
+    fn usage_overflow(
+        &self,
+        overflow: lash_sansio::llm::types::TokenUsageOverflow,
+    ) -> RuntimeError {
+        crate::runtime::runtime_error_from_store_commit(
+            crate::StoreError::TokenUsageAccountingOverflow {
+                usage_source: "turn".to_string(),
+                model: self
+                    .policy
+                    .llm_profile_config()
+                    .model
+                    .wire_model()
+                    .to_string(),
+                counter: overflow.counter(),
+            },
+        )
+    }
+
+    /// Settle the turn's model calls whose tails drained (FIG-6433): each
+    /// call's record is recorded, and its reported usage replaces the
+    /// unknown its response was admitted with; a call whose usage never
+    /// arrived stays unknown. With `wait`, every drain is waited for, each
+    /// bounded by its call's deadline: the turn never closes or parks while
+    /// one of its calls is still draining.
+    pub(super) async fn settle_call_drains(
+        &mut self,
+        machine: &mut TurnMachine,
+        event_tx: &TurnObserver,
+        wait: bool,
+    ) -> Result<(), RuntimeError> {
+        for (drained, newest) in self.call_drains.settle(wait).await {
+            self.publish_call_record(drained.record, event_tx);
+            if let Some(usage) = drained.usage {
+                machine
+                    .settle_unknown_call_usage(&usage, newest)
+                    .map_err(|overflow| self.usage_overflow(overflow))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Count `record`'s call unknown in the turn's usage when it ended
+    /// unsuccessfully after a response was observed and its provider usage
+    /// never arrived: no response admitted it, and it is never a zero.
+    fn record_unknown_failed_call(
+        &self,
+        machine: &mut TurnMachine,
+        result: &Result<LlmResponse, crate::LlmCallError>,
+        record: Option<&crate::LlmCallRecord>,
+    ) -> Result<(), RuntimeError> {
+        if result.is_err() && record.is_some_and(crate::LlmCallRecord::usage_unknown) {
+            machine
+                .record_unknown_call_usage()
+                .map_err(|overflow| self.usage_overflow(overflow))?;
+        }
+        Ok(())
     }
 
     /// Take the protocol's before-call decision on `request`, the call the
@@ -184,6 +231,7 @@ impl RuntimeTurnDriver<'_> {
                 },
         } = answer;
         self.model_attempt = attempt;
+        self.record_unknown_failed_call(machine, &result, call_record.as_ref())?;
         self.record_llm_outcome(&result, call_record, event_tx);
         // Whether the hooks run at all is the plan recorded with the
         // completion (ADR 0105 §1), never the response hooks installed now:
@@ -249,6 +297,16 @@ impl RuntimeTurnDriver<'_> {
             stream,
         } = answer;
         self.model_attempt = attempt;
+        self.record_unknown_failed_call(machine, &result, call_record.as_ref())?;
+        // A completion the stop drops still owes the usage of a tail that
+        // drains: the turn counts it unknown until the drain settles it.
+        if let Ok(response) = &result
+            && response.usage.unknown_calls > 0
+        {
+            machine
+                .record_unknown_call_usage()
+                .map_err(|overflow| self.usage_overflow(overflow))?;
+        }
         self.record_llm_outcome(&result, call_record, event_tx);
         if let Err(error) = self.finish_recorded_stream(&stream.capsule).await {
             tracing::warn!(
@@ -300,13 +358,19 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         if let Some(call_record) = call_record {
-            event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
-                &self.scoped_effect_controller,
-                &self.turn_id,
-                &call_record,
-            )));
-            self.llm_calls.push(call_record);
+            self.publish_call_record(call_record, event_tx);
         }
+    }
+
+    /// Publish a model call's sealed record on the call's own lane
+    /// ([`model_call_activity`]) and keep it on the turn.
+    fn publish_call_record(&mut self, call_record: crate::LlmCallRecord, event_tx: &TurnObserver) {
+        event_tx.publish(RuntimeStreamEvent::Turn(model_call_activity(
+            &self.scoped_effect_controller,
+            &self.turn_id,
+            &call_record,
+        )));
+        self.llm_calls.push(call_record);
     }
 
     /// Answer the machine's model call `id` with `result`, the response it

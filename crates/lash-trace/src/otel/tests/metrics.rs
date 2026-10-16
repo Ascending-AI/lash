@@ -47,6 +47,7 @@ fn chat(adapter: &OtelTelemetry) -> TraceRecord {
                         cache_write_input_tokens: 2,
                         output_tokens: 4,
                         reasoning_output_tokens: 1,
+                        unknown_calls: 0,
                     }),
                 }
                 .into(),

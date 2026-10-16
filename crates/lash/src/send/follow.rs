@@ -838,19 +838,19 @@ pub(super) async fn durable_report(
         })
         .collect();
 
+    // A call whose usage never arrived counts unknown, never as zero.
+    let unknown_call = LlmUsage::unknown_call();
     let usage = llm_calls
         .iter()
         .flat_map(|call| &call.attempts)
         .filter_map(|attempt| attempt.usage.as_ref())
-        .try_fold(LlmUsage::default(), |total, usage| {
-            total.checked_add(&LlmUsage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                cache_read_input_tokens: usage.cache_read_input_tokens,
-                cache_write_input_tokens: usage.cache_write_input_tokens,
-                reasoning_output_tokens: usage.reasoning_output_tokens,
-            })
-        })
+        .chain(
+            llm_calls
+                .iter()
+                .filter(|call| call.usage_unknown())
+                .map(|_| &unknown_call),
+        )
+        .try_fold(LlmUsage::default(), |total, usage| total.checked_add(usage))
         .map_err(|overflow| {
             EmbedError::Runtime(lash_core::RuntimeError::new(
                 lash_core::RuntimeErrorCode::QueuedWork,

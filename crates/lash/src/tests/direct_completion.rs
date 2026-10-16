@@ -83,6 +83,7 @@ async fn a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace(
                                 cache_read_input_tokens: 0,
                                 cache_write_input_tokens: 0,
                                 reasoning_output_tokens: 1,
+                                unknown_calls: 0,
                             },
                             ..text_response("raw direct answer")
                         },

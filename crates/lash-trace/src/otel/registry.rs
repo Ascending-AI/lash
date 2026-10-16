@@ -175,6 +175,7 @@ attributes! {
         ResponseId => ("gen_ai.response.id", String, MODEL),
         ResponseFinishReasons => ("gen_ai.response.finish_reasons", StringArray, MODEL),
         UsageOverflow => ("lash.usage.overflow", Boolean, MODEL),
+        UsageUnknown => ("lash.usage.unknown", Boolean, MODEL),
         AttemptInputTokens => ("lash.usage.input_tokens", Integer, ATTEMPT),
         AttemptOutputTokens => ("lash.usage.output_tokens", Integer, ATTEMPT),
         AttemptCacheReadTokens => ("lash.usage.cache_read_tokens", Integer, ATTEMPT),

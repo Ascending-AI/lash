@@ -221,6 +221,7 @@ pub(crate) fn benchmark_provider_with_control(
                     cache_read_input_tokens: 512,
                     cache_write_input_tokens: 0,
                     reasoning_output_tokens: 48,
+                    unknown_calls: 0,
                 };
                 if let Some(tx) = req.stream_events.as_ref() {
                     if profile.deltas.is_empty() {

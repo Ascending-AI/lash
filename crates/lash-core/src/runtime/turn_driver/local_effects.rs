@@ -284,6 +284,8 @@ pub(super) fn turn_effect_executor(
         opener_state: driver.opener_state.clone(),
         children_stop: driver.children_stop.clone(),
         model_stop_error: Arc::clone(&driver.model_stop_error),
+        model_limit: driver.model_limit,
+        call_drains: driver.call_drains.clone(),
         // The body's own lane, keyed by the effect invocation it runs: the
         // turn cursor is the main driver's alone, and cloning it would put
         // body and driver emissions on colliding {key}#{ordinal} ids.

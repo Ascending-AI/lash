@@ -21,18 +21,12 @@ fn abort_persists_request_disposition_and_typed_interruption() {
         ..Default::default()
     };
 
-    let (response, record) = synthesize_protocol_abort(
-        crate::LlmCallId("call-under-abort".to_string()),
+    let response = protocol_handoff_response(
+        &crate::LlmCallId("call-under-abort".to_string()),
         &accumulator,
-        LlmUsage::default(),
         &evidence,
-        Vec::new(),
     );
 
-    assert_eq!(
-        record.call_id,
-        crate::LlmCallId("call-under-abort".to_string())
-    );
     assert_eq!(
         response
             .generation_disposition
@@ -41,7 +35,6 @@ fn abort_persists_request_disposition_and_typed_interruption() {
         crate::GenerationOptionOutcome::NotRequested
     );
     assert_eq!(response.request_body, evidence.request_body);
-    assert_eq!(record.attempts[0].outcome, crate::AttemptOutcome::Aborted);
     assert_eq!(
         response
             .execution_evidence
@@ -52,53 +45,31 @@ fn abort_persists_request_disposition_and_typed_interruption() {
 }
 
 #[test]
-fn abort_retains_provider_usage_delivered_before_preemption() {
-    let usage = LlmUsage {
-        input_tokens: 11,
-        output_tokens: 7,
-        ..Default::default()
-    };
-    let provider_usage = serde_json::json!({
-        "input_tokens": 11,
-        "output_tokens": 7
-    });
-    let mut evidence = crate::LlmStreamEvidence {
-        response_started: true,
-        generation_disposition: Some(request_disposition()),
-        ..Default::default()
-    };
-    evidence
-        .merge(crate::LlmStreamEvidence {
-            provider_usage: Some(provider_usage.clone()),
-            ..Default::default()
-        })
-        .expect("provider usage without execution identity remains mergeable");
-
-    let (response, record) = synthesize_protocol_abort(
-        crate::LlmCallId("call-under-abort".to_string()),
-        &LlmStreamAccumulator::default(),
-        usage.clone(),
-        &evidence,
-        Vec::new(),
-    );
-
-    assert_eq!(response.usage, usage);
-    assert_eq!(response.provider_usage, Some(provider_usage));
-    assert_eq!(record.attempts[0].usage, Some(response.usage));
-}
-
-#[test]
 fn abort_suppression_updates_response_and_attempt_together() {
-    let (response, mut record) = synthesize_protocol_abort(
-        crate::LlmCallId("call-under-abort".to_string()),
+    let response = protocol_handoff_response(
+        &crate::LlmCallId("call-under-abort".to_string()),
         &LlmStreamAccumulator::default(),
-        LlmUsage::default(),
         &crate::LlmStreamEvidence {
             generation_disposition: Some(request_disposition()),
             ..Default::default()
         },
-        Vec::new(),
     );
+    let mut record = crate::LlmCallRecord {
+        call_id: crate::LlmCallId("call-under-abort".to_string()),
+        label: None,
+        replay_drops: Vec::new(),
+        attempts: vec![crate::AttemptRecord {
+            ordinal: 1,
+            outcome: crate::AttemptOutcome::Completed,
+            protocol_position: crate::ProtocolPosition::TerminalObserved,
+            retry_budget_consumed: true,
+            retry_decision: None,
+            error: None,
+            evidence: None,
+            generation_disposition: Some(request_disposition()),
+            usage: None,
+        }],
+    };
     let mut result = Ok(response);
 
     record_protocol_owned_stop_suppression(&mut result, Some(&mut record));

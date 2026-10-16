@@ -17,15 +17,17 @@ use lash_trace::{
 
 use super::*;
 
+mod drain;
 mod host_forwarder;
 mod support;
 
 use support::*;
 mod terminal;
 
+pub(in crate::runtime) use drain::CallDrains;
 use host_forwarder::ProviderHostForwarder;
 use lash_sansio::session_model::{FailureCode, TurnFailureCode};
-use terminal::{observed_stream_protocol_position, synthesize_protocol_abort};
+use terminal::{observed_stream_protocol_position, protocol_handoff_response};
 
 /// Result of running stream hooks over a visible chunk. Carries both
 /// the (possibly rewritten) text and an `abort_requested` flag that the
@@ -358,6 +360,7 @@ impl RuntimeTurnDriver<'_> {
         );
         let mut call_record = None;
         let mut stream_closed = false;
+        let mut handed_off = false;
         let result = loop {
             match poll_drive_sources(cancel, &mut llm_task, &mut llm_stream_rx, stream_closed).await
             {
@@ -433,24 +436,10 @@ impl RuntimeTurnDriver<'_> {
                         break Err(err);
                     }
                     if *stream_state.abort_requested {
-                        // A plugin stream hook asked us to end the LLM
-                        // call now after seeing a complete response block.
-                        // The response is committed once the plugin asks to
-                        // abort. Continue forwarding late text, signed
-                        // reasoning, and usage into that response, but stop at
-                        // an attempt-reset boundary rather than erasing the
-                        // already-complete cell.
-                        if let Err(err) = self
-                            .collect_trailing_stream_events_before_abort(
-                                &mut host_forwarder,
-                                &mut llm_task,
-                                &mut llm_stream_rx,
-                                &mut stream_state,
-                            )
-                            .await
-                        {
-                            break Err(err);
-                        }
+                        // A plugin stream hook saw a complete response block:
+                        // the turn takes what streamed up to here as the
+                        // response, and its cell runs now. A provider that
+                        // already returned answers as it returned.
                         if llm_task.is_finished()
                             && let Ok(provider_result) = (&mut llm_task).await
                         {
@@ -483,27 +472,20 @@ impl RuntimeTurnDriver<'_> {
                                             ),
                                         );
                                     }
-                                    let (resp, _) = synthesize_protocol_abort(
-                                        call_id.clone(),
+                                    break Ok(protocol_handoff_response(
+                                        &call_id,
                                         stream_state.stream_accumulator,
-                                        stream_state.streamed_usage.clone(),
                                         stream_state.stream_evidence,
-                                        completion_sideband.replay_drops(),
-                                    );
-                                    break Ok(resp);
+                                    ));
                                 }
                             }
                         }
-                        let (resp, aborted_call_record) = synthesize_protocol_abort(
-                            call_id.clone(),
+                        let mut resp = protocol_handoff_response(
+                            &call_id,
                             stream_state.stream_accumulator,
-                            stream_state.streamed_usage.clone(),
                             stream_state.stream_evidence,
-                            completion_sideband.replay_drops(),
                         );
-                        let mut resp = resp;
                         if let Err(error) = completion_sideband.fence_response(&mut resp) {
-                            call_record = Some(aborted_call_record);
                             let retryable = error.is_retryable();
                             break Err(LlmCallError {
                                 message: error.message,
@@ -516,8 +498,10 @@ impl RuntimeTurnDriver<'_> {
                                 partial_response: error.partial_response,
                             });
                         }
-                        call_record = Some(aborted_call_record);
-
+                        // The provider is still generating, and bills all of
+                        // it: its tail drains off the turn's path, and the
+                        // call's record commits when the drain ends.
+                        handed_off = true;
                         break Ok(resp);
                     }
                 }
@@ -757,7 +741,38 @@ impl RuntimeTurnDriver<'_> {
         capsule.chunks = stream_chunks;
         capsule.finish = assistant_stream_finish_reason(&result, abort_requested);
 
-        if let Some(call) = call {
+        if handed_off {
+            llm_task_abort.disarm();
+            let clock = Arc::clone(&self.host.core.clock);
+            let trace = match (call, &result) {
+                (Some(call), Ok(response)) => Some(drain::TailTrace {
+                    call,
+                    context: crate::trace::trace_context_from_invocation(&invocation)
+                        .for_llm_call(llm_call_id),
+                    response: response.clone(),
+                    request_model,
+                    started_at: debug.created_at,
+                    stream_summary: debug.summary.to_json(),
+                }),
+                _ => None,
+            };
+            self.call_drains.start(
+                drain::CallTail {
+                    task: llm_task,
+                    stream: llm_stream_rx,
+                    streamed_usage,
+                    sideband: completion_sideband,
+                    call_id,
+                    protocol_suppressed_stop_sequences,
+                    deadline: self
+                        .model_limit
+                        .map(|limit| clock.now() + limit.remaining(clock.timestamp_ms())),
+                    clock,
+                    trace,
+                },
+                self.children_stop.child_token(),
+            );
+        } else if let Some(call) = call {
             let stream_summary = debug.summary.to_json();
             match &result {
                 Ok(response) => {
@@ -1422,40 +1437,6 @@ impl RuntimeTurnDriver<'_> {
                 forwarder.send_semantic_session_event(SessionStreamEvent::RetryStatus(progress));
             }
         }
-        Ok(())
-    }
-
-    /// `AttemptReset` is a hard boundary: the completed response belongs to the accepted
-    /// attempt and must not be cleared by a provider retry that raced with cancellation.
-    /// If the deadline wins, an uncooperative provider's late usage is unavailable for this
-    /// attempt and the sealed record says so
-    /// (`AttemptUsageOutcome::UnreportedAfterAbort`).
-    /// The deadline is the host's execution budgets' stop grace, not a literal.
-    async fn collect_trailing_stream_events_before_abort<T>(
-        &mut self,
-        forwarder: &mut ProviderHostForwarder<'_>,
-        llm_task: &mut crate::task::JoinHandle<T>,
-        llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,
-        state: &mut LlmStreamState<'_>,
-    ) -> Result<(), LlmCallError> {
-        let clock = self.host.core.clock.clone();
-        let deadline = clock.now() + self.host.core.control.execution_budgets.stop_grace();
-        loop {
-            let deadline_wait = clock.sleep_until(deadline);
-            futures_util::pin_mut!(deadline_wait);
-            let stream_recv = llm_stream_rx.recv();
-            futures_util::pin_mut!(stream_recv);
-            futures_util::select_biased! {
-                _ = deadline_wait.fuse() => break,
-                event = stream_recv.fuse() => match event {
-                    None | Some(LlmStreamEvent::AttemptReset) => break,
-                    Some(event) => {
-                        self.forward_provider_stream_event(forwarder, event, state).await?;
-                    }
-                },
-            }
-        }
-        llm_task.abort();
         Ok(())
     }
 

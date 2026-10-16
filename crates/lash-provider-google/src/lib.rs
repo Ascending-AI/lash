@@ -803,6 +803,7 @@ mod tests {
                 cache_read_input_tokens: 5,
                 cache_write_input_tokens: 0,
                 reasoning_output_tokens: 3,
+                unknown_calls: 0,
             }
         );
     }

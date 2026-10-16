@@ -30,13 +30,18 @@ protocol never receives it as completed output. The attempt ledger records the
 observed facts on an `Interrupted` attempt. A whole-call retry resets provisional
 output and usage before collecting the next attempt (ADR 0040).
 
-Explicit cancellation is distinct from truncation. A protocol-owned abort can
-still drain provider usage before sealing its attempt. The host selects
-the stop grace of its execution budgets (`ExecutionBudgets::stop_grace`),
-which is two seconds in the explicitly selected
-`ExecutionBudgets::recommended()` preset. Usage received in that
-interval remains provider-reported; missing usage becomes
-`UnreportedAfterAbort` (ADR 0031).
+Explicit cancellation is distinct from truncation. A protocol-owned abort ends
+the protocol's stream, not the provider call: the accepted cell runs at once,
+and the call's tail is read to the provider's terminal event off the turn's
+path, its content discarded (FIG-6433). The provider future, and any host
+decorator around it, runs to its end, and the call's record, the turn's usage
+totals and its span carry the usage the provider reported. The drain is bounded
+by the call's pinned deadline; the turn waits for it before it closes or parks.
+Usage that never arrives, because the deadline passed, the provider failed or
+the turn's immediate cancel stopped the tail, is unknown, never zero: the
+attempt's usage is absent (`UnreportedAfterAbort` or `UnreportedAfterFailure`,
+ADR 0031), the turn's `LlmUsage::unknown_calls` counts the call, and the span
+carries `lash.usage.unknown`.
 
 A host may reconcile receipts after a call through its provider decorator
 (ADR 0127). Lash supplies the captured response metadata and attempt history,
@@ -47,12 +52,12 @@ and provides no reconciliation API.
 A host that needs truncation detection selects `RequireTerminalEvidence`.
 EOF tolerance follows the selected policy; missing evidence never silently
 relaxes a strict route. Abort
-drain timing and later accounting remain host choices, while evidence records
-what the provider actually reports.
+drain is bounded by the call's deadline, later accounting remains a host
+choice, and evidence records what the provider actually reports.
 
 ## Implementation
 
 - [Termination policy](../../crates/lash-sansio/src/llm/capability.rs) and [OpenAI route resolution](../../crates/lash-provider-openai/src/config.rs).
 - [OpenAI stream validation](../../crates/lash-provider-openai/src/driver.rs) and [Responses collection](../../crates/lash-provider-openai/src/codex/streaming.rs).
 - [Anthropic completion validation](../../crates/lash-provider-anthropic/src/provider.rs) and [Google defaults](../../crates/lash-provider-google/src/config.rs).
-- [Abort drain](../../crates/lash-core/src/runtime/turn_driver/streaming.rs).
+- [Abort drain](../../crates/lash-core/src/runtime/turn_driver/streaming/drain.rs).

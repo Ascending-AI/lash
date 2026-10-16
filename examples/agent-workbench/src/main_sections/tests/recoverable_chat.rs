@@ -123,6 +123,7 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
                     cache_read_input_tokens: 3,
                     cache_write_input_tokens: 2,
                     reasoning_output_tokens: 5,
+                    unknown_calls: 0,
                 }),
             },
             lash::AttemptRecord {

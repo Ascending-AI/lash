@@ -899,6 +899,7 @@ fn usage(input: i64, output: i64, cache_read: i64, reasoning: i64) -> LlmUsage {
         cache_read_input_tokens: cache_read,
         cache_write_input_tokens: 0,
         reasoning_output_tokens: reasoning,
+        unknown_calls: 0,
     }
 }
 
@@ -1064,6 +1065,7 @@ async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
             cache_read_input_tokens: 16,
             cache_write_input_tokens: 6,
             reasoning_output_tokens: 2,
+            unknown_calls: 0,
         },
         "the report sums both calls, including cache and reasoning tokens"
     );

@@ -272,6 +272,7 @@ fn usage_gate_response() -> lash::provider::LlmResponse {
         cache_read_input_tokens: 3,
         cache_write_input_tokens: 2,
         reasoning_output_tokens: 4,
+        unknown_calls: 0,
     };
     response
 }

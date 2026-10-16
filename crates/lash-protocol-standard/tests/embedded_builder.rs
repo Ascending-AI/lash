@@ -55,6 +55,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
             cache_read_input_tokens: 2,
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 1,
+            unknown_calls: 0,
         },
         ..RuntimeSessionState::fixture(lash_core::SessionPolicy::new(
             lash_core::TurnBudget::Unbounded,

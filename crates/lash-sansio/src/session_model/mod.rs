@@ -1361,6 +1361,7 @@ mod tests {
             cache_read_input_tokens: 5,
             cache_write_input_tokens: 2,
             reasoning_output_tokens: 1,
+            unknown_calls: 0,
         };
         assert_eq!(in_range.checked_input_total(), Ok(in_range.input_total()));
     }

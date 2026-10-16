@@ -181,6 +181,7 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
         cache_write_input_tokens: 2,
         output_tokens: 4,
         reasoning_output_tokens: 1,
+        unknown_calls: 0,
     };
     let builder = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,

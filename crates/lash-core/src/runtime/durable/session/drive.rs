@@ -334,6 +334,18 @@ pub trait TurnDrive: Send {
     /// future does not own, its tool bodies' cooperative stop among it.
     fn stop_cell(&mut self);
 
+    /// The turn is about to park: wait for every model call whose tail is
+    /// still read after its cell was accepted (FIG-6433), each bounded by
+    /// its call's deadline, so parking never cuts a call the provider bills.
+    /// A drive that runs no such call waits for nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when a drained call's usage cannot be recorded.
+    async fn settle_call_drains(&mut self) -> Result<(), TurnError> {
+        Ok(())
+    }
+
     /// The turn's commit to its session once its machine is done: the next
     /// revision of `head`, the session's head as the owner loaded it, which
     /// `turn.commit` publishes with the turn's terminal, and what the turn's

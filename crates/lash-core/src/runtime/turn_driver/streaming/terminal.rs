@@ -1,12 +1,14 @@
 use super::*;
 
-pub(super) fn synthesize_protocol_abort(
-    call_id: crate::LlmCallId,
+/// The response the turn derives an accepted cell from when the protocol
+/// accepted it before the provider returned: what streamed up to the
+/// acceptance. Its usage is unknown until the call's tail drains
+/// (FIG-6433), never the zero of a usage nothing reported (ADR 0031).
+pub(super) fn protocol_handoff_response(
+    call_id: &crate::LlmCallId,
     stream_accumulator: &LlmStreamAccumulator,
-    streamed_usage: LlmUsage,
     stream_evidence: &crate::LlmStreamEvidence,
-    replay_drops: Vec<crate::ProviderReplayDrop>,
-) -> (LlmResponse, crate::LlmCallRecord) {
+) -> LlmResponse {
     let mut execution_evidence = stream_evidence
         .execution_evidence
         .clone()
@@ -16,13 +18,13 @@ pub(super) fn synthesize_protocol_abort(
     let mut response = LlmResponse {
         discarded_after_cell: None,
         parts: Vec::new(),
-        usage: streamed_usage,
+        usage: LlmUsage::unknown_call(),
         terminal_reason: crate::LlmTerminalReason::Stop,
         terminal_diagnostic: None,
         provider_usage: stream_evidence.provider_usage.clone(),
         request_body: stream_evidence.request_body.clone(),
         http_summary: stream_evidence.http_summary.clone(),
-        execution_evidence: Some(execution_evidence.clone()),
+        execution_evidence: Some(execution_evidence),
         generation_disposition: stream_evidence.generation_disposition,
         response_metadata: stream_evidence.response_metadata.clone(),
         // Runtime-synthesized abort: the provider policy is unknowable here,
@@ -31,27 +33,7 @@ pub(super) fn synthesize_protocol_abort(
         expose_thinking: None,
     };
     stream_accumulator.apply_to_response_for_request(&mut response, &call_id.0);
-    // Usage observed before the abort is a fact; its absence is a typed hole
-    // the ledger must show, never a zero (ADR 0031).
-    let usage = (response.provider_usage.is_some() || response.usage != LlmUsage::default())
-        .then(|| response.usage.clone());
-    let call_record = crate::LlmCallRecord {
-        call_id,
-        label: None,
-        replay_drops,
-        attempts: vec![crate::AttemptRecord {
-            ordinal: 1,
-            outcome: crate::AttemptOutcome::Aborted,
-            protocol_position: crate::ProtocolPosition::OutputStarted,
-            retry_budget_consumed: true,
-            retry_decision: None,
-            error: None,
-            evidence: Some(execution_evidence),
-            generation_disposition: response.generation_disposition,
-            usage,
-        }],
-    };
-    (response, call_record)
+    response
 }
 
 pub(super) fn observed_stream_protocol_position(

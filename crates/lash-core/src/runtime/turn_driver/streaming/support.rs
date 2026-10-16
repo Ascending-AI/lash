@@ -31,8 +31,15 @@ pub(super) fn record_protocol_owned_stop_suppression(
         }
     }
     if let Some(call_record) = call_record {
-        for attempt in &mut call_record.attempts {
-            suppress(&mut attempt.generation_disposition);
+        record_protocol_owned_stop_suppression_in(call_record);
+    }
+}
+
+/// [`record_protocol_owned_stop_suppression`] for a call's record alone.
+pub(super) fn record_protocol_owned_stop_suppression_in(call_record: &mut crate::LlmCallRecord) {
+    for attempt in &mut call_record.attempts {
+        if let Some(disposition) = &mut attempt.generation_disposition {
+            disposition.stop_sequences = crate::GenerationOptionOutcome::SuppressedProtocolOwned;
         }
     }
 }

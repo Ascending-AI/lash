@@ -273,6 +273,54 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.last_call_usage.as_ref()
     }
 
+    /// Count one model call whose provider usage never arrived and that no
+    /// response admitted: a call that ended unsuccessfully after its request
+    /// was sent. The turn's total says the call's usage is unknown.
+    ///
+    /// # Errors
+    ///
+    /// [`TokenUsageOverflow`] when the count overflows.
+    pub fn record_unknown_call_usage(&mut self) -> Result<(), TokenUsageOverflow> {
+        self.cumulative_usage = self
+            .cumulative_usage
+            .checked_add(&LlmUsage::unknown_call())?;
+        Ok(())
+    }
+
+    /// Settle the usage of a call whose response was admitted with unknown
+    /// usage (its stream was still being read): the call leaves the unknown
+    /// count and its `reported` usage joins the total. `newest` says no
+    /// other call was answered since it, so its usage is also the last
+    /// call's when that is still unknown.
+    ///
+    /// # Errors
+    ///
+    /// [`TokenUsageOverflow`] when the reported counters overflow.
+    pub fn settle_unknown_call_usage(
+        &mut self,
+        reported: &LlmUsage,
+        newest: bool,
+    ) -> Result<(), TokenUsageOverflow> {
+        let (reported, _) = checked_turn_usage_from_llm_usage(reported)?;
+        let Some(unknown_calls) = self.cumulative_usage.unknown_calls.checked_sub(1) else {
+            return Ok(());
+        };
+        self.cumulative_usage = LlmUsage {
+            unknown_calls,
+            ..self.cumulative_usage.clone()
+        }
+        .checked_add(&reported)?;
+        if newest
+            && self
+                .last_call_usage
+                .as_ref()
+                .is_some_and(|last| last.unknown_calls > 0)
+        {
+            self.last_call_usage = Some(reported);
+        }
+        Ok(())
+    }
+
     pub fn protocol_iteration(&self) -> usize {
         self.protocol_iteration
     }

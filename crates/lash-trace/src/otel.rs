@@ -730,6 +730,9 @@ impl<'a> Projection<'a> {
             } => {
                 model::call_attributes(model.as_ref(), Some(response), attempts.as_deref(), out);
                 logical_usage_attributes(&self.usage, out);
+                if model::usage_unknown(&record.event) {
+                    out.push(A::UsageUnknown.value(true));
+                }
             }
             TraceEvent::LlmCallFailed {
                 model,
@@ -739,6 +742,9 @@ impl<'a> Projection<'a> {
             } => {
                 model::call_attributes(model.as_ref(), None, attempts.as_deref(), out);
                 logical_usage_attributes(&self.usage, out);
+                if model::usage_unknown(&record.event) {
+                    out.push(A::UsageUnknown.value(true));
+                }
                 if error.terminal_reason == crate::TraceLlmTerminalReason::Cancelled {
                     out.push(A::Outcome.value("cancelled"));
                     return;

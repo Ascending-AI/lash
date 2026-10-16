@@ -1244,6 +1244,15 @@ pub struct LlmUsage {
     pub cache_read_input_tokens: i64,
     pub cache_write_input_tokens: i64,
     pub reasoning_output_tokens: i64,
+    /// Model calls whose provider usage never reached lash, so none of their
+    /// tokens are in the counters above (ADR 0031): a sum with a nonzero count
+    /// is a lower bound, never a total. A single call's usage counts itself.
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub unknown_calls: u32,
+}
+
+fn is_zero_count(count: &u32) -> bool {
+    *count == 0
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1258,12 +1267,24 @@ impl TokenUsageOverflow {
 }
 
 impl LlmUsage {
+    /// The usage of one model call whose provider usage never arrived.
+    #[must_use]
+    pub fn unknown_call() -> Self {
+        Self {
+            unknown_calls: 1,
+            ..Self::default()
+        }
+    }
+
+    /// Whether this is a known zero: every counter is zero and no call's
+    /// usage is unknown.
     pub fn is_zero(&self) -> bool {
         self.input_tokens == 0
             && self.output_tokens == 0
             && self.cache_read_input_tokens == 0
             && self.cache_write_input_tokens == 0
             && self.reasoning_output_tokens == 0
+            && self.unknown_calls == 0
     }
 
     pub fn total(&self) -> i64 {
@@ -1314,6 +1335,11 @@ impl LlmUsage {
                 .ok_or(TokenUsageOverflow {
                     counter: "reasoning_output_tokens",
                 })?,
+            unknown_calls: self.unknown_calls.checked_add(other.unknown_calls).ok_or(
+                TokenUsageOverflow {
+                    counter: "unknown_calls",
+                },
+            )?,
         };
         merged.checked_total()?;
         Ok(merged)
@@ -1348,6 +1374,13 @@ impl LlmUsage {
                     self.reasoning_output_tokens,
                     other.reasoning_output_tokens,
                 ),
+                unknown_calls: match self.unknown_calls.checked_add(other.unknown_calls) {
+                    Some(count) => count,
+                    None => {
+                        saturated = true;
+                        u32::MAX
+                    }
+                },
             },
             saturated,
         )

@@ -401,6 +401,8 @@ impl LashRuntime {
             opener_state: crate::session::OpenerState::default(),
             children_stop: CancellationToken::new(),
             model_stop_error: Default::default(),
+            model_limit: None,
+            call_drains: Default::default(),
             // The shift lane sequences what this drive does from where it
             // starts, so it is keyed by the drive: a successor, or a later
             // drive of this owner, never reuses an id an earlier drive

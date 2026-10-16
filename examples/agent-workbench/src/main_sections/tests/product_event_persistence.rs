@@ -174,6 +174,7 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                     cache_read_input_tokens: 3,
                     cache_write_input_tokens: 2,
                     reasoning_output_tokens: 5,
+                    unknown_calls: 0,
                 }),
             },
             lash::AttemptRecord {

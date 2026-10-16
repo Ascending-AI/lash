@@ -98,6 +98,13 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) children_stop: CancellationToken,
     /// A live model call's typed deadline stop, shared with its effect body.
     pub(super) model_stop_error: Arc<std::sync::Mutex<Option<crate::LlmCallError>>>,
+    /// The live model call's pinned deadline, which also bounds the drain
+    /// of its tail once its cell is accepted mid-stream.
+    pub(super) model_limit: Option<crate::ExecutionLimit>,
+    /// The turn's model calls whose tails are still read after their cells
+    /// were accepted (FIG-6433), shared with the effect bodies that run
+    /// them. The turn settles them before it closes.
+    pub(super) call_drains: streaming::CallDrains,
     /// The turn-scope observation cursor: every host-facing emission the
     /// driver makes outside an effect body sequences under the turn scope's
     /// journal key, so no two emissions share an identity (ADR 0105 §1). An

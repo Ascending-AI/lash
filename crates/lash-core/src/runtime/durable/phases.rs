@@ -652,6 +652,7 @@ pub async fn run_phases(
                         // sending the provider call (FIG-6238).
                         let exit = ran?;
                         if exit == CellExit::Suspended {
+                            drive.settle_call_drains().await?;
                             return Ok(PhaseExit::Suspended { due: None });
                         }
                         // Every answered cell is handed off, tools called
@@ -715,7 +716,10 @@ pub async fn run_phases(
                         let stopped = stopped(drive, &mut carry, &mut answered_cell);
                         return stop(cx, services, &row, request, stopped, heads).await;
                     }
-                    RoundExit::Suspended { due } => return Ok(PhaseExit::Suspended { due }),
+                    RoundExit::Suspended { due } => {
+                        drive.settle_call_drains().await?;
+                        return Ok(PhaseExit::Suspended { due });
+                    }
                 }
             }
             Effect::ReportToolCalls { id, completed } => {

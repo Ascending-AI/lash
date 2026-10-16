@@ -1030,6 +1030,7 @@ fn assert_usage(
         cache_read_input_tokens: cache_read,
         cache_write_input_tokens: cache_write,
         reasoning_output_tokens: reasoning,
+        unknown_calls: 0,
     };
     assert_eq!(
         usage, expected,

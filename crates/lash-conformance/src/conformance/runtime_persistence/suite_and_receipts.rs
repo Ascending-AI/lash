@@ -529,6 +529,7 @@ pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overfl
         cache_read_input_tokens: i64::MAX,
         cache_write_input_tokens: 0,
         reasoning_output_tokens: 0,
+        unknown_calls: 0,
     };
     assert!(
         token_usage.checked_total().is_ok(),

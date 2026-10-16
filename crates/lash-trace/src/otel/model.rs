@@ -3,7 +3,8 @@
 use super::*;
 use crate::{TraceLlmResponse, TraceModelAttempt, TraceModelCall};
 use lash_sansio::llm::types::{
-    AttemptOutcome, AttemptRecord, GenerationOptionOutcome, NormalizedError, TokenUsageOverflow,
+    AttemptOutcome, AttemptRecord, GenerationOptionOutcome, NormalizedError, ProtocolPosition,
+    TokenUsageOverflow,
 };
 
 pub(super) fn error_type(error: &NormalizedError) -> String {
@@ -125,6 +126,30 @@ pub(super) fn logical_usage(event: &TraceEvent) -> Option<Result<LlmUsage, Token
         }
         TraceEvent::LlmCallCompleted { usage, .. } => usage.clone().map(Ok),
         _ => None,
+    }
+}
+
+/// Whether a logical call's usage is unknown (ADR 0031): a completed call
+/// whose usage never arrived, or one whose ending attempt was cut short after
+/// a response was observed, before its provider usage arrived.
+pub(super) fn usage_unknown(event: &TraceEvent) -> bool {
+    match event {
+        TraceEvent::LlmCallCompleted { usage: None, .. } => true,
+        TraceEvent::LlmCallCompleted {
+            attempts: Some(attempts),
+            ..
+        }
+        | TraceEvent::LlmCallFailed {
+            attempts: Some(attempts),
+            ..
+        } => attempts.last().is_some_and(|attempt| {
+            attempt
+                .attempt
+                .usage_disposition()
+                .is_unreported_after_interruption()
+                && attempt.attempt.protocol_position != ProtocolPosition::NoResponse
+        }),
+        _ => false,
     }
 }
 

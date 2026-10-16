@@ -1133,6 +1133,12 @@
         "reasoning_output_tokens": {
           "format": "int64",
           "type": "integer"
+        },
+        "unknown_calls": {
+          "description": "Model calls whose provider usage never reached lash, so none of their\ntokens are in the counters above (ADR 0031): a sum with a nonzero count\nis a lower bound, never a total. A single call's usage counts itself.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [

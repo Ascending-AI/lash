@@ -102,6 +102,7 @@ const USAGE: LlmUsage = LlmUsage {
     cache_read_input_tokens: 0,
     cache_write_input_tokens: 0,
     reasoning_output_tokens: 0,
+    unknown_calls: 0,
 };
 /// The host tool a turn's answer may call, declared `Once`.
 const WRITE: &str = "write";

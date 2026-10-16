@@ -68,6 +68,7 @@ fn usage(input_tokens: i64, output_tokens: i64, cache_read_input_tokens: i64) ->
         cache_read_input_tokens,
         cache_write_input_tokens: 0,
         reasoning_output_tokens: 0,
+        unknown_calls: 0,
     }
 }
 

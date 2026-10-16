@@ -379,6 +379,21 @@ pub struct LlmCallRecord {
     pub attempts: Vec<AttemptRecord>,
 }
 
+impl LlmCallRecord {
+    /// Whether the call's usage is unknown: the attempt that ended it was
+    /// cut short after a response was observed, before the provider's usage
+    /// arrived. The provider may bill it, so a usage sum counts it unknown,
+    /// never as zero (ADR 0031).
+    pub fn usage_unknown(&self) -> bool {
+        self.attempts.last().is_some_and(|attempt| {
+            attempt
+                .usage_disposition()
+                .is_unreported_after_interruption()
+                && attempt.protocol_position != ProtocolPosition::NoResponse
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct LlmResponse {
     /// Observed predicted continuation discarded by the protocol after its first cell.

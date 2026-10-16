@@ -280,13 +280,266 @@ pub(super) fn rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_ra
     })
 }
 
+/// Budgets for a call whose cell is accepted mid-stream: a short stop grace,
+/// which the tail's drain must outlast, and `model_total` as the call's
+/// deadline.
 #[cfg(feature = "rlm")]
-pub(super) async fn rlm_abort_drain_core(provider: ProviderHandle) -> Result<LashCore> {
+fn tail_budgets(model_total: std::time::Duration) -> lash_core::ExecutionBudgets {
+    lash_core::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
+        model_total,
+        stop_grace: TAIL_STOP_GRACE,
+        provider: lash_core::ProviderAttemptLimits::new(model_total, model_total, model_total, 1)
+            .expect("provider limits"),
+        ..lash_core::ExecutionBudgetsConfig::recommended()
+    })
+    .expect("tail budgets")
+}
+
+#[cfg(feature = "rlm")]
+const TAIL_STOP_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
+
+#[cfg(feature = "rlm")]
+pub(super) async fn rlm_abort_drain_core(
+    provider: ProviderHandle,
+    model_total: std::time::Duration,
+) -> Result<LashCore> {
     explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+        .execution_budgets(tail_budgets(model_total))
         .serve_test_llm_profile(provider, mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())
 }
 
+/// The first cell of an RLM answer, as the provider streams it.
+#[cfg(feature = "rlm")]
+fn streamed_cell(stream: &lash_core::llm::types::LlmEventSender, value: &str) {
+    stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+        kind: StreamBlockKind::AssistantText,
+        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+        text: format!("<typescript>\nawait control.finish(\"{value}\");\n</typescript>\n"),
+    }));
+}
+
+/// Hands the provider the turn's first `CodeBlockStarted`: the accepted cell
+/// is running. Records every activity.
+#[cfg(feature = "rlm")]
+#[derive(Default)]
+struct CellStarted {
+    started: StdMutex<Option<oneshot::Sender<()>>>,
+    events: RecordingEvents,
+}
+
+#[cfg(feature = "rlm")]
+#[async_trait]
+impl TurnActivitySink for CellStarted {
+    async fn emit(&self, activity: TurnActivity) {
+        if matches!(activity.event, TurnEvent::CodeBlockStarted { .. })
+            && let Some(started) = self.started.lock_recover().take()
+        {
+            let _ = started.send(());
+        }
+        self.events.emit(activity).await;
+    }
+}
+
+/// Observes the provider's future as a host decorator around it does: it
+/// either ran to its end or was dropped first.
+#[cfg(feature = "rlm")]
+struct DecoratedFuture {
+    ended: Arc<std::sync::atomic::AtomicBool>,
+    dropped_early: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(feature = "rlm")]
+impl DecoratedFuture {
+    fn end(self) {
+        self.ended.store(true, Ordering::SeqCst);
+    }
+}
+
+#[cfg(feature = "rlm")]
+impl Drop for DecoratedFuture {
+    fn drop(&mut self) {
+        if !self.ended.load(Ordering::SeqCst) {
+            self.dropped_early.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// FIG-6433: a call whose cell the protocol accepts mid-stream still
+/// commits the usage its provider reports after the tail, later than the
+/// stop grace: the cell runs first, the provider future runs to its end,
+/// and the call record and the turn's totals carry the usage.
+#[cfg(feature = "rlm")]
+#[test]
+pub(super) fn rlm_accepted_cell_commits_the_usage_its_tail_reports() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-tail-usage", || async {
+        let (started_tx, started_rx) = oneshot::channel();
+        let started_rx = Arc::new(StdMutex::new(Some(started_rx)));
+        let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let dropped_early = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let provider = crate::testing::TestProvider::builder()
+            .kind("rlm-tail-usage")
+            .requires_streaming(true)
+            .complete({
+                let ended = Arc::clone(&ended);
+                let dropped_early = Arc::clone(&dropped_early);
+                move |request| {
+                    let started = started_rx.lock_recover().take();
+                    let decorated = DecoratedFuture {
+                        ended: Arc::clone(&ended),
+                        dropped_early: Arc::clone(&dropped_early),
+                    };
+                    async move {
+                        let stream = request.stream_events.expect("stream events");
+                        streamed_cell(&stream, "tail drained");
+                        stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
+                            block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                            text: "Predicted continuation.".to_string(),
+                        }));
+                        // The usage chunk waits for the accepted cell to run,
+                        // then for longer than the stop grace.
+                        started.expect("one call").await.expect("the cell started");
+                        tokio::time::sleep(TAIL_STOP_GRACE * 3).await;
+                        let usage = lash_core::llm::types::LlmUsage {
+                            input_tokens: 17,
+                            output_tokens: 5,
+                            ..Default::default()
+                        };
+                        stream.send(LlmStreamEvent::Usage(usage.clone()));
+                        decorated.end();
+                        Ok(LlmResponse {
+                            parts: vec![LlmOutputPart::Text {
+                                text: "<typescript>\nawait control.finish(\"tail drained\");\n</typescript>\nPredicted continuation.".to_string(),
+                                response_meta: None,
+                            }],
+                            usage,
+                            terminal_reason: lash_core::LlmTerminalReason::Stop,
+                            ..LlmResponse::default()
+                        })
+                    }
+                }
+            })
+            .build()
+            .into_handle();
+        let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(60)).await?;
+        let session = core
+            .session(crate::SessionId::parse("rlm-tail-usage").expect("nonblank host identity"))
+            .created()
+            .await
+            .open()
+            .await?;
+        let sink = CellStarted {
+            started: StdMutex::new(Some(started_tx)),
+            ..CellStarted::default()
+        };
+
+        let result = session
+            .send(TurnInput::text("finish"))
+            .output_into(&sink)
+            .await?;
+
+        assert_eq!(
+            result.finished().map(|(_, value)| value),
+            Some(&serde_json::json!("tail drained"))
+        );
+        assert!(
+            ended.load(Ordering::SeqCst),
+            "the provider future ran to its end"
+        );
+        assert!(
+            !dropped_early.load(Ordering::SeqCst),
+            "the provider future was never dropped before its end"
+        );
+        let record = result.llm_calls.first().expect("the call's record");
+        let attempt = record.attempts.last().expect("the call's attempt");
+        assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
+        assert_eq!(
+            attempt.usage.as_ref().map(|usage| usage.input_tokens),
+            Some(17)
+        );
+        assert_eq!(
+            attempt.usage.as_ref().map(|usage| usage.output_tokens),
+            Some(5)
+        );
+        assert_eq!(result.usage.input_tokens, 17);
+        assert_eq!(result.usage.output_tokens, 5);
+        let committed = committed(&session).await;
+        assert_eq!(committed.token_usage().input_tokens, 17);
+        assert_eq!(committed.token_usage().output_tokens, 5);
+        // The cell ran before the call's record, which waits for the usage.
+        let events = sink.events.snapshot().await;
+        let cell_started = events
+            .iter()
+            .position(|event| matches!(event.event, TurnEvent::CodeBlockStarted { .. }))
+            .expect("the cell started");
+        let call_recorded = events
+            .iter()
+            .position(|event| matches!(event.event, TurnEvent::ModelCallRecorded { .. }))
+            .expect("the call was recorded");
+        assert!(cell_started < call_recorded);
+        Ok(())
+    })
+}
+
+/// FIG-6433: a call whose cell was accepted mid-stream and whose usage
+/// never arrives, because its deadline passes or its stream fails, has
+/// unknown usage on its record and in the turn's totals, never zero.
+#[cfg(feature = "rlm")]
+#[test]
+pub(super) fn rlm_accepted_cell_without_tail_usage_is_unknown_never_zero() -> Result<()> {
+    run_async_test_on_stack_budget("rlm-tail-unknown", || async {
+        for case in ["deadline", "stream-error"] {
+            let provider = crate::testing::TestProvider::builder()
+                .kind("rlm-tail-unknown")
+                .requires_streaming(true)
+                .complete(move |request| async move {
+                    let stream = request.stream_events.expect("stream events");
+                    streamed_cell(&stream, "unknown usage");
+                    if case == "deadline" {
+                        return std::future::pending().await;
+                    }
+                    tokio::time::sleep(TAIL_STOP_GRACE * 3).await;
+                    Err(LlmTransportError::new("the stream broke after the cell")
+                        .with_kind(lash_core::ProviderFailureKind::Stream)
+                        .with_retry_verdict(
+                            lash_core::llm::transport::TransportRetryVerdict::NotRetryable,
+                        ))
+                })
+                .build()
+                .into_handle();
+            let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(2)).await?;
+            let session = core
+                .session(
+                    crate::SessionId::parse(format!("rlm-tail-unknown-{case}"))
+                        .expect("nonblank host identity"),
+                )
+                .created()
+                .await
+                .open()
+                .await?;
+
+            let result = session.send(TurnInput::text("finish")).output().await?;
+
+            assert_eq!(
+                result.finished().map(|(_, value)| value),
+                Some(&serde_json::json!("unknown usage")),
+                "{case}"
+            );
+            let record = result.result.llm_calls.first().expect("the call's record");
+            let attempt = record.attempts.last().expect("the call's attempt");
+            assert_eq!(attempt.usage, None, "{case}");
+            assert!(record.usage_unknown(), "{case}");
+            let unknown = lash_core::llm::types::LlmUsage::unknown_call();
+            assert_eq!(result.result.usage, unknown, "{case}");
+            assert_eq!(committed(&session).await.token_usage(), &unknown, "{case}");
+        }
+        Ok(())
+    })
+}
+
+/// A provider reset after the cell was accepted never erases the cell: the
+/// reset belongs to the call's tail.
 #[cfg(feature = "rlm")]
 #[test]
 pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
@@ -296,19 +549,14 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
             .requires_streaming(true)
             .complete(|request| async move {
                 let stream = request.stream_events.expect("stream events");
-                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                    kind: StreamBlockKind::AssistantText,
-                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                    text: "<typescript>\nawait control.finish(\"cell survived reset\");\n</typescript>\n"
-                        .to_string(),
-                }));
+                streamed_cell(&stream, "cell survived reset");
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 stream.send(LlmStreamEvent::AttemptReset);
                 std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
             })
             .build()
             .into_handle();
-        let core = rlm_abort_drain_core(provider).await?;
+        let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(2)).await?;
         let session = core
             .session(crate::SessionId::parse("rlm-abort-reset").expect("nonblank host identity"))
             .created()
@@ -322,199 +570,6 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
             result.finished().map(|(_, value)| value),
             Some(&serde_json::json!("cell survived reset"))
         );
-        Ok(())
-    })
-}
-
-#[cfg(feature = "rlm")]
-#[test]
-pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Result<()> {
-    run_async_test_on_stack_budget("rlm-abort-drain-late-events", || async {
-        let provider = crate::testing::TestProvider::builder()
-            .kind("rlm-abort-late-events")
-            .requires_streaming(true)
-            .complete(|request| async move {
-                let stream = request.stream_events.expect("stream events");
-                stream.send(LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
-                    response_started: true,
-                    request_body: Some("{\"model\":\"rlm-evidence\"}".to_string()),
-                    http_summary: Some(
-                        "HTTP POST https://provider.test/v1/responses (stream)".to_string(),
-                    ),
-                    execution_evidence: Some(lash_core::ExecutionEvidence {
-                        provider_request_id: Some("request-after-response-start".to_string()),
-                        ..Default::default()
-                    }),
-                    generation_disposition: Some(lash_core::GenerationReceipt {
-                        stop_sequences: lash_core::GenerationOptionOutcome::Applied,
-                        ..Default::default()
-                    }),
-                    response_metadata: std::collections::BTreeMap::from([(
-                        "header:x-request-cost".to_string(),
-                        serde_json::json!("0.04"),
-                    )]),
-                    ..Default::default()
-                }));
-                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                    kind: StreamBlockKind::AssistantText,
-                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                    text: "<typescript>\nawait control.finish(\"late events survived\");\n</typescript>\n"
-                        .to_string(),
-                }));
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                    kind: StreamBlockKind::AssistantText,
-                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                    text: "provider suffix".to_string(),
-                }));
-                stream.send(LlmStreamEvent::Part(LlmOutputPart::Reasoning {
-                    text: "signed reasoning".to_string(),
-                    replay: Some(lash_core::llm::types::ProviderReasoningReplay {
-                        item_id: Some("reasoning-after-abort".to_string()),
-                        encrypted_content: Some("encrypted-after-abort".to_string()),
-                        signature: Some("signature-after-abort".to_string()),
-                        redacted: false,
-                        summary: vec!["signed reasoning".to_string()],
-                        ..Default::default()
-                    }),
-                }));
-                stream.send(LlmStreamEvent::Usage(lash_core::llm::types::LlmUsage {
-                    input_tokens: 17,
-                    output_tokens: 5,
-                    reasoning_output_tokens: 2,
-                    ..lash_core::llm::types::LlmUsage::default()
-                }));
-                std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
-            })
-            .build()
-            .into_handle();
-        let backend = sqlite_memory_store_backend().await;
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
-            .serve_test_llm_profile(provider, mock_llm_profile_spec())
-            .build(crate::testing::runtime_lease_owner())?;
-        let session = core
-            .session(
-                crate::SessionId::parse("rlm-abort-late-events").expect("nonblank host identity"),
-            )
-            .created_with(
-                mock_session_spec().generation(lash_core::GenerationOptions {
-                    stop_sequences: vec!["caller-owned-stop".to_string()],
-                    ..Default::default()
-                }),
-            )
-            .await
-            .open()
-            .await?;
-
-        let result = session.send(TurnInput::text("finish")).output().await?;
-
-        assert!(committed(&session).await.messages().iter().any(|message| {
-            message.parts.iter().any(|part| {
-                part.reasoning_meta().as_ref().is_some_and(|meta| {
-                    meta.signature.as_deref() == Some("signature-after-abort")
-                        && meta.encrypted_content.as_deref() == Some("encrypted-after-abort")
-                })
-            })
-        }));
-
-        let attempt = result
-            .result
-            .llm_calls
-            .first()
-            .and_then(|record| record.attempts.first())
-            .expect("persisted aborted attempt");
-        assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Aborted);
-        assert_eq!(
-            attempt
-                .generation_disposition
-                .expect("attempt disposition")
-                .stop_sequences,
-            lash_core::GenerationOptionOutcome::SuppressedProtocolOwned
-        );
-        assert_eq!(
-            attempt
-                .evidence
-                .as_ref()
-                .and_then(|evidence| evidence.provider_request_id.as_deref()),
-            Some("request-after-response-start")
-        );
-        assert_eq!(
-            attempt
-                .evidence
-                .as_ref()
-                .and_then(|evidence| evidence.collection_interruption),
-            Some(lash_core::ExecutionEvidenceCollectionInterruption::ProtocolAbort)
-        );
-        // Abort-retains-usage law: the late usage landed inside the drain
-        // grace, so the aborted attempt is reported, not a hole.
-        assert_eq!(
-            attempt.usage_disposition(),
-            lash_core::AttemptUsageOutcome::Reported
-        );
-        assert_eq!(
-            attempt.usage.as_ref().map(|usage| usage.input_tokens),
-            Some(17)
-        );
-        assert_eq!(result.result.usage.input_tokens, 17);
-        assert_eq!(result.result.usage.output_tokens, 5);
-        Ok(())
-    })
-}
-
-#[cfg(feature = "rlm")]
-#[test]
-pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<()> {
-    run_async_test_on_stack_budget("rlm-abort-drain-no-usage", || async {
-        let provider = crate::testing::TestProvider::builder()
-            .kind("rlm-abort-no-usage")
-            .requires_streaming(true)
-            .complete(|request| async move {
-                request
-                    .stream_events
-                    .expect("stream events")
-                    .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                        kind: StreamBlockKind::AssistantText,
-                        block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                        text: "<typescript>\nawait control.finish(\"deadline survived\");\n</typescript>\n"
-                            .to_string(),
-                    }));
-                std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
-            })
-            .build()
-            .into_handle();
-        let core = rlm_abort_drain_core(provider).await?;
-        let session = core
-            .session(crate::SessionId::parse("rlm-abort-no-usage").expect("nonblank host identity"))
-            .created()
-            .await
-            .open()
-            .await?;
-
-        let result = session.send(TurnInput::text("finish")).output().await?;
-
-        assert_eq!(
-            result.finished().map(|(_, value)| value),
-            Some(&serde_json::json!("deadline survived"))
-        );
-        // FIG-2765: the deadline wins, so the attempt has no provider usage.
-        // The turn's own counters stay at zero, but the aborted call must
-        // never look free: the sealed attempt says its usage is unreported
-        // after the abort, and the session ledger carries a typed hole for
-        // it even though every counter is zero.
-        assert_eq!(result.result.usage, lash_core::LlmUsage::default());
-        let attempt = result
-            .result
-            .llm_calls
-            .first()
-            .and_then(|record| record.attempts.first())
-            .expect("sealed aborted attempt");
-        assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Aborted);
-        assert_eq!(attempt.usage, None);
-        assert_eq!(
-            attempt.usage_disposition(),
-            lash_core::AttemptUsageOutcome::UnreportedAfterAbort
-        );
-
         Ok(())
     })
 }
@@ -538,7 +593,7 @@ pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() ->
             })
             .build()
             .into_handle();
-        let core = rlm_abort_drain_core(provider).await?;
+        let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(60)).await?;
         let session = core
             .session(crate::SessionId::parse("rlm-zero-usage").expect("nonblank host identity"))
             .created()

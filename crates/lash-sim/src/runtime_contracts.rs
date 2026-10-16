@@ -805,6 +805,7 @@ mod tests {
                 cache_read_input_tokens: 1,
                 cache_write_input_tokens: 1,
                 reasoning_output_tokens: i64::MAX,
+                unknown_calls: 0,
             },
             lash::ReportSource::Live,
         );

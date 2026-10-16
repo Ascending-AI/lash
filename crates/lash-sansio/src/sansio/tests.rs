@@ -1131,6 +1131,7 @@ fn zero_output_limit_with_a_full_prompt_refines_to_context_overflow() {
                 cache_read_input_tokens: 30,
                 cache_write_input_tokens: 8,
                 reasoning_output_tokens: 0,
+                unknown_calls: 0,
             },
             response_metadata: Default::default(),
             ..LlmResponse::default()
@@ -1178,6 +1179,7 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
                 cache_read_input_tokens: i64::MAX,
                 cache_write_input_tokens: 0,
                 reasoning_output_tokens: 0,
+                unknown_calls: 0,
             },
             response_metadata: Default::default(),
             ..LlmResponse::default()

@@ -64,6 +64,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `gen_ai.response.id` | String | Provenance | model |
 | `gen_ai.response.finish_reasons` | StringArray | Provenance | model |
 | `lash.usage.overflow` | Boolean | Provenance | model |
+| `lash.usage.unknown` | Boolean | Provenance | model |
 | `lash.usage.input_tokens` | Integer | Provenance | model_attempt |
 | `lash.usage.output_tokens` | Integer | Provenance | model_attempt |
 | `lash.usage.cache_read_tokens` | Integer | Provenance | model_attempt |
@@ -112,7 +113,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 |---|---|
 | `producer` | 20 |
 | `agent` | 25 |
-| `model` | 45 |
+| `model` | 46 |
 | `model_attempt` | 28 |
 | `tool` | 31 |
 | `cell` | 29 |

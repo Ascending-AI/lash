@@ -722,11 +722,12 @@ impl TurnDrive for RuntimeDrive {
     ) -> Result<(), TurnError> {
         let ModelCallAttempt {
             ordinal: attempt,
+            limit,
             cancel,
             stop_error,
-            ..
         } = attempt;
         self.driver.model_stop_error = Arc::clone(&stop_error);
+        self.driver.model_limit = Some(limit);
         self.driver
             .protocol_reply
             .mark_model_call(self.machine.messages().iter());
@@ -820,6 +821,14 @@ impl TurnDrive for RuntimeDrive {
         call: u32,
         request: Arc<LlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
+        // Tails that already drained commit with this call's admission; the
+        // next call never waits for one that is still being read.
+        Box::pin(
+            self.driver
+                .settle_call_drains(&mut self.machine, &self.observer, false),
+        )
+        .await
+        .map_err(runtime)?;
         let prepared = Box::pin(self.driver.prepare_call(
             &mut self.machine,
             id,
@@ -1152,6 +1161,15 @@ impl TurnDrive for RuntimeDrive {
         self.driver.children_stop.cancel();
     }
 
+    async fn settle_call_drains(&mut self) -> Result<(), TurnError> {
+        Box::pin(
+            self.driver
+                .settle_call_drains(&mut self.machine, &self.observer, true),
+        )
+        .await
+        .map_err(runtime)
+    }
+
     /// The commit is built over the head the runtime opened at; the store
     /// refuses it once the session's head, `head` among its readers, is
     /// elsewhere. The turn's after-turn callbacks run first, once its
@@ -1167,6 +1185,14 @@ impl TurnDrive for RuntimeDrive {
             self.driver.turn_phase_probe.clone(),
             RuntimeTurnPhase::CommittedTurn,
         ));
+        // The turn closes with its calls' real usage: it waits for every
+        // tail still draining, each bounded by its call's deadline.
+        Box::pin(
+            self.driver
+                .settle_call_drains(&mut self.machine, &self.observer, true),
+        )
+        .await
+        .map_err(runtime)?;
         let driver = &mut self.driver;
         driver.apply_final_event_delta(done.event_delta, done.protocol_iteration);
         driver.turn_pipeline.record_protocol_terminal_output(
@@ -1204,10 +1230,17 @@ impl TurnDrive for RuntimeDrive {
         // completed. Project it once at the commit, preserving the head's
         // usage when this turn made no call and its last prompt when the
         // last call reported zero usage.
-        if let Some(last) = self.machine.last_call_usage() {
+        if self.machine.last_call_usage().is_some()
+            || self.machine.cumulative_usage().unknown_calls > 0
+        {
             let state = driver.turn_pipeline.state_mut();
             state.token_usage = self.machine.cumulative_usage().clone();
-            if let Some(prompt) = nonzero_usage(last.clone()) {
+            if let Some(prompt) = self
+                .machine
+                .last_call_usage()
+                .cloned()
+                .and_then(nonzero_usage)
+            {
                 state.last_prompt_usage = Some(prompt);
             }
         }

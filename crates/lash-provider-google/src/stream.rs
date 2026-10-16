@@ -42,6 +42,7 @@ impl GoogleOAuthProvider {
             cache_read_input_tokens: cache_read,
             cache_write_input_tokens: 0,
             reasoning_output_tokens: reasoning,
+            unknown_calls: 0,
         }
     }
 

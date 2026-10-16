@@ -473,6 +473,7 @@ fn emitted_domain_shape_matches_registry() {
         cache_read_input_tokens: 3,
         cache_write_input_tokens: 2,
         reasoning_output_tokens: 1,
+        unknown_calls: 0,
     };
     let model = closing(
         TraceSpanKind::Model,
@@ -1712,6 +1713,7 @@ fn enrichers_see_the_attempt_they_decorate_and_the_usage_lash_exported() {
         cache_read_input_tokens: 0,
         cache_write_input_tokens: 5,
         reasoning_output_tokens: 0,
+        unknown_calls: 0,
     });
     attempts[1].attempt.usage = Some(LlmUsage {
         input_tokens: 11,
@@ -1719,6 +1721,7 @@ fn enrichers_see_the_attempt_they_decorate_and_the_usage_lash_exported() {
         cache_read_input_tokens: 17,
         cache_write_input_tokens: 19,
         reasoning_output_tokens: 3,
+        unknown_calls: 0,
     });
     adapter.append(&record).unwrap();
 
@@ -1734,6 +1737,7 @@ fn enrichers_see_the_attempt_they_decorate_and_the_usage_lash_exported() {
             cache_read_input_tokens: 17,
             cache_write_input_tokens: 24,
             reasoning_output_tokens: 3,
+            unknown_calls: 0,
         })
     );
     for (view, ordinal) in seen[1..].iter().zip([1, 2]) {
@@ -1778,6 +1782,7 @@ fn semconv_token_usage_includes_cache_and_marks_overflow() {
                 cache_read_input_tokens: 3,
                 cache_write_input_tokens: 2,
                 reasoning_output_tokens: 4,
+                unknown_calls: 0,
             }),
             provider_usage: None,
             stream_summary: None,
@@ -2129,6 +2134,7 @@ fn model_fixture(adapter: &OtelTelemetry, provider: &str) -> TraceRecord {
                     cache_read_input_tokens: 3,
                     cache_write_input_tokens: 2,
                     reasoning_output_tokens: 4,
+                    unknown_calls: 0,
                 }),
             },
             span: Some(crate::TraceModelAttemptSpan {

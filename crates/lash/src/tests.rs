@@ -64,6 +64,7 @@ fn mock_provider() -> ProviderHandle {
                     cache_read_input_tokens: 0,
                     cache_write_input_tokens: 0,
                     reasoning_output_tokens: 0,
+                    unknown_calls: 0,
                 },
                 response_metadata: Default::default(),
                 ..LlmResponse::default()

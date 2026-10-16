@@ -119,6 +119,7 @@ pub fn openai_usage_from_usage_value(usage: &Value) -> LlmUsage {
                         .and_then(|d| d.get("reasoning_tokens"))
                 }),
         ),
+        unknown_calls: 0,
     }
 }
 
@@ -418,6 +419,7 @@ mod tests {
                 cache_read_input_tokens: 0,
                 cache_write_input_tokens: 0,
                 reasoning_output_tokens: 0,
+                unknown_calls: 0,
             }
         );
     }

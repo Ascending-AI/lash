@@ -424,7 +424,10 @@ spans carry diagnostic usage under `lash.usage.*`; only the logical chat carries
 include fresh, cache-read and cache-write tokens. A sum that overflows exports
 no `gen_ai.usage.*` counter; an input total that overflows omits
 `gen_ai.usage.input_tokens`; either sets `lash.usage.overflow`. Reasoning tokens use
-`gen_ai.usage.reasoning.output_tokens` and remain a subset of output tokens.
+`gen_ai.usage.reasoning.output_tokens` and remain a subset of output tokens. A
+call whose usage never arrived, because the attempt that ended it was cut short
+after a response was observed, sets `lash.usage.unknown`: its missing
+`gen_ai.usage.*` counters are unknown, not zero (ADR 0031).
 
 Adapter defaults are `openai` for `openai`, `openai-compatible` and `codex`,
 `anthropic` for `anthropic`, and `gcp.gen_ai` for the `google_oauth` adapter's

@@ -107,7 +107,9 @@ pub fn emit_llm_trace_completed(
                     &parts,
                     response.generation_disposition,
                 ),
-                usage: Some(response.usage.clone()),
+                // A response whose usage never arrived traces none, never
+                // a zero (ADR 0031).
+                usage: (response.usage.unknown_calls == 0).then(|| response.usage.clone()),
                 provider_usage: response.provider_usage.clone(),
                 stream_summary,
                 attempts: crate::trace::trace_llm_attempts(call_record),
