@@ -185,6 +185,7 @@ fn a_paged_positional_stack_resumes_with_a_new_layout() {
                     0.0,
                 )))],
                 result: Type::Any,
+                then_yield: false,
             }),
         },
         Stmt::Return {

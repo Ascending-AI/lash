@@ -835,6 +835,7 @@ fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
                 effect: effect.clone(),
                 args,
                 result,
+                then_yield: false,
             },
         });
     }

@@ -346,9 +346,22 @@ fn every_record_round_trips_canonically() {
         TaskStateRecord::Waiting(2),
         TaskStateRecord::Joining(TaskId(3)),
         TaskStateRecord::JoiningMany(4),
-        TaskStateRecord::Resuming(IncomingRecord::Value(value.clone())),
-        TaskStateRecord::Resuming(IncomingRecord::Raise(value.clone())),
-        TaskStateRecord::Resuming(IncomingRecord::Joined(TaskId(3))),
+        TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Value(value.clone()),
+            requeue: false,
+        },
+        TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Raise(value.clone()),
+            requeue: true,
+        },
+        TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Joined(TaskId(3)),
+            requeue: false,
+        },
+        TaskStateRecord::Resuming {
+            incoming: IncomingRecord::Outcome(crate::WaitId(5)),
+            requeue: true,
+        },
         TaskStateRecord::Ended(EndedTask::Returned(value.clone())),
         TaskStateRecord::Ended(EndedTask::Raised(value.clone())),
     ] {

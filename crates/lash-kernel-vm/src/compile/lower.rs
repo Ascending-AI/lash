@@ -354,12 +354,26 @@ impl Compiler<'_> {
                 effect,
                 args,
                 result,
+                then_yield,
             } => ActionKind::Perform {
                 effect: effect.clone(),
                 args: self.atoms(args),
                 result: result.clone(),
+                then_yield: *then_yield,
             },
-            doc::Action::Sleep { duration } => ActionKind::Sleep(self.atom(duration)),
+            doc::Action::Sleep {
+                duration,
+                then_yield,
+            } => ActionKind::Sleep {
+                duration: self.atom(duration),
+                then_yield: *then_yield,
+            },
+            // An await is a call of its policy with the value
+            // (`K-TASK-026`).
+            doc::Action::Await { policy, value } => ActionKind::Call {
+                callee: self.callee(&doc::Callee::Library(*policy)),
+                args: vec![self.atom(value)],
+            },
             doc::Action::Join { task } => ActionKind::Join(self.atom(task)),
             doc::Action::JoinMany { mode, tasks } => ActionKind::JoinMany(*mode, self.atom(tasks)),
             doc::Action::Yield => ActionKind::Yield,
@@ -638,12 +652,26 @@ impl Compiler<'_> {
                 };
                 let kind = match &act.kind {
                     doc::ActKind::Call(callee) => NestedKind::Call(runs(callee)),
-                    doc::ActKind::Perform { effect, result } => NestedKind::Perform {
+                    doc::ActKind::Perform {
+                        effect,
+                        result,
+                        then_yield,
+                    } => NestedKind::Perform {
                         effect: effect.clone(),
                         result: result.clone(),
+                        then_yield: *then_yield,
                     },
-                    doc::ActKind::Sleep => NestedKind::Sleep,
+                    doc::ActKind::Sleep { then_yield } => NestedKind::Sleep {
+                        then_yield: *then_yield,
+                    },
                     doc::ActKind::Spawn(callee) => NestedKind::Spawn(runs(callee)),
+                    doc::ActKind::Join => NestedKind::Join,
+                    doc::ActKind::JoinMany(mode) => NestedKind::JoinMany(*mode),
+                    // An await is a call of its policy with the value
+                    // (`K-TASK-026`).
+                    doc::ActKind::Await(policy) => {
+                        NestedKind::Call(runs(&doc::Callee::Library(*policy)))
+                    }
                 };
                 self.nested(ops, kind, read, &act.args, dst);
             }

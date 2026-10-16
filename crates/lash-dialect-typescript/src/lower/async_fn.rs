@@ -6,22 +6,24 @@
 //! - **An `async` function** is a closure that starts a promise whose task
 //!   runs the function's body. The body runs at once, up to its first wait
 //!   (`K-TASK-002`), as JavaScript runs it up to its first `await`.
-//! - **`await value`** is `ts.await(value)`: a `join` on a promise's task,
-//!   after one `yield` when the promise has already settled, and one
-//!   `yield` alone for a value that is no promise.
-//! - **`await tool(args)`** is one `perform` in the awaiting task, and
-//!   `await sleep(ms)` one `sleep`; each is followed by one `yield`.
+//! - **`await value`** is `await value via ts.await`: a `join` on a
+//!   promise's task, after one `yield` when the promise has already
+//!   settled, and one `yield` alone for a value that is no promise.
+//! - **`await tool(args)`** is one `perform … then yield` in the awaiting
+//!   task, and `await sleep(ms)` one `sleep … then yield`.
 //! - **`tool(args)` and `sleep(ms)` not awaited where they stand** are
 //!   promises whose task performs the effect or sleeps.
 //!
-//! The `yield` after an awaited effect keeps one order between the two ways
-//! of calling a tool. An outcome delivered to a promise's task wakes that
-//! task, which ends and only then wakes the tasks that await the promise:
-//! two turns of the queue. A `perform` in the awaiting task would take one,
-//! so of two outcomes delivered together the one awaited in place would
-//! always run first, which JavaScript does not do. With the `yield` every
-//! delivery takes two turns and the order of continuations is the order of
-//! arrival.
+//! The turn an awaited effect takes once its outcome is in (`then yield`,
+//! `K-TASK-005`) keeps one order between the two ways of calling a tool.
+//! An outcome delivered to a promise's task wakes that task, which ends and
+//! only then wakes the tasks that await the promise: two turns of the
+//! queue. A `perform` in the awaiting task would take one, so of two
+//! outcomes delivered together the one awaited in place would always run
+//! first, which JavaScript does not do. With the extra turn every delivery
+//! takes two turns and the order of continuations is the order of arrival.
+//! The turn is taken when the effect fails or is cancelled too, before the
+//! raise reaches any `catch`.
 //!
 //! The spawn is written in the document, not inside a helper, so a task's
 //! identity (`K-TASK-020`) names the async function or the tool call that
@@ -89,7 +91,7 @@ impl Lowerer<'_> {
                 return Err(self.control_placement(&wait, span));
             }
             let args = self.wait_arguments(&wait, args, span)?;
-            let result = self.wait_in_place(wait, args)?;
+            let result = self.wait_action(wait, args, true)?;
             if control {
                 // The call settled, so the turn is over: nothing after it
                 // runs (`K-FORM-019`). The host reads the control from the
@@ -101,7 +103,9 @@ impl Lowerer<'_> {
             return Ok(result);
         }
         let value = self.lower_expr(value)?;
-        let awaited = self.invoke("ts.await", &[value], Ty::Unknown)?;
+        let policy = self.function("ts.await")?;
+        let value = self.atom(value);
+        let awaited = self.emit_action(Action::Await { policy, value }, Ty::Unknown);
         self.await_process(awaited, span)
     }
 
@@ -120,7 +124,7 @@ impl Lowerer<'_> {
         let this = self.fresh("this");
         let ignored = self.fresh("args");
         let block = self.block(|lowerer| {
-            let result = lowerer.wait_action(wait, args)?;
+            let result = lowerer.wait_action(wait, args, false)?;
             lowerer.emit(Stmt::Return {
                 value: result.expr(),
             });
@@ -247,8 +251,10 @@ impl Lowerer<'_> {
         Ok(self.atoms(&operands))
     }
 
-    /// The wait as one statement, giving its result.
-    fn wait_action(&mut self, wait: Wait, args: Vec<Atom>) -> Lowering<Operand> {
+    /// The wait as one statement, giving its result. Awaited where it
+    /// stands, it takes one more turn once its outcome is in (see the
+    /// module).
+    fn wait_action(&mut self, wait: Wait, args: Vec<Atom>, then_yield: bool) -> Lowering<Operand> {
         match wait {
             Wait::Effect(effect) => {
                 let signature = self.effects[&effect].clone();
@@ -278,6 +284,7 @@ impl Lowerer<'_> {
                         effect,
                         args: copied,
                         result,
+                        then_yield,
                     },
                     ty,
                 ))
@@ -287,42 +294,14 @@ impl Lowerer<'_> {
                     unreachable!("`sleep` is checked to take one argument");
                 };
                 self.emit(Stmt::Do {
-                    action: Action::Sleep { duration },
+                    action: Action::Sleep {
+                        duration,
+                        then_yield,
+                    },
                 });
                 Ok(Operand::undefined())
             }
         }
-    }
-
-    /// The wait in the awaiting task, and then the one `yield` that keeps
-    /// its continuation in arrival order with promises' (see the module).
-    /// The `yield` runs when the effect fails too.
-    fn wait_in_place(&mut self, wait: Wait, args: Vec<Atom>) -> Lowering<Operand> {
-        let pause = Stmt::Do {
-            action: Action::Yield,
-        };
-        if matches!(wait, Wait::Sleep) {
-            let result = self.wait_action(wait, args)?;
-            self.emit(pause);
-            return Ok(result);
-        }
-        let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
-        let name = super::statements::variable_of(&result);
-        let place = Place::Variable(name.clone());
-        // Code after the `try` runs only when the effect gave its result.
-        let mut ty = Ty::Unknown;
-        let body = self.block(|lowerer| {
-            let outcome = lowerer.wait_action(wait, args)?;
-            ty = outcome.ty.clone();
-            lowerer.store(place, outcome);
-            Ok(())
-        })?;
-        let finally = self.block(|lowerer| {
-            lowerer.emit(pause);
-            Ok(())
-        })?;
-        self.emit_try(body, None, Some(finally));
-        Ok(Operand::variable(name, ty))
     }
 
     /// Starts `body(this, args)` as a task and gives its promise:

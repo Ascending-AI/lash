@@ -605,6 +605,8 @@ fn inventory_document() -> k::Document {
     let null = E::Literal(L::Null);
     let v = E::Variable("value".into());
     let id = lash_kernel_dialect::Library::resolve(super::machine::library(), "num.add").unwrap();
+    let policy =
+        lash_kernel_dialect::Library::resolve(super::machine::library(), "py.await").unwrap();
     let member = k::Member::Field {
         target: v.clone(),
         field: "λ".into(),
@@ -702,6 +704,10 @@ fn inventory_document() -> k::Document {
         .manifest
         .functions
         .insert(id, k::FunctionName::new("num.add").unwrap());
+    document
+        .manifest
+        .functions
+        .insert(policy, k::FunctionName::new("py.await").unwrap());
     let actions = vec![
         A::Call {
             callee: C::Declared("declared".into()),
@@ -726,9 +732,25 @@ fn inventory_document() -> k::Document {
             effect: k::EffectName::new("echo").unwrap(),
             args: vec![],
             result: inventory_types(),
+            then_yield: false,
         },
         A::Sleep {
             duration: Atom::Literal(L::Int(0.into())),
+            then_yield: false,
+        },
+        A::Perform {
+            effect: k::EffectName::new("echo").unwrap(),
+            args: vec![],
+            result: k::Type::Any,
+            then_yield: true,
+        },
+        A::Sleep {
+            duration: Atom::Literal(L::Int(1.into())),
+            then_yield: true,
+        },
+        A::Await {
+            policy,
+            value: Atom::Variable("value".into()),
         },
         A::Join {
             task: Atom::Variable("value".into()),
@@ -953,16 +975,31 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
                 effect,
                 args,
                 result,
+                then_yield,
             } => {
                 let _ = (effect, result);
                 for a in args {
                     inventory_atom(a, forms);
                 }
+                if *then_yield {
+                    forms.insert("perform.then_yield");
+                }
                 "perform"
             }
-            k::Action::Sleep { duration } => {
+            k::Action::Sleep {
+                duration,
+                then_yield,
+            } => {
                 inventory_atom(duration, forms);
+                if *then_yield {
+                    forms.insert("sleep.then_yield");
+                }
                 "sleep"
+            }
+            k::Action::Await { policy, value } => {
+                let _ = policy;
+                inventory_atom(value, forms);
+                "await"
             }
             k::Action::Join { task } => {
                 inventory_atom(task, forms);
@@ -1129,6 +1166,9 @@ fn independent_inventory_covers_kernel_variants_and_stored_fields() {
         "cancel",
         "joinMany",
         "yield",
+        "await",
+        "perform.then_yield",
+        "sleep.then_yield",
         "place.variable",
         "place.member",
         "callee.declared",
@@ -1378,6 +1418,7 @@ fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unpr
             effect,
             args: vec![],
             result: ty,
+            then_yield: false,
         },
     });
     let source = roundtrip(&document, true).source;

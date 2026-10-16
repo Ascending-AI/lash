@@ -196,6 +196,7 @@ pub(super) fn check(rule: &str, case: &Case) {
                         effect: lash_kernel_doc::EffectName::new("new").unwrap(),
                         args: vec![],
                         result: lash_kernel_doc::Type::Any,
+                        then_yield: false,
                     },
                 }],
                 &env,

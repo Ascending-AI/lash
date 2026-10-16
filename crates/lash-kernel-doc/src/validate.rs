@@ -47,6 +47,7 @@ pub enum StatementForm {
     Yield,
     Spawn,
     Cancel,
+    Await,
 }
 
 impl StatementForm {
@@ -59,6 +60,7 @@ impl StatementForm {
             Self::Yield => "yield",
             Self::Spawn => "spawn",
             Self::Cancel => "cancel",
+            Self::Await => "await",
         }
     }
 }
@@ -550,8 +552,10 @@ impl Scope<'_> {
         let form = match &act.kind {
             ActKind::Call(_) => StatementForm::Call,
             ActKind::Perform { .. } => StatementForm::Perform,
-            ActKind::Sleep => StatementForm::Sleep,
+            ActKind::Sleep { .. } => StatementForm::Sleep,
             ActKind::Spawn(_) => StatementForm::Spawn,
+            ActKind::Join | ActKind::JoinMany(_) => StatementForm::Join,
+            ActKind::Await(_) => StatementForm::Await,
         };
         // As for a statement action (`K-LIB-004`): a body beside a native
         // may call functions that state one and apply a closure it holds.
@@ -573,7 +577,7 @@ impl Scope<'_> {
             ActKind::Call(callee) | ActKind::Spawn(callee) => {
                 self.check_callee(callee, act.args.len(), site)?
             }
-            ActKind::Perform { effect, result } => {
+            ActKind::Perform { effect, result, .. } => {
                 let Some(document) = self.document else {
                     return Err(invalid(
                         Some(site),
@@ -593,18 +597,32 @@ impl Scope<'_> {
                 check_arity(effect.as_str(), act.args.len(), signature, site)?;
                 check_type(result).map_err(|reason| invalid(Some(site), reason))?;
             }
-            ActKind::Sleep => {
+            ActKind::Sleep { .. } | ActKind::Join | ActKind::JoinMany(_) => {
                 if act.args.len() != 1 {
                     return Err(invalid(
                         Some(site),
                         InvalidReason::CallArity {
-                            name: "sleep".to_owned(),
+                            name: form.keyword().to_owned(),
                             given: act.args.len(),
                             required: 1,
                             accepted: 1,
                         },
                     ));
                 }
+            }
+            ActKind::Await(policy) => {
+                if act.args.len() != 1 {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::CallArity {
+                            name: form.keyword().to_owned(),
+                            given: act.args.len(),
+                            required: 1,
+                            accepted: 1,
+                        },
+                    ));
+                }
+                self.check_callee(&Callee::Library(*policy), 1, site)?
             }
         }
         self.check_exprs(act.args.iter(), site)
@@ -619,6 +637,7 @@ impl Scope<'_> {
             Action::Yield => StatementForm::Yield,
             Action::Spawn { .. } => StatementForm::Spawn,
             Action::Cancel { .. } => StatementForm::Cancel,
+            Action::Await { .. } => StatementForm::Await,
         };
         // A body beside a native implementation may call functions that
         // state one, and apply a closure it holds: one it reaches through
@@ -652,6 +671,7 @@ impl Scope<'_> {
                 effect,
                 args,
                 result,
+                ..
             } => {
                 let Some(document) = self.document else {
                     return Err(invalid(
@@ -673,7 +693,11 @@ impl Scope<'_> {
                 check_type(result).map_err(|reason| invalid(Some(site), reason))?;
                 self.check_atoms(args, site)
             }
-            Action::Sleep { duration: atom }
+            Action::Await { policy, value } => {
+                self.check_callee(&Callee::Library(*policy), 1, site)?;
+                self.check_atoms(std::slice::from_ref(value), site)
+            }
+            Action::Sleep { duration: atom, .. }
             | Action::Join { task: atom }
             | Action::JoinMany { tasks: atom, .. }
             | Action::Cancel { task: atom } => self.check_atoms(std::slice::from_ref(atom), site),

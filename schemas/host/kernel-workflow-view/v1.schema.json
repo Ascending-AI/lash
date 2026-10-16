@@ -20,7 +20,7 @@
       "type": "object"
     },
     "ActKind": {
-      "description": "What an [`Expr::Act`] does. `join`, `yield` and `cancel` stay statement\nactions.",
+      "description": "What an [`Expr::Act`] does. `yield` and `cancel` stay statement\nactions.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -47,6 +47,10 @@
                 },
                 "result": {
                   "$ref": "#/$defs/Type"
+                },
+                "then_yield": {
+                  "description": "As [`Action::Perform`]'s.",
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -62,9 +66,24 @@
           "type": "object"
         },
         {
-          "const": "sleep",
+          "additionalProperties": false,
           "description": "Waits for a number of milliseconds, its one argument.",
-          "type": "string"
+          "properties": {
+            "sleep": {
+              "additionalProperties": false,
+              "properties": {
+                "then_yield": {
+                  "description": "As [`Action::Perform`]'s.",
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "sleep"
+          ],
+          "type": "object"
         },
         {
           "additionalProperties": false,
@@ -76,6 +95,37 @@
           },
           "required": [
             "spawn"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "join",
+          "description": "Waits on the task handle that is its one argument.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Waits on the list of task handles that is its one argument.",
+          "properties": {
+            "join_many": {
+              "$ref": "#/$defs/JoinMode"
+            }
+          },
+          "required": [
+            "join_many"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Awaits its one argument by the await policy (`K-TASK-026`).",
+          "properties": {
+            "await": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "await"
           ],
           "type": "object"
         }
@@ -131,6 +181,10 @@
                 },
                 "result": {
                   "$ref": "#/$defs/Type"
+                },
+                "then_yield": {
+                  "description": "Whether the task takes one more turn of the ready queue once\nthe outcome is in, before it continues (`K-TASK-005`).",
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -155,6 +209,10 @@
               "properties": {
                 "duration": {
                   "$ref": "#/$defs/Atom"
+                },
+                "then_yield": {
+                  "description": "As [`Action::Perform`]'s.",
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -269,6 +327,32 @@
           },
           "required": [
             "cancel"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Awaits a value by its dialect's await policy: a library function\nthat takes the value, waits as the dialect's `await` does, and\nyields what the `await` gives (`K-TASK-026`).",
+          "properties": {
+            "await": {
+              "additionalProperties": false,
+              "properties": {
+                "policy": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "value": {
+                  "$ref": "#/$defs/Atom"
+                }
+              },
+              "required": [
+                "policy",
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "await"
           ],
           "type": "object"
         }
@@ -1634,17 +1718,26 @@
     },
     "SiteKind": {
       "description": "What an action does.",
-      "enum": [
-        "call",
-        "perform",
-        "sleep",
-        "join",
-        "join_many",
-        "yield",
-        "spawn",
-        "cancel"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "call",
+            "perform",
+            "sleep",
+            "join",
+            "join_many",
+            "yield",
+            "spawn",
+            "cancel"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "await",
+          "description": "An `await`: a call of its dialect's await policy.",
+          "type": "string"
+        }
+      ]
     },
     "StatementCoverage": {
       "additionalProperties": false,

@@ -742,9 +742,10 @@ pub mod execution {
         fn task_edges(&self) -> u64 {
             self.frames.task_edges()
                 + match &self.state {
-                    TaskStateRecord::Resuming(
-                        IncomingRecord::Value(v) | IncomingRecord::Raise(v),
-                    )
+                    TaskStateRecord::Resuming {
+                        incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
+                        ..
+                    }
                     | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
                         v.task_edges()
                     }
@@ -755,9 +756,10 @@ pub mod execution {
         fn cost(&self) -> u64 {
             self.frames.cost()
                 + match &self.state {
-                    TaskStateRecord::Resuming(
-                        IncomingRecord::Value(v) | IncomingRecord::Raise(v),
-                    ) => value_cost(v),
+                    TaskStateRecord::Resuming {
+                        incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
+                        ..
+                    } => value_cost(v),
                     TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v))
                         if self.result_retained =>
                     {
@@ -777,7 +779,10 @@ pub mod execution {
             self.occurrences.children(out);
             self.frames.children(out);
             match &self.state {
-                TaskStateRecord::Resuming(IncomingRecord::Value(v) | IncomingRecord::Raise(v))
+                TaskStateRecord::Resuming {
+                    incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
+                    ..
+                }
                 | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
                     value_children(v, out)
                 }
@@ -790,7 +795,10 @@ pub mod execution {
             self.occurrences.grants(children)?;
             self.frames.grants(children)?;
             match &mut self.state {
-                TaskStateRecord::Resuming(IncomingRecord::Value(v) | IncomingRecord::Raise(v))
+                TaskStateRecord::Resuming {
+                    incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
+                    ..
+                }
                 | TaskStateRecord::Ended(EndedTask::Returned(v) | EndedTask::Raised(v)) => {
                     value_grants(v, children)?
                 }

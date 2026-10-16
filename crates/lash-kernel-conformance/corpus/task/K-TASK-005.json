@@ -80,6 +80,221 @@
         ],
         "resume": false
       }
+    },
+    {
+      "name": "a then yield wait continues in arrival order with a joined task's, delivered first",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn inplace() { let a = perform echo(1) as Int then yield print a return a }\nfn wait() { let b = perform echo(2) as Int return b }\nfn promised() { let t = spawn call wait() let b = join t print b return b }\n\nmain {\nlet x = spawn call inplace()\nlet y = spawn call promised()\nlet tasks = [x, y]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "10"
+          },
+          {
+            "int": "20"
+          }
+        ],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "10"
+              },
+              {
+                "int": "20"
+              }
+            ]
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          },
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "2"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "parks": 1
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "10"
+                }
+              }
+            },
+            {
+              "request": 1,
+              "outcome": {
+                "completed": {
+                  "int": "20"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": false
+      }
+    },
+    {
+      "name": "a then yield wait continues in arrival order with a joined task's, delivered second",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn inplace() { let a = perform echo(1) as Int then yield print a return a }\nfn wait() { let b = perform echo(2) as Int return b }\nfn promised() { let t = spawn call wait() let b = join t print b return b }\n\nmain {\nlet x = spawn call inplace()\nlet y = spawn call promised()\nlet tasks = [x, y]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "20"
+          },
+          {
+            "int": "10"
+          }
+        ],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "10"
+              },
+              {
+                "int": "20"
+              }
+            ]
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          },
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "2"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "parks": 1
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": {
+                  "int": "20"
+                }
+              }
+            },
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "10"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": false
+      }
+    },
+    {
+      "name": "a failure delivered to a then yield wait reaches catch only after its turn",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\neffect fails(value: Int) -> Int\nfn guarded() { try { let a = perform fails(1) as Int then yield print a } catch e { print \"caught\" } return null }\nfn other() { let b = perform echo(2) as Int print b return b }\n\nmain {\nlet x = spawn call guarded()\nlet y = spawn call other()\nlet tasks = [x, y]\ndo join all tasks\nfinish null\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "20"
+          },
+          {
+            "text": "caught"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "fails",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          },
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "2"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "parks": 1
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "failed": {
+                  "kind": "test",
+                  "message": "no",
+                  "data": "null"
+                }
+              }
+            },
+            {
+              "request": 1,
+              "outcome": {
+                "completed": {
+                  "int": "20"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": false
+      }
     }
   ]
 }

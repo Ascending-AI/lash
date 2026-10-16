@@ -1,0 +1,19 @@
+{
+  "rule": "K-TASK-026",
+  "cases": [
+    {
+      "name": "an await gives what its policy returns for the value",
+      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nmain { let xs = [1, 2] let n = await xs via list.len finish n }\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": [],
+        "parks": 0
+      }
+    }
+  ]
+}

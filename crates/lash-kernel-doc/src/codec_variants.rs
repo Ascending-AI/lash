@@ -3,8 +3,10 @@
 //! Each number is the variant's zero-based declaration position at revision
 //! `9503e220ed`, transcribed once into an exhaustive match. From here on the
 //! numbers are the format: a new variant takes an unused number, and no
-//! variant is renumbered when the Rust declaration moves. The binary codecs
-//! read these tables; nothing derives a number from declaration order again.
+//! variant is renumbered when the Rust declaration moves. A flag that is off
+//! by default gives its form a number of its own when it is on, so a form
+//! without it keeps its bytes. The binary codecs read these tables; nothing
+//! derives a number from declaration order again.
 
 use crate::graph_tokens::CodecVariant;
 use crate::{
@@ -113,13 +115,24 @@ impl CodecVariant for Action {
     fn codec_variant(&self) -> u32 {
         match self {
             Self::Call { .. } => 0,
-            Self::Perform { .. } => 1,
-            Self::Sleep { .. } => 2,
+            Self::Perform {
+                then_yield: false, ..
+            } => 1,
+            Self::Sleep {
+                then_yield: false, ..
+            } => 2,
             Self::Join { .. } => 3,
             Self::JoinMany { .. } => 4,
             Self::Yield => 5,
             Self::Spawn { .. } => 6,
             Self::Cancel { .. } => 7,
+            Self::Perform {
+                then_yield: true, ..
+            } => 8,
+            Self::Sleep {
+                then_yield: true, ..
+            } => 9,
+            Self::Await { .. } => 10,
         }
     }
 }
@@ -202,9 +215,18 @@ impl CodecVariant for ActKind {
     fn codec_variant(&self) -> u32 {
         match self {
             Self::Call(..) => 0,
-            Self::Perform { .. } => 1,
-            Self::Sleep => 2,
+            Self::Perform {
+                then_yield: false, ..
+            } => 1,
+            Self::Sleep { then_yield: false } => 2,
             Self::Spawn(..) => 3,
+            Self::Join => 4,
+            Self::JoinMany(..) => 5,
+            Self::Await(..) => 6,
+            Self::Perform {
+                then_yield: true, ..
+            } => 7,
+            Self::Sleep { then_yield: true } => 8,
         }
     }
 }

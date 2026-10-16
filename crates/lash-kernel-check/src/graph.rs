@@ -325,6 +325,11 @@ pub enum ActionNode {
     Cancel {
         task: AtomNode,
     },
+    /// Calls the await policy with the value (`K-TASK-026`).
+    Await {
+        policy: FunctionId,
+        value: AtomNode,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -388,9 +393,16 @@ pub enum ExprNode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ActNode {
     Call(CalleeNode),
-    Perform { effect: EffectName, result: Type },
+    Perform {
+        effect: EffectName,
+        result: Type,
+    },
     Sleep,
     Spawn(CalleeNode),
+    Join,
+    JoinMany(JoinMode),
+    /// Calls the await policy with the one argument (`K-TASK-026`).
+    Await(FunctionId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -588,6 +600,7 @@ pub enum SiteKind {
     Yield,
     Spawn,
     Cancel,
+    Await,
 }
 
 impl SiteKind {

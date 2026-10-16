@@ -79,7 +79,8 @@ pub(crate) enum ExecutionGraphNodeKind {
 impl From<SiteKind> for ExecutionGraphNodeKind {
     fn from(kind: SiteKind) -> Self {
         match kind {
-            SiteKind::Call => Self::Call,
+            // An `await` calls its dialect's await policy.
+            SiteKind::Call | SiteKind::Await => Self::Call,
             SiteKind::Perform => Self::Perform,
             SiteKind::Sleep => Self::Sleep,
             SiteKind::Join => Self::Join,
@@ -204,6 +205,7 @@ fn site_label(graph: &Graph, site: &ExecutionSite) -> String {
         .to_owned(),
         NodeKind::Action(ActionNode::Yield) => "yield".to_owned(),
         NodeKind::Action(ActionNode::Cancel { .. }) => "cancel".to_owned(),
+        NodeKind::Action(ActionNode::Await { .. }) => "await".to_owned(),
         NodeKind::Block(_) | NodeKind::Stmt(_) | NodeKind::Expr(_) => site.site.to_string(),
     }
 }

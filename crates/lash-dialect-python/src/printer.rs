@@ -519,6 +519,7 @@ impl Renderer<'_> {
                 effect,
                 args,
                 result,
+                then_yield,
             } => {
                 self.out.write("await tools");
                 if effect.as_str().split('.').all(attribute_identifier) {
@@ -539,6 +540,29 @@ impl Renderer<'_> {
                     self.out.write("result=");
                     self.metadata(result);
                 }
+                // Python's `await` takes no turn of its own; a wait that
+                // takes one more once its outcome is in says so.
+                if *then_yield {
+                    if !args.is_empty() || *result != k::Type::Any {
+                        self.out.write(", ");
+                    }
+                    self.out.write("then_yield=True");
+                }
+            }
+            // Python's own `await`: by the `py.await` the base holds.
+            k::Action::Await {
+                policy,
+                value: value @ k::Atom::Variable(_),
+            } if self.operators.unique("py.await") == Some(*policy) => {
+                self.out.write("await ");
+                self.atom(value);
+                return;
+            }
+            k::Action::Await { policy, value } => {
+                self.out.write("k.await_(");
+                self.helper(policy);
+                self.out.write(", ");
+                self.atom(value);
             }
             k::Action::Spawn {
                 callee: k::Callee::Library(id),
@@ -556,9 +580,15 @@ impl Renderer<'_> {
                 self.out.write(", ");
                 self.atoms(args);
             }
-            k::Action::Sleep { duration } => {
+            k::Action::Sleep {
+                duration,
+                then_yield,
+            } => {
                 self.out.write("k.sleep(");
                 self.atom(duration);
+                if *then_yield {
+                    self.out.write(", then_yield=True");
+                }
             }
             k::Action::Join { task } => {
                 self.out.write("k.join(");
@@ -644,7 +674,9 @@ impl InlinePlan {
 fn awaits(body: &k::Block) -> bool {
     fn node(node: k::Node<'_>) -> bool {
         match node {
-            k::Node::Action(k::Action::Call { .. } | k::Action::Perform { .. }) => true,
+            k::Node::Action(
+                k::Action::Call { .. } | k::Action::Perform { .. } | k::Action::Await { .. },
+            ) => true,
             k::Node::Stmt(
                 k::Stmt::Let {
                     value: k::Rhs::Expr(k::Expr::Closure(_)),

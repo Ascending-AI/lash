@@ -285,17 +285,23 @@ impl TokenCodec for Action {
                 effect,
                 args,
                 result,
+                ..
             } => {
                 out.sum(number, 3);
                 effect.encode(out);
                 args.encode(out);
                 result.encode(out);
             }
-            Self::Sleep { duration: atom }
+            Self::Sleep { duration: atom, .. }
             | Self::Join { task: atom }
             | Self::Cancel { task: atom } => {
                 out.sum(number, 1);
                 atom.encode(out);
+            }
+            Self::Await { policy, value } => {
+                out.sum(number, 2);
+                policy.encode(out);
+                value.encode(out);
             }
             Self::JoinMany { mode, tasks } => {
                 out.sum(number, 2);
@@ -308,9 +314,9 @@ impl TokenCodec for Action {
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         let number = variant(input, |variant| match variant {
-            0 | 4 | 6 => Some(2),
-            1 => Some(3),
-            2 | 3 | 7 => Some(1),
+            0 | 4 | 6 | 10 => Some(2),
+            1 | 8 => Some(3),
+            2 | 3 | 7 | 9 => Some(1),
             5 => Some(0),
             _ => None,
         })?;
@@ -319,13 +325,19 @@ impl TokenCodec for Action {
                 callee: Callee::decode(input)?,
                 args: Vec::decode(input)?,
             },
-            1 => Self::Perform {
+            1 | 8 => Self::Perform {
                 effect: QualifiedName::decode(input)?,
                 args: Vec::decode(input)?,
                 result: Type::decode(input)?,
+                then_yield: number == 8,
             },
-            2 => Self::Sleep {
+            2 | 9 => Self::Sleep {
                 duration: Atom::decode(input)?,
+                then_yield: number == 9,
+            },
+            10 => Self::Await {
+                policy: FunctionId::decode(input)?,
+                value: Atom::decode(input)?,
             },
             3 => Self::Join {
                 task: Atom::decode(input)?,
@@ -452,32 +464,45 @@ impl TokenCodec for ActKind {
                 out.sum(number, 1);
                 callee.encode(out);
             }
-            Self::Perform { effect, result } => {
+            Self::Perform { effect, result, .. } => {
                 out.sum(number, 2);
                 effect.encode(out);
                 result.encode(out);
             }
-            Self::Sleep => out.sum(number, 0),
+            Self::Sleep { .. } | Self::Join => out.sum(number, 0),
+            Self::JoinMany(mode) => {
+                out.sum(number, 1);
+                mode.encode(out);
+            }
+            Self::Await(policy) => {
+                out.sum(number, 1);
+                policy.encode(out);
+            }
         }
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Ok(
-            match variant(input, |variant| match variant {
-                0 | 3 => Some(1),
-                1 => Some(2),
-                2 => Some(0),
-                _ => None,
-            })? {
-                0 => Self::Call(Callee::decode(input)?),
-                1 => Self::Perform {
-                    effect: QualifiedName::decode(input)?,
-                    result: Type::decode(input)?,
-                },
-                2 => Self::Sleep,
-                _ => Self::Spawn(Callee::decode(input)?),
+        let number = variant(input, |variant| match variant {
+            0 | 3 | 5 | 6 => Some(1),
+            1 | 7 => Some(2),
+            2 | 4 | 8 => Some(0),
+            _ => None,
+        })?;
+        Ok(match number {
+            0 => Self::Call(Callee::decode(input)?),
+            1 | 7 => Self::Perform {
+                effect: QualifiedName::decode(input)?,
+                result: Type::decode(input)?,
+                then_yield: number == 7,
             },
-        )
+            2 | 8 => Self::Sleep {
+                then_yield: number == 8,
+            },
+            3 => Self::Spawn(Callee::decode(input)?),
+            4 => Self::Join,
+            5 => Self::JoinMany(JoinMode::decode(input)?),
+            _ => Self::Await(FunctionId::decode(input)?),
+        })
     }
 }
 

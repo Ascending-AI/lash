@@ -35,8 +35,13 @@ pub(super) enum ParkKind {
     Fresh,
     /// The frame above it has just returned or raised into it.
     Returned,
-    /// The task waits on a request, or its outcome has been delivered.
+    /// The task waits on a request, or its outcome has been delivered and
+    /// its turn taken.
     Requested,
+    /// The outcome of a `then yield` wait has been delivered, by result,
+    /// raise or `cancel`, and the task has not yet taken the one more turn
+    /// it takes before it continues (`K-TASK-005`).
+    Delivered,
     /// A raise has been delivered: a `cancel` at the task's wait or turn.
     Raised,
     /// A value has been delivered: a `spawn`'s handle among them.
@@ -49,16 +54,28 @@ impl ParkKind {
     /// How a task in `state` comes to its top frame.
     pub(super) fn of(state: &TaskStateRecord) -> Self {
         match state {
-            TaskStateRecord::Waiting(_) | TaskStateRecord::Resuming(IncomingRecord::Outcome(_)) => {
-                Self::Requested
-            }
-            TaskStateRecord::Resuming(IncomingRecord::Raise(_)) => Self::Raised,
-            TaskStateRecord::Resuming(IncomingRecord::Value(value)) => Self::Valued {
+            TaskStateRecord::Resuming { requeue: true, .. } => Self::Delivered,
+            TaskStateRecord::Waiting(_)
+            | TaskStateRecord::Resuming {
+                incoming: IncomingRecord::Outcome(_),
+                ..
+            } => Self::Requested,
+            TaskStateRecord::Resuming {
+                incoming: IncomingRecord::Raise(_),
+                ..
+            } => Self::Raised,
+            TaskStateRecord::Resuming {
+                incoming: IncomingRecord::Value(value),
+                ..
+            } => Self::Valued {
                 handle: matches!(value, Value::Task(_)),
             },
             TaskStateRecord::Joining(_)
             | TaskStateRecord::JoiningMany(_)
-            | TaskStateRecord::Resuming(IncomingRecord::Joined(_)) => Self::Joined,
+            | TaskStateRecord::Resuming {
+                incoming: IncomingRecord::Joined(_),
+                ..
+            } => Self::Joined,
             _ => Self::Fresh,
         }
     }
@@ -101,6 +118,7 @@ fn phase_name(phase: PhaseRecord) -> &'static str {
         PhaseRecord::Called => "called",
         PhaseRecord::Waiting => "waiting",
         PhaseRecord::Spawned => "spawned",
+        PhaseRecord::Joining => "joining",
     }
 }
 
@@ -699,8 +717,14 @@ fn restore(
                 break;
             } else if parked != ParkKind::Fresh {
                 let stmt = *stmts.get(index).ok_or_else(nowhere)?;
-                if !matches!(exe.stmt(stmt).form, Form::Action(_)) {
+                let Form::Action(action) = &exe.stmt(stmt).form else {
                     return Err(malformed("a resuming frame has no action"));
+                };
+                // Only a `then yield` wait owes a turn once delivered.
+                if parked == ParkKind::Delivered && !action.kind.then_yield() {
+                    return Err(malformed(format!(
+                        "the task's state disagrees with the action at {site}"
+                    )));
                 }
                 awaiting = Some(stmt);
                 index + 1
@@ -893,8 +917,12 @@ fn continuation(
             NestedKind::Call(_) | NestedKind::Body(_)
         ) | (
             PhaseRecord::Waiting,
-            NestedKind::Perform { .. } | NestedKind::Sleep
+            NestedKind::Perform { .. } | NestedKind::Sleep { .. }
         ) | (PhaseRecord::Spawned, NestedKind::Spawn(_))
+            | (
+                PhaseRecord::Joining,
+                NestedKind::Join | NestedKind::JoinMany(_)
+            )
     );
     if !kind || parked == ParkKind::Fresh {
         return Err(ContinuationRefusal::IllegalPhase {
@@ -904,10 +932,19 @@ fn continuation(
     }
     let agrees = match pending.phase {
         PhaseRecord::Called => parked == ParkKind::Returned,
-        PhaseRecord::Waiting => matches!(parked, ParkKind::Requested | ParkKind::Raised),
+        PhaseRecord::Waiting => match parked {
+            ParkKind::Requested | ParkKind::Raised => true,
+            // Only a `then yield` wait owes a turn once delivered.
+            ParkKind::Delivered => entry.kind.then_yield(),
+            _ => false,
+        },
         PhaseRecord::Spawned => {
             matches!(parked, ParkKind::Valued { handle: true } | ParkKind::Raised)
         }
+        PhaseRecord::Joining => matches!(
+            parked,
+            ParkKind::Joined | ParkKind::Valued { .. } | ParkKind::Raised
+        ),
     };
     if !agrees {
         return Err(ContinuationRefusal::TaskState { site: action });

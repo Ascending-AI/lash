@@ -198,9 +198,9 @@ impl Lowerer<'_> {
             },
             Stmt::Let {
                 name: value.clone(),
-                value: lash_kernel_doc::Rhs::Action(Action::Call {
-                    callee: Callee::Library(wait),
-                    args: vec![Atom::Variable(returned)],
+                value: lash_kernel_doc::Rhs::Action(Action::Await {
+                    policy: wait,
+                    value: Atom::Variable(returned),
                 }),
             },
             // A process that returns nothing ends with null.

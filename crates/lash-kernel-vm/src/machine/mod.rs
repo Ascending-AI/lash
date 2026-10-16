@@ -645,6 +645,14 @@ impl KernelMachine {
         }
         self.pins.clear();
         self.fresh.clear();
+        if self.task(task)?.take_requeue() {
+            // The one more turn a `then yield` wait takes once its outcome
+            // is in, as `yield` takes it (`K-TASK-005`, `K-TASK-006`): it
+            // charges nothing and runs no statement.
+            self.ready.push_back(task)?;
+            self.current = None;
+            return Ok(());
+        }
         let outcome = match self.task(task)?.take_incoming() {
             Some(incoming) => {
                 self.refresh_charging(task, exe)?;
@@ -756,7 +764,7 @@ impl KernelMachine {
     /// Makes a waiting task ready, at the back of the queue (`K-TASK-005`).
     fn wake(&mut self, task: TaskId, incoming: Incoming) -> Result<(), Halt> {
         let woken = self.task(task)?;
-        woken.wake(incoming);
+        woken.wake(incoming, false);
         self.ready.push_back(task)?;
         Ok(())
     }
@@ -985,6 +993,22 @@ impl KernelMachine {
     pub(crate) fn tamper_task_state(&mut self, task: TaskId, state: TaskState) -> Result<(), Halt> {
         self.task(task)?.record.state = state;
         Ok(())
+    }
+
+    /// The tasks that stand delivered (`K-TASK-005`): their `then yield`
+    /// outcome is in and their turn not yet taken.
+    pub(crate) fn delivered_tasks(&mut self) -> Vec<TaskId> {
+        let mut delivered = Vec::new();
+        self.publish_holdings().expect("the run publishes");
+        self.tasks
+            .visit(&mut |id, task| {
+                if matches!(task.state, TaskState::Resuming { requeue: true, .. }) {
+                    delivered.push(id);
+                }
+                true
+            })
+            .expect("the task rows read");
+        delivered
     }
 
     /// The phase of every published frame row that stands at a nested

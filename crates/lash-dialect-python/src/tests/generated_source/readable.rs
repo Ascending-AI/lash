@@ -1004,6 +1004,7 @@ fn effect_calls_preserve_names_atomic_arguments_and_result_types() {
                             k::Atom::Literal(k::Literal::Int(1.into())),
                         ],
                         result,
+                        then_yield: false,
                     }),
                 });
                 if declared {
@@ -1123,6 +1124,7 @@ fn generic_member_assignments_decode_native_await_rhs() {
                     effect: k::EffectName::new("echo").unwrap(),
                     args: vec![],
                     result: k::Type::Any,
+                    then_yield: false,
                 }
             };
             let mut doc = document(k::Stmt::Assign {

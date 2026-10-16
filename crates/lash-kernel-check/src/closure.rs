@@ -202,7 +202,8 @@ fn linked_units(graph: &Graph, catalog: &dyn FunctionCatalog, root: Unit) -> Lin
                         }
                         CalleeNode::Library(function) => library_call(unit, function, args),
                     },
-                    ActNode::Sleep => {}
+                    ActNode::Await(policy) => library_call(unit, policy, args),
+                    ActNode::Sleep | ActNode::Join | ActNode::JoinMany(_) => {}
                 }
                 continue;
             }
@@ -217,11 +218,22 @@ fn linked_units(graph: &Graph, catalog: &dyn FunctionCatalog, root: Unit) -> Lin
                 AtomNode::Literal(Literal::Function(name)) => Some(name.clone()),
                 _ => None,
             }));
-        match action {
+        let awaited;
+        let callee = match action {
             ActionNode::Perform { effect, .. } => {
                 unit.effects.insert(effect.clone());
+                None
             }
-            ActionNode::Call { callee, .. } | ActionNode::Spawn { callee, .. } => match callee {
+            ActionNode::Call { callee, .. } | ActionNode::Spawn { callee, .. } => Some(callee),
+            // The await policy is a library call of the value.
+            ActionNode::Await { policy, .. } => {
+                awaited = CalleeNode::Library(*policy);
+                Some(&awaited)
+            }
+            _ => None,
+        };
+        if let Some(callee) = callee {
+            match callee {
                 CalleeNode::Declared(name) => {
                     unit.calls.insert(name.clone());
                 }
@@ -265,8 +277,7 @@ fn linked_units(graph: &Graph, catalog: &dyn FunctionCatalog, root: Unit) -> Lin
                         }
                     }
                 }
-            },
-            _ => {}
+            }
         }
     }
     let mut reached = BTreeSet::new();

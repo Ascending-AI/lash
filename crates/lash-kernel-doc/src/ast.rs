@@ -119,9 +119,18 @@ pub enum Action {
         effect: EffectName,
         args: Vec<Atom>,
         result: Type,
+        /// Whether the task takes one more turn of the ready queue once
+        /// the outcome is in, before it continues (`K-TASK-005`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        then_yield: bool,
     },
     /// Waits for a number of milliseconds.
-    Sleep { duration: Atom },
+    Sleep {
+        duration: Atom,
+        /// As [`Action::Perform`]'s.
+        #[serde(default, skip_serializing_if = "is_false")]
+        then_yield: bool,
+    },
     /// Waits on one task handle.
     Join { task: Atom },
     /// Waits on a list of task handles.
@@ -132,6 +141,14 @@ pub enum Action {
     Spawn { callee: Callee, args: Vec<Atom> },
     /// Raises a cancellation in a task at its current wait.
     Cancel { task: Atom },
+    /// Awaits a value by its dialect's await policy: a library function
+    /// that takes the value, waits as the dialect's `await` does, and
+    /// yields what the `await` gives (`K-TASK-026`).
+    Await { policy: FunctionId, value: Atom },
+}
+
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 #[derive(
@@ -237,7 +254,7 @@ pub struct ActExpr {
     pub args: Vec<Expr>,
 }
 
-/// What an [`Expr::Act`] does. `join`, `yield` and `cancel` stay statement
+/// What an [`Expr::Act`] does. `yield` and `cancel` stay statement
 /// actions.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -245,11 +262,27 @@ pub enum ActKind {
     /// Calls a function and yields what it returns.
     Call(Callee),
     /// Runs one effect and yields its result, decoded as `result`.
-    Perform { effect: EffectName, result: Type },
+    Perform {
+        effect: EffectName,
+        result: Type,
+        /// As [`Action::Perform`]'s.
+        #[serde(default, skip_serializing_if = "is_false")]
+        then_yield: bool,
+    },
     /// Waits for a number of milliseconds, its one argument.
-    Sleep,
+    Sleep {
+        /// As [`Action::Perform`]'s.
+        #[serde(default, skip_serializing_if = "is_false")]
+        then_yield: bool,
+    },
     /// Starts a task running a function and yields its handle.
     Spawn(Callee),
+    /// Waits on the task handle that is its one argument.
+    Join,
+    /// Waits on the list of task handles that is its one argument.
+    JoinMany(JoinMode),
+    /// Awaits its one argument by the await policy (`K-TASK-026`).
+    Await(FunctionId),
 }
 
 impl ActExpr {
@@ -275,17 +308,36 @@ impl ActExpr {
                 callee: callee.clone(),
                 args,
             },
-            ActKind::Perform { effect, result } => Action::Perform {
+            ActKind::Perform {
+                effect,
+                result,
+                then_yield,
+            } => Action::Perform {
                 effect: effect.clone(),
                 args,
                 result: result.clone(),
+                then_yield: *then_yield,
             },
-            ActKind::Sleep => match <[Atom; 1]>::try_from(args) {
-                Ok([duration]) => Action::Sleep { duration },
-                Err(_) => return None,
+            ActKind::Sleep { then_yield } => Action::Sleep {
+                duration: one(args)?,
+                then_yield: *then_yield,
+            },
+            ActKind::Join => Action::Join { task: one(args)? },
+            ActKind::JoinMany(mode) => Action::JoinMany {
+                mode: *mode,
+                tasks: one(args)?,
+            },
+            ActKind::Await(policy) => Action::Await {
+                policy: *policy,
+                value: one(args)?,
             },
         })
     }
+}
+
+fn one(args: Vec<Atom>) -> Option<Atom> {
+    let [only] = <[Atom; 1]>::try_from(args).ok()?;
+    Some(only)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]

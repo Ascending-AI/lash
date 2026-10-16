@@ -19,6 +19,10 @@
 //! nested in a list (`Waiting`), then in a callee called inside it, its
 //! caller standing at the call (`Called`). Every cut ends it with the
 //! uncut run's result.
+//!
+//! A third parks at the same places on `then yield` waits: each step that
+//! delivers an outcome leaves its task delivered, owing one more turn
+//! (`K-TASK-005`), and every cut of that step ends as the uncut run.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -72,6 +76,28 @@ fn inner(x) {
 
 fn worker() {
   let v = [1, sleep 5, call inner("b")]
+  return v
+}
+
+main {
+  finish null
+}
+"#;
+
+/// `NESTED` with each wait taking its turn once delivered: the step that
+/// delivers each outcome stands `Delivered` before the task runs on
+/// (`K-TASK-005`). Three `kernel_run` steps, as `WORKER`'s.
+const THEN_YIELD: &str = r#"kernel 1
+numbers float
+entry worker() -> Any
+
+fn inner(x) {
+  do sleep 7 then yield
+  return x
+}
+
+fn worker() {
+  let v = [1, sleep 5 then yield, call inner("b")]
   return v
 }
 
@@ -431,6 +457,33 @@ async fn a_run_parked_inside_an_expression_resumes_exactly_across_a_cut() {
     report.assert_held();
     let uncut = UNCUT.lock_recover();
     let ended = uncut.iter().find(|(source, _)| *source == NESTED);
+    assert!(
+        ended.is_some_and(|(_, output)| output.contains(r#""b""#)),
+        "{ended:?}"
+    );
+}
+
+/// AWAIT-PHASE, `K-TASK-005`: a step that delivers an outcome to a
+/// `then yield` wait, statement or nested, and takes the turn it owes,
+/// runs again from the parked root on the other node wherever its outcome
+/// was cut, and the run ends as the uncut run.
+#[tokio::test]
+async fn a_delivered_then_yield_wait_resumes_exactly_across_a_cut() {
+    let report = Matrix::new()
+        .labels(&[CommitLabel::STEP_OUTCOME])
+        .faults(&[
+            Fault::FailBefore,
+            Fault::Abort,
+            Fault::AckHidden,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| KernelSteps::new(THEN_YIELD))
+        .await;
+    eprintln!("then yield kernel steps: {} cells", report.cells.len());
+    report.assert_held();
+    let uncut = UNCUT.lock_recover();
+    let ended = uncut.iter().find(|(source, _)| *source == THEN_YIELD);
     assert!(
         ended.is_some_and(|(_, output)| output.contains(r#""b""#)),
         "{ended:?}"

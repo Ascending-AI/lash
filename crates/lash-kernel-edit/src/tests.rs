@@ -590,6 +590,7 @@ fn cases(library: &Library) -> Vec<Case> {
                     effect: effect("fetch"),
                     args: vec![Atom::Literal(Literal::Text("w".to_string()))],
                     result: Type::Any,
+                    then_yield: false,
                 },
             },
             vec![],
@@ -1149,6 +1150,7 @@ fn the_published_manifest_is_the_one_the_edited_code_derives() {
             effect: effect("notify"),
             args: vec![Atom::Literal(Literal::Text("hi".to_string()))],
             result: Type::Any,
+            then_yield: false,
         },
     };
     let edits = vec![

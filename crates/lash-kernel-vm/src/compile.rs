@@ -733,9 +733,28 @@ pub(crate) enum NestedKind {
     Perform {
         effect: doc::EffectName,
         result: Type,
+        then_yield: bool,
     },
-    Sleep,
+    Sleep {
+        then_yield: bool,
+    },
     Spawn(NestedCallee),
+    Join,
+    JoinMany(JoinMode),
+}
+
+impl NestedKind {
+    /// Whether the task takes one more turn once the action's outcome is
+    /// in (`K-TASK-005`).
+    pub(crate) fn then_yield(&self) -> bool {
+        matches!(
+            self,
+            Self::Perform {
+                then_yield: true,
+                ..
+            } | Self::Sleep { then_yield: true }
+        )
+    }
 }
 
 /// What a nested call or `spawn` runs.
@@ -841,8 +860,12 @@ pub(crate) enum ActionKind {
         effect: doc::EffectName,
         args: Vec<Atom>,
         result: Type,
+        then_yield: bool,
     },
-    Sleep(Atom),
+    Sleep {
+        duration: Atom,
+        then_yield: bool,
+    },
     Join(Atom),
     JoinMany(JoinMode, Atom),
     Yield,
@@ -851,6 +874,23 @@ pub(crate) enum ActionKind {
         args: Vec<Atom>,
     },
     Cancel(Atom),
+}
+
+impl ActionKind {
+    /// Whether the task takes one more turn once the action's outcome is
+    /// in (`K-TASK-005`).
+    pub(crate) fn then_yield(&self) -> bool {
+        matches!(
+            self,
+            Self::Perform {
+                then_yield: true,
+                ..
+            } | Self::Sleep {
+                then_yield: true,
+                ..
+            }
+        )
+    }
 }
 
 pub(crate) enum Callee {
@@ -1610,7 +1650,7 @@ impl Placer<'_> {
                 (Some(callee), args)
             }
             ActionKind::Perform { args, .. } => (None, args),
-            ActionKind::Sleep(atom)
+            ActionKind::Sleep { duration: atom, .. }
             | ActionKind::Join(atom)
             | ActionKind::JoinMany(_, atom)
             | ActionKind::Cancel(atom) => (None, std::slice::from_mut(atom)),

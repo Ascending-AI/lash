@@ -46,7 +46,7 @@ export type ActExpr = {
 };
 
 /**
- * What an [`Expr::Act`] does. `join`, `yield` and `cancel` stay statement
+ * What an [`Expr::Act`] does. `yield` and `cancel` stay statement
  * actions.
  */
 export type ActKind = ({
@@ -55,9 +55,24 @@ export type ActKind = ({
   "perform": {
     "effect": QualifiedName;
     "result": Type;
+    /**
+     * As [`Action::Perform`]'s.
+     */
+    "then_yield"?: boolean;
   };
-} | "sleep" | {
+} | {
+  "sleep": {
+    /**
+     * As [`Action::Perform`]'s.
+     */
+    "then_yield"?: boolean;
+  };
+} | {
   "spawn": Callee;
+} | "join" | {
+  "join_many": JoinMode;
+} | {
+  "await": FunctionId;
 });
 
 /**
@@ -75,10 +90,19 @@ export type Action = ({
     "args": Array<Atom>;
     "effect": QualifiedName;
     "result": Type;
+    /**
+     * Whether the task takes one more turn of the ready queue once
+     * the outcome is in, before it continues (`K-TASK-005`).
+     */
+    "then_yield"?: boolean;
   };
 } | {
   "sleep": {
     "duration": Atom;
+    /**
+     * As [`Action::Perform`]'s.
+     */
+    "then_yield"?: boolean;
   };
 } | {
   "join": {
@@ -97,6 +121,11 @@ export type Action = ({
 } | {
   "cancel": {
     "task": Atom;
+  };
+} | {
+  "await": {
+    "policy": FunctionId;
+    "value": Atom;
   };
 });
 

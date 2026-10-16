@@ -594,7 +594,7 @@ impl Parser {
         if !self.at_named_call()
             && matches!(
                 self.statement_form(),
-                Some(StatementForm::Join | StatementForm::Yield | StatementForm::Cancel)
+                Some(StatementForm::Yield | StatementForm::Cancel)
             )
             && let Some(action) = self.action()?
         {
@@ -610,8 +610,8 @@ impl Parser {
     }
 
     /// An action nested in an expression, when the next word begins one:
-    /// `call`, `apply` or `invoke` a function, `perform`, `sleep` or
-    /// `spawn`. The other statement forms have no expression spelling.
+    /// `call`, `apply` or `invoke` a function, `perform`, `sleep`, `spawn`,
+    /// `join` or `await`. `yield` and `cancel` have no expression spelling.
     fn act(&mut self) -> Parsed<Option<ActExpr>> {
         let kind = match self.statement_form() {
             Some(StatementForm::Call) => ActKind::Call(self.act_callee()?),
@@ -626,28 +626,43 @@ impl Parser {
                 let args = self.exprs(&Token::RParen)?;
                 self.expect_keyword("as")?;
                 let result = self.ty()?;
+                let then_yield = self.then_yield()?;
                 return Ok(Some(ActExpr {
-                    kind: ActKind::Perform { effect, result },
+                    kind: ActKind::Perform {
+                        effect,
+                        result,
+                        then_yield,
+                    },
                     args,
                 }));
             }
             Some(StatementForm::Sleep) => {
-                // `sleep(e)` nests any duration; `sleep x` is the
-                // statement's spelling, a variable or a literal.
                 self.position += 1;
-                let duration = if self.eat(&Token::LParen) {
-                    let duration = self.expr()?;
-                    self.expect(&Token::RParen)?;
-                    duration
-                } else {
-                    match self.atom()? {
-                        Atom::Variable(name) => Expr::Variable(name),
-                        Atom::Literal(literal) => Expr::Literal(literal),
-                    }
+                let duration = self.act_operand()?;
+                let then_yield = self.then_yield()?;
+                return Ok(Some(ActExpr {
+                    kind: ActKind::Sleep { then_yield },
+                    args: vec![duration],
+                }));
+            }
+            Some(StatementForm::Join) => {
+                self.position += 1;
+                let kind = match self.join_mode() {
+                    Some(mode) => ActKind::JoinMany(mode),
+                    None => ActKind::Join,
                 };
                 return Ok(Some(ActExpr {
-                    kind: ActKind::Sleep,
-                    args: vec![duration],
+                    kind,
+                    args: vec![self.act_operand()?],
+                }));
+            }
+            Some(StatementForm::Await) => {
+                self.position += 1;
+                let value = self.act_operand()?;
+                self.expect_keyword("via")?;
+                return Ok(Some(ActExpr {
+                    kind: ActKind::Await(self.function_reference()?),
+                    args: vec![value],
                 }));
             }
             _ => return Ok(None),
@@ -657,6 +672,47 @@ impl Parser {
             kind,
             args: self.exprs(&Token::RParen)?,
         }))
+    }
+
+    /// The one argument of a nested `sleep`, `join` or `await`: `(e)`
+    /// nests any expression; a bare variable or literal is the statement's
+    /// spelling.
+    fn act_operand(&mut self) -> Parsed<Expr> {
+        if self.eat(&Token::LParen) {
+            let operand = self.expr()?;
+            self.expect(&Token::RParen)?;
+            return Ok(operand);
+        }
+        Ok(match self.atom()? {
+            Atom::Variable(name) => Expr::Variable(name),
+            Atom::Literal(literal) => Expr::Literal(literal),
+        })
+    }
+
+    /// A `then yield` after a `perform` or a `sleep`.
+    fn then_yield(&mut self) -> Parsed<bool> {
+        if !self.is_word("then") {
+            return Ok(false);
+        }
+        self.position += 1;
+        self.expect_keyword("yield")?;
+        Ok(true)
+    }
+
+    /// The mode of a list `join`, when the next word names one.
+    fn join_mode(&mut self) -> Option<JoinMode> {
+        let Token::Word(word) = self.peek() else {
+            return None;
+        };
+        let mode = match word.as_str() {
+            "all" => JoinMode::All,
+            "settled" => JoinMode::AllSettled,
+            "race" => JoinMode::Race,
+            "any" => JoinMode::Any,
+            _ => return None,
+        };
+        self.position += 1;
+        Some(mode)
     }
 
     /// What a nested call or `spawn` runs: `call`, `apply` or `invoke` and
@@ -685,6 +741,7 @@ impl Parser {
             "yield" => StatementForm::Yield,
             "spawn" => StatementForm::Spawn,
             "cancel" => StatementForm::Cancel,
+            "await" => StatementForm::Await,
             _ => return None,
         })
     }
@@ -712,35 +769,33 @@ impl Parser {
                     effect,
                     args,
                     result: self.ty()?,
+                    then_yield: self.then_yield()?,
                 }
             }
             StatementForm::Sleep => {
                 self.position += 1;
                 Action::Sleep {
                     duration: self.atom()?,
+                    then_yield: self.then_yield()?,
                 }
             }
             StatementForm::Join => {
                 self.position += 1;
-                let mode = match self.peek() {
-                    Token::Word(word) => match word.as_str() {
-                        "all" => Some(JoinMode::All),
-                        "settled" => Some(JoinMode::AllSettled),
-                        "race" => Some(JoinMode::Race),
-                        "any" => Some(JoinMode::Any),
-                        _ => None,
+                match self.join_mode() {
+                    Some(mode) => Action::JoinMany {
+                        mode,
+                        tasks: self.atom()?,
                     },
-                    _ => None,
-                };
-                match mode {
-                    Some(mode) => {
-                        self.position += 1;
-                        Action::JoinMany {
-                            mode,
-                            tasks: self.atom()?,
-                        }
-                    }
                     None => Action::Join { task: self.atom()? },
+                }
+            }
+            StatementForm::Await => {
+                self.position += 1;
+                let value = self.atom()?;
+                self.expect_keyword("via")?;
+                Action::Await {
+                    policy: self.function_reference()?,
+                    value,
                 }
             }
             StatementForm::Yield => {
@@ -862,7 +917,9 @@ impl Parser {
                 || self.is_word("read")
                 || self.is_word("if")
                 || self.is_word("let")
-                || self.is_word("sleep"));
+                || self.is_word("sleep")
+                || self.is_word("join")
+                || self.is_word("await"));
         self.peek_at(offset) == &Token::LParen && !reserved
     }
 

@@ -501,8 +501,17 @@ impl Renderer<'_> {
                 effect,
                 args,
                 result,
+                then_yield,
             } => {
-                self.out.write("await tools.");
+                // A wait that takes one more turn once its outcome is in is
+                // awaited twice, as JavaScript gives a second `await` one
+                // more job.
+                self.out.write(if *then_yield {
+                    "await await "
+                } else {
+                    "await "
+                });
+                self.out.write("tools.");
                 self.out.write(effect.as_str());
                 self.out.write("(");
                 self.arguments(args);
@@ -514,9 +523,31 @@ impl Renderer<'_> {
                     self.out.write(">");
                 }
             }
-            k::Action::Sleep { duration } => {
-                self.out.write("await sleep(");
+            k::Action::Sleep {
+                duration,
+                then_yield,
+            } => {
+                self.out.write(if *then_yield {
+                    "await await "
+                } else {
+                    "await "
+                });
+                self.out.write("sleep(");
                 self.atom(duration);
+                self.out.write(")");
+            }
+            // TypeScript's own `await`: by the `ts.await` the base holds.
+            k::Action::Await { policy, value }
+                if self.operators.unique("ts.await") == Some(*policy) =>
+            {
+                self.out.write("await ");
+                self.atom(value);
+            }
+            k::Action::Await { policy, value } => {
+                self.out.write("await k.await(");
+                self.helper(policy);
+                self.out.write(", ");
+                self.atom(value);
                 self.out.write(")");
             }
             k::Action::Join { task } => {

@@ -166,6 +166,7 @@ main {{
   let twice = invoke helper.outer(first)
   let applied = apply f(&start)
   let again = call start(2)
+  let awaited = await first via helper.twice
   if roll {{
     fail "no"
   }}
@@ -255,6 +256,7 @@ fn form(kind: &NodeKind) -> &'static str {
             ActionNode::Yield => "action:yield",
             ActionNode::Spawn { .. } => "action:spawn",
             ActionNode::Cancel { .. } => "action:cancel",
+            ActionNode::Await { .. } => "action:await",
         },
         NodeKind::Expr(expr) => match expr {
             ExprNode::Literal(_) => "expr:literal",
@@ -351,6 +353,7 @@ fn walking_the_graph_view_reaches_every_node_and_slot() {
         );
     }
     let every_form = [
+        "action:await",
         "action:call",
         "action:cancel",
         "action:join",

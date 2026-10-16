@@ -292,6 +292,14 @@ impl Typer<'_> {
                         }
                         result
                     }
+                    ActNode::Join => match found.first() {
+                        Some(Type::Task(result)) => (**result).clone(),
+                        _ => Type::Any,
+                    },
+                    ActNode::JoinMany(mode) => join_many(mode),
+                    ActNode::Await(policy) => {
+                        self.nested_call(&CalleeNode::Library(policy), &args, &found)
+                    }
                     ActNode::Sleep => Type::Any,
                 }
             }
@@ -401,13 +409,23 @@ impl Typer<'_> {
                 Type::Task(result) => *result,
                 _ => Type::Any,
             },
-            ActionNode::JoinMany { mode, .. } => match mode {
-                JoinMode::All | JoinMode::AllSettled => Type::List(Box::new(Type::Any)),
-                JoinMode::Race | JoinMode::Any => Type::Any,
-            },
+            ActionNode::JoinMany { mode, .. } => join_many(*mode),
+            ActionNode::Await { policy, value } => self.call(
+                id,
+                &CalleeNode::Library(*policy),
+                std::slice::from_ref(value),
+            ),
             ActionNode::Cancel { .. } => Type::Null,
             ActionNode::Sleep { .. } | ActionNode::Yield => Type::Any,
         }
+    }
+}
+
+/// What a list `join` in `mode` gives.
+fn join_many(mode: JoinMode) -> Type {
+    match mode {
+        JoinMode::All | JoinMode::AllSettled => Type::List(Box::new(Type::Any)),
+        JoinMode::Race | JoinMode::Any => Type::Any,
     }
 }
 

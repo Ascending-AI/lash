@@ -78,7 +78,11 @@ pub fn plan(draft: &Draft, operations: impl IntoIterator<Item = Operation>) -> T
                 binding,
             } => {
                 let act = ActExpr {
-                    kind: ActKind::Perform { effect, result },
+                    kind: ActKind::Perform {
+                        effect,
+                        result,
+                        then_yield: false,
+                    },
                     args,
                 };
                 Edit::InsertStatement {
@@ -323,6 +327,7 @@ mod tests {
                         kind: ActKind::Perform {
                             effect: effect.clone(),
                             result: Type::Any,
+                            then_yield: false,
                         },
                         args: vec![computed],
                     }))),
@@ -333,6 +338,7 @@ mod tests {
                         effect,
                         args: vec![Atom::Variable(Name::new("first"))],
                         result: Type::Any,
+                        then_yield: false,
                     }),
                 },
             ]

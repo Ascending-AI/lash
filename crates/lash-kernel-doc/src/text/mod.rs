@@ -68,6 +68,7 @@ pub(crate) const KEYWORDS: &[&str] = &[
     "any",
     "apply",
     "as",
+    "await",
     "body",
     "break",
     "by_spelling",

@@ -52,7 +52,9 @@ operation on it is a row.
 
 An `async` function runs as a kernel task, with the interleaving Node gives.
 A tool call or `sleep(ms)` awaited where it stands is one `perform` or
-`sleep`; one that is not is a promise whose task performs it. `Promise.all`,
+`sleep` marked `then yield`, which takes one more turn once its outcome is
+in, so continuations run in the order outcomes arrive; one that is not is a
+promise whose task performs it. `await p` is `await p via ts.await`. `Promise.all`,
 `allSettled`, `race` and `any` are helpers over the kernel's list joins. The
 lowering is described in `src/lower/async_fn.rs` and
 `src/helpers/promise.kernel`, and the Node witnesses are in `witness/async/`.

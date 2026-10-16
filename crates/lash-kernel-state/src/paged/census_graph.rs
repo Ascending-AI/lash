@@ -61,10 +61,14 @@ impl CensusGraph for PagedHeap {
         })?;
         visit_tree(&self.tasks, &self.access, &mut |task| {
             match &task.state {
-                TaskStateRecord::Resuming(IncomingRecord::Value(v) | IncomingRecord::Raise(v)) => {
-                    visit(v)?
+                TaskStateRecord::Resuming {
+                    incoming: IncomingRecord::Value(v) | IncomingRecord::Raise(v),
+                    ..
+                } => visit(v)?,
+                TaskStateRecord::Resuming {
+                    incoming: IncomingRecord::Joined(t),
+                    ..
                 }
-                TaskStateRecord::Resuming(IncomingRecord::Joined(t))
                 | TaskStateRecord::Joining(t) => visit(&Value::Task(*t))?,
                 _ => (),
             }

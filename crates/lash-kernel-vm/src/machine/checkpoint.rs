@@ -141,9 +141,13 @@ impl Machine for KernelMachine {
         pending.phase = WaitPhase::Committed(frozen);
         let task = pending.task;
         self.waits.write(key, pending, self.heap.pages())?;
+        let requeue = self
+            .frame(task)
+            .map(|frame| super::actions::then_yields(&exe, frame))
+            .map_err(|error| DeliverError::Heap(HeapFault::Malformed(format!("{error:?}"))))?;
         self.task(task)
             .map_err(|error| DeliverError::Heap(HeapFault::Malformed(format!("{error:?}"))))?
-            .wake(Incoming::Outcome(wait));
+            .wake(Incoming::Outcome(wait), requeue);
         self.ready.push_back(task)?;
         Ok(Delivered::Accepted)
     }

@@ -327,6 +327,7 @@ pub fn node_kind(node: k::Node<'_>) -> &'static str {
             k::Action::Yield => "Yield",
             k::Action::Spawn { .. } => "Spawn",
             k::Action::Cancel { .. } => "Cancel",
+            k::Action::Await { .. } => "Await",
         },
         k::Node::Expr(expr) => match expr {
             k::Expr::Literal(_) => "Literal",

@@ -342,6 +342,8 @@ pub enum SiteKind {
     Yield,
     Spawn,
     Cancel,
+    /// An `await`: a call of its dialect's await policy.
+    Await,
 }
 
 impl std::fmt::Display for SiteKind {
@@ -355,6 +357,7 @@ impl std::fmt::Display for SiteKind {
             Self::Yield => "yield",
             Self::Spawn => "spawn",
             Self::Cancel => "cancel",
+            Self::Await => "await",
         })
     }
 }
@@ -480,6 +483,7 @@ fn execution_site(site: &lash_kernel_check::ExecutionSite) -> ExecutionSiteView 
             Graph::Yield => SiteKind::Yield,
             Graph::Spawn => SiteKind::Spawn,
             Graph::Cancel => SiteKind::Cancel,
+            Graph::Await => SiteKind::Await,
         },
         loops: site.loops.clone(),
     }
@@ -714,12 +718,22 @@ impl<'a> Walk<'a> {
         at: &Context,
     ) -> Result<(), ViewError> {
         let statement = at.statement.clone().ok_or_else(|| mismatch(node))?;
+        // An `await` calls its policy (`K-TASK-026`).
+        let awaited;
         let (callee, effect) = match written {
             Written::Statement(Action::Call { callee, .. } | Action::Spawn { callee, .. })
             | Written::Nested(ActExpr {
                 kind: ActKind::Call(callee) | ActKind::Spawn(callee),
                 ..
             }) => (Some(callee), None),
+            Written::Statement(Action::Await { policy, .. })
+            | Written::Nested(ActExpr {
+                kind: ActKind::Await(policy),
+                ..
+            }) => {
+                awaited = Callee::Library(*policy);
+                (Some(&awaited), None)
+            }
             Written::Statement(Action::Perform { effect, .. })
             | Written::Nested(ActExpr {
                 kind: ActKind::Perform { effect, .. },
@@ -783,11 +797,24 @@ impl<'a> Walk<'a> {
         let operand = match written {
             Written::Statement(Action::Sleep { .. })
             | Written::Nested(ActExpr {
-                kind: ActKind::Sleep,
+                kind: ActKind::Sleep { .. },
                 ..
             }) => Some("duration"),
-            Written::Statement(Action::Join { .. } | Action::Cancel { .. }) => Some("task"),
-            Written::Statement(Action::JoinMany { .. }) => Some("tasks"),
+            Written::Statement(Action::Join { .. } | Action::Cancel { .. })
+            | Written::Nested(ActExpr {
+                kind: ActKind::Join,
+                ..
+            }) => Some("task"),
+            Written::Statement(Action::JoinMany { .. })
+            | Written::Nested(ActExpr {
+                kind: ActKind::JoinMany(_),
+                ..
+            }) => Some("tasks"),
+            Written::Statement(Action::Await { .. })
+            | Written::Nested(ActExpr {
+                kind: ActKind::Await(_),
+                ..
+            }) => Some("value"),
             Written::Statement(_) | Written::Nested(_) => None,
         };
         let arguments: Vec<(Expr, Option<Site>, Option<usize>)> = match (written, derived) {
@@ -849,12 +876,16 @@ impl<'a> Walk<'a> {
                 ActionNode::Yield => SiteKind::Yield,
                 ActionNode::Spawn { .. } => SiteKind::Spawn,
                 ActionNode::Cancel { .. } => SiteKind::Cancel,
+                ActionNode::Await { .. } => SiteKind::Await,
             },
             Derived::Nested(kind, _) => match kind {
                 ActNode::Call(_) => SiteKind::Call,
                 ActNode::Perform { .. } => SiteKind::Perform,
                 ActNode::Sleep => SiteKind::Sleep,
                 ActNode::Spawn(_) => SiteKind::Spawn,
+                ActNode::Join => SiteKind::Join,
+                ActNode::JoinMany(_) => SiteKind::JoinMany,
+                ActNode::Await(_) => SiteKind::Await,
             },
         };
         let result_type = match derived {
@@ -967,7 +998,8 @@ fn direct_references(kind: &NodeKind) -> Vec<BindingId> {
                 | ActionNode::Join { .. }
                 | ActionNode::JoinMany { .. }
                 | ActionNode::Yield
-                | ActionNode::Cancel { .. } => None,
+                | ActionNode::Cancel { .. }
+                | ActionNode::Await { .. } => None,
             };
             callee
                 .into_iter()
@@ -996,6 +1028,7 @@ fn atoms(action: &ActionNode) -> Vec<&AtomNode> {
         ActionNode::Sleep { duration } => vec![duration],
         ActionNode::Join { task } | ActionNode::Cancel { task } => vec![task],
         ActionNode::JoinMany { tasks, .. } => vec![tasks],
+        ActionNode::Await { value, .. } => vec![value],
         ActionNode::Yield => vec![],
     }
 }
@@ -1005,9 +1038,10 @@ fn written_atoms(action: &Action) -> Vec<&Atom> {
         Action::Call { args, .. } | Action::Spawn { args, .. } | Action::Perform { args, .. } => {
             args.iter().collect()
         }
-        Action::Sleep { duration } => vec![duration],
+        Action::Sleep { duration, .. } => vec![duration],
         Action::Join { task } | Action::Cancel { task } => vec![task],
         Action::JoinMany { tasks, .. } => vec![tasks],
+        Action::Await { value, .. } => vec![value],
         Action::Yield => vec![],
     }
 }

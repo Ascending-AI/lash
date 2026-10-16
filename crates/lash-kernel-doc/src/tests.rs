@@ -108,6 +108,8 @@ fn worker(url) {{
   let page = perform fetch(url) as Record{{status: Int, body?: Text, ..Any}}
   do sleep 10
   do yield
+  let later = perform fetch(url) as Any then yield
+  do sleep 0 then yield
   return page
 }}
 
@@ -128,6 +130,8 @@ main {{
   let again = call worker(&worker)
   let applied = apply g(null, absent, true, -1, 2.5, "t", b"")
   let nested = [call worker([1][0]), apply g(1), invoke helper.twice(first), perform fetch("y") as Any, sleep(1), spawn call worker("z")]
+  let waits = [perform fetch("y") as Any then yield, sleep(1) then yield, join(h), join all([h2, h3]), await([h][0]) via helper.twice]
+  let awaited = await h via helper.twice
   set nested[0] = (sleep 5, spawn apply g(first))
   let direct = call worker([1][0])
   do perform fetch("x") as Union(Null, Number, Tuple(Bool, Bytes), Map(Text, Set(Timestamp)), Enum("a", "b"), Task(Error), Handle("db"), Fn(a: Int, b?: Float) -> Absent, Record{{}}, Record{{..Text}})
@@ -194,20 +198,28 @@ fn kernel_text_round_trips_documents_that_use_every_form() {
     }
     // The corpus is only a proof if nothing is missing from it.
     let expected = [
+        "action:await",
         "action:call",
         "action:cancel",
         "action:join",
         "action:join_many",
         "action:perform",
+        "action:perform:then_yield",
         "action:sleep",
+        "action:sleep:then_yield",
         "action:spawn",
         "action:yield",
         "callee:declared",
         "callee:library",
         "callee:value",
+        "expr:act:await",
         "expr:act:call",
+        "expr:act:join",
+        "expr:act:join_many",
         "expr:act:perform",
+        "expr:act:perform:then_yield",
         "expr:act:sleep",
+        "expr:act:sleep:then_yield",
         "expr:act:spawn",
         "expr:call",
         "expr:clock",
@@ -290,10 +302,30 @@ fn collect_forms(node: Node<'_>, forms: &mut std::collections::BTreeSet<&'static
             let (name, callee, atoms): (_, Option<&Callee>, &[Atom]) = match action {
                 Action::Call { callee, args } => ("action:call", Some(callee), args),
                 Action::Spawn { callee, args } => ("action:spawn", Some(callee), args),
-                Action::Perform { args, .. } => ("action:perform", None, args),
-                Action::Sleep { duration } => {
-                    ("action:sleep", None, std::slice::from_ref(duration))
-                }
+                Action::Perform {
+                    args, then_yield, ..
+                } => (
+                    if *then_yield {
+                        "action:perform:then_yield"
+                    } else {
+                        "action:perform"
+                    },
+                    None,
+                    args,
+                ),
+                Action::Sleep {
+                    duration,
+                    then_yield,
+                } => (
+                    if *then_yield {
+                        "action:sleep:then_yield"
+                    } else {
+                        "action:sleep"
+                    },
+                    None,
+                    std::slice::from_ref(duration),
+                ),
+                Action::Await { value, .. } => ("action:await", None, std::slice::from_ref(value)),
                 Action::Join { task } => ("action:join", None, std::slice::from_ref(task)),
                 Action::JoinMany { tasks, .. } => {
                     ("action:join_many", None, std::slice::from_ref(tasks))
@@ -340,9 +372,18 @@ fn collect_forms(node: Node<'_>, forms: &mut std::collections::BTreeSet<&'static
                 Expr::Read(_) => "expr:read",
                 Expr::Act(act) => match &act.kind {
                     crate::ActKind::Call(_) => "expr:act:call",
-                    crate::ActKind::Perform { .. } => "expr:act:perform",
-                    crate::ActKind::Sleep => "expr:act:sleep",
+                    crate::ActKind::Perform {
+                        then_yield: false, ..
+                    } => "expr:act:perform",
+                    crate::ActKind::Perform {
+                        then_yield: true, ..
+                    } => "expr:act:perform:then_yield",
+                    crate::ActKind::Sleep { then_yield: false } => "expr:act:sleep",
+                    crate::ActKind::Sleep { then_yield: true } => "expr:act:sleep:then_yield",
                     crate::ActKind::Spawn(_) => "expr:act:spawn",
+                    crate::ActKind::Join => "expr:act:join",
+                    crate::ActKind::JoinMany(_) => "expr:act:join_many",
+                    crate::ActKind::Await(_) => "expr:act:await",
                 },
             });
         }
@@ -436,17 +477,13 @@ fn a_body_only_library_function_is_invoked_inside_an_expression() {
     assert_eq!(validate_document(&invoked, &catalog), Ok(()));
 }
 
-/// `K-FORM-001`: `join`, `yield` and `cancel` are statement forms only.
-/// Kernel text refuses each inside an expression with a typed error at the
-/// form; the tree has no node that could hold one.
+/// `K-FORM-001`: `yield` and `cancel` are statement forms only. Kernel
+/// text refuses each inside an expression with a typed error at the form;
+/// the tree has no node that could hold one. A `join` and an `await` may
+/// nest (`K-EVAL-008`).
 #[test]
-fn join_yield_and_cancel_are_refused_inside_an_expression() {
+fn yield_and_cancel_are_refused_inside_an_expression() {
     let cases = [
-        (
-            "let h = 1\nlet y = {v: join h}",
-            StatementForm::Join,
-            (9, 13),
-        ),
         ("let y = map{1: yield}", StatementForm::Yield, (8, 16)),
         (
             "let h = 1\nlet y = set{cancel h}",

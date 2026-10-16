@@ -432,7 +432,11 @@ impl Reads {
                 self.effects.insert(effect.clone());
                 args.iter().for_each(|arg| self.atom(arg, bound));
             }
-            Action::Sleep { duration: atom }
+            Action::Await { policy, value } => {
+                self.library.insert(*policy);
+                self.atom(value, bound);
+            }
+            Action::Sleep { duration: atom, .. }
             | Action::Join { task: atom }
             | Action::JoinMany { tasks: atom, .. }
             | Action::Cancel { task: atom } => self.atom(atom, bound),
@@ -507,7 +511,10 @@ impl Reads {
                     ActKind::Perform { effect, .. } => {
                         self.effects.insert(effect.clone());
                     }
-                    ActKind::Sleep => {}
+                    ActKind::Await(policy) => {
+                        self.library.insert(*policy);
+                    }
+                    ActKind::Sleep { .. } | ActKind::Join | ActKind::JoinMany(_) => {}
                 }
                 act.args.iter().for_each(|arg| self.expr(arg, bound));
             }

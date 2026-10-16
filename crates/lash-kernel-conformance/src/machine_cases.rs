@@ -271,6 +271,11 @@ fn k_site_005() {
 }
 
 #[test]
+fn k_task_026() {
+    super::run_rule("K-TASK-026", include_str!("../corpus/task/K-TASK-026.json"));
+}
+
+#[test]
 fn k_text_001() {
     super::run_rule("K-TEXT-001", include_str!("../corpus/text/K-TEXT-001.json"));
 }

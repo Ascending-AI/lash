@@ -35,8 +35,8 @@ impl Task {
         }
     }
     pub(super) fn take_incoming(&mut self) -> Option<IncomingRecord> {
-        if matches!(self.record.state, TaskStateRecord::Resuming(_)) {
-            let TaskStateRecord::Resuming(incoming) =
+        if matches!(self.record.state, TaskStateRecord::Resuming { .. }) {
+            let TaskStateRecord::Resuming { incoming, .. } =
                 std::mem::replace(&mut self.record.state, TaskStateRecord::Ready)
             else {
                 unreachable!()
@@ -45,6 +45,24 @@ impl Task {
         } else {
             None
         }
+    }
+    /// Takes the turn a delivered task owes before it continues
+    /// (`K-TASK-005`): whether it owed one.
+    pub(super) fn take_requeue(&mut self) -> bool {
+        match &mut self.record.state {
+            TaskStateRecord::Resuming { requeue, .. } if *requeue => {
+                *requeue = false;
+                true
+            }
+            _ => false,
+        }
+    }
+    /// Whether the task is delivered and owes its turn.
+    pub(super) fn owes_turn(&self) -> bool {
+        matches!(
+            self.record.state,
+            TaskStateRecord::Resuming { requeue: true, .. }
+        )
     }
     pub(super) fn wait(&self) -> Option<Wait> {
         match self.record.state {
@@ -61,8 +79,10 @@ impl Task {
             Wait::JoinMany(id) => TaskStateRecord::JoiningMany(id),
         };
     }
-    pub(super) fn wake(&mut self, incoming: IncomingRecord) {
-        self.record.state = TaskStateRecord::Resuming(incoming);
+    /// Makes the task ready to continue with `incoming`, first taking one
+    /// more turn of the queue when `requeue` (`K-TASK-005`).
+    pub(super) fn wake(&mut self, incoming: IncomingRecord, requeue: bool) {
+        self.record.state = TaskStateRecord::Resuming { incoming, requeue };
     }
 }
 impl std::ops::Deref for Task {

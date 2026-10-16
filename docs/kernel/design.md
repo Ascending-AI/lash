@@ -77,7 +77,7 @@ A run is a set of tasks. `main` is the first.
 
 - `spawn f(args)` creates a task that runs `f`, and returns its handle. The new task runs at once, up to its first wait or its end; then the spawning task continues. (This is how a JavaScript async function behaves. A dialect whose language queues a new task instead, as Python's `create_task` does, makes `yield` the task's first statement. A Python coroutine that is only awaited is an ordinary call.)
 - One task runs at a time, until it reaches a wait or ends. Then the next ready task runs, first in first out. There is no parallelism inside a run.
-- A wait that completes makes its task ready, at the back of the queue. A `join` on a handle that has already ended continues at once. When a task ends, every waiting join it decides, on its handle alone or on a list, becomes ready in join-start order.
+- A wait that completes makes its task ready, at the back of the queue. A `perform` or `sleep` marked `then yield` takes one more turn once its outcome is in, before its result or raise reaches the code. A `join` on a handle that has already ended continues at once. When a task ends, every waiting join it decides, on its handle alone or on a list, becomes ready in join-start order.
 - `join` on a list: all returns when every member has ended or at the first failure; all-settled when every member has ended; race at the first member to end; any at the first to succeed. Members not yet ended keep running.
 - **Errors.** An error that ends a task is data on its handle, raised at each `join` that observes it, and nothing more.
 - `cancel h` raises a cancellation error in the task at its current wait. Its cleanup blocks run and may wait. Cancelling an ended task does nothing.
@@ -88,7 +88,7 @@ A run is a set of tasks. `main` is the first.
 
 The scheduling rules above are part of the kernel version.
 
-How source maps: `await tool(x)` is one `perform`. `const p = tool(x)` is a `spawn` of a function that performs it, and `await p` is a `join`. `Promise.all(xs.map(async x => …))` spawns one task per element and joins the list; `asyncio.gather` does the same.
+How source maps: `await tool(x)` is one `perform` (TypeScript marks it `then yield`, so it continues in arrival order with a promise's). `const p = tool(x)` is a `spawn` of a function that performs it, and `await p` is `await p via ts.await`, whose policy joins the promise's task; Python's `await t` is `await t via py.await`, which takes no turn of its own. `Promise.all(xs.map(async x => …))` spawns one task per element and joins the list; `asyncio.gather` does the same.
 
 ### 2.4 Library functions (one mechanism)
 

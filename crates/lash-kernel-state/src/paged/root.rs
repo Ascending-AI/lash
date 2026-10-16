@@ -309,7 +309,14 @@ pub enum JoinerRecord {
 #[derive(Clone, Debug)]
 pub enum TaskStateRecord {
     Ready,
-    Resuming(IncomingRecord),
+    /// Ready, with what its pending action continues with. `requeue`: the
+    /// action waited `then yield` and its outcome is in, but the task has
+    /// not yet taken the one more turn of the queue it takes before it
+    /// continues (`K-TASK-005`): it stands *delivered*.
+    Resuming {
+        incoming: IncomingRecord,
+        requeue: bool,
+    },
     /// In a `perform` or a `sleep`: the wait's number.
     Waiting(u64),
     Joining(TaskId),

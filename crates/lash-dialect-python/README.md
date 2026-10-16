@@ -44,7 +44,8 @@ Where Python's meaning is the kernel's, the lowerer emits the kernel form:
 `==` is `eq`, `is` is `same`, `//` and `%` on integers are `div_floor` and
 `rem_floor`, `await tool(x)` is one `perform`, whose reply `py.reply`
 reads, an awaited coroutine call is an ordinary call, `asyncio.create_task`
-is `spawn`, and `asyncio.sleep(0)` is `yield`. Where it is not, the lowerer calls a helper: the functions
+is `spawn`, `await t` on a task is `await t via py.await`, which takes no
+turn of its own, and `asyncio.sleep(0)` is `yield`. Where it is not, the lowerer calls a helper: the functions
 named `py.*`, written in kernel text under `src/helpers/` and installed
 with `define_helpers`. Truthiness, operators on values whose kind is not
 known when lowering, subscripts with negative indices and slices, the

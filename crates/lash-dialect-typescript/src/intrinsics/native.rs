@@ -140,8 +140,71 @@ impl Reader {
         expr: &s::Expr,
         annotation: Option<&s::TsType>,
     ) -> Result<k::Action, Diagnostic> {
+        // A tool call or a `sleep` awaited twice takes one more turn once
+        // its outcome is in.
+        if let s::Expr::Await(inner) = expr {
+            return match self.awaited_action(&inner.arg, annotation)? {
+                k::Action::Perform {
+                    effect,
+                    args,
+                    result,
+                    then_yield: false,
+                } => Ok(k::Action::Perform {
+                    effect,
+                    args,
+                    result,
+                    then_yield: true,
+                }),
+                k::Action::Sleep {
+                    duration,
+                    then_yield: false,
+                } => Ok(k::Action::Sleep {
+                    duration,
+                    then_yield: true,
+                }),
+                _ => Err(invalid(
+                    "only a tool call or `sleep` is awaited twice",
+                    Some(expr.span()),
+                )),
+            };
+        }
+        // `await value` awaits by the base's `ts.await`.
+        if !matches!(expr, s::Expr::Call(_)) {
+            if annotation.is_some() {
+                return Err(invalid(
+                    "only effects have result annotations",
+                    Some(expr.span()),
+                ));
+            }
+            let policy = self.operators.unique("ts.await").ok_or_else(|| {
+                invalid(
+                    "`await` of a value needs the base's one `ts.await`",
+                    Some(expr.span()),
+                )
+            })?;
+            return Ok(k::Action::Await {
+                policy,
+                value: self.atom(expr)?,
+            });
+        }
         let (callee, args) = call(expr)?;
         let spelling = path(callee);
+        // An `await` by a policy other than the base's `ts.await`.
+        if spelling.as_deref() == Some("k.await") {
+            let [policy, value] = args.as_slice() else {
+                return Err(invalid("wrong native action arity", Some(expr.span())));
+            };
+            if annotation.is_some() {
+                return Err(invalid(
+                    "only effects have result annotations",
+                    Some(expr.span()),
+                ));
+            }
+            return Ok(k::Action::Await {
+                policy: self.id(policy)?,
+                value: self.atom(value)?,
+            });
+        }
         let args_atoms = args
             .iter()
             .map(|arg| self.atom(arg))
@@ -161,6 +224,7 @@ impl Reader {
                 effect,
                 args: args_atoms,
                 result,
+                then_yield: false,
             });
         }
         if annotation.is_some() {
@@ -172,6 +236,7 @@ impl Reader {
         Ok(match (spelling.as_deref(), args_atoms.as_slice()) {
             (Some("sleep"), [duration]) => k::Action::Sleep {
                 duration: duration.clone(),
+                then_yield: false,
             },
             (Some("join"), [task]) => k::Action::Join { task: task.clone() },
             (Some("cancel"), [task]) => k::Action::Cancel { task: task.clone() },
@@ -192,7 +257,7 @@ impl Reader {
             },
             (
                 Some(
-                    "sleep" | "join" | "cancel" | "yieldTask" | "Promise.all"
+                    "sleep" | "join" | "cancel" | "yieldTask" | "k.await" | "Promise.all"
                     | "Promise.allSettled" | "Promise.race" | "Promise.any",
                 ),
                 _,

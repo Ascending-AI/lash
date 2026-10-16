@@ -1414,3 +1414,27 @@ for i in stored:
         )
     );
 }
+
+/// AWAIT-PHASE, `K-TASK-026`: Python's await policy adds no turn. A task
+/// that awaits a tool in place and one that awaits a task awaiting a tool,
+/// their outcomes delivered together in either order, continue as asyncio
+/// runs them: the in-place awaiter first, since the awaited task must end
+/// before its awaiter wakes. The lowered document takes no `then yield`.
+#[test]
+fn python_awaits_add_no_turn() {
+    let source = "import asyncio\n\
+        async def in_place():\n    v = await echo('i')\n    print(v)\n\
+        async def inner():\n    return await echo('p')\n\
+        async def promised():\n    t = asyncio.create_task(inner())\n    v = await t\n    print(v)\n\
+        a = asyncio.create_task(in_place())\n\
+        b = asyncio.create_task(promised())\n\
+        await asyncio.gather(a, b)\n";
+    let text = kernel_text(source);
+    assert!(!text.contains("then yield"), "{text}");
+    assert!(text.contains("via py.await"), "{text}");
+    for order in [["echo:i", "echo:p"], ["echo:p", "echo:i"]] {
+        let recorded = run(source, &[order.map(String::from).to_vec()]);
+        assert_eq!(recorded.lines(), ["i", "p"], "{order:?}");
+        assert_eq!(recorded.end, "ok");
+    }
+}

@@ -244,9 +244,11 @@ impl TokenCodec for TaskStateRecord {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
             Self::Ready => out.sum(0, 0),
-            Self::Resuming(value) => {
-                out.sum(1, 1);
-                value.encode(out);
+            // A delivered task takes a tag of its own, so a ready one keeps
+            // its bytes.
+            Self::Resuming { incoming, requeue } => {
+                out.sum(if *requeue { 6 } else { 1 }, 1);
+                incoming.encode(out);
             }
             Self::Waiting(value) => {
                 out.sum(2, 1);
@@ -273,9 +275,12 @@ impl TokenCodec for TaskStateRecord {
                 TokenReader::expect_fields(fields, 0)?;
                 Self::Ready
             }
-            1 => {
+            1 | 6 => {
                 TokenReader::expect_fields(fields, 1)?;
-                Self::Resuming(<IncomingRecord>::decode(input)?)
+                Self::Resuming {
+                    incoming: <IncomingRecord>::decode(input)?,
+                    requeue: tag == 6,
+                }
             }
             2 => {
                 TokenReader::expect_fields(fields, 1)?;

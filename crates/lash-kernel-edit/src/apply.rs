@@ -76,10 +76,11 @@ fn arguments(action: &mut Action) -> Vec<&mut Atom> {
         Action::Call { args, .. } | Action::Perform { args, .. } | Action::Spawn { args, .. } => {
             args.iter_mut().collect()
         }
-        Action::Sleep { duration: atom }
+        Action::Sleep { duration: atom, .. }
         | Action::Join { task: atom }
         | Action::JoinMany { tasks: atom, .. }
-        | Action::Cancel { task: atom } => vec![atom],
+        | Action::Cancel { task: atom }
+        | Action::Await { value: atom, .. } => vec![atom],
         Action::Yield => Vec::new(),
     }
 }
@@ -94,6 +95,7 @@ fn form(action: &Action) -> StatementForm {
         Action::Yield => StatementForm::Yield,
         Action::Spawn { .. } => StatementForm::Spawn,
         Action::Cancel { .. } => StatementForm::Cancel,
+        Action::Await { .. } => StatementForm::Await,
     }
 }
 
@@ -111,17 +113,28 @@ fn nested(action: &Action) -> Option<ActExpr> {
             effect,
             args,
             result,
+            then_yield,
         } => (
             ActKind::Perform {
                 effect: effect.clone(),
                 result: result.clone(),
+                then_yield: *then_yield,
             },
             args.iter().collect(),
         ),
-        Action::Sleep { duration } => (ActKind::Sleep, vec![duration]),
-        Action::Join { .. } | Action::JoinMany { .. } | Action::Yield | Action::Cancel { .. } => {
-            return None;
-        }
+        Action::Sleep {
+            duration,
+            then_yield,
+        } => (
+            ActKind::Sleep {
+                then_yield: *then_yield,
+            },
+            vec![duration],
+        ),
+        Action::Join { task } => (ActKind::Join, vec![task]),
+        Action::JoinMany { mode, tasks } => (ActKind::JoinMany(*mode), vec![tasks]),
+        Action::Await { policy, value } => (ActKind::Await(*policy), vec![value]),
+        Action::Yield | Action::Cancel { .. } => return None,
     };
     Some(ActExpr {
         kind,
@@ -187,6 +200,7 @@ fn names(kind: &NodeKind, binding: BindingId) -> bool {
             | ActionNode::Join { task: one }
             | ActionNode::JoinMany { tasks: one, .. }
             | ActionNode::Cancel { task: one } => atom(one),
+            ActionNode::Await { value, .. } => atom(value),
             ActionNode::Yield => false,
         },
         NodeKind::Expr(expr) => match expr {

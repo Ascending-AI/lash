@@ -300,15 +300,27 @@ impl<'a> Printer<'a> {
                 effect,
                 args,
                 result,
+                then_yield,
             } => {
                 self.out.push_str(&format!("perform {effect}"));
                 self.atoms(args);
                 self.out.push_str(" as ");
                 self.ty(result);
+                self.then_yield(*then_yield);
             }
-            Action::Sleep { duration } => {
+            Action::Sleep {
+                duration,
+                then_yield,
+            } => {
                 self.out.push_str("sleep ");
                 self.atom(duration);
+                self.then_yield(*then_yield);
+            }
+            Action::Await { policy, value } => {
+                self.out.push_str("await ");
+                self.atom(value);
+                self.out.push_str(" via ");
+                self.function(policy);
             }
             Action::Join { task } => {
                 self.out.push_str("join ");
@@ -328,6 +340,12 @@ impl<'a> Printer<'a> {
                 self.out.push_str("cancel ");
                 self.atom(task);
             }
+        }
+    }
+
+    fn then_yield(&mut self, then_yield: bool) {
+        if then_yield {
+            self.out.push_str(" then yield");
         }
     }
 
@@ -523,16 +541,43 @@ impl<'a> Printer<'a> {
                     self.exprs(act.args.iter());
                     self.out.push(')');
                 }
-                ActKind::Perform { effect, result } => {
+                ActKind::Perform {
+                    effect,
+                    result,
+                    then_yield,
+                } => {
                     self.out.push_str(&format!("perform {effect}("));
                     self.exprs(act.args.iter());
                     self.out.push_str(") as ");
                     self.ty(result);
+                    self.then_yield(*then_yield);
                 }
-                ActKind::Sleep => {
+                ActKind::Sleep { then_yield } => {
                     self.out.push_str("sleep(");
                     self.exprs(act.args.iter());
                     self.out.push(')');
+                    self.then_yield(*then_yield);
+                }
+                ActKind::Join => {
+                    self.out.push_str("join(");
+                    self.exprs(act.args.iter());
+                    self.out.push(')');
+                }
+                ActKind::JoinMany(mode) => {
+                    self.out.push_str(match mode {
+                        JoinMode::All => "join all(",
+                        JoinMode::AllSettled => "join settled(",
+                        JoinMode::Race => "join race(",
+                        JoinMode::Any => "join any(",
+                    });
+                    self.exprs(act.args.iter());
+                    self.out.push(')');
+                }
+                ActKind::Await(policy) => {
+                    self.out.push_str("await(");
+                    self.exprs(act.args.iter());
+                    self.out.push_str(") via ");
+                    self.function(policy);
                 }
             },
         }

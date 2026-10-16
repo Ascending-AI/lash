@@ -518,14 +518,26 @@ impl<'a> Reader<'a> {
             };
             let effect = k::EffectName::new(name).map_err(|e| invalid(e.to_string()))?;
             let mut result = None;
+            let mut then_yield = false;
             c.expect("(")?;
             let mut args = vec![];
             if !c.take(")") {
                 loop {
-                    if c.take("result=") {
-                        result = Some(c.metadata()?);
+                    if c.take("then_yield=True") {
+                        then_yield = true;
                         c.expect(")")?;
                         break;
+                    }
+                    if result.is_none() && c.take("result=") {
+                        result = Some(c.metadata()?);
+                        if c.take(")") {
+                            break;
+                        }
+                        c.expect(",")?;
+                        continue;
+                    }
+                    if result.is_some() {
+                        return Err(invalid("a tool call's arguments come before `result=`"));
                     }
                     args.push(self.atom(c)?);
                     if c.take(")") {
@@ -540,6 +552,7 @@ impl<'a> Reader<'a> {
                 effect,
                 args,
                 result,
+                then_yield,
             });
         }
         let callee = if c.take("declared.") {
@@ -547,7 +560,19 @@ impl<'a> Reader<'a> {
         } else if c.text.trim_start().starts_with("helper_") {
             k::Callee::Library(self.id(c)?)
         } else {
-            k::Callee::Value(self.name(c)?)
+            let name = self.name(c)?;
+            // `await name` awaits by the base's `py.await`.
+            if !c.text.trim_start().starts_with('(') {
+                let policy = self
+                    .operators
+                    .unique("py.await")
+                    .ok_or_else(|| invalid("`await` of a value needs the base's one `py.await`"))?;
+                return Ok(k::Action::Await {
+                    policy,
+                    value: k::Atom::Variable(name),
+                });
+            }
+            k::Callee::Value(name)
         };
         c.expect("(")?;
         let mut args = vec![];
@@ -819,7 +844,15 @@ impl<'a> Reader<'a> {
         probe.operation().is_ok_and(|op| {
             matches!(
                 op,
-                "call" | "spawn" | "perform" | "sleep" | "join" | "join_many" | "cancel" | "yield_"
+                "call"
+                    | "spawn"
+                    | "perform"
+                    | "sleep"
+                    | "join"
+                    | "join_many"
+                    | "cancel"
+                    | "yield_"
+                    | "await_"
             )
         })
     }
@@ -1264,11 +1297,28 @@ impl<'a> Reader<'a> {
                     effect,
                     args,
                     result,
+                    then_yield: false,
                 }
             }
-            "sleep" => k::Action::Sleep {
-                duration: self.atom(c)?,
-            },
+            "sleep" => {
+                let duration = self.atom(c)?;
+                let then_yield = c.take(",") && {
+                    c.expect("then_yield=True")?;
+                    true
+                };
+                k::Action::Sleep {
+                    duration,
+                    then_yield,
+                }
+            }
+            "await_" => {
+                let policy = self.id(c)?;
+                c.expect(",")?;
+                k::Action::Await {
+                    policy,
+                    value: self.atom(c)?,
+                }
+            }
             "join" => k::Action::Join {
                 task: self.atom(c)?,
             },

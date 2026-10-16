@@ -293,13 +293,17 @@ impl Graph {
                     .map(|arg| self.expr(arg, scope, owner))
                     .collect();
                 match &act.kind {
-                    ActKind::Call(Callee::Library(id)) => self.library_call(*id, args, owner),
+                    ActKind::Call(Callee::Library(id)) | ActKind::Await(id) => {
+                        self.library_call(*id, args, owner)
+                    }
                     ActKind::Call(Callee::Value(name)) => {
                         self.call(Self::variable(scope, name), args, owner)
                     }
                     ActKind::Call(Callee::Declared(_))
                     | ActKind::Perform { .. }
-                    | ActKind::Sleep
+                    | ActKind::Sleep { .. }
+                    | ActKind::Join
+                    | ActKind::JoinMany(_)
                     | ActKind::Spawn(_) => {
                         self.units[owner].class = Class::Body;
                         let result = self.slot();
@@ -346,6 +350,10 @@ impl Graph {
                         result
                     }
                 }
+            }
+            Action::Await { policy, value } => {
+                let args = vec![self.atom(value, scope)];
+                self.library_call(*policy, args, owner)
             }
             Action::Perform { .. }
             | Action::Sleep { .. }

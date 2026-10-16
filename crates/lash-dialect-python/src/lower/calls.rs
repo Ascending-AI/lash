@@ -610,6 +610,7 @@ impl Lowerer<'_> {
             effect: effect.clone(),
             args: self.atoms(&slots),
             result: signature.result.clone(),
+            then_yield: false,
         })
     }
 
@@ -624,11 +625,13 @@ impl Lowerer<'_> {
         self.awaited(&await_expr.value)
     }
 
-    /// `await value`.
+    /// `await value`: an `await` action by the policy that awaits what
+    /// the value can be (`K-TASK-026`). Python's policies take no turn of
+    /// their own: a task that has ended gives its answer at once.
     fn awaited(&mut self, value: &PyExpr) -> Lowering<Operand> {
         let PyExpr::Call(call) = value else {
             let value = self.expr(value)?;
-            return self.invoke("py.await", &[value], Ty::Unknown);
+            return self.await_via("py.await", value);
         };
         // An awaited coroutine call is an ordinary call, and an awaited
         // tool call is one `perform` and the reading of its reply. The value
@@ -656,8 +659,15 @@ impl Lowerer<'_> {
         let value = self.call(call, true)?;
         match helper {
             None => Ok(value),
-            Some(helper) => self.invoke(helper, &[value], Ty::Unknown),
+            Some(policy) => self.await_via(policy, value),
         }
+    }
+
+    /// `await value via policy`.
+    fn await_via(&mut self, policy: &str, value: Operand) -> Lowering<Operand> {
+        let policy = self.function(policy)?;
+        let value = self.atom(value);
+        Ok(self.let_rhs(Rhs::Action(Action::Await { policy, value }), Ty::Unknown))
     }
 
     fn asyncio(
@@ -691,6 +701,7 @@ impl Lowerer<'_> {
                     Some(None) => Action::Yield,
                     Some(Some(duration)) => Action::Sleep {
                         duration: Atom::Literal(duration),
+                        then_yield: false,
                     },
                     None => {
                         let seconds = self.expr(seconds)?;

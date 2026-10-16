@@ -68,7 +68,10 @@ fn scan(
                     ActKind::Perform { effect, .. } => {
                         effects.insert(effect.clone());
                     }
-                    ActKind::Sleep => {}
+                    ActKind::Await(policy) => {
+                        functions.insert(*policy);
+                    }
+                    ActKind::Sleep { .. } | ActKind::Join | ActKind::JoinMany(_) => {}
                 },
             },
             Node::Action(action) => {
@@ -89,7 +92,11 @@ fn scan(
                         effects.insert(effect.clone());
                         args
                     }
-                    Action::Sleep { duration } => std::slice::from_ref(duration),
+                    Action::Await { policy, value } => {
+                        functions.insert(*policy);
+                        std::slice::from_ref(value)
+                    }
+                    Action::Sleep { duration, .. } => std::slice::from_ref(duration),
                     Action::Join { task } | Action::Cancel { task } => std::slice::from_ref(task),
                     Action::JoinMany { tasks, .. } => std::slice::from_ref(tasks),
                     Action::Yield => &[],

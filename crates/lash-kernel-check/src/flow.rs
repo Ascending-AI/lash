@@ -307,7 +307,8 @@ pub(crate) fn atoms(action: &ActionNode) -> impl Iterator<Item = &AtomNode> {
         ActionNode::Sleep { duration: atom }
         | ActionNode::Join { task: atom }
         | ActionNode::JoinMany { tasks: atom, .. }
-        | ActionNode::Cancel { task: atom } => (&[], Some(atom)),
+        | ActionNode::Cancel { task: atom }
+        | ActionNode::Await { value: atom, .. } => (&[], Some(atom)),
         ActionNode::Yield => (&[], None),
     };
     many.iter().chain(one)
@@ -326,12 +327,16 @@ fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
                 ActionNode::Yield => SiteKind::Yield,
                 ActionNode::Spawn { .. } => SiteKind::Spawn,
                 ActionNode::Cancel { .. } => SiteKind::Cancel,
+                ActionNode::Await { .. } => SiteKind::Await,
             },
             NodeKind::Expr(ExprNode::Act { kind, .. }) => match kind {
                 ActNode::Call(_) => SiteKind::Call,
                 ActNode::Perform { .. } => SiteKind::Perform,
                 ActNode::Sleep => SiteKind::Sleep,
                 ActNode::Spawn(_) => SiteKind::Spawn,
+                ActNode::Join => SiteKind::Join,
+                ActNode::JoinMany(_) => SiteKind::JoinMany,
+                ActNode::Await(_) => SiteKind::Await,
             },
             _ => continue,
         };
@@ -485,7 +490,10 @@ fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
                 ActNode::Call(callee) | ActNode::Spawn(callee) => {
                     reach(unit, callee, catalog, &mut applies);
                 }
-                ActNode::Sleep => {}
+                ActNode::Await(policy) => {
+                    reach(unit, &CalleeNode::Library(*policy), catalog, &mut applies);
+                }
+                ActNode::Sleep | ActNode::Join | ActNode::JoinMany(_) => {}
             },
             NodeKind::Expr(ExprNode::Call { function, .. }) => {
                 unit.through_values |= library_applies(catalog, function, &mut applies);
@@ -496,6 +504,9 @@ fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
                 }
                 if let ActionNode::Call { callee, .. } | ActionNode::Spawn { callee, .. } = action {
                     reach(unit, callee, catalog, &mut applies);
+                }
+                if let ActionNode::Await { policy, .. } = action {
+                    reach(unit, &CalleeNode::Library(*policy), catalog, &mut applies);
                 }
                 for atom in atoms(action) {
                     if let AtomNode::Literal(Literal::Function(name)) = atom {

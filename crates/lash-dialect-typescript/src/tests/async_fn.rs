@@ -183,12 +183,13 @@ fn an_awaited_rejection_nothing_catches_ends_the_run() {
     assert_eq!(recorded.end, "error boom: x");
 }
 
-/// `await sleep(ms)` is one `sleep` in the awaiting task.
+/// `await sleep(ms)` is one `sleep` in the awaiting task, taking its
+/// turn once it has elapsed (`K-TASK-005`).
 #[test]
 fn an_awaited_sleep_is_one_sleep() {
     assert_eq!(
         main_text_with_effects("await sleep(5);"),
-        "do sleep 5.0\ndo yield"
+        "do sleep 5.0 then yield"
     );
 }
 

@@ -88,6 +88,7 @@ impl KernelMachine {
                 effect,
                 args,
                 result,
+                ..
             } => {
                 let values = self.atoms(task, exe, args)?;
                 let mut copied = Vec::with_capacity(values.len());
@@ -116,7 +117,7 @@ impl KernelMachine {
                 )?;
                 Ok(Flow::Step)
             }
-            ActionKind::Sleep(duration) => {
+            ActionKind::Sleep { duration, .. } => {
                 let duration = self.atom(task, exe, duration)?;
                 let duration = sleep_duration(duration)?;
                 let wait = self.request(task, stmt, &action.site)?;
@@ -130,94 +131,34 @@ impl KernelMachine {
                 Ok(Flow::Step)
             }
             ActionKind::Join(handle) => {
-                let Value::Task(joined) = self.atom(task, exe, handle)? else {
-                    return raise("type_error", "`join` takes a task handle");
-                };
-                if joined == task {
-                    return raise("join_self", "a task cannot join its own handle");
+                let handle = self.atom(task, exe, handle)?;
+                match self.join_one(task, handle)? {
+                    Ok(value) => {
+                        self.put(out, value);
+                        Ok(Flow::Done)
+                    }
+                    Err(joined) => {
+                        self.wait_one(task, stmt, joined)?;
+                        Ok(Flow::Step)
+                    }
                 }
-                if matches!(self.task(joined)?.state, TaskState::Ended(_)) {
-                    let value = self.join_result(joined)?;
-                    self.put(out, value);
-                    return Ok(Flow::Done);
-                }
-                self.add_joiner(joined, Joiner::Single(task))?;
-                self.suspend(task, stmt, Wait::Join(joined))?;
-                Ok(Flow::Step)
             }
             ActionKind::JoinMany(mode, handles) => {
                 let handles = self.atom(task, exe, handles)?;
-                let len = match &handles {
-                    Value::Tuple(tuple) => tuple.summary.len,
-                    Value::List(id) => self.heap.len(*id)?,
-                    _ => {
-                        return raise(
-                            "type_error",
-                            "`join` takes a list or a tuple of task handles",
-                        );
-                    }
-                };
-                let limit = u64::from(self.bounds.join_members);
-                if len > limit {
-                    return Err(bound(Bound::JoinMembers, limit).into());
-                }
-                let mut tasks = Tree::new(true);
-                for at in 0..len {
-                    let member = match &handles {
-                        Value::Tuple(tuple) => self.heap.tuple_get(tuple, at)?,
-                        Value::List(id) => self.heap.list_get(*id, at)?,
-                        _ => unreachable!(),
-                    };
-                    let Some(Value::Task(member)) = member else {
-                        return raise(
-                            "type_error",
-                            "`join` takes a list or a tuple of task handles",
-                        );
-                    };
-                    if member == task {
-                        return raise("join_self", "a task cannot join its own handle");
-                    }
-                    tasks.write(ordinal_key(at), member, self.heap.pages())?;
-                }
-                if len == 0 && matches!(mode, JoinMode::Race | JoinMode::Any) {
-                    return raise("empty_join", "this `join` needs at least one task");
-                }
-                match self.decide(*mode, &tasks, None)? {
-                    Some(decision) => {
-                        self.pass(&tasks)?;
-                        self.put(out, decision.map_err(Interrupt::raised)?);
+                match self.join_list(task, *mode, &handles)? {
+                    Ok(value) => {
+                        self.put(out, value);
                         Ok(Flow::Done)
                     }
-                    None => {
-                        let order = self.next_join;
-                        self.next_join += 1;
-                        // Repeated handles keep their places in the result,
-                        // but register only one wake on each live member.
-                        for member in task_members(&tasks, self.heap.pages())?
-                            .into_iter()
-                            .collect::<BTreeSet<_>>()
-                        {
-                            if !matches!(self.task(member)?.state, TaskState::Ended(_)) {
-                                self.add_joiner(member, Joiner::List(order))?;
-                            }
-                        }
-                        self.joins.write(
-                            ordinal_key(order),
-                            ListJoin {
-                                joiner: task,
-                                mode: *mode,
-                                members: tasks,
-                            },
-                            self.heap.pages(),
-                        )?;
-                        self.suspend(task, stmt, Wait::JoinMany(order))?;
+                    Err(members) => {
+                        self.wait_list(task, stmt, *mode, members)?;
                         Ok(Flow::Step)
                     }
                 }
             }
             ActionKind::Yield => {
                 let yielding = self.task(task)?;
-                yielding.wake(Incoming::Value(Value::Null));
+                yielding.wake(Incoming::Value(Value::Null), false);
                 self.frame(task)?.awaiting = Some(stmt);
                 self.ready.push_back(task)?;
                 self.current = None;
@@ -264,11 +205,7 @@ impl KernelMachine {
         match &entry.kind {
             NestedKind::Call(callee) => {
                 if !library {
-                    let occurrence = self.occurrence(task, site)?;
-                    if host.observes_sites() {
-                        let identity = self.action_identity(task, site, occurrence)?;
-                        host.enter_site(&identity);
-                    }
+                    self.enter(task, host, site)?;
                 }
                 let (target, at) = self.nested_target(exe, callee, args)?;
                 let enters = match &target {
@@ -305,7 +242,7 @@ impl KernelMachine {
                 }
                 Ok(self.answered_at(flow, at, args))
             }
-            NestedKind::Perform { effect, result } => {
+            NestedKind::Perform { effect, result, .. } => {
                 let mut copied = Vec::with_capacity(count);
                 for at in args..args + count {
                     let value = self.take(at);
@@ -331,7 +268,41 @@ impl KernelMachine {
                 )?;
                 Ok(Flow::Step)
             }
-            NestedKind::Sleep => {
+            NestedKind::Join => {
+                if !library {
+                    self.enter(task, host, site)?;
+                }
+                let handle = self.take(args);
+                match self.join_one(task, handle)? {
+                    Ok(value) => {
+                        self.put(args, value);
+                        Ok(Flow::Done)
+                    }
+                    Err(joined) => {
+                        self.capture(task, entry, act, PhaseRecord::Joining)?;
+                        self.wait_one(task, stmt, joined)?;
+                        Ok(Flow::Step)
+                    }
+                }
+            }
+            NestedKind::JoinMany(mode) => {
+                if !library {
+                    self.enter(task, host, site)?;
+                }
+                let handles = self.take(args);
+                match self.join_list(task, *mode, &handles)? {
+                    Ok(value) => {
+                        self.put(args, value);
+                        Ok(Flow::Done)
+                    }
+                    Err(members) => {
+                        self.capture(task, entry, act, PhaseRecord::Joining)?;
+                        self.wait_list(task, stmt, *mode, members)?;
+                        Ok(Flow::Step)
+                    }
+                }
+            }
+            NestedKind::Sleep { .. } => {
                 let duration = self.take(args);
                 let duration = sleep_duration(duration)?;
                 self.capture(task, entry, act, PhaseRecord::Waiting)?;
@@ -348,6 +319,113 @@ impl KernelMachine {
         }
     }
 
+    /// A `join` on `handle`: what it gives when the task has ended
+    /// (`K-TASK-007`, `K-TASK-009`), or the task it waits on.
+    fn join_one(&mut self, task: TaskId, handle: Value) -> Eval<Result<Value, TaskId>> {
+        let Value::Task(joined) = handle else {
+            return raise("type_error", "`join` takes a task handle");
+        };
+        if joined == task {
+            return raise("join_self", "a task cannot join its own handle");
+        }
+        if matches!(self.task(joined)?.state, TaskState::Ended(_)) {
+            return Ok(Ok(self.join_result(joined)?));
+        }
+        Ok(Err(joined))
+    }
+
+    /// Waits in statement `stmt` until `joined` ends (`K-TASK-008`).
+    fn wait_one(&mut self, task: TaskId, stmt: StmtId, joined: TaskId) -> Result<(), Halt> {
+        self.add_joiner(joined, Joiner::Single(task))?;
+        self.suspend(task, stmt, Wait::Join(joined))
+    }
+
+    /// A list `join` in `mode` on `handles`: what it gives or raises when
+    /// it is decided as it starts (`K-TASK-011` to `K-TASK-014`), or its
+    /// members to wait on.
+    fn join_list(
+        &mut self,
+        task: TaskId,
+        mode: JoinMode,
+        handles: &Value,
+    ) -> Eval<Result<Value, Tree<TaskId>>> {
+        let len = match handles {
+            Value::Tuple(tuple) => tuple.summary.len,
+            Value::List(id) => self.heap.len(*id)?,
+            _ => {
+                return raise(
+                    "type_error",
+                    "`join` takes a list or a tuple of task handles",
+                );
+            }
+        };
+        let limit = u64::from(self.bounds.join_members);
+        if len > limit {
+            return Err(bound(Bound::JoinMembers, limit).into());
+        }
+        let mut tasks = Tree::new(true);
+        for at in 0..len {
+            let member = match handles {
+                Value::Tuple(tuple) => self.heap.tuple_get(tuple, at)?,
+                Value::List(id) => self.heap.list_get(*id, at)?,
+                _ => unreachable!(),
+            };
+            let Some(Value::Task(member)) = member else {
+                return raise(
+                    "type_error",
+                    "`join` takes a list or a tuple of task handles",
+                );
+            };
+            if member == task {
+                return raise("join_self", "a task cannot join its own handle");
+            }
+            tasks.write(ordinal_key(at), member, self.heap.pages())?;
+        }
+        if len == 0 && matches!(mode, JoinMode::Race | JoinMode::Any) {
+            return raise("empty_join", "this `join` needs at least one task");
+        }
+        match self.decide(mode, &tasks, None)? {
+            Some(decision) => {
+                self.pass(&tasks)?;
+                Ok(Ok(decision.map_err(Interrupt::raised)?))
+            }
+            None => Ok(Err(tasks)),
+        }
+    }
+
+    /// Waits in statement `stmt` until the list `join` of `members` in
+    /// `mode` is decided.
+    fn wait_list(
+        &mut self,
+        task: TaskId,
+        stmt: StmtId,
+        mode: JoinMode,
+        members: Tree<TaskId>,
+    ) -> Result<(), Halt> {
+        let order = self.next_join;
+        self.next_join += 1;
+        // Repeated handles keep their places in the result, but register
+        // only one wake on each live member.
+        for member in task_members(&members, self.heap.pages())?
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+        {
+            if !matches!(self.task(member)?.state, TaskState::Ended(_)) {
+                self.add_joiner(member, Joiner::List(order))?;
+            }
+        }
+        self.joins.write(
+            ordinal_key(order),
+            ListJoin {
+                joiner: task,
+                mode,
+                members,
+            },
+            self.heap.pages(),
+        )?;
+        self.suspend(task, stmt, Wait::JoinMany(order))
+    }
+
     /// An action that completed at once left its value in `at`, its
     /// arguments' first register: the value is the action's, in `dst`.
     fn answered_at(&mut self, flow: Flow, at: Reg, dst: Reg) -> Flow {
@@ -356,6 +434,17 @@ impl KernelMachine {
             self.put(dst, value);
         }
         flow
+    }
+
+    /// Counts the running task's entry into the action at `site` and tells
+    /// a host that observes sites.
+    fn enter(&mut self, task: TaskId, host: &mut dyn Host, site: &Site) -> Result<(), Halt> {
+        let occurrence = self.occurrence(task, site)?;
+        if host.observes_sites() {
+            let identity = self.action_identity(task, site, occurrence)?;
+            host.enter_site(&identity);
+        }
+        Ok(())
     }
 
     /// Saves where the top frame of `task` stands: at the nested action of
@@ -791,7 +880,7 @@ impl KernelMachine {
             Err(halt) => return Err(halt),
         }
         let spawner = self.task(task)?;
-        spawner.wake(Incoming::Value(handle));
+        spawner.wake(Incoming::Value(handle), false);
         self.frame(task)?.awaiting = Some(stmt);
         self.ready.push_front(task)?;
         self.current = Some(child);
@@ -947,8 +1036,17 @@ impl KernelMachine {
             return Ok(());
         }
         let Some(wait) = self.task(target)?.wait() else {
-            self.task(target)?.wake(Incoming::Raise(cancelled()));
+            // The raise replaces what a ready task resumes with; a
+            // delivered one still takes its turn first (`K-TASK-005`).
+            let ready = self.task(target)?;
+            let requeue = ready.owes_turn();
+            ready.wake(Incoming::Raise(cancelled()), requeue);
             return Ok(());
+        };
+        // A `then yield` wait the cancel withdraws takes its turn too.
+        let requeue = matches!(wait, Wait::Request(_)) && {
+            let exe = Arc::clone(&self.exe);
+            then_yields(&exe, self.frame(target)?)
         };
         match wait {
             Wait::Request(wait) => {
@@ -976,7 +1074,10 @@ impl KernelMachine {
                 }
             }
         }
-        self.wake(target, Incoming::Raise(cancelled()))
+        self.task(target)?
+            .wake(Incoming::Raise(cancelled()), requeue);
+        self.ready.push_back(target)?;
+        Ok(())
     }
 }
 
@@ -992,7 +1093,9 @@ pub(super) fn waiting(
         Some(act) => {
             let entry = stream.nested.get(act.ix())?;
             let perform = match &entry.kind {
-                NestedKind::Perform { effect, result } => Some((effect.clone(), result.clone())),
+                NestedKind::Perform { effect, result, .. } => {
+                    Some((effect.clone(), result.clone()))
+                }
                 _ => None,
             };
             Some((entry.site.clone(), perform))
@@ -1009,6 +1112,22 @@ pub(super) fn waiting(
             };
             Some((action.site.clone(), perform))
         }
+    }
+}
+
+/// Whether the action the frame waits at waits `then yield`: its task
+/// takes one more turn once the outcome is in (`K-TASK-005`).
+pub(super) fn then_yields(exe: &Executable, frame: &super::Frame) -> bool {
+    let Some(stmt) = frame.awaiting else {
+        return false;
+    };
+    let (stream, statement, _) = exe.statement(stmt);
+    match frame.nested {
+        Some(act) => stream
+            .nested
+            .get(act.ix())
+            .is_some_and(|entry| entry.kind.then_yield()),
+        None => matches!(&statement.form, Form::Action(action) if action.kind.then_yield()),
     }
 }
 

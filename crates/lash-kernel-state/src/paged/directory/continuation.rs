@@ -45,6 +45,9 @@ pub enum PhaseRecord {
     /// A `spawn`: the child runs first, and the spawner goes on next with
     /// the handle (`K-TASK-002`).
     Spawned,
+    /// A `join` on one handle or a list: the task waits until the join is
+    /// decided (`K-TASK-008`).
+    Joining,
 }
 
 /// One operand value a continuation keeps: the path suffix, under the
@@ -234,6 +237,7 @@ impl TokenCodec for PhaseRecord {
                 Self::Called => 0,
                 Self::Waiting => 1,
                 Self::Spawned => 2,
+                Self::Joining => 3,
             },
             0,
         );
@@ -245,6 +249,7 @@ impl TokenCodec for PhaseRecord {
             0 => Self::Called,
             1 => Self::Waiting,
             2 => Self::Spawned,
+            3 => Self::Joining,
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })
     }

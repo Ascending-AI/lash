@@ -144,6 +144,7 @@ const CORPUS_FILES: &[(&str, &str)] = &[
     ("K-TASK-023.json", include_str!("../corpus/task/K-TASK-023.json")),
     ("K-TASK-024.json", include_str!("../corpus/task/K-TASK-024.json")),
     ("K-TASK-025.json", include_str!("../corpus/task/K-TASK-025.json")),
+    ("K-TASK-026.json", include_str!("../corpus/task/K-TASK-026.json")),
     ("K-TEXT-001.json", include_str!("../corpus/text/K-TEXT-001.json")),
     ("K-TEXT-002.json", include_str!("../corpus/text/K-TEXT-002.json")),
     ("K-TEXT-003.json", include_str!("../corpus/text/K-TEXT-003.json")),

@@ -56,13 +56,18 @@ impl NamePlan {
                         ids.insert(*function);
                     }
                     k::Node::Action(action) => {
+                        let awaited;
                         let (callee, atoms): (Option<&k::Callee>, Vec<&k::Atom>) = match action {
                             k::Action::Call { callee, args }
                             | k::Action::Spawn { callee, args } => {
                                 (Some(callee), args.iter().collect())
                             }
                             k::Action::Perform { args, .. } => (None, args.iter().collect()),
-                            k::Action::Sleep { duration } => (None, vec![duration]),
+                            k::Action::Sleep { duration, .. } => (None, vec![duration]),
+                            k::Action::Await { policy, value } => {
+                                awaited = k::Callee::Library(*policy);
+                                (Some(&awaited), vec![value])
+                            }
                             k::Action::Join { task } | k::Action::Cancel { task } => {
                                 (None, vec![task])
                             }

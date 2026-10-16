@@ -771,7 +771,10 @@ fn a_task_state_that_disagrees_is_refused() {
         .machine
         .tamper_task_state(
             TaskId::MAIN,
-            TaskStateRecord::Resuming(IncomingRecord::Value(Value::Null)),
+            TaskStateRecord::Resuming {
+                incoming: IncomingRecord::Value(Value::Null),
+                requeue: false,
+            },
         )
         .unwrap();
     let problem = refused(&mut embedder);
@@ -913,8 +916,8 @@ fn live_roles_match_every_resume_entry() {
 }
 
 /// Positions an action cannot be nested in are refused with a typed
-/// reason: a `while` condition and an assignment's place; and the
-/// actions P2-5 and later lanes own stay statements.
+/// reason: a `while` condition and an assignment's place; and `yield`
+/// and `cancel` stay statements.
 #[test]
 fn refused_positions_are_typed() {
     let library = embedder::library(true);
@@ -943,8 +946,8 @@ fn refused_positions_are_typed() {
             "`{text}` refused with {problem}"
         );
     }
+    // A nested `join` is admitted (`nested_join_resumes_exactly`).
     for text in [
-        "main { let h = spawn call f() let r = [join h] }",
         "main { let r = [yield] }",
         "main { let h = spawn call f() let r = [cancel h] }",
     ] {
@@ -960,4 +963,31 @@ fn refused_positions_are_typed() {
             });
         assert!(admitted.is_err(), "`{text}` was admitted");
     }
+}
+
+/// A `join` on one handle and on a list, nested in an expression: the
+/// frame stands joining, its operands kept as roles (`K-EVAL-008`).
+const NESTED_JOIN: &str = "fn w(x) { let v = perform echo(x) as Any return v }\n\
+    main { let h = spawn call w(\"a\") let g = spawn call w(\"b\") let hs = [h, g]\n\
+    let r = [1, join(h), join all(hs)]\n\
+    return r }\n";
+
+const NESTED_JOIN_HOISTED: &str = "fn w(x) { let v = perform echo(x) as Any return v }\n\
+    main { let h = spawn call w(\"a\") let g = spawn call w(\"b\") let hs = [h, g]\n\
+    let t0 = join h\n\
+    let t1 = join all hs\n\
+    let r = [1, t0, t1]\n\
+    return r }\n";
+
+#[test]
+fn nested_join_resumes_exactly() {
+    let expected = list(&[int(1), text("a"), list(&[text("a"), text("b")])]);
+    case(
+        NESTED_JOIN,
+        &["b", "a"],
+        &expected,
+        &[],
+        &[PhaseRecord::Joining],
+    );
+    case(NESTED_JOIN_HOISTED, &["b", "a"], &expected, &[], &[]);
 }

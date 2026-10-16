@@ -342,13 +342,18 @@ impl Linker {
                 effect,
                 args,
                 result,
+                ..
             } => ActionNode::Perform {
                 effect: effect.clone(),
                 args: self.atoms(args, scope, &site, id),
                 result: result.clone(),
             },
-            Action::Sleep { duration } => ActionNode::Sleep {
+            Action::Sleep { duration, .. } => ActionNode::Sleep {
                 duration: self.atom(duration, scope, &site, id),
+            },
+            Action::Await { policy, value } => ActionNode::Await {
+                policy: *policy,
+                value: self.atom(value, scope, &site, id),
             },
             Action::Join { task } => ActionNode::Join {
                 task: self.atom(task, scope, &site, id),
@@ -515,11 +520,14 @@ impl Linker {
                 let kind = match &act.kind {
                     ActKind::Call(callee) => ActNode::Call(self.callee(callee, scope, &site, id)),
                     ActKind::Spawn(callee) => ActNode::Spawn(self.callee(callee, scope, &site, id)),
-                    ActKind::Perform { effect, result } => ActNode::Perform {
+                    ActKind::Perform { effect, result, .. } => ActNode::Perform {
                         effect: effect.clone(),
                         result: result.clone(),
                     },
-                    ActKind::Sleep => ActNode::Sleep,
+                    ActKind::Sleep { .. } => ActNode::Sleep,
+                    ActKind::Join => ActNode::Join,
+                    ActKind::JoinMany(mode) => ActNode::JoinMany(*mode),
+                    ActKind::Await(policy) => ActNode::Await(*policy),
                 };
                 ExprNode::Act {
                     kind,
