@@ -75,7 +75,8 @@ open that two lanes would otherwise settle differently.
 - **D-IMM.** Two rules govern an immutable payload (text, bytes, integer
   digits). (1) It is `Payload::Resident` when it is at most
   `IMMUTABLE_INLINE_MAX` (256) bytes or was built in this activation and not
-  yet placed in pages. Otherwise it is `Payload::Paged`. (2) Payload trees
+  yet placed in pages. Otherwise it is `Payload::Paged`, its `PageRef`
+  shared behind one `Arc` ([vm-value-layout.md](vm-value-layout.md)). (2) Payload trees
   are **canonical**: greedy leaves of at most `PAYLOAD_LEAF_BYTES` (4096)
   that end on UTF-8 scalar boundaries, with fanout-32 indexes built bottom-up
   and carrying byte, character and UTF-16 counts. Two paged payloads are

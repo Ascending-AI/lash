@@ -28,7 +28,7 @@ pub(super) fn text(access: &Access<'_>, text: &str) -> Result<TextRef, HeapFault
         body: if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
             Payload::Resident(Arc::from(text))
         } else {
-            Payload::Paged(super::super::payload::build(access, text.as_bytes(), true)?)
+            Payload::paged(super::super::payload::build(access, text.as_bytes(), true)?)
         },
     })
 }
@@ -39,7 +39,7 @@ fn bytes(access: &Access<'_>, bytes: &[u8]) -> Result<BytesRef, HeapFault> {
         body: if bytes.len() as u64 <= IMMUTABLE_INLINE_MAX {
             Payload::Resident(Arc::from(bytes))
         } else {
-            Payload::Paged(super::super::payload::build(access, bytes, false)?)
+            Payload::paged(super::super::payload::build(access, bytes, false)?)
         },
     })
 }
@@ -75,11 +75,11 @@ impl Freezer<'_> {
                         bits: v.bits(),
                         negative: v.is_negative(),
                     },
-                    digits: super::super::payload::build(
+                    digits: Arc::new(super::super::payload::build(
                         &self.heap.access,
                         &integer_digits(v),
                         false,
-                    )?,
+                    )?),
                 }
             }),
             Datum::Number(_) => {
@@ -108,7 +108,7 @@ impl Freezer<'_> {
                     )?;
                 }
                 rows.seal(&self.heap.access, &mut SealWork::new(budget()))?;
-                Value::Tuple(TupleRef {
+                Value::Tuple(Arc::new(TupleRef {
                     normal: Default::default(),
                     family: None,
                     summary: TupleSummary {
@@ -120,8 +120,8 @@ impl Freezer<'_> {
                     },
                     body: rows
                         .page()
-                        .map_or_else(|| Payload::Resident(Arc::from([])), Payload::Paged),
-                })
+                        .map_or_else(|| Payload::Resident(Arc::from([])), Payload::paged),
+                }))
             }
             Datum::List(values) | Datum::Set(values) => {
                 let ordinal = self.entities;

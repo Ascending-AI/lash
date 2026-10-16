@@ -312,10 +312,10 @@ pub fn value_children(value: &Value, out: &mut Vec<PageRef>) {
         | Value::Bytes(BytesRef {
             body: Payload::Paged(p),
             ..
-        }) => out.push(*p),
-        Value::Int(IntRef::Paged { digits, .. }) => out.push(*digits),
+        }) => out.push(**p),
+        Value::Int(IntRef::Paged { digits, .. }) => out.push(**digits),
         Value::Tuple(t) => match &t.body {
-            Payload::Paged(p) => out.push(*p),
+            Payload::Paged(p) => out.push(**p),
             Payload::Resident(v) => {
                 for v in v.iter() {
                     value_children(v, out);
@@ -327,7 +327,7 @@ pub fn value_children(value: &Value, out: &mut Vec<PageRef>) {
             value_children(&Value::Text(e.message.clone()), out);
             match &e.data {
                 Payload::Resident(v) => value_children(v, out),
-                Payload::Paged(p) => out.push(*p),
+                Payload::Paged(p) => out.push(**p),
             }
         }
         _ => (),
@@ -336,7 +336,7 @@ pub fn value_children(value: &Value, out: &mut Vec<PageRef>) {
 pub fn value_grants(value: &mut Value, children: &[PageRef]) -> Result<(), HeapFault> {
     fn text_grants(text: &mut TextRef, children: &[PageRef]) -> Result<(), HeapFault> {
         if let Payload::Paged(p) = &mut text.body {
-            grant(p, children)?;
+            grant(Arc::make_mut(p), children)?;
         }
         Ok(())
     }
@@ -344,12 +344,12 @@ pub fn value_grants(value: &mut Value, children: &[PageRef]) -> Result<(), HeapF
         Value::Text(t) | Value::Function(t) => text_grants(t, children)?,
         Value::Bytes(b) => {
             if let Payload::Paged(p) = &mut b.body {
-                grant(p, children)?;
+                grant(Arc::make_mut(p), children)?;
             }
         }
-        Value::Int(IntRef::Paged { digits, .. }) => grant(digits, children)?,
-        Value::Tuple(t) => match &mut t.body {
-            Payload::Paged(p) => grant(p, children)?,
+        Value::Int(IntRef::Paged { digits, .. }) => grant(Arc::make_mut(digits), children)?,
+        Value::Tuple(t) => match &mut Arc::make_mut(t).body {
+            Payload::Paged(p) => grant(Arc::make_mut(p), children)?,
             Payload::Resident(v) => {
                 for v in Arc::make_mut(v) {
                     value_grants(v, children)?;
@@ -362,7 +362,7 @@ pub fn value_grants(value: &mut Value, children: &[PageRef]) -> Result<(), HeapF
             text_grants(&mut e.message, children)?;
             match &mut e.data {
                 Payload::Resident(v) => value_grants(Arc::make_mut(v), children)?,
-                Payload::Paged(p) => grant(p, children)?,
+                Payload::Paged(p) => grant(Arc::make_mut(p), children)?,
             }
         }
         _ => (),

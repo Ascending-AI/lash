@@ -183,7 +183,7 @@ fn context(value: &mut Value, family: Option<FamilyId>) -> Result<(), HeapFault>
             id.family =
                 family.ok_or_else(|| invalid("zero-entity frozen root contains an occurrence"))?
         }
-        Value::Tuple(t) => t.family = family,
+        Value::Tuple(t) => Arc::make_mut(t).family = family,
         Value::Error(e) => {
             let error = Arc::make_mut(e);
             error.family = family;
@@ -328,14 +328,14 @@ impl Freezer<'_> {
                 summary.has_edges = has_edges;
                 summary.task_edges = 0;
                 summary.depth = depth;
-                Ok(Value::Tuple(TupleRef {
+                Ok(Value::Tuple(Arc::new(TupleRef {
                     normal: Default::default(),
                     family: None,
                     summary,
                     body: rows
                         .page()
-                        .map_or_else(|| Payload::Resident(Arc::from([])), Payload::Paged),
-                }))
+                        .map_or_else(|| Payload::Resident(Arc::from([])), Payload::paged),
+                })))
             }
             Value::Error(e) => {
                 let data = self.value(&self.heap.error_data(e)?)?;
@@ -697,7 +697,7 @@ fn frozen_error(
         depth: super::heap_impl::value_depth(&data) + 1,
         cost,
         has_edges: super::directory::value_has_edges(&data),
-        data: Payload::Paged(
+        data: Payload::paged(
             rows.page()
                 .ok_or_else(|| invalid("error data page missing"))?,
         ),

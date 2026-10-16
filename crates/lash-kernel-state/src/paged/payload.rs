@@ -362,7 +362,7 @@ impl NativeHeap for PagedHeap {
                     .checked_sub(error.kind.summary.utf8_bytes)
                     .and_then(|v| v.checked_sub(error.message.summary.utf8_bytes))
                     .ok_or_else(|| HeapFault::Malformed("error cost summary mismatch".into()))?;
-                let tree = Tree::<Value>::open(Some(*page), 1, LogicalBytes(cost), true)
+                let tree = Tree::<Value>::open(Some(**page), 1, LogicalBytes(cost), true)
                     .with_task_edges(error.task_edges);
                 let tree = match error.family {
                     Some(family) => tree.in_family(family),
@@ -380,7 +380,7 @@ impl NativeHeap for PagedHeap {
         }
         match &tuple.body {
             Payload::Resident(v) => Ok(v.get(index as usize).cloned()),
-            Payload::Paged(p) => tuple_tree(tuple, *p)
+            Payload::Paged(p) => tuple_tree(tuple, **p)
                 .rank_get(index, &self.access)
                 .map(|v| v.map(|(_, v)| v)),
         }
@@ -400,7 +400,7 @@ impl NativeHeap for PagedHeap {
                 Ok(())
             }
             Payload::Paged(p) => {
-                tuple_tree(tuple, *p).visit(&self.access, &mut |_, v| visitor(v).is_continue())
+                tuple_tree(tuple, **p).visit(&self.access, &mut |_, v| visitor(v).is_continue())
             }
         }
     }
@@ -427,7 +427,7 @@ impl NativeHeap for PagedHeap {
                     Ok(())
                 }
                 Payload::Paged(p) => {
-                    super::payload::visit(&self.access, *p, t.summary, true, range, &mut |bytes| {
+                    super::payload::visit(&self.access, **p, t.summary, true, range, &mut |bytes| {
                         // The payload decoder proved UTF-8 and the range's boundaries.
                         match std::str::from_utf8(bytes) {
                             Ok(text) => visitor(Chunk::Text(text)),
@@ -449,7 +449,7 @@ impl NativeHeap for PagedHeap {
                 }
                 Payload::Paged(p) => super::payload::visit(
                     &self.access,
-                    *p,
+                    **p,
                     binary_summary(b.len),
                     false,
                     range,
@@ -464,7 +464,7 @@ impl NativeHeap for PagedHeap {
                 let mut invalid = false;
                 super::payload::visit(
                     &self.access,
-                    *digits,
+                    **digits,
                     binary_summary(len),
                     false,
                     range,
@@ -507,7 +507,7 @@ impl NativeHeap for PagedHeap {
                 .char_indices()
                 .nth(index as usize)
                 .map_or(t.len() as u64, |(i, _)| i as u64)),
-            Payload::Paged(p) => super::payload::offset(&self.access, *p, text.summary, index),
+            Payload::Paged(p) => super::payload::offset(&self.access, **p, text.summary, index),
         }
     }
     fn materialize_text(&mut self, text: &TextRef) -> Result<Arc<str>, NativeError> {
@@ -533,7 +533,7 @@ impl NativeHeap for PagedHeap {
             body: if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
                 Payload::Resident(Arc::from(text))
             } else {
-                Payload::Paged(super::payload::build(&self.access, text.as_bytes(), true)?)
+                Payload::paged(super::payload::build(&self.access, text.as_bytes(), true)?)
             },
         })
     }
@@ -544,7 +544,7 @@ impl NativeHeap for PagedHeap {
             body: if bytes.len() as u64 <= IMMUTABLE_INLINE_MAX {
                 Payload::Resident(Arc::from(bytes))
             } else {
-                Payload::Paged(super::payload::build(&self.access, bytes, false)?)
+                Payload::paged(super::payload::build(&self.access, bytes, false)?)
             },
         })
     }
@@ -559,10 +559,14 @@ impl NativeHeap for PagedHeap {
         Ok(IntRef::Paged {
             normal: Default::default(),
             summary,
-            digits: super::payload::build(&self.access, &integer_digits(&int), false)?,
+            digits: Arc::new(super::payload::build(
+                &self.access,
+                &integer_digits(&int),
+                false,
+            )?),
         })
     }
-    fn tuple(&mut self, members: Vec<Value>) -> Result<TupleRef, NativeError> {
+    fn tuple(&mut self, members: Vec<Value>) -> Result<Arc<TupleRef>, NativeError> {
         let mut values = Vec::with_capacity(members.len());
         let mut depth = 1;
         for v in members {
@@ -599,17 +603,17 @@ impl NativeHeap for PagedHeap {
                     bytes: u64::MAX,
                 }),
             )?;
-            Payload::Paged(
+            Payload::paged(
                 tree.page()
                     .ok_or_else(|| HeapFault::Malformed("nonempty tuple has no page".into()))?,
             )
         };
-        Ok(TupleRef {
+        Ok(Arc::new(TupleRef {
             normal: Default::default(),
             summary,
             body,
             family: None,
-        })
+        }))
     }
     fn concat(&mut self, parts: &[Value]) -> Result<Value, NativeError> {
         match parts.first() {

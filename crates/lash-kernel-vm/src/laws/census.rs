@@ -189,7 +189,7 @@ impl CensusGraph for Graph {
             Value::Task(task) | Value::Ref(Identity::Task(task)) => out(Identity::Task(*task))?,
             Value::Tuple(tuple) if tuple.summary.has_edges => match &tuple.body {
                 Payload::Paged(page) => {
-                    self.read_summary(*page, out)?;
+                    self.read_summary(**page, out)?;
                 }
                 Payload::Resident(values) => {
                     for v in values.iter() {
@@ -200,7 +200,7 @@ impl CensusGraph for Graph {
             Value::Error(error) if error.has_edges => match &error.data {
                 Payload::Resident(data) => self.value_edges(data, out)?,
                 Payload::Paged(page) => {
-                    self.read_summary(*page, out)?;
+                    self.read_summary(**page, out)?;
                 }
             },
             _ => {}
@@ -309,7 +309,7 @@ fn refinement_counts_registers_native_args_and_reservations() {
     graph.task(11, 1024, &[edge(5)]); // unreachable result and its payload
     let tuple = graph.summary(32, &[edge(1), Identity::Task(TaskId(10))]);
     let registers = [Value::List(id(0))];
-    let native_args = [Value::Tuple(TupleRef {
+    let native_args = [Value::Tuple(std::sync::Arc::new(TupleRef {
         normal: Default::default(),
         summary: TupleSummary {
             len: 2,
@@ -318,9 +318,9 @@ fn refinement_counts_registers_native_args_and_reservations() {
             task_edges: 1,
             depth: 1,
         },
-        body: Payload::Paged(tuple),
+        body: Payload::paged(tuple),
         family: None,
-    })];
+    }))];
     let pinned = [Value::Ref(Identity::Task(TaskId(10)))];
     let transient = TransientRoots {
         registers: &registers,

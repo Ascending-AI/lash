@@ -725,7 +725,7 @@ pub mod heap_values {
                     if summary.utf8_bytes <= IMMUTABLE_INLINE_MAX {
                         return Err(invalid("a short text must be inline"));
                     }
-                    Payload::Paged(PageRef::decode(input)?)
+                    Payload::paged(PageRef::decode(input)?)
                 }
             };
             Ok(Self {
@@ -765,7 +765,7 @@ pub mod heap_values {
                     if len <= IMMUTABLE_INLINE_MAX {
                         return Err(invalid("short bytes must be inline"));
                     }
-                    Payload::Paged(PageRef::decode(input)?)
+                    Payload::paged(PageRef::decode(input)?)
                 }
             };
             Ok(Self {
@@ -813,7 +813,7 @@ pub mod heap_values {
                         Self::Paged {
                             normal: Default::default(),
                             summary,
-                            digits: PageRef::decode(input)?,
+                            digits: Arc::new(PageRef::decode(input)?),
                         }
                     }
                 },
@@ -836,7 +836,7 @@ pub mod heap_values {
         fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
             Ok(match variant(input, |v| (v <= 1).then_some(1))? {
                 0 => Self::Resident(Arc::new(Value::decode(input)?)),
-                _ => Self::Paged(PageRef::decode(input)?),
+                _ => Self::paged(PageRef::decode(input)?),
             })
         }
     }
@@ -865,7 +865,7 @@ pub mod heap_values {
         let message = TextRef::decode(input)?;
         let data = match variant(input, |v| (v <= 1).then_some(1))? {
             0 => Payload::Resident(Arc::new(decode_value_with_family(input, family)?)),
-            _ => Payload::Paged(PageRef::decode(input)?),
+            _ => Payload::paged(PageRef::decode(input)?),
         };
         let depth = u32::decode(input)?;
         if depth == 0 || depth > 128 {
@@ -969,7 +969,7 @@ pub mod heap_values {
                 }
                 Payload::Resident(Arc::from(values))
             }
-            _ => Payload::Paged(PageRef::decode(input)?),
+            _ => Payload::paged(PageRef::decode(input)?),
         };
         Ok(TupleRef {
             normal: Default::default(),
@@ -1049,7 +1049,7 @@ pub mod heap_values {
                     5 => Value::Text(TextRef::decode(input)?),
                     6 => Value::Bytes(BytesRef::decode(input)?),
                     7 => Value::Timestamp(Timestamp::decode(input)?),
-                    8 => Value::Tuple(decode_tuple(input, family)?),
+                    8 => Value::Tuple(Arc::new(decode_tuple(input, family)?)),
                     9 => Value::List(absolute_entity(input, family)?),
                     10 => Value::Map(absolute_entity(input, family)?),
                     11 => Value::Set(absolute_entity(input, family)?),

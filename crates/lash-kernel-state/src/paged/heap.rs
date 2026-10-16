@@ -209,7 +209,7 @@ pub trait SemanticHeap: NativeHeap {
         &mut self,
         tuple: &TupleRef,
         range: Range<u64>,
-    ) -> Result<TupleRef, HeapWriteError>;
+    ) -> Result<std::sync::Arc<TupleRef>, HeapWriteError>;
 
     /// Reserves `bytes` of logical memory for the machine (frames, roots,
     /// a statement's temporaries). `transient` names every value the

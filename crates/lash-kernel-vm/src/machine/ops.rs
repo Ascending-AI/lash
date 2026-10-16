@@ -88,6 +88,10 @@ impl KernelMachine {
     /// Writes `value` to register `out`, growing the registers to it.
     #[inline(always)]
     pub(super) fn put(&mut self, out: Reg, value: Value) {
+        #[cfg(test)]
+        {
+            self.storage.value_moves += 1;
+        }
         match self.regs.get_mut(out) {
             Some(held) => release(std::mem::replace(held, value)),
             None => self.grow(out, value),
@@ -103,6 +107,10 @@ impl KernelMachine {
     /// Takes the value out of register `r`, which is left null.
     #[inline(always)]
     pub(super) fn take(&mut self, r: Reg) -> Value {
+        #[cfg(test)]
+        {
+            self.storage.value_moves += 1;
+        }
         std::mem::replace(&mut self.regs[r], Value::Null)
     }
 
@@ -619,7 +627,7 @@ impl KernelMachine {
     ) -> Status {
         let cursor = match self.take(iterable) {
             Value::List(id) => Cursor::List(id, 0),
-            Value::Tuple(items) => Cursor::Tuple(std::sync::Arc::new(items), 0),
+            Value::Tuple(items) => Cursor::Tuple(items, 0),
             Value::Map(id) => Cursor::Map(id, None),
             Value::Set(id) => Cursor::Set(id, None),
             _ => {

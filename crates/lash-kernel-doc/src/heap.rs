@@ -98,21 +98,32 @@ pub const IMMUTABLE_INLINE_MAX: u64 = 256;
 /// boundaries.
 pub const PAYLOAD_LEAF_BYTES: u64 = 4_096;
 
-/// Where an immutable payload's bytes are.
+/// Where an immutable payload's bytes are. Both variants are one shared
+/// pointer: a cold payload's 80-byte [`PageRef`] is held once behind its
+/// `Arc` and shared by every copy of the value, never inlined in each
+/// [`Value`] (`docs/design/vm-value-layout.md`).
 #[derive(Debug)]
 pub enum Payload<T: ?Sized> {
     /// At most [`IMMUTABLE_INLINE_MAX`] bytes, or a value built in this
     /// activation and not yet placed in pages.
     Resident(Arc<T>),
-    /// A sealed payload tree. Reading it can fault.
-    Paged(PageRef),
+    /// A sealed payload tree. Reading it can fault. Build one with
+    /// [`Payload::paged`].
+    Paged(Arc<PageRef>),
+}
+
+impl<T: ?Sized> Payload<T> {
+    /// The payload of the sealed tree at `page`.
+    pub fn paged(page: PageRef) -> Self {
+        Self::Paged(Arc::new(page))
+    }
 }
 
 impl<T: ?Sized> Clone for Payload<T> {
     fn clone(&self) -> Self {
         match self {
             Self::Resident(payload) => Self::Resident(Arc::clone(payload)),
-            Self::Paged(page) => Self::Paged(*page),
+            Self::Paged(page) => Self::Paged(Arc::clone(page)),
         }
     }
 }
@@ -175,14 +186,15 @@ pub struct IntSummary {
 }
 
 /// An integer: inline up to [`IMMUTABLE_INLINE_MAX`] bytes of magnitude,
-/// otherwise its digits are a payload tree.
+/// otherwise its digits are a payload tree, shared like any paged
+/// [`Payload`].
 #[derive(Clone, Debug)]
 pub enum IntRef {
     Inline(Integer),
     Paged {
         normal: NormalKeyCache,
         summary: IntSummary,
-        digits: PageRef,
+        digits: Arc<PageRef>,
     },
 }
 
@@ -241,6 +253,12 @@ pub enum Identity {
 /// A kernel value after the cutover: immutable data in place or by
 /// descriptor, or the identity of a heap entity.
 ///
+/// It is 56 bytes: every variant is a scalar, an identity, or
+/// a descriptor whose cold parts are shared pointers. A paged payload's
+/// page reference and a tuple's descriptor live behind an `Arc`, so a
+/// register, frame slot or call operand moves a small value
+/// (`docs/design/vm-value-layout.md`).
+///
 /// It has no Rust equality. Guest equality, ordering and key normalization
 /// are the heap's (`SemanticHeap::equal`, `SemanticHeap::normal_key`):
 /// they can read pages and are fallible.
@@ -254,7 +272,7 @@ pub enum Value {
     Text(TextRef),
     Bytes(BytesRef),
     Timestamp(Timestamp),
-    Tuple(TupleRef),
+    Tuple(Arc<TupleRef>),
     List(EntityId),
     Map(EntityId),
     Set(EntityId),
@@ -266,6 +284,10 @@ pub enum Value {
     Handle(Arc<Handle>),
     Ref(Identity),
 }
+
+// The layout is part of the call path's cost: every register, slot and
+// operand moves a whole Value (FIG-6502, `docs/design/vm-value-layout.md`).
+const _: () = assert!(std::mem::size_of::<Value>() == 56);
 
 impl Value {
     pub fn kind(&self) -> crate::ValueKind {
@@ -508,7 +530,7 @@ pub trait NativeHeap {
     fn text(&mut self, text: &str) -> Result<TextRef, NativeError>;
     fn bytes(&mut self, bytes: &[u8]) -> Result<BytesRef, NativeError>;
     fn int(&mut self, int: Integer) -> Result<IntRef, NativeError>;
-    fn tuple(&mut self, members: Vec<Value>) -> Result<TupleRef, NativeError>;
+    fn tuple(&mut self, members: Vec<Value>) -> Result<Arc<TupleRef>, NativeError>;
     /// Joins immutable payloads without copying the pages they share.
     fn concat(&mut self, parts: &[Value]) -> Result<Value, NativeError>;
     fn slice(&mut self, value: &Value, range: Range<u64>) -> Result<Value, NativeError>;

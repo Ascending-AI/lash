@@ -242,7 +242,7 @@ impl NativeHeap for Spy<'_> {
     fn int(&mut self, int: Integer) -> Result<IntRef, NativeError> {
         self.heap.int(int)
     }
-    fn tuple(&mut self, members: Vec<Value>) -> Result<TupleRef, NativeError> {
+    fn tuple(&mut self, members: Vec<Value>) -> Result<std::sync::Arc<TupleRef>, NativeError> {
         self.heap.tuple(members)
     }
     fn concat(&mut self, parts: &[Value]) -> Result<Value, NativeError> {

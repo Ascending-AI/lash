@@ -96,8 +96,8 @@ pub fn same(a: &Value, b: &Value, heap: &dyn NativeHeap) -> Result<bool, HeapFau
     enum Step {
         Pair(Value, Value),
         Members(
-            lash_kernel_doc::heap::TupleRef,
-            lash_kernel_doc::heap::TupleRef,
+            std::sync::Arc<lash_kernel_doc::heap::TupleRef>,
+            std::sync::Arc<lash_kernel_doc::heap::TupleRef>,
             u64,
         ),
     }

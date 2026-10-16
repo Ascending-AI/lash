@@ -432,7 +432,7 @@ impl PagedHeap {
                             bytes: u64::MAX,
                         }),
                     )?;
-                    Payload::Paged(
+                    Payload::paged(
                         tree.page()
                             .ok_or_else(|| HeapFault::Malformed("error data has no page".into()))?,
                     )
@@ -886,7 +886,7 @@ impl SemanticHeap for PagedHeap {
         &mut self,
         tuple: &TupleRef,
         range: Range<u64>,
-    ) -> Result<TupleRef, HeapWriteError> {
+    ) -> Result<Arc<TupleRef>, HeapWriteError> {
         if range.start > range.end || range.end > tuple.summary.len {
             return Err(raised(
                 "index_out_of_range",

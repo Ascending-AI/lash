@@ -144,7 +144,7 @@ impl NativeHeap for CallHeap<'_> {
     fn int(&mut self, int: Integer) -> Result<IntRef, NativeError> {
         self.write(|heap| heap.int(int.clone()))
     }
-    fn tuple(&mut self, members: Vec<Value>) -> Result<TupleRef, NativeError> {
+    fn tuple(&mut self, members: Vec<Value>) -> Result<Arc<TupleRef>, NativeError> {
         self.write(|heap| heap.tuple(members.clone()))
     }
     fn concat(&mut self, parts: &[Value]) -> Result<Value, NativeError> {

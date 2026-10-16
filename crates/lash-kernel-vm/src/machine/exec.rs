@@ -581,6 +581,10 @@ impl KernelMachine {
             code: code_id,
         });
         for (index, param) in code.params.iter().enumerate() {
+            #[cfg(test)]
+            {
+                self.storage.value_moves += usize::from(index < given);
+            }
             let value = match index < given {
                 true => std::mem::replace(&mut self.regs[base + index], Value::Absent),
                 false => Value::Absent,
@@ -652,6 +656,10 @@ impl KernelMachine {
             self.reserve_held(value_bytes(&value))?;
             SlotState::Value(value)
         };
+        #[cfg(test)]
+        {
+            self.storage.value_moves += 1;
+        }
         self.frame(task)?.set_slot(at, state);
         Ok(())
     }

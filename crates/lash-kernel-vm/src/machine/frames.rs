@@ -339,9 +339,7 @@ impl Frame {
                     };
                     let (value, position) = match cursor {
                         Cursor::List(id, at) => (Value::List(*id), *at as u64),
-                        Cursor::Tuple(tuple, at) => {
-                            (Value::Tuple(tuple.as_ref().clone()), *at as u64)
-                        }
+                        Cursor::Tuple(tuple, at) => (Value::Tuple(Arc::clone(tuple)), *at as u64),
                         Cursor::Map(id, at) => {
                             (Value::Map(*id), at.map(|at| at.0).unwrap_or(u64::MAX))
                         }
@@ -769,7 +767,7 @@ fn restore(
                             .map_err(|_| malformed("list cursor overflows"))?,
                     ),
                     Value::Tuple(tuple) if position <= tuple.summary.len => {
-                        Cursor::Tuple(Arc::new(tuple), position as usize)
+                        Cursor::Tuple(tuple, position as usize)
                     }
                     Value::Map(id) => Cursor::Map(
                         id,
@@ -1004,6 +1002,36 @@ mod laws {
             embedder.machine.storage.binding_canonicalizations - before,
             0,
             "scalar bindings must bypass payload canonicalization"
+        );
+    }
+
+    /// FIG-6502: a value is a small handle, so a guest call moves few bytes.
+    /// Each call of `echo` moves its argument through registers into the
+    /// callee's slot, reads it back to return it, and binds the result in
+    /// the caller: seven value moves. At 56 bytes a value they stay within
+    /// 448 bytes a call; the 144-byte layout, with an inline 80-byte page
+    /// reference in every payload, moved 1,008.
+    #[test]
+    fn a_guest_call_moves_small_values() {
+        const CALLS: usize = 64;
+        let mut source = String::from("fn echo(x) { return x } main {");
+        for index in 0..CALLS {
+            source.push_str(&format!("let v{index} = call echo(\"text {index}\") "));
+        }
+        source.push_str("return v63 }");
+        let mut embedder = Embedder::new(&source);
+        let before = embedder.machine.storage.value_moves;
+        use crate::Machine;
+        assert!(matches!(
+            Machine::run(&mut embedder.machine, &mut embedder.world, u64::MAX).unwrap(),
+            crate::Step::Ended(crate::End::Finished(_))
+        ));
+        let moves = (embedder.machine.storage.value_moves - before) / CALLS;
+        let bytes = moves * std::mem::size_of::<crate::machine::Value>();
+        assert!(
+            bytes <= 448,
+            "a call moves {moves} values of {} bytes: {bytes} bytes",
+            std::mem::size_of::<crate::machine::Value>()
         );
     }
 

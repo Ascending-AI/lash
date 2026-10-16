@@ -256,6 +256,9 @@ struct Storage {
     binding_canonicalizations: usize,
     #[cfg(test)]
     formula_sources: std::cell::RefCell<Vec<usize>>,
+    /// Values moved into or out of a register or a frame slot.
+    #[cfg(test)]
+    value_moves: usize,
 }
 
 struct Frame {

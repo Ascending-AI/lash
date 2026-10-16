@@ -46,7 +46,7 @@ impl NameRef {
         let body = if text.len() as u64 <= IMMUTABLE_INLINE_MAX {
             Payload::Resident(Arc::from(text))
         } else {
-            Payload::Paged(build(access, text.as_bytes(), true)?)
+            Payload::paged(build(access, text.as_bytes(), true)?)
         };
         let cached = OnceLock::new();
         if text.len() <= IMMUTABLE_INLINE_MAX as usize {
@@ -73,13 +73,13 @@ impl NameRef {
         let name = match &self.text.body {
             Payload::Resident(text) => Name::new(text.to_string()),
             Payload::Paged(page) => {
-                if let Some(name) = access.projected_name(*page, self.text.summary) {
+                if let Some(name) = access.projected_name(**page, self.text.summary) {
                     return Ok(name);
                 }
                 let mut bytes = Vec::new();
                 visit(
                     access,
-                    *page,
+                    **page,
                     self.text.summary,
                     true,
                     0..self.text.summary.utf8_bytes,
@@ -95,8 +95,8 @@ impl NameRef {
         };
         if name.as_str().len() <= IMMUTABLE_INLINE_MAX as usize {
             let _ = self.cached.set(name.clone());
-        } else if let Payload::Paged(page) = self.text.body {
-            access.retain_projected_name(page, self.text.summary, &name);
+        } else if let Payload::Paged(page) = &self.text.body {
+            access.retain_projected_name(**page, self.text.summary, &name);
         }
         Ok(name)
     }
@@ -129,13 +129,13 @@ impl NameRef {
         }
     }
     pub fn children(&self, out: &mut Vec<PageRef>) {
-        if let Payload::Paged(page) = self.text.body {
-            out.push(page);
+        if let Payload::Paged(page) = &self.text.body {
+            out.push(**page);
         }
     }
     pub fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
         if let Payload::Paged(page) = &mut self.text.body {
-            grant(page, children)?;
+            grant(Arc::make_mut(page), children)?;
         }
         Ok(())
     }
