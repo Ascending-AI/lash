@@ -668,6 +668,100 @@ fn a_worker_reads_back_what_it_sealed_through_its_stage_capability() {
     assert_eq!(store.pages.lock().expect("pages").len(), committed);
 }
 
+/// FIG-6466: a committed child read under this activation's root grant can
+/// be resealed after its namer in one batch. Its grant must still cross:
+/// staging the namer cannot depend on a child staged later in that batch.
+#[test]
+fn a_committed_child_resealed_after_its_namer_keeps_its_grant() {
+    use lash_vm_protocol::page::{PageReply, PageRequest};
+
+    // Observe the decoded wire request without changing the real service.
+    struct Witness<'a> {
+        pages: &'a mut ActivationPages<Store>,
+        batches: Vec<Vec<PageEnvelope>>,
+    }
+
+    #[async_trait::async_trait]
+    impl PageExchange for Witness<'_> {
+        async fn serve(&mut self, request: PageRequest) -> PageReply {
+            if let PageRequest::Seal { pages, .. } = &request {
+                self.batches.push(pages.clone());
+            }
+            self.pages.serve(request).await
+        }
+    }
+
+    let store = Arc::new(Store::default());
+    let mut tokens = TokenWriter::new();
+    tokens.text("already committed");
+    let child = frame(PageKind::PAYLOAD_LEAF, &tokens);
+    store.commit(&child);
+    let mut tokens = TokenWriter::new();
+    tokens.seq(2);
+    tokens.text("checkpoint");
+    tokens.child(child.id.child_ref());
+    let root = frame(PageKind::CHECKPOINT_ROOT, &tokens);
+    store.commit(&root);
+    let spools = tempfile::tempdir().expect("dir");
+    let spools = SpoolRoot::open(spools.path(), 1 << 20, 1 << 20).expect("spools");
+    let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
+    let start = root_ref(&pages);
+    let mut witness = Witness {
+        pages: &mut pages,
+        batches: Vec::new(),
+    };
+    // Eviction prevents the port's resident-grant shortcut from skipping
+    // the reseal; the heap's reference still holds its authenticated grant.
+    let ((namer, read_back), traffic) = served(&mut witness, 0, move |source| {
+        let root = read_one(source, start).expect("leased root");
+        let child = root.children[0];
+        assert_ne!(child.grant, PageGrant::NONE, "the root granted its child");
+        let committed = read_one(source, child).expect("committed child reads under its grant");
+        let mut tokens = TokenWriter::new();
+        tokens.seq(2);
+        tokens.text("namer");
+        tokens.child(lash_core_store::checkpoint_graph::ChildRef(child.id.0));
+        let namer = source
+            .seal(PageBody {
+                kind: PageKind::SEQUENCE_LEAF,
+                tokens: tokens.into_bytes(),
+                children: vec![child],
+            })
+            .expect("queue the namer first");
+        let resealed = source
+            .seal(PageBody {
+                kind: committed.kind,
+                tokens: committed.tokens.to_vec(),
+                children: committed.children,
+            })
+            .expect("queue the identical committed child second");
+        assert_eq!(resealed.id, child.id);
+        let read_back = source.port().flush().and_then(|()| {
+            let parent = read_one(source, namer)?;
+            assert_eq!(parent.children.len(), 1);
+            assert_eq!(parent.children[0].id, child.id);
+            read_one(source, parent.children[0])
+        });
+        (namer.id, read_back)
+    });
+    assert_eq!(witness.batches.len(), 1, "one outgoing seal batch");
+    let batch = &witness.batches[0];
+    assert_eq!(
+        batch.iter().map(|page| page.id).collect::<Vec<_>>(),
+        vec![namer.0, child.id.0],
+        "rare-state witness: the wire batch contains namer then committed child"
+    );
+    assert_eq!(batch[1].envelope.as_slice(), child.bytes.as_ref());
+    let back = read_back.expect("the namer stages with its child's grant and both pages read back");
+    assert_eq!(back.kind, PageKind::PAYLOAD_LEAF);
+    assert_eq!(
+        TokenReader::new(&back.tokens).text().expect("payload"),
+        "already committed"
+    );
+    assert_eq!(traffic.pages_sealed, 2);
+    assert_eq!(pages.usage().pages, 2);
+}
+
 /// Sealed pages cross in batches, not one exchange each: a chain of pages
 /// sealed children first crosses in one exchange when the worker hands its
 /// top on, and every page of it reads back from the spool.

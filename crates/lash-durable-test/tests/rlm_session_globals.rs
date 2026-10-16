@@ -17,8 +17,9 @@
 //! a projected host binding, a deferred tool binding's result, and a
 //! loop-carried global.
 //!
-//! FIG-6466: a session's later turns read every page its earlier turns
-//! committed, on the same worker every turn and on a fresh worker each.
+//! Multi-turn reads preserve all prior nested records, on one worker and
+//! across node/worker restarts. The deterministic FIG-6466 reseal-order
+//! regression lives in lash-vm-worker's page laws.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -395,7 +396,7 @@ async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
 }
 
 /// The session the page laws run in.
-const PAGES_SESSION: &str = "fig6466-pages";
+const PAGES_SESSION: &str = "multi-turn-pages";
 /// The host tool whose nested result each turn binds.
 const RECORDS: &str = "records";
 /// How many turns the page laws run.
@@ -464,7 +465,7 @@ fn one_worker() -> lash::vm::WorkerService {
 
 /// Turn `turn`'s cell: it rebinds `result` to the turn's records, keeps
 /// them as `turn_<turn>`, prints them, and finishes with every turn's
-/// records so far, which reads each page an earlier turn committed.
+/// records so far, which reads the values earlier turns committed.
 fn page_cell(turn: usize) -> String {
     let kept: Vec<String> = (1..=turn).map(|turn| format!("turn_{turn}")).collect();
     format!(
@@ -476,10 +477,9 @@ fn page_cell(turn: usize) -> String {
     )
 }
 
-/// Runs turn `turn` of the page laws' session and checks it reached every
-/// page: its answer is every turn's records, read back whole.
+/// Runs turn `turn` and checks every turn's records are read back whole.
 async fn page_turn(world: &World, turn: usize) {
-    let name = format!("fig6466-turn-{turn}");
+    let name = format!("multi-turn-{turn}");
     world.script(&name, vec![served::cell(&page_cell(turn))]);
     let session = world
         .core
@@ -497,16 +497,13 @@ async fn page_turn(world: &World, turn: usize) {
     assert_eq!(
         answered,
         Some(serde_json::Value::Array(expected)),
-        "turn {turn} reads every page its session committed"
+        "turn {turn} reads every prior turn's records"
     );
 }
 
-/// FIG-6466: a session's later turns read the pages its earlier turns
-/// committed and seal pages that name them, on the same worker every turn.
-/// Turn two was refused `PageRefused Unauthorized` at every pass: its heap
-/// sealed again a committed page it held under a grant, after a page that
-/// named it, and that page crossed without the grant.
-async fn later_turns_read_their_pages_on_the_same_worker(tier: Tier) {
+/// Three turns read back all earlier turns' nested records. Worker receipts
+/// prove that the same worker serves the entire session.
+async fn later_turns_read_all_prior_records_on_one_worker(tier: Tier) {
     let workers = one_worker();
     let Some(world) = World::new(tier, |backend| page_builder(backend, workers.clone())).await
     else {
@@ -525,9 +522,9 @@ async fn later_turns_read_their_pages_on_the_same_worker(tier: Tier) {
     world.shutdown().await;
 }
 
-/// FIG-6466: the same session, each turn on a fresh worker of a node that
-/// boots for it and reads the session back from the store.
-async fn later_turns_read_their_pages_on_a_fresh_worker_each(tier: Tier) {
+/// Three turns read back all earlier turns' nested records after each node
+/// restart. Worker receipts prove that each turn uses a fresh worker.
+async fn later_turns_read_all_prior_records_after_each_restart(tier: Tier) {
     let mut workers = one_worker();
     let first = workers.clone();
     let Some(mut world) = World::new(tier, |backend| page_builder(backend, first)).await else {
@@ -540,7 +537,7 @@ async fn later_turns_read_their_pages_on_a_fresh_worker_each(tier: Tier) {
             workers = one_worker();
             let fresh = workers.clone();
             world
-                .restart(&format!("fig6466-boot-{turn}"), |backend| {
+                .restart(&format!("multi-turn-boot-{turn}"), |backend| {
                     page_builder(backend, fresh)
                 })
                 .await;
@@ -568,6 +565,6 @@ async fn later_turns_read_their_pages_on_a_fresh_worker_each(tier: Tier) {
 tiered_laws!(
     session_globals_survive_cells_and_reload_and_private_slots_never_do,
     rlm_message_append_keeps_the_committed_execution,
-    later_turns_read_their_pages_on_the_same_worker,
-    later_turns_read_their_pages_on_a_fresh_worker_each,
+    later_turns_read_all_prior_records_on_one_worker,
+    later_turns_read_all_prior_records_after_each_restart,
 );
