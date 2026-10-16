@@ -83,7 +83,8 @@ impl Lowerer<'_> {
     /// `await value`. The statements of everything the source evaluated
     /// before it are already emitted.
     pub(super) fn lower_await(&mut self, value: &ast::Expr, span: SourceSpan) -> Lowering<Operand> {
-        if let ast::Expr::Call { callee, args, .. } = value
+        if self.calls.is_none()
+            && let ast::Expr::Call { callee, args, .. } = value
             && let Some(wait) = self.wait_of(callee)
         {
             let control = self.control_call(&wait);
@@ -168,6 +169,9 @@ impl Lowerer<'_> {
     /// names it is written with.
     pub(super) fn wait_of(&self, callee: &ast::Expr) -> Option<Wait> {
         let path = self.unbound_path(callee)?;
+        if crate::builtins::is_global(path.split('.').next()?) {
+            return None;
+        }
         if path == "sleep" {
             return Some(Wait::Sleep);
         }

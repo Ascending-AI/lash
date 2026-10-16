@@ -180,67 +180,6 @@ fn restored_session_bindings_cannot_mask_builtins() {
     }
 }
 
-/// FIG-5803 / overnight decision 12: namespace boundaries come from the
-/// catalog, retaining both underscores in a root and the full callable name.
-#[test]
-fn tool_namespace_roots_are_not_guessed_from_underscores() {
-    use lash_kernel_dialect::Environment;
-    use lash_kernel_doc::{EffectName, Name, Signature, Type};
-    use std::collections::{BTreeMap, BTreeSet};
-
-    let effects = BTreeMap::from([(
-        EffectName::new("team_ops_lookup").expect("effect"),
-        Signature {
-            params: Vec::new(),
-            result: Type::Any,
-        },
-    )]);
-    let roots = BTreeSet::from([Name::new("team_ops")]);
-    let environment = Environment {
-        library: machine::library(),
-        effects: &effects,
-        tool_roots: &roots,
-        controls: &BTreeMap::new(),
-    };
-    for name in ["team_ops", "team_ops_lookup"] {
-        for source in [
-            format!("{name} = 1"),
-            format!("class {name}(Exception):\n    pass"),
-        ] {
-            let error = crate::lower(
-                &source,
-                &environment,
-                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
-            )
-            .expect_err("reserved catalog name");
-            assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
-            assert!(
-                error
-                    .repairs
-                    .iter()
-                    .any(|repair| repair.contains(&format!("{name}_")))
-            );
-        }
-        let bindings = BTreeSet::from([Name::new(name)]);
-        let error = crate::lower(
-            "1",
-            &environment,
-            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
-                bindings: &bindings,
-                functions: &BTreeMap::new(),
-            }),
-        )
-        .expect_err("restored names obey the same reservation");
-        assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
-    }
-    crate::lower(
-        "team = 1\nteam_ops_ = 2",
-        &environment,
-        lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
-    )
-    .expect("neither an inferred prefix nor the suggested repair is reserved");
-}
-
 /// FIG-5824: control remains reserved without any offered control tools.
 #[test]
 fn control_is_reserved_without_control_tools() {
@@ -251,5 +190,24 @@ fn control_is_reserved_without_control_tools() {
             .repairs
             .iter()
             .any(|repair| repair.contains("control_"))
+    );
+}
+
+/// FIG-6524: parameters and earlier cells shadow namespaces in their scope.
+#[test]
+fn tool_discovery_resolves_lexical_values_before_namespaces() {
+    use lash_kernel_dialect::FrontEnd as _;
+    let bindings = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("previous")]);
+    let calls = crate::Python::default().tool_calls(
+        "text = 'phantom.call()'\ndef order(items):\n    items.sort(key=lambda item: item['key'])\nprevious.sort()\n[2, 1].sort()\nprint(text)\n# phantom.comment()\nawait items.sort({})\nawait other_fetch({})\n",
+        &lash_kernel_dialect::Environment {
+            library: machine::library(), effects: &Default::default(),
+            controls: &Default::default(), tool_roots: &Default::default(),
+        },
+        lash_kernel_dialect::CellEnvironment { bindings: &bindings, functions: &Default::default() },
+    ).expect("discover calls in their scopes");
+    assert_eq!(
+        calls,
+        std::collections::BTreeSet::from(["items.sort".into(), "other_fetch".into()])
     );
 }

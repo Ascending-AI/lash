@@ -99,6 +99,16 @@ pub fn lower_with_limits(
     mode: Mode<'_>,
     limits: SourceLimits,
 ) -> Result<Lowered, Diagnostic> {
+    lower_with_calls(source, environment, mode, limits, None)
+}
+
+fn lower_with_calls(
+    source: &str,
+    environment: &Environment<'_>,
+    mode: Mode<'_>,
+    limits: SourceLimits,
+    calls: Option<&mut std::collections::BTreeSet<String>>,
+) -> Result<Lowered, Diagnostic> {
     if let Mode::Cell(cell) = mode {
         lower::check_binding_names(
             cell.bindings.iter().map(lash_kernel_doc::Name::as_str),
@@ -123,12 +133,13 @@ pub fn lower_with_limits(
         kind: Code::Syntax.kind(),
         repairs: Vec::new(),
     })?;
-    lower::lower(
+    lower::lower_with_calls(
         parsed.syntax(),
         source,
         environment,
         mode,
         limits.max_nesting,
+        calls,
     )
 }
 
@@ -139,6 +150,23 @@ pub struct Python {
 }
 
 impl FrontEnd for Python {
+    fn tool_calls(
+        &self,
+        source: &str,
+        environment: &Environment<'_>,
+        cell: lash_kernel_dialect::CellEnvironment<'_>,
+    ) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
+        let mut calls = std::collections::BTreeSet::new();
+        lower_with_calls(
+            source,
+            environment,
+            Mode::Cell(cell),
+            self.limits,
+            Some(&mut calls),
+        )?;
+        Ok(calls)
+    }
+
     fn lower(
         &self,
         source: &str,

@@ -1284,3 +1284,92 @@ async fn an_interrupted_once_effect_observation_names_the_effect() {
     );
     assert!(tools.answered().is_empty(), "Once never starts again");
 }
+
+/// FIG-6524: local methods and built-ins never enter deferred resolution.
+async fn local_methods_stay_in_the_language(dialect: CellDialect, code: &str) {
+    struct RejectMethods;
+    resolves_only!(RejectMethods);
+    #[async_trait::async_trait]
+    impl lash_core::DeferredToolProvider for RejectMethods {
+        async fn resolve(
+            &self,
+            _cx: &lash_core::DeferredResolveContext<'_>,
+            paths: &[&str],
+        ) -> std::collections::BTreeMap<String, lash_core::DeferredOutcome> {
+            assert!(
+                paths.is_empty(),
+                "language operations reached the tool resolver: {paths:?}"
+            );
+            Default::default()
+        }
+    }
+    struct ItemsTools;
+    #[async_trait::async_trait]
+    impl lash_core::ToolProvider for ItemsTools {
+        fn tool_manifests(
+            &self,
+            _config: &lash_core::OwnerConfigView,
+        ) -> Result<Vec<lash_core::ToolManifest>, lash_core::PluginError> {
+            Ok(vec![
+                definition("tool:items_sort", "items_sort", "items", "sort").manifest(),
+            ])
+        }
+        fn resolve_contract(
+            &self,
+            name: &str,
+            _config: &lash_core::OwnerConfigView,
+        ) -> Option<Arc<lash_core::ToolContract>> {
+            match name {
+                "items_sort" => Some(Arc::new(
+                    definition("tool:items_sort", "items_sort", "items", "sort").contract(),
+                )),
+                _ => None,
+            }
+        }
+        async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+            panic!("a local shadows the tool namespace: {}", call.name());
+        }
+    }
+    let host = open_host().await;
+    let services = cell_services(
+        &dialect,
+        if dialect.name() == "python" {
+            python_workers()
+        } else {
+            Default::default()
+        },
+    );
+    let deferred = Arc::new(RejectMethods) as Arc<dyn lash_core::DeferredToolProvider>;
+    let response = run_cell(
+        &mut crate::testing::session_state(&dialect),
+        context_with(&host, "exec-code:0", Arc::new(ItemsTools), Some(&deferred)),
+        &services,
+        code,
+    )
+    .await;
+    assert_eq!(
+        finish_of(&response),
+        serde_json::json!([{"key": 1}, {"key": 2}])
+    );
+    assert_eq!(response.prints.len(), 1, "the sorted records are logged");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn typescript_local_sort_and_console_never_resolve_tools() {
+    local_methods_stay_in_the_language(
+        CellDialect::typescript(),
+        r#"
+        const items = [{key: 2}, {key: 1}];
+        function order(items) { items.sort((a, b) => a.key - b.key); return items; }
+        order(items).sort((a, b) => a.key - b.key);
+        console.log(items);
+        await control.finish(items);
+    "#,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn python_local_sort_and_print_never_resolve_tools() {
+    local_methods_stay_in_the_language(CellDialect::python(), "items = [{'key': 2}, {'key': 1}]\ndef order(items):\n    items.sort(key=lambda item: item['key'])\n    return items\norder(items).sort(key=lambda item: item['key'])\nprint(items)\nawait control_finish(items)\n").await;
+}

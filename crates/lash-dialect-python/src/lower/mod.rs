@@ -153,6 +153,7 @@ struct Found {
 
 pub(crate) struct Lowerer<'a> {
     source: &'a str,
+    calls: Option<&'a mut BTreeSet<String>>,
     library: &'a dyn Library,
     effects: &'a BTreeMap<EffectName, Signature>,
     /// The effects whose call ends the turn: a control call ends `main`
@@ -196,20 +197,17 @@ pub(crate) struct Lowerer<'a> {
 }
 
 /// No module or restored session binding may mask the dialect's built-ins,
-/// nor a tool name or catalog namespace root (`control_finish`, `control`,
-/// ...). Roots are carried separately because flattened names are ambiguous.
+/// nor a callable tool name or `control`. Ordinary catalog namespace roots
+/// obey lexical shadowing.
 pub(crate) fn check_binding_names<'a>(
     names: impl IntoIterator<Item = &'a str>,
     effects: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
-    tool_roots: &BTreeSet<Name>,
+    _tool_roots: &BTreeSet<Name>,
 ) -> Lowering<()> {
     for name in names {
         let message = if calls::is_builtin(name) || crate::exceptions::is_builtin(name) {
             format!("`{name}` is a built-in; a top-level binding cannot reuse its name")
-        } else if name == "control"
-            || tool_roots.contains(&Name::new(name))
-            || effects.keys().any(|effect| effect.as_str() == name)
-        {
+        } else if name == "control" || effects.keys().any(|effect| effect.as_str() == name) {
             format!(
                 "`{name}` names one of the session's tools; a top-level binding cannot reuse its name"
             )
@@ -226,12 +224,13 @@ pub(crate) fn check_binding_names<'a>(
 }
 
 /// Lowers a parsed module against `environment`.
-pub(crate) fn lower(
+pub(crate) fn lower_with_calls(
     module: &ast::ModModule,
     source: &str,
     environment: &Environment<'_>,
     mode: Mode<'_>,
     max_nesting: usize,
+    calls: Option<&mut BTreeSet<String>>,
 ) -> Lowering<Lowered> {
     let (cell, workflow) = match mode {
         Mode::Cell(cell) => (cell, None),
@@ -300,6 +299,7 @@ pub(crate) fn lower(
     let integer_locals = scope::integer_locals(&module.body, &bindings, &excluded, true);
     let mut lowerer = Lowerer {
         source,
+        calls,
         library: environment.library,
         effects: environment.effects,
         controls: environment.controls,

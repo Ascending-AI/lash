@@ -136,6 +136,29 @@ impl Parser {
         }
     }
 
+    /// Finds tool calls using the same scopes and built-ins as lowering.
+    pub fn tool_calls(
+        &mut self,
+        source: &str,
+        environment: &Environment<'_>,
+        cell: lash_kernel_dialect::CellEnvironment<'_>,
+    ) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
+        lower::check_binding_names(
+            cell.bindings.iter().map(lash_kernel_doc::Name::as_str),
+            environment.effects,
+        )?;
+        let program = self.parser.parse(source)?;
+        let mut calls = std::collections::BTreeSet::new();
+        lower::lower_with_calls(
+            &program,
+            source,
+            environment,
+            Mode::Cell(cell),
+            Some(&mut calls),
+        )?;
+        Ok(calls)
+    }
+
     /// Lowers as [`lower`] does. A cell reuses the parser thread; a module,
     /// which a host imports once, is read on a thread of its own.
     pub fn lower(
@@ -169,6 +192,18 @@ pub struct TypeScript {
 }
 
 impl FrontEnd for TypeScript {
+    fn tool_calls(
+        &self,
+        source: &str,
+        environment: &Environment<'_>,
+        cell: lash_kernel_dialect::CellEnvironment<'_>,
+    ) -> Result<std::collections::BTreeSet<String>, lash_kernel_dialect::Diagnostic> {
+        Parser::default()
+            .with_limits(self.limits)
+            .tool_calls(source, environment, cell)
+            .map_err(Into::into)
+    }
+
     fn lower(
         &self,
         source: &str,

@@ -17,6 +17,48 @@ pub(crate) fn perform(
     let request: Request = rmp_serde::from_slice(&request.0)
         .map_err(|error| PoolError::payload(PayloadKind::ServiceRequest, error))?;
     let response = match request {
+        Request::ToolCalls {
+            dialect,
+            source,
+            bindings,
+            functions,
+            effects,
+            controls,
+            helpers,
+        } => {
+            let library = match embedding.library_for(helpers) {
+                Ok(library) => library,
+                Err(_) => {
+                    return rmp_serde::to_vec_named(&Response::HelperReleaseNotHeld {
+                        release: helpers,
+                    })
+                    .map(EncodedPayload)
+                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error));
+                }
+            };
+            match embedding.dialects.get(&dialect) {
+                None => Response::UnknownDialect { dialect },
+                Some(package) => match package.front_end.tool_calls(
+                    &source,
+                    &lash_kernel_dialect::Environment {
+                        library,
+                        effects: &effects,
+                        tool_roots: &Default::default(),
+                        controls: &controls,
+                    },
+                    lash_kernel_dialect::CellEnvironment {
+                        bindings: &bindings,
+                        functions: &functions
+                            .into_iter()
+                            .map(|(name, function)| (name, function.into_saved()))
+                            .collect(),
+                    },
+                ) {
+                    Ok(calls) => Response::ToolCalls(calls),
+                    Err(diagnostic) => Response::DialectRefused(refusal(diagnostic)),
+                },
+            }
+        }
         Request::Lower {
             dialect,
             source,

@@ -122,7 +122,9 @@ impl Facts {
                 .iter()
                 .filter(|(name, _)| {
                     let root = name.as_str().split('.').next().unwrap_or_default();
-                    !collector.entries.contains_key(root) && !session.contains(&Name::new(root))
+                    !crate::builtins::is_global(root)
+                        && !collector.entries.contains_key(root)
+                        && !session.contains(&Name::new(root))
                 })
                 .map(|(name, signature)| {
                     (name.as_str().to_string(), Ty::decoded(&signature.result))

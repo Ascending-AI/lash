@@ -279,6 +279,7 @@ struct FunctionFrame {
 
 pub(crate) struct Lowerer<'a> {
     source: &'a str,
+    calls: Option<&'a mut BTreeSet<String>>,
     /// The entries of a workflow module, as they are lowered; `None` for a
     /// cell.
     module: Option<workflow::Module>,
@@ -332,12 +333,10 @@ pub(crate) struct Lowerer<'a> {
 }
 
 /// Session names are checked before either source or saved state can mask a built-in.
-/// A tool namespace root (`control`, `tools`, ...: the first segment of an
-/// effect the environment offers) is reserved the same way: a binding of
-/// that name would hide the session's tools from every later cell.
+/// `control` stays reserved; ordinary tool namespaces obey lexical shadowing.
 pub(crate) fn check_binding_names<'a>(
     names: impl IntoIterator<Item = &'a str>,
-    effects: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
+    _effects: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
 ) -> Lowering<()> {
     for name in names.into_iter().collect::<BTreeSet<_>>() {
         if builtins::is_global(name) {
@@ -348,11 +347,7 @@ pub(crate) fn check_binding_names<'a>(
                 None,
             ));
         }
-        if name == "control"
-            || effects
-                .keys()
-                .any(|effect| effect.as_str().split('.').next() == Some(name))
-        {
+        if name == "control" {
             return Err(Diagnostic::with_repair(
                 DiagnosticCode::ShadowsBuiltin,
                 format!(
@@ -373,6 +368,16 @@ pub(crate) fn lower(
     environment: &Environment<'_>,
     mode: Mode<'_>,
 ) -> Lowering<Lowered> {
+    lower_with_calls(program, source, environment, mode, None)
+}
+
+pub(crate) fn lower_with_calls(
+    program: &ast::Program,
+    source: &str,
+    environment: &Environment<'_>,
+    mode: Mode<'_>,
+    calls: Option<&mut BTreeSet<String>>,
+) -> Lowering<Lowered> {
     let (cell, module) = match mode {
         Mode::Cell(cell) => (cell, None),
         Mode::Module => (CellEnvironment::first(), Some(workflow::Module::new())),
@@ -385,6 +390,7 @@ pub(crate) fn lower(
     taken.extend(cell.bindings.iter().map(|name| name.as_str().to_string()));
     let mut lowerer = Lowerer {
         source,
+        calls,
         module,
         library: environment.library,
         effects: environment.effects,

@@ -231,7 +231,11 @@ impl Lowerer<'_> {
         match expr {
             PyExpr::Name(name) => {
                 let id = name.id.as_str();
-                self.variable(id).is_none().then(|| id.to_owned())
+                (self.variable(id).is_none()
+                    && !is_builtin(id)
+                    && !crate::exceptions::is_builtin(id)
+                    && id != "asyncio")
+                    .then(|| id.to_owned())
             }
             PyExpr::Attribute(attribute) => {
                 let mut path = self.tool_path(&attribute.value)?;
@@ -284,6 +288,18 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn call(&mut self, call: &ast::ExprCall, awaited: bool) -> Lowering<Operand> {
+        if let Some(path) = self.tool_path(&call.func)
+            && let Some(calls) = &mut self.calls
+        {
+            calls.insert(path);
+            for argument in &call.arguments.args {
+                self.expr(argument)?;
+            }
+            for keyword in &call.arguments.keywords {
+                self.expr(&keyword.value)?;
+            }
+            return Ok(Operand::none());
+        }
         self.no_stars(&call.arguments)
             .or_else(|error| match self.asyncio_function(call) {
                 // `asyncio.gather(*tasks)` is the one starred call.

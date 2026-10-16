@@ -110,50 +110,6 @@ impl DeferredResolutionError {
     }
 }
 
-/// Every call path the source writes: dotted in TypeScript, also bare
-/// in Python (whose tools use names such as `web_fetch`). A scan of the
-/// text, not a parse: it over-approximates (a method call on a value is a
-/// path too), which costs the resolver a path it answers `NotAvailable`
-/// for, and it never misses a call the dialect could lower to an effect,
-/// because an effect is called by its dialect's call path.
-pub(crate) fn called_paths(source: &str, dialect: &str) -> BTreeSet<String> {
-    let mut paths = BTreeSet::new();
-    let bytes = source.as_bytes();
-    let ident_start = |byte: u8| byte == b'_' || byte.is_ascii_alphabetic();
-    let ident_part = |byte: u8| byte == b'_' || byte.is_ascii_alphanumeric();
-    let mut index = 0;
-    while index < bytes.len() {
-        if !ident_start(bytes[index])
-            || (index > 0 && (ident_part(bytes[index - 1]) || bytes[index - 1] == b'.'))
-        {
-            index += 1;
-            continue;
-        }
-        let start = index;
-        let mut segments = 0;
-        loop {
-            while index < bytes.len() && ident_part(bytes[index]) {
-                index += 1;
-            }
-            segments += 1;
-            if index + 1 < bytes.len() && bytes[index] == b'.' && ident_start(bytes[index + 1]) {
-                index += 1;
-            } else {
-                break;
-            }
-        }
-        let end = index;
-        let mut after = index;
-        while after < bytes.len() && bytes[after].is_ascii_whitespace() {
-            after += 1;
-        }
-        if (segments > 1 || dialect == "python") && bytes.get(after) == Some(&b'(') {
-            paths.insert(source[start..end].to_owned());
-        }
-    }
-    paths
-}
-
 /// Decides each candidate under the cell's effect: the run's deferred
 /// provider resolves the batch once, and the matches commit before the cell
 /// is lowered. A redrive reuses the committed matches; a precommit redrive
@@ -349,21 +305,6 @@ mod tests {
                 Some(lash_core::RuntimeErrorCause::PluginOperation { .. })
             ),
             "the host receives a typed cause"
-        );
-    }
-
-    /// The gather step finds every dotted call and nothing that is not
-    /// one: a bare call, a member read and a path inside a longer name are
-    /// not candidates.
-    #[test]
-    fn the_gather_step_finds_dotted_calls() {
-        let paths = called_paths(
-            "const page = await web.fetch({url});\nprint(page.title);\nawait a.b.c (1); xs.map(f); web_fetch(1); q.r",
-            "typescript",
-        );
-        assert_eq!(
-            paths.into_iter().collect::<Vec<_>>(),
-            ["a.b.c", "web.fetch", "xs.map"]
         );
     }
 }

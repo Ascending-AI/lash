@@ -809,6 +809,15 @@ impl Lowerer<'_> {
                 )
             });
         }
+        if let Some(path) = self.unbound_path(callee)
+            && !crate::builtins::is_global(path.split('.').next().unwrap_or_default())
+            && path != "sleep"
+            && let Some(calls) = &mut self.calls
+        {
+            calls.insert(path);
+            self.arguments(args)?;
+            return Ok(Operand::undefined());
+        }
         if let Some(wait) = self.wait_of(callee) {
             return self.lower_wait_call(wait, args, span);
         }

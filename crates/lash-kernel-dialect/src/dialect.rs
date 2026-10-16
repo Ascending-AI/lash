@@ -126,6 +126,16 @@ pub struct Lowered {
 /// has hoisted, in the source's evaluation order, every operand the source
 /// evaluates before a statement-position form (`K-EVAL-001`).
 pub trait FrontEnd {
+    /// Free tool call paths after lexical and built-in resolution. Discovery
+    /// runs in the worker before the host resolves deferred tools; value
+    /// methods never cross that boundary.
+    fn tool_calls(
+        &self,
+        source: &str,
+        environment: &Environment<'_>,
+        cell: CellEnvironment<'_>,
+    ) -> Result<BTreeSet<String>, Diagnostic>;
+
     fn lower(
         &self,
         source: &str,

@@ -389,30 +389,74 @@ async fn link_cell(
         }
     }
 
+    state
+        .prepare_cell(ctx.session_pages())
+        .await
+        .map_err(|error| host_failure(format!("the session's state is not readable: {error}")))?;
+    let mut names = state.names();
+    names.extend(projected.keys().map(|name| Name::new(name.as_str())));
+
+    // A cell is written against the newest helper release every live node
+    // holds (FIG-5799).
+    let helpers = match &services.helpers {
+        Some(gate) => gate
+            .writable()
+            .await
+            .map_err(|error| Refused::Helpers(Box::new(error)))?,
+        None => lash_vm_runtime::KERNEL_HELPER_RELEASE,
+    };
+
     // gather → decide → offer: the run's deferred provider matches the
     // paths no surface tool answers, and the matches commit before the cell
     // is lowered. A committed match is never resolved again.
-    let outcomes = if ctx.parent_invocation().is_some() {
-        let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve");
-        let offered = boundary.signatures();
-        let candidates = crate::deferred::called_paths(code, state.dialect())
-            .into_iter()
-            .filter(|path| {
-                !lash_kernel_doc::EffectName::new(path.as_str())
-                    .is_ok_and(|name| offered.contains_key(&name))
-            })
-            .collect::<BTreeSet<_>>();
-        if candidates.is_empty() {
-            BTreeMap::new()
+    let mut discovery_failure = None;
+    let outcomes =
+        if ctx.parent_invocation().is_some() && !matches!(ctx.deferred_provider(), Ok(None)) {
+            let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve");
+            let offered = boundary.signatures();
+            let calls = services
+                .workers
+                .request_accounted(Request::ToolCalls {
+                    dialect: state.dialect().to_owned(),
+                    source: code.to_owned(),
+                    bindings: names.clone(),
+                    functions: state.lowering_functions(),
+                    effects: offered.clone(),
+                    controls: boundary.controls(),
+                    helpers,
+                })
+                .await;
+            let calls = match calls {
+                Ok(Response::ToolCalls(calls)) => calls,
+                Ok(Response::Lowered { .. } | Response::Printed(_) | Response::Read { .. }) => {
+                    discovery_failure = Some(Err(lash_vm_client::PoolError::breach(
+                        lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+                    )));
+                    BTreeSet::new()
+                }
+                other => {
+                    discovery_failure = Some(other);
+                    BTreeSet::new()
+                }
+            };
+            let candidates = calls
+                .into_iter()
+                .filter(|path| {
+                    !lash_kernel_doc::EffectName::new(path.as_str())
+                        .is_ok_and(|name| offered.contains_key(&name))
+                })
+                .collect::<BTreeSet<_>>();
+            if candidates.is_empty() {
+                BTreeMap::new()
+            } else {
+                crate::deferred::journal_deferred_matches(candidates, ctx)
+                    .await
+                    .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?
+                    .unwrap_or_default()
+            }
         } else {
-            crate::deferred::journal_deferred_matches(candidates, ctx)
-                .await
-                .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?
-                .unwrap_or_default()
-        }
-    } else {
-        BTreeMap::new()
-    };
+            BTreeMap::new()
+        };
     let grants = crate::deferred::offer_deferred_matches(&mut boundary, &outcomes, ctx)
         .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?;
     for grant in grants.values() {
@@ -424,38 +468,28 @@ async fn link_cell(
     }
     let candidates = read_candidates(ctx, &boundary, &grants, read_tools);
 
-    state
-        .prepare_cell(ctx.session_pages())
-        .await
-        .map_err(|error| host_failure(format!("the session's state is not readable: {error}")))?;
-    let mut names = state.names();
-    names.extend(projected.keys().map(|name| Name::new(name.as_str())));
-    // A cell is written against the newest helper release every live node
-    // holds (FIG-5799).
-    let helpers = match &services.helpers {
-        Some(gate) => gate
-            .writable()
-            .await
-            .map_err(|error| Refused::Helpers(Box::new(error)))?,
-        None => lash_vm_runtime::KERNEL_HELPER_RELEASE,
-    };
     let mut effects = boundary.signatures();
     let unavailable_notes = crate::deferred::offer_unavailable_notes(&outcomes, &mut effects);
     // The worker that lowers the cell starts its run (FIG-5921).
-    let lowered = services
-        .workers
-        .request_for_run(Request::Lower {
-            dialect: state.dialect().to_owned(),
-            source: code.to_owned(),
-            effects,
-            tool_roots,
-            controls: boundary.controls(),
-            bindings: names,
-            functions: state.lowering_functions(),
-            helpers,
-            reads: candidates.keys().cloned().collect(),
-        })
-        .await;
+    let lowered = match discovery_failure {
+        Some(failure) => failure,
+        None => {
+            services
+                .workers
+                .request_for_run(Request::Lower {
+                    dialect: state.dialect().to_owned(),
+                    source: code.to_owned(),
+                    effects,
+                    tool_roots,
+                    controls: boundary.controls(),
+                    bindings: names,
+                    functions: state.lowering_functions(),
+                    helpers,
+                    reads: candidates.keys().cloned().collect(),
+                })
+                .await
+        }
+    };
     let (document, source_map, written, function_values, reached) = match lowered {
         Ok(Response::Lowered {
             document,
@@ -485,7 +519,7 @@ async fn link_cell(
                 format!("this session's cells are written against helper release {release}, and the worker does not hold it"),
             ).into());
         }
-        Ok(Response::Printed(_) | Response::Read { .. }) => {
+        Ok(Response::Printed(_) | Response::Read { .. } | Response::ToolCalls(_)) => {
             return Err(Refused::Worker(Box::new(
                 lash_vm_client::PoolError::breach(
                     lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,

@@ -541,6 +541,19 @@ mod typescript {
     }
 
     impl lash_kernel_dialect::FrontEnd for FrontEnd {
+        fn tool_calls(
+            &self,
+            source: &str,
+            environment: &Environment<'_>,
+            cell: lash_kernel_dialect::CellEnvironment<'_>,
+        ) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
+            self.parser
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .tool_calls(source, environment, cell)
+                .map_err(Into::into)
+        }
+
         fn lower(
             &self,
             source: &str,

@@ -321,3 +321,38 @@ fn null_base_assignment_precedes_key_conversion() {
     let case = witness("null_base_assignment_precedes_key_conversion");
     assert_eq!(run(&case.source, &case.deliveries), case.node);
 }
+
+/// FIG-6524: only free callees are tool candidates, at their lexical scope.
+#[test]
+fn tool_discovery_resolves_lexical_values_before_namespaces() {
+    let bindings = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("previous")]);
+    let calls = crate::Parser::default()
+        .tool_calls(
+            r#"
+        const text = "phantom.call()";
+        function order(items) { items.sort((a, b) => a.key - b.key); }
+        { const items = []; items.sort(); }
+        previous.sort();
+        [{key: 2}, {key: 1}].sort((a, b) => a.key - b.key);
+        console.log(text);
+        // phantom.comment()
+        await items.sort({});
+        await other.fetch({});
+        "#,
+            &lash_kernel_dialect::Environment {
+                library: super::library(),
+                effects: &Default::default(),
+                controls: &Default::default(),
+                tool_roots: &Default::default(),
+            },
+            lash_kernel_dialect::CellEnvironment {
+                bindings: &bindings,
+                functions: &Default::default(),
+            },
+        )
+        .expect("discover calls in their scopes");
+    assert_eq!(
+        calls,
+        std::collections::BTreeSet::from(["items.sort".into(), "other.fetch".into()])
+    );
+}

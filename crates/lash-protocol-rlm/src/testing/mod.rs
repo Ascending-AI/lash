@@ -328,6 +328,15 @@ pub(crate) fn python_workers() -> lash_vm_client::service::Service {
 struct Unmapped(Box<dyn lash_kernel_dialect::FrontEnd>);
 
 impl lash_kernel_dialect::FrontEnd for Unmapped {
+    fn tool_calls(
+        &self,
+        source: &str,
+        environment: &lash_kernel_dialect::Environment<'_>,
+        cell: lash_kernel_dialect::CellEnvironment<'_>,
+    ) -> Result<std::collections::BTreeSet<String>, lash_kernel_dialect::Diagnostic> {
+        self.0.tool_calls(source, environment, cell)
+    }
+
     fn lower(
         &self,
         source: &str,

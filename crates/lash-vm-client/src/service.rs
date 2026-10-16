@@ -18,6 +18,16 @@ pub use source::SourceServiceError;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    /// Discover free tool calls with the dialect's lexical resolver.
+    ToolCalls {
+        dialect: String,
+        source: String,
+        bindings: BTreeSet<Name>,
+        functions: BTreeMap<Name, LowerFunction>,
+        effects: BTreeMap<EffectName, Signature>,
+        controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+        helpers: u32,
+    },
     /// Lower `source`, written in `dialect`, to a kernel document against
     /// the effects the host supplies and the session bindings in scope.
     Lower {
@@ -202,6 +212,7 @@ pub struct DialectRefusal {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
+    ToolCalls(BTreeSet<String>),
     Lowered {
         /// The document's token body (`K-ID-003`).
         #[serde(with = "serde_bytes")]
@@ -462,6 +473,7 @@ impl Default for Service {
 #[cfg(feature = "testing")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WorkerPath {
+    ToolCalls,
     Lower,
     ImportWorkflow,
     Print,
@@ -627,7 +639,7 @@ pub mod runtime_ops {
         }
 
         fn request_blocking(&self, request: Request, for_run: bool) -> Result<Response, PoolError> {
-            if let Request::Lower { source, .. } = &request
+            if let Request::Lower { source, .. } | Request::ToolCalls { source, .. } = &request
                 && source.len() as u64 > self.config.protocol.max_source_bytes
             {
                 return Err(PoolError::refused(
@@ -649,6 +661,7 @@ pub mod runtime_ops {
             #[cfg(feature = "testing")]
             self.record_worker(
                 match &request {
+                    Request::ToolCalls { .. } => WorkerPath::ToolCalls,
                     Request::Lower { .. } => WorkerPath::Lower,
                     Request::ImportWorkflow { .. } => WorkerPath::ImportWorkflow,
                     Request::Print { .. } => WorkerPath::Print,
