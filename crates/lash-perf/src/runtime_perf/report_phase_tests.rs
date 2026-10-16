@@ -316,8 +316,22 @@ async fn checkpoint_state_hot_paths_capture_one_changed_component_per_turn() {
 
     assert_eq!(result.turns.len(), 2);
     assert_eq!(result.extra_counters["execution_state_bindings"], 300);
-    assert_eq!(result.extra_counters["execution_state_value_leaves"], 300);
-    assert_eq!(result.extra_counters["incremental_value_leaves"], 1);
+    assert!(result.extra_counters["initial_pages"] > 0);
+    assert!(result.extra_counters["initial_spool_bytes"] > 0);
+    assert_eq!(result.metric_samples["changed_bindings"], [1.0, 1.0]);
+    for metric in ["pages_sealed", "spool_bytes"] {
+        let samples = &result.metric_samples[metric];
+        assert_eq!(samples.len(), 2);
+        let seed = result.extra_counters[if metric == "pages_sealed" {
+            "initial_pages"
+        } else {
+            "initial_spool_bytes"
+        }] as f64;
+        assert!(
+            samples.iter().all(|value| *value > 0.0 && *value < seed),
+            "one changed binding's {metric} must cost less than the retained population: {samples:?} vs {seed}"
+        );
+    }
     assert!(result.extra_counters["checkpoint_bytes"] > 0);
     assert!(result.extra_counters["hydrated_execution_state_bytes"] > 0);
     for turn in &result.turns {
@@ -366,7 +380,9 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
             "reachable_node_count",
             "staged_node_count",
             "staged_node_bytes",
-            "staged_leaf_bytes",
+            "changed_bindings",
+            "pages_sealed",
+            "spool_bytes",
             "graph_adopt_count",
             "graph_adopt_bytes",
             "graph_encode_count",
@@ -402,9 +418,10 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
                 value("staged_node_count") > 0 && value("staged_node_bytes") > 0,
                 "{prefix} sample {sample} must stage the reassigned binding"
             );
+            assert_eq!(value("changed_bindings"), 1);
             assert!(
-                value("staged_leaf_bytes") < point.transcript_bytes as u64,
-                "{prefix} sample {sample} restaged a binding's large value"
+                value("pages_sealed") > 0 && value("spool_bytes") > 0,
+                "{prefix} sample {sample} must measure heap work for its one changed binding"
             );
         }
     }
@@ -420,11 +437,20 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
             left.iter().zip(right).all(|(left, right)| left < right),
             "component curve reachable nodes must increase monotonically: left={left:?}, right={right:?}"
         );
-        let left = &result.metric_samples[&format!("{}.staged_leaf_bytes", pair[0].prefix())];
-        let right = &result.metric_samples[&format!("{}.staged_leaf_bytes", pair[1].prefix())];
-        assert_eq!(
-            left, right,
-            "component curve staged leaf bytes must stay flat: one binding is reassigned at every size"
+    }
+    // HEAP-METER's fixed-change rule: sealed pages grow only with index
+    // depth, not retained bindings. Bytes within packed pages can vary at
+    // these small populations; the byte axis below measures payload growth.
+    let first = component_points.first().unwrap();
+    let last = component_points.last().unwrap();
+    let left = &result.metric_samples[&format!("{}.pages_sealed", first.prefix())];
+    let right = &result.metric_samples[&format!("{}.pages_sealed", last.prefix())];
+    for (left, right) in left.iter().zip(right) {
+        let exponent =
+            (right / left).ln() / (last.component_count as f64 / first.component_count as f64).ln();
+        assert!(
+            exponent <= 0.25,
+            "one changed binding's sealed pages must stay flat in retained bindings: {left} -> {right} (exponent {exponent})"
         );
     }
     let byte_points = points
@@ -432,11 +458,20 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
         .filter(|point| point.axis == CheckpointCurveAxis::Bytes)
         .collect::<Vec<_>>();
     for pair in byte_points.windows(2) {
-        let left = &result.metric_samples[&format!("{}.staged_node_bytes", pair[0].prefix())];
-        let right = &result.metric_samples[&format!("{}.staged_node_bytes", pair[1].prefix())];
+        let left = &result.metric_samples[&format!("{}.spool_bytes", pair[0].prefix())];
+        let right = &result.metric_samples[&format!("{}.spool_bytes", pair[1].prefix())];
         assert!(
             left.iter().zip(right).all(|(left, right)| left < right),
-            "byte curve staged bytes must increase strictly: left={left:?}, right={right:?}"
+            "byte curve spooled bytes must increase strictly: left={left:?}, right={right:?}"
+        );
+    }
+    let component_center = component_points[1];
+    let byte_center = byte_points[1];
+    for metric in ["changed_bindings", "pages_sealed", "spool_bytes"] {
+        assert_eq!(
+            result.metric_samples[&format!("{}.{metric}", component_center.prefix())],
+            result.metric_samples[&format!("{}.{metric}", byte_center.prefix())],
+            "paired center points must measure the same heap work for {metric}"
         );
     }
 }

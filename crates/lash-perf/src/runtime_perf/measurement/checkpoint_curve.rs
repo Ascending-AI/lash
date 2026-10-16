@@ -77,13 +77,11 @@ pub(crate) fn checkpoint_curve_points(config: &CheckpointCurveConfig) -> Vec<Che
 }
 
 /// What a capture's publication carries: the execution pages no earlier
-/// commit installed, and among them the heap payload leaves that hold the
-/// bindings' large texts.
+/// commit installed. Seal and spool counters measure their production work.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct CheckpointArtifactShape {
     staged_node_count: u64,
     staged_node_bytes: u64,
-    staged_leaf_bytes: u64,
 }
 
 impl CheckpointArtifactShape {
@@ -94,9 +92,6 @@ impl CheckpointArtifactShape {
         for node in nodes {
             shape.staged_node_count += 1;
             shape.staged_node_bytes += node.bytes.len() as u64;
-            if node.envelope()?.kind == lash_core_store::checkpoint_graph::NodeKind::PAYLOAD_LEAF {
-                shape.staged_leaf_bytes += node.bytes.len() as u64;
-            }
         }
         Ok(shape)
     }
@@ -218,21 +213,12 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 CHECKPOINT_CURVE_COMMIT_ROWS,
             ),
         );
-        // Every binding's large value is published by the first commit,
-        // each in its own leaves.
-        let initial_shape = CheckpointArtifactShape::from_publication(
-            &fixture.commit(&mut publisher, &seed_commit).await?,
-        )?;
-        if initial_shape.staged_leaf_bytes < (point.component_count * point.transcript_bytes) as u64
-        {
-            anyhow::bail!(
-                "{} seeded {} leaf bytes, fewer than its {} bindings of {} bytes",
-                point.prefix(),
-                initial_shape.staged_leaf_bytes,
-                point.component_count,
-                point.transcript_bytes
-            );
-        }
+        let published = fixture.commit(&mut publisher, &seed_commit).await?;
+        anyhow::ensure!(
+            staged_pages(&published)? > 0,
+            "{} seed must contain semantic heap pages",
+            point.prefix()
+        );
         let runtime_state =
             super::checkpoint::reloaded(store.clone(), &runtime_state.session_id).await?;
         fixture.read_head(&publisher, &runtime_state).await?;
@@ -262,18 +248,23 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         for (point_index, fixture) in fixtures.iter_mut().enumerate() {
             append_checkpoint_curve_graph(&mut fixture.runtime_state, fixture.point, sample);
             let prefix = fixture.point.prefix();
-            // The paired center points have identical shapes. Give each edit
-            // its own identity so the global immutable encoding cache cannot
-            // supply another point's already-materialized checkpoint. Retained
-            // large values still reuse their encodings (PC-LARGE-ONCE).
+            // Paired center points have identical shapes. Distinct edits
+            // keep both observations independent of immutable page sharing.
             let edit = edit_seed.wrapping_add(sample * point_count + point_index);
-            fixture.fixture.assign(sample, edit).await?;
             let work_collector = lash_core::perf_witness::Collector::install()?;
+            let before_pages = fixture.fixture.pages_sealed();
+            fixture.fixture.assign(sample, edit).await?;
             let (snapshot, capture_phase) = Box::pin(measure_runtime_perf_async_phase(
                 "checkpoint_curve.capture",
                 async { fixture.fixture.capture().await.map_err(anyhow::Error::from) },
             ))
             .await?;
+            let pages_sealed = fixture.fixture.pages_sealed() - before_pages;
+            let spool_bytes = work_collector.snapshot().spool_bytes;
+            anyhow::ensure!(
+                pages_sealed > 0 && spool_bytes > 0,
+                "{prefix} must seal pages for its changed binding"
+            );
             let root = captured_root(&snapshot)?;
             let (serialized, serialize_phase) = measure_runtime_perf_phase(
                 "checkpoint_curve.serialize",
@@ -318,15 +309,6 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 })
                 .await?;
             let shape = CheckpointArtifactShape::from_publication(&published)?;
-            // The reassigned binding keeps its large value: what an earlier
-            // commit installed is never published again (PC-LARGE-ONCE).
-            if shape.staged_leaf_bytes >= fixture.point.transcript_bytes as u64 {
-                anyhow::bail!(
-                    "{prefix} restaged {} leaf bytes, as much as a binding's {}-byte value",
-                    shape.staged_leaf_bytes,
-                    fixture.point.transcript_bytes
-                );
-            }
             let (loaded_state, load_phase) =
                 measure_runtime_perf_async_phase("checkpoint_curve.load", async {
                     let loaded_state = lash::persistence::load_session_window_state(
@@ -384,7 +366,9 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 ("reachable_node_count", reachable),
                 ("staged_node_count", shape.staged_node_count),
                 ("staged_node_bytes", shape.staged_node_bytes),
-                ("staged_leaf_bytes", shape.staged_leaf_bytes),
+                ("changed_bindings", 1),
+                ("pages_sealed", pages_sealed),
+                ("spool_bytes", spool_bytes),
                 ("graph_adopt_count", work.graph_adopt_attempts),
                 ("graph_adopt_bytes", work.graph_adopt_bytes),
                 ("graph_encode_count", work.graph_envelopes),

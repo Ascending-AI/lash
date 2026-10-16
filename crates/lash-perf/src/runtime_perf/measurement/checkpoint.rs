@@ -116,6 +116,7 @@ const CHECKPOINT_STATE_BODY_BYTES: usize = 3 * 1024 + 512;
 pub(super) struct CheckpointBindingFixture {
     fixture: Arc<tokio::sync::Mutex<lash_protocol_rlm::CodeModeCheckpointPerfFixture>>,
     backend: lash::Backend,
+    workers: lash_vm_client::WorkerPool,
     factory: Arc<dyn lash_core::plugin::PluginFactory>,
     session_id: SessionId,
 }
@@ -165,12 +166,16 @@ impl CheckpointBindingFixture {
         bytes: usize,
         backend: lash::Backend,
     ) -> anyhow::Result<Self> {
+        let mut worker_config = lash_vm_client::service::Service::default().config().clone();
+        worker_config
+            .entry
+            .args
+            .push("--count-heap-work".to_owned());
+        let service = lash_vm_client::service::Service::new(worker_config);
+        let workers = service.pool()?;
         let fixture = Arc::new(tokio::sync::Mutex::new(
             lash_protocol_rlm::CodeModeCheckpointPerfFixture::new(
-                &dialect,
-                lash_vm_client::service::Service::default(),
-                bindings,
-                bytes,
+                &dialect, service, bindings, bytes,
             )
             .await?,
         ));
@@ -238,15 +243,24 @@ impl CheckpointBindingFixture {
         core.shutdown().await?;
         Ok(Self {
             fixture,
+            workers,
             backend,
             factory,
             session_id,
         })
     }
 
+    pub(super) fn pages_sealed(&self) -> u64 {
+        self.workers
+            .measurements()
+            .counters
+            .worker_work
+            .pages_sealed
+    }
+
     pub(super) async fn assign(&self, index: usize, turn: usize) -> anyhow::Result<()> {
-        // The structural work collector is process-wide. Join the served
-        // node before capture so task settlement cannot enter its hash samples.
+        // Join the served node before capture so every edit's page counters
+        // are complete and its actor claim has been released.
         let core = super::super::harness::checkpoint_benchmark_core(
             self.backend.clone(),
             Arc::clone(&self.factory),
@@ -343,39 +357,39 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         })
         .await?;
 
-    let (initial_component_count, initial_capture_phase) = run
+    let (initial_pages, initial_spool_bytes, initial_capture_phase) = run
         .seed(async {
+            let collector = lash_core::perf_witness::Collector::install()?;
             let (initial_snapshot, initial_capture_phase) =
                 measure_runtime_perf_async_phase("checkpoint_state.initial_capture", async {
                     fixture.capture().await.map_err(anyhow::Error::from)
-                }).await?;
+                })
+                .await?;
             lash_core::testing::stage_execution_graph(&mut runtime_state, initial_snapshot);
             let initial_commit = RuntimeCommit::persisted_state_for_test_with_budget(
                 &runtime_state,
                 lash_core::CommitBudget::bounded(8 * 1024 * 1024, 2_048),
             );
             let published = fixture.commit(&mut publisher, &initial_commit).await?;
-            let (initial_component_count, initial_bytes) = staged_nodes(&published)?;
-            // Every binding's value is published once: none was installed
-            // before.
-            if initial_component_count != CHECKPOINT_STATE_BINDINGS
-                || initial_bytes < CHECKPOINT_STATE_BINDINGS * CHECKPOINT_STATE_BODY_BYTES
-            {
-                anyhow::bail!(
-                    "checkpoint-state fixture captured {initial_component_count} value leaves of {initial_bytes} bytes, \
-                     expected {CHECKPOINT_STATE_BINDINGS} of {CHECKPOINT_STATE_BODY_BYTES} bytes"
-                );
-            }
+            let initial_pages = staged_pages(&published)?;
+            let initial_spool_bytes = collector.snapshot().spool_bytes;
+            drop(collector);
+            anyhow::ensure!(
+                initial_pages > 0 && initial_spool_bytes > 0,
+                "checkpoint-state seed must seal heap pages"
+            );
             runtime_state = reloaded(store.clone(), &runtime_state.session_id).await?;
             fixture.read_head(&publisher, &runtime_state).await?;
-            Ok((initial_component_count, initial_capture_phase))
+            Ok((initial_pages, initial_spool_bytes, initial_capture_phase))
         })
         .await?;
 
     let mut last_checkpoint_bytes = 0_u64;
-    let mut last_changed_components = 0_u64;
+    let mut metric_samples = BTreeMap::<String, Vec<f64>>::new();
     let mut last_hydrated_bytes = 0_u64;
     for turn_index in 0..chat_turns {
+        let collector = lash_core::perf_witness::Collector::install()?;
+        let before_pages = fixture.pages_sealed();
         fixture.assign(turn_index, turn_index).await?;
         run.turn(
             turn_index,
@@ -393,6 +407,19 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 fixture.capture().await.map_err(anyhow::Error::from)
             }).await?;
         phase_profile.insert(phase.0, phase.1);
+        let pages_sealed = fixture.pages_sealed() - before_pages;
+        let spool_bytes = collector.snapshot().spool_bytes;
+        drop(collector);
+        // One binding changes. Its pages and index paths must be smaller
+        // than sealing the entire retained population of 300 bindings.
+        anyhow::ensure!(pages_sealed > 0 && pages_sealed < initial_pages,
+            "one binding sealed {pages_sealed} pages versus {initial_pages} seed pages");
+        anyhow::ensure!(spool_bytes > 0 && spool_bytes < initial_spool_bytes,
+            "one binding spooled {spool_bytes} bytes versus {initial_spool_bytes} seed bytes");
+        for (name, value) in [("changed_bindings", 1), ("pages_sealed", pages_sealed), ("spool_bytes", spool_bytes)] {
+            metric_samples.entry(name.to_owned()).or_default().push(value as f64);
+        }
+
         lash_core::testing::stage_execution_graph(&mut runtime_state, snapshot);
         let commit = RuntimeCommit::persisted_state_for_test_with_budget(
             &runtime_state,
@@ -407,7 +434,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         phase_profile.insert(phase.0, phase.1);
         last_checkpoint_bytes = budget_measurement.checkpoint_bytes as u64;
 
-        let (published, phase) =
+        let (_, phase) =
             measure_runtime_perf_async_phase("checkpoint_state.component_commit", async {
                 fixture
                     .commit(&mut publisher, &commit)
@@ -418,17 +445,6 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         phase_profile.insert(phase.0, phase.1);
         runtime_state = reloaded(store.clone(), &runtime_state.session_id).await?;
         fixture.read_head(&publisher, &runtime_state).await?;
-        // One binding was reassigned: the commit publishes its new text, and
-        // every binding's large value, the reassigned one's too, stays
-        // where an earlier commit installed it (PC-LARGE-ONCE).
-        let (new_leaves, _) = staged_nodes(&published)?;
-        last_changed_components = new_leaves as u64;
-        if new_leaves != 1 {
-            anyhow::bail!(
-                "incremental checkpoint published {new_leaves} value leaves, expected its one reassigned binding's"
-            );
-        }
-
         let (loaded_execution_state, phase) =
             measure_runtime_perf_async_phase("checkpoint_state.component_load", async {
                 let persisted = store
@@ -477,14 +493,8 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         "execution_state_bindings".to_string(),
         CHECKPOINT_STATE_BINDINGS as u64,
     );
-    extra_counters.insert(
-        "execution_state_value_leaves".to_string(),
-        initial_component_count as u64,
-    );
-    extra_counters.insert(
-        "incremental_value_leaves".to_string(),
-        last_changed_components,
-    );
+    extra_counters.insert("initial_pages".to_string(), initial_pages);
+    extra_counters.insert("initial_spool_bytes".to_string(), initial_spool_bytes);
     extra_counters.insert("checkpoint_bytes".to_string(), last_checkpoint_bytes);
     extra_counters.insert(
         "hydrated_execution_state_bytes".to_string(),
@@ -493,24 +503,24 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
 
     Ok(run.finish(RunTail {
         extra_counters,
+        metric_samples,
         ..RunTail::default()
     }))
 }
 
-/// The payload leaves a commit published, and their encoded bytes: each
-/// binding's large text is one heap payload leaf, and a leaf an earlier
-/// commit installed is never published again.
-fn staged_nodes(
+/// Fresh semantic pages published by the seed. Bindings share packed
+/// pages; there is no one-leaf-per-binding representation.
+pub(super) fn staged_pages(
     published: &[lash_core_store::checkpoint_graph::EncodedNode],
-) -> anyhow::Result<(usize, usize)> {
-    let mut leaves = (0, 0);
+) -> anyhow::Result<u64> {
+    let mut pages = 0;
     for node in published {
-        if node.envelope()?.kind == lash_core_store::checkpoint_graph::NodeKind::PAYLOAD_LEAF {
-            leaves.0 += 1;
-            leaves.1 += node.bytes.len();
+        if lash_core_store::checkpoint_graph::NodeKind::SEMANTIC.contains(&node.envelope()?.kind.0)
+        {
+            pages += 1;
         }
     }
-    Ok(leaves)
+    Ok(pages)
 }
 
 /// The root of `state`'s head revision: its checkpoint.
