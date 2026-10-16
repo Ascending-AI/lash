@@ -741,3 +741,44 @@ fn registration_identifies_each_immutable_definition_once() {
     let after = crate::function::IDENTITY_CALLS.with(std::cell::Cell::get);
     assert_eq!(after - before, 1);
 }
+
+/// DECLARATIONS-RETAIN-ONCE (FIG-6457): a document's declarations drawn from a
+/// registry are checked against the identities registration took, never by
+/// identifying each definition again, and carry the JSON registration
+/// encoded once.
+#[test]
+fn registered_declarations_check_without_identifying_again() {
+    let mut registry = FunctionRegistry::declarations();
+    let mut header = String::from("kernel 1\nnumbers float\n");
+    for name in ["helper.one", "helper.two", "helper.three"] {
+        let function = registry.register(definition(name, false), None).unwrap();
+        header.push_str(&format!("use {name} = @{function}\n"));
+    }
+    let document = parse_document(&format!("{header}main {{ return 1 }}\n")).unwrap();
+    assert_eq!(document.manifest.functions.len(), 3);
+    let before = crate::function::IDENTITY_CALLS.with(std::cell::Cell::get);
+    let declarations = crate::required_declarations(&document, &registry).unwrap();
+    let first = crate::CheckedDeclarations::required(&document, &registry).unwrap();
+    let second = crate::CheckedDeclarations::required(&document, &registry).unwrap();
+    first.check(&document).unwrap();
+    let after = crate::function::IDENTITY_CALLS.with(std::cell::Cell::get);
+    assert_eq!(declarations.len(), 3);
+    assert_eq!(
+        after - before,
+        0,
+        "registered declarations are identified again"
+    );
+    let (first, second) = (first.images().unwrap(), second.images().unwrap());
+    assert_eq!(first.len(), 3);
+    assert!(
+        first
+            .iter()
+            .zip(&second)
+            .all(|((_, one), (_, two))| std::sync::Arc::ptr_eq(one, two)),
+        "a registered declaration is encoded once"
+    );
+    for (function, image) in &first {
+        let definition = registry.get(function).unwrap().definition();
+        assert_eq!(&**image, definition.to_json().unwrap());
+    }
+}

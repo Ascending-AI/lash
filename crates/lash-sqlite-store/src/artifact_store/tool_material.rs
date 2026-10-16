@@ -274,8 +274,5 @@ fn release_material_tx(
             referrer.canonical_id()
         ],
     )?;
-    for artifact_ref in held {
-        SqliteStore::reclaim_unreferenced_artifact_tx(tx, TOOL_MATERIAL_NAMESPACE, &artifact_ref)?;
-    }
-    Ok(())
+    SqliteStore::reclaim_unreferenced_artifacts_tx(tx, TOOL_MATERIAL_NAMESPACE, &held)
 }

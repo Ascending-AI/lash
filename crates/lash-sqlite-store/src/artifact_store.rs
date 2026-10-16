@@ -41,15 +41,6 @@ lash_store_sql::statements! {
         select_blob_ref = "SELECT blob_ref FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref = ?2";
 
-        /// `NOT EXISTS` is the whole safety argument: a referrer acquired
-        /// between the release and this delete keeps the row.
-        delete_unreferenced = "DELETE FROM artifact_refs
-             WHERE namespace = ?1 AND artifact_ref = ?2
-               AND NOT EXISTS (
-                   SELECT 1 FROM artifact_referrer_edges
-                   WHERE namespace = ?1 AND artifact_ref = ?2
-               )";
-
         /// Every pointer row, as the collector's root set.
         select_gc_roots = "SELECT namespace, blob_ref FROM artifact_refs
              ORDER BY namespace, artifact_ref";
@@ -103,6 +94,7 @@ pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
 pub(crate) const TURN_PRELUDE_NAMESPACE: &str = "turn_prelude";
 
+mod held;
 mod tool_material;
 
 /// The namespace of a store-set artifact store; an engine's own store has
@@ -323,71 +315,6 @@ impl SqliteStore {
         }).await.map_err(artifact_sqlite_error)
     }
 
-    fn reclaim_unreferenced_artifact_tx(
-        tx: &rusqlite::Connection,
-        namespace: &str,
-        artifact_ref: &str,
-    ) -> rusqlite::Result<()> {
-        use lash_core_execution::store::{EnumerationProgress, ReclamationEnumeration};
-        let mut enumeration = ReclamationEnumeration::<
-            lash_core_execution::ArtifactReferrerKind,
-            (lash_core_execution::ArtifactReferrerKind, String),
-        >::new();
-        let mut stmt = tx.prepare_cached(artifact_sql().edges.select_artifact_edges.sql())?;
-        let referrers = stmt
-            .query_map(params![namespace, artifact_ref], |row| {
-                let kind: String = row.get(0)?;
-                let id: String = row.get(1)?;
-                let referrer = decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
-                Ok((referrer.kind(), referrer.canonical_id()))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for kind in lash_core_execution::ArtifactReferrerKind::ALL {
-            enumeration
-                .page(
-                    kind,
-                    0,
-                    referrers
-                        .iter()
-                        .filter(|(source, _)| *source == kind)
-                        .cloned(),
-                    EnumerationProgress::Exhausted,
-                )
-                .map_err(sqlite_conversion_error)?;
-        }
-        let witness = enumeration.finish().map_err(sqlite_conversion_error)?;
-        Self::delete_unreferenced_artifact_tx(tx, namespace, artifact_ref, &witness)
-    }
-
-    fn delete_unreferenced_artifact_tx(
-        tx: &rusqlite::Connection,
-        namespace: &str,
-        artifact_ref: &str,
-        referrers: &lash_core_execution::store::CompleteArtifactReferrers,
-    ) -> rusqlite::Result<()> {
-        if !referrers.is_empty() {
-            return Ok(());
-        }
-        let blob_ref: Option<String> = tx
-            .query_row(
-                artifact_sql().refs.select_blob_ref.sql(),
-                params![namespace, artifact_ref],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let Some(blob_ref) = blob_ref else {
-            return Ok(());
-        };
-        crate::conn::cached_execute(
-            tx,
-            artifact_sql().refs.delete_unreferenced.sql(),
-            params![namespace, artifact_ref],
-        )?;
-        // The pointer was the blob's root: peel it and what only it reached.
-        crate::durable::peel(tx, std::collections::BTreeSet::from([blob_ref]))?;
-        Ok(())
-    }
-
     async fn end_artifact_referrer(
         &self,
         namespace: &'static str,
@@ -500,10 +427,7 @@ impl SqliteStore {
                 cleanup.referrer.canonical_id()
             ],
         )?;
-        for artifact_ref in refs {
-            Self::reclaim_unreferenced_artifact_tx(tx, namespace, &artifact_ref)?;
-        }
-        Ok(())
+        Self::reclaim_unreferenced_artifacts_tx(tx, namespace, &refs)
     }
 
     /// The database-owned share of an end. The obligation remains until
@@ -718,6 +642,36 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
             claim.clone(),
         )
         .await
+    }
+
+    async fn hold_module_artifacts(
+        &self,
+        claim: &ReferrerClaim,
+        artifacts: &[lash_core_execution::ModuleArtifactHold<'_>],
+    ) -> Result<(), ArtifactStoreError> {
+        if artifacts.is_empty() {
+            return Ok(());
+        }
+        let artifacts = artifacts
+            .iter()
+            .map(|artifact| {
+                if !crate::namespace::is_valid_opaque_key(artifact.module_ref()) {
+                    return Err(ArtifactStoreError::Encode(
+                        "invalid module reference".into(),
+                    ));
+                }
+                Ok(held::HeldArtifact {
+                    artifact_ref: artifact.module_ref().to_owned(),
+                    bytes: artifact.bytes().to_vec(),
+                    verified: matches!(
+                        artifact,
+                        lash_core_execution::ModuleArtifactHold::Publish { .. }
+                    ),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.hold_module_artifact_batch(claim.clone(), artifacts)
+            .await
     }
 
     async fn end_module_referrer(

@@ -246,7 +246,7 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         let functions = self.engine.functions.as_ref();
         lash_kernel_doc::validate_document(&document, functions)
             .map_err(|error| unresolvable(error.to_string()))?;
-        let declarations = lash_kernel_doc::required_declarations(&document, functions)
+        let declarations = lash_kernel_doc::CheckedDeclarations::required(&document, functions)
             .map_err(|error| unresolvable(error.to_string()))?;
         self.engine
             .documents
@@ -362,9 +362,14 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
             .collect::<Result<Vec<_>, _>>()?;
         // Only an admitted document is held, with the declarations it was
         // admitted against.
+        let declarations = lash_kernel_doc::CheckedDeclarations::required(
+            document.document(),
+            self.engine.functions.as_ref(),
+        )
+        .map_err(|refusal| store_fault(refusal.into()))?;
         self.engine
             .documents
-            .publish(claim, document.document(), document.declarations())
+            .publish(claim, document.document(), &declarations)
             .await
             .map_err(store_fault)?;
         Ok(lash_core::ProcessDocument::new(

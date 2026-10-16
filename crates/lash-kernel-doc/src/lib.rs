@@ -19,7 +19,9 @@ mod source_map_codec;
 #[cfg(test)]
 mod source_map_tests;
 pub use correspondence::{Correspondence, Survivor};
-pub use declarations::{DeclarationRefusal, check_declarations, required_declarations};
+pub use declarations::{
+    CheckedDeclarations, DeclarationRefusal, check_declarations, required_declarations,
+};
 pub use source_map::{SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span};
 mod codec_variants;
 mod continuation;

@@ -85,11 +85,37 @@ impl Fixture {
         }
     }
 
+    /// Every edge to a kernel document. A document is held with the
+    /// declaration of each helper it lists, `function:<id>` beside it under
+    /// the same referrer (FIG-6379): those edges are checked here, so a
+    /// declaration held by a referrer that holds no document fails every
+    /// law that reads edges, and are left out of the answer.
+    pub async fn edges(&self) -> Vec<Edge> {
+        let (declarations, documents): (Vec<Edge>, Vec<Edge>) = self
+            .kernel_document_edges()
+            .await
+            .into_iter()
+            .partition(|edge| edge.artifact_ref.starts_with("function:"));
+        let holders: std::collections::BTreeSet<(&str, &str)> = documents
+            .iter()
+            .map(|edge| (edge.kind.as_str(), edge.id.as_str()))
+            .collect();
+        let stray: Vec<&Edge> = declarations
+            .iter()
+            .filter(|edge| !holders.contains(&(edge.kind.as_str(), edge.id.as_str())))
+            .collect();
+        assert!(
+            stray.is_empty(),
+            "declarations held by a referrer that holds no document: {stray:#?}"
+        );
+        documents
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "acceptance fixture reads the durable edge table"
     )]
-    pub async fn edges(&self) -> Vec<Edge> {
+    async fn kernel_document_edges(&self) -> Vec<Edge> {
         const SQLITE_QUERY: &str = "SELECT artifact_ref, referrer_kind, referrer_id
             FROM artifact_referrer_edges WHERE namespace = 'kernel_document'
             ORDER BY artifact_ref, referrer_kind, referrer_id";

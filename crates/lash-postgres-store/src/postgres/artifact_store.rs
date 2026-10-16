@@ -329,6 +329,80 @@ impl PostgresLashVmArtifactStore {
         tx.commit().await.map_err(backend)
     }
 
+    /// Hold every module artifact under the claim in one transaction: the
+    /// referrer's lock, fence and guard once, every artifact's lock in key
+    /// order, each artifact stored as its hold says, then every edge.
+    async fn hold_module_artifact_batch(
+        &self,
+        claim: &ReferrerClaim,
+        artifacts: &[lash_core_execution::ModuleArtifactHold<'_>],
+    ) -> Result<(), ArtifactStoreError> {
+        if !claim.referrer().kind().holds_artifacts() {
+            return Err(ArtifactStoreError::ReferrerKindRefused {
+                kind: claim.referrer().kind(),
+            });
+        }
+        let mut tx = begin_guarded(&self.pool, &self.fence)
+            .await
+            .map_err(ArtifactStoreError::from)?;
+        lock_referrer_tx(&mut tx, &claim.referrer())
+            .await
+            .map_err(backend)?;
+        if is_fenced_tx(&mut tx, &claim.referrer()).await? {
+            return Err(ArtifactStoreError::ReferrerEnded {
+                referrer: claim.referrer(),
+            });
+        }
+        let mut locked: Vec<&str> = artifacts
+            .iter()
+            .map(lash_core_execution::ModuleArtifactHold::module_ref)
+            .collect();
+        locked.sort_unstable();
+        locked.dedup();
+        for artifact_ref in &locked {
+            lock_artifact_tx(&mut tx, MODULE_ARTIFACT_NAMESPACE, artifact_ref).await?;
+        }
+        if let Some(cleanup) = claim.guard_cleanup() {
+            crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, self.clock.timestamp_ms())
+                .await
+                .map_err(ArtifactStoreError::from)?;
+        }
+        for artifact in artifacts {
+            let (artifact_ref, bytes) = (artifact.module_ref(), artifact.bytes());
+            crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
+                .bind(MODULE_ARTIFACT_NAMESPACE)
+                .bind(artifact_ref)
+                .bind(bytes)
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(backend)?;
+            if let lash_core_execution::ModuleArtifactHold::Publish { .. } = artifact {
+                let stored: Vec<u8> = crate::observed_sql::query_scalar(
+                    artifact_sql().lash_vm_artifacts.select_bytes.sql(),
+                )
+                .bind(MODULE_ARTIFACT_NAMESPACE)
+                .bind(artifact_ref)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(backend)?;
+                if stored != bytes {
+                    return Err(ArtifactStoreError::Immutable {
+                        artifact_ref: artifact_ref.to_owned(),
+                    });
+                }
+            }
+            crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
+                .bind(MODULE_ARTIFACT_NAMESPACE)
+                .bind(artifact_ref)
+                .bind(claim.referrer().kind().as_str())
+                .bind(claim.referrer().canonical_id())
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(backend)?;
+        }
+        tx.commit().await.map_err(backend)
+    }
+
     /// Hold one definition closure under the claim in one transaction: the
     /// referrer's lock and fence, then every artifact's lock in key order,
     /// every manifest artifact stored, the descriptor published (verified
@@ -714,6 +788,25 @@ impl lash_core_execution::ModuleArtifactStore for PostgresLashVmArtifactStore {
         }
         self.write_namespaced(MODULE_ARTIFACT_NAMESPACE, module_ref, None, claim)
             .await
+    }
+
+    async fn hold_module_artifacts(
+        &self,
+        claim: &ReferrerClaim,
+        artifacts: &[lash_core_execution::ModuleArtifactHold<'_>],
+    ) -> Result<(), ArtifactStoreError> {
+        if artifacts.is_empty() {
+            return Ok(());
+        }
+        if artifacts
+            .iter()
+            .any(|artifact| !crate::namespace::is_valid_opaque_key(artifact.module_ref()))
+        {
+            return Err(ArtifactStoreError::Encode(
+                "invalid module reference".into(),
+            ));
+        }
+        self.hold_module_artifact_batch(claim, artifacts).await
     }
 
     async fn end_module_referrer(

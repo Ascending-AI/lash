@@ -313,6 +313,14 @@ impl ModuleArtifactStore for Modules {
         self.0.acquire(claim, module_ref)
     }
 
+    async fn hold_module_artifacts(
+        &self,
+        _claim: &ReferrerClaim,
+        _artifacts: &[crate::ModuleArtifactHold<'_>],
+    ) -> Result<(), ArtifactStoreError> {
+        Ok(())
+    }
+
     async fn end_module_referrer(
         &self,
         cleanup: &ResolvedArtifactCleanup,

@@ -65,6 +65,15 @@ impl ModuleArtifactStore for HeldPublication {
         self.inner.acquire_module_artifact(claim, module_ref).await
     }
 
+    async fn hold_module_artifacts(
+        &self,
+        claim: &ReferrerClaim,
+        artifacts: &[lash_core::ModuleArtifactHold<'_>],
+    ) -> Result<(), ArtifactStoreError> {
+        self.gate.pass().await;
+        self.inner.hold_module_artifacts(claim, artifacts).await
+    }
+
     async fn end_module_referrer(
         &self,
         cleanup: &ResolvedArtifactCleanup,

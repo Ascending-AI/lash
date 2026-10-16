@@ -94,6 +94,8 @@ pub struct RegisteredFunction {
     native: Option<Arc<dyn NativeFunction>>,
     function: FunctionId,
     callees: Arc<OnceLock<BTreeSet<FunctionId>>>,
+    /// The definition's JSON, encoded once for every holder that stores it.
+    image: Arc<OnceLock<Result<Arc<str>, EncodeError>>>,
     // Consumers own their derived types. Erasure keeps the document vocabulary
     // independent of the checker while registry clones share each result.
     derived: Arc<Mutex<DerivedFacts>>,
@@ -112,6 +114,7 @@ impl RegisteredFunction {
             native,
             function,
             callees: Arc::default(),
+            image: Arc::default(),
             derived: Arc::default(),
         }
     }
@@ -128,6 +131,18 @@ impl RegisteredFunction {
 
     pub fn identity(&self) -> FunctionId {
         self.function
+    }
+
+    /// The definition's JSON ([`FunctionDefinition::to_json`]), encoded
+    /// once per registration and shared by the registry's clones.
+    ///
+    /// # Errors
+    ///
+    /// The definition's encoding refusal.
+    pub fn image(&self) -> Result<Arc<str>, EncodeError> {
+        self.image
+            .get_or_init(|| self.definition.to_json().map(Arc::from))
+            .clone()
     }
 
     /// The functions the body actually calls or spawns, including nested expressions.

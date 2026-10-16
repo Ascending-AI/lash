@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use lash_core::{
     ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactStoreError, ArtifactStoreId,
-    DurabilityTier, HostArtifactPin, ModuleArtifactStore, ReferrerClaim, ReferrerGuard,
-    ResolvedArtifactCleanup,
+    DurabilityTier, HostArtifactPin, ModuleArtifactHold, ModuleArtifactStore, ReferrerClaim,
+    ReferrerGuard, ResolvedArtifactCleanup,
 };
 
 /// A writer and a fresh handle over the same durable store.
@@ -214,6 +214,105 @@ pub async fn ended_referrer_fences_late_publication(store: Arc<dyn ModuleArtifac
     assert!(
         matches!(refusal, ArtifactStoreError::ReferrerEnded { referrer: ended } if ended == referrer)
     );
+}
+
+/// FIG-6457: one batch holds every artifact under its claim in one write:
+/// a stored artifact acquired whatever bytes it was handed, an absent one
+/// stored, a published one verified. A refusal holds none of them, and an
+/// ended referrer holds nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store step"
+)]
+pub async fn batch_holds_all_or_nothing(store: Arc<dyn ModuleArtifactStore>) {
+    let [stored, fresh, document] = ["batch-stored", "batch-fresh", "batch-document"]
+        .map(|name| module(name).to_store_bytes().expect("module bytes"));
+    let [stored_key, fresh_key, document_key] =
+        ["batch-stored", "batch-fresh", "batch-document"].map(|name| module(name).key().to_owned());
+    let (earlier, earlier_claim) = host_claim();
+    store
+        .publish_module_artifact(&earlier_claim, &stored_key, &stored)
+        .await
+        .expect("publish");
+    let (holder, claim) = host_claim();
+    let refusal = store
+        .hold_module_artifacts(
+            &claim,
+            &[
+                ModuleArtifactHold::Acquire {
+                    module_ref: &fresh_key,
+                    bytes: &fresh,
+                },
+                ModuleArtifactHold::Publish {
+                    module_ref: &stored_key,
+                    bytes: &fresh,
+                },
+            ],
+        )
+        .await
+        .expect_err("other bytes under a published reference");
+    assert!(
+        matches!(refusal, ArtifactStoreError::Immutable { artifact_ref } if artifact_ref == stored_key)
+    );
+    assert_eq!(
+        store.get_module_artifact(&fresh_key).await.expect("read"),
+        None
+    );
+    store
+        .hold_module_artifacts(
+            &claim,
+            &[
+                ModuleArtifactHold::Acquire {
+                    module_ref: &stored_key,
+                    bytes: &fresh,
+                },
+                ModuleArtifactHold::Acquire {
+                    module_ref: &fresh_key,
+                    bytes: &fresh,
+                },
+                ModuleArtifactHold::Publish {
+                    module_ref: &document_key,
+                    bytes: &document,
+                },
+            ],
+        )
+        .await
+        .expect("hold");
+    store
+        .end_module_referrer(&end(earlier))
+        .await
+        .expect("end earlier");
+    for (key, bytes) in [
+        (&stored_key, &stored),
+        (&fresh_key, &fresh),
+        (&document_key, &document),
+    ] {
+        assert_eq!(
+            store.get_module_artifact(key).await.expect("read"),
+            Some(bytes.clone()),
+            "the batch holds `{key}`"
+        );
+    }
+    store
+        .end_module_referrer(&end(holder.clone()))
+        .await
+        .expect("end holder");
+    let refusal = store
+        .hold_module_artifacts(
+            &claim,
+            &[ModuleArtifactHold::Acquire {
+                module_ref: &fresh_key,
+                bytes: &fresh,
+            }],
+        )
+        .await
+        .expect_err("fenced batch");
+    assert!(
+        matches!(refusal, ArtifactStoreError::ReferrerEnded { referrer } if referrer == holder)
+    );
+    for key in [&stored_key, &fresh_key, &document_key] {
+        assert_eq!(store.get_module_artifact(key).await.expect("read"), None);
+    }
 }
 
 #[expect(

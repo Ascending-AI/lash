@@ -270,7 +270,7 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
     )
     .expect("the document is admitted");
     let declarations =
-        lash::workflow::document::required_declarations(&document, functions.as_ref())
+        lash::workflow::document::CheckedDeclarations::required(&document, functions.as_ref())
             .expect("the document's helpers are shipped");
     let identity = lash_vm_runtime::KernelDocuments::new(backend.module_artifacts())
         .publish(
@@ -1535,8 +1535,11 @@ async fn payload_under(
             ))
             .expect("a host pin is unguarded"),
             &document,
-            &lash::workflow::document::required_declarations(&document, environment.functions())
-                .expect("the document's helpers are held"),
+            &lash::workflow::document::CheckedDeclarations::required(
+                &document,
+                environment.functions(),
+            )
+            .expect("the document's helpers are held"),
         )
         .await
         .expect("the document publishes");

@@ -131,7 +131,7 @@ pub(super) async fn retain_document(
     // The cell's document is held with the declarations of the helpers it
     // was lowered against, so it reads without this build's library
     // (FIG-6379).
-    let declarations = lash_kernel_doc::required_declarations(&entries.document, functions)
+    let declarations = lash_kernel_doc::CheckedDeclarations::required(&entries.document, functions)
         .map_err(|error| error.to_string())?;
     lash_vm_runtime::KernelDocuments::new(ctx.actor_context().backend().module_artifacts())
         .publish(&claim, &entries.document, &declarations)

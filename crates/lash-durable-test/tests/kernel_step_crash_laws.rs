@@ -175,7 +175,7 @@ impl KernelSteps {
                 &lash_vm_runtime::standard_functions()
                     .ok()
                     .and_then(|functions| {
-                        lash::workflow::document::required_declarations(
+                        lash::workflow::document::CheckedDeclarations::required(
                             &document,
                             functions.as_ref(),
                         )

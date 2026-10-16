@@ -19,11 +19,13 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use lash_core::{ArtifactName, ArtifactStoreError, ModuleArtifactStore, ReferrerClaim};
+use lash_core::{
+    ArtifactName, ArtifactStoreError, ModuleArtifactHold, ModuleArtifactStore, ReferrerClaim,
+};
 use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
 use lash_kernel_doc::{
-    Correspondence, Document, DocumentId, FunctionDeclarations, FunctionDefinition, FunctionId,
-    SourceMap, SourceMapId, WorkflowDocumentRef,
+    CheckedDeclarations, Correspondence, Document, DocumentId, FunctionDeclarations,
+    FunctionDefinition, FunctionId, SourceMap, SourceMapId, WorkflowDocumentRef,
 };
 
 /// The module artifact a document is stored under.
@@ -285,9 +287,10 @@ impl KernelDocuments {
 
     /// Stores `document` under its identity with `declarations`, the
     /// definition of every library function it lists, each under its own
-    /// identity, and adds `claim`'s edge to each: the one writer of kernel
-    /// documents. The declarations are checked against the document first;
-    /// a declaration already stored is only acquired.
+    /// identity, and adds `claim`'s edge to each, in one store transaction:
+    /// the one writer of kernel documents. The declarations are checked
+    /// against the document first; a declaration already stored is only
+    /// acquired.
     ///
     /// # Errors
     ///
@@ -297,19 +300,29 @@ impl KernelDocuments {
         &self,
         claim: &ReferrerClaim,
         document: &Document,
-        declarations: &FunctionDeclarations,
+        declarations: &CheckedDeclarations,
     ) -> Result<DocumentId, DocumentStoreError> {
-        lash_kernel_doc::check_declarations(document, declarations)?;
+        declarations.check(document)?;
         let identity = document.identity();
-        for (function, definition) in declarations {
-            self.hold(claim, &function_artifact(function), || {
-                definition.to_json().map(String::into_bytes)
+        let functions: Vec<(ArtifactName, Arc<str>)> = declarations
+            .images()?
+            .into_iter()
+            .map(|(function, image)| (function_artifact(&function), image))
+            .collect();
+        let document_ref = identity.to_string();
+        let document_bytes = document.to_json()?;
+        let artifacts: Vec<ModuleArtifactHold<'_>> = functions
+            .iter()
+            .map(|(name, image)| ModuleArtifactHold::Acquire {
+                module_ref: &name.artifact_ref,
+                bytes: image.as_bytes(),
             })
-            .await?;
-        }
-        self.store
-            .publish_module_artifact(claim, &identity.to_string(), document.to_json()?.as_bytes())
-            .await?;
+            .chain(std::iter::once(ModuleArtifactHold::Publish {
+                module_ref: &document_ref,
+                bytes: document_bytes.as_bytes(),
+            }))
+            .collect();
+        self.store.hold_module_artifacts(claim, &artifacts).await?;
         Ok(identity)
     }
 
@@ -319,20 +332,18 @@ impl KernelDocuments {
         &self,
         claim: &ReferrerClaim,
         name: &ArtifactName,
-        bytes: impl FnOnce() -> Result<Vec<u8>, lash_kernel_doc::EncodeError>,
+        bytes: &[u8],
     ) -> Result<(), DocumentStoreError> {
-        match self
+        Ok(self
             .store
-            .acquire_module_artifact(claim, &name.artifact_ref)
-            .await
-        {
-            Ok(()) => Ok(()),
-            Err(ArtifactStoreError::ArtifactMissing { .. }) => Ok(self
-                .store
-                .publish_module_artifact(claim, &name.artifact_ref, &bytes()?)
-                .await?),
-            Err(error) => Err(error.into()),
-        }
+            .hold_module_artifacts(
+                claim,
+                &[ModuleArtifactHold::Acquire {
+                    module_ref: &name.artifact_ref,
+                    bytes,
+                }],
+            )
+            .await?)
     }
 
     /// The declarations `document` was stored with, each read back under
@@ -441,17 +452,12 @@ impl KernelDocuments {
         claim: &ReferrerClaim,
         correspondence: &Correspondence,
     ) -> Result<(), DocumentStoreError> {
-        match self
-            .hold(claim, &rewrite_artifact(&correspondence.result), || {
-                serde_json::to_vec(correspondence).map_err(|error| lash_kernel_doc::EncodeError {
-                    message: error.to_string(),
-                })
-            })
+        let bytes =
+            serde_json::to_vec(correspondence).map_err(|error| lash_kernel_doc::EncodeError {
+                message: error.to_string(),
+            })?;
+        self.hold(claim, &rewrite_artifact(&correspondence.result), &bytes)
             .await
-        {
-            Err(DocumentStoreError::Store(ArtifactStoreError::Immutable { .. })) => Ok(()),
-            held => held,
-        }
     }
 
     async fn rewrite(
@@ -497,14 +503,22 @@ impl KernelDocuments {
     ) -> Result<SourceMapId, DocumentStoreError> {
         map.validate(document, source)?;
         let identity = map.identity();
-        self.hold(claim, &source_artifact(&map.source), || {
-            Ok(source.as_bytes().to_vec())
-        })
-        .await?;
-        self.hold(claim, &source_map_artifact(&identity), || {
-            Ok(map.canonical_bytes())
-        })
-        .await?;
+        let map_bytes = map.canonical_bytes();
+        self.store
+            .hold_module_artifacts(
+                claim,
+                &[
+                    ModuleArtifactHold::Acquire {
+                        module_ref: &source_artifact(&map.source).artifact_ref,
+                        bytes: source.as_bytes(),
+                    },
+                    ModuleArtifactHold::Acquire {
+                        module_ref: &source_map_artifact(&identity).artifact_ref,
+                        bytes: &map_bytes,
+                    },
+                ],
+            )
+            .await?;
         Ok(identity)
     }
 
@@ -675,6 +689,16 @@ mod tests {
         ) -> Result<(), ArtifactStoreError> {
             Ok(())
         }
+        async fn hold_module_artifacts(
+            &self,
+            _: &ReferrerClaim,
+            artifacts: &[ModuleArtifactHold<'_>],
+        ) -> Result<(), ArtifactStoreError> {
+            if let Some(last) = artifacts.last() {
+                *self.0.lock().expect("store") = Some(last.bytes().to_vec());
+            }
+            Ok(())
+        }
         async fn end_module_referrer(
             &self,
             _: &lash_core::ResolvedArtifactCleanup,
@@ -688,6 +712,145 @@ mod tests {
         ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
             Ok(self.0.lock().expect("store").clone())
         }
+    }
+
+    /// One store write a retention made: each artifact it holds, with the
+    /// address of the bytes it was handed.
+    type Write = Vec<(String, usize)>;
+
+    /// Every store write a retention makes.
+    #[derive(Default)]
+    struct Counted {
+        stored: Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+        writes: Mutex<Vec<Write>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ModuleArtifactStore for Counted {
+        async fn publish_module_artifact(
+            &self,
+            claim: &ReferrerClaim,
+            module_ref: &str,
+            bytes: &[u8],
+        ) -> Result<(), ArtifactStoreError> {
+            self.hold_module_artifacts(claim, &[ModuleArtifactHold::Publish { module_ref, bytes }])
+                .await
+        }
+        async fn acquire_module_artifact(
+            &self,
+            _: &ReferrerClaim,
+            module_ref: &str,
+        ) -> Result<(), ArtifactStoreError> {
+            self.writes
+                .lock()
+                .expect("writes")
+                .push(vec![(module_ref.to_owned(), 0)]);
+            Err(ArtifactStoreError::ArtifactMissing {
+                artifact_ref: module_ref.to_owned(),
+            })
+        }
+        async fn hold_module_artifacts(
+            &self,
+            _: &ReferrerClaim,
+            artifacts: &[ModuleArtifactHold<'_>],
+        ) -> Result<(), ArtifactStoreError> {
+            let mut stored = self.stored.lock().expect("store");
+            let mut write = Write::new();
+            for artifact in artifacts {
+                stored
+                    .entry(artifact.module_ref().to_owned())
+                    .or_insert_with(|| artifact.bytes().to_vec());
+                write.push((
+                    artifact.module_ref().to_owned(),
+                    artifact.bytes().as_ptr() as usize,
+                ));
+            }
+            self.writes.lock().expect("writes").push(write);
+            Ok(())
+        }
+        async fn end_module_referrer(
+            &self,
+            _: &lash_core::ResolvedArtifactCleanup,
+        ) -> Result<(), ArtifactStoreError> {
+            self.stored.lock().expect("store").clear();
+            Ok(())
+        }
+        async fn get_module_artifact(
+            &self,
+            module_ref: &str,
+        ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+            Ok(self.stored.lock().expect("store").get(module_ref).cloned())
+        }
+    }
+
+    /// DECLARATIONS-RETAIN-ONCE (FIG-6457): a cell retains its document and
+    /// the K helper declarations it lists in one fenced store write, handing
+    /// the store the JSON the registry encoded once, every cell alike; the
+    /// declarations still read back with the document.
+    #[tokio::test]
+    async fn declarations_retain_once_in_one_fenced_batch() {
+        let mut registry = lash_kernel_doc::FunctionRegistry::new();
+        let mut header = String::from("kernel 1\nnumbers float\n");
+        let mut calls = String::new();
+        for (name, local) in [
+            ("helper.one", "a"),
+            ("helper.two", "b"),
+            ("helper.three", "c"),
+        ] {
+            calls.push_str(&format!("let {local} = invoke {name}() "));
+            let function = registry
+                .register(
+                    lash_kernel_doc::parse_definition(&format!(
+                        "function {name}() -> Any\nkernel 1\ncharge 1\nbody {{ return 7 }}"
+                    ))
+                    .expect("helper"),
+                    None,
+                )
+                .expect("registered");
+            header.push_str(&format!("use {name} = @{function}\n"));
+        }
+        let store = Arc::new(Counted::default());
+        let documents = KernelDocuments::new(store.clone());
+        let mut retained = Vec::new();
+        // Each cell's declarations stay alive, so an image encoded again
+        // could not reuse the address of the one before.
+        let mut checked = Vec::new();
+        for cell in [7, 8] {
+            let document = lash_kernel_doc::parse_document(&format!(
+                "{header}main {{ {calls}return {cell} }}"
+            ))
+            .expect("document");
+            let claim = ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                lash_core::HostArtifactPin::mint(),
+            ))
+            .expect("host claim");
+            checked.push(CheckedDeclarations::required(&document, &registry).expect("listed"));
+            let identity = documents
+                .publish(&claim, &document, checked.last().expect("checked"))
+                .await
+                .expect("published");
+            let mut writes = std::mem::take(&mut *store.writes.lock().expect("writes"));
+            assert_eq!(writes.len(), 1, "one fenced batch, not {writes:?}");
+            let mut write = writes.remove(0);
+            assert_eq!(write.len(), 4);
+            assert_eq!(
+                write.pop().map(|(artifact, _)| artifact),
+                Some(document_artifact(&identity).artifact_ref)
+            );
+            let read = documents
+                .workflow(&WorkflowDocumentRef {
+                    document: identity,
+                    entry: lash_kernel_doc::WorkflowDocumentEntry::Main,
+                })
+                .await
+                .expect("read");
+            assert!(matches!(read, StoredWorkflow::Read(_)), "{read:?}");
+            retained.push(write);
+        }
+        assert_eq!(
+            retained[0], retained[1],
+            "a later cell holds the same declaration images, encoded once"
+        );
     }
 
     /// FIG-6148, K-DOC-003: repeated activations share decoding, but the

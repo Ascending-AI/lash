@@ -7,7 +7,13 @@
 //! identity names, under the name the document uses it by, whose body calls
 //! only functions the document lists as well.
 
-use crate::{Document, FunctionCatalog, FunctionDeclarations, FunctionId, FunctionName};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use crate::{
+    Document, EncodeError, FunctionCatalog, FunctionDeclarations, FunctionDefinition, FunctionId,
+    FunctionName,
+};
 
 /// Why a set of declarations is not the one a document uses.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -49,23 +55,36 @@ pub fn check_declarations(
     document: &Document,
     declarations: &FunctionDeclarations,
 ) -> Result<(), DeclarationRefusal> {
+    check_held(document, declarations, |_, definition| (definition, None))
+}
+
+/// [`check_declarations`] over `held`, where `declaration` answers each
+/// held definition and, when its holder already took it, its identity: a
+/// registry's identity is the one registration took, so a definition is
+/// identified once however often a document draws it.
+fn check_held<'a, D>(
+    document: &Document,
+    held: &'a BTreeMap<FunctionId, D>,
+    declaration: impl Fn(&FunctionId, &'a D) -> (&'a FunctionDefinition, Option<FunctionId>),
+) -> Result<(), DeclarationRefusal> {
     let listed = &document.manifest.functions;
     if let Some((function, name)) = listed
         .iter()
-        .find(|(function, _)| !declarations.contains_key(function))
+        .find(|(function, _)| !held.contains_key(function))
     {
         return Err(DeclarationRefusal::Missing {
             function: *function,
             name: name.clone(),
         });
     }
-    for (function, definition) in declarations {
+    for (function, held) in held {
         let Some(expected) = listed.get(function) else {
             return Err(DeclarationRefusal::Unused {
                 function: *function,
             });
         };
-        let found = definition.identity();
+        let (definition, identified) = declaration(function, held);
+        let found = identified.unwrap_or_else(|| definition.identity());
         if found != *function {
             return Err(DeclarationRefusal::Identity {
                 function: *function,
@@ -94,6 +113,36 @@ pub fn check_declarations(
     Ok(())
 }
 
+/// Each library function `document` lists, as `catalog` holds it: a
+/// registered definition with the identity registration took.
+fn drawn<'a>(
+    document: &Document,
+    catalog: &'a dyn FunctionCatalog,
+) -> Result<BTreeMap<FunctionId, (&'a FunctionDefinition, Option<FunctionId>)>, DeclarationRefusal>
+{
+    let mut held = BTreeMap::new();
+    for (function, name) in &document.manifest.functions {
+        let declaration = match catalog.registered(function) {
+            Some(registered) => (
+                registered.definition().as_ref(),
+                Some(registered.identity()),
+            ),
+            None => match catalog.definition(function) {
+                Some(definition) => (definition, None),
+                None => {
+                    return Err(DeclarationRefusal::Missing {
+                        function: *function,
+                        name: name.clone(),
+                    });
+                }
+            },
+        };
+        held.insert(*function, declaration);
+    }
+    check_held(document, &held, |_, declaration| *declaration)?;
+    Ok(held)
+}
+
 /// The declarations of the library functions `document` lists, taken from
 /// `catalog` and checked as [`check_declarations`] checks them: the subset of
 /// a registry's or a shipped export's definitions a holder keeps.
@@ -105,16 +154,82 @@ pub fn required_declarations(
     document: &Document,
     catalog: &dyn FunctionCatalog,
 ) -> Result<FunctionDeclarations, DeclarationRefusal> {
-    let mut held = FunctionDeclarations::new();
-    for (function, name) in &document.manifest.functions {
-        let Some(definition) = catalog.definition(function) else {
-            return Err(DeclarationRefusal::Missing {
-                function: *function,
-                name: name.clone(),
-            });
-        };
-        held.insert(*function, definition.clone());
+    Ok(drawn(document, catalog)?
+        .into_iter()
+        .map(|(function, (definition, _))| (function, definition.clone()))
+        .collect())
+}
+
+/// The declarations of the library functions a document lists, checked
+/// against it, each with the JSON it is stored as. A registered
+/// definition's identity and JSON are the ones its registration holds, so
+/// a holder that retains a document's helpers for every cell identifies
+/// and encodes each of them once (FIG-6457).
+#[derive(Clone, Debug)]
+pub struct CheckedDeclarations {
+    held: BTreeMap<FunctionId, CheckedDeclaration>,
+}
+
+#[derive(Clone, Debug)]
+struct CheckedDeclaration {
+    definition: Arc<FunctionDefinition>,
+    image: Result<Arc<str>, EncodeError>,
+}
+
+impl CheckedDeclarations {
+    /// The declarations [`required_declarations`] takes from `catalog`, as
+    /// it checks them, with their images.
+    ///
+    /// # Errors
+    ///
+    /// The first [`DeclarationRefusal`].
+    pub fn required(
+        document: &Document,
+        catalog: &dyn FunctionCatalog,
+    ) -> Result<Self, DeclarationRefusal> {
+        let drawn = drawn(document, catalog)?;
+        let mut held = BTreeMap::new();
+        for (function, (definition, _)) in drawn {
+            let declaration = match catalog.registered(&function) {
+                Some(registered) => CheckedDeclaration {
+                    definition: Arc::clone(registered.definition()),
+                    image: registered.image(),
+                },
+                None => CheckedDeclaration {
+                    definition: Arc::new(definition.clone()),
+                    image: definition.to_json().map(Arc::from),
+                },
+            };
+            held.insert(function, declaration);
+        }
+        Ok(Self { held })
     }
-    check_declarations(document, &held)?;
-    Ok(held)
+
+    /// Checks that these are `document`'s declarations, by the identities
+    /// they were checked under.
+    ///
+    /// # Errors
+    ///
+    /// The first [`DeclarationRefusal`], as [`check_declarations`] orders
+    /// them.
+    pub fn check(&self, document: &Document) -> Result<(), DeclarationRefusal> {
+        check_held(document, &self.held, |function, declaration| {
+            (declaration.definition.as_ref(), Some(*function))
+        })
+    }
+
+    /// Each declaration's function and the JSON it is stored as, in
+    /// identity order.
+    ///
+    /// # Errors
+    ///
+    /// The first declaration with no JSON encoding.
+    pub fn images(&self) -> Result<Vec<(FunctionId, Arc<str>)>, EncodeError> {
+        self.held
+            .iter()
+            .map(|(function, declaration)| {
+                declaration.image.clone().map(|image| (*function, image))
+            })
+            .collect()
+    }
 }

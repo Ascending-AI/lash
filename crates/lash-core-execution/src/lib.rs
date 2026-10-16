@@ -65,7 +65,9 @@ pub use backend::{
 pub use lash_durable::{DurableConfig, DurableSettings, DurableStore};
 mod module_artifacts;
 pub use lash_sansio::module_artifact_refusal::{ModuleArtifactCorruption, ModuleArtifactRefusal};
-pub use module_artifacts::{ArtifactStoreError, DurabilityTier, ModuleArtifactStore};
+pub use module_artifacts::{
+    ArtifactStoreError, DurabilityTier, ModuleArtifactHold, ModuleArtifactStore,
+};
 pub mod direct;
 pub mod direct_completion_client;
 pub mod effect_attempt;

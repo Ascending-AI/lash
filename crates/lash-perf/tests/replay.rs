@@ -89,3 +89,65 @@ fn traffic_conservation_replay_exports_only_complete_attribution() {
         round["metrics"]["store_bytes_written"].as_f64().unwrap()
     );
 }
+
+/// FIG-6467: a fresh code-mode turn must not retain and release its helper
+/// declarations a few SQL statements apiece. The pre-heap replay used 570
+/// statements; allow half that count again for persistent-heap leases and
+/// publication.
+#[test]
+fn a_first_cell_turn_stays_within_the_sql_statement_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("first-turn.json");
+    std::fs::write(
+        &script,
+        serde_json::to_vec(&serde_json::json!({
+            "format": "lash-perf-replay/1",
+            "name": "first-cell-turn",
+            "description": "Fresh-process host JSON turn SQL budget (FIG-6467)",
+            "protocol": "typescript",
+            "sessions": 1,
+            "turns": [{
+                "user": "Read and print a host value",
+                "replies": [
+                    {"cell": [
+                        "const result = await tools.fixture_lookup({key: \"json\"});",
+                        "console.log(JSON.stringify(result));"
+                    ]},
+                    {"text": "done"}
+                ]
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let receipt = dir.path().join("receipt.json");
+    let shapes = dir.path().join("shapes.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .arg("replay")
+        .arg(&script)
+        .arg("--store-dir")
+        .arg(dir.path().join("stores"))
+        .arg("--out")
+        .arg(&receipt)
+        .arg("--sql-shapes")
+        .arg(&shapes)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(receipt).unwrap()).unwrap();
+    let shapes: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(shapes).unwrap()).unwrap();
+    eprintln!("SQL attribution: {shapes}");
+    let statements = receipt["workloads"][0]["rounds"][0]["metrics"]["sql_statements"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        statements <= 855.0,
+        "first turn issued {statements} SQL statements, budget is 855 (1.5 × pre-heap 570)"
+    );
+}

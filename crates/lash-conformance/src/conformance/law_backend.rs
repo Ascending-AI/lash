@@ -231,6 +231,14 @@ impl crate::ModuleArtifactStore for UnavailableModuleArtifacts {
         StoreLawStores::no_second_substrate("Lash VM artifact store")
     }
 
+    async fn hold_module_artifacts(
+        &self,
+        _: &crate::ReferrerClaim,
+        _: &[crate::ModuleArtifactHold<'_>],
+    ) -> Result<(), crate::ArtifactStoreError> {
+        StoreLawStores::no_second_substrate("Lash VM artifact store")
+    }
+
     async fn end_module_referrer(
         &self,
         _: &crate::ResolvedArtifactCleanup,

@@ -188,6 +188,38 @@ fn module_artifact_refused(refusal: ModuleArtifactRefusal) -> crate::PluginError
     )
 }
 
+/// One artifact a [`ModuleArtifactStore::hold_module_artifacts`] batch holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModuleArtifactHold<'a> {
+    /// Stored when absent and verified against stored bytes, as
+    /// [`ModuleArtifactStore::publish_module_artifact`] holds it.
+    Publish {
+        module_ref: &'a str,
+        bytes: &'a [u8],
+    },
+    /// Acquired whatever bytes are stored, as
+    /// [`ModuleArtifactStore::acquire_module_artifact`] holds it, and stored
+    /// as `bytes` when nothing is.
+    Acquire {
+        module_ref: &'a str,
+        bytes: &'a [u8],
+    },
+}
+
+impl<'a> ModuleArtifactHold<'a> {
+    pub fn module_ref(&self) -> &'a str {
+        match self {
+            Self::Publish { module_ref, .. } | Self::Acquire { module_ref, .. } => module_ref,
+        }
+    }
+
+    pub fn bytes(&self) -> &'a [u8] {
+        match self {
+            Self::Publish { bytes, .. } | Self::Acquire { bytes, .. } => bytes,
+        }
+    }
+}
+
 /// The module-artifact store of one store set: the admitted kernel documents.
 ///
 /// A module is published once under its module reference (an opaque key) as
@@ -221,6 +253,16 @@ pub trait ModuleArtifactStore: Send + Sync {
         &self,
         claim: &ReferrerClaim,
         module_ref: &str,
+    ) -> Result<(), ArtifactStoreError>;
+
+    /// Hold every one of `artifacts` under the claim in one transaction: the
+    /// referrer's lock, fence check and guard arming once, then each artifact
+    /// as its [`ModuleArtifactHold`] says, then the claim's edge to each. A
+    /// refusal holds none of them.
+    async fn hold_module_artifacts(
+        &self,
+        claim: &ReferrerClaim,
+        artifacts: &[ModuleArtifactHold<'_>],
     ) -> Result<(), ArtifactStoreError>;
 
     /// Apply one resolved cleanup in one transaction (ADR 0113 §2.3): fence

@@ -261,8 +261,11 @@ async fn seed(backend: &Backend, source: &str) {
             &lash_vm_runtime::standard_functions()
                 .ok()
                 .and_then(|functions| {
-                    lash::workflow::document::required_declarations(&document, functions.as_ref())
-                        .ok()
+                    lash::workflow::document::CheckedDeclarations::required(
+                        &document,
+                        functions.as_ref(),
+                    )
+                    .ok()
                 })
                 .expect("the document's helpers are shipped"),
         )

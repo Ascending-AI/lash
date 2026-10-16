@@ -84,6 +84,51 @@ fn blob_content_hash(content: &[u8]) -> String {
     BlobRef::for_content(content).0
 }
 
+/// The stored envelopes of the module artifacts this store encoded, by
+/// content address and envelope version: a kernel declaration a later cell
+/// holds again after its blob was reclaimed is stored as the envelope it
+/// was, without compressing it again. The encoding is a function of the
+/// content, the store's profile and the version, so a reused envelope is
+/// byte for byte the one a fresh encoding writes.
+#[derive(Default)]
+pub(crate) struct EncodedImages {
+    envelopes: std::collections::HashMap<(String, u32), Arc<[u8]>>,
+    order: std::collections::VecDeque<(String, u32)>,
+    bytes: usize,
+}
+
+impl EncodedImages {
+    /// Bound the reused envelopes to four MiB of stored bytes.
+    const BYTES: usize = 4 * 1024 * 1024;
+
+    fn envelope(
+        &mut self,
+        blob_ref: &str,
+        version: u32,
+        encode: impl FnOnce() -> Result<Vec<u8>, StoreError>,
+    ) -> Result<Arc<[u8]>, StoreError> {
+        let key = (blob_ref.to_owned(), version);
+        if let Some(envelope) = self.envelopes.get(&key) {
+            return Ok(Arc::clone(envelope));
+        }
+        let envelope: Arc<[u8]> = encode()?.into();
+        if envelope.len() <= Self::BYTES {
+            while self.bytes + envelope.len() > Self::BYTES {
+                let Some(oldest) = self.order.pop_front() else {
+                    break;
+                };
+                if let Some(evicted) = self.envelopes.remove(&oldest) {
+                    self.bytes -= evicted.len();
+                }
+            }
+            self.bytes += envelope.len();
+            self.order.push_back(key.clone());
+            self.envelopes.insert(key, Arc::clone(&envelope));
+        }
+        Ok(envelope)
+    }
+}
+
 impl SqliteStore {
     /// Decode a checkpoint from a fresh durable connection without calling
     /// the session history read path.
@@ -148,6 +193,32 @@ impl SqliteStore {
         )
         .map_err(sqlite_error)?;
         Ok(())
+    }
+
+    /// The stored envelope of the kernel-document artifact `content`, whose
+    /// content address is `blob_ref`, encoded once per content and version
+    /// (`images`).
+    pub(crate) fn module_envelope(
+        blob_ref: &BlobRef,
+        content: &[u8],
+        profile: BuiltinBlobProfile,
+        fleet: FleetFormat,
+        images: &std::sync::Mutex<EncodedImages>,
+    ) -> Result<Arc<[u8]>, StoreError> {
+        let version = fleet.writer_version(lash_core_execution::surface_format!(
+            SQLITE_BLOB_ENVELOPE_VERSION
+        ));
+        images
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .envelope(blob_ref.as_str(), version, || {
+                encode_artifact_blob(
+                    &BlobArtifactDescriptor::kernel_document(),
+                    profile,
+                    content,
+                    version,
+                )
+            })
     }
 
     /// Seed an intentionally unrooted artifact for GC and failure-path tests.

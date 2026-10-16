@@ -218,14 +218,13 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
         )
         .map_err(retried)?;
         let declarations =
-            lash_kernel_doc::required_declarations(&document, engine.functions.as_ref()).map_err(
-                |refusal| {
+            lash_kernel_doc::CheckedDeclarations::required(&document, engine.functions.as_ref())
+                .map_err(|refusal| {
                     fatal(&KernelMigrationRefusal::NotAdmitted {
                         document: correspondence.base,
                         reason: refusal.to_string(),
                     })
-                },
-            )?;
+                })?;
         input.document = engine
             .documents
             .publish(&claim, &document, &declarations)

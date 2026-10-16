@@ -195,8 +195,8 @@ pub use lash_core::{
 };
 /// The Lash VM module-artifact port a backend's store set supplies.
 pub use lash_core::{
-    ArtifactStoreError, DurabilityTier, ModuleArtifactCorruption, ModuleArtifactRefusal,
-    ModuleArtifactStore,
+    ArtifactStoreError, DurabilityTier, ModuleArtifactCorruption, ModuleArtifactHold,
+    ModuleArtifactRefusal, ModuleArtifactStore,
 };
 pub use lash_core::{
     BlobRef, CallResultSummary, DurableItem, DurablePayload, DurableScan, DurableScanPage,

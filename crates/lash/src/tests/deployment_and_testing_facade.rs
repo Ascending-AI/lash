@@ -227,6 +227,17 @@ impl lash_core::ModuleArtifactStore for ScriptedArtifactReads {
             .await
     }
 
+    async fn hold_module_artifacts(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        artifacts: &[lash_core::ModuleArtifactHold<'_>],
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        self.store
+            .inner()
+            .hold_module_artifacts(claim, artifacts)
+            .await
+    }
+
     async fn end_module_referrer(
         &self,
         cleanup: &lash_core::ResolvedArtifactCleanup,
