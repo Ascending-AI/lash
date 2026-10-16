@@ -150,6 +150,9 @@ struct World {
     early: Mutex<Vec<String>>,
     /// The arguments of every `write` body entry.
     writes: Mutex<Vec<Value>>,
+    /// Notified at each `write`: an accepted cell's provider streams its
+    /// tail once the cell ran.
+    written: tokio::sync::Notify,
 }
 
 impl World {
@@ -205,8 +208,9 @@ enum Answer {
     Cell,
     /// A TypeScript cell that only prints, then `done`.
     PrintingCell,
-    /// The [`Answer::Cell`] cell streamed with trailing text and never
-    /// completed: the cell mask aborts the stream at its close tag.
+    /// The [`Answer::Cell`] cell, accepted by the cell mask at its close
+    /// tag while the provider still generates: the provider streams its
+    /// trailing text and reports [`USAGE`] only after the cell ran.
     AbortedCell,
     /// Two streamed deltas, then a provider failure no retry follows.
     Failed,
@@ -223,7 +227,7 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("model-answer-receipt")
         .requires_streaming(true)
-        .complete(move |mut request: LlmRequest| {
+        .complete(move |request: LlmRequest| {
             let world = Arc::clone(&world);
             async move {
                 world.all_sends.fetch_add(1, Ordering::SeqCst);
@@ -279,14 +283,21 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                     ),
                     Answer::AbortedCell => {
                         let mut pieces = cell(marker);
-                        pieces.push("\nTrailing prose the mask cuts.".to_owned());
                         stream(&request, &pieces);
-                        // The provider never completes: the mask's abort
-                        // ends the call, and the runtime synthesizes its
-                        // response from what streamed.
-                        drop(request.stream_events.take());
-                        std::future::pending::<()>().await;
-                        unreachable!("an aborted call never completes");
+                        // The mask accepts the cell at its close tag and the
+                        // cell runs from what streamed; the provider's tail
+                        // drains off the turn's path (FIG-6433).
+                        world.written.notified().await;
+                        let tail = "\nTrailing prose the mask cuts.".to_owned();
+                        stream(&request, std::slice::from_ref(&tail));
+                        pieces.push(tail);
+                        LlmResponse {
+                            parts: vec![LlmOutputPart::Text {
+                                text: pieces.concat(),
+                                response_meta: None,
+                            }],
+                            ..LlmResponse::default()
+                        }
                     }
                 };
                 response.usage = USAGE;
@@ -468,6 +479,7 @@ struct Writes {
 impl StaticToolExecute for Writes {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.world.writes.lock_recover().push(call.args.clone());
+        self.world.written.notify_one();
         ToolOutcome::ok(json!({ "wrote": call.args })).into()
     }
 }
@@ -1224,9 +1236,9 @@ async fn a_cell_that_never_saves_is_derived_again_from_its_receipt() {
     deployment.end();
 }
 
-/// The uncut run's derivations of `answer`'s turn, for a law to compare a
-/// resumed run with.
-async fn uncut_derivations(answer: Answer) -> Vec<Value> {
+/// The uncut run of `answer`'s turn, for a law to compare a resumed run
+/// with: its derivations and its committed usage.
+async fn uncut_run(answer: Answer) -> (Vec<Value>, LlmUsage) {
     let deployment = Deployment::new(Setup::new(answer, Hooks::All), |_| {}).await;
     let _handle = deployment.send().await;
     deployment.settle().await;
@@ -1236,16 +1248,22 @@ async fn uncut_derivations(answer: Answer) -> Vec<Value> {
         .into_iter()
         .map(|(handed, _)| handed)
         .collect();
+    let usage = deployment.usage().await;
     deployment.end();
-    derived
+    (derived, usage)
 }
 
 /// RECEIPT-INCLUDES-STREAM-RECOVERY-INPUTS: A holds in its stream finish,
 /// after the receipt committed, and is killed. B runs on a core of its own,
 /// whose stream hooks never saw A's stream: it finishes the stream from the
 /// receipt's capsule and derives what the uncut run derives, with no send.
+/// The uncut run charges the paid answer's usage. B charges what the receipt
+/// holds: that usage for a call that completed before its receipt, and for
+/// a cell accepted mid-stream, whose tail drained on A alone, the call
+/// counted unknown, never zero (FIG-6433).
 async fn a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(answer: Answer) {
-    let uncut = uncut_derivations(answer).await;
+    let (uncut, uncut_usage) = uncut_run(answer).await;
+    assert_eq!(uncut_usage, USAGE, "the uncut run charges the paid answer");
     let deployment = Deployment::new(
         Setup::new(answer, Hooks::All).b_on_its_own_core(Hooks::All),
         |_| {},
@@ -1281,6 +1299,11 @@ async fn a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(answer: Answe
         "B derives from the receipt what the uncut run derives"
     );
     assert_eq!(markers(&deployment.world), [ANSWERS[0]]);
+    let resumed_usage = match answer {
+        Answer::AbortedCell => LlmUsage::unknown_call(),
+        _ => USAGE,
+    };
+    assert_eq!(deployment.usage().await, resumed_usage);
     deployment.end();
 }
 
@@ -1290,8 +1313,9 @@ async fn a_completed_streams_finish_resumes_from_the_receipt_on_another_core() {
     a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(Answer::Cell).await;
 }
 
-/// RECEIPT-INCLUDES-STREAM-RECOVERY-INPUTS for a stream the cell mask
-/// aborted at its close tag, whose response the runtime synthesized.
+/// RECEIPT-INCLUDES-STREAM-RECOVERY-INPUTS for a stream whose cell the
+/// cell mask accepted at its close tag, whose response the runtime derived
+/// from what streamed while the provider's tail drained.
 #[tokio::test]
 async fn a_protocol_aborted_streams_finish_resumes_from_the_receipt_on_another_core() {
     a_stream_finish_killed_on_a_resumes_from_the_receipt_on_b(Answer::AbortedCell).await;

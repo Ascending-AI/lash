@@ -56,6 +56,35 @@ fn abort_first_chunk(id: &'static str) -> Arc<dyn lash_core::facade_support::Plu
     ))
 }
 
+/// A plugin that aborts the assistant stream at its first chunk once the
+/// provider has returned: the call's provider failure races the protocol's
+/// acceptance of the stream and is already in when the cell is accepted.
+fn abort_first_chunk_after_provider_returned(
+    id: &'static str,
+    returned: Arc<tokio::sync::Notify>,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(StaticPluginFactory::new(
+        lash_core::plugin::PluginDeclaration::initial(id),
+        lash_core::facade_support::PluginSpec::new().with_assistant_stream(
+            lash_core::hook_key!("assistant-stream-abort"),
+            Arc::new(move |context| {
+                let returned = Arc::clone(&returned);
+                Box::pin(async move {
+                    returned.notified().await;
+                    // The provider task seals the call after its future
+                    // returns.
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    Ok(AssistantStreamTransform {
+                        chunk: context.chunk,
+                        abort_stream: true,
+                        ..Default::default()
+                    })
+                })
+            }),
+        ),
+    ))
+}
+
 /// A law's deployment: its core, its session, and the sink its core's trace
 /// records land in.
 struct Replay {
@@ -307,41 +336,54 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
     Ok(())
 }
 
+/// A provider failure whose partial carries a foreign replay origin, in
+/// before the protocol accepts the stream, fails the call with the typed
+/// conflict and keeps the provider's own failure on the attempt. A failure
+/// that arrives after the acceptance is the call's tail (FIG-6433):
+/// [`protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_failure`].
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() -> Result<()> {
+    let returned = Arc::new(tokio::sync::Notify::new());
+    let provider_returned = Arc::clone(&returned);
     let provider = crate::testing::TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
-        .complete(|request| async move {
-            let events = request.stream_events.expect("streaming driver sender");
-            events.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                kind: StreamBlockKind::AssistantText,
-                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                text: "abort now".to_string(),
-            }));
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            Err(LlmTransportError::new("confirm2 original provider failure")
-                .with_kind(lash_core::ProviderFailureKind::Stream)
-                .with_code(FailureCode::provider("confirm2_original_code"))
-                .with_http_status(502)
-                .with_raw("confirm2 original raw provider evidence")
-                .with_partial_response(LlmResponse {
-                    parts: vec![LlmOutputPart::Reasoning {
-                        text: "partial summary".to_string(),
-                        replay: Some(lash_core::llm::types::ProviderReasoningReplay {
-                            signature: Some("foreign-partial-secret".to_string()),
-                            origin: Some(foreign_route()),
-                            ..Default::default()
-                        }),
-                    }],
-                    ..Default::default()
-                }))
+        .complete(move |request| {
+            let provider_returned = Arc::clone(&provider_returned);
+            async move {
+                let events = request.stream_events.expect("streaming driver sender");
+                events.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
+                    text: "abort now".to_string(),
+                }));
+                provider_returned.notify_one();
+                Err(LlmTransportError::new("confirm2 original provider failure")
+                    .with_kind(lash_core::ProviderFailureKind::Stream)
+                    .with_code(FailureCode::provider("confirm2_original_code"))
+                    .with_http_status(502)
+                    .with_raw("confirm2 original raw provider evidence")
+                    .with_partial_response(LlmResponse {
+                        parts: vec![LlmOutputPart::Reasoning {
+                            text: "partial summary".to_string(),
+                            replay: Some(lash_core::llm::types::ProviderReasoningReplay {
+                                signature: Some("foreign-partial-secret".to_string()),
+                                origin: Some(foreign_route()),
+                                ..Default::default()
+                            }),
+                        }],
+                        ..Default::default()
+                    }))
+            }
         })
         .build();
     let replay = Replay::over(
         "confirm2-abort-conflict-provider-failure",
         provider,
-        vec![abort_first_chunk("abort-before-provider-failure")],
+        vec![abort_first_chunk_after_provider_returned(
+            "abort-after-provider-failure",
+            returned,
+        )],
         true,
     )
     .await?;
