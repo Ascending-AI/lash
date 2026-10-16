@@ -28,13 +28,11 @@ pub use types::{
 /// The TypeScript presenter's id.
 pub const TYPESCRIPT_TOOL_PRESENTER_ID: &str = "lash.tools.typescript.v1";
 
-/// The TypeScript presenter's config: its prompt-facing schema and example
-/// cuts. Validation always reads the full schema.
+/// The TypeScript presenter's schema import budget. Exceeding it refuses
+/// presentation; validation always reads the full schema.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TypescriptPresenterConfig {
-    pub example_limit: usize,
-    pub example_chars: usize,
     pub schema_depth: usize,
 }
 
@@ -45,14 +43,10 @@ impl Default for TypescriptPresenterConfig {
 }
 
 impl TypescriptPresenterConfig {
-    /// Standard preset: two examples, 240 characters each, eight schema
-    /// container levels. Historical cuts with no universal workload measurement.
+    /// Standard preset: eight schema container levels. A historical budget with
+    /// no universal workload measurement.
     pub const fn standard() -> Self {
-        Self {
-            example_limit: 2,
-            example_chars: 240,
-            schema_depth: 8,
-        }
+        Self { schema_depth: 8 }
     }
 }
 
@@ -84,7 +78,7 @@ impl TypescriptToolPresenter {
         );
         pool.reserve_document(&input);
         pool.reserve_document(&output);
-        render_tool_doc(tool, config, &input, &output, &mut pool)
+        render_tool_doc(tool, &input, &output, &mut pool)
     }
 }
 
@@ -143,7 +137,7 @@ impl ToolPresenter for TypescriptToolPresenter {
         };
         listing::plan(request, initial, |index, pool| {
             let (input, output) = &documents[index];
-            render_tool_doc(&request.tools[index], config, input, output, pool)
+            render_tool_doc(&request.tools[index], input, output, pool)
         })
         .map(|plan| plan.render(request.tools))
     }
@@ -221,14 +215,13 @@ impl ToolPresenter for TypescriptToolPresenter {
 /// let mut pool = TypescriptDefinitions::new(["HistoryItem"]);
 /// pool.reserve_document(&input);
 /// pool.reserve_document(&output);
-/// let text = render_tool_doc(&tool, config, &input, &output, &mut pool)?;
+/// let text = render_tool_doc(&tool, &input, &output, &mut pool)?;
 /// ```
 ///
 /// # Errors
 /// Returns a typed refusal for missing references or unsupported shapes.
 pub fn render_tool_doc(
     tool: &ToolPresentationEntry<'_>,
-    config: TypescriptPresenterConfig,
     input: &SchemaDocument,
     output: &SchemaDocument,
     pool: &mut TypescriptDefinitions,
@@ -262,17 +255,6 @@ pub fn render_tool_doc(
         if !rows.is_empty() {
             sections.push(format!("{title}:\n{}", rows.join("\n")));
         }
-    }
-    let examples = listing::compact_examples(
-        &tool.contract.examples,
-        config.example_limit,
-        config.example_chars,
-    )
-    .iter()
-    .map(|example| render_tool_example(example))
-    .collect::<Vec<_>>();
-    if !examples.is_empty() {
-        sections.push(format!("Examples: {}", examples.join("; ")));
     }
     Ok(sections.join("\n"))
 }
@@ -347,65 +329,6 @@ pub fn tool_signature(
     };
     let output = definitions::root_expression(output, output_names)?;
     Ok(format!("{call_path}({input}): Promise<{output}>"))
-}
-
-fn is_plain_identifier(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '_')
-        && !text.starts_with(|character: char| character.is_ascii_digit())
-}
-
-/// Rewrites an authored Lash VM example into this dialect.
-///
-/// Deliberately a small, total rewriter over the shapes the authored corpus
-/// actually uses rather than a translator: every example is a sequence of
-/// statement lines that are either an awaited call or an assignment.
-/// Anything it does not recognize still loses the try-operator
-/// and gains a terminator, which is the difference between "reads like
-/// TypeScript" and "is a syntax error".
-///
-/// It rewrites line by line, so an example whose *string literal* spans a
-/// real newline would have a terminator inserted inside the literal. No
-/// authored example does that (they escape it as `\n`), and the walker
-/// parses every rendered example, so the day one does the check fails
-/// rather than the model reading a syntax error.
-///
-/// ```rust,ignore
-/// assert_eq!(
-///     render_tool_example("page = await web.fetch({ url: \"u\" })?"),
-///     "const page = await web.fetch({ url: \"u\" });"
-/// );
-/// ```
-pub fn render_tool_example(example: &str) -> String {
-    example
-        .lines()
-        .map(|line| {
-            let trimmed = line.trim_end();
-            if trimmed.is_empty() {
-                return String::new();
-            }
-            let indent_len = trimmed.len() - trimmed.trim_start().len();
-            let (indent, body) = trimmed.split_at(indent_len);
-            // `expr?` — the Lash VM try-operator. TypeScript propagates a
-            // rejection from `await` itself, so the operator has no twin.
-            let body = body.strip_suffix('?').unwrap_or(body);
-            let body = match body.split_once(" = ") {
-                Some((name, value)) if is_plain_identifier(name) => {
-                    format!("const {name} = {value}")
-                }
-                _ => body.to_string(),
-            };
-            let body = if body.ends_with(';') || body.ends_with('{') || body.ends_with(',') {
-                body
-            } else {
-                format!("{body};")
-            };
-            format!("{indent}{body}")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[cfg(test)]

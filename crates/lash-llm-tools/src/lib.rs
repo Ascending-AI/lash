@@ -327,10 +327,6 @@ pub fn llm_query_tool_definition() -> ToolDefinition {
         "llm_query",
         "Run a one-shot LLM prompt over supplied data and return its result. The `task` plus everything in `inputs` is rendered into that single prompt; the call cannot use tools, inspect files, or gather more context beyond what you pass it. Use this for extracting information, classification, summarization, judging, or transformation over data already in your variables. `inputs` can be any structured value. `output` is optional and defaults to a string; when present, it requests structured output using record descriptors or `Type { ... }` literals.",
         llm_query_input_schema(),
-        vec![
-            r#"summary = await llm.query({ task: "Summarize the supplied notes in three bullets", inputs: { notes: notes } })?"#.into(),
-            r#"claims = await llm.query({ task: "Extract the key claim from each supplied chunk", inputs: { chunks: chunks }, output: { claims: "list[str]" } })?"#.into(),
-        ],
     )
     .with_tool_binding(ToolBinding::new(["llm"], "query"))
     .with_output_from_input_schema(
@@ -455,7 +451,6 @@ fn tool_definition(
     name: &str,
     description: impl Into<String>,
     input_schema: Value,
-    examples: Vec<String>,
 ) -> ToolDefinition {
     ToolDefinition::raw(
         format!("tool:{name}"),
@@ -467,7 +462,6 @@ fn tool_definition(
     .expect("valid declared tool schemas")
     // One model call: as long as lash lets a model call run.
     .with_execution(std::time::Duration::from_secs(10 * 60))
-    .with_examples(examples)
 }
 
 fn required_string(args: &Value, key: &str) -> Result<String, String> {

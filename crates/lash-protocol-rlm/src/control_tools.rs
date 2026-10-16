@@ -220,9 +220,7 @@ pub(crate) fn finish_tool_definition_for(
         definition_description,
         lash_core::JsonSchema::any(),
     );
-    definition
-        .with_examples(vec![vocabulary.finish_call.into()])
-        .with_tool_binding(ToolBinding::new(["control"], FINISH_TOOL_NAME))
+    definition.with_tool_binding(ToolBinding::new(["control"], FINISH_TOOL_NAME))
 }
 
 /// The `continue_as` control tool as a session in `dialect` advertises it.
@@ -246,7 +244,6 @@ pub(crate) fn continue_as_tool_definition_for(
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_examples(vec![vocabulary.continue_as_example.into()])
     .with_tool_binding(ToolBinding::new(["control"], "continue_as"))
     .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
         "seed",

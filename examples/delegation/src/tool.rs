@@ -113,15 +113,6 @@ pub fn spawn_agent_tool_definition() -> ToolDefinition {
         // prose. A call's explicit output schema still constrains its result.
         json!({}),
     )
-    .with_examples(vec![
-        r#"typed = await agents.spawn({ task: "Find the longest line in src/main.rs", output: { line: "str", length: "int" } })?"#.to_string(),
-        r#"answer = await agents.spawn({ task: "Solve sub-problem 3 using the bound problem text.", seed: { problem: input.prompt }, output: { value: "int" } })?"#.to_string(),
-        // A reusable shape binding, spelled as the same descriptor shorthand
-        // `output` accepts.
-        r#"Shape = { name: "str", tags: "list[str]", status: "str" }"#.to_string(),
-        r#"signed = await agents.spawn({ task: "Parse the book listing in data/books.json", output: Shape })?"#.to_string(),
-        r#"prose = await agents.spawn({ task: "Skim the routes in api/ and flag any missing auth checks" })?"#.to_string(),
-    ])
     .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
         "seed",
     ))

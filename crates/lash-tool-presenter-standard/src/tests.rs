@@ -39,12 +39,7 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
         }),
     )
     .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_examples(vec![
-        "await tools.search_docs({ query: \"rust\" })?".to_string(),
-        "await tools.search_docs({ query: \"rust\", limit: 3 })?".to_string(),
-        "await tools.search_docs({ query: \"ignored\" })?".to_string(),
-    ]);
+    .with_execution(std::time::Duration::from_secs(120));
 
     let contract = compact(&tool);
     assert_eq!(
@@ -64,7 +59,6 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
             .unwrap(),
         vec![serde_json::json!({"path":"input.limit", "notes":["<= 10", "default 5"]})]
     );
-    assert_eq!(contract.examples.len(), 2);
 
     let docs = compact(&tool).render_markdown();
     assert!(docs.contains(
@@ -72,9 +66,6 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
     ));
     assert!(!docs.contains("Returns:"));
     assert!(docs.contains("Parameters:\n- `input.limit` (<= 10, default 5)"));
-    assert!(docs.contains(
-        "Examples: await tools.search_docs({ query: \"rust\" })?; await tools.search_docs({ query: \"rust\", limit: 3 })?"
-    ));
 }
 
 #[test]
@@ -206,7 +197,6 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
             "execution": { "secs": 30, "nanos": 0 },
         },
         "contract": {
-            "examples": ["show album library"],
             "input_schema": {
                 "canonical": {
                 "type": "object",
@@ -604,5 +594,29 @@ fn static_and_dynamic_witness_closures_have_distinct_definition_identities() {
     assert!(
         !text.contains("type Input = record{output: TypeSpec<T>}"),
         "{text}"
+    );
+}
+
+/// FIG-6490: the discovery projection is a wire boundary too; removed
+/// authored examples cannot be accepted and discarded there.
+#[test]
+fn compact_discovery_refuses_legacy_authored_examples() {
+    let tool = ToolDefinition::raw(
+        "tool:lookup",
+        "lookup",
+        "Lookup",
+        serde_json::json!({"type":"object"}),
+        serde_json::json!({"type":"string"}),
+    )
+    .expect("schemas")
+    .with_execution(std::time::Duration::from_secs(30));
+    let mut wire = serde_json::to_value(compact(&tool)).expect("compact discovery serializes");
+    assert!(wire.get("examples").is_none());
+    wire["examples"] = serde_json::json!([]);
+    let refused = serde_json::from_value::<CompactToolContract>(wire)
+        .expect_err("removed authored examples are not ignored");
+    assert!(
+        refused.to_string().contains("unknown field `examples`"),
+        "{refused}"
     );
 }

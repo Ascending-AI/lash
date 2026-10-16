@@ -206,12 +206,14 @@ async fn regenerate_current_parked_image_set() {
     }
 }
 
-/// Append a full set locally at a release cut, naming the retained build.
+/// Append a full set at a release cut, or refresh one authorized pre-cut
+/// witness selected by LASH_IMAGE_NAME without changing its metadata or oracle.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "appends a new retained parked-run image set"]
 async fn record_current_parked_image_set() {
     assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
     let build = std::env::var("LASH_IMAGE_BUILD").expect("name the recording build commit");
+    let selected = std::env::var("LASH_IMAGE_NAME").ok();
     let mut records = Vec::new();
     for (name, kind, source) in [
         ("loop-closures-aliases", "kernel", LOOP),
@@ -221,7 +223,19 @@ async fn record_current_parked_image_set() {
         ("pending-tool-python", "python-cell", PYTHON_CELL),
         ("saved-declared-read", "declared-read-cell", READ_CELL),
     ] {
+        if selected.as_deref().is_some_and(|selected| selected != name) {
+            continue;
+        }
         records.push(record_image(name, kind, source).await);
+    }
+    if selected.is_some() {
+        assert_eq!(
+            records.len(),
+            1,
+            "select one of the six retained image names"
+        );
+        images::rerecord(&build, records.pop().unwrap());
+        return;
     }
     images::append(images::ImageSet {
         build,

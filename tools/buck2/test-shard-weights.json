@@ -749,7 +749,6 @@
     "control_tools::tests::continue_as_routes_projected_entries_and_globals_to_one_seed_event": 1,
     "control_tools::tests::identical_continue_as_tasks_at_distinct_calls_derive_distinct_keys": 3,
     "dialect::prompt_walker_tests::no_assembled_prompt_fragment_carries_the_retired_surfaces_words": 212,
-    "dialect::prompt_walker_tests::the_marker_list_and_the_example_rewriter_are_not_vacuous": 20,
     "dialect::tests::extension_session_bound_variables_use_its_vocabulary": 38,
     "dialect::tests::extension_session_parse_feedback_uses_its_cell_delimiter": 239,
     "dialect::tests::inferred_bound_and_read_only_shapes_use_the_dialect_schema_renderer": 1,

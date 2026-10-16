@@ -264,7 +264,6 @@ pub struct DialectPromptVocabulary {
     /// The continue-as control call, as a model would write it.
     pub continue_as_call: &'static str,
     /// A complete continue-as example for the tool doc.
-    pub continue_as_example: &'static str,
     /// The rule the bound-variable listing states about field names, in the
     /// terms of what this dialect's runtime does with a missing field.
     pub field_miss_rule: &'static str,

@@ -350,7 +350,7 @@ impl DefinitionPool {
 
 /// A tool's doc as a code-mode presenter lists it: its signature, its
 /// description, the notes of the fields that say more than their type
-/// (spelled with `schema_type`), and its examples.
+/// (spelled with `schema_type`).
 ///
 /// ```rust,ignore
 /// let doc = listing::code_mode_tool_doc(
@@ -359,7 +359,6 @@ impl DefinitionPool {
 ///     &input_shape,
 ///     &output_shape,
 ///     &render_schema_shape,
-///     &[],
 /// );
 /// assert!(doc.starts_with("`tools.lookup("));
 /// ```
@@ -369,7 +368,6 @@ pub fn code_mode_tool_doc(
     input: &SchemaShape,
     output: &SchemaShape,
     schema_type: &dyn Fn(&SchemaShape) -> String,
-    examples: &[String],
 ) -> String {
     // The signature carries every field's name and type. The rows under
     // it add what a type cannot say, for the fields that say it.
@@ -383,9 +381,6 @@ pub fn code_mode_tool_doc(
         if !rows.is_empty() {
             sections.push(format!("{title}:\n{}", rows.join("\n")));
         }
-    }
-    if !examples.is_empty() {
-        sections.push(format!("Examples: {}", examples.join("; ")));
     }
     sections.join("\n")
 }
@@ -485,31 +480,4 @@ pub fn discovery_text(
         }
     }
     Ok(lines.join("\n"))
-}
-
-/// Authored examples under a presenter's cuts: the first `limit` nonempty
-/// ones, each at most `max_chars` characters.
-///
-/// ```rust,ignore
-/// let cut = listing::compact_examples(&["a".into(), " ".into(), "bc".into()], 2, 240);
-/// assert_eq!(cut, ["a", "bc"]);
-/// ```
-pub fn compact_examples(examples: &[String], limit: usize, max_chars: usize) -> Vec<String> {
-    examples
-        .iter()
-        .map(|example| example.trim())
-        .filter(|example| !example.is_empty())
-        .take(limit)
-        .map(|example| {
-            if example.chars().count() <= max_chars {
-                return example.to_string();
-            }
-            let mut out = example
-                .chars()
-                .take(max_chars.saturating_sub(3))
-                .collect::<String>();
-            out.extend("...".chars().take(max_chars.min(3)));
-            out
-        })
-        .collect()
 }

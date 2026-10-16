@@ -375,22 +375,17 @@ struct DeferredSearchResult {
     call_path: String,
     signature: String,
     description: String,
-    examples: Vec<String>,
 }
 
 impl DeferredSearchResult {
     /// A catalogued tool as the session's dialect shows it: the same
-    /// signature and examples its resident tool docs would carry.
+    /// signature its resident tool docs would carry.
     #[expect(
         clippy::expect_used,
         reason = "the fixed deferred tool schemas are pinned by the discovery laws"
     )]
     fn new(call_path: &str, definition: &ToolDefinition) -> Self {
-        use lash::rlm::typescript_tool_presenter::{
-            TypescriptPresenterConfig, render_tool_example,
-        };
         use lash::rlm::{CellDialect, discovered_tool_signature};
-        let config = TypescriptPresenterConfig::standard();
         let contract = definition.contract();
         let input = &contract.input_schema.canonical;
         Self {
@@ -404,14 +399,6 @@ impl DeferredSearchResult {
             )
             .expect("built-in deferred tool schemas are representable"),
             description: definition.description().trim().to_string(),
-            examples: lash::tools::presenter_listing::compact_examples(
-                &contract.examples,
-                config.example_limit,
-                config.example_chars,
-            )
-            .iter()
-            .map(|example| render_tool_example(example))
-            .collect(),
         }
     }
 }
@@ -487,10 +474,9 @@ fn search_tool_definition() -> ToolDefinition {
                         "properties": {
                             "call_path": { "type": "string" },
                             "signature": { "type": "string" },
-                            "description": { "type": "string" },
-                            "examples": { "type": "array", "items": { "type": "string" } }
+                            "description": { "type": "string" }
                         },
-                        "required": ["call_path", "signature", "description", "examples"],
+                        "required": ["call_path", "signature", "description"],
                         "additionalProperties": false
                     }
                 }
@@ -500,9 +486,6 @@ fn search_tool_definition() -> ToolDefinition {
         }),
     ).expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_examples(vec![
-        "await tools.search({ query: \"text checksum\", limit: 3 });".to_string(),
-    ])
     .with_tool_binding(ToolBinding::new(["tools"], "search"))
 }
 
@@ -629,10 +612,6 @@ fn utility_definition(
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_examples(vec![format!(
-        "await {}.{}({{ /* matching arguments */ }})?",
-        module[0], operation
-    )])
     .with_tool_binding(ToolBinding::new(module, operation))
 }
 
@@ -733,6 +712,42 @@ fn invalid_arguments(message: &str) -> ToolOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-6490: discovery publishes only the callable contract; neither the
+    /// result schema nor its actual records carry authored tool examples.
+    #[test]
+    fn discovery_has_no_authored_examples_and_refuses_the_legacy_field() {
+        let definition = search_tool_definition();
+        let contract = definition.contract();
+        let schema = contract.output_schema.canonical.as_value();
+        let item = &schema["properties"]["results"]["items"];
+        assert!(item["properties"].get("examples").is_none());
+        assert!(
+            !item["required"]
+                .as_array()
+                .expect("required fields")
+                .contains(&json!("examples"))
+        );
+        let catalogue = DeferredCatalogue::new(workbench_deferred_definitions());
+        let results = catalogue.search("text checksum", 3);
+        assert!(!results.is_empty());
+        let mut wire = json!({ "results": results });
+        for result in wire["results"].as_array().expect("results") {
+            assert!(result.get("examples").is_none());
+        }
+        contract
+            .output_schema
+            .canonical
+            .validate(&wire)
+            .expect("discovery matches its schema");
+        wire["results"][0]["examples"] = json!([]);
+        contract
+            .output_schema
+            .canonical
+            .validate(&wire)
+            .expect_err("legacy authored examples are refused");
+        assert!(!prompt_preview().to_lowercase().contains("examples"));
+    }
 
     /// Resolve `paths` the way a process cell's link asks: no run, no
     /// capability refs. The workbench grants by call path alone.

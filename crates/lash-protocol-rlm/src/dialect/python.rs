@@ -160,7 +160,6 @@ const PYTHON_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabular
     print_statement_suffix: ")",
     finish_call: "await control_finish(value)",
     continue_as_call: "control_continue_as(...)",
-    continue_as_example: "await control_continue_as({\"task\": \"continue the audit from the summarized findings\", \"seed\": {\"problem\": input[\"prompt\"], \"findings\": findings}})",
     not_carried_repair: "Await the task and keep its result, or define the function using captures that are data or other saved functions.",
     unjoined_task_repair: "Await every task before the cell ends: `await` it, or collect them with `await asyncio.gather(...)`. A cell does not leave work running behind it.",
     field_miss_rule: "Never write a key you haven't seen in the key sets below: reading a key that is not there raises `KeyError`. If a name is not listed, it does not exist on that value.",

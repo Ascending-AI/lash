@@ -15,7 +15,7 @@ identifiers need distinct rules. TypeScript is the shipped source dialect;
 
 Every shared RLM prompt fragment uses the selected dialect's vocabulary.
 `DialectPromptVocabulary` supplies the language name, cell noun, print call,
-finish forms and continue-as examples. The dialect also supplies cell tags,
+finish forms. The dialect also supplies cell tags,
 tool signatures and schema spelling. Bound variables, read-only variables,
 retry feedback, budget advice and finalization describe that source. Delimiter
 advice appears only on the cell channel and uses that dialect's delimiter.

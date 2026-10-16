@@ -528,10 +528,7 @@ mod tests {
     /// conflict, and a record that names no presenter is refused.
     #[test]
     fn a_session_presents_its_tools_as_its_record_names() {
-        let creator = presenting_host(
-            CellDialect::typescript(),
-            serde_json::json!({ "example_limit": 0 }),
-        );
+        let creator = presenting_host(CellDialect::typescript(), serde_json::json!({}));
         let behaviour = creator
             .session_behaviour(&lash_core::PluginConfig::default(), Creation)
             .expect("a session being created");
@@ -540,8 +537,6 @@ mod tests {
             lash_tool_presenter_api::RecordedToolPresenter {
                 id: "lash.tools.typescript.v1".to_owned(),
                 config: serde_json::json!({
-                    "example_limit": 0,
-                    "example_chars": 240,
                     "schema_depth": 8
                 }),
             },
@@ -557,7 +552,7 @@ mod tests {
 
         let reopening = presenting_host(
             CellDialect::typescript(),
-            serde_json::json!({ "example_limit": 5, "schema_depth": 2 }),
+            serde_json::json!({ "schema_depth": 2 }),
         );
         let reopened = reopening
             .session_behaviour(&stored, Rematerialization)
@@ -613,7 +608,7 @@ mod tests {
 
         let refusing = presenting_host(
             CellDialect::typescript(),
-            serde_json::json!({ "example_limit": "two" }),
+            serde_json::json!({ "schema_depth": "two" }),
         );
         assert!(matches!(
             refusing.session_behaviour(&lash_core::PluginConfig::default(), Creation),

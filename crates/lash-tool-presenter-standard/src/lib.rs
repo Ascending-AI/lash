@@ -28,13 +28,11 @@ pub use compact::{
 /// The standard presenter's id.
 pub const STANDARD_TOOL_PRESENTER_ID: &str = "lash.tools.compact.v1";
 
-/// The standard presenter's config: its prompt-facing schema and example
-/// cuts. Validation always reads the full schema.
+/// The standard presenter's schema import budget. Exceeding it refuses
+/// presentation; validation always reads the full schema.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StandardPresenterConfig {
-    pub example_limit: usize,
-    pub example_chars: usize,
     pub schema_depth: usize,
 }
 
@@ -45,14 +43,10 @@ impl Default for StandardPresenterConfig {
 }
 
 impl StandardPresenterConfig {
-    /// Standard preset: two examples, 240 characters each, eight schema
-    /// container levels. Historical cuts with no universal workload measurement.
+    /// Standard preset: eight schema container levels. A historical budget with
+    /// no universal workload measurement.
     pub const fn standard() -> Self {
-        Self {
-            example_limit: 2,
-            example_chars: 240,
-            schema_depth: 8,
-        }
+        Self { schema_depth: 8 }
     }
 }
 
@@ -122,7 +116,6 @@ impl ToolPresenter for StandardToolPresenter {
                 tool.manifest,
                 tool.contract,
                 tool.call_path,
-                &config,
                 (input.clone(), output.clone(), default.clone()),
                 pool,
             )
@@ -188,8 +181,9 @@ impl ToolPresenter for StandardToolPresenter {
 
 /// The compact projection of a tool: its one-line signature, its return
 /// type, reachable definitions and path-only parameter and return notes,
-/// plus its description and examples under `config`'s cuts.
+/// plus its description.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CompactToolContract {
     pub name: String,
     pub signature: String,
@@ -205,8 +199,6 @@ pub struct CompactToolContract {
     pub return_fields: Vec<CompactNoteRow>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub examples: Vec<String>,
 }
 
 /// `manifest`'s tool under `contract`, compacted as `signature_name` under
@@ -232,14 +224,7 @@ pub fn compact_contract(
         .collect::<Vec<_>>();
     let mut pool =
         listing::DefinitionPool::with_allocator(compact_name_allocator(&refs, &[signature_name]));
-    compact_contract_with_pool(
-        manifest,
-        contract,
-        signature_name,
-        config,
-        documents,
-        &mut pool,
-    )
+    compact_contract_with_pool(manifest, contract, signature_name, documents, &mut pool)
 }
 
 fn contract_documents(
@@ -271,7 +256,7 @@ fn contract_documents(
 /// definitions and notes are part of the returned document's byte cost.
 ///
 /// ```rust,ignore
-/// let contract = compact_contract_with_pool(manifest, contract, "lookup", &config,
+/// let contract = compact_contract_with_pool(manifest, contract, "lookup",
 ///     (input, output, None), &mut pool)?;
 /// ```
 ///
@@ -281,7 +266,6 @@ pub fn compact_contract_with_pool(
     manifest: &ToolManifest,
     contract: &ToolContract,
     signature_name: &str,
-    config: &StandardPresenterConfig,
     (mut input_document, output_document, default): (
         SchemaDocument,
         SchemaDocument,
@@ -373,11 +357,6 @@ pub fn compact_contract_with_pool(
             ToolOutputContract::FromInputSchema { .. } => Vec::new(),
         },
         description: manifest.description.trim().to_string(),
-        examples: listing::compact_examples(
-            &contract.examples,
-            config.example_limit,
-            config.example_chars,
-        ),
     })
 }
 
@@ -556,7 +535,7 @@ impl CompactToolContract {
     }
 
     /// The contract as one markdown block: its signature heading, its
-    /// description, its rows and its examples.
+    /// description and its rows.
     pub fn render_markdown(&self) -> String {
         let mut sections = self.definitions.clone();
         sections.push(format!("### {}", self.render_signature_head()));
@@ -582,9 +561,6 @@ impl CompactToolContract {
                     .collect::<Vec<_>>()
                     .join("\n")
             ));
-        }
-        if !self.examples.is_empty() {
-            sections.push(format!("Examples: {}", self.examples.join("; ")));
         }
         sections.join("\n")
     }

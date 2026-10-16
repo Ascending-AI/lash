@@ -347,11 +347,6 @@ fn process_list_tool_definition() -> ToolDefinition {
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_examples(vec![
-        "await processes.list({})?".into(),
-        r#"await processes.list({ status: "any" })?"#.into(),
-        "await processes.list({ definition_id: on_button.id })?".into(),
-    ])
     .with_tool_binding(ToolBinding::new(["processes"], "list"))
 }
 
@@ -406,7 +401,7 @@ fn process_await_tool_definition() -> ToolDefinition {
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_examples(vec!["await processes.await({ handle: h })?".into()])
+
     // `await_process` parks, so admission records that it may defer and the
     // runtime pre-derives the completion key its recorded attempt reads.
     // An await has no deadline of its own: it parks until the awaited
@@ -454,11 +449,6 @@ fn process_cancel_tool_definition() -> ToolDefinition {
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_examples(vec![
-        "await processes.cancel({ handle: h })?".into(),
-        r#"await processes.cancel({ process_id: "p_019a432c701070008000000000000001" })?"#.into(),
-        r#"await processes.cancel({ process_id: "p_019a432c701070008000000000000002" })?"#.into(),
-    ])
     .with_declaration(lash_core::ToolDeclaration::default()
             .with_intents([lash_core::ToolIntentKind::CancelProcess]), None)
             .expect("a valid tool declaration")
@@ -568,20 +558,6 @@ pub fn process_handle_view_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Cancel examples must carry ids admitted by the public process-id parser.
-    #[test]
-    fn cancel_examples_name_valid_process_ids() {
-        for example in process_cancel_tool_definition().contract().examples.iter() {
-            if let Some((_, tail)) = example.split_once("process_id: \"") {
-                let id = tail.split('"').next().expect("example id");
-                assert!(
-                    ProcessId::parse(id).is_ok(),
-                    "invalid example process id: {id}"
-                );
-            }
-        }
-    }
 
     #[test]
     fn list_output_contract_matches_the_handle_view() {

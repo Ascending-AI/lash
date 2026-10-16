@@ -307,36 +307,3 @@ fn a_delegated_child_may_fail_its_task_and_may_not_delegate() {
     assert!(child.iter().any(|name| name == "submit_error"), "{child:?}");
     assert!(!child.iter().any(|name| name == "spawn_agent"), "{child:?}");
 }
-
-/// FIG-1480: an authored example the dialect's line rewriter cannot dress
-/// as TypeScript reaches the model as a broken program. Pin the tool's real
-/// examples at the rendered surface: respelled through the dialect, then
-/// parsed.
-#[test]
-fn spawn_agent_examples_render_as_parseable_typescript() {
-    let definition = spawn_agent_tool_definition();
-    let examples = &definition.contract().examples;
-    let rendered = examples
-        .iter()
-        .map(|example| lash::rlm::typescript_tool_presenter::render_tool_example(example))
-        .collect::<Vec<_>>();
-    // Parsed rather than linked: examples name host modules and free
-    // identifiers no isolated environment has, so an unknown binding is
-    // expected and a *syntax* error is not.
-    let mut unparseable = Vec::new();
-    for (example, rendered) in examples.iter().zip(&rendered) {
-        if let Err(error) = lash::typescript::parse(rendered) {
-            let code = format!("{:?}", error.code);
-            if code.contains("UnknownBinding") || code.contains("LinkError") {
-                continue;
-            }
-            unparseable.push(format!("`{example}` -> `{rendered}`: {error}"));
-        }
-    }
-    assert!(unparseable.is_empty(), "{unparseable:#?}");
-    assert!(
-        rendered.iter().any(|example| example
-            .contains(r#"const Shape = { name: "str", tags: "list[str]", status: "str" };"#)),
-        "{rendered:#?}"
-    );
-}

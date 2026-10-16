@@ -73,7 +73,6 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     print_statement_suffix: ")",
     finish_call: "await control.finish(value)",
     continue_as_call: "control.continue_as(...)",
-    continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } });",
     // A wrong field name is the one mistake this runtime does not report.
     // Reading a key that was never there yields `undefined`, which flows into
     // arithmetic as `NaN` and into totals as nothing at all: the cell

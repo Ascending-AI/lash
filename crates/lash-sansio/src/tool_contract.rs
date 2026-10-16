@@ -629,6 +629,7 @@ fn read_refusal(
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
+#[serde(deny_unknown_fields)]
 pub struct ToolContract {
     #[serde(skip)]
     identity: Option<ToolContractIdentity>,
@@ -638,8 +639,6 @@ pub struct ToolContract {
     pub output_schema: SchemaContract,
     #[serde(default, skip_serializing_if = "ToolOutputContract::is_static")]
     pub output_contract: ToolOutputContract,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub examples: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -655,7 +654,6 @@ impl Default for ToolContract {
             input_schema: Self::default_input_schema_contract(),
             output_schema: JsonSchema::any().into(),
             output_contract: ToolOutputContract::Static,
-            examples: Vec::new(),
         }
     }
 }
@@ -717,6 +715,7 @@ impl ToolContract {
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
+#[serde(deny_unknown_fields)]
 pub struct ToolDefinition {
     pub manifest: ToolManifest,
     pub contract: ToolContract,
@@ -747,12 +746,7 @@ impl ToolDraft {
         &self.name
     }
 
-    pub fn with_examples(mut self, examples: Vec<String>) -> Self {
-        self.contract.examples = examples;
-        self
-    }
-
-    /// The tool's contract: its schemas and examples.
+    /// The tool's canonical schema contract.
     pub fn contract(&self) -> &ToolContract {
         &self.contract
     }
@@ -878,11 +872,6 @@ impl ToolDefinition {
             schema_for::<Args>(),
             schema_for::<Output>(),
         )
-    }
-
-    pub fn with_examples(mut self, examples: Vec<String>) -> Self {
-        self.contract.examples = examples;
-        self
     }
 
     pub fn with_argument_projection(
@@ -1093,3 +1082,48 @@ where
 mod schema_validation;
 #[cfg(feature = "schema-validation")]
 pub use schema_validation::validate_tool_input;
+
+#[cfg(test)]
+mod authored_examples_tests {
+    use super::*;
+
+    /// FIG-6490: removed authored examples are refused, even when empty,
+    /// rather than silently discarded at a tool's wire boundary.
+    #[test]
+    fn legacy_authored_examples_are_refused_at_the_contract_boundary() {
+        for examples in [serde_json::json!([]), serde_json::json!(["old call"])] {
+            let contract = serde_json::json!({ "examples": examples });
+            let refused = serde_json::from_value::<ToolContract>(contract.clone())
+                .expect_err("authored examples are no longer a contract member");
+            assert!(
+                refused.to_string().contains("unknown field `examples`"),
+                "{refused}"
+            );
+            let definition = serde_json::json!({
+                "manifest": { "id": "tool:legacy", "name": "legacy", "execution": { "secs": 30, "nanos": 0 } },
+                "contract": contract,
+            });
+            let refused = serde_json::from_value::<ToolDefinition>(definition)
+                .expect_err("nested contracts enforce the same wire boundary");
+            assert!(
+                refused.to_string().contains("unknown field `examples`"),
+                "{refused}"
+            );
+        }
+        let mut definition = serde_json::json!({
+            "manifest": { "id": "tool:legacy", "name": "legacy", "execution": { "secs": 30, "nanos": 0 } },
+            "contract": {},
+        });
+        serde_json::from_value::<ToolDefinition>(definition.clone())
+            .expect("a current definition decodes");
+        definition["examples"] = serde_json::json!([]);
+        let refused = serde_json::from_value::<ToolDefinition>(definition)
+            .expect_err("top-level legacy examples are refused too");
+        assert!(
+            refused.to_string().contains("unknown field `examples`"),
+            "{refused}"
+        );
+        let schema = serde_json::to_value(schemars::schema_for!(ToolContract)).expect("schema");
+        assert!(schema["properties"].get("examples").is_none());
+    }
+}

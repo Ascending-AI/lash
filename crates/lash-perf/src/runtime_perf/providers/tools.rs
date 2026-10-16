@@ -791,16 +791,9 @@ fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
         gmail_like_tool_description(index, name),
         gmail_like_input_schema(name),
         gmail_like_output_schema(name),
-    ).expect("valid declared tool schemas")
+    )
+    .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_examples(vec![
-        format!(
-            r#"call {name} {{ user_id: "me", message_id: "msg_123", payload: {{ label_ids: ["INBOX", "IMPORTANT"] }} }}"#
-        ),
-        format!(
-            r#"call {name} {{ user_id: "me", query: "from:alerts@example.com newer_than:7d", limit: 25 }}"#
-        ),
-    ])
     .with_tool_binding(
         ToolBinding::new(
             ["gmail"],

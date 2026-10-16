@@ -415,6 +415,89 @@ async fn builder_configured_tools_and_hooks_are_never_discarded_on_postgres() ->
     builder_configured_tools_and_hooks_are_never_discarded(backend).await
 }
 
+/// FIG-6490: every shipped mode documents schema contracts without an
+/// authored-example row, and refuses removed example settings at admission
+/// and when reading a recorded config.
+#[test]
+fn shipped_tool_presenters_have_no_authored_examples() {
+    use crate::tools::{
+        ToolDisclosure, ToolPresentationEntry, ToolPresentationRequest, ToolPresenter,
+    };
+    let definition = crate::tools::ToolDefinition::raw(
+        "tool:lookup", "lookup", "Lookup a record",
+        serde_json::json!({"type":"object", "properties":{"query":{"type":"string", "description":"Search text"}}, "required":["query"]}),
+        serde_json::json!({"type":"string"}),
+    ).expect("schemas").with_execution(std::time::Duration::from_secs(30));
+    let manifest = definition.manifest();
+    let contract = definition.contract();
+    let entries = [ToolPresentationEntry {
+        manifest: &manifest,
+        contract: &contract,
+        call_path: "lookup",
+        pinned: false,
+    }];
+    let standard = crate::standard::StandardToolPresenter;
+    #[cfg_attr(
+        not(feature = "rlm"),
+        expect(unused_mut, reason = "RLM builds add both dialect presenters")
+    )]
+    let mut presenters: Vec<&dyn ToolPresenter> = vec![&standard];
+    #[cfg(feature = "rlm")]
+    let (typescript, python) = (
+        crate::rlm::typescript_tool_presenter::TypescriptToolPresenter,
+        crate::rlm::python_tool_presenter::PythonToolPresenter,
+    );
+    #[cfg(feature = "rlm")]
+    presenters.extend([
+        &typescript as &dyn ToolPresenter,
+        &python as &dyn ToolPresenter,
+    ]);
+    for presenter in presenters {
+        let config = presenter
+            .admit_config(&serde_json::json!({}))
+            .expect("default config");
+        let section = presenter
+            .present(ToolPresentationRequest {
+                tools: &entries,
+                config: &config,
+                disclosure: ToolDisclosure::Complete,
+                reserved_names: &[],
+                max_section_bytes: None,
+            })
+            .expect("tool docs");
+        let discovered = presenter
+            .tool_doc(&entries[0], &config)
+            .expect("discovery doc");
+        assert!(section.text.contains("lookup"));
+        for doc in [&section.text, &discovered] {
+            assert!(
+                !doc.lines().any(|row| row.starts_with("Examples:")),
+                "{doc}"
+            );
+        }
+        assert!(
+            serde_json::to_value(&contract)
+                .expect("contract serializes")
+                .get("examples")
+                .is_none()
+        );
+        for field in ["example_limit", "example_chars", "examples"] {
+            let mut legacy = config.clone();
+            legacy[field] = serde_json::json!(0);
+            let refused = presenter
+                .admit_config(&legacy)
+                .expect_err("removed fields are refused");
+            assert!(
+                refused
+                    .to_string()
+                    .contains(&format!("unknown field `{field}`")),
+                "{refused}"
+            );
+            assert!(presenter.tool_doc(&entries[0], &legacy).is_err());
+        }
+    }
+}
+
 /// D-DEFAULTS2: a standard session's tool docs and catalogue advertisements
 /// use the host's non-default presentation values: the standard presenter's
 /// config, admitted over its standard one. Exhausted schema import budgets
@@ -425,23 +508,11 @@ fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
         "display", "display", "display contract",
         serde_json::json!({"type":"object", "properties":{"nested":{"type":"object", "properties":{"deep":{"type":"string"}}}}}),
         serde_json::json!({"type":"string"}),
-    ).expect("schemas").with_execution(std::time::Duration::from_secs(30)).with_examples(vec!["abcdefghijklmnopqrstuvwxyz".into(), "second".into()]);
+    ).expect("schemas").with_execution(std::time::Duration::from_secs(30));
     let catalog = crate::plugins::ToolCatalog::from_tool_definitions(vec![definition]);
     let mut host = crate::plugins::StandardProtocolConfig::standard();
-    let base = host.tool_docs(&catalog).expect("the standard presentation");
-    host.tool_presentation =
-        serde_json::json!({ "example_limit": 1, "example_chars": 8, "schema_depth": 4 });
-    let selected = host.tool_docs(&catalog).expect("the selected presentation");
-    let examples = selected
-        .text
-        .lines()
-        .find_map(|line| line.strip_prefix("Examples: "))
-        .expect("an examples row");
-    assert!(
-        !examples.contains(';') && examples.chars().count() <= 8,
-        "{examples}"
-    );
-    assert_ne!(selected.text, base.text);
+    host.tool_presentation = serde_json::json!({ "schema_depth": 4 });
+    host.tool_docs(&catalog).expect("the selected presentation");
     assert_eq!(
         host.recorded_behaviour()
             .expect("the selected presentation admits")

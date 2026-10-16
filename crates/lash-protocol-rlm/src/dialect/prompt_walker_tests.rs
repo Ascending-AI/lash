@@ -12,23 +12,10 @@
 //! battery caught a model spending reasoning tokens trying to reconcile the
 //! two.
 //!
-//! TypeScript is now the only contract (ADR 0096), so this walks every fragment
-//! the crate contributes to an assembled prompt and fails on any word of the
-//! retired surface. The markers are not vestigial: the host-surface inventory
-//! is declared in Lash VM `TypeExpr`s and the tool examples are authored in
-//! the retired spelling, so both are still rendered through a translator that
-//! can regress.
-//!
-//! Tool descriptions and schema prose come from their owning crates and render
-//! verbatim. The owning crate must test the prose it contributes to a prompt.
-//!
-//! Authored examples share the blind spot and sit outside even that gate's
-//! reach: the prose sweep excludes them on purpose, and `authored_tool_examples`
-//! below is a copied fixture rather than the live corpus — which is how
-//! `agents.spawn` rendered `const Shape = Type { ... }` to TypeScript sessions
-//! (FIG-1480). The rewriter stays pinned here over representative spellings;
-//! each owning crate pins its own rendered catalog (see the rendered-catalog
-//! test on `spawn_agent_tool_definition` in `examples/delegation`).
+//! This walks every fragment the crate contributes to an assembled prompt
+//! for retired surface words, including host-surface type declarations.
+//! Tool descriptions and schema prose come from their owning crates and
+//! render verbatim. Their owners test the prose they contribute.
 
 use super::*;
 use lash_vm_runtime::ToolDefinitionBindingExt as _;
@@ -57,7 +44,7 @@ const RETIRED_SURFACE_MARKERS: &[&str] = &[
     ": int,",
     "?: any |",
     "-> str",
-    // The retired try-operator, in an authored tool example.
+    // The retired surface's try-operator.
     ")?",
     "-> float",
     "trigger.register",
@@ -169,117 +156,6 @@ fn retired_type_words(text: &str) -> Vec<String> {
     found
 }
 
-/// The walker only measures if its marker list can fire, and only proves
-/// anything if a rendered example is *parseable* TypeScript.
-#[test]
-fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
-    // RV-3: a rendered example must be *parseable* TypeScript, not merely free
-    // of retired markers. The marker walk cannot tell "reads like TypeScript"
-    // from "is a syntax error", and a syntax error in an example is exactly the
-    // defect the examples fix exists to close. Parsed rather than linked: an
-    // example names host modules and free identifiers that no isolated
-    // environment has, so `TS_UNKNOWN_BINDING` is expected and a *syntax* error
-    // is not.
-    let tuning = lash_vm_client::WorkerTuning::standard();
-    let embedding = lash_vm_worker::Embedder::kernel()
-        .and_then(|embedder| embedder.dialect(lash_vm_worker::typescript(&tuning)))
-        .and_then(lash_vm_worker::Embedder::finish)
-        .expect("a TypeScript worker embedding");
-    let (effects, bindings) = (
-        std::collections::BTreeMap::new(),
-        std::collections::BTreeSet::new(),
-    );
-    let mut unparseable = Vec::new();
-    for example in authored_tool_examples() {
-        let rendered = lash_tool_presenter_typescript::render_tool_example(example);
-        if let Err(error) = lash_dialect_typescript::lower(
-            &rendered,
-            &lash_kernel_dialect::Environment {
-                library: embedding.library(),
-                effects: &effects,
-                controls: &std::collections::BTreeMap::new(),
-                tool_roots: &std::collections::BTreeSet::new(),
-            },
-            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
-                bindings: &bindings,
-                functions: &std::collections::BTreeMap::new(),
-            }),
-        ) {
-            let code = format!("{:?}", error.code);
-            if code.contains("UnknownBinding") || code.contains("MethodUnsupported") {
-                continue;
-            }
-            unparseable.push(format!("`{example}` → `{rendered}`: {}", error.message));
-        }
-    }
-    assert!(
-        unparseable.is_empty(),
-        "rendered examples that are not TypeScript: {unparseable:#?}"
-    );
-
-    // Non-vacuity for the example surface: the *authored* corpus really does
-    // carry the try-operator, so the marker has something to catch.
-    assert!(
-        authored_tool_examples()
-            .iter()
-            .any(|example| example.contains(")?")),
-        "the authored corpus must carry the try-operator"
-    );
-
-    // The rewriter itself: a reader must be shown the examples rewritten.
-    assert_eq!(
-        lash_tool_presenter_typescript::render_tool_example(
-            r#"await web.fetch({ url: "https://example.test/" })?"#
-        ),
-        r#"await web.fetch({ url: "https://example.test/" });"#
-    );
-    assert_eq!(
-        lash_tool_presenter_typescript::render_tool_example(
-            "page = await web.fetch({ url: \"u\" })?"
-        ),
-        "const page = await web.fetch({ url: \"u\" });"
-    );
-
-    // And the markers themselves must be present in the retired surface's real
-    // copy, or the walker is looking for strings nothing ever emitted.
-    assert!(RETIRED_SURFACE_MARKERS.contains(&"<lash_vm>"));
-    assert!(RETIRED_SURFACE_MARKERS.contains(&"finish <value>"));
-    assert_ne!(
-        crate::dialect::TypescriptPrompts
-            .prompt_vocabulary()
-            .cell_tags
-            .open,
-        "<lash_vm>",
-        "the sole vocabulary must not be the retired one"
-    );
-}
-
-/// The authored example corpus, as tool authors spell it.
-///
-/// Copied deliberately rather than read from a live catalog: this is the shape
-/// authors write, and the rewriter has to survive every one of them. The set
-/// spans the current first-party plugins (process controls, the standard
-/// protocol, the MCP web tools) plus retired tool families the rewriter must
-/// still accept verbatim.
-fn authored_tool_examples() -> Vec<&'static str> {
-    vec![
-        r#"await parallel.web_search_57jmhsdk2uvtc7o55qwq73syq({ query: "latest Rust release notes", limit: 5 })?"#,
-        r#"await files.read({ path: "src/main.rs", offset: 1, limit: 120 })?"#,
-        r#"await files.edit({ path: "src/main.rs", edits: [{ oldText: "old();", newText: "new();" }] })?"#,
-        r#"await files.glob({ pattern: "**/*.rs", path: "crates/lash/src", limit: 50 })?"#,
-        r#"await files.write({ path: "hello.txt", content: "hello\n" })?"#,
-        r#"await jobs.run({ target: "//crates/lash-protocol-rlm:protocol_drivers__test", timeout_ms: 600000 })?"#,
-        r#"probe = await files.stat({ path: "Cargo.lock" })?"#,
-        r#"await jobs.start({ name: "daemon", args: ["--serve"], detach: true })?"#,
-        r#"await jobs.send({ process_id: "call-job-1", message: "", close: true })?"#,
-        r#"await processes.list({ status: "any" })?"#,
-        r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#,
-        r#"await tools.batch({ tool_calls: [{ tool: "read_file", parameters: { path: "src/main.rs" } }] })?"#,
-        r#"await tools.search({ query: "text checksum", limit: 3 })?"#,
-        r#"await workbench_deferred.stats({ /* matching arguments */ })?"#,
-    ]
-}
-
 async fn assembled_prompt_fragments_with_projection(
     dialect: &SessionDialect,
     projected_value: serde_json::Value,
@@ -299,13 +175,6 @@ async fn assembled_prompt_fragments_with_projection(
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_examples(vec![
-        // Authored as LashVm, like every example in the resident catalog.
-        // Six of seven in the shipped catalog carry the try-operator, which is
-        // a syntax error in TypeScript.
-        r#"await web.fetch({ url: "https://example.test/" })?"#.to_string(),
-        "page = await web.fetch({ url: \"https://example.test/\" })?\nfinish page".to_string(),
-    ])
     .with_tool_binding(lash_vm_runtime::ToolBinding::new(["web"], "fetch"));
     // A second member whose *shapes* are collections of records, like
     // `processes.list`. The first fixture's schema is one string field, so the
@@ -345,9 +214,6 @@ async fn assembled_prompt_fragments_with_projection(
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_examples(vec![
-        r#"await processes.list({ status: "any" })?"#.to_string(),
-    ])
     .with_tool_binding(lash_vm_runtime::ToolBinding::new(["processes"], "list"));
     // A third member shaped like an MCP import (FIG-4544): no
     // `additionalProperties`, nested object and array properties, constraints

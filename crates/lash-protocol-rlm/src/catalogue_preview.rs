@@ -103,18 +103,12 @@ pub fn catalogue_preview(
     }
 
     let search_call = options.search_call_path.trim().to_string();
-    // No code snippet here. This crate has no dialect: the advertisement
-    // goes into the prompt of whatever session holds the catalogue, and the Lash VM spelling this sentence used to carry
-    // (`await {search_call}({ query: "..." })?`) put the try-operator — a
-    // TypeScript syntax error — in front of every judged TypeScript session
-    // with a deferred catalogue. The search tool's own doc block already shows
-    // an example, respelled by the session's dialect (ADR 0063); naming the
-    // argument in prose says the same thing in every dialect.
+    // Naming the query argument in prose works in every session dialect.
     let mut rendered = format!(
         "The capabilities below are callable directly by their module path; the listing is usually enough to call them. \
          Call `{search_call}(...)` with a `query` argument only if you need more detail than shown, or to find a \
          capability not listed here, then call the returned module path. \
-         Results use the same compact contract shape as resident capabilities: call path, signature, description, and capped examples."
+         Results use the same compact contract shape as resident capabilities: call path, signature, and description."
     );
 
     if by_module.len() <= options.module_limit {
