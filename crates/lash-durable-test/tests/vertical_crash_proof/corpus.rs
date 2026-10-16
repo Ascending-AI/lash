@@ -1,6 +1,35 @@
 //! FIG-6183: every retained parked-run image resumes to its recorded result.
 use super::*;
 
+const CURRENT_SET_OUTPUT: &str = "crates/lash-durable-test/tests/fixtures/formats/corpus/4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1";
+
+fn current_set() -> &'static images::ImageSet {
+    let build = CURRENT_SET_OUTPUT.rsplit('/').next().unwrap();
+    images::retained()
+        .iter()
+        .find(|set| set.build == build)
+        .expect("the current set is retained")
+}
+
+/// The land step's literal discovery path must cover the set we refresh.
+#[test]
+fn generator_output_names_the_current_set() {
+    let source = include_str!("corpus.rs");
+    let (declaration, _) = source
+        .split_once("\nasync fn regenerate_current_parked_image_set()")
+        .expect("the current corpus has a generator");
+    let output = declaration
+        .lines()
+        .rev()
+        .find_map(|line| {
+            line.strip_prefix("#[ignore = \"regenerates ")
+                .and_then(|line| line.strip_suffix("\"]"))
+        })
+        .expect("the generator declares its output");
+    assert_eq!(output, CURRENT_SET_OUTPUT);
+    assert_eq!(output.rsplit('/').next().unwrap(), current_set().build);
+}
+
 const LOOP: &str = r#"kernel 1
 numbers float
 entry worker() -> Any
@@ -134,54 +163,65 @@ async fn every_retained_parked_image_resumes_to_its_recorded_result() {
     }
 }
 
-/// Run locally on the build being retained. Append a full set, or refresh only
-/// LASH_IMAGE_NAME under the pre-cut recording policy.
+/// Record and cold-resume the archived program on the current build.
+async fn record_image(name: &str, kind: &str, source: &'static str) -> images::RetainedImage {
+    match kind {
+        "kernel" => {
+            let (_dir, path) = kernel_images::record(source).await;
+            let mut image = images::capture(&path, name, kind, source);
+            image.expected = kernel_images::resume(&image.image()).await;
+            image
+        }
+        "typescript-cell" | "python-cell" | "declared-read-cell" => {
+            let protocol = Protocol::ImageCell(source, kind == "python-cell");
+            let (_dir, path) = session_images::record(protocol).await;
+            let mut image = images::capture(&path, name, kind, source);
+            let stored = Box::leak(Box::new(image.image()));
+            image.expected = session_images::resume(stored, protocol).await;
+            image
+        }
+        kind => panic!("{name} has unknown image kind {kind}"),
+    }
+}
+
+/// Refresh the unsealed set without changing its metadata, programs or oracles.
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "regenerates crates/lash-durable-test/tests/fixtures/formats/corpus/4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1"]
+async fn regenerate_current_parked_image_set() {
+    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+    let set = current_set();
+    let mut records = Vec::new();
+    for old in &set.images {
+        let fresh = record_image(&old.name, &old.kind, &old.source).await;
+        assert_eq!(
+            fresh.expected, old.expected,
+            "a refresh keeps {}'s recorded result",
+            old.name
+        );
+        records.push(fresh);
+    }
+    // Verify the complete set before replacing any payload.
+    for image in records {
+        images::rerecord(&set.build, image);
+    }
+}
+
+/// Append a full set locally at a release cut, naming the retained build.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "appends a new retained parked-run image set"]
 async fn record_current_parked_image_set() {
+    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
     let build = std::env::var("LASH_IMAGE_BUILD").expect("name the recording build commit");
-    let selected = std::env::var("LASH_IMAGE_NAME").ok();
     let mut records = Vec::new();
-    for (name, source) in [
-        ("loop-closures-aliases", LOOP),
-        ("task-join", JOIN),
-        ("suspending-cleanup", CLEANUP),
+    for (name, kind, source) in [
+        ("loop-closures-aliases", "kernel", LOOP),
+        ("task-join", "kernel", JOIN),
+        ("suspending-cleanup", "kernel", CLEANUP),
+        ("pending-tool-typescript", "typescript-cell", CELL),
+        ("pending-tool-python", "python-cell", PYTHON_CELL),
+        ("saved-declared-read", "declared-read-cell", READ_CELL),
     ] {
-        if selected.as_deref().is_some_and(|selected| selected != name) {
-            continue;
-        }
-        let (_dir, path) = kernel_images::record(source).await;
-        let mut image = images::capture(&path, name, "kernel", source);
-        image.expected = kernel_images::resume(&image.image()).await;
-        records.push(image);
-    }
-    for (name, kind, source, python) in [
-        ("pending-tool-typescript", "typescript-cell", CELL, false),
-        ("pending-tool-python", "python-cell", PYTHON_CELL, true),
-        (
-            "saved-declared-read",
-            "declared-read-cell",
-            READ_CELL,
-            false,
-        ),
-    ] {
-        if selected.as_deref().is_some_and(|selected| selected != name) {
-            continue;
-        }
-        let (_dir, path) = session_images::record(Protocol::ImageCell(source, python)).await;
-        let mut image = images::capture(&path, name, kind, source);
-        let stored = Box::leak(Box::new(image.image()));
-        image.expected = session_images::resume(stored, Protocol::ImageCell(source, python)).await;
-        records.push(image);
-    }
-    if selected.is_some() {
-        assert_eq!(
-            records.len(),
-            1,
-            "select one of the six retained image names"
-        );
-        images::rerecord(&build, records.pop().unwrap());
-        return;
+        records.push(record_image(name, kind, source).await);
     }
     images::append(images::ImageSet {
         build,

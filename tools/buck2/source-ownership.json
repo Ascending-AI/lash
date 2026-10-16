@@ -855,7 +855,8 @@
         "tests/fixtures/formats/pre-heap-session/db-wal.gz",
         "tests/fixtures/formats/pre-heap-session/db.gz",
         "tests/fixtures/formats/session/db-wal.gz",
-        "tests/fixtures/formats/session/db.gz"
+        "tests/fixtures/formats/session/db.gz",
+        "tests/vertical_crash_proof/corpus.rs"
       ]
     },
     "test_input_fallbacks": {},
