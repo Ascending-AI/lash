@@ -165,6 +165,90 @@ fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
     assert!(lowered.document.manifest.effects.contains_key(&show));
 }
 
+/// FIG-6515: host tools take one input record. Python keywords name its
+/// declared fields, and the performed argument stays that one record.
+#[test]
+fn tool_keywords_name_the_declared_input_fields() {
+    use lash_kernel_doc::{Datum, EffectName};
+    use lash_kernel_vm::{End, Outcome, Request};
+
+    let show = EffectName::new("display.show_message").expect("a tool's name");
+    let signature = lash_kernel_check::tool_signature(
+        &serde_json::json!({
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "style": {"type": "string"}
+            },
+            "required": ["text"],
+            "additionalProperties": false
+        }),
+        false,
+        &serde_json::json!({"type": "null"}),
+    );
+    let effects = BTreeMap::from([(show.clone(), signature.clone())]);
+    let environment = Environment {
+        library: machine::library(),
+        effects: &effects,
+        controls: machine::controls(),
+        tool_roots: &BTreeSet::from([Name::new("display")]),
+    };
+    for (call, expected) in [
+        (
+            "display.show_message(text='hi')",
+            vec![("text".to_owned(), Datum::Text("hi".to_owned()))],
+        ),
+        (
+            "display.show_message(style='bold', text='hi')",
+            vec![
+                ("style".to_owned(), Datum::Text("bold".to_owned())),
+                ("text".to_owned(), Datum::Text("hi".to_owned())),
+            ],
+        ),
+    ] {
+        let source = format!("async def demo():\n    return await {call}\n");
+        let lowered = crate::lower(&source, &environment, Mode::Module)
+            .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"));
+        assert_eq!(lowered.document.manifest.effects[&show], signature);
+        let mut admission = lash_kernel_check::Environment::new(machine::library());
+        admission.effects = effects.clone();
+        lash_kernel_check::admit(&lowered.document, &admission).expect("valid tool input");
+        let mut calls = 0;
+        // Cells use the catalog's flat name; modules use its dotted path.
+        let cell_effect = EffectName::new("show_message").expect("a tool's name");
+        let (_, end) = machine::drive(
+            &format!("await {}\n", call.replace("display.", "")),
+            BTreeMap::from([(cell_effect.clone(), signature.clone())]),
+            super::pages::Session::default(),
+            |_, park, _| {
+                park.requests
+                    .into_iter()
+                    .map(|request| {
+                        let Request::Effect(effect) = request else {
+                            panic!("the tool call does not sleep");
+                        };
+                        calls += 1;
+                        assert_eq!(effect.effect, cell_effect);
+                        assert_eq!(effect.args, [Datum::Record(expected.clone())]);
+                        (effect.wait, Outcome::Completed(Datum::Null))
+                    })
+                    .collect()
+            },
+        );
+        assert!(matches!(end, End::Finished(_)), "{end:?}");
+        assert_eq!(calls, 1);
+    }
+    for call in [
+        "display.show_message(text='hi', typo='bold')",
+        "display.show_message(style='bold')",
+        "display.show_message({'text': 'hi'}, text='again')",
+    ] {
+        let source = format!("async def demo():\n    return await {call}\n");
+        let refused = crate::lower(&source, &environment, Mode::Module).expect_err(call);
+        assert_eq!(refused.code, "PY_ARGUMENTS", "{call}: {refused}");
+    }
+}
+
 /// The contract's refusals, under the codes every dialect shares.
 #[test]
 fn the_contract_refuses_under_the_shared_codes() {

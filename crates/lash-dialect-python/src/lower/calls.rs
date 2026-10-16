@@ -1,7 +1,8 @@
 //! Calls: functions, tools, built-ins, methods and asyncio.
 
 use lash_kernel_doc::{
-    Action, Atom, Callee, EffectName, Expr, Literal, Name, Rhs, Signature, Stmt,
+    Action, Atom, Callee, EffectName, Expr, Literal, Name, RecordEntry, RecordType, Rhs, Signature,
+    Stmt, Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
@@ -538,6 +539,80 @@ impl Lowerer<'_> {
         call: &ast::ExprCall,
     ) -> Lowering<Action> {
         self.no_stars(&call.arguments)?;
+        let args = if let [param] = signature.params.as_slice()
+            && let Type::Record(input) = &param.ty
+            && !call.arguments.keywords.is_empty()
+        {
+            let input = self.tool_keyword_input(effect, input, call)?;
+            self.atoms(&[input])
+        } else {
+            self.tool_arguments(effect, signature, call)?
+        };
+        self.performed.insert(effect.clone(), signature.clone());
+        Ok(Action::Perform {
+            effect: effect.clone(),
+            args,
+            result: signature.result.clone(),
+            then_yield: false,
+        })
+    }
+
+    /// The host's single input record is spelled as declared keyword fields
+    /// in Python. Keep evaluation in source order and omit absent fields.
+    fn tool_keyword_input(
+        &mut self,
+        effect: &EffectName,
+        input: &RecordType,
+        call: &ast::ExprCall,
+    ) -> Lowering<Operand> {
+        if !call.arguments.args.is_empty() {
+            return Err(arguments_error(
+                format!("the tool `{effect}` takes either an input record or keyword fields"),
+                call.range(),
+            ));
+        }
+        let mut fields = Vec::<RecordEntry>::new();
+        for keyword in &call.arguments.keywords {
+            let name = keyword.arg.as_ref().map_or("", |name| name.id.as_str());
+            if !input.fields.iter().any(|field| field.name == name) {
+                return Err(arguments_error(
+                    format!("the tool `{effect}` has no parameter `{name}`"),
+                    keyword.range,
+                ));
+            }
+            if fields.iter().any(|field| field.field == name) {
+                return Err(arguments_error(
+                    format!("the tool `{effect}` got multiple values for `{name}`"),
+                    keyword.range,
+                ));
+            }
+            let value = self.expr(&keyword.value)?;
+            let value = self.pin(value);
+            fields.push(RecordEntry {
+                field: name.to_owned(),
+                value: value.expr,
+            });
+        }
+        for field in &input.fields {
+            if !field.optional && !fields.iter().any(|given| given.field == field.name) {
+                return Err(arguments_error(
+                    format!(
+                        "the call gives the tool `{effect}` no value for `{}`",
+                        field.name
+                    ),
+                    call.range(),
+                ));
+            }
+        }
+        Ok(self.let_rhs(Rhs::Expr(Expr::Record(fields)), Ty::Unknown))
+    }
+
+    fn tool_arguments(
+        &mut self,
+        effect: &EffectName,
+        signature: &Signature,
+        call: &ast::ExprCall,
+    ) -> Lowering<Vec<Atom>> {
         let positional = call.arguments.args.len();
         if positional > signature.params.len() {
             return Err(arguments_error(
@@ -605,13 +680,7 @@ impl Lowerer<'_> {
                 None => absent(),
             })
             .collect();
-        self.performed.insert(effect.clone(), signature.clone());
-        Ok(Action::Perform {
-            effect: effect.clone(),
-            args: self.atoms(&slots),
-            result: signature.result.clone(),
-            then_yield: false,
-        })
+        Ok(self.atoms(&slots))
     }
 
     pub(super) fn await_expr(&mut self, await_expr: &ast::ExprAwait) -> Lowering<Operand> {
