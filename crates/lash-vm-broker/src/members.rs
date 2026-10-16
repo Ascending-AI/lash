@@ -21,7 +21,7 @@ use std::time::Duration;
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::lifecycle::{Act, Lifecycle, MemberBodies};
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, PinnedWaits, PolicyView, RoundError, RunFold, fold,
+    AdmittedExecution, PinnedWaits, PolicyView, RoundError, RunFold, RunRecords,
 };
 use lash_core_execution::runtime::turn_control;
 use lash_durable::domain::{OwnerKey, RunFacts, RunSeq};
@@ -69,7 +69,7 @@ pub(crate) struct Members {
     lifecycle: Option<Lifecycle>,
     /// The owner's records as last read and appended; `None` once a commit
     /// this cache does not see may have changed them.
-    rows: Option<RunFacts>,
+    rows: Option<RunRecords>,
     /// The completion waits the admissions among `rows` pinned, read with
     /// them: a row a commit appends is never an admission.
     waits: PinnedWaits,
@@ -155,21 +155,29 @@ impl Members {
         Ok(())
     }
 
-    async fn rows(&mut self) -> Result<RunFacts, RoundError> {
-        if let Some(rows) = &self.rows {
-            return Ok(rows.clone());
+    async fn load_rows(&mut self) -> Result<(), RoundError> {
+        if self.rows.is_some() {
+            return Ok(());
         }
         let reads = self.cx.durable_reads()?;
         let rows = reads.run_facts(&self.owner).await?;
         self.waits = PinnedWaits::read(reads, &rows).await?;
-        self.rows = Some(rows.clone());
-        Ok(rows)
+        self.rows = Some(RunRecords::new(rows));
+        Ok(())
     }
 
     /// The owner's records, folded under the declared policies.
+    #[expect(
+        clippy::expect_used,
+        reason = "load_rows installs the activation's records"
+    )]
     pub(crate) async fn fold(&mut self) -> Result<RunFold, RoundError> {
-        let rows = self.rows().await?;
-        Ok(fold(&rows, &self.policies, &self.waits)?)
+        self.load_rows().await?;
+        Ok(self
+            .rows
+            .as_mut()
+            .expect("records were loaded")
+            .fold(&self.policies, &self.waits)?)
     }
 
     /// Act once on the folded records: `None` when it committed or its
@@ -203,6 +211,10 @@ impl Members {
     /// [`Undriven`]: ownership lost or another store failure, records that
     /// do not fold, the activation stopping, no member bodies bound, or a
     /// decision nothing can answer.
+    #[expect(
+        clippy::expect_used,
+        reason = "load_rows installs the activation's records"
+    )]
     pub(crate) async fn drive_by<T>(
         &mut self,
         cancel: &CancellationToken,
@@ -223,9 +235,10 @@ impl Members {
                 quiet_since = None;
                 continue;
             };
-            let rows = self.rows().await?;
+            self.load_rows().await?;
             let now = self.cx.durable_now().await?;
-            let until = match decide(&rows, &folded, now) {
+            let rows = self.rows.as_ref().expect("records were loaded").facts();
+            let until = match decide(rows, &folded, now) {
                 Decide::Answer(answer) => return Ok(Driven::Answered(answer)),
                 Decide::Wait { until } => until,
             };

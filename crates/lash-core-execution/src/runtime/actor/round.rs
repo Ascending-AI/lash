@@ -99,6 +99,8 @@ mod runner;
 mod store_local;
 mod tools;
 
+#[doc(hidden)]
+pub use fold::RunRecords;
 pub use fold::{MemberState, RoundMember, RoundView, fold};
 pub use lifecycle::{
     Discharge, Fence, MemberBodies, MemberBody, MemberOutcome, Presented, member_body,

@@ -286,12 +286,76 @@ impl RoundView {
     }
 }
 
-fn decode(facts: &RunFacts, row: &RunFactRow) -> Result<Record, FoldRefusal> {
-    records::read(facts, row).map_err(|reason| FoldRefusal::Undecodable {
-        run: row.run,
-        ordinal: row.ordinal,
-        reason,
-    })
+/// An activation's owned facts and checked records. Repeated folds borrow
+/// the checked records and share their immutable payload images. Appending
+/// facts preserves earlier images; a reload constructs a new set of records.
+pub struct RunRecords {
+    facts: RunFacts,
+    decoded: BTreeMap<(RunSeq, Ordinal), Arc<Record>>,
+}
+
+impl RunRecords {
+    /// Start reading one protected snapshot of an owner's facts.
+    #[must_use]
+    pub fn new(facts: RunFacts) -> Self {
+        Self {
+            facts,
+            decoded: BTreeMap::new(),
+        }
+    }
+
+    /// The immutable snapshot these records read.
+    #[must_use]
+    pub fn facts(&self) -> &RunFacts {
+        &self.facts
+    }
+
+    /// Include appended facts and their immutable nodes.
+    pub fn extend(&mut self, appended: RunFacts) {
+        // Normally appended nodes are new or byte-identical. A conflicting
+        // image invalidates every checked record, including its descendants:
+        // the next fold must encounter the decoder's integrity refusal.
+        if appended.nodes.iter().any(|(id, node)| {
+            self.facts
+                .nodes
+                .get(id)
+                .is_some_and(|previous| previous != node)
+        }) {
+            self.decoded.clear();
+        }
+        self.facts.extend(appended);
+    }
+
+    /// Fold the records under the current policies and pinned waits.
+    ///
+    /// # Errors
+    /// The same record and ordering refusals as [`fold`].
+    pub fn fold(
+        &mut self,
+        current: &PolicyView,
+        waits: &PinnedWaits,
+    ) -> Result<RunFold, FoldRefusal> {
+        let facts = &self.facts;
+        fold_records(facts, current, waits, &mut |row| {
+            let record = match self.decoded.entry((row.run, row.ordinal)) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(decode(facts, row)?)
+                }
+            };
+            Ok(Arc::clone(record))
+        })
+    }
+}
+
+fn decode(facts: &RunFacts, row: &RunFactRow) -> Result<Arc<Record>, FoldRefusal> {
+    records::read(facts, row)
+        .map(Arc::new)
+        .map_err(|reason| FoldRefusal::Undecodable {
+            run: row.run,
+            ordinal: row.ordinal,
+            reason,
+        })
 }
 
 fn out_of_order(row: &RunFactRow) -> FoldRefusal {
@@ -320,6 +384,17 @@ pub fn fold(
     current: &PolicyView,
     waits: &PinnedWaits,
 ) -> Result<RunFold, FoldRefusal> {
+    fold_records(facts, current, waits, &mut |row| decode(facts, row))
+}
+
+type ReadRecord<'a> = dyn FnMut(&RunFactRow) -> Result<Arc<Record>, FoldRefusal> + 'a;
+
+fn fold_records(
+    facts: &RunFacts,
+    current: &PolicyView,
+    waits: &PinnedWaits,
+    read: &mut ReadRecord<'_>,
+) -> Result<RunFold, FoldRefusal> {
     let mut runs: BTreeMap<RunSeq, Vec<&RunFactRow>> = BTreeMap::new();
     for row in &facts.rows {
         runs.entry(row.run).or_default().push(row);
@@ -339,11 +414,11 @@ pub fn fold(
             .first()
             .is_some_and(|row| row.kind == RunFactKind::CellReport)
         {
-            let report = fold_report(facts, &records)?;
+            let report = fold_report(facts, &records, read)?;
             folded.reports.insert(run, report);
             continue;
         }
-        let view = fold_run(facts, run, &records, waits)?;
+        let view = fold_run(run, &records, waits, read)?;
         for member in &view.members {
             folded
                 .recoveries
@@ -358,18 +433,20 @@ pub fn fold(
 fn fold_report(
     facts: &RunFacts,
     records: &[&RunFactRow],
+    read: &mut ReadRecord<'_>,
 ) -> Result<lash_core_store::checkpoint_graph::NodeId, FoldRefusal> {
     let [row] = records else {
         return Err(out_of_order(records[1]));
     };
-    let Record::CellReport(report) = decode(facts, row)? else {
+    let record = read(row)?;
+    let Record::CellReport(report) = record.as_ref() else {
         return Err(out_of_order(row));
     };
     super::graph::ReportView::load(
         &mut lash_core_store::checkpoint_graph::GraphDecoder::new(facts, facts.read_limits),
-        report,
+        *report,
     )
-    .map(|_| report)
+    .map(|_| *report)
     .map_err(|refusal| FoldRefusal::Undecodable {
         run: row.run,
         ordinal: row.ordinal,
@@ -378,10 +455,10 @@ fn fold_report(
 }
 
 fn fold_run(
-    facts: &RunFacts,
     run: RunSeq,
     records: &[&RunFactRow],
     waits: &PinnedWaits,
+    read: &mut ReadRecord<'_>,
 ) -> Result<RoundView, FoldRefusal> {
     let Some(admit) = records
         .first()
@@ -392,7 +469,8 @@ fn fold_run(
             missing: ADMIT_ORDINAL,
         });
     };
-    let Record::Admit(body) = decode(facts, admit)? else {
+    let record = read(admit)?;
+    let Record::Admit(body) = record.as_ref() else {
         return Err(out_of_order(admit));
     };
     let mut members: Vec<Option<RoundMember>> = Vec::new();
@@ -409,7 +487,8 @@ fn fold_run(
         })?;
     let mut presented = false;
     for row in &records[1..] {
-        match decode(facts, row)? {
+        let record = read(row)?;
+        match record.as_ref() {
             Record::Admit(_) | Record::CellReport(_) => return Err(out_of_order(row)),
             Record::Start(start) => {
                 let index = usize::try_from(start.member)
@@ -454,7 +533,7 @@ fn fold_run(
                 }
             }
             Record::Wait(parked) => {
-                let SettledOutput::Waiting(source) = parked.output else {
+                let SettledOutput::Waiting(source) = &parked.output else {
                     return Err(out_of_order(row));
                 };
                 let member = open_attempt(&mut members, row, parked.start)?;
@@ -465,7 +544,7 @@ fn fold_run(
                 member.state = MemberState::Waiting {
                     start: Ordinal(parked.start),
                     attempt,
-                    source,
+                    source: source.clone(),
                 };
             }
             Record::Outcome(settled) => {
@@ -479,9 +558,9 @@ fn fold_run(
                     .insert(attempt, (settled.output.clone(), None));
                 member.state = MemberState::Final {
                     start: Ordinal(settled.start),
-                    outcome: settled.output,
+                    outcome: settled.output.clone(),
                 };
-                member.committed_state = settled.state;
+                member.committed_state = settled.state.clone();
                 member.ended_at_ms = settled.ended_at_ms;
             }
             Record::Retry(retry) => {
@@ -507,7 +586,7 @@ fn fold_run(
                 member.state = MemberState::RetryDue {
                     start: Ordinal(retry.start),
                     attempt,
-                    outcome: retry.output,
+                    outcome: retry.output.clone(),
                     due: DurableInstant(retry.due_at_ms),
                 };
             }

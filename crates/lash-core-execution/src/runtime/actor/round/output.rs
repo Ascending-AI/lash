@@ -8,6 +8,8 @@
 //! stored form (an outcome or retry record, a step's settlement in engine
 //! state) decodes through [`SettledOutput`]'s own form and the same check.
 
+use std::sync::Arc;
+
 use lash_core_store::tool_run::{
     AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
     LimitCause, MaterialDigest, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
@@ -44,7 +46,9 @@ impl NamesMaterial for CompletionSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Material<T = MaterialRef> {
     named: T,
-    payload: String,
+    // Checked with `named` once; cloning a material never copies or rehashes
+    // its immutable payload. String preserves ownership when into_parts is unique.
+    payload: Arc<String>,
 }
 
 impl<T: NamesMaterial> Material<T> {
@@ -57,7 +61,10 @@ impl<T: NamesMaterial> Material<T> {
     pub fn new(named: T, payload: String) -> Result<Self, SettledOutputRefusal> {
         let reference = named.material();
         reference.verify(&reference.owner, &digest(reference, &payload))?;
-        Ok(Self { named, payload })
+        Ok(Self {
+            named,
+            payload: Arc::new(payload),
+        })
     }
 
     /// What names the material.
@@ -81,7 +88,7 @@ impl<T: NamesMaterial> Material<T> {
     /// What names the material, and its payload.
     #[must_use]
     pub fn into_parts(self) -> (T, String) {
-        (self.named, self.payload)
+        (self.named, Arc::unwrap_or_clone(self.payload))
     }
 }
 
@@ -91,7 +98,10 @@ impl Material {
     #[must_use]
     pub fn journal_local(owner: MaterialOwner, role: MaterialRole, payload: String) -> Self {
         let named = mint(owner, role, MaterialLocation::JournalLocal, &payload);
-        Self { named, payload }
+        Self {
+            named,
+            payload: Arc::new(payload),
+        }
     }
 
     /// This material as a known failure's output.

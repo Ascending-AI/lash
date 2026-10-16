@@ -24,7 +24,8 @@ use tokio_util::sync::CancellationToken;
 use super::super::ActorContext;
 use super::lifecycle::{Act, Fence, Lifecycle, MemberBodies};
 use super::{
-    AdmittedRound, FoldRefusal, PinnedWaits, PolicyView, RoundView, RunFold, SettleRefusal, fold,
+    AdmittedRound, FoldRefusal, PinnedWaits, PolicyView, RoundView, RunFold, RunRecords,
+    SettleRefusal,
 };
 
 /// How a round's run ended.
@@ -266,7 +267,7 @@ impl RoundRunner {
             if cancelled {
                 self.lifecycle.cancel_runs_before(RunSeq(self.run.0 + 1));
             }
-            let folded = fold(&rows, &self.policies, &waits)?;
+            let folded = rows.fold(&self.policies, &waits)?;
             let settled = folded
                 .round(self.run)
                 .ok_or(RoundError::NotAdmitted(self.run))?
@@ -287,7 +288,7 @@ impl RoundRunner {
                 rows.extend(
                     RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch()).of_run(self.run),
                 );
-                let folded = fold(&rows, &self.policies, &waits)?;
+                let folded = rows.fold(&self.policies, &waits)?;
                 self.cx.clear_due(DueSource::RetryDue);
                 return Ok(PreparedRoundEnd::Prepared {
                     round: SettledRound {
@@ -342,10 +343,10 @@ async fn load(
     cx: &ActorContext,
     owner: &OwnerKey,
     run: RunSeq,
-) -> Result<(RunFacts, PinnedWaits), RoundError> {
+) -> Result<(RunRecords, PinnedWaits), RoundError> {
     let reads = cx.durable_reads()?;
     let mut rows = reads.run_facts_of(owner, run).await?;
     rows.read_limits = cx.backend().config().settings().graph_reads.owner();
     let waits = PinnedWaits::read(reads, &rows).await?;
-    Ok((rows, waits))
+    Ok((RunRecords::new(rows), waits))
 }

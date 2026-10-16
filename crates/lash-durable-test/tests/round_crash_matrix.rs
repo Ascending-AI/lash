@@ -1228,3 +1228,203 @@ async fn a_cancel_during_a_retry_backoff_starts_no_next_attempt() {
         "the cancel waited for the retry's due time: {cancelled_at:?}"
     );
 }
+
+/// SETTLED-PAYLOAD-REUSE: settled native members reuse their verified
+/// payload image across folds, attempt histories and recovery views.
+#[tokio::test]
+async fn settled_payload_reuse() {
+    use lash_durable::DurableReads as _;
+    let stores = sim::memory(SimClock::new()).await;
+    let database = stores.durable_store();
+    let mut seed = MailTx::new();
+    seed.create_actor(actor(), FormatSet::new(FORMATS));
+    database
+        .commit_mail(seed, CommitLabel::MAIL_SESSION)
+        .await
+        .unwrap();
+    let lease = database
+        .register_node(&lash_durable::NodeSpec {
+            node: lash_durable::NodeId::new("payload-reuse"),
+            decodes: vec![FormatSet::new(FORMATS)],
+            serves: Vec::new(),
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    let claimed = database.claim(&lease, 1).await.unwrap();
+    assert_eq!(claimed.len(), 1);
+    let epoch = claimed[0].epoch;
+    let mut tx = database.begin(&actor(), epoch).await.unwrap();
+    let drafts = (0..18)
+        .map(|index| {
+            ExecutionDraft::new(
+                call(&format!("branch-{index}")),
+                ToolId::new("fixture_large"),
+                material("request"),
+                ExecutionPolicy::Once,
+                ExecutionLimit {
+                    expires_at: u64::MAX,
+                    max_slice: Duration::from_secs(60),
+                },
+                None,
+            )
+        })
+        .collect();
+    let members = round::admit(&mut tx, &owner(), RUN, drafts).unwrap();
+    let mut expected = Vec::new();
+    for member in &members {
+        let answer = lash_core_execution::ToolCallOutput::success(
+            serde_json::json!({"text": "x".repeat(3370)}),
+        );
+        let completed = round::CompletedCall {
+            call_id: member.call().clone(),
+            provider_call_id: None,
+            tool_name: "fixture_large".to_owned(),
+            args: serde_json::json!({"bytes": 3370}),
+            model_return: lash_sansio::ModelToolReturn::from_output(
+                "fixture_large".to_owned(),
+                &answer,
+            ),
+            output: answer,
+            intent_outcomes: Vec::new(),
+            replay: None,
+        };
+        let payload = serde_json::to_string(&completed).unwrap();
+        expected.push(payload.clone());
+        round::settle(
+            &mut tx,
+            member,
+            SettledOutput::Completed(output(payload)),
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+    }
+    database
+        .commit(tx, CommitLabel::ROUND_OUTCOME)
+        .await
+        .unwrap();
+    let facts = database.run_facts(&owner()).await.unwrap();
+    let waits = round::PinnedWaits::default();
+    let policies = PolicyView::default();
+    let mut records = round::RunRecords::new(facts);
+    let first = records.fold(&policies, &waits).unwrap();
+    let revisited = records.fold(&policies, &waits).unwrap();
+    assert_eq!(first, revisited);
+    for ((before, after), payload) in first
+        .round(RUN)
+        .unwrap()
+        .members()
+        .iter()
+        .zip(revisited.round(RUN).unwrap().members())
+        .zip(&expected)
+    {
+        let original = before.outcome().unwrap().payload().unwrap();
+        let reused = after.outcome().unwrap().payload().unwrap();
+        assert_eq!(reused, payload);
+        let output = after.outcome().unwrap();
+        let wire = serde_json::json!({"outcome": output.outcome(), "payload": payload});
+        assert_eq!(serde_json::to_value(output).unwrap(), wire);
+        assert_eq!(
+            serde_json::from_value::<SettledOutput>(wire).unwrap(),
+            *output
+        );
+        assert_eq!(
+            original.as_ptr(),
+            reused.as_ptr(),
+            "a settled payload is shared on revisit"
+        );
+        assert_eq!(
+            after
+                .attempts()
+                .next()
+                .unwrap()
+                .1
+                .payload()
+                .unwrap()
+                .as_ptr(),
+            reused.as_ptr()
+        );
+        let named = match after.outcome().unwrap() {
+            SettledOutput::Completed(material) => material.reference(),
+            _ => panic!("a completed member"),
+        };
+        assert!(Material::new(named.clone(), "changed".to_owned()).is_err());
+        let mut wrong_owner = named.clone();
+        wrong_owner.owner = MaterialOwner::Run {
+            opener: EffectOpener::turn("another", "run"),
+        };
+        assert!(Material::new(wrong_owner, reused.to_owned()).is_err());
+    }
+    for ((_, recovery), member) in revisited
+        .recoveries()
+        .iter()
+        .zip(revisited.round(RUN).unwrap().members())
+    {
+        let round::Recovery::Settled(output) = recovery else {
+            panic!("a settled recovery")
+        };
+        assert_eq!(
+            output.payload().unwrap().as_ptr(),
+            member.outcome().unwrap().payload().unwrap().as_ptr()
+        );
+    }
+    // A new settlement changes only its own image, never earlier members'.
+    let mut tx = database.begin(&actor(), epoch).await.unwrap();
+    let next = RunSeq(RUN.0 + 1);
+    let changed_draft = members[0].draft().clone();
+    // A different run may reuse this call's pinned request.
+    let changed = round::admit(&mut tx, &owner(), next, vec![changed_draft]).unwrap();
+    let changed_output = SettledOutput::Completed(output("changed payload".to_owned()));
+    round::settle(
+        &mut tx,
+        &changed[0],
+        changed_output.clone(),
+        Vec::new(),
+        None,
+    )
+    .unwrap();
+    let appended = lash_durable::domain::RunFacts::appended(tx.domain(), tx.graph(), epoch);
+    database
+        .commit(tx, CommitLabel::ROUND_OUTCOME)
+        .await
+        .unwrap();
+    records.extend(appended);
+    let extended = records.fold(&policies, &waits).unwrap();
+    assert_eq!(
+        extended.round(next).unwrap().members()[0].outcome(),
+        Some(&changed_output)
+    );
+    for (before, after) in first
+        .round(RUN)
+        .unwrap()
+        .members()
+        .iter()
+        .zip(extended.round(RUN).unwrap().members())
+    {
+        assert_eq!(
+            before.outcome().unwrap().payload().unwrap().as_ptr(),
+            after.outcome().unwrap().payload().unwrap().as_ptr()
+        );
+    }
+
+    // Replacing an already checked node cannot reuse its old checked image.
+    let id = records
+        .facts()
+        .rows
+        .iter()
+        .find(|row| row.kind == RunFactKind::XOutcome)
+        .unwrap()
+        .record;
+    let mut bad = records.facts().nodes[&id].clone();
+    let mut bytes = bad.bytes.to_vec();
+    *bytes.last_mut().unwrap() ^= 1;
+    bad.bytes = bytes.into();
+    let mut corrupted = lash_durable::domain::RunFacts::default();
+    corrupted.nodes.insert(id, bad);
+    records.extend(corrupted);
+    assert!(
+        records.fold(&policies, &waits).is_err(),
+        "a conflicting node must be checked again"
+    );
+}
