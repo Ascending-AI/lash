@@ -45,6 +45,12 @@ mod rule_cases {
 fn run_rule(rule: &str, text: &str) {
     let shard: Shard = serde_json::from_str(text).expect("decode rule shard");
     assert_eq!(shard.rule, rule);
+    let registry = corpus_registry();
+    contract_cases::verify(&shard, &registry);
+    run_shard(&shard, registry);
+}
+
+fn corpus_registry() -> lash_kernel_doc::FunctionRegistry {
     let mut registry = lash_kernel_doc::FunctionRegistry::new();
     lash_kernel_vm::register_machine_functions(&mut registry).expect("register kernel functions");
     lash_kernel_lib::register_numbers(&mut registry).expect("register numeric natives");
@@ -55,8 +61,7 @@ fn run_rule(rule: &str, text: &str) {
         &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(4)),
     )
     .expect("register regex natives");
-    contract_cases::verify(&shard, &registry);
-    run_shard(&shard, registry);
+    registry
 }
 
 fn run_shard(shard: &Shard, registry: lash_kernel_doc::FunctionRegistry) {
@@ -209,6 +214,40 @@ fn coverage_pending_owners_partition_the_rules() {
             .unknown
             .contains("K-FUTURE-001")
     );
+}
+
+#[test]
+fn admitted_corpus_library_identities_are_current() {
+    // FIG-6558: a changed library body must not strand an admitted rule case
+    // on its superseded identity before the rule's observations can run.
+    let registry = corpus_registry();
+    let shards = load_corpus(
+        CORPUS_FILES
+            .iter()
+            .chain(LIBRARY_CORPUS_FILES)
+            .chain(&[(
+                "K-LJSON-005.json",
+                include_str!("../supplements/json/K-LJSON-005.json"),
+            )])
+            .copied(),
+    )
+    .expect("decode document corpus");
+    let mut missing = Vec::new();
+    for shard in shards {
+        for case in shard.cases {
+            // Refusal cases deliberately name unavailable functions.
+            if case.expected.end == ExpectedEnd::Refused {
+                continue;
+            }
+            let document = parse_document(&case.document).expect("admitted case parses");
+            for (id, name) in &document.manifest.functions {
+                if registry.get(id).is_none() {
+                    missing.push(format!("{} {}: {name} = @{id}", shard.rule, case.name));
+                }
+            }
+        }
+    }
+    assert!(missing.is_empty(), "{}", missing.join("\n"));
 }
 
 #[test]

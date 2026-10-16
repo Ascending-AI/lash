@@ -40,6 +40,11 @@ Values in the envelope use kernel `Datum` serialization: `"null"`,
 `{"int":"3"}`, `{"float":"1.0"}`, `{"text":"hello"}`,
 `{"list":[...]}`, `{"record":[["field",value]]}`, etc. The document contains
 literal library identities in its `use` lines; the test injects its registry.
+`tests::admitted_corpus_library_identities_are_current` rejects superseded
+identities in admitted corpus cases. Refresh K-VAL-033's unordered-sort
+document with `kiln run //crates/lash-kernel-conformance:sort_corpus__example -- "$PWD"`;
+the recorder derives its manifest from the current library and preserves its
+expected observations.
 
 `environment` defaults to no host reads or deliveries, a charge bound of
 1,000,000, 16 MiB of memory, call depth 64, and 128 live tasks, requests per
