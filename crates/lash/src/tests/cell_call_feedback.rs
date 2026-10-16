@@ -414,7 +414,7 @@ async fn plugins_own_cell_failure_repairs_in_the_next_model_input() -> Result<()
                 assert_eq!(
                     feedback,
                     format!(
-                        "{diagnostic_code}: {message} (line 1, column 7)\n  {code}\n\nA standalone `</{}>` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line.\n\nNext: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell.",
+                        "{diagnostic_code}: {message} (line 1, column 7)\n  {code}\n\nA line starting with `</{}>` after whitespace terminates the outer cell even inside multiline source text; construct that content without a line-leading closing delimiter. Everything after that closing tag is discarded; wait for real results before continuing.\n\nNext: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell.",
                         dialect.name(),
                     ),
                     "no plugin preserves the original feedback bytes"

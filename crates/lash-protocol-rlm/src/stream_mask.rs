@@ -493,7 +493,8 @@ mod tests {
             "<typescript>\nprint 1\n</typescript>",
             "<typescript>\nprint 1\n</typescript>\nsuffix",
         ] {
-            let expected = accepted(&[raw]);
+            let expected = Some("<typescript>\nprint 1\n</typescript>".to_string());
+            assert_eq!(accepted(&[raw]), expected);
             for split in raw
                 .char_indices()
                 .map(|(index, _)| index)
@@ -507,11 +508,11 @@ mod tests {
             }
         }
 
-        let malformed = "<typescript>\nprint 1\n</typescript>suffix";
-        let after_tag = malformed.find("suffix").expect("suffix boundary");
+        let reply = "<typescript>\nprint 1\n</typescript>suffix";
+        let after_tag = reply.find("suffix").expect("suffix boundary");
         assert_eq!(
-            accepted(&[&malformed[..after_tag], &malformed[after_tag..]]),
-            None
+            accepted(&[&reply[..after_tag], &reply[after_tag..]]),
+            Some("<typescript>\nprint 1\n</typescript>".to_string())
         );
     }
 

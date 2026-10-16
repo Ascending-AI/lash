@@ -204,7 +204,7 @@ impl CellObservation {
                 // as an argument, where no delimiter can truncate it.
                 if !refusal.unsupported && channel == crate::plugin::RlmChannel::Cell {
                     message.push_str(&format!(
-                        "\n\nA line starting with `{}` after whitespace terminates the outer {} even inside multiline source text; construct that content without a line-leading closing delimiter.",
+                        "\n\nA line starting with `{}` after whitespace terminates the outer {} even inside multiline source text; construct that content without a line-leading closing delimiter. Everything after that closing tag is discarded; wait for real results before continuing.",
                         vocabulary.cell_tags.close, vocabulary.cell_noun,
                     ));
                 }
