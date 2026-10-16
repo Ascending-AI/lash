@@ -205,7 +205,13 @@ impl From<HeapFault> for CopyError {
 }
 
 pub(crate) fn text_copy(heap: &dyn NativeHeap, text: &TextRef) -> Result<String, HeapFault> {
-    let mut out = String::new();
+    // The descriptor certifies the full UTF-8 extent; check String's host
+    // capacity limit before reserving it once, rather than growing per leaf.
+    let capacity = usize::try_from(text.summary.utf8_bytes)
+        .ok()
+        .filter(|&bytes| bytes <= isize::MAX as usize)
+        .ok_or_else(|| HeapFault::Malformed("text length exceeds host String capacity".into()))?;
+    let mut out = String::with_capacity(capacity);
     heap.payload_visit(
         &Value::Text(text.clone()),
         0..text.summary.utf8_bytes,
