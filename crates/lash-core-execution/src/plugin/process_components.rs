@@ -1100,8 +1100,8 @@ impl ProcessComposition {
     /// Resolve `path`, the call path of a `call_dynamic` call `owner` makes
     /// under `env`, through the deferred provider `env` links the endpoint
     /// to, under `env`'s config (P6). Resolution is read-only discovery: a
-    /// path the provider does not answer is unavailable, and its note is
-    /// bounded.
+    /// path the provider does not answer is unavailable. Host notes and
+    /// refusal reasons are preserved verbatim.
     ///
     /// # Errors
     ///
@@ -1160,7 +1160,7 @@ impl ProcessComposition {
         }
         Ok(crate::DeferredMatch {
             requested: path.to_owned(),
-            outcome: crate::bounded_deferred_outcome(outcome),
+            outcome,
         })
     }
 

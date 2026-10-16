@@ -731,6 +731,11 @@ const REFUSED_PATH: &str = "search.refused";
 /// A call path no tool answers.
 const MISSING_PATH: &str = "search.missing";
 
+/// FIG-6590: exactly 1 KiB of host-authored UTF-8, retained byte-for-byte.
+fn dynamic_host_explanation() -> String {
+    format!("{}éé", "é🦀".repeat(170))
+}
+
 /// What the dynamic laws observe of every node: the outside world.
 #[derive(Default)]
 struct Resolutions {
@@ -824,7 +829,10 @@ impl lash_core::DeferredToolProvider for Resolver {
                     binding: None,
                 },
                 REFUSED_PATH => lash_core::DeferredOutcome::Refused {
-                    reason: "not for this process".to_owned(),
+                    reason: dynamic_host_explanation(),
+                },
+                MISSING_PATH => lash_core::DeferredOutcome::Unavailable {
+                    note: Some(dynamic_host_explanation()),
                 },
                 _ => continue,
             };
@@ -1145,6 +1153,14 @@ impl DynamicCalls {
                     ));
                 }
             }
+            let explanation = dynamic_host_explanation();
+            if answer[0]["data"]["cause"]["reason"] != explanation
+                || answer[1]["data"]["cause"]["note"] != explanation
+            {
+                violations.push(format!(
+                    "the committed host explanations did not survive verbatim: {answer}"
+                ));
+            }
         }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
@@ -1277,6 +1293,7 @@ async fn a_dynamic_call_resumes_its_matched_target_and_never_resolves_again(tier
 /// A refused path and a path no tool answers are each a durable decision
 /// (P6, S6): the body catches each as its typed failure, no tool runs, and
 /// a crash after a decision committed never resolves its path again.
+/// FIG-6590: its 1 KiB host explanation survives each commit and reopen verbatim.
 async fn a_refused_or_unavailable_dynamic_call_is_decided_once_and_caught_typed(tier: Tier) {
     dynamic_matrix(tier, DECIDING).await;
 }

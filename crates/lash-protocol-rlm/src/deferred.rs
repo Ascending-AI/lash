@@ -164,11 +164,9 @@ pub(crate) async fn journal_deferred_matches(
                 .into_iter()
                 .map(|path| DeferredMatch {
                     requested: path.to_owned(),
-                    outcome: lash_core::bounded_deferred_outcome(
-                        resolved
-                            .remove(path)
-                            .unwrap_or(DeferredOutcome::Unavailable { note: None }),
-                    ),
+                    outcome: resolved
+                        .remove(path)
+                        .unwrap_or(DeferredOutcome::Unavailable { note: None }),
                 })
                 .collect::<Vec<_>>();
             for matched in &matches {

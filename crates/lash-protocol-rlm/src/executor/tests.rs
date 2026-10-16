@@ -816,20 +816,23 @@ async fn a_deferred_tool_granted_to_a_cell_is_callable_after_a_restart() {
     );
 }
 
-/// FIG-6011: an unavailable path's host note reaches the model in either
-/// dialect, and a redrive uses the recorded note without rediscovery.
+/// FIG-6590 / FIG-6011: host notes and refusal reasons survive commit and
+/// reopen verbatim in either dialect, without rediscovery on redrive.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unavailable_deferred_tool_note_is_visible_and_reused_on_redrive() {
-    struct Unavailable {
+async fn deferred_host_explanations_survive_commit_and_reopen_verbatim() {
+    struct Explains {
         asked: AtomicUsize,
+        refused: bool,
     }
 
-    const NOTE: &str = "MCP server unreachable; reconnect before calling web.fetch";
+    fn host_note() -> String {
+        format!("{}éé", "é🦀".repeat(170))
+    }
 
-    resolves_only!(Unavailable);
+    resolves_only!(Explains);
 
     #[async_trait::async_trait]
-    impl lash_core::DeferredToolProvider for Unavailable {
+    impl lash_core::DeferredToolProvider for Explains {
         async fn resolve(
             &self,
             _cx: &lash_core::DeferredResolveContext<'_>,
@@ -843,108 +846,105 @@ async fn an_unavailable_deferred_tool_note_is_visible_and_reused_on_redrive() {
                     "web.fetch"
                 }
                 .into(),
-                lash_core::DeferredOutcome::Unavailable {
-                    note: Some(if attempt == 0 {
-                        format!("{NOTE}; {}", "é🦀".repeat(150))
+                {
+                    let note = if attempt == 0 {
+                        host_note()
                     } else {
                         "a different discovery answer".to_owned()
-                    }),
+                    };
+                    if self.refused {
+                        lash_core::DeferredOutcome::Refused { reason: note }
+                    } else {
+                        lash_core::DeferredOutcome::Unavailable { note: Some(note) }
+                    }
                 },
             )])
         }
     }
 
-    for dialect in [CellDialect::typescript(), CellDialect::python()] {
-        let mut host = open_host().await;
-        let tools = Arc::new(CellTools::default());
-        let resolver = Arc::new(Unavailable {
-            asked: AtomicUsize::new(0),
-        });
-        let services = cell_services(
-            &dialect,
-            if dialect.name() == CellDialect::python().name() {
-                python_workers()
+    let expected = host_note();
+    assert_eq!(expected.len(), 1024);
+    for refused in [true, false] {
+        for dialect in [CellDialect::typescript(), CellDialect::python()] {
+            let mut host = open_host().await;
+            let tools = Arc::new(CellTools::default());
+            let resolver = Arc::new(Explains {
+                asked: AtomicUsize::new(0),
+                refused,
+            });
+            let services = cell_services(
+                &dialect,
+                if dialect.name() == CellDialect::python().name() {
+                    python_workers()
+                } else {
+                    lash_vm_client::service::Service::default()
+                },
+            );
+            let deferred = resolver.clone() as Arc<dyn lash_core::DeferredToolProvider>;
+            let code = if dialect.name() == CellDialect::python().name() {
+                "try:\n    await echo_say({'text': 'held'})\nexcept Exception:\n    pass\nawait web_fetch({})"
             } else {
-                lash_vm_client::service::Service::default()
-            },
-        );
-        let deferred = resolver.clone() as Arc<dyn lash_core::DeferredToolProvider>;
-        let code = if dialect.name() == CellDialect::python().name() {
-            "try:\n    await echo_say({'text': 'held'})\nexcept Exception:\n    pass\nawait web_fetch({})"
-        } else {
-            "try { await echo.say({ text: 'held' }); } catch (error) {}\nawait web.fetch({});"
-        };
-        tools.hold.store(true, Ordering::SeqCst);
-        {
-            let mut state = crate::testing::session_state(&dialect);
-            let running = run_cell(
-                &mut state,
+                "try { await echo.say({ text: 'held' }); } catch (error) {}\nawait web.fetch({});"
+            };
+            tools.hold.store(true, Ordering::SeqCst);
+            {
+                let mut state = crate::testing::session_state(&dialect);
+                let running = run_cell(
+                    &mut state,
+                    context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
+                    &services,
+                    code,
+                );
+                tokio::select! {
+                    response = running => panic!("the cell ended before its held call: {:?}", response.error()),
+                    () = tools.held_started.notified() => {}
+                }
+            }
+            assert_eq!(resolver.asked.load(Ordering::SeqCst), 1);
+            host.kill_and_resume().await;
+            tools.hold.store(false, Ordering::SeqCst);
+            let first = run_cell(
+                &mut crate::testing::session_state(&dialect),
                 context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
                 &services,
                 code,
+            )
+            .await;
+            let failure = first.error().expect("the tool is unavailable");
+            assert!(failure.message.ends_with(&expected), "{failure:?}");
+            let rendered = crate::feedback::render(failure, "cell");
+            assert!(rendered.contains(&expected), "{rendered}");
+
+            host.kill_and_resume().await;
+            let redriven = run_cell(
+                &mut crate::testing::session_state(&dialect),
+                context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
+                &services,
+                code,
+            )
+            .await;
+            assert_eq!(redriven.error(), first.error());
+            assert_eq!(resolver.asked.load(Ordering::SeqCst), 1);
+
+            let next = run_cell(
+                &mut crate::testing::session_state(&dialect),
+                context_with(&host, "exec-code:1", tools, Some(&deferred)),
+                &services,
+                if dialect.name() == CellDialect::python().name() {
+                    "await web_fetch({})"
+                } else {
+                    "await web.fetch({})"
+                },
+            )
+            .await;
+            assert!(
+                next.error()
+                    .unwrap()
+                    .message
+                    .contains("a different discovery answer")
             );
-            tokio::select! {
-                response = running => panic!("the cell ended before its held call: {:?}", response.error()),
-                () = tools.held_started.notified() => {}
-            }
+            assert_eq!(resolver.asked.load(Ordering::SeqCst), 2);
         }
-        assert_eq!(resolver.asked.load(Ordering::SeqCst), 1);
-        host.kill_and_resume().await;
-        tools.hold.store(false, Ordering::SeqCst);
-        let first = run_cell(
-            &mut crate::testing::session_state(&dialect),
-            context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
-            &services,
-            code,
-        )
-        .await;
-        let failure = first.error().expect("the tool is unavailable");
-        assert!(failure.message.contains(NOTE), "{failure:?}");
-        let tail = failure
-            .message
-            .split_once(": MCP server unreachable")
-            .expect("the unavailable error contains the host note")
-            .1;
-        let note = format!("MCP server unreachable{tail}");
-        assert!(note.len() <= lash_core::MAX_DEFERRED_NOTE_BYTES);
-        assert!(note.ends_with(" [truncated]"), "{note}");
-        let constructed =
-            lash_core::bounded_deferred_outcome(lash_core::DeferredOutcome::Unavailable {
-                note: Some(format!("{NOTE}; {}", "é🦀".repeat(150))),
-            });
-        assert_eq!(serde_json::to_value(constructed).unwrap()["note"], note);
-        let rendered = crate::feedback::render(failure, "cell");
-        assert!(rendered.contains(NOTE), "{rendered}");
-
-        host.kill_and_resume().await;
-        let redriven = run_cell(
-            &mut crate::testing::session_state(&dialect),
-            context_with(&host, "exec-code:0", tools.clone(), Some(&deferred)),
-            &services,
-            code,
-        )
-        .await;
-        assert_eq!(redriven.error(), first.error());
-        assert_eq!(resolver.asked.load(Ordering::SeqCst), 1);
-
-        let next = run_cell(
-            &mut crate::testing::session_state(&dialect),
-            context_with(&host, "exec-code:1", tools, Some(&deferred)),
-            &services,
-            if dialect.name() == CellDialect::python().name() {
-                "await web_fetch({})"
-            } else {
-                "await web.fetch({})"
-            },
-        )
-        .await;
-        assert!(
-            next.error()
-                .unwrap()
-                .message
-                .contains("a different discovery answer")
-        );
-        assert_eq!(resolver.asked.load(Ordering::SeqCst), 2);
     }
 }
 

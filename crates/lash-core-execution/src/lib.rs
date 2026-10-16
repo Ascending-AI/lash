@@ -478,10 +478,7 @@ fn tool_failure_for_projection(failure: &ToolFailure) -> serde_json::Value {
     }
     projected
 }
-pub use deferred_provider::{
-    DeferredResolveContext, DeferredToolProvider, MAX_DEFERRED_NOTE_BYTES,
-    bounded_outcome as bounded_deferred_outcome,
-};
+pub use deferred_provider::{DeferredResolveContext, DeferredToolProvider};
 pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
 pub use lash_core_store::tool_surface::{
     CALL_DYNAMIC_EFFECT, DeferredMatch, DeferredOutcome, DynamicCall, EffectLink, ExecutionBinding,
