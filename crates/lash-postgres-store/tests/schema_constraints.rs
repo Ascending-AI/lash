@@ -641,7 +641,15 @@ async fn turn_cancellation_shape_is_guarded() {
 #[tokio::test]
 async fn isolated_cells_do_not_checkpoint_or_share_state() {
     use lash_postgres_store::testing::{IsolatedDatabase, connect, required_database_url};
-    let url = required_database_url();
+    let base_url = required_database_url();
+    // The vacant-shell pool is keyed by maintenance URL. Give this law its own
+    // key without changing the server, so unrelated fixtures cannot affect its
+    // allocation bound. Both users below still share this pool.
+    let separator = if base_url.contains('?') { '&' } else { '?' };
+    let url = format!(
+        "{base_url}{separator}application_name=isolated_cells_{}",
+        uuid::Uuid::new_v4().simple()
+    );
     let mut admin = PgConnection::connect(&url).await.expect("connect admin");
     let before: i64 = sqlx::query_scalar("SELECT num_requested FROM pg_stat_checkpointer")
         .fetch_one(&mut admin)
@@ -651,13 +659,15 @@ async fn isolated_cells_do_not_checkpoint_or_share_state() {
         IsolatedDatabase::create(&url),
         IsolatedDatabase::create(&url)
     );
-    let first_oid: i64 =
-        sqlx::query_scalar("SELECT oid::bigint FROM pg_database WHERE datname = $1")
-            .bind(first.database_name())
-            .fetch_one(&mut admin)
-            .await
-            .expect("read first shell identity");
-    let retired_url = first.url().to_owned();
+    let initial_oids: Vec<i64> = sqlx::query_scalar(
+        "SELECT oid::bigint FROM pg_database WHERE datname = ANY($1) ORDER BY oid",
+    )
+    .bind(vec![first.database_name(), second.database_name()])
+    .fetch_all(&mut admin)
+    .await
+    .expect("read the initial shell identities");
+    assert_eq!(initial_oids.len(), 2, "the two live cells own two shells");
+    let retired_urls = [first.url().to_owned(), second.url().to_owned()];
     let first_storage = connect(first.url())
         .await
         .expect("verify first cell catalog");
@@ -684,6 +694,12 @@ async fn isolated_cells_do_not_checkpoint_or_share_state() {
         .await
         .expect("read second cell");
     assert_eq!(count, 0, "a concurrent cell sees no other cell's rows");
+    sqlx::query(
+        "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('cell', 'second'::bytea, 0)",
+    )
+    .execute(second_storage.pool())
+    .await
+    .expect("write the companion cell");
     // Checkpointer statistics are published asynchronously; no snapshot is
     // retained while the two cells are made.
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
@@ -726,46 +742,58 @@ async fn isolated_cells_do_not_checkpoint_or_share_state() {
         after_teardown, after,
         "cell teardown must not checkpoint a live companion cell"
     );
+    // A companion user checks out the retired shell before this user does.
+    // Releasing the second shell gives this user another valid reuse choice.
+    let companion = IsolatedDatabase::create(&url).await;
+    drop(second_storage);
+    drop(second);
     let third = IsolatedDatabase::create(&url).await;
-    let third_oid: i64 =
-        sqlx::query_scalar("SELECT oid::bigint FROM pg_database WHERE datname = $1")
-            .bind(third.database_name())
-            .fetch_one(&mut admin)
-            .await
-            .expect("read later shell identity");
+    let reused_oids: Vec<i64> = sqlx::query_scalar(
+        "SELECT oid::bigint FROM pg_database WHERE datname = ANY($1) ORDER BY oid",
+    )
+    .bind(vec![companion.database_name(), third.database_name()])
+    .fetch_all(&mut admin)
+    .await
+    .expect("read both reused shell identities");
     assert_eq!(
-        third_oid, first_oid,
-        "retired shells bound disk use across cuts"
+        reused_oids, initial_oids,
+        "shell allocation stays bounded by the two peak live cells, regardless of which user reuses each shell"
     );
-    assert!(
-        PgConnection::connect(&retired_url).await.is_err(),
-        "a retired URL cannot enter the later cell"
-    );
-    let third_storage = connect(third.url())
-        .await
-        .expect("verify later cell catalog");
-    let third_id: String = sqlx::query_scalar("SELECT catalog_id FROM lash_catalog_identity")
-        .fetch_one(third_storage.pool())
-        .await
-        .expect("later catalog identity");
-    assert_ne!(third_id, first_id);
-    assert_ne!(third_id, second_id);
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_blobs")
-        .fetch_one(third_storage.pool())
-        .await
-        .expect("read later cell");
-    assert_eq!(count, 0, "a later cell sees no previous cell's rows");
-    let scratch: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM pg_namespace WHERE nspname = 'cell_scratch'")
-            .fetch_one(third_storage.pool())
+    for retired_url in retired_urls {
+        assert!(
+            PgConnection::connect(&retired_url).await.is_err(),
+            "a retired URL cannot enter either later cell"
+        );
+    }
+    let mut catalog_ids = std::collections::BTreeSet::from([first_id, second_id]);
+    for cell in [&companion, &third] {
+        let storage = connect(cell.url())
             .await
-            .expect("check the later cell's scratch schemas");
-    assert_eq!(
-        scratch, 0,
-        "a later cell sees no previous cell's scratch schema"
-    );
-    drop((second_storage, third_storage));
-    drop((second, third));
+            .expect("verify reused cell catalog");
+        let catalog_id: String = sqlx::query_scalar("SELECT catalog_id FROM lash_catalog_identity")
+            .fetch_one(storage.pool())
+            .await
+            .expect("reused cell catalog identity");
+        assert!(
+            catalog_ids.insert(catalog_id),
+            "every reused cell has a fresh catalog identity"
+        );
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_blobs")
+            .fetch_one(storage.pool())
+            .await
+            .expect("read reused cell");
+        assert_eq!(count, 0, "a reused cell sees no previous cell's rows");
+        let scratch: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM pg_namespace WHERE nspname = 'cell_scratch'")
+                .fetch_one(storage.pool())
+                .await
+                .expect("check the reused cell's scratch schemas");
+        assert_eq!(
+            scratch, 0,
+            "a reused cell sees no previous cell's scratch schema"
+        );
+    }
+    drop((companion, third));
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     sqlx::query("SELECT pg_stat_clear_snapshot()")
         .execute(&mut admin)
