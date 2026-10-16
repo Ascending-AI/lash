@@ -39,7 +39,6 @@ pub(super) const DATA: &str = r####"{
 "e44206aa7a5feeb72dde29dba6aa4a60f95ae8cf14f3a1352e47d14406715a9a":{"charge":497,"outcome":"raised \"type_error\" \"ref requires an object or task\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "e4430656b122a21c96f6813fab5efbecd52cb47b6bf4cb13384cb5ce3d904599":[{"int":"6798272577352146980"}],
 "e4430eee11fbc14043603a195cc786f795660f1b287fae085706cdef6444ecea":{"charge":13,"outcome":"ok {\"record\":[[\"🦀𝄞\",{\"int\":\"63\"}]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"e4431c011049354bdfe94d08f754caf3465fc334b8763c9c6b04eb8c1de1440b":["null",{"int":"31"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "e4441e2aa14cdd2459153c3539ff96be43e9f5e9f7acb3274c5b627ff70c94d3":{"charge":20,"outcome":"ok {\"int\":\"-17181436069829181843370506917143558800\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "e445c4171373bf5a91b5420d760832e639d15def2f14cd1b39e762ecf828b1b5":[{"int":"3283332763667956777"},{"float":"4.417835566690982e-106"}],
 "e44a03bb366f8754fd13af4ca2b2f031280738dd7a4c1e8c9b1fcf08509097b0":{"charge":37,"outcome":"raised \"number_range\" \"radix must be between 2 and 36\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

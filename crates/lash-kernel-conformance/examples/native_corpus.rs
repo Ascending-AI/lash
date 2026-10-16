@@ -1,8 +1,10 @@
 //! Explicitly records new native identities without building their release.
 //!
-//! Run through kiln, passing the checkout root as the only argument. Every
+//! Run through kiln, passing the checkout root and an optional mode. Every
 //! existing answer is certified before source is written; this command cannot
 //! re-record an incompatible implementation under a pinned identity.
+//! `--replace-unsealed-baseline` intentionally drops superseded identities only
+//! from the unsealed release the tree builds; surviving answers stay pinned.
 
 #![allow(clippy::disallowed_methods, reason = "explicit source-data recorder")]
 
@@ -20,6 +22,8 @@ mod inputs;
 mod probe;
 #[path = "../../lash-vm-releases/src/build/record.rs"]
 mod record;
+#[path = "../../lash-vm-releases/src/sealed.rs"]
+mod sealed;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::args_os()
@@ -28,18 +32,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mode = std::env::args_os().nth(2);
     let extend = mode.as_ref().is_some_and(|flag| flag == "--extend");
     let audit = mode.as_ref().is_some_and(|flag| flag == "--audit");
+    let replace = mode
+        .as_ref()
+        .is_some_and(|flag| flag == "--replace-unsealed-baseline");
+    if mode.is_some() && !extend && !audit && !replace {
+        return Err("expected --extend, --audit or --replace-unsealed-baseline".into());
+    }
     let mut recorded = corpus::Corpus::recorded()?;
     let release = declared::RETAINED_HELPER_RELEASES
         .last()
         .ok_or("no retained release")?
         .0;
+    let record = |recorded: &mut corpus::Corpus,
+                  registry: &lash_kernel_doc::FunctionRegistry,
+                  dialect: &str| {
+        if replace {
+            let sealed = sealed::SEALED
+                .iter()
+                .find(|(name, _)| *name == dialect)
+                .map_or(&[][..], |(_, releases)| *releases);
+            recorded.replace_unsealed_baseline(registry, dialect, release, sealed)
+        } else {
+            recorded.record_new(registry, dialect, release)
+        }
+    };
     let mut registry = lash_kernel_doc::FunctionRegistry::new();
     lash_kernel_lib::register_numbers(&mut registry)?;
     lash_kernel_lib::register_text_json(&mut registry)?;
     lash_kernel_vm::register_machine_functions(&mut registry)?;
     lash_kernel_lib::register_collections(&mut registry)?;
     if !audit {
-        recorded.record_new(&registry, declared::PYTHON, release)?;
+        record(&mut recorded, &registry, declared::PYTHON)?;
     }
     if extend {
         recorded.extend_generated(&registry, declared::PYTHON, release)?;
@@ -58,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     }
-    recorded.record_new(&registry, declared::TYPESCRIPT, release)?;
+    record(&mut recorded, &registry, declared::TYPESCRIPT)?;
     if extend {
         recorded.extend_generated(&registry, declared::TYPESCRIPT, release)?;
     }

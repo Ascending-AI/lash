@@ -135,7 +135,6 @@ pub(super) const DATA: &str = r####"{
 "52ec0a66743867ba56fa40af5537dc67f852df8d7657ef5b5a9c127601d099af":{"charge":44,"outcome":"ok {\"text\":\"0e0\"}","prepared_difference":null,"reservations":[[0,2],[0,2],[0,2]],"reserved":6,"spent":0},
 "52eeb6f6d5a42faf7197695eaf6ceaa2e8a0d28bec2a1c8d0a8e810b510788ae":[{"float":"-4.150664933492571e-139"},{"float":"9.311893245214764e207"}],
 "52f0e3ffe4326af5389c0af875b29929d4f3945a9e0617d890e1a1b3cdcf5907":{"charge":80,"outcome":"raised \"type_error\" \"Date receiver required\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"52f21c955304d2641e7bce6c592f01e8c5ba70dc8fd94e3b9830d7db97e4a8cf":["null",{"int":"-1"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "52f30b254790f3da0ad40d9be2d2300e3695d6ec7454aa4f3e70007fc9cb0f9f":[{"text":"򸛉󲆄񺫇􁙒󭓾񬃗􄪖𫾃󸠼򱈬󧔈󰗢򤥩𕆻񊯘󦪏𼮚򠢍󨯜򦇋𿯈򭨿󬙋󿌇񅴡񅯛򰆬񛊯񒨊񾛞풓򲏺􏬽񙖋򖩠񀲴񻮭򼆚𦲙𕨀񛂴󽓕񩸼񟨀ᇴ컗􍒊𔾣򞧼󇤯𳘝򬜱񝛿񲒒𿱛񊝣򙓭񽚄򃘩򍰅򌋽񲨸񲡬򑌼󰰚"},{"int":"2584659055908836994"},{"text":"񫧆󘜵𢅻񪟹򮳶򺢯򃠾񱷎􇡵𡏅󱪢񿸗𡸫თ򕔶𩘜𰰰񬨨򢦼𹋯򅘊򁘦񎖊𕳁𫘸󊵔򔬎䈘򡒜񁶵񴳎򏿗𔯨񱅿񪲝󏚄񝙩𱾅𲳺󁠣􃫓󃩦򘖒򹰙򹥡󎔗"},{"text":"end"}],
 "52f3f57ffeaae93a7365579a22f70217d197a0ca5ab5b2605c8d4a4f651a2f9d":{"charge":543,"outcome":"ok {\"list\":[{\"record\":[[\"index\",{\"int\":\"0\"}],[\"groups\",{\"list\":[{\"text\":\"\"}]}],[\"named\",\"null\"]]}]}","prepared_difference":null,"reservations":[[1,0],[1,0],[0,0]],"reserved":32,"spent":1},
 "52f4b4c7c212f5da7f68e74c5322bd72d8dccb0a12bf3296e0582444ff6961a5":{"charge":24,"outcome":"ok {\"text\":\"-7794671124610205399\"}","prepared_difference":null,"reservations":[[0,42]],"reserved":42,"spent":0},

@@ -18,7 +18,6 @@ pub(super) const DATA: &str = r####"{
 "b12b43dac0da42c1a84b8412e75a0b372f6fc9813f8b8bd5e0e401293efaed17":[{"list":[{"bool":true},{"float":"2.2640936408556087e103"},{"float":"-7.08295339274216e44"},{"bool":true},{"text":"󷚮񕧃𞦰鉣󼮇񯧐񣠣򝢓򉯢󻹕򍱩𽾑󸹮󱣲󹩃򁎷🁐񧾰򼕏𰔅򸱏󥢗򉿦򹕙񤸳𩩯񮲛󊶂򚩙񜅍𝾏󽟰󆉟𺭛򓣍񅿼􂉃󂋇퍂󯙤򟒈ㅡ𶝃󰭍񂘛󱢗󎵦󴼼𹪢𘄗򉯕랢𞑍񂻅񨧘񯃋󴟪񤇥󗘦𺽊񑒔򁎽񵃚𿓻󛇒񈸱𐅭񽠯驟󁂫򦩊򆐞᝖󧳸񸨁󽅕򿶷󧶌󸹷򧢫􋺚"},{"float":"-1.0803096252392945e200"}]}],
 "b12daa3bd8fe7f0af53478908ce1ccdfd39cfccdf1db60c6c3cde55943070ea7":[{"float":"-8.428737857927979e-103"}],
 "b12e011e1a0f50e7b315f2b1aec7388f686330bd47de06cf36172bc319701129":{"charge":540,"outcome":"raised \"type_error\" \"collection has the wrong kind\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"b12fe162a587dbf8ee6db353316fe0ac2aac439d003a8e75205a1525a63e1a98":[{"bool":true},{"int":"1"},{"int":"1"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "b1370d41b3cdc4e79490d7779ae3bad28d630530b19b9a983c94a4de0cff6831":[{"int":"-2015289922468531924"}],
 "b1399d43b04b55807740aa6e0ef253d7d2227a01cc7e5f484c967a492bb30271":{"charge":27,"outcome":"raised \"json_syntax\" \"invalid JSON, including unpaired surrogates\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b139e7299a8d99994f521c01cefbf4cc3b9b7438027b4bf1937eccc42d7e6f93":[{"float":"3.930587605680134e-100"}],

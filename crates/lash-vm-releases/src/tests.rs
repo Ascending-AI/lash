@@ -648,6 +648,80 @@ fn native_corpus_certifies_answers_and_keeps_compatible_anchors() {
     assert_eq!(anchored, original.certify(&general, "test", "1.0").unwrap());
 }
 
+/// FIG-6454, K-LIB-011: intentional baseline replacement retires only
+/// superseded unsealed identities; sealed releases and surviving answers stay
+/// pinned, including when other releases share their records.
+#[test]
+fn native_baseline_replacement_refuses_sealed_releases_and_preserves_surviving_answers() {
+    use lash_kernel_doc::{NativeCall, NativeError, NativeFunction, Value};
+    struct Native(bool);
+    impl NativeFunction for Native {
+        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+            let Value::Bool(value) = call.args[0] else {
+                unreachable!()
+            };
+            Ok(Value::Bool(value ^ self.0))
+        }
+    }
+    let registry = |param, invert| {
+        let mut registry = lash_kernel_doc::FunctionRegistry::new();
+        registry
+            .register(
+                lash_kernel_doc::parse_definition(&format!(
+                    "function probe({param}: Bool) -> Bool\nkernel 1\ncharge 1\nnative\n"
+                ))
+                .unwrap(),
+                Some(std::sync::Arc::new(Native(invert))),
+            )
+            .unwrap();
+        registry
+    };
+    let mut corpus = corpus::Corpus::default();
+    let old = registry("old", false);
+    corpus.record_new(&old, "test", "0.9").unwrap();
+    corpus.record_new(&old, "test", "1.0").unwrap();
+    let previous = corpus.releases["test@0.9"].clone();
+    let current = registry("current", false);
+    assert!(
+        corpus
+            .clone()
+            .record_new(&current, "test", "1.0")
+            .unwrap_err()
+            .contains("no retained implementation")
+    );
+    let mut shipped = release::freeze(
+        "1.0",
+        1,
+        None,
+        &old,
+        &corpus.verify_release(&old, "test", "0.9").unwrap(),
+    );
+    shipped.seal().unwrap();
+    let sealed = serde_json::to_string(&shipped).unwrap();
+    let before = serde_json::to_vec(&corpus).unwrap();
+    assert!(
+        corpus
+            .replace_unsealed_baseline(&current, "test", "1.0", &[&sealed])
+            .unwrap_err()
+            .contains("sealed release test@1.0")
+    );
+    assert_eq!(serde_json::to_vec(&corpus).unwrap(), before);
+    corpus
+        .replace_unsealed_baseline(&current, "test", "1.0", &[])
+        .unwrap();
+    assert_eq!(corpus.certify(&current, "test", "1.0").unwrap().len(), 1);
+    assert_eq!(corpus.releases["test@1.0"].len(), 1);
+    assert_eq!(corpus.releases["test@0.9"], previous);
+    corpus.verify_release(&old, "test", "0.9").unwrap();
+    let before = serde_json::to_vec(&corpus).unwrap();
+    assert!(
+        corpus
+            .replace_unsealed_baseline(&registry("current", true), "test", "1.0", &[])
+            .is_err()
+    );
+    assert_eq!(serde_json::to_vec(&corpus).unwrap(), before);
+}
+
 /// FIG-6180, K-LIB-006/011: an equivalent prepared entry is the same native
 /// behavior, so installing it must not replace a pinned release identity.
 #[test]

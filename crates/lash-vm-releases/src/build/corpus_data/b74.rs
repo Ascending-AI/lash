@@ -79,7 +79,6 @@ pub(super) const DATA: &str = r####"{
 "74938abcfb852e025d7c7fc5832cbcc3f6cb5f356949e0d4000cf9152e8930af":{"charge":436,"outcome":"ok {\"text\":\"\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "749466f573886e8b45f02db72aa72d089696bfe4784f22aba5c30d9566170a16":[{"int":"5643591051259206763"}],
 "7496066c16cabc02a3d496eb47bf4404d2b590e9f36c032b11ea1a14727149d6":[{"text":"12.5"},{"int":"1180591620717411303424"},{"text":"a"},{"text":"start"}],
-"7497caea41b0f9a45a7f491931b217a68b8eb2a90fd44a82be9162a2c51ed8f5":[{"int":"32"},{"int":"0"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "74981396623b0221f20c71afdb84fca1c731634c87b7686e7ec7d0ea1d7e9a2f":[{"int":"-2031024429403553242"}],
 "7498a47cc5bdd42decd695bcbb94feded52666f8a8ee0a523a2e84e7b7d7985e":{"charge":69,"outcome":"ok {\"float\":\"9.584000334242516e-93\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7498e2067025b7f6652b650ee1f8075fad0263bbcbe1fb870f8f53327bb88fda":{"charge":353,"outcome":"raised \"key_missing\" \"map has no such key\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

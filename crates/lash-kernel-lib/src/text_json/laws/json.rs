@@ -612,11 +612,14 @@ fn an_amplifier_reserves_its_result_before_it_builds_it() {
 /// it reaches, and allocates nothing even when the remaining room is zero.
 #[test]
 fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
+    use lash_kernel_state::paged::{ObjectInit, SemanticHeap as _};
+
     let mut lab = Lab::new();
     let plain = lab.value(list(vec![Datum::Null, b(true), t("large leaf")]));
     let absent = lab.value(Datum::Absent);
     let refused = lab.list_of(vec![absent, plain.clone()]);
-    let oversized = lab.value(list(vec![Datum::Null; 128]));
+    let over_old_cap = lab.value(list(vec![Datum::Null; 128]));
+    let shared = lab.list_of(vec![over_old_cap.clone(), over_old_cap.clone()]);
     let enormous = lab.value(list(vec![Datum::Null; 100_000]));
     let enormous_record = lab.value(Datum::Record(
         (0..100_000)
@@ -625,8 +628,9 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
     ));
     let field = lab.value(Datum::Record(vec![("a".into(), Datum::Null)]));
     let hook = lab.value(Datum::Record(vec![("toJSON".into(), Datum::Null)]));
+    let cycle = lab.heap.allocate_object(ObjectInit::List(vec![])).unwrap();
+    lab.heap.list_write(cycle, 0, Value::List(cycle)).unwrap();
     let policy = lab.values(&[
-        i(128),
         i(8),
         Datum::Tuple(vec![t("toJSON"), t("brand")]),
         t("0"),
@@ -638,11 +642,16 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
         (Value::Null, 3),
         (plain, 9),
         (refused, 4),
-        (oversized, 2),
-        (enormous, 2),
-        (enormous_record, 2),
+        (over_old_cap, 259),
+        (shared, 519),
+        (enormous, 200_003),
+        // k0..k99999: 10 two-byte, 90 three-byte, 900 four-byte,
+        // 9000 five-byte and 90000 six-byte keys. Each key's comparisons
+        // cost 10, 12, 14, 16 and 17 respectively, plus its value node.
+        (enormous_record, 3_575_563),
         (field, 21),
         (hook, 16),
+        (Value::List(cycle), 18),
     ] {
         let mut args = vec![value];
         args.extend(policy.iter().cloned());
@@ -663,7 +672,6 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
             "json.classify",
             &[
                 Datum::Record(vec![("brand".into(), Datum::Null)]),
-                i(128),
                 i(8),
                 Datum::Tuple(vec![t("deny"), t("ban")]),
                 t("z"),
@@ -672,4 +680,37 @@ fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
         ),
         i(27)
     );
+    let classify = |value, depth| {
+        run(
+            "json.classify",
+            &[
+                value,
+                i(depth),
+                Datum::Tuple(vec![t("toJSON"), t("brand")]),
+                t("0"),
+                t(":"),
+            ],
+        )
+    };
+    let mut nested = Datum::Null;
+    for _ in 0..64 {
+        nested = list(vec![nested]);
+    }
+    assert_eq!(classify(nested.clone(), 64), i(131));
+    assert_eq!(classify(list(vec![nested]), 64), i(130));
+    for depth in [0, 65] {
+        assert_eq!(
+            raised(
+                "json.classify",
+                &[
+                    Datum::Null,
+                    i(depth),
+                    Datum::Tuple(vec![t("toJSON"), t("brand")]),
+                    t("0"),
+                    t(":"),
+                ],
+            ),
+            "number_range"
+        );
+    }
 }

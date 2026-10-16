@@ -61,7 +61,6 @@ pub(super) const DATA: &str = r####"{
 "f367dac33ec6a83e03dca2f2161de0d7d22c46d730d85c253db1d623c32e652e":[{"text":""},{"text":"a+"},{"int":"0"}],
 "f36c5a53f8104f5297807ba421539c192ad36635ca44683e6e733a5ea7a080a2":[{"int":"6917582238325880666"},{"int":"8124228553771208628"}],
 "f36cb0971d0827bf7493b8b921dac0aa66caa77b10ad224b52132b872bf76418":[{"float":"-3.842176982167205e63"}],
-"f36cfdadccd298a4937c24ef4c980fc2e8c5d2292e9ed98b8013338b9c7fe5bc":[{"bytes":""},{"int":"0"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "f36ee578a455c09d5d20ba98aa65facb7da4f25f0278750d3f2156ea247281fc":{"charge":7,"outcome":"ok {\"int\":\"-1386828052325446369\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "f36f184339e85da3667b17ef4ba1e7d753e38e30a80c83c044c2dfcbbfe99ed1":[{"record":19},{"text":"a+"}],
 "f370f32a524f64171e211efa0e346ce068aa793c7fea2f6a2530732d4e501a29":{"charge":5,"outcome":"ok {\"int\":\"3830081576519204684\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

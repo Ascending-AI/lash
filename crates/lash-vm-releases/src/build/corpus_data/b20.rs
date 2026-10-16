@@ -34,6 +34,7 @@ pub(super) const DATA: &str = r####"{
 "202a860cdec342f0530969631ad967dc52fff91e1dc339ffe3dde31f931190cd":[{"record":0},{"text":"񈓔񵫝򒤨򭭺񊱌񃰔򒵬􁀶󴞖񧊙󰸼𸌠򿈦򘡂򐏒𵗗𶢼󇽭򘫓팆󘬠𖰶󒅮񨚬񫚡򡆌骯󲩚󨲎򥠗񆅧󋉥񖱁􁻙򇊤"}],
 "202c1d9930a20fa5a08e276c684cbe5e71911f310036998e71857f664bfe1edf":{"charge":257,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "202ce7f44e46ff30f1fc62b066e7f9a5ed82b28d21610e2bb36857ade35ebea2":{"charge":3708,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `䏡` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"202fc2051e0e6bc5ef81343b43918a2fe6418244ad571797ed95e3c313f802e7":[{"text":"Hello, Wörld"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "203133ce4087b3eb8936ba69a4def38bb5863c1731078be7fa6d300c4325956e":[{"int":"2709460042530018906"},{"int":"877805954842704758"}],
 "203194c711dee31e2300a7f6e26208baf64ec3c58be6aa854100fbf1ebf74e71":[{"float":"9.140662378109784e-187"},{"float":"5.115714115037977e17"}],
 "2032b6e8b01851fa50c489164b7ff7f1e43315309b3282fa755a3528c82e3af8":{"charge":19,"outcome":"ok {\"int\":\"-172519947768040961\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

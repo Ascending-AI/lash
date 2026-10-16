@@ -8,6 +8,46 @@ use super::corpus::{Case, Corpus, NativeRecord, digest};
 use super::{inputs, probe::answer};
 
 impl Corpus {
+    /// Drops superseded identities from the release still under construction.
+    /// Surviving identities keep their cases and must still certify; this mode
+    /// cannot bless changed answers under an existing identity. Shipped releases
+    /// and their shared records are never replaced.
+    pub(crate) fn replace_unsealed_baseline(
+        &mut self,
+        registry: &FunctionRegistry,
+        dialect: &str,
+        release: &str,
+        sealed: &[&str],
+    ) -> Result<(), String> {
+        #[derive(serde::Deserialize)]
+        struct ReleaseName {
+            release: String,
+        }
+        for source in sealed {
+            let shipped: ReleaseName =
+                serde_json::from_str(source).map_err(|error| error.to_string())?;
+            if shipped.release == release {
+                return Err(format!(
+                    "cannot replace native baseline for sealed release {dialect}@{release}"
+                ));
+            }
+        }
+        let mut replacement = self.clone();
+        if let Some(index) = replacement
+            .releases
+            .get_mut(&format!("{dialect}@{release}"))
+        {
+            index.retain(|function, _| {
+                registry
+                    .get(function)
+                    .is_some_and(|registered| registered.native().is_some())
+            });
+        }
+        replacement.record_new(registry, dialect, release)?;
+        *self = replacement;
+        Ok(())
+    }
+
     #[cfg_attr(
         not(test),
         expect(

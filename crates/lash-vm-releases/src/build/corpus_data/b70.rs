@@ -84,7 +84,6 @@ pub(super) const DATA: &str = r####"{
 "707e40269cea9f817df3bad0f7dab8747eef0b1c5c8758d1756274d97e372c78":[{"text":""},{"text":"12.5"},{"bool":false},{"bool":true}],
 "7080789d80c0a913041e248a160a99bb572db32367c6417b38cffc090d805585":[{"float":"1.008627022963501e87"},{"float":"5.206782653110044e56"}],
 "70815a2456a35cb3b81bca1d8697c43513d15ee4a44f5291b73cc33cf34e66a1":[{"record":8},{"text":"੥𐄱񸥳钡𦯈󳼟񔪡𝹴󁻈𨃵򹂴󳊕򙆰񷊓񽊶󲢓򐐂􉂊󤄫񕅩򤾋񜷔🭏񀽹󮬧𷜱󜞟񊗐򪺛𹼆򥞸ᄗ򜃵𧫰䈅񗇁󇍢󬷦󻏽󑿚򓅥򶡇󼍗񺴑򉀋󽯫񉲜򰒥񆷬𑨷򴯃󴮔󛸃񇖿󓺔𗯩񮽞𕤀󨖲񂸹򅨥ב񑦚𤴩𙯳򑘄󖤨韠󞲉񼜐󭊞󲊻񇘾򇽒󚤬兾󅱜񐷤󱓿󕤖񋸤񫑘񡔰􇬚𵅬򧋎򓾫񀴔𣐎󿧦󰾕󍋊񩏯񠜈򇌆򭙠󸇌𻿏󠕰󻕺𤊐𭈕񝃱𕜐󼖾򶾵򷐪􂡂򐂒򣨓󑊧񄅂򳅀񹬢󼂔𬰕􋫍󺫸􂖭񞢦򥃷𝦖𯆥񘼆"}],
-"708366e94f075c82064bf1d79502ea918f7496113af83724c91a0c9bd5e32f8a":["null",{"int":"0"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":"["}],
 "70850440cfcd504ba3ffa67048e0a27f06e9112b715be7c3353f29a792d27c88":[{"text":"Hello, Wörld"},{"int":"1"}],
 "70850da8a5c04579576a06fb58dfd850ab1c40e20e0b96f58611ed675f3d00db":{"charge":143,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "70853ceb1959bfb7b89b8acdbb88278fa015759374ba4b40aa98e50438d656ff":[{"float":"9.36157784168543e201"}],

@@ -67,6 +67,7 @@ pub(super) const DATA: &str = r####"{
 "6d6f1bb02be2482213f3dce534d214a67ac9f69d7ec2249f06b4c1e34309a78c":[{"int":"3098128111509698779"},{"int":"-7520425661463727638"}],
 "6d707a985a772e8da9d8554aa249a51569f6b26a151d7a6a0611d3fceab71393":[{"int":"2124090257123820548"},{"int":"2968357668926730892"}],
 "6d710e305ee22b7f9ef3a3ba89c73a4078a53a3dde60bf213caa81886b4b6c97":[{"list":85},{"int":"2"}],
+"6d7283782f5f4e118dc62af7202ea1130ceb6e97c882edc6eeade1db7e3b4d67":["null",{"int":"-9223372036854775809"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "6d7311985409eeae78e425cf79964ed2764d21036520090b319235f7a073510c":{"charge":265,"outcome":"raised \"index_out_of_range\" \"text index is out of range\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6d73c9e6eb38fa912c8080cbf05c428132581bee43ad580ff8581a1a3dec34bc":[{"list":85},"null",{"int":"-9223372036854775808"},{"int":"0"},{"bool":false},{"bool":false}],
 "6d7463c154068c1edc64652565ce3a8ad887742b1cddbce710fba430251438c3":[{"list":85},"null",{"int":"1"},{"int":"0"},{"bool":false},{"bool":false}],

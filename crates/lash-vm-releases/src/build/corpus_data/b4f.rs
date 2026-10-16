@@ -74,7 +74,6 @@ pub(super) const DATA: &str = r####"{
 "4f8126feb266d8567f4975889c0ad2e2a3ca661d12e8dd4862c92edc488d8760":{"charge":375,"outcome":"raised \"normalization_form\" \"expected NFC, NFD, NFKC or NFKD\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "4f819bd4ff3a395f162e8147dd71eac4dc0afdfa38d4e9aaa81f54efb1048536":[{"map":8},{"list":77}],
 "4f8450e1a8d1e864f5f150d4567c5b076905ebaed7e8143ac88328c8d3e8c18e":{"charge":12,"outcome":"ok {\"list\":[{\"int\":\"101\"},{\"int\":\"769\"}]}","prepared_difference":null,"reservations":[[2,3]],"reserved":35,"spent":0},
-"4f85fd360262e1003ed4b43e68eb59a0478e263152daa3af62c5dd73f8c046fb":[{"float":"-1.5"},{"int":"0"},{"int":"1"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "4f862ca29d67e21fddf874cf5bf684ccef7f5212264101e6b2d9c5db1248527e":[{"int":"-5110982068849660248"}],
 "4f8640adc720e82d5fcff551a4f401d8ada576dec74185c3697db77c3eec153e":[{"int":"2833729368161732206"},{"int":"2202545107569386338"}],
 "4f899ed0b1447c5f2f138693bbb4f7c21f025a0c15ed4e80de303e22af757e5b":[{"float":"-3.702270125185368e-126"}],

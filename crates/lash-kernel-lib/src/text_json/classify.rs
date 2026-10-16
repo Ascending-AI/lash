@@ -1,4 +1,4 @@
-//! Allocation-free classification of a bounded JSON graph. Admission policy
+//! Allocation-free classification of a depth-bounded JSON graph. Admission policy
 //! (excluded fields and a lexical key interval) belongs to the caller.
 
 use std::ops::ControlFlow;
@@ -16,7 +16,6 @@ pub(super) fn functions() -> Vec<Function> {
         "json.classify",
         &[
             ("value", Type::Any),
-            ("visits", Type::Int),
             ("depth", Type::Int),
             ("excluded", Type::Tuple(vec![Type::Text, Type::Text])),
             ("key_from", Type::Text),
@@ -38,7 +37,6 @@ pub(super) fn functions() -> Vec<Function> {
 
 struct Walk<'a> {
     heap: &'a dyn NativeHeap,
-    remaining: usize,
     depth: usize,
     excluded: [TextRef; 2],
     key_from: TextRef,
@@ -80,11 +78,6 @@ impl Walk<'_> {
         if depth > self.depth {
             return Ok(false);
         }
-        let length = self.heap.len(id)?;
-        if length > self.remaining as u64 {
-            return Ok(false);
-        }
-        self.remaining -= length as usize;
         let mut admitted = true;
         let mut fault = None;
         self.heap.visit(id, &mut |element| {
@@ -117,15 +110,11 @@ impl Walk<'_> {
 }
 
 fn classify(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let visits = count_arg(call.args, 1)?;
-    let depth = count_arg(call.args, 2)?;
-    if !(1..=128).contains(&visits) || !(1..=64).contains(&depth) {
-        return Err(raise(
-            "number_range",
-            "classification needs 1..128 visits and 1..64 levels",
-        ));
+    let depth = count_arg(call.args, 1)?;
+    if !(1..=64).contains(&depth) {
+        return Err(raise("number_range", "classification needs 1..64 levels"));
     }
-    let Value::Tuple(excluded) = arg(call.args, 3)? else {
+    let Value::Tuple(excluded) = arg(call.args, 2)? else {
         return Err(raise("type_error", "expected two excluded field names"));
     };
     if excluded.summary.len != 2 {
@@ -143,11 +132,10 @@ fn classify(call: NativeCall<'_>) -> Result<Value, NativeError> {
     };
     let mut walk = Walk {
         heap: call.heap,
-        remaining: visits - 1,
         depth,
         excluded: [first, second],
-        key_from: text(4)?,
-        key_until: text(5)?,
+        key_from: text(3)?,
+        key_until: text(4)?,
         work: 0,
     };
     let admitted = walk.node(arg(call.args, 0)?, 1)?;

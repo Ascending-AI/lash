@@ -110,7 +110,6 @@ pub(super) const DATA: &str = r####"{
 "e2b323de0eb13b55ebef669f0c3a174020d02c86d83ec1ad324b7e8ea9d5af27":{"charge":392,"outcome":"raised \"number_parse\" \"expected decimal digits with optional sign, point and exponent\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "e2b380674e3d276ae950ccc6029108e71fda9dd715f911a6b517c47378ef581e":{"charge":3,"outcome":"ok {\"float\":\"-5.852401604782317e123\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "e2b45d68fb5cc147036c970f2d12c76d2a6d032677d1cfd917943de2cda58f94":[{"float":"9007199254740992.0"},"null"],
-"e2b493fac6ce337ec5a3f8e511587e193d1e7aa84a381d8887b2ae0cb616a8e9":[{"int":"63"},{"int":"9223372036854775808"},{"int":"9223372036854775808"},{"tuple":[{"text":"🦀𝄞"},{"text":"🦀𝄞"}]},{"text":"🦀𝄞"},{"text":"🦀𝄞"}],
 "e2bb9e79633524fe6dd3d3f9d918c22e2c82bfed20ebd08f2abc32670d40dde4":[{"list":[{"int":"2149313315546055044"},{"int":"-4153268279496579321"}]}],
 "e2bcc1bac9f30e2b28289fa1e1ba5bd4b8ccbe8298deb5328b939fd209a53306":[{"text":""},{"int":"3"}],
 "e2be1a62906d1b65b784fd6fcb46b67c12ebaba5656377ae5a81cadb51bca3d0":{"charge":14,"outcome":"ok {\"text\":\"12.5\"}","prepared_difference":null,"reservations":[[0,8]],"reserved":8,"spent":0},

@@ -13,69 +13,6 @@ use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, S
 
 use super::machine;
 
-const KERNEL_GUARD: &str = r#"
-function ts.test.json.plain(value: Any) -> Bool
-kernel 1
-charge 1
-body {
-  let k = kind(value)
-  if same(k, "text") { return true }
-  if same(k, "float") { return num.is_finite(value) }
-  if same(k, "bool") { return true }
-  if same(k, "null") { return true }
-  let container = same(k, "record")
-  if same(k, "list") { set container = true }
-  if container {} else { return same(k, "integer") }
-  # The containers to read, breadth first, with the depth of their members.
-  # The counts are floats, which compare more cheaply than integers.
-  let containers = [value]
-  let depths = [2.0]
-  let visits = 1.0
-  let next = 0.0
-  while num.lt(next, list.len(containers)) {
-    let items = containers[next]
-    let depth = depths[next]
-    set next = num.add(next, 1.0)
-    if same(kind(items), "record") {
-      if num.lt(128.0, num.add(visits, record.len(items))) { return false }
-      if record.contains(items, "toJSON") { return false }
-      if record.contains(items, "__ts_brand") { return false }
-      for key in record.keys(items) {
-        if same(text.compare(key, ":"), -1) {
-          if same(text.compare(key, "0"), -1) {} else { return false }
-        }
-      }
-      set items = record.values(items)
-    } else {
-      if num.lt(128.0, num.add(visits, list.len(items))) { return false }
-    }
-    set visits = num.add(visits, list.len(items))
-    for item in items {
-      let k = kind(item)
-      if same(k, "text") { continue }
-      if same(k, "float") {
-        if num.is_finite(item) { continue }
-        return false
-      }
-      if same(k, "bool") { continue }
-      if same(k, "null") { continue }
-      let container = same(k, "record")
-      if same(k, "list") { set container = true }
-      if container {
-        if num.lt(8.0, depth) { return false }
-        set containers[list.len(containers)] = item
-        set depths[list.len(depths)] = num.add(depth, 1.0)
-        continue
-      }
-      if same(k, "integer") { continue }
-      return false
-    }
-  }
-  return true
-}
-
-"#;
-
 const BOUNDS: Bounds = Bounds {
     charge: 50_000_000,
     memory: 256 << 20,
@@ -91,7 +28,6 @@ const BOUNDS: Bounds = Bounds {
 const ENTRIES: &str = r#"
 entry fast(v: Any, mode: Int, tail: List(Any)) -> Any
 entry walk(v: Any, mode: Int, tail: List(Any)) -> Any
-entry kernel_admits(v: Any, mode: Int, tail: List(Any)) -> Any
 entry admits(v: Any, mode: Int, tail: List(Any)) -> Any
 entry draw(v: Any, mode: Int, tail: List(Any)) -> Any
 entry idle(v: Any, mode: Int, tail: List(Any)) -> Any
@@ -124,12 +60,6 @@ fn admits(v, mode, tail) {
   let out = invoke ts.json.plain(x)
   return out
 }
-fn kernel_admits(v, mode, tail) {
-  let x = call build(v, mode)
-  let args = list.concat([x], tail)
-  let out = invoke ts.test.json.plain(x)
-  return out
-}
 fn draw(v, mode, tail) {
   let x = call build(v, mode)
   let args = list.concat([x], tail)
@@ -149,28 +79,7 @@ main { }
 fn program() -> &'static Program {
     static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
     PROGRAM.get_or_init(|| {
-        let mut registry = machine::registry().as_ref().clone();
-        let mut library = lash_kernel_dialect::NamedLibrary::from_registry(&registry).unwrap();
-        let mut oracle = String::new();
-        for name in [
-            "kind",
-            "same",
-            "num.is_finite",
-            "list.len",
-            "num.lt",
-            "num.add",
-            "record.len",
-            "record.contains",
-            "record.keys",
-            "record.values",
-            "text.compare",
-        ] {
-            oracle.push_str(&format!("use {name}\n"));
-        }
-        oracle.push_str(KERNEL_GUARD);
-        for definition in lash_kernel_dialect::define_functions(&oracle, &mut library).unwrap() {
-            registry.register(definition, None).unwrap();
-        }
+        let registry = machine::registry().as_ref().clone();
         let registry = Arc::new(registry);
         let names = [
             "eq",
@@ -178,7 +87,6 @@ fn program() -> &'static Program {
             "ts.json.stringify",
             "ts.json.stringify_generic",
             "ts.json.plain",
-            "ts.test.json.plain",
             "ts.console.json",
         ];
         let mut text = String::from("kernel 1\nnumbers float\n");
@@ -289,11 +197,10 @@ struct Case {
 /// What `ts.json.plain` should say, written independently of it: the value
 /// `build` makes holds only lists, records, null, bools, text and finite
 /// numbers; no record has a `toJSON` or `__ts_brand` field or a key that begins
-/// with a digit; no container is more than eight deep; and it holds at most
-/// 128 values, counting itself and each place a shared value is held.
+/// with a digit; no container is more than eight deep. The number of values
+/// is unbounded, counting each place a shared value is held.
 fn plain(case: &Case) -> bool {
-    fn walk(value: &Datum, depth: usize, visits: &mut usize) -> bool {
-        *visits += 1;
+    fn walk(value: &Datum, depth: usize) -> bool {
         let members: Vec<&Datum> = match value {
             Datum::Null | Datum::Bool(_) | Datum::Text(_) | Datum::Int(_) => return true,
             Datum::Float(float) => return float.get().is_finite(),
@@ -310,7 +217,7 @@ fn plain(case: &Case) -> bool {
             }
             _ => return false,
         };
-        depth <= 8 && members.iter().all(|member| walk(member, depth + 1, visits))
+        depth <= 8 && members.iter().all(|member| walk(member, depth + 1))
     }
     let value = match case.mode {
         0 => case.value.clone(),
@@ -328,8 +235,7 @@ fn plain(case: &Case) -> bool {
         // A cycle, a toJSON hook or a closure.
         _ => return false,
     };
-    let mut visits = 0;
-    walk(&value, 1, &mut visits) && visits <= 128
+    walk(&value, 1)
 }
 
 /// A deterministic xorshift stream.
@@ -490,9 +396,8 @@ fn nested(depth: usize, inner: Datum) -> Datum {
     (0..depth).fold(inner, |value, _| Datum::List(vec![value]))
 }
 
-/// The cases at the guard's edges: depth eight and nine, 128 and 129
-/// values, a container longer than the budget, and shared and cyclic
-/// graphs.
+/// The guard's depth boundary, values beyond the former 128-node cap,
+/// and shared and cyclic graphs.
 fn edges() -> Vec<Datum> {
     let flat = |count: usize| Datum::List((0..count).map(|n| float(n as f64)).collect());
     vec![
@@ -589,7 +494,6 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
             "{case:?}"
         );
         let guard = run("admits", &case);
-        assert_eq!(guard.end, run("kernel_admits", &case).end, "{case:?}");
         let none = run("idle", &case);
         let replacer_or_space = case.tail.iter().any(|arg| *arg != Datum::Absent);
         let expected = !replacer_or_space && plain(&case);

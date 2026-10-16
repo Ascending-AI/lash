@@ -116,7 +116,6 @@ fn classification_needs_no_extra_guest_space() {
             &mut heap,
             vec![
                 input,
-                int(128),
                 int(8),
                 Datum::Tuple(vec![s("toJSON"), s("brand")]),
                 s("0"),

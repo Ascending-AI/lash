@@ -103,6 +103,7 @@ pub(super) const DATA: &str = r####"{
 "ff9582bc5213ff2d66d21d5cac4d15f3db5fb30f377830385d6845d638973adb":[{"list":87},{"text":"0"}],
 "ff973df83331f83b568dc5d0c5dafe0711262fbb501c21c300d293723254626d":{"charge":7,"outcome":"ok {\"int\":\"-16528762186569560610\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "ff9904ffa59e7945c6edcbd471d56b76e5692ebed5813c5cfd675c278e302175":[{"float":"-3.273454322821615e-36"},{"float":"-4.2735655379870844e24"}],
+"ff9927a8da4ca5cbab9d292f289b87668d83a6fcf11c52b4aa6e646d3c273518":[{"function":"corpus"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "ff9a33507d2d3e57dfd2b8b7c531af6764f43c5316483da78c4efaa8b6dee6d4":{"charge":5,"outcome":"ok {\"int\":\"-6048666540041158566\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "ff9d73be7dbaa68a8d9ddb6700545cccdfe51693c2341153b16119431356ff3c":{"charge":5,"outcome":"ok {\"int\":\"-1499729362704734754\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "ff9d964f95d09636ae3f060c27c2640edb502ede7e40c3758624b4fe2469c750":{"charge":391,"outcome":"raised \"number_range\" \"expected a nonnegative machine-sized integer\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

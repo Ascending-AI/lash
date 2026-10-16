@@ -54,7 +54,6 @@ pub(super) const DATA: &str = r####"{
 "bd4bd8ac3fc82145364089d391ff833cc2b93843e0fe04d65dff725c25260cd3":{"charge":7,"outcome":"ok {\"record\":[[\"{}\",{\"int\":\"9223372036854775807\"}]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "bd4fbfb639cbd1ba53dee6fdd42d1f8f4596c91b2f98d5352947391c30a310c2":[{"int":"5366002249300039749"}],
 "bd510b6e50e4ab98ea2df97dd00008d5da93bedfa9152c5ddc5c09c8724c0ff6":{"charge":68,"outcome":"ok {\"float\":\"-2.644120761058629\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"bd51fcb1d8ac967d9733d07ce430f8b4f11cc7bd00d902f35417804a119ab461":["null",{"int":"0"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":"0"},{"text":""}],
 "bd54b971f26445a24723a2a7cea85ac53387b3fb46d07ee2a47eb141287a82a7":[{"record":7},{"text":"􋋠𱆅󾣦󕂷񞏖󇎑𔬶򮐠𗏨򇔏󓰥򑬝󥁫񹰋񇿳􂟌񂺃󆰞򽍆𼭠𦣶򥞧򨋈󗏍󏙪򹼆󁎸򪾟򬄀򬢂ᶓ󲵨򺬲󾓤𬨭𹛹󡾔򃚫򦈆󂭂򾞔񴕛󊴑󅰋򼙳󆬿񏈩񽆍񚽮󰎰򇶷򜊌򲰉򎰑񪎉񗲎𗯷󝻀񤽽򻪣򴼖񔘈󒒄򱗍򅂦􌞇񂏈򪾏񴬐ᎆ򇠡񻺑񳖬𠻇򟜚㱴𡤌󅘾񓤒𮗠𖐫򥸣񋁟𔛿󎎲򩫵񇪀񾑵􃃽񀷜󉓇󾸮𰉲𴫶񂧣񋍰򘐖񾊞񩓛𶬲񚥤􁤶񘊄늁򶞤󠱫򃺳񑠎򃮾𝱉󬮱򁩦󤏒𙏕񂾲񭵭𓾗𐠨򴀸􉺸𛖅㶮󀱕󄴍🳗򑫮"},{"int":"-5657455225561124747"}],
 "bd552894ed6afb11919bf456e76498b862e6f5ed4783c36d4ce216d2055580bb":[{"int":"-2109779236817184479"},{"int":"-2107856976100312621"}],
 "bd587629971f2e6b629f1ca1b2a2bee0408c27d64993e12e2b97cefb4ccbaae3":[{"record":112},{"text":"ab"},{"float":"-1.5"}],

@@ -126,7 +126,6 @@ pub(super) const DATA: &str = r####"{
 "e7dd651e792b395f83c86874e282cb4b771f897fc4362ceebe24eca66e34aa06":[{"float":"3.819902706680204e41"}],
 "e7de3b195c1042784259dc4916fb59b88540a6dc92bc0c27651d0533b4a8942f":{"charge":18,"outcome":"ok {\"float\":\"2.2139390707805644\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "e7df192f9e91a767d42594ea9ece67226507e041511fe8eb604f3a0f28974332":{"charge":635,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `I` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"e7e044ca4d7a23b7199e4b8ae55874bd99985723b37c86857721be7927010a85":["null",{"int":"0"},{"int":"31"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "e7e24209f73065296a1303a42dfe10e253afcb98816f46259bbf68e00745f04e":[{"text":"򇰼𩷄񜯿򩎨򰪏轚󂻄򆖙𫤒􆃠󧈡𑲅󀧼𤋯򗦪ꏙ񷻞򚞣"}],
 "e7e3cf247279e08adf2b47fe965e5914ee6f61ab60316d3d1a4b20e76d4fb64c":[{"float":"-4.349520506459636e-141"}],
 "e7e4de414bf107e726329f16108081fed272b3561c4c4a7ffbb81bea7db9d16b":[{"int":"-2702253958788176286"},{"int":"-1514702896150417163"}],
@@ -140,7 +139,6 @@ pub(super) const DATA: &str = r####"{
 "e7f63e8c9aa378df957c7b64f46f6aef080109080833b496f1a99d14af0b0c6d":["null",{"int":"32"},{"int":"0"}],
 "e7f66ff03ceb94d2611992d379bd595d58d15a9fb3b09a19f8daac1e24d3dcf5":[{"float":"-4.61371704716057e-76"}],
 "e7f7917f801ac88370c68c3376e0f332cae2fb024a6f8619d7f10fbf86d768f0":{"charge":726,"outcome":"raised \"type_error\" \"Invalid URL\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"e7f881ad8c49d3f8ab4914cfe79ec86834b6b6d528f8cfebbdf88519c2bc6cac":[{"bool":true},{"int":"0"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],
 "e7fadd27cb03b58bfe494669428627c730d1e83250e325a0cb611dbf6a4f4c04":{"charge":199,"outcome":"ok {\"text\":\"񭄩񞻋𸇖񪵕𣵏񛋵𣻐𘪭﫸𝔍󑏧򛘀𦅬򬒮񋪧򸀒𿾒񑋭𡖈򤎣󡷤𨫟󍀊턪񙠈\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "e7fcd728ce3faec33a5391cfac8bc14b5883ee907251ac50e79e6b944b2a0163":[{"int":"6303778448669514584"},{"int":"-751016559838286942"}]
 }"####;
