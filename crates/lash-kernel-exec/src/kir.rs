@@ -320,6 +320,9 @@ pub enum Op {
     Return {
         src: Reg,
     },
+    ReturnVia {
+        src: Reg,
+    },
     Throw {
         src: Reg,
     },
@@ -384,6 +387,7 @@ pub enum OpKind {
     Break,
     Continue,
     Return,
+    ReturnVia,
     Throw,
     Print,
     Finish,
@@ -440,6 +444,7 @@ impl OpKind {
         Self::Break,
         Self::Continue,
         Self::Return,
+        Self::ReturnVia,
         Self::Throw,
         Self::Print,
         Self::Finish,
@@ -547,6 +552,7 @@ impl Op {
             Self::Break => OpKind::Break,
             Self::Continue => OpKind::Continue,
             Self::Return { .. } => OpKind::Return,
+            Self::ReturnVia { .. } => OpKind::ReturnVia,
             Self::Throw { .. } => OpKind::Throw,
             Self::Print { .. } => OpKind::Print,
             Self::Finish { .. } => OpKind::Finish,
@@ -577,6 +583,7 @@ impl Op {
             | Self::WriteSession { src, .. }
             | Self::WriteUnbound { src, .. }
             | Self::Return { src }
+            | Self::ReturnVia { src }
             | Self::Throw { src }
             | Self::Print { src }
             | Self::Finish { src }

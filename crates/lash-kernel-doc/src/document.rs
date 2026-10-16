@@ -38,14 +38,22 @@ pub struct Document {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub functions: BTreeMap<Name, Function>,
     /// The declared functions a host may start, each with the typed
-    /// signature it is started under.
+    /// signature and calling convention it is started under.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub entries: BTreeMap<Name, Signature>,
+    pub entries: BTreeMap<Name, Entry>,
     /// The variables of `main` that are the program's own. Every other
     /// variable `main` declares at its top level is a session binding.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub private_bindings: BTreeSet<Name>,
     pub main: Block,
+}
+
+/// A declared entry's host signature and synchronous calling convention.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Entry {
+    pub signature: Signature,
+    pub convention: crate::StartConvention,
 }
 
 /// What a document needs from the environment that runs it. Admission

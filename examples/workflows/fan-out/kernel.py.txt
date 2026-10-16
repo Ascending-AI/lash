@@ -24,7 +24,7 @@ use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0
 entry demo() -> Any
 
 fn demo() {
-  let t14 = fn() start() -> Any bare direct {
+  try {
     let work = absent
     set work = fn(value) start(value: Text) -> Any bare direct {
       if same(value, absent) {
@@ -50,18 +50,14 @@ fn demo() {
     let t12 = [t7, t11]
     let t13 = invoke py.gather(t12)
     return t13
-  }
-  let t15 = apply t14()
-  return t15
-}
-
-main {
-  let demo = absent
-  try {
-    set demo = &demo
   } finally {
     do invoke tasks.cancel_all()
   }
 }
 
-unit Function(Name("demo")): statements=24 scopes=7 sites=38
+main {
+  let demo = absent
+  set demo = &demo
+}
+
+unit Function(Name("demo")): statements=23 scopes=8 sites=34

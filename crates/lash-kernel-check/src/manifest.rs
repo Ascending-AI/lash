@@ -36,6 +36,9 @@ fn scan(
     let mut pending = vec![Node::Block(block)];
     while let Some(node) = pending.pop() {
         match node {
+            Node::Stmt(lash_kernel_doc::Stmt::ReturnVia { policy, .. }) => {
+                functions.insert(*policy);
+            }
             Node::Stmt(lash_kernel_doc::Stmt::For { via: Some(via), .. }) => {
                 functions.extend(via.functions())
             }
@@ -203,7 +206,13 @@ pub(crate) fn reach(
         .functions
         .values()
         .filter_map(|function| function.start.as_ref())
-        .flat_map(lash_kernel_doc::StartAdapter::functions);
+        .flat_map(lash_kernel_doc::StartAdapter::functions)
+        .chain(
+            document
+                .entries
+                .values()
+                .flat_map(|entry| entry.convention.functions()),
+        );
     reach_from(
         std::iter::once(&document.main)
             .chain(document.functions.values().map(|function| &function.body)),

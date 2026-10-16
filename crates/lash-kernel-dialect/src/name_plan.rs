@@ -42,6 +42,9 @@ impl NamePlan {
                         add(binding);
                         ids.extend(via.iter().flat_map(k::Protocol::functions));
                     }
+                    k::Node::Stmt(k::Stmt::ReturnVia { policy, .. }) => {
+                        ids.insert(*policy);
+                    }
                     k::Node::Stmt(k::Stmt::Try(scope)) => {
                         if let Some(catch) = &scope.catch {
                             add(&catch.binding);

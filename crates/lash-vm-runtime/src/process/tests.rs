@@ -742,13 +742,16 @@ fn a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refu
         );
         document.entries.insert(
             run.clone(),
-            Signature {
-                params: vec![Param {
-                    name: Name::new("x"),
-                    ty: Type::Any,
-                    optional: false,
-                }],
-                result: Type::Any,
+            lash_kernel_doc::Entry {
+                signature: Signature {
+                    params: vec![Param {
+                        name: Name::new("x"),
+                        ty: Type::Any,
+                        optional: false,
+                    }],
+                    result: Type::Any,
+                },
+                convention: lash_kernel_doc::StartConvention::Direct,
             },
         );
         FunctionValue {

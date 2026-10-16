@@ -73,6 +73,13 @@ pub enum Stmt {
     Return {
         value: Expr,
     },
+    /// Evaluates the value, unwinds source cleanup, then calls `policy`
+    /// with the surviving value. The policy may wait; its result returns
+    /// directly, outside the source function's handlers.
+    ReturnVia {
+        value: Expr,
+        policy: FunctionId,
+    },
     Try(TryStmt),
     Throw {
         value: Expr,
@@ -592,6 +599,7 @@ impl<'a> Node<'a> {
                 }
                 Stmt::Break | Stmt::Continue => {}
                 Stmt::Return { value }
+                | Stmt::ReturnVia { value, .. }
                 | Stmt::Throw { value }
                 | Stmt::Print { value }
                 | Stmt::Finish { value }
@@ -706,6 +714,7 @@ fn stmt_closures(stmt: &mut Stmt, visit: &mut dyn FnMut(&mut Closure)) {
             each_closure_mut(else_block, visit);
         }
         Stmt::Return { value }
+        | Stmt::ReturnVia { value, .. }
         | Stmt::Throw { value }
         | Stmt::Print { value }
         | Stmt::Finish { value }

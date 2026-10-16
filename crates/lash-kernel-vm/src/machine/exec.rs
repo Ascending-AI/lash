@@ -236,7 +236,10 @@ impl KernelMachine {
         mut departure: Completion,
     ) -> Result<(), Halt> {
         loop {
-            if let Completion::Return(value) | Completion::Throw(value) = &mut departure {
+            if let Completion::Return(value)
+            | Completion::ReturnVia { value, .. }
+            | Completion::Throw(value) = &mut departure
+            {
                 **value = self.heap_write(|heap| {
                     heap.canonical_value(value.as_ref().clone())
                         .map_err(super::write_halt)
@@ -246,7 +249,9 @@ impl KernelMachine {
                 Completion::Normal => return Ok(()),
                 // A value on its way out is in no variable: the frames it
                 // leaves take theirs with them.
-                Completion::Return(value) | Completion::Throw(value) => {
+                Completion::Return(value)
+                | Completion::ReturnVia { value, .. }
+                | Completion::Throw(value) => {
                     self.pins.hold(value, value_bytes(value))?;
                 }
                 Completion::Break | Completion::Continue => {}
@@ -259,15 +264,46 @@ impl KernelMachine {
             frame.record.pending = None;
             // A return or a raise that no `try` of the frame can take leaves
             // the frame at once: ending the frame ends all its variables.
-            if matches!(departure, Completion::Return(_) | Completion::Throw(_))
-                && !frame
-                    .control
-                    .iter()
-                    .any(|control| matches!(control, Control::Try { .. }))
+            if matches!(
+                departure,
+                Completion::Return(_) | Completion::ReturnVia { .. } | Completion::Throw(_)
+            ) && !frame
+                .control
+                .iter()
+                .any(|control| matches!(control, Control::Try { .. }))
             {
                 frame.control.clear();
             }
             let Some(control) = frame.control.last_mut() else {
+                if let Completion::ReturnVia { value, stmt } = departure {
+                    let Form::ReturnVia { site, policy } = &exe.stmt(stmt).form else {
+                        return Err(fault("a deferred return has no policy"));
+                    };
+                    // Source handlers have gone. The policy is an ordinary
+                    // call, and its result leaves this frame directly.
+                    for at in 0..exe.code(frame.code).slots_by_at.len() {
+                        frame.set_slot(at as u32, SlotState::Empty);
+                    }
+                    frame.record.statement =
+                        lash_kernel_state::paged::SiteRef::new(site, &frame.access)?;
+                    frame.awaiting = Some(stmt);
+                    self.put(0, *value);
+                    match self.call_lib(task, exe, *policy, 0, 1, Some(stmt)) {
+                        Ok(super::ops::Flow::Step) => return Ok(()),
+                        Ok(super::ops::Flow::Done) => {
+                            let value = self.take(0);
+                            departure = match self.finish_action(task, host, exe, value) {
+                                Ok((_, Ran::Depart(next))) => next,
+                                Ok(_) => return Err(fault("a return policy did not return")),
+                                Err(Interrupt::Raise(value)) => Completion::Throw(value),
+                                Err(Interrupt::Halt(halt)) => return Err(*halt),
+                            };
+                        }
+                        Err(Interrupt::Raise(value)) => departure = Completion::Throw(value),
+                        Err(Interrupt::Halt(halt)) => return Err(*halt),
+                    }
+                    continue;
+                }
                 let result = match departure {
                     Completion::Return(value) => Ok(*value),
                     Completion::Throw(value) => Err(*value),
@@ -346,6 +382,35 @@ impl KernelMachine {
             })?;
             self.charge_call(exe, call.lib, units)?;
         }
+        let result = if task == TaskId::MAIN && self.task(task)?.frames.is_empty() {
+            match &frame.exe.code(frame.code).site.unit {
+                lash_kernel_doc::Unit::Function(name)
+                    if self
+                        .program
+                        .document
+                        .entries
+                        .get(name)
+                        .is_some_and(|entry| {
+                            matches!(
+                                entry.convention,
+                                lash_kernel_doc::StartConvention::TsArgsList { .. }
+                                    | lash_kernel_doc::StartConvention::TsDirect { .. }
+                            )
+                        }) =>
+                {
+                    result.map(|value| {
+                        if matches!(value, Value::Absent) {
+                            Value::Null
+                        } else {
+                            value
+                        }
+                    })
+                }
+                _ => result,
+            }
+        } else {
+            result
+        };
         self.observe(Event::Pop { task });
         self.recycle(frame);
         if self.task(task)?.frames.is_empty() {
@@ -892,6 +957,15 @@ impl KernelMachine {
         };
         let nested = frame.nested.take();
         let pending = frame.record.pending.take();
+        if nested.is_none()
+            && pending.is_none()
+            && matches!(exe.stmt(id).form, Form::ReturnVia { .. })
+        {
+            if task == TaskId::MAIN && self.task(task)?.frames.len() == 1 {
+                self.copy_out(&value)?;
+            }
+            return Ok((id, Ran::Depart(Completion::Return(Box::new(value)))));
+        }
         // A `for`'s protocol hook answered from its frame: the header
         // goes on (`K-ITER-005`).
         if nested.is_none() && pending.is_none() && self.in_header(task)? {

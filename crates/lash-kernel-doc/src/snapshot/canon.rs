@@ -223,6 +223,7 @@ impl Renamer<'_, '_> {
             }
             Stmt::Break | Stmt::Continue => {}
             Stmt::Return { value }
+            | Stmt::ReturnVia { value, .. }
             | Stmt::Throw { value }
             | Stmt::Print { value }
             | Stmt::Finish { value }

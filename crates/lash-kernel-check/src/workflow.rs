@@ -181,7 +181,11 @@ impl WorkflowDocument {
     pub fn entry_signature(&self) -> Option<&Signature> {
         match &self.reference.entry {
             WorkflowDocumentEntry::Main => None,
-            WorkflowDocumentEntry::Entry { function } => self.document.entries.get(function),
+            WorkflowDocumentEntry::Entry { function } => self
+                .document
+                .entries
+                .get(function)
+                .map(|entry| &entry.signature),
         }
     }
 }

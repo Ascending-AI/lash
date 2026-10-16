@@ -507,6 +507,33 @@ impl Executable {
         &self.library.0.libs[id.0 as usize]
     }
 
+    /// Resolves a source statement inside one admitted code body.
+    pub(crate) fn stmt_at(&self, code: CodeId, site: &Site) -> Option<StmtId> {
+        let code = self.code(code);
+        if code.site.unit != site.unit || !site.path.starts_with(&code.site.path) {
+            return None;
+        }
+        let mut depth = code.site.path.len();
+        let mut block = code.body;
+        loop {
+            let stmt = *self
+                .block(block)
+                .stmts
+                .get(*site.path.get(depth)? as usize)?;
+            if depth + 1 == site.path.len() {
+                return Some(stmt);
+            }
+            let inner = site.path.get(..depth + 2)?;
+            block = self
+                .stmt(stmt)
+                .form
+                .blocks()
+                .into_iter()
+                .find(|block| self.block(*block).site.path == inner)?;
+            depth += 2;
+        }
+    }
+
     /// The library function `function`, when the document reaches it.
     pub(crate) fn lib_of(&self, function: &FunctionId) -> Option<LibId> {
         if !self.reaches(function) {
@@ -791,6 +818,10 @@ pub(crate) struct Stmt {
 pub(crate) enum Form {
     /// A statement its ops run to their end.
     Plain,
+    ReturnVia {
+        site: Site,
+        policy: LibId,
+    },
     If {
         then_block: BlockId,
         else_block: BlockId,
@@ -842,7 +873,7 @@ impl Form {
     /// The blocks the statement holds.
     fn blocks(&self) -> Vec<BlockId> {
         match self {
-            Form::Plain | Form::Action(_) => Vec::new(),
+            Form::Plain | Form::ReturnVia { .. } | Form::Action(_) => Vec::new(),
             Form::If {
                 then_block,
                 else_block,
@@ -1666,7 +1697,7 @@ impl Placer<'_> {
     /// blocks it holds.
     fn form(&self, form: &mut Form, blocks: &mut Vec<BlockId>) {
         match form {
-            Form::Plain => {}
+            Form::Plain | Form::ReturnVia { .. } => {}
             Form::If {
                 then_block,
                 else_block,

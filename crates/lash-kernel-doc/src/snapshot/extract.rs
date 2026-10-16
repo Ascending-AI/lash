@@ -163,8 +163,8 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
     let mut units: BTreeMap<Name, Function> = BTreeMap::new();
     let mut pending: Vec<Name> = Vec::new();
     let named;
-    // The unit the entry is, and the signature it is started under.
-    let (entry, signature) = match root {
+    // The entry unit and the descriptor its host start uses.
+    let (entry, entry_definition) = match root {
         CrossingRoot::Closure(id) => {
             let site = heap.closure_site(*id)?;
             if let Unit::Library(_) = site.unit {
@@ -193,7 +193,13 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
             );
             let wrapper = fresh("run");
             units.insert(wrapper.clone(), entry_wrapper(&start, &root_name));
-            (wrapper, start.signature)
+            (
+                wrapper,
+                crate::Entry {
+                    signature: start.signature,
+                    convention: start.convention,
+                },
+            )
         }
         CrossingRoot::Declared(name) => {
             named = BTreeMap::new();
@@ -212,7 +218,13 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
                 pending.push(name.clone());
                 let wrapper = fresh("run");
                 units.insert(wrapper.clone(), entry_wrapper(&start, name));
-                (wrapper, start.signature)
+                (
+                    wrapper,
+                    crate::Entry {
+                        signature: start.signature,
+                        convention: start.convention,
+                    },
+                )
             }
         }
     };
@@ -241,7 +253,11 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
         units.insert(name, with_prelude(code, captures));
     }
     let mut value = Document::new(document.manifest.numbers, Vec::new());
-    let mut library = BTreeSet::new();
+    let mut library: BTreeSet<_> = entry_definition
+        .convention
+        .functions()
+        .into_iter()
+        .collect();
     for unit in units.values() {
         let reads = CodeReads::of(&unit.params, &unit.body);
         for effect in reads.effects {
@@ -267,7 +283,7 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
     let public = Name::new(crate::FUNCTION_VALUE_ENTRY);
     super::canon::canonical(&mut value, &entry, &public);
     let entry = public;
-    value.entries.insert(entry.clone(), signature);
+    value.entries.insert(entry.clone(), entry_definition);
     let value = FunctionValue {
         document: value,
         entry,
@@ -339,77 +355,77 @@ fn with_prelude(function: Function, captures: BTreeMap<Name, Expr>) -> Function 
 
 /// The entry that starts the declared function `root` as `start` says.
 fn entry_wrapper(start: &StartAdapter, root: &Name) -> Function {
-    let params: Vec<Name> = start
+    let source_params: Vec<Name> = start
         .signature
         .params
         .iter()
-        .map(|param| param.name.clone())
+        .map(|p| p.name.clone())
         .collect();
     let local = |base: &str| {
         let mut name = Name::new(base);
-        while params.contains(&name) {
+        while source_params.contains(&name) {
             name = Name::new(format!("_{}", name.as_str()));
         }
         name
     };
     let returned = local("returned");
-    let call = |args: Vec<Atom>| {
+    let call = |args| {
         Rhs::Action(Action::Call {
             callee: Callee::Declared(root.clone()),
             args,
         })
     };
-    let body = match &start.convention {
-        StartConvention::Direct => vec![
-            Stmt::Let {
-                name: returned.clone(),
-                value: call(params.iter().cloned().map(Atom::Variable).collect()),
-            },
-            Stmt::Return {
-                value: Expr::Variable(returned),
-            },
-        ],
-        StartConvention::TsArgsList { await_fn, same_fn } => {
+    let (params, mut body, args) = match &start.convention {
+        StartConvention::Direct => (
+            source_params.clone(),
+            Vec::new(),
+            source_params.iter().cloned().map(Atom::Variable).collect(),
+        ),
+        StartConvention::TsDirect { .. } => {
             let args = local("args");
-            let value = local("value");
-            vec![
-                Stmt::Let {
-                    name: args.clone(),
-                    value: Rhs::Expr(Expr::List(
-                        params.iter().cloned().map(Expr::Variable).collect(),
-                    )),
-                },
-                Stmt::Let {
-                    name: returned.clone(),
-                    value: call(vec![Atom::Literal(Literal::Absent), Atom::Variable(args)]),
-                },
-                Stmt::Let {
-                    name: value.clone(),
-                    value: Rhs::Action(Action::Call {
-                        callee: Callee::Library(*await_fn),
-                        args: vec![Atom::Variable(returned)],
-                    }),
-                },
-                // A function that returns nothing ends its start with null.
-                Stmt::If {
-                    condition: Expr::Call {
-                        function: *same_fn,
-                        args: vec![
-                            Expr::Variable(value.clone()),
-                            Expr::Literal(Literal::Absent),
-                        ],
-                    },
-                    then_block: vec![Stmt::Return {
-                        value: Expr::Literal(Literal::Null),
-                    }],
-                    else_block: Vec::new(),
-                },
-                Stmt::Return {
-                    value: Expr::Variable(value),
-                },
-            ]
+            let body = vec![Stmt::Let {
+                name: args.clone(),
+                value: Rhs::Expr(Expr::List(
+                    source_params.iter().cloned().map(Expr::Variable).collect(),
+                )),
+            }];
+            (
+                source_params.clone(),
+                body,
+                vec![Atom::Literal(Literal::Absent), Atom::Variable(args)],
+            )
+        }
+        StartConvention::TsArgsList { .. } => {
+            let this = local("this");
+            let args = local("args");
+            (
+                vec![this.clone(), args.clone()],
+                Vec::new(),
+                vec![Atom::Variable(this), Atom::Variable(args)],
+            )
         }
     };
+    body.push(Stmt::Let {
+        name: returned.clone(),
+        value: call(args),
+    });
+    let value = match &start.convention {
+        StartConvention::Direct => returned,
+        StartConvention::TsDirect { await_fn } | StartConvention::TsArgsList { await_fn, .. } => {
+            let value = local("value");
+            body.push(Stmt::Let {
+                name: value.clone(),
+                value: Rhs::Action(Action::Await {
+                    policy: *await_fn,
+                    value: Atom::Variable(returned),
+                }),
+            });
+            value
+        }
+    };
+    body.push(Stmt::Return {
+        value: Expr::Variable(value),
+    });
     Function {
         params,
         body,

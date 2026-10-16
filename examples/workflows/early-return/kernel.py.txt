@@ -1,33 +1,22 @@
 kernel 1
 numbers by_spelling
 effect corpus.echo(input?: Any) -> Any
-use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use lt = @a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0
-use py.arg_missing = @556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a
-use py.fail = @3299c00d83f497f9de331da39e68fa2fb955b9641f7c3f797922ef47af84ceef
 use py.reply = @09159bbbadc0f6eda5aa8761653ad9fc2f463b362941fe756a2cf7e9aa2006cd
 use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
 entry demo(value: Int) -> Any
 
 fn demo(value) {
-  let t4 = fn(value) start(value: Int) -> Any bare direct {
-    if same(value, absent) {
-      do invoke py.arg_missing("demo")
-    }
-    if lt(value, 0) {
-      return "negative"
-    }
-    let t1 = value
-    let t2 = perform corpus.echo(t1) as Any
-    do invoke py.reply(t2)
-    return "done"
+  if lt(value, 0) {
+    return "negative"
   }
-  let t5 = apply t4(value)
-  return t5
+  let t1 = value
+  let t2 = perform corpus.echo(t1) as Any
+  do invoke py.reply(t2)
+  return "done"
 }
 
 main {
@@ -35,4 +24,4 @@ main {
   set demo = &demo
 }
 
-unit Function(Name("demo")): statements=11 scopes=6 sites=17
+unit Function(Name("demo")): statements=6 scopes=3 sites=10

@@ -1441,7 +1441,7 @@ function initialInputs(next) {
     items: [{ title: "Welcome aboard" }, { title: "Weekly summary" }],
   };
   return Object.fromEntries(
-    (next.document.entries[next.entry]?.params ?? []).map((param) => [
+    (next.document.entries[next.entry]?.signature.params ?? []).map((param) => [
       param.name,
       presets[param.name] ?? defaultValue(param.ty),
     ]),
@@ -1522,7 +1522,7 @@ function constantControl(parent, label, type, value, id, config = {}) {
   };
 }
 function renderInvocationInputs(container) {
-  const params = workflow.document.entries[workflow.entry]?.params ?? [];
+  const params = workflow.document.entries[workflow.entry]?.signature.params ?? [];
   if (!params.length) {
     container.append(
       el("p", "help", "This workflow takes no invocation parameters."),

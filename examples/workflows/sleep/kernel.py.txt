@@ -3,12 +3,8 @@ numbers by_spelling
 entry demo() -> Any
 
 fn demo() {
-  let t1 = fn() start() -> Any bare direct {
-    do sleep(5.0)
-    return "awake"
-  }
-  let t2 = apply t1()
-  return t2
+  do sleep(5.0)
+  return "awake"
 }
 
 main {
@@ -16,4 +12,4 @@ main {
   set demo = &demo
 }
 
-unit Function(Name("demo")): statements=5 scopes=2 sites=9
+unit Function(Name("demo")): statements=2 scopes=1 sites=5

@@ -427,7 +427,10 @@ pub fn derive_callable(
         Unit::Library(_) => return Err(mismatch(graph.node(unit.body))),
     };
     let expected = match entry {
-        Unit::Function(name) => document.entries.get(name).map(|entry| entry.result.clone()),
+        Unit::Function(name) => document
+            .entries
+            .get(name)
+            .map(|entry| entry.signature.result.clone()),
         Unit::Main | Unit::Library(_) => None,
     };
     let mut walk = Walk {
@@ -720,7 +723,9 @@ impl<'a> Walk<'a> {
                 opens.extend(catch.as_ref().map(|catch| (catch.body, ScopeKind::Catch)));
                 opens.extend(finally.map(|finally| (finally, ScopeKind::Finally)));
             }
-            StmtNode::Return { value } | StmtNode::Finish { value } => {
+            StmtNode::Return { value }
+            | StmtNode::ReturnVia { value, .. }
+            | StmtNode::Finish { value } => {
                 let callable = if matches!(statement, StmtNode::Finish { .. }) {
                     &self.entry
                 } else {
@@ -827,7 +832,7 @@ impl<'a> Walk<'a> {
                             })
                             .collect()
                     },
-                    |signature| signature.params.clone(),
+                    |entry| entry.signature.params.clone(),
                 );
                 (Some(CalleeView::Declared(name.clone())), params)
             }

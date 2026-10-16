@@ -5,20 +5,13 @@
 -use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 -use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 -use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
+-use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
 -use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
--entry demo() -> Any
+-entry demo() -> Any ts_direct(ts.await)
 -
 -fn demo() {
--  let t2 = fn(this1, args1) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
--    let t1 = perform corpus.echo("hello") as Any then yield
--    return t1
--  }
--  let t3 = []
--  let t4 = apply t2(absent, t3)
--  if same(t4, absent) {
--    return null
--  }
--  return t4
+-  let t1 = perform corpus.echo("hello") as Any then yield
+-  return t1 via ts.promise.adopt
 -}
 -
 -main {
@@ -31,20 +24,13 @@
 +use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 +use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 +use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
++use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
 +use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
-+entry demo() -> Any
++entry demo() -> Any ts_direct(ts.await)
 +
 +fn demo() {
-+  let t2 = fn(this1, args1) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
-+    let t1 = perform corpus.echo("edited λ") as Any then yield
-+    return t1
-+  }
-+  let t3 = []
-+  let t4 = apply t2(absent, t3)
-+  if same(t4, absent) {
-+    return null
-+  }
-+  return t4
++  let t1 = perform corpus.echo("edited λ") as Any then yield
++  return t1 via ts.promise.adopt
 +}
 +
 +main {
@@ -53,8 +39,8 @@
 
 Correspondence:
 {
-  "base": "efd01445780db343320193fcf9488783405542eeef20fe94922b71ed7e310efa",
-  "result": "9ed781e456956823e9e2f5650030d6a57249fdc45a894c3f62aafea787225999",
+  "base": "bd46f01583853c6c58a9a3e78bd8a9bd62562af0c757b700462f4865b2687878",
+  "result": "a28360b4c30964b95697d6a26b8dc96bd1d3adc9d5f79bc98aef1c854e814dda",
   "entries": [
     {
       "from": {
@@ -142,78 +128,6 @@ Correspondence:
           0,
           0
         ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ]
       },
       "edited": true
     },
@@ -223,56 +137,6 @@ Correspondence:
           "function": "demo"
         },
         "path": [
-          0,
-          0,
-          0,
-          1
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          1
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          1,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          1,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
           1
         ]
       },
@@ -301,250 +165,6 @@ Correspondence:
         },
         "path": [
           1,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          2
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          2
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          2,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          2,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          0,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          0,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          0,
-          1
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          0,
-          1
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          1
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          1
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          1,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          1,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          1,
-          0,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          1,
-          0,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          2
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          3,
-          2
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          4
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          4
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          4,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          4,
           0
         ]
       }
@@ -554,16 +174,8 @@ Correspondence:
 
 Reprinted source:
 export async function demo() {
-  let t2 = async function(this1, args1) {
-    let t1 = await await tools.corpus.echo("edited λ");
-    return t1;
-  };
-  let t3 = [];
-  let t4 = await (t2)(undefined, t3);
-  if (helper_same(t4, undefined)) {
-    return null;
-  }
-  return t4;
+  let t1 = await await tools.corpus.echo("edited λ");
+  return k.returnVia(t1, helper_ts_promise_adopt);
 }
 async function main() {
   let demo = declared.demo;

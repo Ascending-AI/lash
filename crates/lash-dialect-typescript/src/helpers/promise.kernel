@@ -29,6 +29,7 @@ use ts.iterate
 use ts.promise.is
 use ts.promise.pending
 use ts.await
+use ts.promise.adopt
 use ts.promise.run
 use ts.promise.start
 use ts.promise.settled
@@ -79,9 +80,23 @@ body {
   return value
 }
 
+# The policy of a surviving async return, after its source finalizers.
+# Resolving with a promise takes a job before awaiting it.
+function ts.promise.adopt(value: Any) -> Any
+kernel 1
+charge 0
+body {
+  let adopts = invoke ts.promise.is(value)
+  if adopts {
+    do yield
+    let outcome = invoke ts.await(value)
+    return outcome
+  }
+  return value
+}
+
 # What a promise's task runs: `work(this, args)`, then the settlement.
-# A body that returns a promise resolves this one with it, which JavaScript
-# does in a job of its own before it waits on that promise.
+# Its async source body owns adoption through its deferred return.
 function ts.promise.run(promise: Any, work: Any, this: Any, args: Any) -> Any
 kernel 1
 charge 8
@@ -89,11 +104,6 @@ body {
   let value = absent
   try {
     set value = apply work(this, args)
-    let adopts = invoke ts.promise.is(value)
-    if adopts {
-      do yield
-      set value = invoke ts.await(value)
-    }
   } catch reason {
     set promise.state = "rejected"
     throw reason
@@ -192,7 +202,7 @@ body {
       set handler = invoke ts.callable(handler)
       let values = [outcome]
       let handled_to = apply handler(absent, values)
-      return handled_to
+      return handled_to via ts.promise.adopt
     }
     if fulfilled {
       return outcome

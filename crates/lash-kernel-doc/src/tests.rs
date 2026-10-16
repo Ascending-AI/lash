@@ -46,6 +46,10 @@ pub(crate) fn every_form_corpus() -> Vec<String> {
         format!(
             r#"{header}
 entry start(count: Int, label?: Text) -> List(Text)
+entry positional(value: Any) -> Any ts_direct(helper.twice)
+entry packed(value: Any) -> Any ts_args(helper.twice, num.neg)
+fn positional(value) {{ return value via helper.twice }}
+fn packed(this, args) {{ return args }}
 private t1, `let`
 
 fn start(count, label) {{
@@ -263,6 +267,7 @@ fn kernel_text_round_trips_documents_that_use_every_form() {
         "stmt:print",
         "stmt:remove",
         "stmt:return",
+        "stmt:return-via",
         "stmt:throw",
         "stmt:try",
         "stmt:while",
@@ -296,6 +301,7 @@ fn collect_forms(node: Node<'_>, forms: &mut std::collections::BTreeSet<&'static
                 Stmt::While { .. } => "stmt:while",
                 Stmt::Break => "stmt:break",
                 Stmt::Continue => "stmt:continue",
+                Stmt::ReturnVia { .. } => "stmt:return-via",
                 Stmt::Return { .. } => "stmt:return",
                 Stmt::Try(_) => "stmt:try",
                 Stmt::Throw { .. } => "stmt:throw",

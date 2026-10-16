@@ -172,6 +172,9 @@ impl RegisteredFunction {
                             }
                             _ => {}
                         },
+                        crate::Node::Stmt(crate::Stmt::ReturnVia { policy, .. }) => {
+                            callees.insert(*policy);
+                        }
                         crate::Node::Stmt(crate::Stmt::For { via: Some(via), .. }) => {
                             callees.extend(via.functions());
                         }

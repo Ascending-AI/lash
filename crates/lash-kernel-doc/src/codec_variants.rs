@@ -98,6 +98,7 @@ impl CodecVariant for Stmt {
             Self::Break => 7,
             Self::Continue => 8,
             Self::Return { .. } => 9,
+            Self::ReturnVia { .. } => 17,
             Self::Try(..) => 10,
             Self::Throw { .. } => 11,
             Self::Print { .. } => 12,

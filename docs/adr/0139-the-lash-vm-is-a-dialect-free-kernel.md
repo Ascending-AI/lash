@@ -87,6 +87,20 @@ and every test the record marks as passing passes on the kernel or is named
 by a register row (`scripts/check_test262_ratchet.py`). A conflict between a
 Test262 case and a kernel rule is a register row, never a kernel change.
 
+Async bodies use the generic kernel `return value via policy`: the value
+is evaluated at the return site, held while source `finally` blocks unwind,
+and passed to the policy only if that return survives. A finalizer's own
+departure, including cancellation raised at its wait, replaces the held
+return and drops its policy. The TypeScript dialect supplies
+`ts.promise.adopt` for every async body, including entries and frozen
+function values; `ts.promise.run` only settles the enclosing task's promise.
+The policy runs through ordinary library call frames after the source scopes
+have gone, so its result or raise cannot re-enter those handlers. A checkpoint
+inside cleanup records the held value and return site as a typed deferred
+completion; a checkpoint inside the policy records the ordinary call frames.
+Entry argument binding and final Absent-to-Null normalization remain
+synchronous and carry no continuation state.
+
 ### Processes are entries started by effects
 
 The kernel has no process form. A document lists its entries, the functions

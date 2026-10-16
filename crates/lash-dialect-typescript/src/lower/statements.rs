@@ -218,10 +218,7 @@ impl Lowerer<'_> {
                     Some(value) => self.lower_expr(value)?,
                     None => Operand::undefined(),
                 };
-                self.emit(Stmt::Return {
-                    value: value.expr(),
-                });
-                Ok(())
+                self.source_return(value.expr())
             }
             ast::Stmt::If {
                 test,

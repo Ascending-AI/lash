@@ -45,7 +45,7 @@ pub fn escape_function_key(key: &str) -> std::borrow::Cow<'_, str> {
 pub const FUNCTION_VALUE_ENTRY: &str = "run";
 
 /// A function as data: a self-contained document and the entry that starts
-/// it. The entry's signature is `document.entries[entry]`.
+/// it. The entry's signature is `document.entries[entry].signature`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FunctionValue {
@@ -68,10 +68,7 @@ impl StartAdapter {
     /// The library functions starting through this adapter calls: code
     /// that holds it reaches them (`K-DOC-002`).
     pub fn functions(&self) -> Vec<FunctionId> {
-        match &self.convention {
-            StartConvention::Direct => Vec::new(),
-            StartConvention::TsArgsList { await_fn, same_fn } => vec![*await_fn, *same_fn],
-        }
+        self.convention.functions()
     }
 }
 
@@ -96,13 +93,19 @@ impl FunctionRepresentation {
     }
 }
 
-/// How the entry of a function value calls the function.
+/// How a host starts an entry. A start adapter uses the same convention
+/// when it extracts a function value from a dialect callable.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum StartConvention {
     /// With the start's arguments, in the signature's order, returning what
     /// the function returns.
     Direct,
+    /// Source parameters are bound directly; extra start arguments are
+    /// discarded, missing ones are absent, and an absent result becomes null.
+    /// When extracting a packed TypeScript callable, `await_fn` settles its
+    /// result before the entry returns.
+    TsDirect { await_fn: FunctionId },
     /// With an absent `this` and the list of the start's arguments; the
     /// returned value is awaited by `await_fn`, and an absent result
     /// (`same_fn` compares it with absent) ends the start with null.
@@ -110,6 +113,17 @@ pub enum StartConvention {
         await_fn: FunctionId,
         same_fn: FunctionId,
     },
+}
+
+impl StartConvention {
+    /// Library identities reached by this convention.
+    pub fn functions(&self) -> Vec<FunctionId> {
+        match self {
+            Self::Direct => Vec::new(),
+            Self::TsDirect { await_fn } => vec![*await_fn],
+            Self::TsArgsList { await_fn, same_fn } => vec![*await_fn, *same_fn],
+        }
+    }
 }
 
 /// The bound on one function value: its canonical tagged JSON, counting its
@@ -175,7 +189,10 @@ pub enum FunctionValueRefusal {
 impl FunctionValue {
     /// The signature the value is started under.
     pub fn signature(&self) -> Option<&Signature> {
-        self.document.entries.get(&self.entry)
+        self.document
+            .entries
+            .get(&self.entry)
+            .map(|entry| &entry.signature)
     }
 
     /// The canonical bytes of the transport form, `{"$lash_function": ..}`,

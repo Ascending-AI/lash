@@ -273,6 +273,10 @@ impl Linker {
             Stmt::Continue => StmtNode::Continue {
                 target: self.loops.last().copied().unwrap_or(id),
             },
+            Stmt::ReturnVia { value, policy } => StmtNode::ReturnVia {
+                value: self.expr(value, slots.take(), id, scope),
+                policy: *policy,
+            },
             Stmt::Return { value } => StmtNode::Return {
                 value: self.expr(value, slots.take(), id, scope),
             },

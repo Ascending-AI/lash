@@ -674,6 +674,7 @@ ts.pad	total
 ts.pow	operation
 ts.primitive_to_number	total
 ts.primitive_to_string	total
+ts.promise.adopt	body
 ts.promise.all	body
 ts.promise.all_settled	body
 ts.promise.any	body
@@ -688,7 +689,7 @@ ts.promise.race	body
 ts.promise.reactions	body
 ts.promise.reject	body
 ts.promise.resolve	body
-ts.promise.run	body
+ts.promise.run	operation
 ts.promise.settled	body
 ts.promise.start	body
 ts.promise.then	body

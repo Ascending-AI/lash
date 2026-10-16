@@ -9,7 +9,6 @@ use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use map.copy_deep = @0b8756185acbba5254579b4e28b3609cbd353673a46350444efe5bac54d03e97
 use map.values = @52849f963c318359e81934c83cd35ce4364ec742a159a8e99be42dff2351d980
 use num.add = @9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343
-use num.le = @d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b
 use num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e
 use num.sub = @f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28
 use num.to_float = @d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df
@@ -19,34 +18,21 @@ use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 use set.copy_deep = @3bca75c884c39293ac043da1ab4ca91be4d9585702aa3304f394b9812215c6d7
 use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
 use ts.boundary = @4979682bd7501b8088dc50a0b7839615c9541621786252504fbf17afc282d4fc
-use ts.pad = @c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd
+use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
 use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
-entry demo(value: Number) -> Any
+entry demo(value: Number) -> Any ts_direct(ts.await)
 
 fn demo(value) {
-  let t6 = fn(this1, args1) start(value: Number) -> Any token("ts.function", 4) ts_args(ts.await, same) {
-    let t1 = args1
-    if num.lt(list.len(args1), 1.0) {
-      set t1 = invoke ts.pad(args1, 1.0)
-    }
-    let value_1 = t1[0.0]
-    if num.lt(num.to_float(value_1), 0.0) {
-      return "negative"
-    }
-    let t4 = invoke ts.boundary(value_1)
-    do perform corpus.echo(t4) as Any then yield
-    return "done"
+  if num.lt(num.to_float(value), 0.0) {
+    return "negative" via ts.promise.adopt
   }
-  let t7 = [value]
-  let t8 = apply t6(absent, t7)
-  if same(t8, absent) {
-    return null
-  }
-  return t8
+  let t1 = invoke ts.boundary(value)
+  do perform corpus.echo(t1) as Any then yield
+  return "done" via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=15 scopes=8 sites=20
+unit Function(Name("demo")): statements=5 scopes=3 sites=8

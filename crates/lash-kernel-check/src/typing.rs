@@ -117,6 +117,10 @@ impl Typer<'_> {
                 }
             }
             StmtNode::Break { .. } | StmtNode::Continue { .. } => {}
+            StmtNode::ReturnVia { value, policy } => {
+                let found = self.value(value);
+                self.nested_call(&CalleeNode::Library(policy), &[value], &[found]);
+            }
             StmtNode::Return { value }
             | StmtNode::Throw { value }
             | StmtNode::Print { value }

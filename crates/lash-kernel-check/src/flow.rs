@@ -232,7 +232,7 @@ impl Flow<'_> {
                     taken.cont = true;
                 }
             }
-            StmtNode::Return { .. } => {
+            StmtNode::Return { .. } | StmtNode::ReturnVia { .. } => {
                 self.edge(id, routes.ret, EdgeKind::Return);
                 taken.ret = true;
             }
@@ -465,6 +465,10 @@ fn library_applies(
                     })
                     | lash_kernel_doc::Node::Expr(Expr::Call {
                         function: callee, ..
+                    })
+                    | lash_kernel_doc::Node::Stmt(lash_kernel_doc::Stmt::ReturnVia {
+                        policy: callee,
+                        ..
                     }) => callees.push(*callee),
                     lash_kernel_doc::Node::Expr(Expr::Act(act)) => {
                         if let ActKind::Call(Callee::Library(callee)) = &act.kind {
@@ -513,7 +517,10 @@ fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
                 | ActNode::Yield
                 | ActNode::Cancel => {}
             },
-            NodeKind::Expr(ExprNode::Call { function, .. }) => {
+            NodeKind::Expr(ExprNode::Call { function, .. })
+            | NodeKind::Stmt(StmtNode::ReturnVia {
+                policy: function, ..
+            }) => {
                 unit.through_values |= library_applies(catalog, function, &mut applies);
             }
             NodeKind::Action(action) => {

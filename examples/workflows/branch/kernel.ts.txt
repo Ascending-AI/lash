@@ -2,38 +2,22 @@ kernel 1
 numbers float
 effect corpus.echo(input?: Any) -> Any
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
-use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
-use num.le = @d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b
-use num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
-use ts.pad = @c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd
+use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
 use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
-entry demo(flag: Bool) -> Any
+entry demo(flag: Bool) -> Any ts_direct(ts.await)
 
 fn demo(flag) {
-  let t5 = fn(this1, args1) start(flag: Bool) -> Any token("ts.function", 4) ts_args(ts.await, same) {
-    let t1 = args1
-    if num.lt(list.len(args1), 1.0) {
-      set t1 = invoke ts.pad(args1, 1.0)
-    }
-    let flag_1 = t1[0.0]
-    if flag_1 {
-      let t4 = perform corpus.echo("yes") as Any then yield
-      return t4
-    }
-    return "no"
+  if flag {
+    let t1 = perform corpus.echo("yes") as Any then yield
+    return t1 via ts.promise.adopt
   }
-  let t6 = [flag]
-  let t7 = apply t5(absent, t6)
-  if same(t7, absent) {
-    return null
-  }
-  return t7
+  return "no" via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=14 scopes=8 sites=18
+unit Function(Name("demo")): statements=4 scopes=3 sites=6

@@ -36,7 +36,9 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
         .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"))
         .document
         .entries
-        .clone()
+        .iter()
+        .map(|(name, entry)| (name.clone(), entry.signature.clone()))
+        .collect()
 }
 
 fn refusal(source: &str) -> String {
@@ -289,4 +291,63 @@ fn the_contract_refuses_under_the_shared_codes() {
     ] {
         assert_eq!(refusal(source), expected.code(), "{source}");
     }
+}
+
+/// ENTRY-CONV: host arguments bind the author's parameters directly;
+/// calls in the body retain Python's positional and keyword ordering.
+#[test]
+fn entry_convention_keeps_python_positional_and_keyword_arguments() {
+    use lash_kernel_doc::{Datum, Integer, StartConvention};
+    let lowered = module("async def run(a: int, b: int):\n    async def pair(x, y):\n        return [x, y]\n    return [await pair(a, b), await pair(y=a, x=b)]\n").unwrap();
+    let entry = &lowered.document.entries[&Name::new("run")];
+    assert_eq!(entry.convention, StartConvention::Direct);
+    assert_eq!(
+        lowered.document.functions[&Name::new("run")].params,
+        [Name::new("a"), Name::new("b")]
+    );
+    let a = Datum::Int(Integer::from(3));
+    let b = Datum::Int(Integer::from(7));
+    assert_eq!(
+        machine::end_of_entry(lowered.document.into_document(), vec![a.clone(), b.clone()]),
+        Datum::List(vec![
+            Datum::List(vec![a.clone(), b.clone()]),
+            Datum::List(vec![b, a])
+        ])
+    );
+}
+
+/// K-TASK-019: resolved task creation, including ensure_future in a callee,
+/// installs cleanup at the run root. Mere spelling and shadowed names do not.
+#[test]
+fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
+    let plain = module("# create_task gather\nasync def run():\n    def gather():\n        return 'create_task'\n    return gather()\n").unwrap();
+    assert!(
+        !plain
+            .document
+            .manifest
+            .functions
+            .values()
+            .any(|name| name.as_str() == "tasks.cancel_all")
+    );
+    let tasks = module("import asyncio\nasync def run():\n    async def child():\n        await asyncio.sleep(1)\n    def launch():\n        return asyncio.ensure_future(child())\n    launch()\n").unwrap();
+    let body = &tasks.document.functions[&Name::new("run")].body;
+    assert!(matches!(
+        body.last(),
+        Some(lash_kernel_doc::Stmt::Try(lash_kernel_doc::TryStmt {
+            finally: Some(_),
+            ..
+        }))
+    ));
+    assert!(
+        !tasks
+            .document
+            .main
+            .iter()
+            .any(|stmt| matches!(stmt, lash_kernel_doc::Stmt::Try(_)))
+    );
+    let (lines, end) = machine::output(
+        "import asyncio\nasync def child():\n    try:\n        await asyncio.sleep(1)\n    finally:\n        print('cleanup')\nasyncio.ensure_future(child())\nawait asyncio.sleep(0)\nprint('done')\n",
+    );
+    assert_eq!(end, "ok");
+    assert_eq!(lines, ["done", "cleanup"]);
 }

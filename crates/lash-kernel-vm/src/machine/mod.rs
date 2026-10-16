@@ -188,6 +188,7 @@ enum Completion {
     Break,
     Continue,
     Return(Box<Value>),
+    ReturnVia { value: Box<Value>, stmt: StmtId },
     Throw(Box<Value>),
 }
 

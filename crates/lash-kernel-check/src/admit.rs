@@ -218,7 +218,10 @@ fn check(
             Unit::Function(name.clone()),
             &function.params,
             &function.body,
-            document.entries.get(name).cloned(),
+            document
+                .entries
+                .get(name)
+                .map(|entry| entry.signature.clone()),
         );
     }
     errors.append(&mut linker.errors);

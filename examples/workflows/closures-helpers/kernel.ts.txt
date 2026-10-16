@@ -76,6 +76,7 @@ use ts.number_index = @2846cd4a7e382de93752da056715a5884f589f87a4e7367d01024046b
 use ts.pad = @c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd
 use ts.primitive_to_number = @ad02d8e25efbacf5d1a409cca8fb7975aae191f7cdd31f5267eb915dc426f715
 use ts.primitive_to_string = @ce452ee11eca78020d6ebfe84d0cf308c5738b68daa8f1772b85f54ba2214aa3
+use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
 use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
 use ts.property.length = @0e2828db7d514db6ef224897f54d14d0c627d1aac3c18a10e9eadc6a2f969cf8
 use ts.read = @9d1544371aa2ac0c2a761ceaedd2bc3477fab2fb853bf19b6c022300334690ca
@@ -92,55 +93,42 @@ use ts.to_primitive = @1376a5afb8cd4f716fcdf8f4c4c37660e1b33120a9bdf785d7a5ad5de
 use ts.to_property_key = @3360fd167e2174596e5c60a00936fc593e2bbaf9de6705fde916834887fa3812
 use ts.to_string = @0d4e32ecc2847e28538f93d70487f5e7effaed80b6008a59dc46cbab07e65201
 use url.whatwg.update = @060c2b213abb407a56baee6776241fc1e2b019176e931c2825eac851361fd08d
-entry demo(items: List(Text)) -> Any
+entry demo(items: List(Text)) -> Any ts_direct(ts.await)
 
 fn demo(items) {
-  let t19 = fn(this1, args1) start(items: List(Text)) -> Any token("ts.function", 4) ts_args(ts.await, same) {
-    let t1 = args1
-    if num.lt(list.len(args1), 1.0) {
-      set t1 = invoke ts.pad(args1, 1.0)
+  let t5 = fn(this2, args2) start(item: Text) -> Any token("ts.function", 4) ts_direct(ts.await) {
+    let t1 = args2
+    if num.lt(list.len(args2), 1.0) {
+      set t1 = invoke ts.pad(args2, 1.0)
     }
-    let items_1 = t1[0.0]
-    let t8 = fn(this2, args2) start(item: Text) -> Any token("ts.function", 4) ts_args(ts.await, same) {
-      let t4 = args2
-      if num.lt(list.len(args2), 1.0) {
-        set t4 = invoke ts.pad(args2, 1.0)
-      }
-      let item = t4[0.0]
-      let t7 = invoke ts.property.length(item)
-      return t7
-    }
-    let size = ("ts.function", "", "size", 1.0, t8, {})
-    let t9 = items_1
-    let t10 = same(kind(t9), "list")
-    if t10 {} else {
-      let t11 = invoke ts.array.is(t9)
-      if t11 {} else {
-        throw error.new("type_error", "expected an array", null)
-      }
-    }
-    let t12 = absent
-    if t10 {
-      let t13 = [size]
-      set t12 = invoke ts.array.map(t9, t13)
-    } else {
-      let t15 = invoke ts.member.map(t9)
-      let t16 = [size]
-      let t17 = ts.callable(t15)
-      set t12 = apply t17(t9, t16)
-    }
-    return t12
+    let item = t1[0.0]
+    let t4 = invoke ts.property.length(item)
+    return t4
   }
-  let t20 = [items]
-  let t21 = apply t19(absent, t20)
-  if same(t21, absent) {
-    return null
+  let size = ("ts.function", "", "size", 1.0, t5, {})
+  let t6 = items
+  let t7 = same(kind(t6), "list")
+  if t7 {} else {
+    let t8 = invoke ts.array.is(t6)
+    if t8 {} else {
+      throw error.new("type_error", "expected an array", null)
+    }
   }
-  return t21
+  let t9 = absent
+  if t7 {
+    let t10 = [size]
+    set t9 = invoke ts.array.map(t6, t10)
+  } else {
+    let t12 = invoke ts.member.map(t6)
+    let t13 = [size]
+    let t14 = ts.callable(t12)
+    set t9 = apply t14(t6, t13)
+  }
+  return t9 via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=33 scopes=15 sites=42
+unit Function(Name("demo")): statements=23 scopes=10 sites=30

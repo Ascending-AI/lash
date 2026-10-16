@@ -255,9 +255,12 @@ fn a_function_value_at_its_bound_round_trips_and_one_past_it_is_refused() {
         );
         document.entries.insert(
             run.clone(),
-            crate::Signature {
-                params: Vec::new(),
-                result: crate::Type::Any,
+            crate::Entry {
+                signature: crate::Signature {
+                    params: Vec::new(),
+                    result: crate::Type::Any,
+                },
+                convention: crate::StartConvention::Direct,
             },
         );
         crate::FunctionValue {

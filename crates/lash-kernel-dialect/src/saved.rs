@@ -324,11 +324,7 @@ fn save_closure(
     // function and closures call.
     let mut library = gathered.library.clone();
     each_start(&gathered.function, &mut |start| {
-        if let lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn } =
-            &start.convention
-        {
-            library.extend([*await_fn, *same_fn]);
-        }
+        library.extend(start.functions());
     });
     for function in &library {
         document.manifest.functions.insert(

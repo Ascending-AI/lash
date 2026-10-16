@@ -248,8 +248,14 @@ pub fn validate_document_with_limits(
     for name in &document.private_bindings {
         check_name(name, None)?;
     }
-    for (entry, signature) in &document.entries {
+    for (entry, definition) in &document.entries {
+        let signature = &definition.signature;
         check_signature(signature)?;
+        for function in definition.convention.functions() {
+            if !document.manifest.functions.contains_key(&function) {
+                return Err(invalid(None, InvalidReason::FunctionNotListed { function }));
+            }
+        }
         let Some(function) = document.functions.get(entry) else {
             return Err(invalid(
                 None,
@@ -258,12 +264,18 @@ pub fn validate_document_with_limits(
                 },
             ));
         };
-        if function.params.len() != signature.params.len() {
+        let expected = match definition.convention {
+            crate::StartConvention::Direct | crate::StartConvention::TsDirect { .. } => {
+                signature.params.len()
+            }
+            crate::StartConvention::TsArgsList { .. } => 2,
+        };
+        if function.params.len() != expected {
             return Err(invalid(
                 None,
                 InvalidReason::EntryArity {
                     entry: entry.clone(),
-                    signature: signature.params.len(),
+                    signature: expected,
                     declared: function.params.len(),
                 },
             ));
@@ -530,6 +542,19 @@ impl Scope<'_> {
             }
             Stmt::Break => loop_control(in_loop, "break", site),
             Stmt::Continue => loop_control(in_loop, "continue", site),
+            Stmt::ReturnVia { value, policy } => {
+                let definition = self.listed(policy, site)?;
+                if self.native_body && !definition.has_native() {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::NativeBodyMayWait {
+                            form: StatementForm::Call,
+                        },
+                    ));
+                }
+                check_arity(definition.name.as_str(), 1, &definition.signature, site)?;
+                self.check_expr(value, &child())
+            }
             Stmt::Return { value }
             | Stmt::Throw { value }
             | Stmt::Print { value }
@@ -991,29 +1016,23 @@ impl Scope<'_> {
         {
             return Err(invalid(Some(site), InvalidReason::StartToken));
         }
-        match &start.convention {
-            crate::StartConvention::Direct => {
-                if start.signature.params.len() != params {
-                    return Err(invalid(
-                        Some(site),
-                        InvalidReason::StartArity {
-                            signature: start.signature.params.len(),
-                            declared: params,
-                        },
-                    ));
-                }
-            }
-            crate::StartConvention::TsArgsList { await_fn, same_fn } => {
-                for function in [await_fn, same_fn] {
-                    if !self.functions.contains_key(function) {
-                        return Err(invalid(
-                            Some(site),
-                            InvalidReason::FunctionNotListed {
-                                function: *function,
-                            },
-                        ));
-                    }
-                }
+        if matches!(start.convention, crate::StartConvention::Direct)
+            && start.signature.params.len() != params
+        {
+            return Err(invalid(
+                Some(site),
+                InvalidReason::StartArity {
+                    signature: start.signature.params.len(),
+                    declared: params,
+                },
+            ));
+        }
+        for function in start.functions() {
+            if !self.functions.contains_key(&function) {
+                return Err(invalid(
+                    Some(site),
+                    InvalidReason::FunctionNotListed { function },
+                ));
             }
         }
         Ok(())

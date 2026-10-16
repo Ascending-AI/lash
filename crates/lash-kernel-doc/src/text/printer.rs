@@ -38,10 +38,14 @@ pub fn print_document_with_ranges(
         printer.out.push('\n');
     }
     printer.uses(&document.manifest.functions);
-    for (name, signature) in &document.entries {
+    for (name, entry) in &document.entries {
         printer.out.push_str("entry ");
         printer.name(name);
-        printer.signature(signature);
+        printer.signature(&entry.signature);
+        if entry.convention != StartConvention::Direct {
+            printer.convention(&entry.convention);
+            printer.out.pop();
+        }
         printer.out.push('\n');
     }
     if !document.private_bindings.is_empty() {
@@ -314,6 +318,11 @@ impl<'a> Printer<'a> {
             Stmt::Break => self.out.push_str("break"),
             Stmt::Continue => self.out.push_str("continue"),
             Stmt::Return { value } => self.keyword_expr("return", value),
+            Stmt::ReturnVia { value, policy } => {
+                self.keyword_expr("return", value);
+                self.out.push_str(" via ");
+                self.function(policy);
+            }
             Stmt::Throw { value } => self.keyword_expr("throw", value),
             Stmt::Print { value } => self.keyword_expr("print", value),
             Stmt::Finish { value } => self.keyword_expr("finish", value),
@@ -671,8 +680,17 @@ impl<'a> Printer<'a> {
                 self.out.push_str(&format!(", {callable})"));
             }
         }
-        match &start.convention {
+        self.convention(&start.convention);
+    }
+
+    fn convention(&mut self, convention: &StartConvention) {
+        match convention {
             StartConvention::Direct => self.out.push_str(" direct "),
+            StartConvention::TsDirect { await_fn } => {
+                self.out.push_str(" ts_direct(");
+                self.function(await_fn);
+                self.out.push_str(") ");
+            }
             StartConvention::TsArgsList { await_fn, same_fn } => {
                 self.out.push_str(" ts_args(");
                 self.function(await_fn);

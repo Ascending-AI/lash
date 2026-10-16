@@ -438,7 +438,40 @@ record!(FinallyRecord {
     site: SiteRef,
     entered: EnteredRecord
 });
-units!(EnteredRecord { Normal = 0, Throw = 1, Return = 2, Break = 3, Continue = 4 });
+impl TokenCodec for EnteredRecord {
+    fn encode(&self, out: &mut TokenWriter) {
+        match self {
+            Self::ReturnVia(site) => {
+                out.sum(5, 1);
+                site.encode(out);
+            }
+            _ => out.sum(
+                match self {
+                    Self::Normal => 0,
+                    Self::Throw => 1,
+                    Self::Return => 2,
+                    Self::Break => 3,
+                    Self::Continue => 4,
+                    Self::ReturnVia(_) => unreachable!(),
+                },
+                0,
+            ),
+        }
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let (tag, fields) = input.sum()?;
+        TokenReader::expect_fields(fields, if tag == 5 { 1 } else { 0 })?;
+        Ok(match tag {
+            0 => Self::Normal,
+            1 => Self::Throw,
+            2 => Self::Return,
+            3 => Self::Break,
+            4 => Self::Continue,
+            5 => Self::ReturnVia(Box::new(SiteRef::decode(input)?)),
+            _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
+        })
+    }
+}
 
 record!(WaitRecord {
     task: TaskId,

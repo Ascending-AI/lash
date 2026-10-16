@@ -1,23 +1,13 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("t3"), value: Expr(Closure(Closure { params: [Name("this1"), Name("args1")], body: [Let { name: Name("result"), value: Expr(Literal(Text("start"))) }, Try(TryStmt { body: [Assign { place: Variable(Name("result")), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("try"))], result: Any, then_yield: true }) }], catch: Some(Catch { binding: Name("error"), body: [Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))) }] }), finally: Some([Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("finally"))] }) }]) }), Return { value: Variable(Name("result")) }], start: Some(StartAdapter { signature: Signature { params: [], result: Any }, representation: Token { tag: "ts.function", callable: 4 }, convention: TsArgsList { await_fn: FunctionId(1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a), same_fn: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578) } }) })) }
-statement fn demo/0/0/0/0 ordinal=5 depth=1 block=fn demo/0/0/0 Let { name: Name("result"), value: Expr(Literal(Text("start"))) }
-statement fn demo/0/0/0/1 ordinal=6 depth=1 block=fn demo/0/0/0 Try(TryStmt { body: [Assign { place: Variable(Name("result")), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("try"))], result: Any, then_yield: true }) }], catch: Some(Catch { binding: Name("error"), body: [Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))) }] }), finally: Some([Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("finally"))] }) }]) })
-statement fn demo/0/0/0/1/0/0 ordinal=8 depth=2 block=fn demo/0/0/0/1/0 Assign { place: Variable(Name("result")), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("try"))], result: Any, then_yield: true }) }
-statement fn demo/0/0/0/1/1/0 ordinal=10 depth=2 block=fn demo/0/0/0/1/1 Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))) }
-statement fn demo/0/0/0/1/2/0 ordinal=12 depth=2 block=fn demo/0/0/0/1/2 Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("finally"))] }) }
-statement fn demo/0/0/0/2 ordinal=13 depth=1 block=fn demo/0/0/0 Return { value: Variable(Name("result")) }
-statement fn demo/1 ordinal=14 depth=0 block=fn demo Let { name: Name("t4"), value: Expr(List([])) }
-statement fn demo/2 ordinal=15 depth=0 block=fn demo Let { name: Name("t5"), value: Action(Call { callee: Value(Name("t3")), args: [Literal(Absent), Variable(Name("t4"))] }) }
-statement fn demo/3 ordinal=16 depth=0 block=fn demo If { condition: Call { function: FunctionId(1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578), args: [Variable(Name("t5")), Literal(Absent)] }, then_block: [Return { value: Literal(Null) }], else_block: [] }
-statement fn demo/3/1/0 ordinal=18 depth=1 block=fn demo/3/1 Return { value: Literal(Null) }
-statement fn demo/4 ordinal=20 depth=0 block=fn demo Return { value: Variable(Name("t5")) }
+statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("result"), value: Expr(Literal(Text("start"))) }
+statement fn demo/1 ordinal=4 depth=0 block=fn demo Try(TryStmt { body: [Assign { place: Variable(Name("result")), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("try"))], result: Any, then_yield: true }) }], catch: Some(Catch { binding: Name("error"), body: [Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))) }] }), finally: Some([Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("finally"))] }) }]) })
+statement fn demo/1/0/0 ordinal=6 depth=1 block=fn demo/1/0 Assign { place: Variable(Name("result")), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("try"))], result: Any, then_yield: true }) }
+statement fn demo/1/1/0 ordinal=8 depth=1 block=fn demo/1/1 Assign { place: Variable(Name("result")), value: Expr(Literal(Text("caught"))) }
+statement fn demo/1/2/0 ordinal=10 depth=1 block=fn demo/1/2 Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("finally"))] }) }
+statement fn demo/2 ordinal=11 depth=0 block=fn demo ReturnVia { value: Variable(Name("result")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
 scope fn demo ordinal=2 depth=0 Entry
-scope fn demo/0/0/0 ordinal=4 depth=1 Closure
-scope fn demo/0/0/0/1/0 ordinal=7 depth=2 Try
-scope fn demo/0/0/0/1/1 ordinal=9 depth=2 Catch
-scope fn demo/0/0/0/1/2 ordinal=11 depth=2 Finally
-scope fn demo/3/1 ordinal=17 depth=1 Then
-scope fn demo/3/2 ordinal=19 depth=1 Else
-action fn demo/0/0/0/1/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
-action fn demo/0/0/0/1/2/0/0 Some(Effect(QualifiedName("corpus.echo")))
-action fn demo/2/0 None
+scope fn demo/1/0 ordinal=5 depth=1 Try
+scope fn demo/1/1 ordinal=7 depth=1 Catch
+scope fn demo/1/2 ordinal=9 depth=1 Finally
+action fn demo/1/0/0/0 Some(Effect(QualifiedName("corpus.echo")))
+action fn demo/1/2/0/0 Some(Effect(QualifiedName("corpus.echo")))

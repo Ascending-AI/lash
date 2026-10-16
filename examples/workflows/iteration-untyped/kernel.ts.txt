@@ -79,9 +79,9 @@ use ts.number.parse_int = @b811c17ddecf5214a038f7ffe5ea0c72a04801ee1f9407259201a
 use ts.number.parts = @c06d5d6a4c1e60bcbf0e431d86c7e7a6a31d60dcd606e547c92928480a014b0f
 use ts.number.to_string = @bbb9dce7354218bdce6d02442f90974a5cff393625a4dbdf767ac05788488cda
 use ts.number_index = @2846cd4a7e382de93752da056715a5884f589f87a4e7367d01024046b8afc30a
-use ts.pad = @c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd
 use ts.primitive_to_number = @ad02d8e25efbacf5d1a409cca8fb7975aae191f7cdd31f5267eb915dc426f715
 use ts.primitive_to_string = @ce452ee11eca78020d6ebfe84d0cf308c5738b68daa8f1772b85f54ba2214aa3
+use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
 use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
 use ts.receiver = @c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6
 use ts.regexp.escaped_source = @326719b934273dad2daaaeffe5d1dc15319a85ae0f7a72b1bf62d8062524ac95
@@ -93,34 +93,21 @@ use ts.to_number = @ce0104d5f7263439ddbd1ac638d1272d62aa8fe30598a61ff98bdbf3346f
 use ts.to_primitive = @1376a5afb8cd4f716fcdf8f4c4c37660e1b33120a9bdf785d7a5ad5de7e6e933
 use ts.to_property_key = @3360fd167e2174596e5c60a00936fc593e2bbaf9de6705fde916834887fa3812
 use ts.to_string = @0d4e32ecc2847e28538f93d70487f5e7effaed80b6008a59dc46cbab07e65201
-entry demo(items: Any) -> Any
+entry demo(items: Any) -> Any ts_direct(ts.await)
 
 fn demo(items) {
-  let t8 = fn(this1, args1) start(items: Any) -> Any token("ts.function", 4) ts_args(ts.await, same) {
-    let t1 = args1
-    if num.lt(list.len(args1), 1.0) {
-      set t1 = invoke ts.pad(args1, 1.0)
-    }
-    let items_1 = t1[0.0]
-    let out = []
-    for t4 in items_1 via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {
-      let item = t4
-      let t5 = out
-      let t6 = invoke ts.boundary(item)
-      set t5[list.len(t5)] = perform corpus.echo(t6) as Any then yield
-    }
-    return out
+  let out = []
+  for t1 in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {
+    let item = t1
+    let t2 = out
+    let t3 = invoke ts.boundary(item)
+    set t2[list.len(t2)] = perform corpus.echo(t3) as Any then yield
   }
-  let t9 = [items]
-  let t10 = apply t8(absent, t9)
-  if same(t10, absent) {
-    return null
-  }
-  return t10
+  return out via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=17 scopes=7 sites=22
+unit Function(Name("demo")): statements=7 scopes=2 sites=10

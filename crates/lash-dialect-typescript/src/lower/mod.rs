@@ -105,6 +105,7 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.pow",
     "ts.promise.pending",
     "ts.promise.run",
+    "ts.promise.adopt",
     "ts.read",
     "ts.rem",
     "ts.require_object_coercible",
@@ -273,9 +274,11 @@ enum Control {
 #[derive(Debug)]
 struct FunctionFrame {
     arrow: bool,
+    async_body: bool,
     this: Option<Name>,
     args: Option<Name>,
     arguments_used: bool,
+    context_used: bool,
     controls: Vec<Control>,
 }
 
@@ -317,7 +320,6 @@ pub(crate) struct Lowerer<'a> {
     declared: BTreeMap<Name, lash_kernel_doc::Function>,
     /// The notes of each declared function's body.
     declared_notes: BTreeMap<Name, Vec<Note>>,
-    /// The declared functions a host may start, with their signatures.
     /// While a process body is lowered: the cell's names, none of which the
     /// body may read.
     lifting: Option<HashSet<String>>,
@@ -393,9 +395,11 @@ pub(crate) fn lower(
         scopes: Vec::new(),
         functions: vec![FunctionFrame {
             arrow: false,
+            async_body: false,
             this: None,
             args: None,
             arguments_used: false,
+            context_used: false,
             controls: Vec::new(),
         }],
         buf: Buf::default(),
@@ -957,17 +961,40 @@ impl Lowerer<'_> {
     }
 
     /// How a function value of this signature is started when it crosses
-    /// to a tool (`K-CLO-004`): the token's closure, called with an absent
-    /// `this` and the list of the start's arguments, its promise awaited by
-    /// `ts.await`, and undefined ending the start with null.
+    /// to a tool (`K-CLO-004`). The token keeps the internal packed call ABI;
+    /// extraction exposes a host entry under the source body's convention.
     fn start_adapter(&mut self, signature: Signature) -> Option<lash_kernel_doc::StartAdapter> {
         let await_fn = self.function("ts.await").ok()?;
-        let same_fn = self.function("same").ok()?;
         Some(lash_kernel_doc::StartAdapter {
             signature,
             representation: crate::function_values(),
-            convention: lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn },
+            convention: lash_kernel_doc::StartConvention::TsDirect { await_fn },
         })
+    }
+
+    /// A source function's crossing uses the same body test as a workflow
+    /// entry. Generated closures carry no start adapter.
+    fn set_start_convention(&mut self, packed: bool) -> Lowering<()> {
+        let Some(Stmt::Let {
+            value: Rhs::Expr(Expr::Closure(closure)),
+            ..
+        }) = self.buf.stmts.last()
+        else {
+            return Ok(());
+        };
+        if closure.start.is_none() {
+            return Ok(());
+        }
+        let convention = self.entry_convention(packed)?;
+        if let Some(Stmt::Let {
+            value: Rhs::Expr(Expr::Closure(closure)),
+            ..
+        }) = self.buf.stmts.last_mut()
+            && let Some(start) = &mut closure.start
+        {
+            start.convention = convention;
+        }
+        Ok(())
     }
 
     /// Hands the last statement what is known of the function it binds.

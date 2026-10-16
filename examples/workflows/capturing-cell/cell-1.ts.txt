@@ -649,6 +649,7 @@ use ts.pad = @ts.pad
 use ts.pow = @ts.pow
 use ts.primitive_to_number = @ts.primitive_to_number
 use ts.primitive_to_string = @ts.primitive_to_string
+use ts.promise.adopt = @ts.promise.adopt
 use ts.promise.all = @ts.promise.all
 use ts.promise.all_settled = @ts.promise.all_settled
 use ts.promise.any = @ts.promise.any
@@ -810,9 +811,9 @@ use ts.wrap_int32 = @ts.wrap_int32
 use url.whatwg.parse = @url.whatwg.parse
 use url.whatwg.query_stringify = @url.whatwg.query_stringify
 use url.whatwg.update = @url.whatwg.update
-entry run(x: Number) -> Any
+entry run(x: Number) -> Any ts_direct(ts.await)
 
-fn f0(v0, v1) start(x: Number) -> Any token("ts.function", 4) ts_args(ts.await, same) {
+fn f0(v0, v1) start(x: Number) -> Any token("ts.function", 4) ts_direct(ts.await) {
   let v2 = 3.0
   let v3 = [1.0]
   let v4 = absent
@@ -832,7 +833,7 @@ fn f0(v0, v1) start(x: Number) -> Any token("ts.function", 4) ts_args(ts.await, 
     } else {
       set v10 = invoke ts.get_computed(v3, 0.0)
     }
-    return ts.add(v9, v10)
+    return ts.add(v9, v10) via ts.promise.adopt
   }
   let v11 = list.copy(v1)
   let v12 = invoke ts.promise.pending()
@@ -843,10 +844,7 @@ fn f0(v0, v1) start(x: Number) -> Any token("ts.function", 4) ts_args(ts.await, 
 fn run(x) {
   let v0 = [x]
   let v1 = call f0(absent, v0)
-  let v2 = invoke ts.await(v1)
-  if same(v2, absent) {
-    return null
-  }
+  let v2 = await v1 via ts.await
   return v2
 }
 

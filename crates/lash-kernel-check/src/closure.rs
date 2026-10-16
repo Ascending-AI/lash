@@ -182,6 +182,10 @@ fn linked_units(graph: &Graph, catalog: &dyn FunctionCatalog, root: Unit) -> Lin
         };
         let action = match &node.kind {
             NodeKind::Action(action) => action,
+            NodeKind::Stmt(StmtNode::ReturnVia { value, policy }) => {
+                library_call(unit, policy, &[*value]);
+                continue;
+            }
             NodeKind::Expr(ExprNode::Call { function, args }) => {
                 library_call(unit, function, args);
                 continue;

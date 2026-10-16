@@ -374,6 +374,10 @@ impl KernelMachine {
                 }
                 Ran::Depart(Completion::Return(Box::new(value)))
             }
+            Op::ReturnVia { src } => Ran::Depart(Completion::ReturnVia {
+                value: Box::new(self.take(at(src))),
+                stmt: running.id,
+            }),
             Op::Throw { src } => return Err(Interrupt::raised(self.take(at(src)))),
             Op::Print { src } => {
                 let value = self.take(at(src));

@@ -17,7 +17,7 @@ async function main() {
     } else {
       t4 = await helper_ts_get_computed(shared, 0.0);
     }
-    return t6 + t4;
+    return k.returnVia(t6 + t4, helper_ts_promise_adopt);
   };
   let t10 = async function(this2, args2) {
     let t8 = helper_list_copy(args2);

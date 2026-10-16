@@ -1,5 +1,5 @@
 async def demo():
-    async def t14():
+    try:
         work = k.absent
         async def work(value):
             if value is k.absent:
@@ -23,11 +23,8 @@ async def demo():
         t12 = [t7, t11]
         t13 = await helper_py_gather(t12)
         return t13
-    t15 = await t14()
-    return t15
-async def main():
-    demo = k.absent
-    try:
-        demo = declared.demo
     finally:
         await helper_tasks_cancel_all()
+def main():
+    demo = k.absent
+    demo = declared.demo

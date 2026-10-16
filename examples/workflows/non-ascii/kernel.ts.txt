@@ -9,7 +9,6 @@ use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use map.copy_deep = @0b8756185acbba5254579b4e28b3609cbd353673a46350444efe5bac54d03e97
 use map.values = @52849f963c318359e81934c83cd35ce4364ec742a159a8e99be42dff2351d980
 use num.add = @9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343
-use num.le = @d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b
 use num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e
 use num.sub = @f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28
 use record.copy_deep = @a6d4171fd163b1a7519a83d38916149be44c801ebe223d1d7a7db311e9bf2008
@@ -19,33 +18,20 @@ use set.copy_deep = @3bca75c884c39293ac043da1ab4ca91be4d9585702aa3304f394b981221
 use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
 use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
 use ts.boundary = @4979682bd7501b8088dc50a0b7839615c9541621786252504fbf17afc282d4fc
-use ts.pad = @c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd
+use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
 use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
-entry demo(name: Text) -> Any
+entry demo(name: Text) -> Any ts_direct(ts.await)
 
 fn demo(name) {
-  let t7 = fn(this1, args1) start(name: Text) -> Any token("ts.function", 4) ts_args(ts.await, same) {
-    let t1 = args1
-    if num.lt(list.len(args1), 1.0) {
-      set t1 = invoke ts.pad(args1, 1.0)
-    }
-    let name_1 = t1[0.0]
-    let `größe` = "日本 🦀"
-    let t4 = text.concat(`größe`, name_1)
-    let t5 = invoke ts.boundary(t4)
-    let t6 = perform corpus.echo(t5) as Any then yield
-    return t6
-  }
-  let t8 = [name]
-  let t9 = apply t7(absent, t8)
-  if same(t9, absent) {
-    return null
-  }
-  return t9
+  let `größe` = "日本 🦀"
+  let t1 = text.concat(`größe`, name)
+  let t2 = invoke ts.boundary(t1)
+  let t3 = perform corpus.echo(t2) as Any then yield
+  return t3 via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=15 scopes=6 sites=20
+unit Function(Name("demo")): statements=5 scopes=1 sites=8

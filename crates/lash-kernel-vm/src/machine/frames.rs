@@ -415,7 +415,9 @@ impl Frame {
                         Completion::Normal => EnteredRecord::Normal,
                         Completion::Break => EnteredRecord::Break,
                         Completion::Continue => EnteredRecord::Continue,
-                        Completion::Return(value) | Completion::Throw(value) => {
+                        Completion::Return(value)
+                        | Completion::ReturnVia { value, .. }
+                        | Completion::Throw(value) => {
                             write(
                                 &mut self.record.departing,
                                 departing,
@@ -423,7 +425,15 @@ impl Frame {
                                 &self.access,
                             )?;
                             departing += 1;
-                            if matches!(completion, Completion::Return(_)) {
+                            if let Completion::ReturnVia { stmt, .. } = completion {
+                                let Form::ReturnVia { site, .. } = &self.exe.stmt(*stmt).form
+                                else {
+                                    return Err(malformed("a deferred return has no policy"));
+                                };
+                                EnteredRecord::ReturnVia(Box::new(
+                                    lash_kernel_state::paged::SiteRef::new(site, &self.access)?,
+                                ))
+                            } else if matches!(completion, Completion::Return(_)) {
                                 EnteredRecord::Return
                             } else {
                                 EnteredRecord::Throw
@@ -832,7 +842,17 @@ fn restore(
     let mut awaiting = None;
     let mut nested = None;
     let nowhere = || malformed(format!("{} is no statement of the admitted document", site));
-    loop {
+    // A policy call has already left every source scope. Rebuilding the
+    // path to its return would incorrectly enter those scopes again.
+    let adopting = exe.stmt_at(code_id, &site).filter(|stmt| {
+        parked == ParkKind::Returned
+            && record.pending.is_none()
+            && matches!(exe.stmt(*stmt).form, Form::ReturnVia { .. })
+    });
+    if let Some(stmt) = adopting {
+        awaiting = Some(stmt);
+    }
+    while adopting.is_none() {
         let index = *site.path.get(depth).ok_or_else(nowhere)? as usize;
         let stmts = &exe.block(block).stmts;
         if depth + 1 == site.path.len() {
@@ -971,6 +991,21 @@ fn restore(
                         EnteredRecord::Continue => Completion::Continue,
                         EnteredRecord::Throw => Completion::Throw(Box::new(value()?)),
                         EnteredRecord::Return => Completion::Return(Box::new(value()?)),
+                        EnteredRecord::ReturnVia(site) => {
+                            let site = site.resolve(&access)?;
+                            let stmt = exe
+                                .stmt_at(code_id, &site)
+                                .filter(|stmt| {
+                                    matches!(exe.stmt(*stmt).form, Form::ReturnVia { .. })
+                                })
+                                .ok_or_else(|| {
+                                    malformed("a saved return has no admitted policy")
+                                })?;
+                            Completion::ReturnVia {
+                                value: Box::new(value()?),
+                                stmt,
+                            }
+                        }
                     };
                     (TryPhase::Finally(completion), cleanup)
                 } else {

@@ -469,6 +469,12 @@ impl Graph {
                         self.block(finally, &scope, owner);
                     }
                 }
+                Stmt::ReturnVia { value, policy } => {
+                    let held = self.expr(value, &scope, owner);
+                    let value = self.library_call(*policy, vec![held], owner);
+                    self.flow(value, self.units[owner].result);
+                    self.escapes.push(value);
+                }
                 Stmt::Return { value } => {
                     let value = self.expr(value, &scope, owner);
                     self.flow(value, self.units[owner].result);

@@ -71,7 +71,7 @@ pub use ast::{
 };
 pub use continuation::{LiveRolesError, live_roles, live_roles_in};
 pub use document::{
-    DecodeError, Document, EncodeError, KERNEL_VERSION, Label, MAX_NESTING_DEPTH, Manifest,
+    DecodeError, Document, EncodeError, Entry, KERNEL_VERSION, Label, MAX_NESTING_DEPTH, Manifest,
 };
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition, Guard,

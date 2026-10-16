@@ -346,6 +346,13 @@ impl Renderer<'_> {
             }
             k::Stmt::Break => self.out.write("break;"),
             k::Stmt::Continue => self.out.write("continue;"),
+            k::Stmt::ReturnVia { value, policy } => {
+                self.out.write("return k.returnVia(");
+                self.expr(value);
+                self.out.write(", ");
+                self.helper(policy);
+                self.out.write(");");
+            }
             k::Stmt::Return { value } => {
                 self.out.write("return ");
                 self.expr(value);

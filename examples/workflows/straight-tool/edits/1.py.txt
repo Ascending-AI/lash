@@ -10,13 +10,9 @@
 -entry demo() -> Any
 -
 -fn demo() {
--  let t3 = fn() start() -> Any bare direct {
--    let t1 = perform corpus.echo("hello") as Any
--    let t2 = invoke py.reply(t1)
--    return t2
--  }
--  let t4 = apply t3()
--  return t4
+-  let t1 = perform corpus.echo("hello") as Any
+-  let t2 = invoke py.reply(t1)
+-  return t2
 -}
 -
 -main {
@@ -35,13 +31,9 @@
 +entry demo() -> Any
 +
 +fn demo() {
-+  let t3 = fn() start() -> Any bare direct {
-+    let t1 = perform corpus.echo("edited λ") as Any
-+    let t2 = invoke py.reply(t1)
-+    return t2
-+  }
-+  let t4 = apply t3()
-+  return t4
++  let t1 = perform corpus.echo("edited λ") as Any
++  let t2 = invoke py.reply(t1)
++  return t2
 +}
 +
 +main {
@@ -51,8 +43,8 @@
 
 Correspondence:
 {
-  "base": "6e3abb545421b2d4d0b88bee71f15bc89301e39469bb67ef9a1c2be0bcf847da",
-  "result": "1a0834cb559febf38a1d8d1827e5b9ddf671ab56eea0794e5129f11b86d71fb0",
+  "base": "c198a488e190871a26e8630e7faefdd1bd793fe5ddef4a9ae32d6e49e7db9489",
+  "result": "46bc0be504857bb807feee1af080c42248156714c50ed3578fbebfc3eba125eb",
   "entries": [
     {
       "from": {
@@ -170,180 +162,8 @@ Correspondence:
           0,
           0
         ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ]
       },
       "edited": true
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          1
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          1
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          1,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          1,
-          0
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          2
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          2
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          2,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          0,
-          0,
-          0,
-          2,
-          0
-        ]
-      }
     },
     {
       "from": {
@@ -426,12 +246,9 @@ Correspondence:
 
 Reprinted source:
 async def demo():
-    async def t3():
-        t1 = await tools.corpus.echo("edited λ")
-        t2 = await helper_py_reply(t1)
-        return t2
-    t4 = await t3()
-    return t4
+    t1 = await tools.corpus.echo("edited λ")
+    t2 = await helper_py_reply(t1)
+    return t2
 def main():
     demo = k.absent
     demo = declared.demo

@@ -95,6 +95,10 @@ impl CodeReads {
                 self.block(else_block, bound);
             }
             Stmt::Break | Stmt::Continue => {}
+            Stmt::ReturnVia { value, policy } => {
+                self.library.insert(*policy);
+                self.expr(value, bound);
+            }
             Stmt::Return { value }
             | Stmt::Throw { value }
             | Stmt::Print { value }

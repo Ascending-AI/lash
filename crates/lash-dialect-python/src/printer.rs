@@ -274,6 +274,12 @@ impl Renderer<'_> {
                     self.block(else_block);
                 }
             }
+            k::Stmt::ReturnVia { value, policy } => {
+                self.out.write("with k.return_via(");
+                self.helper(policy);
+                self.suite();
+                self.expr(value);
+            }
             k::Stmt::Return { value }
             | k::Stmt::Throw { value }
             | k::Stmt::Print { value }

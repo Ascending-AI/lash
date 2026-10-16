@@ -397,6 +397,51 @@ pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
     }
 }
 
+/// Runs an explicit workflow or frozen-function entry through the public machine.
+pub(crate) fn end_of_entry(
+    document: lash_kernel_doc::Document,
+    entry: &str,
+    args: Vec<Datum>,
+) -> (Vec<String>, Datum) {
+    let text = lash_kernel_doc::print_document(&document);
+    let program = Program {
+        release: super::pages::RELEASE,
+        document: Arc::new(document),
+        library: prepared().clone(),
+    };
+    let start = CellStart {
+        target: Target::Entry(Name::new(entry)),
+        args,
+        session: None,
+        owner: super::pages::OWNER,
+        modes: Default::default(),
+        host: Vec::new(),
+    };
+    let mut machine = super::pages::start(program, BOUNDS, start)
+        .unwrap_or_else(|error| panic!("{error}\n{text}"));
+    let mut console = Console::default();
+    let mut asked = Vec::new();
+    loop {
+        match machine
+            .run(&mut console, u64::MAX)
+            .unwrap_or_else(|error| panic!("{error}\n{text}"))
+        {
+            Step::Slice => unreachable!("the slice is unbounded"),
+            Step::Ended(End::Finished(finished)) => return (asked, finished.result),
+            Step::Ended(other) => panic!("{other:?}\n{text}"),
+            Step::Parked(park) => {
+                for request in &park.requests {
+                    asked.push(label(request));
+                    let (wait, outcome) = answer(request);
+                    machine
+                        .deliver(wait, outcome)
+                        .unwrap_or_else(|error| panic!("{error}"));
+                }
+            }
+        }
+    }
+}
+
 /// Executes with a fresh serialized import at slices and parks. Neither
 /// source facts nor operand metadata may be required by resumed execution.
 pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, usize) {
@@ -685,5 +730,128 @@ fn sort_comparisons_are_bounded_by_n_log_n() {
             machine.meters().charged
         );
         assert_eq!(console.lines[0], "true");
+    }
+}
+
+/// ENTRY-CONV and FN-CROSS: a function handed to a tool keeps the same
+/// host convention as a workflow entry, including missing and extra args.
+#[test]
+fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
+    for (function, packed, args, expected) in [
+        (
+            "async function f(x) { return x; }",
+            false,
+            vec![Datum::Text("first".into()), Datum::Null],
+            Datum::Text("first".into()),
+        ),
+        (
+            "async function f(x) { return x; }",
+            false,
+            vec![],
+            Datum::Null,
+        ),
+        (
+            "async function f() { async function child() { return 7; } return child(); }",
+            false,
+            vec![],
+            Datum::Float(lash_kernel_doc::Float::new(7.0)),
+        ),
+        (
+            "function f() { return this === undefined; }",
+            true,
+            vec![Datum::Null],
+            Datum::Bool(true),
+        ),
+        (
+            "async function f(x) { function inner() { return arguments.length; } return inner(); }",
+            false,
+            vec![Datum::Null, Datum::Null],
+            Datum::Float(lash_kernel_doc::Float::new(0.0)),
+        ),
+        (
+            "function f() { return undefined; }",
+            false,
+            vec![],
+            Datum::Null,
+        ),
+        (
+            "async function f(x) { return [this === undefined, arguments.length, arguments[1], x]; }",
+            true,
+            vec![Datum::Null, Datum::Text("extra".into())],
+            Datum::List(vec![
+                Datum::Bool(true),
+                Datum::Float(lash_kernel_doc::Float::new(2.0)),
+                Datum::Text("extra".into()),
+                Datum::Null,
+            ]),
+        ),
+        (
+            "async function f(x) { const read = () => arguments.length; return read(); }",
+            true,
+            vec![Datum::Null, Datum::Null],
+            Datum::Float(lash_kernel_doc::Float::new(2.0)),
+        ),
+    ] {
+        let (_, tail) = function
+            .split_once("function f")
+            .expect("a source function");
+        let effects = effects();
+        let environment = Environment {
+            library: super::library(),
+            effects: &effects,
+            controls: super::controls(),
+            tool_roots: &std::collections::BTreeSet::new(),
+        };
+        let entry = crate::lower(
+            &format!("export async function run{tail}"),
+            &environment,
+            lash_kernel_dialect::Mode::Module,
+        )
+        .expect("the same body imports as an entry")
+        .document
+        .into_document();
+        let convention = entry.entries[&Name::new("run")].convention.clone();
+        let (_, result) = end_of_entry(entry, "run", args.clone());
+        assert_eq!(result, expected, "workflow: {function}");
+        let source = format!("{function} await echo(f);");
+        let (mut machine, text) = start(&source);
+        let mut host = Console::default();
+        let function = loop {
+            match machine
+                .run(&mut host, u64::MAX)
+                .unwrap_or_else(|e| panic!("{e}\n{text}"))
+            {
+                Step::Slice => {}
+                Step::Parked(park) => {
+                    let Request::Effect(effect) = &park.requests[0] else {
+                        panic!("a tool request");
+                    };
+                    let Datum::FunctionValue(function) = &effect.args[0] else {
+                        panic!("a frozen function: {:?}", effect.args);
+                    };
+                    break function.clone();
+                }
+                other => panic!("{other:?}\n{text}"),
+            }
+        };
+        let entry = &function.document.entries[&function.entry];
+        assert_eq!(
+            entry.convention, convention,
+            "entry and frozen callable share their host convention"
+        );
+        assert_eq!(
+            matches!(
+                entry.convention,
+                lash_kernel_doc::StartConvention::TsArgsList { .. }
+            ),
+            packed
+        );
+        assert!(matches!(
+            entry.convention,
+            lash_kernel_doc::StartConvention::TsDirect { .. }
+                | lash_kernel_doc::StartConvention::TsArgsList { .. }
+        ));
+        let (_, result) = end_of_entry(function.document, function.entry.as_str(), args);
+        assert_eq!(result, expected, "{source}");
     }
 }

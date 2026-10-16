@@ -501,9 +501,16 @@ pub mod execution {
         }
         fn children(&self, out: &mut Vec<PageRef>) {
             self.site.children(out);
+            if let EnteredRecord::ReturnVia(site) = &self.entered {
+                site.children(out);
+            }
         }
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
-            self.site.grants(children)
+            self.site.grants(children)?;
+            if let EnteredRecord::ReturnVia(site) = &mut self.entered {
+                site.grants(children)?;
+            }
+            Ok(())
         }
     }
     impl Cell for JoinerRecord {

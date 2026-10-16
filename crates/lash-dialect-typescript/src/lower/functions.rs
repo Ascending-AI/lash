@@ -131,9 +131,11 @@ impl Lowerer<'_> {
         let arguments = (!function.is_arrow).then(|| self.fresh("arguments"));
         self.functions.push(FunctionFrame {
             arrow: function.is_arrow,
+            async_body: function.is_async,
             this: Some(this.clone()),
             args: arguments.clone(),
             arguments_used: false,
+            context_used: false,
             controls: Vec::new(),
         });
         let outer_span = self.span;
@@ -159,16 +161,74 @@ impl Lowerer<'_> {
             Ok(())
         });
         self.span = outer_span;
-        self.functions.pop();
+        let Some(frame) = self.functions.pop() else {
+            unreachable!("function frame is active");
+        };
         let body = body?;
         self.written = Some(self.written(function));
         let closure = self.emit_closure(vec![this, args], body);
+        self.set_start_convention(frame.context_used || frame.arguments_used)?;
         Ok(Operand {
             plain: None,
             expr: closure.expr,
             stable: closure.stable,
             ty: self.facts.function(function.return_ty.as_ref()),
         })
+    }
+
+    /// A workflow's declared function is its source body, with no closure
+    /// creation or call around it. Only the packed convention needs the
+    /// parameter-list bindings an ordinary JavaScript call uses.
+    pub(super) fn entry_body(
+        &mut self,
+        function: &ast::Function,
+    ) -> Lowering<(Vec<lash_kernel_doc::Name>, Buf, bool)> {
+        let this = self.fresh("this");
+        let args = self.fresh("args");
+        let arguments = self.fresh("arguments");
+        self.functions.push(FunctionFrame {
+            arrow: false,
+            async_body: function.is_async,
+            this: Some(this.clone()),
+            args: Some(arguments.clone()),
+            arguments_used: false,
+            context_used: false,
+            controls: Vec::new(),
+        });
+        let span = self.span;
+        let mut params = Vec::new();
+        let body = self.scoped_block(|lowerer| {
+            for param in &function.params {
+                let ast::Pattern::Ident(name, _) = param else {
+                    unreachable!("an admitted entry has plain parameters");
+                };
+                params.push(lowerer.declare(name, BindingKind::Local));
+            }
+            lowerer.admitted_body(function, None)?;
+            if lowerer.frame().context_used || lowerer.frame().arguments_used {
+                let prefix = lowerer.block(|lowerer| {
+                    lowerer.parameters(&function.params, &args)?;
+                    if lowerer.frame().arguments_used {
+                        let object = lowerer.invoke(
+                            "ts.arguments",
+                            &[Operand::variable(args.clone(), Ty::Unknown)],
+                            Ty::Unknown,
+                        )?;
+                        lowerer.bind(arguments, object);
+                    }
+                    Ok(())
+                })?;
+                lowerer.buf.stmts.splice(0..0, prefix.stmts);
+                lowerer.buf.notes.splice(0..0, prefix.notes);
+                params = vec![this, args];
+            }
+            Ok(())
+        });
+        self.span = span;
+        let Some(frame) = self.functions.pop() else {
+            unreachable!("entry frame is active");
+        };
+        Ok((params, body?, frame.context_used || frame.arguments_used))
     }
 
     /// Admit normalized numeric parameters before the shared source body.
@@ -222,6 +282,19 @@ impl Lowerer<'_> {
         Ok(())
     }
 
+    pub(super) fn source_return(&mut self, value: Expr) -> Lowering<()> {
+        let stmt = if self.frame().async_body {
+            Stmt::ReturnVia {
+                value,
+                policy: self.function("ts.promise.adopt")?,
+            }
+        } else {
+            Stmt::Return { value }
+        };
+        self.emit(stmt);
+        Ok(())
+    }
+
     /// The shared source body, after its parameter bindings.
     fn function_body(&mut self, function: &ast::Function) -> Lowering<()> {
         match &function.body {
@@ -232,15 +305,14 @@ impl Lowerer<'_> {
             }
             ast::FunctionBody::Expression(value) => {
                 let value = self.lower_expr(value)?;
-                self.emit(Stmt::Return {
-                    value: value.expr(),
-                });
+                self.source_return(value.expr())?;
             }
         }
-        if !matches!(self.buf.stmts.last(), Some(Stmt::Return { .. })) {
-            self.emit(Stmt::Return {
-                value: Expr::Literal(Literal::Absent),
-            });
+        if !matches!(
+            self.buf.stmts.last(),
+            Some(Stmt::Return { .. } | Stmt::ReturnVia { .. })
+        ) {
+            self.source_return(Expr::Literal(Literal::Absent))?;
         }
         Ok(())
     }
@@ -257,9 +329,11 @@ impl Lowerer<'_> {
         let mut params = vec![this.clone()];
         self.functions.push(FunctionFrame {
             arrow: false,
+            async_body: function.is_async,
             this: Some(this),
             args: None,
             arguments_used: false,
+            context_used: false,
             controls: Vec::new(),
         });
         let outer_span = self.span;
@@ -280,7 +354,9 @@ impl Lowerer<'_> {
             lowerer.admitted_body(function, None)
         });
         self.span = outer_span;
-        self.functions.pop();
+        let Some(frame) = self.functions.pop() else {
+            unreachable!("positional function frame is active");
+        };
         let body = body?;
         let made = self.emit_closure(params, body);
         self.store(Place::Variable(entry.name.clone()), made);
@@ -308,6 +384,7 @@ impl Lowerer<'_> {
         })?;
         self.written = Some(self.written(function));
         let closure = self.emit_closure(vec![this, args], body);
+        self.set_start_convention(frame.context_used || frame.arguments_used)?;
         let closure = Operand {
             ty: self.facts.function(function.return_ty.as_ref()),
             ..closure
@@ -373,23 +450,34 @@ impl Lowerer<'_> {
 
     /// The enclosing function's `this`, which an arrow shares with the
     /// function around it.
-    pub(super) fn this_binding(&self) -> Option<lash_kernel_doc::Name> {
-        self.functions
-            .iter()
+    pub(super) fn this_binding(&mut self) -> Option<lash_kernel_doc::Name> {
+        let binding = self
+            .functions
+            .iter_mut()
             .rev()
             .find(|frame| !frame.arrow)
-            .and_then(|frame| frame.this.clone())
+            .and_then(|frame| {
+                frame.context_used = true;
+                frame.this.clone()
+            });
+        self.frame_mut().context_used = true;
+        binding
     }
 
     /// The enclosing function's argument list, which is its `arguments`.
     pub(super) fn arguments_binding(&mut self) -> Option<lash_kernel_doc::Name> {
-        self.functions
+        let binding = self
+            .functions
             .iter_mut()
             .rev()
             .find(|frame| !frame.arrow)
             .and_then(|frame| {
                 frame.arguments_used = true;
                 frame.args.clone()
-            })
+            });
+        if binding.is_some() {
+            self.frame_mut().context_used = true;
+        }
+        binding
     }
 }

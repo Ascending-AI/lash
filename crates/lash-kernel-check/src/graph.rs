@@ -255,6 +255,10 @@ pub enum StmtNode {
     Return {
         value: NodeId,
     },
+    ReturnVia {
+        value: NodeId,
+        policy: FunctionId,
+    },
     Throw {
         value: NodeId,
     },
@@ -477,6 +481,7 @@ impl GraphNode {
                 }
                 StmtNode::Break { .. } | StmtNode::Continue { .. } => {}
                 StmtNode::Return { value }
+                | StmtNode::ReturnVia { value, .. }
                 | StmtNode::Throw { value }
                 | StmtNode::Print { value }
                 | StmtNode::Finish { value }

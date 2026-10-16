@@ -247,6 +247,21 @@ impl Compiler<'_> {
                 ops.push(Op::Continue);
                 Form::Plain
             }
+            doc::Stmt::ReturnVia { value, policy } => {
+                self.valued(&mut ops, value, |src| Op::ReturnVia { src });
+                match self.resolve.lib(policy) {
+                    Some(policy) => Form::ReturnVia {
+                        site: self.site(),
+                        policy,
+                    },
+                    None => {
+                        let name = self.name(Name::new(policy.to_string()));
+                        ops.ops.pop();
+                        ops.push(Op::Unbound { dst: Reg(0), name });
+                        Form::Plain
+                    }
+                }
+            }
             doc::Stmt::Return { value } => self.valued(&mut ops, value, |src| Op::Return { src }),
             doc::Stmt::Throw { value } => self.valued(&mut ops, value, |src| Op::Throw { src }),
             doc::Stmt::Print { value } => self.valued(&mut ops, value, |src| Op::Print { src }),

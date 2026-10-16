@@ -151,7 +151,7 @@ main {{
   }}
   let f = fn(a) {{
     let g = fn() {{
-      return a
+      return a via num.neg
     }}
     return g
   }}
@@ -222,7 +222,14 @@ fn a_document_that_uses_every_form_admits() {
     let start = graph.unit(&Unit::Function(Name::new("start"))).unwrap();
     assert_eq!(start.effects.effects, BTreeSet::from([effect("fetch")]));
     assert!(!start.effects.through_values);
-    assert_eq!(start.signature, document.entries.values().next().cloned());
+    assert_eq!(
+        start.signature,
+        document
+            .entries
+            .values()
+            .next()
+            .map(|entry| entry.signature.clone())
+    );
     let main = graph.unit(&Unit::Main).unwrap();
     assert_eq!(main.effects.effects, BTreeSet::from([effect("fetch")]));
     assert!(main.effects.through_values);
@@ -244,6 +251,7 @@ fn form(kind: &NodeKind) -> &'static str {
             StmtNode::Break { .. } => "stmt:break",
             StmtNode::Continue { .. } => "stmt:continue",
             StmtNode::Return { .. } => "stmt:return",
+            StmtNode::ReturnVia { .. } => "stmt:return-via",
             StmtNode::Throw { .. } => "stmt:throw",
             StmtNode::Print { .. } => "stmt:print",
             StmtNode::Finish { .. } => "stmt:finish",
@@ -394,6 +402,7 @@ fn walking_the_graph_view_reaches_every_node_and_slot() {
         "stmt:print",
         "stmt:remove",
         "stmt:return",
+        "stmt:return-via",
         "stmt:throw",
         "stmt:try",
         "stmt:while",

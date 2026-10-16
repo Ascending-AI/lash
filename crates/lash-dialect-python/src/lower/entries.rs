@@ -2,19 +2,15 @@
 //! the workflow contract every dialect shares
 //! (`lash_kernel_dialect::workflow`).
 //!
-//! An entry is a declared function of the document that a host starts. Its
-//! body is the `def`'s own closure, made with nothing of the module in
-//! scope and called once, directly, with the entry's arguments: a coroutine
-//! call in this dialect has run by the time it returns. Its signature is
-//! what the annotations mean in Python, mapped structurally; an annotation
-//! with no kernel type is refused rather than read as any value.
+//! An entry's declared function is the author's body. The machine binds its
+//! source parameters under `Direct`; there is no closure or call wrapper.
+//! Annotation and capture refusals are shared with every workflow dialect.
 
 use std::collections::HashSet;
 
 use lash_kernel_dialect::workflow::{Entry, ModuleError, ModuleRefusal};
 use lash_kernel_doc::{
-    Action, Atom, Callee, Closure, Expr, Function, Literal, MapType, Name, Param, Place, Rhs,
-    Signature, Stmt, Type,
+    Expr, Function, Literal, MapType, Name, Param, Place, Rhs, Signature, Stmt, Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
@@ -42,60 +38,22 @@ impl Lowerer<'_> {
         self.span_of(def);
         let span = self.span;
         let signature = self.entry_signature(&def.parameters, def.returns.as_deref())?;
-        let active = self.takes_active(name).then(|| self.fresh("active"));
-        let defaults = vec![None; def.parameters.args.len()];
-        let written =
-            self.function_written(Some(&def.parameters), def.is_async, def.returns.as_deref());
-        let params: Vec<Name> = signature
-            .params
-            .iter()
-            .map(|param| param.name.clone())
-            .collect();
         self.in_entry = true;
-        let body = self.block(|this| {
-            let (closure_params, body) = this.function_body(
-                Some(&def.parameters),
-                Body::Suite(&def.body),
-                true,
-                &defaults,
-                name,
-                active.clone(),
-            )?;
-            let run = this.temp();
-            this.span = span;
-            let start = super::saved::start_adapter(&written, closure_params.len());
-            this.push(
-                Stmt::Let {
-                    name: run.clone(),
-                    value: Rhs::Expr(Expr::Closure(Box::new(Closure {
-                        params: closure_params,
-                        body: body.stmts,
-                        start,
-                    }))),
-                },
-                vec![body.notes],
-            );
-            if let Some(note) = this.buf.notes.last_mut() {
-                note.written = Some(written);
-            }
-            let mut args: Vec<Atom> = params.iter().cloned().map(Atom::Variable).collect();
-            if active.is_some() {
-                args.push(Atom::Literal(Literal::Absent));
-            }
-            let returned = this.temp();
-            this.emit(Stmt::Let {
-                name: returned.clone(),
-                value: Rhs::Action(Action::Call {
-                    callee: Callee::Value(run),
-                    args,
-                }),
-            });
-            this.emit(Stmt::Return {
-                value: Expr::Variable(returned),
-            });
-            Ok(())
-        });
+        let creates_tasks = std::mem::take(&mut self.creates_tasks);
+        let body = self.function_body(
+            Some(&def.parameters),
+            Body::Suite(&def.body),
+            true,
+            &[],
+            name,
+            None,
+        );
         self.in_entry = false;
+        let body = body.and_then(|(params, body)| {
+            let body = self.task_cleanup(body)?;
+            Ok((params, body))
+        });
+        self.creates_tasks = creates_tasks;
         if let Some((captured, at)) = self.captured.borrow_mut().take() {
             return Err(ModuleRefusal::CapturedModuleBinding
                 .at(
@@ -106,7 +64,7 @@ impl Lowerer<'_> {
                 )
                 .into_diagnostic());
         }
-        let body = body?;
+        let (params, body) = body?;
         let entry = Name::new(name);
         // Only a module's lowering marks entry definitions (`declarations`).
         if let Some(module) = self.module.as_mut() {
@@ -120,6 +78,7 @@ impl Lowerer<'_> {
                         start: None,
                     },
                     signature,
+                    convention: lash_kernel_doc::StartConvention::Direct,
                     notes: body.notes,
                 })
                 .map_err(ModuleError::into_diagnostic)?;
@@ -132,6 +91,22 @@ impl Lowerer<'_> {
             value: Rhs::Expr(Expr::Literal(Literal::Function(entry))),
         });
         Ok(())
+    }
+
+    /// Task cleanup belongs to the run root, including tasks made by callees.
+    pub(super) fn task_cleanup(&mut self, body: super::Buf) -> Lowering<super::Buf> {
+        if !self.creates_tasks {
+            return Ok(body);
+        }
+        let span = self.span;
+        self.span = None;
+        let result = self.block(|this| {
+            let finally = this.block(|this| this.invoke_do("tasks.cancel_all", &[]))?;
+            this.emit_try(body, None, Some(finally));
+            Ok(())
+        });
+        self.span = span;
+        result
     }
 
     /// The signature a host starts an entry under: each parameter a plain

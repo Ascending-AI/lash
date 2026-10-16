@@ -137,6 +137,11 @@ pub const SEMANTICS: &[OpSpec] = &[
     spec(K::Break, &[], false),
     spec(K::Continue, &[], false),
     spec(K::Return, &[E::CopyOut, E::BodyFormula], true),
+    spec(
+        K::ReturnVia,
+        &[E::CopyOut, E::NativeFormula, E::BodyFormula],
+        true,
+    ),
     spec(K::Throw, &[], true),
     spec(K::Print, &[E::CopyOut], true),
     spec(K::Finish, &[E::CopyOut], true),

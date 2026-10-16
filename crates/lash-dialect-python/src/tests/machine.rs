@@ -406,6 +406,36 @@ pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
     run_cell(source, deliveries, Session::default()).0
 }
 
+/// Runs an entry with positional host arguments through the real machine.
+pub(super) fn end_of_entry(document: lash_kernel_doc::Document, args: Vec<Datum>) -> Datum {
+    let session = Session::default();
+    let program = Program {
+        release: pages::RELEASE,
+        document: Arc::new(document),
+        library: installed().prepared.clone(),
+    };
+    let mut machine = KernelMachine::start(
+        program,
+        BOUNDS,
+        lash_kernel_vm::CellStart {
+            owner: pages::OWNER,
+            target: lash_kernel_vm::Target::Entry(Name::new("run")),
+            args,
+            session: None,
+            modes: Default::default(),
+            host: Vec::new(),
+        },
+        Box::new(session.source.clone()),
+        session.census(BOUNDS.memory),
+    )
+    .unwrap();
+    let mut console = Console::default();
+    match machine.run(&mut console, u64::MAX).unwrap() {
+        Step::Ended(End::Finished(finished)) => finished.result,
+        other => panic!("{other:?}"),
+    }
+}
+
 /// The lines a cell that calls no tool prints, and how it ends.
 pub(crate) fn output(source: &str) -> (Vec<String>, String) {
     let recorded = run(source, &[]);

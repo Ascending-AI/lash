@@ -64,62 +64,55 @@ use ts.number.to_string = @bbb9dce7354218bdce6d02442f90974a5cff393625a4dbdf767ac
 use ts.pad = @c28af511a9ebc14d71b94562038cc56639bd3dfcfc05b0efcbc2f747a52795dd
 use ts.primitive_to_number = @ad02d8e25efbacf5d1a409cca8fb7975aae191f7cdd31f5267eb915dc426f715
 use ts.primitive_to_string = @ce452ee11eca78020d6ebfe84d0cf308c5738b68daa8f1772b85f54ba2214aa3
-use ts.promise.all = @f6b81eb81aa3e8d0b308cafcd6b890c0caf7faba8456bd6e0293512673bd984d
+use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
+use ts.promise.all = @6edd6833d792ecf9704b1e49c66b464f2c8a92fd2a35f3cd4fab529aada20db6
 use ts.promise.decided = @9c4fd8aace9ba1ea39414f98a73e2b3ad4c03edca4e0eac72be196bcd23b75d4
 use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
-use ts.promise.members = @8dee9e41d02215c19dc01050cb0a6a76a5af01c008ca1db32639165d58ed9f57
+use ts.promise.members = @5ec47b728681005926715378c84493bee4cf78879f41638906a571398e438df6
 use ts.promise.pending = @656aeb7c2f80aaa8c1a1f930bf330144f4d2b86e156f57a111e2b66c4bd7f9be
-use ts.promise.run = @b5d7323cfb8fd85bd529192148137269284bc5ec55c5d4c5a78bb474cc6269e0
-use ts.promise.settled = @74f846cadfd60b4095ac350094c68008941e8de067b6c74444bf495c6e1e62ca
-use ts.promise.start = @22c567ab491a1625ac03943c0a79078d9d45b72f60143560603ab56d689b77bd
+use ts.promise.run = @1f532a178ec4dc76b622a2ce6f487cbb91ea1fe40f9a11911124c4316a761178
+use ts.promise.settled = @31078d3e54f5f62abd4a1bc87ca270c6fc2f9850c691fd431e03c3bbc03ae6a6
+use ts.promise.start = @379f2a0bc62ce0cf6bb692d5b5199bb78ef2a5839cde7babe132416ff021d09a
 use ts.receiver = @c596cde0e665d942e11935ad08c3788c2b14e1028bc49c6859de5414fff86fa6
 use ts.regexp.escaped_source = @326719b934273dad2daaaeffe5d1dc15319a85ae0f7a72b1bf62d8062524ac95
 use ts.regexp.spell = @96cffb14c2793a02e2fa2b46e50a627e8cebeb324b751ed9a5335725b3164046
 use ts.string.trim_value = @1e2c4cd075b48eb80bd85b68d25c9996afee079c00ea334fe52549825adc623c
 use ts.to_number = @ce0104d5f7263439ddbd1ac638d1272d62aa8fe30598a61ff98bdbf3346f44e3
 use ts.to_primitive = @1376a5afb8cd4f716fcdf8f4c4c37660e1b33120a9bdf785d7a5ad5de7e6e933
-entry demo() -> Any
+entry demo() -> Any ts_direct(ts.await)
 
 fn demo() {
-  let t19 = fn(this1, args1) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
-    let t6 = fn(this2, args2) {
-      let t1 = args2
-      if num.lt(list.len(args2), 1.0) {
-        set t1 = invoke ts.pad(args2, 1.0)
-      }
-      let value = t1[0.0]
-      let t4 = invoke ts.boundary(value)
-      let t5 = perform corpus.echo(t4) as Any then yield
-      return t5
+  let t6 = fn(this2, args2) {
+    let t1 = args2
+    if num.lt(list.len(args2), 1.0) {
+      set t1 = invoke ts.pad(args2, 1.0)
     }
-    let t9 = fn(this3, args3) start(value: Text) -> Any token("ts.function", 4) ts_args(ts.await, same) {
-      let t7 = list.copy(args3)
-      let t8 = invoke ts.promise.pending()
-      set t8.task = spawn invoke ts.promise.run(t8, t6, this3, t7)
-      return t8
-    }
-    let work = ("ts.function", "", "work", 1.0, t9, {})
-    let t10 = ["a"]
-    let t11 = ts.callable(work)
-    let t12 = apply t11(absent, t10)
-    let t13 = ["b"]
-    let t14 = ts.callable(work)
-    let t15 = apply t14(absent, t13)
-    let t16 = [[t12, t15]]
-    let t17 = invoke ts.promise.all(absent, t16)
-    let t18 = await t17 via ts.await
-    return t18
+    let value = t1[0.0]
+    let t4 = invoke ts.boundary(value)
+    let t5 = perform corpus.echo(t4) as Any then yield
+    return t5 via ts.promise.adopt
   }
-  let t20 = []
-  let t21 = apply t19(absent, t20)
-  if same(t21, absent) {
-    return null
+  let t9 = fn(this3, args3) start(value: Text) -> Any token("ts.function", 4) ts_direct(ts.await) {
+    let t7 = list.copy(args3)
+    let t8 = invoke ts.promise.pending()
+    set t8.task = spawn invoke ts.promise.run(t8, t6, this3, t7)
+    return t8
   }
-  return t21
+  let work = ("ts.function", "", "work", 1.0, t9, {})
+  let t10 = ["a"]
+  let t11 = ts.callable(work)
+  let t12 = apply t11(absent, t10)
+  let t13 = ["b"]
+  let t14 = ts.callable(work)
+  let t15 = apply t14(absent, t13)
+  let t16 = [[t12, t15]]
+  let t17 = invoke ts.promise.all(absent, t16)
+  let t18 = await t17 via ts.await
+  return t18 via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=30 scopes=8 sites=41
+unit Function(Name("demo")): statements=24 scopes=5 sites=34

@@ -772,9 +772,9 @@
       "properties": {
         "entries": {
           "additionalProperties": {
-            "$ref": "#/$defs/Signature"
+            "$ref": "#/$defs/Entry"
           },
-          "description": "The declared functions a host may start, each with the typed\nsignature it is started under.",
+          "description": "The declared functions a host may start, each with the typed\nsignature and calling convention it is started under.",
           "type": "object"
         },
         "functions": {
@@ -805,6 +805,23 @@
       "required": [
         "manifest",
         "main"
+      ],
+      "type": "object"
+    },
+    "Entry": {
+      "additionalProperties": false,
+      "description": "A declared entry's host signature and synchronous calling convention.",
+      "properties": {
+        "convention": {
+          "$ref": "#/$defs/StartConvention"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        }
+      },
+      "required": [
+        "signature",
+        "convention"
       ],
       "type": "object"
     },
@@ -1164,7 +1181,7 @@
     },
     "FunctionValue": {
       "additionalProperties": false,
-      "description": "A function as data: a self-contained document and the entry that starts\nit. The entry's signature is `document.entries[entry]`.",
+      "description": "A function as data: a self-contained document and the entry that starts\nit. The entry's signature is `document.entries[entry].signature`.",
       "properties": {
         "document": {
           "$ref": "#/$defs/Document"
@@ -1827,12 +1844,34 @@
       "type": "object"
     },
     "StartConvention": {
-      "description": "How the entry of a function value calls the function.",
+      "description": "How a host starts an entry. A start adapter uses the same convention\nwhen it extracts a function value from a dialect callable.",
       "oneOf": [
         {
           "const": "direct",
           "description": "With the start's arguments, in the signature's order, returning what\nthe function returns.",
           "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Source parameters are bound directly; extra start arguments are\ndiscarded, missing ones are absent, and an absent result becomes null.\nWhen extracting a packed TypeScript callable, `await_fn` settles its\nresult before the entry returns.",
+          "properties": {
+            "ts_direct": {
+              "additionalProperties": false,
+              "properties": {
+                "await_fn": {
+                  "$ref": "#/$defs/FunctionId"
+                }
+              },
+              "required": [
+                "await_fn"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "ts_direct"
+          ],
+          "type": "object"
         },
         {
           "additionalProperties": false,
@@ -2103,6 +2142,32 @@
           },
           "required": [
             "return"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Evaluates the value, unwinds source cleanup, then calls `policy`\nwith the surviving value. The policy may wait; its result returns\ndirectly, outside the source function's handlers.",
+          "properties": {
+            "return_via": {
+              "additionalProperties": false,
+              "properties": {
+                "policy": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "value",
+                "policy"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "return_via"
           ],
           "type": "object"
         },

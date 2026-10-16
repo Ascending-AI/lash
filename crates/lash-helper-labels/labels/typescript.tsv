@@ -554,6 +554,7 @@ ts.pad	TypeScript pad
 ts.pow	TypeScript pow
 ts.primitive_to_number	TypeScript primitive to number
 ts.primitive_to_string	TypeScript primitive to string
+ts.promise.adopt	TypeScript promise adopt
 ts.promise.all	TypeScript promise all
 ts.promise.all_settled	TypeScript promise all settled
 ts.promise.any	TypeScript promise any

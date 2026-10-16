@@ -17,6 +17,22 @@ use crate::{
 };
 use crate::{FunctionRepresentation, FunctionValue, StartAdapter, StartConvention};
 
+impl TokenCodec for crate::Entry {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.signature.encode(out);
+        self.convention.encode(out);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            signature: Signature::decode(input)?,
+            convention: StartConvention::decode(input)?,
+        })
+    }
+}
+
 // Types and signatures.
 
 impl TokenCodec for Type {
@@ -628,12 +644,16 @@ impl TokenCodec for FunctionRepresentation {
     }
 }
 
-/// Direct (0) or TypeScript's argument list (1) with its await and
-/// comparison functions.
+/// Direct (0), TypeScript's argument list (1), or source parameters (2).
+/// TypeScript adapters retain the helpers extraction needs.
 impl TokenCodec for StartConvention {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
             Self::Direct => out.sum(0, 0),
+            Self::TsDirect { await_fn } => {
+                out.sum(2, 1);
+                await_fn.encode(out);
+            }
             Self::TsArgsList { await_fn, same_fn } => {
                 out.sum(1, 2);
                 await_fn.encode(out);
@@ -647,9 +667,13 @@ impl TokenCodec for StartConvention {
             match variant(input, |v| match v {
                 0 => Some(0),
                 1 => Some(2),
+                2 => Some(1),
                 _ => None,
             })? {
                 0 => Self::Direct,
+                2 => Self::TsDirect {
+                    await_fn: FunctionId::decode(input)?,
+                },
                 _ => Self::TsArgsList {
                     await_fn: FunctionId::decode(input)?,
                     same_fn: FunctionId::decode(input)?,
@@ -925,6 +949,11 @@ impl TokenCodec for Stmt {
                 out.sum(number, 1);
                 value.encode(out);
             }
+            Self::ReturnVia { value, policy } => {
+                out.sum(number, 2);
+                value.encode(out);
+                policy.encode(out);
+            }
             Self::Try(scope) => {
                 out.sum(number, 1);
                 scope.encode(out);
@@ -935,7 +964,7 @@ impl TokenCodec for Stmt {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.nested(|input| {
             let number = variant(input, |variant| match variant {
-                0 | 1 | 6 => Some(2),
+                0 | 1 | 6 | 17 => Some(2),
                 2 | 3 | 9..=14 => Some(1),
                 4 | 5 | 16 => Some(3),
                 15 => Some(5),
@@ -1003,6 +1032,10 @@ impl TokenCodec for Stmt {
                 8 => Self::Continue,
                 9 => Self::Return {
                     value: Expr::decode(input)?,
+                },
+                17 => Self::ReturnVia {
+                    value: Expr::decode(input)?,
+                    policy: FunctionId::decode(input)?,
                 },
                 10 => Self::Try(TryStmt::decode(input)?),
                 11 => Self::Throw {

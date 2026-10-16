@@ -1,10 +1,5 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=4 depth=0 block=fn demo Let { name: Name("t1"), value: Expr(Closure(Closure { params: [], body: [Do { value: Act(ActExpr { kind: Sleep { then_yield: false }, args: [Literal(Float(Float(5.0)))] }) }, Return { value: Literal(Text("awake")) }], start: Some(StartAdapter { signature: Signature { params: [], result: Any }, representation: Bare, convention: Direct }) })) }
-statement fn demo/0/0/0/0 ordinal=6 depth=1 block=fn demo/0/0/0 Do { value: Act(ActExpr { kind: Sleep { then_yield: false }, args: [Literal(Float(Float(5.0)))] }) }
-statement fn demo/0/0/0/1 ordinal=7 depth=1 block=fn demo/0/0/0 Return { value: Literal(Text("awake")) }
-statement fn demo/1 ordinal=8 depth=0 block=fn demo Let { name: Name("t2"), value: Action(Call { callee: Value(Name("t1")), args: [] }) }
-statement fn demo/2 ordinal=9 depth=0 block=fn demo Return { value: Variable(Name("t2")) }
+statement fn demo/0 ordinal=4 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Sleep { then_yield: false }, args: [Literal(Float(Float(5.0)))] }) }
+statement fn demo/1 ordinal=5 depth=0 block=fn demo Return { value: Literal(Text("awake")) }
 scope fn demo ordinal=3 depth=0 Entry
-scope fn demo/0/0/0 ordinal=5 depth=1 Closure
-action fn demo/0/0/0/0/0 None
-action fn demo/1/0 None
+action fn demo/0/0 None

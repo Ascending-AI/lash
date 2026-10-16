@@ -3,8 +3,7 @@
 use std::collections::HashSet;
 
 use lash_kernel_doc::{
-    Action, Atom, Callee, EffectName, Expr, Literal, Name, Param, RecordType, RecordTypeField,
-    Signature, Stmt, Type,
+    EffectName, Expr, Literal, Name, Param, RecordType, RecordTypeField, Signature, Type,
 };
 
 use lash_kernel_dialect::workflow::{self, ModuleRefusal};
@@ -93,16 +92,13 @@ impl Lowerer<'_> {
         let entry = Name::new(name);
         let span = self.span;
         let signature = self.start_signature(function)?;
-        let body = self.lift(&signature.params, function)?;
+        let (params, body, packed) = self.lift(function)?;
         let function = lash_kernel_doc::Function {
-            params: signature
-                .params
-                .iter()
-                .map(|param| param.name.clone())
-                .collect(),
+            params,
             body: body.stmts,
             start: None,
         };
+        let convention = self.entry_convention(packed)?;
         // Only a module's lowering finds an entry (`module_entry`).
         if let Some(module) = self.module.as_mut() {
             module
@@ -111,6 +107,7 @@ impl Lowerer<'_> {
                     span,
                     function,
                     signature,
+                    convention,
                     notes: body.notes,
                 })
                 .map_err(Diagnostic::module)?;
@@ -118,11 +115,9 @@ impl Lowerer<'_> {
         Ok(reference(entry))
     }
 
-    /// The body of an entry that runs `function` under `params`: the
-    /// function's own closure, made with none of the cell or module in
-    /// scope, called once with the entry's arguments; a process that returns
-    /// nothing ends with null.
-    fn lift(&mut self, params: &[Param], function: &ast::Function) -> Lowering<Buf> {
+    /// The author's entry body, lowered with none of the cell or module
+    /// in scope.
+    fn lift(&mut self, function: &ast::Function) -> Lowering<(Vec<Name>, Buf, bool)> {
         let outer: HashSet<String> = self
             .scopes
             .iter()
@@ -135,16 +130,20 @@ impl Lowerer<'_> {
             vec![
                 FunctionFrame {
                     arrow: false,
+                    async_body: false,
                     this: None,
                     args: None,
                     arguments_used: false,
+                    context_used: false,
                     controls: Vec::new(),
                 },
                 FunctionFrame {
                     arrow: false,
+                    async_body: false,
                     this: None,
                     args: None,
                     arguments_used: false,
+                    context_used: false,
                     controls: Vec::new(),
                 },
             ],
@@ -153,42 +152,7 @@ impl Lowerer<'_> {
         let session = std::mem::replace(&mut self.session, &NO_SESSION);
         let span = self.span;
         self.lifting = Some(outer);
-        let body = self.scoped_block(|lowerer| {
-            let mut passed = Vec::with_capacity(params.len());
-            for param in params {
-                let kernel = lowerer.declare(param.name.as_str(), BindingKind::Local);
-                debug_assert_eq!(kernel, param.name, "an entry's parameter keeps its name");
-                passed.push(Expr::Variable(kernel));
-            }
-            let run = lowerer.closure(function)?;
-            let Expr::Variable(run) = run.expr else {
-                unreachable!("a closure is bound to a temporary");
-            };
-            let args = lowerer.let_expr(Expr::List(passed), Ty::Unknown);
-            let args = lowerer.atom(args);
-            let value = lowerer.emit_action(
-                Action::Call {
-                    callee: Callee::Value(run),
-                    args: vec![Atom::Literal(Literal::Absent), args],
-                },
-                Ty::Unknown,
-            );
-            // A process that returns nothing ends with null: `undefined`
-            // is not data a process can end with.
-            let nothing =
-                lowerer.native("same", vec![value.expr(), Expr::Literal(Literal::Absent)])?;
-            let ended = lowerer.block(|lowerer| {
-                lowerer.emit(Stmt::Return {
-                    value: Expr::Literal(Literal::Null),
-                });
-                Ok(())
-            })?;
-            lowerer.emit_if(nothing, ended, Buf::default());
-            lowerer.emit(Stmt::Return {
-                value: value.expr(),
-            });
-            Ok(())
-        });
+        let body = self.entry_body(function);
         self.lifting = None;
         self.span = span;
         self.session = session;
@@ -196,6 +160,21 @@ impl Lowerer<'_> {
         self.functions = frames;
         self.scopes = scopes;
         body
+    }
+
+    pub(super) fn entry_convention(
+        &mut self,
+        packed: bool,
+    ) -> Lowering<lash_kernel_doc::StartConvention> {
+        if !packed {
+            return Ok(lash_kernel_doc::StartConvention::TsDirect {
+                await_fn: self.function("ts.await")?,
+            });
+        }
+        Ok(lash_kernel_doc::StartConvention::TsArgsList {
+            await_fn: self.function("ts.await")?,
+            same_fn: self.function("same")?,
+        })
     }
 
     /// What `await` gives for `awaited`, the settled value: a process

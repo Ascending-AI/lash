@@ -54,9 +54,12 @@ fn hand_document() -> k::Document {
     );
     document.entries.insert(
         "worker".into(),
-        k::Signature {
-            params: vec![],
-            result: k::Type::Any,
+        lash_kernel_doc::Entry {
+            signature: k::Signature {
+                params: vec![],
+                result: k::Type::Any,
+            },
+            convention: lash_kernel_doc::StartConvention::Direct,
         },
     );
     document.private_bindings.insert("odd name".into());
@@ -774,6 +777,10 @@ fn inventory_document() -> k::Document {
             value: action.into(),
         });
     }
+    document.main.push(S::ReturnVia {
+        value: null.clone(),
+        policy,
+    });
     document.main.push(S::Finish {
         value: null.clone(),
     });
@@ -788,13 +795,16 @@ fn inventory_document() -> k::Document {
     document.private_bindings.insert("value".into());
     document.entries.insert(
         "declared".into(),
-        k::Signature {
-            params: vec![k::Param {
-                name: "optional".into(),
-                ty: k::Type::Any,
-                optional: true,
-            }],
-            result: k::Type::Any,
+        lash_kernel_doc::Entry {
+            signature: k::Signature {
+                params: vec![k::Param {
+                    name: "optional".into(),
+                    ty: k::Type::Any,
+                    optional: true,
+                }],
+                result: k::Type::Any,
+            },
+            convention: lash_kernel_doc::StartConvention::Direct,
         },
     );
     document.manifest.effects.insert(
@@ -866,6 +876,10 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
             }
             k::Stmt::Break => "break",
             k::Stmt::Continue => "continue",
+            k::Stmt::ReturnVia { value, policy } => {
+                let _ = (value, policy);
+                "return-via"
+            }
             k::Stmt::Return { value } => {
                 let _ = value;
                 "return"
@@ -1152,6 +1166,7 @@ fn independent_inventory_covers_kernel_variants_and_stored_fields() {
         "break",
         "continue",
         "return",
+        "return-via",
         "try",
         "throw",
         "print",
@@ -1219,7 +1234,10 @@ fn independent_inventory_covers_kernel_variants_and_stored_fields() {
         }
     }
     let mut types = BTreeSet::new();
-    for signature in effects.values().chain(entries.values()) {
+    for signature in effects
+        .values()
+        .chain(entries.values().map(|entry| &entry.signature))
+    {
         inventory_signature(signature, &mut types);
     }
     assert_eq!(

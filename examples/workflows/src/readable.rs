@@ -71,22 +71,50 @@ pub(super) fn source_map(lowered: &Lowered, source: &str, allowed: &[String]) ->
 }
 
 fn task_finalizer(document: &Document, site: &Site) -> bool {
-    let Some(last) = document
-        .main
+    let body = match &site.unit {
+        Unit::Main => &document.main,
+        Unit::Function(name) if document.entries.contains_key(name) => {
+            let Some(function) = document.functions.get(name) else {
+                return false;
+            };
+            &function.body
+        }
+        _ => return false,
+    };
+    let Some(last) = body
         .len()
         .checked_sub(1)
         .and_then(|index| u32::try_from(index).ok())
     else {
         return false;
     };
-    matches!(
-        document.main.last(),
-        Some(k::Stmt::Try(k::TryStmt {
-            catch: None,
-            finally: Some(_),
-            ..
-        }))
-    ) && site.unit == Unit::Main
+    let Some(k::Stmt::Try(k::TryStmt {
+        catch: None,
+        finally: Some(finally),
+        ..
+    })) = body.last()
+    else {
+        return false;
+    };
+    // Only the dialect's root cancellation is unspelled. An arbitrary
+    // finalizer, or cleanup in an ordinary callee, still needs source.
+    let [
+        k::Stmt::Do {
+            value: Expr::Act(action),
+        },
+    ] = finally.as_slice()
+    else {
+        return false;
+    };
+    let k::ActKind::Call(k::Callee::Library(id)) = &action.kind else {
+        return false;
+    };
+    action.args.is_empty()
+        && document
+            .manifest
+            .functions
+            .get(id)
+            .is_some_and(|name| name.as_str() == "tasks.cancel_all")
         && (site.path == [last] || site.path.starts_with(&[last, 1]))
 }
 

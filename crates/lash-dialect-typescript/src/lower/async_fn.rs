@@ -59,12 +59,13 @@ impl Lowerer<'_> {
         if let Some(note) = self.buf.notes.last_mut() {
             note.written = None;
         }
+        let mut convention = None;
         if let Some(Stmt::Let {
             value: lash_kernel_doc::Rhs::Expr(Expr::Closure(closure)),
             ..
         }) = self.buf.stmts.last_mut()
         {
-            closure.start = None;
+            convention = closure.start.take().map(|start| start.convention);
         }
         let written = self.written(function);
         let this = self.fresh("this");
@@ -85,6 +86,15 @@ impl Lowerer<'_> {
         })?;
         self.written = Some(written);
         let closure = self.emit_closure(params, block);
+        if let Some(Stmt::Let {
+            value: Rhs::Expr(Expr::Closure(closure)),
+            ..
+        }) = self.buf.stmts.last_mut()
+            && let Some(start) = &mut closure.start
+            && let Some(convention) = convention
+        {
+            start.convention = convention;
+        }
         Ok(self.function_token(function, closure))
     }
 

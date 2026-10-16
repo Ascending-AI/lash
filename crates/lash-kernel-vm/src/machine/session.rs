@@ -1,7 +1,9 @@
 //! Starting and carrying a cell preserve the paged identity directory.
 use super::*;
 use crate::interface::{CellStart, Finished, Target};
-use lash_kernel_state::paged::{AllocationCensus, CarryRoots, EditEpoch, KeyedRoot, PageSource};
+use lash_kernel_state::paged::{
+    AllocationCensus, CarryRoots, EditEpoch, KeyedRoot, ObjectInit, PageSource,
+};
 
 pub(super) fn empty_root() -> KeyedRoot {
     KeyedRoot::Empty
@@ -119,15 +121,20 @@ pub(super) fn start(
                 });
             }
             let document = Arc::clone(&machine.program.document);
-            let (Some(signature), Some(code)) =
+            let (Some(definition), Some(code)) =
                 (document.entries.get(entry), exe.declared.get(entry))
             else {
                 return Err(StartError::UnknownEntry {
                     entry: entry.clone(),
                 });
             };
+            let signature = &definition.signature;
             let given = start.args.len();
-            if !(signature.required()..=signature.params.len()).contains(&given) {
+            if matches!(
+                definition.convention,
+                lash_kernel_doc::StartConvention::Direct
+            ) && !(signature.required()..=signature.params.len()).contains(&given)
+            {
                 return Err(arguments(format!(
                     "`{entry}` takes {} to {} argument(s); {given} given",
                     signature.required(),
@@ -136,6 +143,7 @@ pub(super) fn start(
             }
             let mut args = Vec::new();
             for (datum, param) in start.args.iter().zip(&signature.params) {
+                machine.regs = args.clone().into();
                 args.push(if param.optional && matches!(datum, Datum::Absent) {
                     Value::Absent
                 } else {
@@ -143,6 +151,22 @@ pub(super) fn start(
                         .decode(&exe, datum, &param.ty)
                         .map_err(|error| start_interrupt(param.name.as_str(), error))?
                 });
+            }
+            if let lash_kernel_doc::StartConvention::TsArgsList { .. } = definition.convention {
+                for datum in start.args.iter().skip(signature.params.len()) {
+                    machine.regs = args.clone().into();
+                    args.push(
+                        machine
+                            .decode(&exe, datum, &lash_kernel_doc::Type::Any)
+                            .map_err(|error| start_interrupt("extra argument", error))?,
+                    );
+                }
+                // Start arguments remain roots while the packed list reserves.
+                machine.regs = args.clone().into();
+                let list = machine
+                    .alloc(ObjectInit::List(args))
+                    .map_err(|error| start_interrupt("arguments", error.into()))?;
+                args = vec![Value::Absent, Value::List(list)];
             }
             machine.charged = 0;
             (*code, args)

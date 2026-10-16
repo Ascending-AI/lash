@@ -695,6 +695,14 @@ impl<'a> Reader<'a> {
                     else_block: self.generic_else(i, d)?,
                 }
             }
+            "return_via" => {
+                let policy = self.id(&mut c)?;
+                c.end(true)?;
+                k::Stmt::ReturnVia {
+                    value: self.expr(i, d)?,
+                    policy,
+                }
+            }
             "return_" | "throw" | "print" | "finish" | "fail" => {
                 c.end(true)?;
                 let value = self.expr(i, d)?;

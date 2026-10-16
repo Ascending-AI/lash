@@ -849,9 +849,14 @@ export type StartAdapter = {
 };
 
 /**
- * How the entry of a function value calls the function.
+ * How a host starts an entry. A start adapter uses the same convention
+ * when it extracts a function value from a dialect callable.
  */
 export type StartConvention = ("direct" | {
+  "ts_direct": {
+    "await_fn": FunctionId;
+  };
+} | {
   "ts_args_list": {
     "await_fn": FunctionId;
     "same_fn": FunctionId;
@@ -939,6 +944,11 @@ export type Stmt = (("break" | "continue") | {
   };
 } | {
   "return": {
+    "value": Expr;
+  };
+} | {
+  "return_via": {
+    "policy": FunctionId;
     "value": Expr;
   };
 } | {

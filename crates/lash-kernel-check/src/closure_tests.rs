@@ -169,7 +169,11 @@ fn start() {{
 main {{ finish null }}
 "#
             );
-            let spellings = if both {
+            let deferred = text.replace(
+                &format!("  let got = invoke helper.run({argument})\n  return got"),
+                &format!("  return {argument} via helper.run"),
+            );
+            let mut spellings = if both {
                 vec![
                     text.clone(),
                     text.replace("invoke helper.run(", "helper.run("),
@@ -177,6 +181,7 @@ main {{ finish null }}
             } else {
                 vec![text]
             };
+            spellings.push(deferred);
             for text in spellings {
                 let document = parse_document(&text).unwrap();
                 let graph = derive(&document, &catalog).unwrap_or_else(|refusal| {
@@ -203,7 +208,7 @@ main {{ finish null }}
         }
         let id = helper.identity();
         let catalog = BTreeMap::from([(id, helper)]);
-        let document = parse_document(&format!(
+        let text = format!(
             r#"kernel 1
 numbers float
 use helper.keep = @{id}
@@ -213,13 +218,21 @@ fn worker() {{ let got = perform search.run(null) as Any return got }}
 fn start() {{ let held = invoke helper.keep(&worker) return held }}
 main {{ finish null }}
 "#
-        ))
-        .unwrap();
-        let graph = derive(&document, &catalog).unwrap();
-        assert!(
-            entry_effects(&document, &graph, &catalog, &Name::new("start"))
-                .unwrap()
-                .is_empty()
         );
+        for text in [
+            text.clone(),
+            text.replace(
+                "let held = invoke helper.keep(&worker) return held",
+                "return &worker via helper.keep",
+            ),
+        ] {
+            let document = parse_document(&text).unwrap();
+            let graph = derive(&document, &catalog).unwrap();
+            assert!(
+                entry_effects(&document, &graph, &catalog, &Name::new("start"))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
     }
 }

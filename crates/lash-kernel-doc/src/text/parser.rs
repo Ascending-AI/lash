@@ -78,8 +78,15 @@ pub fn parse_document_with_limits(
             "entry" => {
                 let name = parser.name()?;
                 let signature = parser.signature()?;
+                let convention = parser.entry_convention()?;
                 parser.once(
-                    entries.insert(name.clone(), signature),
+                    entries.insert(
+                        name.clone(),
+                        crate::Entry {
+                            signature,
+                            convention,
+                        },
+                    ),
                     &format!("entry `{name}`"),
                 )?;
             }
@@ -574,9 +581,17 @@ impl Parser {
             },
             "break" => Stmt::Break,
             "continue" => Stmt::Continue,
-            "return" => Stmt::Return {
-                value: self.expr()?,
-            },
+            "return" => {
+                let value = self.expr()?;
+                if self.eat_word("via") {
+                    Stmt::ReturnVia {
+                        value,
+                        policy: self.function_reference()?,
+                    }
+                } else {
+                    Stmt::Return { value }
+                }
+            }
             "try" => {
                 let body = self.block()?;
                 let catch = if self.eat_word("catch") {
@@ -1201,8 +1216,32 @@ impl Parser {
             }
             _ => return Err(self.unexpected_previous("`bare` or `token`")),
         };
-        let convention = match self.keyword("`direct` or `ts_args`")?.as_str() {
+        let convention = self.convention()?;
+        Ok(Some(StartAdapter {
+            signature,
+            representation,
+            convention,
+        }))
+    }
+
+    fn entry_convention(&mut self) -> Parsed<StartConvention> {
+        if matches!(self.peek(), Token::Word(word) if word == "direct" || word == "ts_args" || word == "ts_direct")
+        {
+            self.convention()
+        } else {
+            Ok(StartConvention::Direct)
+        }
+    }
+
+    fn convention(&mut self) -> Parsed<StartConvention> {
+        let convention = match self.keyword("`direct`, `ts_direct` or `ts_args`")?.as_str() {
             "direct" => StartConvention::Direct,
+            "ts_direct" => {
+                self.expect(&Token::LParen)?;
+                let await_fn = self.function_reference()?;
+                self.expect(&Token::RParen)?;
+                StartConvention::TsDirect { await_fn }
+            }
             "ts_args" => {
                 self.expect(&Token::LParen)?;
                 let await_fn = self.function_reference()?;
@@ -1211,13 +1250,9 @@ impl Parser {
                 self.expect(&Token::RParen)?;
                 StartConvention::TsArgsList { await_fn, same_fn }
             }
-            _ => return Err(self.unexpected_previous("`direct` or `ts_args`")),
+            _ => return Err(self.unexpected_previous("`direct`, `ts_direct` or `ts_args`")),
         };
-        Ok(Some(StartAdapter {
-            signature,
-            representation,
-            convention,
-        }))
+        Ok(convention)
     }
 
     /// Steps over a start adapter before the bodies are read, when the

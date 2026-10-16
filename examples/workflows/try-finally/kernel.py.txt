@@ -14,28 +14,24 @@ use tuple.contains = @865719b4040dc09e2521e6be6ed41d8429fd68789553b5c55be60f7662
 entry demo() -> Any
 
 fn demo() {
-  let t8 = fn() start() -> Any bare direct {
-    let `result` = absent
-    set `result` = "start"
-    try {
-      let t4 = perform corpus.echo("try") as Any
-      set `result` = invoke py.reply(t4)
-    } catch t1 {
-      let t6 = ()
-      let t7 = invoke py.exc.is_exception(t1, t6)
-      if t7 {
-        set `result` = "caught"
-      } else {
-        throw t1
-      }
-    } finally {
-      let t2 = perform corpus.echo("finally") as Any
-      do invoke py.reply(t2)
+  let `result` = absent
+  set `result` = "start"
+  try {
+    let t4 = perform corpus.echo("try") as Any
+    set `result` = invoke py.reply(t4)
+  } catch t1 {
+    let t6 = ()
+    let t7 = invoke py.exc.is_exception(t1, t6)
+    if t7 {
+      set `result` = "caught"
+    } else {
+      throw t1
     }
-    return `result`
+  } finally {
+    let t2 = perform corpus.echo("finally") as Any
+    do invoke py.reply(t2)
   }
-  let t9 = apply t8()
-  return t9
+  return `result`
 }
 
 main {
@@ -43,4 +39,4 @@ main {
   set demo = &demo
 }
 
-unit Function(Name("demo")): statements=16 scopes=7 sites=24
+unit Function(Name("demo")): statements=13 scopes=6 sites=20

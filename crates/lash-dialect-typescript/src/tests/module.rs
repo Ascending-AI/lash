@@ -36,7 +36,9 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
         .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"))
         .document
         .entries
-        .clone()
+        .iter()
+        .map(|(name, entry)| (name.clone(), entry.signature.clone()))
+        .collect()
 }
 
 /// FIG-6507: a list-valued tool result admits as an array callback receiver.
@@ -230,4 +232,100 @@ fn the_contract_refuses_under_the_shared_codes() {
             "{source}"
         );
     }
+}
+
+/// ENTRY-CONV: host starts use JavaScript's arity and return boundary,
+/// while the entry executes the author's function body.
+#[test]
+fn entry_conventions_bind_source_arguments_and_normalize_absent() {
+    for (source, args, expected) in [
+        (
+            "export async function run(x) { return x; }",
+            vec![
+                lash_kernel_doc::Datum::Text("first".into()),
+                lash_kernel_doc::Datum::Null,
+            ],
+            lash_kernel_doc::Datum::Text("first".into()),
+        ),
+        (
+            "export async function run(x) { return x; }",
+            vec![],
+            lash_kernel_doc::Datum::Null,
+        ),
+        (
+            "export async function run() { return undefined; }",
+            vec![],
+            lash_kernel_doc::Datum::Null,
+        ),
+        (
+            "export async function run(x) { return [this === undefined, arguments.length, arguments[1], x]; }",
+            vec![
+                lash_kernel_doc::Datum::Null,
+                lash_kernel_doc::Datum::Text("extra".into()),
+            ],
+            lash_kernel_doc::Datum::List(vec![
+                lash_kernel_doc::Datum::Bool(true),
+                lash_kernel_doc::Datum::Float(lash_kernel_doc::Float::new(2.0)),
+                lash_kernel_doc::Datum::Text("extra".into()),
+                lash_kernel_doc::Datum::Null,
+            ]),
+        ),
+    ] {
+        let document = module(source).unwrap().document.into_document();
+        let entry = &document.entries[&lash_kernel_doc::Name::new("run")];
+        assert_eq!(
+            matches!(
+                entry.convention,
+                lash_kernel_doc::StartConvention::TsArgsList { .. }
+            ),
+            source.contains("arguments")
+        );
+        if matches!(
+            entry.convention,
+            lash_kernel_doc::StartConvention::TsDirect { .. }
+        ) {
+            assert_eq!(
+                document.functions[&lash_kernel_doc::Name::new("run")].params,
+                entry
+                    .signature
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect::<Vec<_>>()
+            );
+        }
+        let (_, result) = super::machine::end_of_entry(document, "run", args);
+        assert_eq!(result, expected, "{source}");
+    }
+}
+
+/// K-ADM-007: a function without a start signature does not add the
+/// dependencies of an entry adapter it cannot carry.
+#[test]
+fn a_function_without_a_start_signature_adds_no_entry_adapter_dependencies() {
+    let lowered = super::lower("function f(x = 1) { return x; } f();").unwrap();
+    lash_kernel_check::derive(&lowered.document, super::library()).unwrap_or_else(|error| {
+        panic!(
+            "{error}\n{}",
+            lash_kernel_doc::print_document(&lowered.document)
+        );
+    });
+}
+
+/// Async returns adopt a returned promise after source finalizers complete.
+#[test]
+fn an_async_return_adopts_a_promise_as_an_entry_and_as_a_nested_call() {
+    let source = "async function run() { async function child() { return 7; } return child(); }";
+    let document = module(&format!("export {source}"))
+        .unwrap()
+        .document
+        .into_document();
+    let (_, result) = super::machine::end_of_entry(document, "run", vec![]);
+    assert_eq!(
+        result,
+        lash_kernel_doc::Datum::Float(lash_kernel_doc::Float::new(7.0))
+    );
+    let recorded = super::machine::run(&format!("{source} console.log(await run());"), &[]);
+    assert_eq!(recorded.end, "ok");
+    assert_eq!(recorded.lines(), ["7"]);
 }

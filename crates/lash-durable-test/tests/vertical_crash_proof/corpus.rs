@@ -190,8 +190,23 @@ async fn record_image(name: &str, kind: &str, source: &'static str) -> images::R
 async fn regenerate_current_parked_image_set() {
     assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
     let set = current_set();
+    let selected = std::env::var("LASH_IMAGE_NAMES").ok();
+    if let Some(names) = &selected {
+        for name in names.split(',') {
+            assert!(
+                set.images.iter().any(|image| image.name == name),
+                "unknown image: {name}"
+            );
+        }
+    }
     let mut records = Vec::new();
     for old in &set.images {
+        if selected
+            .as_ref()
+            .is_some_and(|names| !names.split(',').any(|name| name == old.name))
+        {
+            continue;
+        }
         let fresh = record_image(&old.name, &old.kind, &old.source).await;
         assert_eq!(
             fresh.expected, old.expected,
@@ -200,7 +215,7 @@ async fn regenerate_current_parked_image_set() {
         );
         records.push(fresh);
     }
-    // Verify the complete set before replacing any payload.
+    // Verify every selected image before replacing any payload.
     for image in records {
         images::rerecord(&set.build, image);
     }

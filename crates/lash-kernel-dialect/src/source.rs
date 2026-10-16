@@ -150,6 +150,9 @@ fn collect_calls(node: Node<'_>, called: &mut BTreeSet<FunctionId>) {
             }
             _ => {}
         },
+        Node::Stmt(lash_kernel_doc::Stmt::ReturnVia { policy, .. }) => {
+            called.insert(*policy);
+        }
         Node::Stmt(lash_kernel_doc::Stmt::For { via: Some(via), .. }) => {
             called.extend(via.functions())
         }

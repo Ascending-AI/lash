@@ -1067,3 +1067,119 @@ main {
         ],
     );
 }
+
+/// A return policy is an ordinary body that may wait. Its print makes
+/// the instant adoption starts observable through the public machine.
+fn return_policy(
+    registry: &mut FunctionRegistry,
+    ids: &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)> {
+    let mut probes = bodies(registry, ids);
+    let definition = parse_definition("function body.adopt(x: Any) -> Any\nkernel 1\ncharge 0\nbody { print \"adopt\" let value = join x return value }").unwrap();
+    probes.push(("body.adopt", registry.register(definition, None).unwrap()));
+    probes
+}
+
+/// K-FORM-015, K-FORM-017: evaluate now, then unwind, then adopt.
+#[test]
+fn a_return_policy_runs_after_source_finalizers() {
+    let source = r#"
+fn child() { return 7 }
+fn value() { print "evaluated" return spawn call child() }
+fn work() {
+  try { return call value() via body.adopt }
+  finally { print "finally" }
+}
+main { let value = call work() return value }
+"#;
+    exact(
+        Drive {
+            probes: return_policy,
+            ..Drive::new(u64::MAX, false)
+        },
+        source,
+        &[],
+        &int(7),
+        &[text("evaluated"), text("finally"), text("adopt")],
+    );
+}
+
+/// K-FORM-017: a finalizer's own return drops the held value and policy.
+#[test]
+fn a_finalizer_return_discards_the_interrupted_return_policy() {
+    let source = r#"
+fn child() { return 7 }
+fn work(held) {
+  try { return held via body.adopt }
+  finally { print "override" return 9 }
+}
+main { let held = spawn call child() let value = call work(held) do join held return value }
+"#;
+    exact(
+        Drive {
+            probes: return_policy,
+            ..Drive::new(u64::MAX, false)
+        },
+        source,
+        &[],
+        &int(9),
+        &[text("override")],
+    );
+}
+
+/// K-TASK-017, K-FORM-017: cancellation at a cleanup wait replaces
+/// the held return; no adoption call starts on the cancelled path.
+#[test]
+fn cancellation_during_unwind_discards_the_return_policy() {
+    let source = r#"
+fn child() { return 7 }
+fn work(held) {
+  try { return held via body.adopt }
+  finally { print "cleanup" do perform echo("cleanup") as Any }
+}
+main {
+  let held = spawn call child()
+  let worker = spawn call work(held)
+  do cancel worker
+  let outcome = null
+  try { do join worker } catch e { set outcome = e.kind }
+  do join held
+  return outcome
+}
+"#;
+    exact(
+        Drive {
+            probes: return_policy,
+            ..Drive::new(u64::MAX, false)
+        },
+        source,
+        &[],
+        &text("cancelled"),
+        &[text("cleanup")],
+    );
+}
+
+/// K-FORM-015, CONT-EXACT, CONT-ONCE: a held return survives a
+/// cleanup park, then its policy can park too, without repeating either.
+#[test]
+fn a_return_policy_adopts_once_after_a_cold_cleanup_park() {
+    let source = r#"
+fn child() { do perform echo("value") as Any return 7 }
+fn value() { print "evaluated" return spawn call child() }
+fn work() {
+  try { return call value() via body.adopt }
+  finally { do perform echo("cleanup") as Any print "cleaned" }
+}
+main { let value = call work() return value }
+"#;
+    exact(
+        Drive {
+            probes: return_policy,
+            ..Drive::new(u64::MAX, false)
+        },
+        source,
+        &["cleanup", "value"],
+        &int(7),
+        &[text("evaluated"), text("cleaned"), text("adopt")],
+    );
+}

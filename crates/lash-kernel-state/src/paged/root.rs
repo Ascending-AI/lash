@@ -446,8 +446,10 @@ pub struct FinallyRecord {
     pub entered: EnteredRecord,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum EnteredRecord {
+    /// The return site supplies the policy after cleanup has unwound.
+    ReturnVia(Box<SiteRef>),
     Normal,
     Throw,
     Return,

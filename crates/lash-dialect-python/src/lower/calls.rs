@@ -799,10 +799,12 @@ impl Lowerer<'_> {
                 if !awaited {
                     return Err(not_awaited(call.range()));
                 }
+                self.creates_tasks = true;
                 let tasks = self.gather_members(call)?;
                 self.invoke("py.gather", &[tasks], Ty::List)
             }
             "create_task" | "ensure_future" => {
+                self.creates_tasks = true;
                 self.plain_arguments(&call.arguments, "asyncio.create_task")?;
                 let [coroutine] = &*call.arguments.args else {
                     return Err(arguments_error(

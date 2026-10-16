@@ -198,6 +198,7 @@ pub(crate) struct Lowerer<'a> {
     /// Whether an entry's body is being lowered, where no name of the
     /// module resolves.
     in_entry: bool,
+    creates_tasks: bool,
     /// The first module name an entry's body named, with where, which the
     /// entry is refused for.
     captured: std::cell::RefCell<Option<(String, Option<Span>)>>,
@@ -332,6 +333,7 @@ pub(crate) fn lower_with_calls(
         module: workflow,
         entry_defs,
         in_entry: false,
+        creates_tasks: false,
         captured: std::cell::RefCell::new(None),
     };
     lowerer.declare_classes(&module.body)?;
@@ -341,31 +343,9 @@ pub(crate) fn lower_with_calls(
             value: Rhs::Expr(Expr::Literal(Literal::Absent)),
         });
     }
-    // asyncio cancels the tasks still running when the program ends; the
-    // kernel would call them an error (`K-TASK-018`, `K-TASK-019`).
-    if source.contains("create_task") || source.contains("gather") {
-        let body = lowerer.block(|this| this.statements(&module.body))?;
-        let cancel = lowerer.function("tasks.cancel_all")?;
-        let finally = Buf {
-            stmts: vec![Stmt::Do {
-                value: (Action::Call {
-                    callee: Callee::Library(cancel),
-                    args: Vec::new(),
-                })
-                .into(),
-            }],
-            notes: vec![Note {
-                span: None,
-                blocks: Vec::new(),
-                written: None,
-                nested_written: Vec::new(),
-            }],
-        };
-        lowerer.span = None;
-        lowerer.emit_try(body, None, Some(finally));
-    } else {
-        lowerer.statements(&module.body)?;
-    }
+    let body = lowerer.block(|this| this.statements(&module.body))?;
+    let body = lowerer.task_cleanup(body)?;
+    lowerer.append(body);
     let main = std::mem::take(&mut lowerer.buf);
     let mut document = Document::new(NumberPolicy::BySpelling, main.stmts);
     document.private_bindings = lowerer.private;

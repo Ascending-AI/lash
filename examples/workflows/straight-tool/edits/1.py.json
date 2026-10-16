@@ -21,11 +21,11 @@
     }
   },
   "transaction": {
-    "base": "6e3abb545421b2d4d0b88bee71f15bc89301e39469bb67ef9a1c2be0bcf847da",
+    "base": "c198a488e190871a26e8630e7faefdd1bd793fe5ddef4a9ae32d6e49e7db9489",
     "edits": [
       {
         "set_value": {
-          "base": "6e3abb545421b2d4d0b88bee71f15bc89301e39469bb67ef9a1c2be0bcf847da",
+          "base": "c198a488e190871a26e8630e7faefdd1bd793fe5ddef4a9ae32d6e49e7db9489",
           "target": {
             "tool_argument": {
               "action": {
@@ -33,9 +33,6 @@
                   "function": "demo"
                 },
                 "path": [
-                  0,
-                  0,
-                  0,
                   0,
                   0
                 ]

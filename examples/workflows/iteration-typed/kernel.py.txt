@@ -10,7 +10,6 @@ use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use map.contains = @5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3
 use map.keys = @c0ca090ea752577550298c1dc3ea7697df5676465337d814ffe3b4c265b5dc16
 use map.len = @eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d
-use py.arg_missing = @556c1567d7aa4c49eebd5daf663f5651525f848b23743b82669317db056c192a
 use py.exc.name = @01ffcde599e3545d525e4a0dc9e66d69153a9b24168b2cdbe9db5b201785c0d1
 use py.fail = @3299c00d83f497f9de331da39e68fa2fb955b9641f7c3f797922ef47af84ceef
 use py.for_in.check = @c85c33d14ac1847f1c08b7354b0227e0fcdceb1b53426309b174b0251c05a7c3
@@ -32,21 +31,14 @@ use tuple.values = @5273a8716ecc76558fb60aa870684b3dc9068f466d745fa7ec00b80ac693
 entry demo(items: List(Int)) -> Any
 
 fn demo(items) {
-  let t3 = fn(items) start(items: Any) -> Any bare direct {
-    let item = absent
-    let total = absent
-    if same(items, absent) {
-      do invoke py.arg_missing("demo")
-    }
-    set total = 0
-    for t1 in items via (open py.for_in.open, check py.for_in.check) {
-      set item = t1
-      set total = invoke py.iadd(total, item)
-    }
-    return total
+  let item = absent
+  let total = absent
+  set total = 0
+  for t1 in items via (open py.for_in.open, check py.for_in.check) {
+    set item = t1
+    set total = invoke py.iadd(total, item)
   }
-  let t4 = apply t3(items)
-  return t4
+  return total
 }
 
 main {
@@ -54,4 +46,4 @@ main {
   set demo = &demo
 }
 
-unit Function(Name("demo")): statements=12 scopes=5 sites=17
+unit Function(Name("demo")): statements=7 scopes=2 sites=10

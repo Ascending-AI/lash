@@ -4,31 +4,24 @@ effect corpus.echo(input?: Any) -> Any
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
+use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
 use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
-entry demo() -> Any
+entry demo() -> Any ts_direct(ts.await)
 
 fn demo() {
-  let t3 = fn(this1, args1) start() -> Any token("ts.function", 4) ts_args(ts.await, same) {
-    let `result` = "start"
-    try {
-      set `result` = perform corpus.echo("try") as Any then yield
-    } catch error {
-      set `result` = "caught"
-    } finally {
-      do perform corpus.echo("finally") as Any then yield
-    }
-    return `result`
+  let `result` = "start"
+  try {
+    set `result` = perform corpus.echo("try") as Any then yield
+  } catch error {
+    set `result` = "caught"
+  } finally {
+    do perform corpus.echo("finally") as Any then yield
   }
-  let t4 = []
-  let t5 = apply t3(absent, t4)
-  if same(t5, absent) {
-    return null
-  }
-  return t5
+  return `result` via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=12 scopes=7 sites=16
+unit Function(Name("demo")): statements=6 scopes=4 sites=9

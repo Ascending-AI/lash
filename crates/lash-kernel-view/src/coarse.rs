@@ -643,6 +643,7 @@ fn terminal(statement: &Stmt) -> bool {
     matches!(
         statement,
         Stmt::Return { .. }
+            | Stmt::ReturnVia { .. }
             | Stmt::Throw { .. }
             | Stmt::Finish { .. }
             | Stmt::Fail { .. }

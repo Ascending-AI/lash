@@ -84,6 +84,9 @@ pub fn replace_functions(document: &mut Document, functions: &BTreeMap<FunctionI
         .into_iter()
         .map(|(id, name)| (functions.get(&id).copied().unwrap_or(id), name))
         .collect();
+    for entry in document.entries.values_mut() {
+        replace_in_convention(&mut entry.convention, functions);
+    }
     replace_in_block(&mut document.main, functions);
     for function in document.functions.values_mut() {
         replace_in_start(function.start.as_mut(), functions);
@@ -97,11 +100,21 @@ fn replace_in_start(
     start: Option<&mut lash_kernel_doc::StartAdapter>,
     functions: &BTreeMap<FunctionId, FunctionId>,
 ) {
-    if let Some(lash_kernel_doc::StartAdapter {
-        convention: lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn },
-        ..
-    }) = start
+    if let Some(start) = start {
+        replace_in_convention(&mut start.convention, functions);
+    }
+}
+
+fn replace_in_convention(
+    convention: &mut lash_kernel_doc::StartConvention,
+    functions: &BTreeMap<FunctionId, FunctionId>,
+) {
+    if let lash_kernel_doc::StartConvention::TsDirect { await_fn } = convention
+        && let Some(to) = functions.get(await_fn)
     {
+        *await_fn = *to;
+    }
+    if let lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn } = convention {
         for function in [await_fn, same_fn] {
             if let Some(to) = functions.get(function) {
                 *function = *to;
@@ -166,6 +179,12 @@ pub(crate) fn replace_in_block(block: &mut Block, functions: &BTreeMap<FunctionI
                 replace_in_block(else_block, functions);
             }
             Stmt::Break | Stmt::Continue => {}
+            Stmt::ReturnVia { value, policy } => {
+                if let Some(next) = functions.get(policy) {
+                    *policy = *next;
+                }
+                replace_in_expr(value, functions);
+            }
             Stmt::Return { value }
             | Stmt::Throw { value }
             | Stmt::Print { value }

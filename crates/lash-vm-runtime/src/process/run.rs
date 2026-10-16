@@ -672,12 +672,13 @@ pub(super) fn entry_args(
     document: &Document,
     input: &KernelProcessInput,
 ) -> Result<Vec<Datum>, String> {
-    let signature = document.entries.get(&input.entry).ok_or_else(|| {
+    let entry = document.entries.get(&input.entry).ok_or_else(|| {
         format!(
             "document `{}` has no entry `{}`",
             input.document, input.entry
         )
     })?;
+    let signature = &entry.signature;
     if let Some(unknown) = input.args.keys().find(|name| {
         !signature
             .params

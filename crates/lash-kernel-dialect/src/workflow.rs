@@ -159,6 +159,7 @@ pub struct Entry {
     pub span: Option<Span>,
     pub function: Function,
     pub signature: Signature,
+    pub convention: lash_kernel_doc::StartConvention,
     pub notes: Vec<Note>,
 }
 
@@ -219,7 +220,13 @@ impl Module {
                 return Err(duplicate(&name, entry.span));
             }
             document.functions.insert(name.clone(), entry.function);
-            document.entries.insert(name.clone(), entry.signature);
+            document.entries.insert(
+                name.clone(),
+                lash_kernel_doc::Entry {
+                    signature: entry.signature,
+                    convention: entry.convention,
+                },
+            );
             notes.insert(name, entry.notes);
         }
         Ok(())

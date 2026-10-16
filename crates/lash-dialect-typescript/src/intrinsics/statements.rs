@@ -159,6 +159,26 @@ impl Reader {
             },
             s::Stmt::Break(statement) if statement.label.is_none() => k::Stmt::Break,
             s::Stmt::Continue(statement) if statement.label.is_none() => k::Stmt::Continue,
+            s::Stmt::Return(statement)
+                if statement.arg.as_ref().is_some_and(
+                    |value| matches!(invocation(value), Ok((name, _)) if name == "returnVia"),
+                ) =>
+            {
+                let Some(value) = &statement.arg else {
+                    unreachable!()
+                };
+                let (_, args) = invocation(value)?;
+                let [value, policy] = args[..] else {
+                    return Err(invalid(
+                        "k.returnVia takes value and policy",
+                        Some(stmt.span()),
+                    ));
+                };
+                k::Stmt::ReturnVia {
+                    value: self.expression(value)?,
+                    policy: self.id(policy)?,
+                }
+            }
             s::Stmt::Return(statement) => {
                 k::Stmt::Return {
                     value: self.expression(statement.arg.as_ref().ok_or_else(|| {

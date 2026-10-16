@@ -55,11 +55,20 @@ pub fn function_value(
     functions: &dyn FunctionCatalog,
 ) -> Result<FunctionValue, DocumentRefusal> {
     let document = rooted(migration, &value.document, &value.entry, functions)?;
-    if document.entries.get(&value.entry) != value.document.entries.get(&value.entry) {
+    let same_start = document
+        .entries
+        .get(&value.entry)
+        .zip(value.document.entries.get(&value.entry))
+        .is_some_and(|(to, from)| {
+            to.signature == from.signature
+                && std::mem::discriminant(&to.convention)
+                    == std::mem::discriminant(&from.convention)
+        });
+    if !same_start {
         return Err(DocumentRefusal::FormNotCarried {
             site: Site::new(Unit::Function(value.entry.clone()), []),
             detail: format!(
-                "the rewritten document changes the signature of `{}`, the entry the value starts",
+                "the rewritten document changes the signature or calling convention of `{}`, the entry the value starts",
                 value.entry
             ),
         });

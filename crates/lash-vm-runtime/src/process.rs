@@ -310,7 +310,7 @@ pub fn definition_of_entry(
     .map_err(|error| error.to_string())?;
     serde_json::to_value(lash_core::ProcessDefinition::new(
         draft.id(),
-        entry_signature(signature),
+        entry_signature(&signature.signature),
     ))
     .map_err(|error| error.to_string())
 }
@@ -507,7 +507,7 @@ impl KernelProcessEngine {
             )));
         }
         Ok(match document.entries.get(&definition.entry).cloned() {
-            Some(signature) => Ok((document, signature)),
+            Some(entry) => Ok((document, entry.signature)),
             None => Err(format!(
                 "document `{}` has no entry `{}`",
                 definition.document, definition.entry
