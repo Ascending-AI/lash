@@ -178,8 +178,11 @@ of `lashvm` and `session` byte for byte. They are refusal witnesses, not
 upgrade witnesses: no build reads them.
 `format_fixtures::pre_heap_images_are_refused_naming_their_format` holds that
 a pre-heap cell's graph read is refused with `GraphRefusal::RetiredFormat`
-naming `KernelWhole`, and that the kernel engine refuses a pre-heap process's
-state by naming the same format. Never re-record them.
+naming `Annotations` (kind 11, retired by FIG-6376), and that the kernel
+engine refuses a pre-heap process's state by naming `KernelWhole` (kind 16).
+A retired kind is refused as soon as its envelope is read, before its body;
+the cell reaches its retired annotation layer before its whole-state run.
+Never re-record these refusal witnesses.
 
 Source `env.sh`, then run the existing recorder locally on the build being
 retained, naming its full commit (use a new build, never an existing set):
@@ -246,6 +249,10 @@ source map (kind 42, `SourceMap`). Every image holding a kind-15 envelope
 (`session` and set `4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1`'s
 `pending-tool-typescript`, `pending-tool-python` and `saved-declared-read`) is
 re-recorded in place with its recorder on a build rebased onto `origin/main`,
-keeping every oracle, set id, program, helper catalogue and version. The three
-kernel images, `lashvm` and the pre-heap refusal witnesses hold no envelope
-and keep their bytes.
+keeping every oracle, set id, program, helper catalogue and version. The
+FIG-6424 fix-forward completed these four recordings on main
+`37060726d0552bccc28f3a6b17a375e4c7f765a4` with the fixture-law repair.
+Each fresh corpus image resumed to exactly its original expected result.
+The three kernel corpus images and `lashvm` hold no cell envelope and keep
+their bytes. Both pre-heap refusal witnesses also keep their bytes; their
+retired formats are refused as described above.

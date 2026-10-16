@@ -55,8 +55,10 @@ async fn a_kernel_process_decodes_and_resumes_from_its_1_0_image() {
 /// FIG-6193: a pre-heap image is refused with a typed refusal naming its
 /// format, never misread. The persistent heap replaced the whole-state
 /// parked run in place under the 1.0 freeze, with no reader for the old
-/// shape. A parked cell's KernelWhole root stops its execution root's
-/// graph read before any of its body is decoded; a kernel process's state,
+/// shape. A parked cell's retired Annotations node stops its execution
+/// root's graph read before the KernelWhole body is decoded (FIG-6376);
+/// retired kinds are refused as soon as their envelope is read. A kernel
+/// process's state,
 /// which carried its sealed KernelWhole graph inline, is refused by the
 /// engine that would advance it.
 #[tokio::test(flavor = "current_thread")]
@@ -65,16 +67,6 @@ async fn pre_heap_images_are_refused_naming_their_format() {
     use lash_durable::DurableReads as _;
     use lash_durable::domain::RootOwner;
     let limits = GraphReadPolicy::standard();
-    let kernel_whole = |refusal: &GraphRefusal| {
-        matches!(
-            refusal,
-            GraphRefusal::RetiredFormat {
-                kind: 16,
-                format: "KernelWhole",
-                ..
-            }
-        )
-    };
 
     let (stores, _dir) = images::open(&images::PRE_HEAP_SESSION, SimClock::new()).await;
     let reads = stores.durable_store();
@@ -97,7 +89,14 @@ async fn pre_heap_images_are_refused_naming_their_format() {
         .map(|_| ())
         .expect_err("a pre-heap parked cell is never read");
     assert!(
-        matches!(&refused, lash_durable::DurableError::Graph(refusal) if kernel_whole(refusal)),
+        matches!(
+            &refused,
+            lash_durable::DurableError::Graph(GraphRefusal::RetiredFormat {
+                kind: 11,
+                format: "Annotations",
+                ..
+            })
+        ),
         "{refused:?}"
     );
 
