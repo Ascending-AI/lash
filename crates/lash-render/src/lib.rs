@@ -289,6 +289,7 @@ struct Sink {
     chars: usize,
     column: usize,
     limit: Option<usize>,
+    collect_limit: Option<usize>,
 }
 
 impl Sink {
@@ -298,6 +299,7 @@ impl Sink {
             chars: 0,
             column: 0,
             limit: None,
+            collect_limit: None,
         }
     }
 
@@ -305,6 +307,15 @@ impl Sink {
         Self {
             limit: Some(limit),
             ..Self::new(false)
+        }
+    }
+
+    // Unlike the inline-layout probe, a collected prefix keeps counting after
+    // its buffer fills: layout decisions and cut metadata need the full walk.
+    fn prefix(limit: usize) -> Self {
+        Self {
+            collect_limit: Some(limit),
+            ..Self::new(true)
         }
     }
 
@@ -316,6 +327,7 @@ impl Sink {
         if self.saturated() {
             return;
         }
+        let start = self.chars;
         self.chars += self.limit.map_or_else(
             || text.chars().count(),
             |limit| {
@@ -335,7 +347,12 @@ impl Sink {
             }
         });
         if let Some(body) = &mut self.body {
-            body.push_str(text);
+            let end = self.collect_limit.map_or(text.len(), |limit| {
+                text.char_indices()
+                    .nth(limit.saturating_sub(start))
+                    .map_or(text.len(), |(byte, _)| byte)
+            });
+            body.push_str(&text[..end]);
         }
     }
 
@@ -547,9 +564,8 @@ fn write_entry_prefix(sink: &mut Sink, params: &RenderParams, config: WalkConfig
     }
 }
 
-fn compress_stack(stack: &str, params: &RenderParams, cuts: &mut CutReport) -> String {
-    let lines: Vec<_> = stack.split('\n').collect();
-    let Some(start) = lines.iter().position(|line| {
+fn compress_stack(stack: &str, params: &RenderParams, cuts: &mut CutReport, sink: &mut Sink) {
+    let Some(start) = stack.split('\n').position(|line| {
         let trimmed = line.trim_start_matches(char::is_whitespace);
         trimmed.len() != line.len()
             && trimmed
@@ -557,26 +573,31 @@ fn compress_stack(stack: &str, params: &RenderParams, cuts: &mut CutReport) -> S
                 .and_then(|rest| rest.chars().next())
                 .is_some_and(char::is_whitespace)
     }) else {
-        return stack.to_owned();
+        sink.write(stack);
+        return;
     };
-    let frames = &lines[start..];
+    let lines = stack.split('\n').count();
+    let frames = lines - start;
     let keep = params.stack_head.saturating_add(params.stack_tail);
-    if frames.len() <= keep {
-        return stack.to_owned();
+    if frames <= keep {
+        sink.write(stack);
+        return;
     }
-    let hidden = frames.len() - keep;
-    let mut result = lines[..start].to_vec();
-    result.extend(frames.iter().take(params.stack_head).copied());
+    let hidden = frames - keep;
     let marker = format!("    ... [{hidden} frames hidden]");
-    result.push(&marker);
-    result.extend(
-        frames
-            .iter()
-            .skip(frames.len() - params.stack_tail)
-            .copied(),
-    );
+    for (index, line) in stack
+        .split('\n')
+        .take(start + params.stack_head)
+        .chain(std::iter::once(marker.as_str()))
+        .chain(stack.split('\n').skip(lines - params.stack_tail))
+        .enumerate()
+    {
+        if index > 0 {
+            sink.write("\n");
+        }
+        sink.write(line);
+    }
     cuts.add(CutKind::Stack);
-    result.join("\n")
 }
 
 fn sample_array<V: RenderValue>(
@@ -596,7 +617,7 @@ fn sample_array<V: RenderValue>(
     );
     let mut items = Vec::new();
     for index in (0..head).chain(len - tail..len) {
-        let mut sink = Sink::new(true);
+        let mut sink = Sink::prefix(budget);
         if let Some(child) = value.index(index) {
             write_value(
                 child.as_ref(),
@@ -613,8 +634,8 @@ fn sample_array<V: RenderValue>(
         } else {
             sink.write("null");
         }
+        let length = sink.chars;
         let item = sink.finish();
-        let length = item.chars().count();
         let item = if length > budget {
             cuts.add(CutKind::Item);
             let prefix: String = item.chars().take(budget.saturating_sub(3)).collect();
@@ -643,6 +664,26 @@ fn sample_array<V: RenderValue>(
 }
 
 pub fn render<V: RenderValue>(value: &V, params: &RenderParams) -> Rendered<String> {
+    render_inner(value, params, None, false)
+}
+
+/// Render a character-bounded preview, counting the omitted suffix without
+/// collecting it. Quoting root text matches a variable preview; leaving it raw
+/// matches print rendering. The truncation notice lies outside the budget.
+pub fn render_preview<V: RenderValue>(
+    value: &V,
+    params: &RenderParams,
+    quote_root_text: bool,
+) -> Rendered<String> {
+    render_inner(value, params, Some(params.max_chars), quote_root_text)
+}
+
+fn render_inner<V: RenderValue>(
+    value: &V,
+    params: &RenderParams,
+    collect_limit: Option<usize>,
+    quote_root_text: bool,
+) -> Rendered<String> {
     let mut full = Sink::new(false);
     let mut ignored = CutReport::default();
     if let Some(stack) = value.stack().filter(|stack| !stack.is_empty()) {
@@ -658,7 +699,7 @@ pub fn render<V: RenderValue>(value: &V, params: &RenderParams) -> Rendered<Stri
                 depth: 0,
                 layout,
                 limited: false,
-                root_text_raw: true,
+                root_text_raw: !quote_root_text,
             },
         );
     }
@@ -666,50 +707,64 @@ pub fn render<V: RenderValue>(value: &V, params: &RenderParams) -> Rendered<Stri
         original_chars: full.chars,
         ..CutReport::default()
     };
-    let body = if let Some(stack) = value.stack().filter(|stack| !stack.is_empty()) {
-        compress_stack(&stack, params, &mut cuts)
-    } else if let RenderNode::Array(len) = value.node() {
-        if len > params.array_threshold {
-            sample_array(value, len, params, &mut cuts)
-        } else {
-            render_limited(value, params, &mut cuts)
-        }
+    let mut sink = collect_limit.map_or_else(|| Sink::new(true), Sink::prefix);
+    if let Some(stack) = value.stack().filter(|stack| !stack.is_empty()) {
+        compress_stack(&stack, params, &mut cuts, &mut sink);
+    } else if let RenderNode::Array(len) = value.node()
+        && len > params.array_threshold
+    {
+        sink.write(&sample_array(value, len, params, &mut cuts));
     } else {
-        render_limited(value, params, &mut cuts)
-    };
-    Rendered { body, cuts }
-}
-
-fn render_limited<V: RenderValue>(
-    value: &V,
-    params: &RenderParams,
-    cuts: &mut CutReport,
-) -> String {
-    let mut sink = Sink::new(true);
-    let layout = walk_layout(params);
-    write_value(
-        value,
-        params,
-        &mut sink,
+        write_value(
+            value,
+            params,
+            &mut sink,
+            &mut cuts,
+            WalkConfig {
+                depth: 0,
+                layout: walk_layout(params),
+                limited: true,
+                root_text_raw: !quote_root_text,
+            },
+        );
+    }
+    let chars = sink.chars;
+    let rendered = Rendered {
+        body: sink.finish(),
         cuts,
-        WalkConfig {
-            depth: 0,
-            layout,
-            limited: true,
-            root_text_raw: true,
-        },
-    );
-    sink.finish()
+    };
+    if let Some(limit) = collect_limit {
+        finish_char_cut(rendered, chars, limit)
+    } else {
+        rendered
+    }
 }
 
 pub fn truncate_chars(mut rendered: Rendered<String>, max_chars: usize) -> Rendered<String> {
     let chars = rendered.body.chars().count();
     if chars > max_chars {
-        let prefix: String = rendered.body.chars().take(max_chars).collect();
-        let shown_lines = if prefix.is_empty() {
+        // An uncapped caller must also release the hidden buffer's capacity.
+        rendered.body = rendered.body.chars().take(max_chars).collect();
+    }
+    finish_char_cut(rendered, chars, max_chars)
+}
+
+fn finish_char_cut(
+    mut rendered: Rendered<String>,
+    chars: usize,
+    max_chars: usize,
+) -> Rendered<String> {
+    if chars > max_chars {
+        let end = rendered
+            .body
+            .char_indices()
+            .nth(max_chars)
+            .map_or(rendered.body.len(), |(byte, _)| byte);
+        rendered.body.truncate(end);
+        let shown_lines = if rendered.body.is_empty() {
             0
         } else {
-            prefix.split('\n').count()
+            rendered.body.split('\n').count()
         };
         rendered.cuts.add(CutKind::Chars);
         rendered.cuts.shown.push(ShownRange::Text {
@@ -717,7 +772,9 @@ pub fn truncate_chars(mut rendered: Rendered<String>, max_chars: usize) -> Rende
             chars: 0..max_chars,
             lines: 0..shown_lines,
         });
-        rendered.body = format!("{prefix}\n...[truncated {} chars]", chars - max_chars);
+        rendered
+            .body
+            .push_str(&format!("\n...[truncated {} chars]", chars - max_chars));
     }
     rendered
 }

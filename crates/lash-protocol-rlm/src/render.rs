@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use lash_render::{CutKind, RenderParams, Rendered, render, truncate_chars};
+use lash_render::{CutKind, RenderParams, Rendered, render, render_preview, truncate_chars};
 use lash_rlm_types::RlmRenderPatch;
 
 pub trait CodeRenderer: Send + Sync {
@@ -10,12 +10,14 @@ pub trait CodeRenderer: Send + Sync {
         render(value, params)
     }
 
+    /// Return the final preview and cut report, including the character cut.
+    /// The truncation notice lies outside `params.max_chars`.
     fn variable_preview(
         &self,
         value: &serde_json::Value,
         params: &RenderParams,
     ) -> Rendered<String> {
-        render(value, params)
+        render_preview(value, params, false)
     }
 }
 
@@ -31,13 +33,7 @@ impl CodeRenderer for BuiltinCodeRenderer {
         value: &serde_json::Value,
         params: &RenderParams,
     ) -> Rendered<String> {
-        let mut rendered = render(value, params);
-        if matches!(value, serde_json::Value::String(_)) {
-            rendered.body =
-                serde_json::to_string(&rendered.body).unwrap_or_else(|_| "\"\"".to_string());
-            rendered.cuts.original_chars = rendered.body.chars().count();
-        }
-        rendered
+        render_preview(value, params, true)
     }
 }
 
@@ -161,6 +157,70 @@ fn cut_name(kind: CutKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_preserves_text_and_cut_report() {
+        struct RawRenderer;
+        impl CodeRenderer for RawRenderer {
+            fn id(&self) -> &str {
+                "raw"
+            }
+        }
+        // The unbounded print renderer is the independent oracle for the
+        // existing preview spelling and exact cuts, including quoted text.
+        let cases = [
+            serde_json::json!("é🙂z\"\\\n\u{0000}"),
+            serde_json::json!({"q\n": ["é🙂\"", {"a": {"b": 1}}], "tail": null}),
+            serde_json::json!(["x".repeat(2_000), "middle", "é🙂".repeat(1_000)]),
+            serde_json::json!({"stack": "Error\n    at a\n    at b\n    at c\n    at d\n    at e\n"}),
+            serde_json::json!({"stack": "é🙂\nplain text"}),
+            serde_json::json!({"stack": "", "message": "boom"}),
+            serde_json::json!([]),
+        ];
+        for value in cases {
+            for layout in [
+                lash_render::Layout::Compact,
+                lash_render::Layout::Pretty,
+                lash_render::Layout::Auto,
+            ] {
+                for max_chars in [0, 1, 2, 3, 7, 50, 1_000, 8_000] {
+                    for max_depth in [0, 2] {
+                        for (head, tail) in [(0, 0), (1, 1), (4, 1)] {
+                            let params = RenderParams {
+                                max_chars,
+                                layout,
+                                max_depth,
+                                line_width: 8,
+                                array_threshold: 2,
+                                array_head: head,
+                                array_tail: tail,
+                                min_item_chars: 1,
+                                stack_head: head,
+                                stack_tail: tail,
+                                ..RenderParams::preview()
+                            };
+                            let raw = render(&value, &params);
+                            assert_eq!(
+                                RawRenderer.variable_preview(&value, &params),
+                                truncate_chars(raw.clone(), max_chars),
+                                "raw {value:?} {params:?}"
+                            );
+                            let mut quoted = raw;
+                            if value.is_string() {
+                                quoted.body = serde_json::to_string(&quoted.body).unwrap();
+                                quoted.cuts.original_chars = quoted.body.chars().count();
+                            }
+                            assert_eq!(
+                                BuiltinCodeRenderer.variable_preview(&value, &params),
+                                truncate_chars(quoted, max_chars),
+                                "quoted {value:?} {params:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn print_keeps_typed_value_and_places_cut_header_outside_body_budget() {

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::dialect::DialectPrompts;
 use crate::render::CodeRenderer;
 use lash_core::LlmUsage;
-use lash_render::{RenderNode, RenderParams, RenderValue, truncate_chars};
+use lash_render::{RenderNode, RenderParams, RenderValue};
 use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
 use serde_json::Value as FlowValue;
 
@@ -513,7 +513,7 @@ fn build_bound_variable_row(
     params: &RenderParams,
     max_inline_keys: usize,
 ) -> BuiltRow {
-    let result = truncate_chars(renderer.variable_preview(value, params), params.max_chars);
+    let result = renderer.variable_preview(value, params);
     if result.cuts.is_empty() {
         return BuiltRow {
             inline: Some(result.body),
@@ -870,6 +870,77 @@ fn singularize_segment(segment: &str) -> String {
 mod bound_variable_tests {
     use super::*;
     use serde_json::json;
+
+    struct PreviewAllocator;
+
+    thread_local! {
+        static PREVIEW_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[expect(
+        unsafe_code,
+        reason = "PREVIEW-BUFFER-BOUNDED counts thread-local allocation traffic through GlobalAlloc"
+    )]
+    unsafe impl std::alloc::GlobalAlloc for PreviewAllocator {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            let _ = PREVIEW_BYTES.try_with(|bytes| bytes.set(bytes.get() + layout.size()));
+            unsafe { std::alloc::System.alloc(layout) }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+            unsafe { std::alloc::System.dealloc(ptr, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static PREVIEW_ALLOCATOR: PreviewAllocator = PreviewAllocator;
+
+    #[test]
+    fn preview_buffer_bounded() {
+        // PREVIEW-BUFFER-BOUNDED: the FIG-6450 fixed-state geometry has eight
+        // seed strings and one overwritten 829,893-byte slot. Input creation
+        // is outside the measured preview window, as in the selected-turn study.
+        fn measure(retained: usize) -> usize {
+            let seed = (retained - 829_893) / 8;
+            let value = serde_json::Value::Array(
+                (0..8)
+                    .map(|index| {
+                        json!("x".repeat(seed + usize::from(index < (retained - 829_893) % 8)))
+                    })
+                    .chain(std::iter::once(json!("x".repeat(829_893))))
+                    .collect(),
+            );
+            let before = PREVIEW_BYTES.with(std::cell::Cell::get);
+            let row = build_bound_variable_row(
+                &value,
+                &crate::render::BuiltinCodeRenderer,
+                &RenderParams::preview(),
+                10,
+            );
+            let allocated = PREVIEW_BYTES.with(std::cell::Cell::get) - before;
+            let preview = row.preview.unwrap();
+            let original = retained + 2 * 9 + 8 + 2;
+            assert_eq!(
+                preview,
+                format!(
+                    "[\"{}\n...[truncated {} chars]",
+                    "x".repeat(998),
+                    original - 1_000
+                )
+            );
+            allocated
+        }
+        let low = measure(1_659_786);
+        let high = measure(7_469_037);
+        eprintln!(
+            "PREVIEW-BUFFER-BOUNDED: low={low} B high={high} B growth={} B",
+            high.saturating_sub(low)
+        );
+        assert!(
+            high <= low + 64 * 1024,
+            "PREVIEW-BUFFER-BOUNDED: low={low} B high={high} B"
+        );
+    }
 
     #[test]
     fn inferred_typescript_shapes_use_the_tool_schema_spelling() {
