@@ -354,11 +354,13 @@ async fn sample_with_stores(
         .pages()
         .context("the durable store publishes heap pages")?;
     let pool = service.pool()?;
+    let spools = service.spools()?;
     let session_id = lash::SessionId::try_from(format!("heap-{scenario}-{h}"))?;
     let meter = Arc::new(Meter {
         actor: super::turn::session_actor(&session_id)?.to_string(),
         recorder,
-        collector: Collector::install_with_sql_receipts()?,
+        collector: Collector::install_with_sql_receipts()?
+            .with_spool_bytes(move || spools.spooled_bytes()),
         pool,
         scenario: scenario.to_owned(),
         store,
@@ -821,10 +823,11 @@ mod tests {
         eprintln!("HEAP-METER: 12 populations in {:?}", started.elapsed());
         for row in &rows {
             eprintln!(
-                "HEAP-METER {} H={} park={} seed_ms={:.0} wall_ms={:.0}",
+                "HEAP-METER {} H={} park={} spool_bytes={} seed_ms={:.0} wall_ms={:.0}",
                 row.scenario,
                 row.h,
                 row.park,
+                row.counts[super::SPOOL_BYTES],
                 row.seed_ns as f64 / 1e6,
                 row.wall_ns as f64 / 1e6
             );

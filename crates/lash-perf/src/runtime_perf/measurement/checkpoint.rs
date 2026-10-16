@@ -117,6 +117,7 @@ pub(super) struct CheckpointBindingFixture {
     fixture: Arc<tokio::sync::Mutex<lash_protocol_rlm::CodeModeCheckpointPerfFixture>>,
     backend: lash::Backend,
     workers: lash_vm_client::WorkerPool,
+    spools: Arc<lash_vm_broker::kernel::pages::SpoolRoot>,
     factory: Arc<dyn lash_core::plugin::PluginFactory>,
     session_id: SessionId,
 }
@@ -173,6 +174,7 @@ impl CheckpointBindingFixture {
             .push("--count-heap-work".to_owned());
         let service = lash_vm_client::service::Service::new(worker_config);
         let workers = service.pool()?;
+        let spools = service.spools()?;
         let fixture = Arc::new(tokio::sync::Mutex::new(
             lash_protocol_rlm::CodeModeCheckpointPerfFixture::new(
                 &dialect, service, bindings, bytes,
@@ -244,6 +246,7 @@ impl CheckpointBindingFixture {
         Ok(Self {
             fixture,
             workers,
+            spools,
             backend,
             factory,
             session_id,
@@ -256,6 +259,12 @@ impl CheckpointBindingFixture {
             .counters
             .worker_work
             .pages_sealed
+    }
+
+    pub(super) fn work_collector(&self) -> anyhow::Result<lash_core::perf_witness::Collector> {
+        let spools = Arc::clone(&self.spools);
+        Ok(lash_core::perf_witness::Collector::install()?
+            .with_spool_bytes(move || spools.spooled_bytes()))
     }
 
     pub(super) async fn assign(&self, index: usize, turn: usize) -> anyhow::Result<()> {
@@ -359,7 +368,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
 
     let (initial_pages, initial_spool_bytes, initial_capture_phase) = run
         .seed(async {
-            let collector = lash_core::perf_witness::Collector::install()?;
+            let collector = fixture.work_collector()?;
             let (initial_snapshot, initial_capture_phase) =
                 measure_runtime_perf_async_phase("checkpoint_state.initial_capture", async {
                     fixture.capture().await.map_err(anyhow::Error::from)
@@ -388,7 +397,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
     let mut metric_samples = BTreeMap::<String, Vec<f64>>::new();
     let mut last_hydrated_bytes = 0_u64;
     for turn_index in 0..chat_turns {
-        let collector = lash_core::perf_witness::Collector::install()?;
+        let collector = fixture.work_collector()?;
         let before_pages = fixture.pages_sealed();
         fixture.assign(turn_index, turn_index).await?;
         run.turn(

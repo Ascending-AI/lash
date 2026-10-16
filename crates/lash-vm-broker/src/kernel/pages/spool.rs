@@ -243,6 +243,9 @@ impl SpoolMeter {
 pub struct SpoolRoot {
     dir: PathBuf,
     quota: u64,
+    /// Cumulative successful page writes across this runtime's activations.
+    #[cfg(feature = "perf-witness")]
+    spooled_bytes: Arc<AtomicU64>,
     /// Held locked until the process ends.
     _lock: fs::File,
 }
@@ -284,8 +287,18 @@ impl SpoolRoot {
         Ok(Self {
             dir,
             quota,
+            #[cfg(feature = "perf-witness")]
+            spooled_bytes: Arc::default(),
             _lock: lock,
         })
+    }
+
+    /// Page bytes this runtime has successfully staged, including pages since
+    /// settled or discarded. Re-sealing a page already in a spool adds nothing.
+    /// Other roots, even under the same parent directory, have separate counts.
+    #[cfg(feature = "perf-witness")]
+    pub fn spooled_bytes(&self) -> u64 {
+        self.spooled_bytes.load(Ordering::Relaxed)
     }
 
     /// The spool of the activation `lease` names, empty.
@@ -301,6 +314,8 @@ impl SpoolRoot {
         Ok(DiskSpool {
             lease,
             dir,
+            #[cfg(feature = "perf-witness")]
+            spooled_bytes: Arc::clone(&self.spooled_bytes),
             usage: StageUsage {
                 pages: 0,
                 bytes: 0,
@@ -325,6 +340,8 @@ pub struct DiskSpool {
     lease: StageLeaseId,
     dir: PathBuf,
     usage: StageUsage,
+    #[cfg(feature = "perf-witness")]
+    spooled_bytes: Arc<AtomicU64>,
     candidate: Option<Candidate>,
     /// Staged pages plus distinct external references, each charged
     /// [`ENTRY_BYTES`] of the quota.
@@ -505,7 +522,7 @@ impl StageSpool for DiskSpool {
             self.reference(&child, true)?;
         }
         #[cfg(feature = "perf-witness")]
-        lash_core_execution::perf_witness::record_spool_bytes(page.bytes.len());
+        self.spooled_bytes.fetch_add(len, Ordering::Relaxed);
         self.usage.pages += 1;
         self.usage.bytes += len;
         Ok(())

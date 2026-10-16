@@ -44,7 +44,6 @@ static SQL_ROWS_READ: AtomicU64 = AtomicU64::new(0);
 static SQL_ROWS_WRITTEN: AtomicU64 = AtomicU64::new(0);
 static SQL_BYTES_WRITTEN: AtomicU64 = AtomicU64::new(0);
 static STORE_PAGES_WRITTEN: AtomicU64 = AtomicU64::new(0);
-static SPOOL_BYTES: AtomicU64 = AtomicU64::new(0);
 static RETIREMENT_BATCHES: AtomicU64 = AtomicU64::new(0);
 
 /// Statement text and expanded byte length, without retaining bound values.
@@ -178,7 +177,8 @@ pub struct Snapshot {
     /// Database pages the store's connections wrote to the WAL (SQLite's
     /// `DBSTATUS_CACHE_WRITE`); bytes are pages times the page size.
     pub store_pages_written: u64,
-    /// Heap page bytes the parent's activations wrote to their spools.
+    /// Heap page bytes written since this collector attached its runtime's
+    /// spool counter. Zero when no spool counter is attached.
     pub spool_bytes: u64,
     /// Retirement steps the store ran, each one bounded transaction.
     pub retirement_batches: u64,
@@ -186,7 +186,7 @@ pub struct Snapshot {
 
 /// Exclusive process-global runtime-work witness.
 pub struct Collector {
-    _private: (),
+    spool_bytes: Option<Box<dyn Fn() -> u64 + Send + Sync>>,
 }
 
 /// Another process-global collector is already active.
@@ -202,6 +202,16 @@ impl std::fmt::Display for AlreadyInstalled {
 impl std::error::Error for AlreadyInstalled {}
 
 impl Collector {
+    /// Attaches the measured runtime's cumulative spool bytes. Each snapshot
+    /// reports growth since attachment, excluding other runtimes and earlier
+    /// writes. The counter must be monotonic for this collector's lifetime.
+    #[must_use]
+    pub fn with_spool_bytes(mut self, read: impl Fn() -> u64 + Send + Sync + 'static) -> Self {
+        let before = read();
+        self.spool_bytes = Some(Box::new(move || read() - before));
+        self
+    }
+
     pub fn install() -> Result<Self, AlreadyInstalled> {
         Self::install_configured(false, false)
     }
@@ -225,7 +235,6 @@ impl Collector {
         SQL_ROWS_WRITTEN.store(0, Ordering::Relaxed);
         SQL_BYTES_WRITTEN.store(0, Ordering::Relaxed);
         STORE_PAGES_WRITTEN.store(0, Ordering::Relaxed);
-        SPOOL_BYTES.store(0, Ordering::Relaxed);
         RETIREMENT_BATCHES.store(0, Ordering::Relaxed);
         SQL_RECEIPTS
             .lock()
@@ -242,7 +251,7 @@ impl Collector {
             sql_shapes::disable();
         }
         COLLECTOR_STATE.store(ACTIVE, Ordering::Release);
-        Ok(Self { _private: () })
+        Ok(Self { spool_bytes: None })
     }
 
     /// Snapshot all work observed since this collector was installed.
@@ -273,7 +282,7 @@ impl Collector {
             sql_rows_written: SQL_ROWS_WRITTEN.load(Ordering::Relaxed),
             sql_bytes_written: SQL_BYTES_WRITTEN.load(Ordering::Relaxed),
             store_pages_written: STORE_PAGES_WRITTEN.load(Ordering::Relaxed),
-            spool_bytes: SPOOL_BYTES.load(Ordering::Relaxed),
+            spool_bytes: self.spool_bytes.as_ref().map_or(0, |read| read()),
             retirement_batches: RETIREMENT_BATCHES.load(Ordering::Relaxed),
             sql_statements_by_verb: SqlVerb::ALL
                 .iter()
@@ -371,14 +380,6 @@ pub fn record_sql_bytes_written(bytes: u64) {
         return;
     }
     SQL_BYTES_WRITTEN.fetch_add(bytes, Ordering::Relaxed);
-}
-
-/// Record one heap page of `bytes` written to an activation's spool.
-#[inline]
-pub fn record_spool_bytes(bytes: usize) {
-    if COLLECTOR_STATE.load(Ordering::Relaxed) == ACTIVE {
-        SPOOL_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
-    }
 }
 
 /// Record one retirement step, one bounded transaction.

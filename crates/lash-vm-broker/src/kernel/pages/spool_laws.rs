@@ -1127,3 +1127,43 @@ fn the_quota_charges_each_distinct_entry_once_and_releases_it() {
         .expect("settlement releases the last external ref");
     assert_eq!((spool.entries(), spool.usage().bytes), (0, 0));
 }
+
+/// HEAP-SPOOL-OWNER: a measured runtime counts its own successful writes,
+/// including successive activations, while another runtime stages pages
+/// during the same collector interval. Deduplicated pages count once.
+#[cfg(feature = "perf-witness")]
+#[test]
+fn spool_bytes_exclude_an_overlapping_runtime() {
+    let fixture = tempfile::tempdir().unwrap();
+    let measured = std::sync::Arc::new(SpoolRoot::open(fixture.path(), 1 << 20).unwrap());
+    let foreign = SpoolRoot::open(fixture.path(), 1 << 20).unwrap();
+    let page = |kind, text: &str| {
+        let mut tokens = TokenWriter::new();
+        tokens.text(text);
+        frame_direct(NodeKind(kind), tokens.as_bytes(), MAX_NODE_BYTES).unwrap()
+    };
+    let own_page = page(1002, "measured");
+    let other_page = page(1005, &"foreign".repeat(4096));
+    let mut seed = measured.spool(StageLeaseId(0)).unwrap();
+    seed.seal(own_page.clone(), &|_| false).unwrap();
+    let counter = std::sync::Arc::clone(&measured);
+    let collector = lash_core_execution::perf_witness::Collector::install()
+        .unwrap()
+        .with_spool_bytes(move || counter.spooled_bytes());
+    let mut first = measured.spool(StageLeaseId(1)).unwrap();
+    first.seal(own_page.clone(), &|_| false).unwrap();
+    first.seal(own_page.clone(), &|_| false).unwrap();
+    std::thread::spawn(move || {
+        let mut other = foreign.spool(StageLeaseId(2)).unwrap();
+        other.seal(other_page, &|_| false).unwrap();
+    })
+    .join()
+    .unwrap();
+    let mut second = measured.spool(StageLeaseId(3)).unwrap();
+    second.seal(own_page.clone(), &|_| false).unwrap();
+    assert_eq!(
+        collector.snapshot().spool_bytes,
+        2 * own_page.bytes.len() as u64,
+        "only the measured runtime's two activations wrote these bytes"
+    );
+}

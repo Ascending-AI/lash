@@ -251,7 +251,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             // Paired center points have identical shapes. Distinct edits
             // keep both observations independent of immutable page sharing.
             let edit = edit_seed.wrapping_add(sample * point_count + point_index);
-            let work_collector = lash_core::perf_witness::Collector::install()?;
+            let work_collector = fixture.fixture.work_collector()?;
             let before_pages = fixture.fixture.pages_sealed();
             fixture.fixture.assign(sample, edit).await?;
             let (snapshot, capture_phase) = Box::pin(measure_runtime_perf_async_phase(
