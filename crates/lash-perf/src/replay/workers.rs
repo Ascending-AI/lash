@@ -45,6 +45,7 @@ pub(crate) fn service(
                 .to_owned(),
         ]);
     }
+    config.entry.args.push("--count-heap-work".to_owned());
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;

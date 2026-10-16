@@ -40,7 +40,7 @@ const fn counted(name: &'static str, unit: &'static str, meaning: &'static str) 
 }
 
 /// Every metric a turn record may carry, in receipt order.
-pub const METRICS: [MetricDef; 20] = [
+pub const METRICS: [MetricDef; 22] = [
     counted(
         "sql_statements",
         "statements",
@@ -102,6 +102,16 @@ pub const METRICS: [MetricDef; 20] = [
         "ipc_bytes",
         "bytes",
         "frame bytes exchanged with code-mode workers, both directions",
+    ),
+    counted(
+        "heap_pages_read",
+        "pages",
+        "pages worker heaps loaded through their page ports (cache misses)",
+    ),
+    counted(
+        "heap_pages_written",
+        "pages",
+        "pages worker heaps sealed into activation staging, not durable store writes",
     ),
     counted(
         "worker_executions",
@@ -312,6 +322,11 @@ impl Meter {
             reading.insert(
                 "ipc_bytes",
                 (counters.ipc_sent_bytes + counters.ipc_received_bytes) as f64,
+            );
+            reading.insert("heap_pages_read", counters.worker_work.pages_loaded as f64);
+            reading.insert(
+                "heap_pages_written",
+                counters.worker_work.pages_sealed as f64,
             );
             reading.insert(
                 "worker_executions",
