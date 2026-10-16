@@ -270,11 +270,13 @@ define_plugin_errors! {
         => crate::ToolFailureClass::InvalidRequest;
 /// An execution mode's tool presenter refused: the host's presentation
     /// config at a session's creation, or a section it could not present.
+    /// `presenter` is the installed presenter id; `code` is its stable, dotted
+    /// cause kind. `message` carries human-readable details.
     #[error("plugin `{plugin_id}`'s tool presenter `{presenter}` refused: {message}")]
-    ToolPresentationRefused { plugin_id: String, presenter: String, message: String }
-        => PluginError::ToolPresentationRefused { plugin_id, presenter, message }
-        => { plugin_id: String, presenter: String, message: String }
-        => Self::ToolPresentationRefused { plugin_id: plugin_id.clone(), presenter: presenter.clone(), message: message.clone() }
+    ToolPresentationRefused { plugin_id: String, presenter: String, code: String, message: String }
+        => PluginError::ToolPresentationRefused { plugin_id, presenter, code, message }
+        => { plugin_id: String, presenter: String, code: String, message: String }
+        => Self::ToolPresentationRefused { plugin_id: plugin_id.clone(), presenter: presenter.clone(), code: code.clone(), message: message.clone() }
         => Self::ToolPresentationRefused { .. }
         => "tool_presentation_refused"
         => crate::ToolFailureClass::InvalidRequest;

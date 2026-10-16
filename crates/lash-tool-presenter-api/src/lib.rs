@@ -163,9 +163,33 @@ impl PresentedToolSection {
 }
 
 /// Why a presenter refused.
+///
+/// The shipped standard, TypeScript and Python presenters emit these stable
+/// codes through [`Self::code`]. Messages supply details and may change.
+///
+/// | Code | Cause |
+/// | --- | --- |
+/// | `shape.missing_reference` | A local schema reference has no target. |
+/// | `shape.unsupported_reference` | A reference uses an unsupported location. |
+/// | `shape.unsupported_construct` | A schema keyword cannot be represented. |
+/// | `shape.invalid_schema` | A schema keyword has an invalid value. |
+/// | `shape.recursion_depth` | Schema nesting exceeds the configured depth. |
+/// | `shape.node_limit` | The schema graph exceeds the importer's node limit. |
+/// | `shape.resource_exhausted` | Another schema import resource is exhausted. |
+/// | `config.invalid` | The presenter cannot admit or read its config. |
+/// | `tool.unrepresentable` | The presenter cannot document a tool. |
+/// | `listing.incomplete` | The section fails to account for the offered tools. |
+///
+/// Host presenters can return [`Self::Custom`] with their own stable, dotted
+/// code. Protocol boundaries retain the installed presenter's id, this code and
+/// the display message, including across durable serialization.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum PresentationRefusal {
+    /// A host presenter's own refusal kind. Keep `code` stable and dotted;
+    /// put instance-specific details in `message`.
+    #[error("{message}")]
+    Custom { code: String, message: String },
     /// The schema cannot be represented without losing contract information.
     #[error("tool schema cannot be presented: {cause}")]
     Shape {
@@ -190,6 +214,29 @@ pub enum PresentationRefusal {
 }
 
 impl PresentationRefusal {
+    /// The stable, machine-readable cause documented on [`Self`]. A host
+    /// presenter's custom code is returned unchanged.
+    pub fn code(&self) -> &str {
+        use lash_tool_shape::ShapeImportRefusal;
+        match self {
+            Self::Custom { code, .. } => code,
+            Self::Shape { cause } => match cause {
+                ShapeImportRefusal::MissingReference { .. } => "shape.missing_reference",
+                ShapeImportRefusal::UnsupportedReference { .. } => "shape.unsupported_reference",
+                ShapeImportRefusal::UnsupportedConstruct { .. } => "shape.unsupported_construct",
+                ShapeImportRefusal::InvalidSchema { .. } => "shape.invalid_schema",
+                ShapeImportRefusal::ResourceExhausted { resource, .. } => match resource.as_str() {
+                    "depth" => "shape.recursion_depth",
+                    "nodes" => "shape.node_limit",
+                    _ => "shape.resource_exhausted",
+                },
+            },
+            Self::Config { .. } => "config.invalid",
+            Self::Tool { .. } => "tool.unrepresentable",
+            Self::Listing { .. } => "listing.incomplete",
+        }
+    }
+
     /// The refusal of `raw` as `presenter`'s config.
     pub fn config(presenter: &str, reason: impl std::fmt::Display) -> Self {
         Self::Config {

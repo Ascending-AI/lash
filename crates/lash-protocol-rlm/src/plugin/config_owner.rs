@@ -147,7 +147,11 @@ pub enum RlmConfigRefusal {
     /// The stated finish value schema is not a schema a tool admits.
     FinishValueSchemaRefused { message: String },
     /// The dialect's tool presenter refuses the host's tool presentation.
-    ToolPresentationRefused { presenter: String, message: String },
+    ToolPresentationRefused {
+        presenter: String,
+        code: String,
+        message: String,
+    },
 }
 
 /// `schema`, refused unless a tool's input admits it.
@@ -180,7 +184,9 @@ impl std::fmt::Display for RlmConfigRefusal {
             Self::FinishValueSchemaRefused { message } => {
                 write!(formatter, "the finish value schema is refused: {message}")
             }
-            Self::ToolPresentationRefused { presenter, message } => {
+            Self::ToolPresentationRefused {
+                presenter, message, ..
+            } => {
                 write!(
                     formatter,
                     "tool presenter `{presenter}` refuses the tool presentation: {message}"
@@ -240,6 +246,7 @@ impl ConfigOwner for RlmConfigOwner {
             .recorded_behaviour(&self.dialect)
             .map_err(|refusal| RlmConfigRefusal::ToolPresentationRefused {
                 presenter: self.dialect.tool_presenter().presenter().id().to_owned(),
+                code: refusal.code().to_owned(),
                 message: refusal.to_string(),
             })?;
         Ok(Some(RlmRecordedConfig {

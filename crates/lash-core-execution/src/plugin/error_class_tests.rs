@@ -94,6 +94,7 @@ plugin_error_samples! {
     ToolPresentationRefused { .. } => PluginError::ToolPresentationRefused {
         plugin_id: "sampled".to_string(),
         presenter: "sampled".to_string(),
+        code: "shape.recursion_depth".to_string(),
         message: "sampled".to_string(),
     },
     ResidentToolContractUnavailable { .. } => PluginError::ResidentToolContractUnavailable {

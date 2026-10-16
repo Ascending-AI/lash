@@ -51,6 +51,7 @@ pub(crate) fn tool_presentation_refused(
     lash_core::plugin::PluginError::ToolPresentationRefused {
         plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
         presenter: config.tool_presenter.presenter().id().to_owned(),
+        code: refusal.code().to_owned(),
         message: refusal.to_string(),
     }
 }

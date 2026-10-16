@@ -231,6 +231,7 @@ pub(crate) fn tool_presentation_refused(
     PluginError::ToolPresentationRefused {
         plugin_id: RLM_PROTOCOL_PLUGIN_ID.to_string(),
         presenter: dialect.tool_presenter().presenter().id().to_owned(),
+        code: refusal.code().to_owned(),
         message: refusal.to_string(),
     }
 }
@@ -616,8 +617,8 @@ mod tests {
         );
         assert!(matches!(
             refusing.session_behaviour(&lash_core::PluginConfig::default(), Creation),
-            Err(PluginError::ToolPresentationRefused { ref presenter, .. })
-                if presenter == "lash.tools.typescript.v1"
+            Err(PluginError::ToolPresentationRefused { ref presenter, ref code, .. })
+                if presenter == "lash.tools.typescript.v1" && code == "config.invalid"
         ));
     }
 

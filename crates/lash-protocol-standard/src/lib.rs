@@ -403,7 +403,11 @@ pub enum StandardConfigRefusal {
     /// creation.
     BehaviourChanged { recorded: String, candidate: String },
     /// The host's tool presenter refuses its tool presentation.
-    ToolPresentationRefused { presenter: String, message: String },
+    ToolPresentationRefused {
+        presenter: String,
+        code: String,
+        message: String,
+    },
 }
 
 /// Why the standard protocol resolved no render for a run.
@@ -442,7 +446,9 @@ impl std::fmt::Display for StandardConfigRefusal {
                 "the session's standard-protocol behaviour is recorded as {recorded} and cannot \
                  become {candidate}"
             ),
-            Self::ToolPresentationRefused { presenter, message } => write!(
+            Self::ToolPresentationRefused {
+                presenter, message, ..
+            } => write!(
                 formatter,
                 "tool presenter `{presenter}` refuses the tool presentation: {message}"
             ),
@@ -649,6 +655,7 @@ impl StandardProtocolPluginFactory {
                 behaviour: self.config.recorded_behaviour().map_err(|refusal| {
                     StandardConfigRefusal::ToolPresentationRefused {
                         presenter: self.config.tool_presenter.presenter().id().to_owned(),
+                        code: refusal.code().to_owned(),
                         message: refusal.to_string(),
                     }
                 }),
