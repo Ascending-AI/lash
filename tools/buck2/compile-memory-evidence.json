@@ -15,8 +15,8 @@
     "lash-internal-conformance/lash_conformance": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
-      "p99_anon_peak_bytes": 2168094720,
-      "samples": 30
+      "p99_anon_peak_bytes": 760655872,
+      "samples": 360
     },
     "lash-internal-core-effect/lash_core_effect": {
       "legacy_peak_bytes": 0,
