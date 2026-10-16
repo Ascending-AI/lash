@@ -142,6 +142,9 @@ pub struct HeapRoot {
     /// The census's persisted accounting (S7).
     pub accounting: AccountingCertificate,
     pub population: super::DataOnlyCertificate,
+    /// Live-size estimate at the last collection (or first carry). Growth
+    /// above it pays for the next carry's collection, across cold opens.
+    pub collection_live: Option<LogicalBytes>,
 }
 
 /// Whether the execution is parked or ended.

@@ -10,14 +10,9 @@ use super::tree::{Cell, SealWork, Tree, checked_sum};
 use super::*;
 use lash_kernel_doc::heap::*;
 
-/// The largest U at which a carry traces to collect the cell's garbage
-/// (FIG-6321): a small session sheds what its cell left dead before it
-/// rides into every later cell's pages; a larger one collects under
-/// pressure only (ADR 0145 §5). U bounds the trace's work, where an entity
-/// count does not (FIG-6425): every entity costs at least
-/// [`MIN_ENTITY_COST`] and every element, entry or capture the trace walks
-/// for edges at least 8 bytes, so a carry under this bound visits at most
-/// 4,096 entities and 16,384 rows, however long one scalar list grows.
+/// Small-heap cleanup ceiling and the minimum garbage allowance for
+/// ratio-paced collection. A large heap collects after growth of at least
+/// its last live estimate, amortizing tracing against intervening allocation.
 pub(super) const CARRY_COLLECTION_BYTES: u64 = 4096 * MIN_ENTITY_COST.0;
 
 /// What the machine holds outside the heap's trees: the running
@@ -287,7 +282,7 @@ impl PagedHeap {
         let reserved = self.outstanding_reserved();
         let mut seeds = self.holdings.fresh.clone();
         seeds.extend_from_slice(fresh);
-        match census.refine(
+        let decision = census.refine(
             self,
             &TransientRoots {
                 registers: &registers,
@@ -300,27 +295,38 @@ impl PagedHeap {
                 bytes: LogicalBytes(pending),
                 overflowed: false,
             },
-        ) {
+        );
+        if decision.is_ok() {
+            self.collection_live = Some(census.certificate().upper);
+        }
+        match decision {
             Ok(RefinedDecision::Granted(_)) => Ok(()),
             Ok(RefinedDecision::Refused { .. }) => Err(HeapWriteError::Memory),
             Err(error) => Err(census_fault(error).into()),
         }
     }
     /// Whether a carry collects: when the census still counts a closure
-    /// entity or a task edge, which the carried bindings never reach (a
-    /// binding that reaches one is not carried), and U is at most
-    /// [`CARRY_COLLECTION_BYTES`], so the trace is bounded by a constant.
-    /// Both facts are the heap header's, so a cell's carry decides the same
-    /// however often its heap reopened mid-cell; a cell that made no
-    /// function or task, a no-op one included, traces nothing, and its
-    /// data garbage waits for pressure. Left in place, a dead closure would
-    /// make every later carry's classification read every binding.
+    /// entity or task edge in a small heap, or the census has grown by at
+    /// least max(last live estimate, 128 KiB). Scalar payloads count toward
+    /// the pacing allowance; a no-op carry spends none of it. Every input
+    /// is persisted in the heap header, independent of checkpoint cuts.
     pub(super) fn collects_at_carry(&self) -> bool {
-        (self.population.closure_entities > 0 || self.population.task_edges > 0)
-            && self
-                .census
-                .as_ref()
-                .is_some_and(|census| census.certificate().upper.0 <= CARRY_COLLECTION_BYTES)
+        self.census.as_ref().is_some_and(|census| {
+            let upper = census.certificate().upper.0;
+            ((self.population.closure_entities > 0 || self.population.task_edges > 0)
+                && upper <= CARRY_COLLECTION_BYTES)
+                || self.collection_live.is_some_and(|live| {
+                    upper.saturating_sub(live.0) >= live.0.max(CARRY_COLLECTION_BYTES)
+                })
+        })
+    }
+    /// Seed pacing once without tracing the initial, potentially huge,
+    /// live population. Later exact refinements replace this estimate.
+    pub(super) fn carried_collection_estimate(&mut self) {
+        if self.collection_live.is_none() {
+            self.collection_live = Some(self.accounting.upper);
+            self.header = None;
+        }
     }
     /// One exact refinement outside pressure: traces from the persistent
     /// roots and the installed statement roots, sweeps what it did not

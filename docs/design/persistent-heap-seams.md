@@ -1212,18 +1212,24 @@ copy keeps its residency weight; a self-contained site reference is
 memoized per heap. The census sees the same root cost at every reservation
 as before, because a frame's cost counts holdings only (FIG-6318).
 
-S7, collection: a cell's carry refines once when the census's population
-certificate still counts a closure entity or a task edge, which no carried
-binding reaches, and U is at most 128 KiB (`CARRY_COLLECTION_BYTES`, 4096
-entities at their minimum cost); a park never collects. Both facts are the
-heap header's, so a carry decides the same whether or not its cell's heap
-reopened mid-cell from a checkpoint (FIG-6453): a mark kept only in the
-open heap would make the carried root depend on where the run was cut. A
-no-op cell, or one that made no function or task, traces nothing; its data
-garbage waits for pressure. U bounds
-the trace's work where an entity count does not: every entity, element,
-entry and capture it walks costs at least 8 bytes, while one list of
-scalars is one entity however long it is (FIG-6425).
+S7, collection (FIG-6482): the heap header retains `collection_live`, the
+live-size estimate from the last exact refinement. The first carry seeds it
+from U without walking the initial population. A carry collects when growth
+in U above this estimate reaches `max(collection_live, 128 KiB)`; each exact
+refinement resets it to the reachable cost. Allocation pays for tracing,
+including across cells that replace large values, rather than deferring every
+large heap to memory pressure. This is an estimate: new live allocations may
+also contribute to growth. It changes neither the memory metric nor its exact
+refusal rule.
+
+Small heaps still collect when the population certificate counts a closure
+entity or task edge and U is at most 128 KiB (`CARRY_COLLECTION_BYTES`), so
+later carry classification need not reread bindings for dead functions and
+tasks. Every decision input is the heap header's, preserving FIG-6453's
+checkpoint-cut independence. A no-op carry adds no debt and traces nothing;
+parks never collect. The ratio trigger supersedes FIG-6425/FIG-6453's
+pressure-only deferral above 128 KiB and keeps carry work amortized in
+allocation, without restoring the old entity-count guard.
 
 Replay measurement: `lash-perf replay` settles page retirement between
 rounds, outside each round's window, as it settles artifact cleanup; the

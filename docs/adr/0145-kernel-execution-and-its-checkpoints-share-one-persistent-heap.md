@@ -60,7 +60,8 @@ no fragment set and no export or import step.
   at most 256 token bytes, or a page reference with its body length.
 - **The heap header.** A `KEYED_LEAF`-tagged page holds the `HeapRoot`:
   directory, families, the next primary ordinal and family, the accounting
-  certificate and the data-only population certificate. A checkpoint root
+  certificate, the data-only population certificate and the last collection's
+live-size estimate. A checkpoint root
   and a session root name this page; an unchanged heap reuses it.
 - **Sealing.** A seal happens at a park, and dirty-page eviction seals what
   it evicts: past 32 MiB of dirty pages the oldest are sealed down to
@@ -208,7 +209,7 @@ ends, the worker is discarded, and the run resumes from its last committed
 root. Staging quota and transport failures leave the committed root
 intact.
 
-### 5. Memory is a certified upper bound refined only under pressure
+### 5. Memory is a certified upper bound with exact refinement
 
 The heap's allocation census holds a certified upper bound U of the run's
 logical memory under the unchanged cost metric (`LocalCostV1`): local costs
@@ -235,19 +236,24 @@ again. Only a refused refinement is `Bound::Memory`.
 So whether an allocation passes depends on what the run can reach, not on
 residency, eviction or when the census last refined (`K-BND-003`).
 
-One collection runs outside pressure, and it is bounded by a constant: a
-cell's carry refines once when the census still counts a closure entity
-or a task edge, which no carried binding reaches, and U is at most 128 KiB
-(`CARRY_COLLECTION_BYTES`), so a session sheds the functions and tasks its
-cell left dead before its pages are sealed, and a later carry's
-classification reads nothing. Both facts are the heap header's, so the
-decision is the same however often the cell's heap reopened (FIG-6453). A
-no-op cell, or one that made no function or task, traces nothing; its data
-garbage and a larger session are left to pressure. A park still never
-collects (FIG-6321). The bound is on U, not on the entity count: every entity,
-element, entry and capture a trace walks costs at least 8 bytes, so U
-bounds the trace's work, while one list of scalars is one entity however
-long it is (FIG-6425).
+A cell's carry also collects under allocation pacing (FIG-6482). The heap
+header retains `collection_live`, the live-size estimate from the last exact
+refinement, seeded from U at the first carry without a walk. Its garbage
+estimate is growth in U above that estimate. A carry refines when that growth
+reaches `max(collection_live, 128 KiB)`: intervening allocation pays for the
+trace, so carry collection costs amortized O(allocation), including when a
+large value is repeatedly replaced. Every successful exact refinement resets
+the estimate to its reachable cost. Growth can include new live values, so
+the trigger is an estimate, never an exact liveness claim or memory verdict.
+
+Small heaps still shed forbidden closure entities and task edges when U is
+at most 128 KiB (`CARRY_COLLECTION_BYTES`), bounding that cleanup by a constant
+and keeping later carry classification from rereading bindings. All decision
+inputs are persisted in the heap header, preserving FIG-6453's independence
+from checkpoint cuts. A no-op cell creates no pacing debt and traces nothing;
+a park still never collects. This replaces FIG-6425/FIG-6453's rule that a
+larger session's garbage always waits for pressure, without restoring the
+unbounded entity-count guard.
 
 The machine keeps live slots and call stacks mutable between publication
 points (FIG-6435). Slot edits coalesce until a reader needs their declaring-site

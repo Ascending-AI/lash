@@ -629,12 +629,12 @@ impl HeapLifecycle for PagedHeap {
                     other => invalid(format!("session root transfer failed: {other}")),
                 })?;
         }
-        // A small carried session sheds the functions and tasks its cell
-        // left dead here, once per cell, so no later carry's classification
-        // walks its bindings for them. The trace is bounded.
+        // A small session sheds forbidden identities; a large one pays
+        // for collection with its allocation since the last live estimate.
         if self.collects_at_carry() {
             self.collect()?;
         }
+        self.carried_collection_estimate();
         self.seal(budget())?
             .ok_or_else(|| invalid("unbounded heap seal incomplete"))?;
         Ok(SessionRoot {

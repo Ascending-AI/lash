@@ -25,9 +25,14 @@ pub struct PagedHeap {
     pub(super) header: Option<PageRef>,
     /// The accounting and population `header` records: a header sealed
     /// before either changed is not this heap's (FIG-6318).
-    header_state: Option<(AccountingCertificate, DataOnlyCertificate)>,
+    header_state: Option<(
+        AccountingCertificate,
+        DataOnlyCertificate,
+        Option<LogicalBytes>,
+    )>,
     pub(super) accounting: AccountingCertificate,
     pub(super) population: DataOnlyCertificate,
+    pub(super) collection_live: Option<LogicalBytes>,
     pub(super) family_base: RefCell<Option<Box<dyn FamilyBase>>>,
     pub(super) census: Option<Box<dyn AllocationCensus>>,
     /// The execution roots, installed only through publication.
@@ -108,9 +113,10 @@ impl PagedHeap {
             next_family: root.next_family,
             epoch,
             header: Some(page),
-            header_state: Some((root.accounting, root.population)),
+            header_state: Some((root.accounting, root.population, root.collection_live)),
             accounting: root.accounting,
             population: root.population,
+            collection_live: root.collection_live,
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
@@ -186,6 +192,7 @@ impl PagedHeap {
             next_family: self.next_family,
             accounting: self.accounting,
             population: self.population,
+            collection_live: self.collection_live,
         })
     }
     /// The entity's current head, copied.
@@ -505,6 +512,7 @@ impl SemanticHeap for PagedHeap {
             epoch,
             header: None,
             header_state: None,
+            collection_live: None,
             population: DataOnlyCertificate {
                 closure_entities: 0,
                 task_edges: 0,
@@ -541,6 +549,7 @@ impl SemanticHeap for PagedHeap {
             header_state: None,
             accounting: root.accounting,
             population: root.population,
+            collection_live: root.collection_live,
             family_base: RefCell::new(None),
             census: None,
             session: Tree::new(false),
@@ -904,8 +913,13 @@ impl SemanticHeap for PagedHeap {
             ReservationDecision::Granted(_) => Ok(()),
             ReservationDecision::NeedsPrecision(pending) => {
                 match census.refine(self, transient, pending) {
-                    Ok(RefinedDecision::Granted(_)) => Ok(()),
-                    Ok(RefinedDecision::Refused { .. }) => Err(HeapWriteError::Memory),
+                    Ok(decision) => {
+                        self.collection_live = Some(census.certificate().upper);
+                        match decision {
+                            RefinedDecision::Granted(_) => Ok(()),
+                            RefinedDecision::Refused { .. } => Err(HeapWriteError::Memory),
+                        }
+                    }
                     Err(error) => Err(HeapWriteError::Fault(census_fault(error))),
                 }
             }
@@ -915,7 +929,9 @@ impl SemanticHeap for PagedHeap {
         result
     }
     fn seal(&mut self, budget: SealBudget) -> Result<Option<SealedHeap>, HeapFault> {
-        if self.header.is_some() && self.header_state == Some((self.accounting, self.population)) {
+        if self.header.is_some()
+            && self.header_state == Some((self.accounting, self.population, self.collection_live))
+        {
             return Ok(Some(SealedHeap {
                 root: self.heap_root()?,
                 sealed_pages: 0,
@@ -942,7 +958,7 @@ impl SemanticHeap for PagedHeap {
             return Ok(None);
         }
         self.header = Some(self.access.seal(PageKind::KEYED_LEAF, tokens, children)?);
-        self.header_state = Some((root.accounting, root.population));
+        self.header_state = Some((root.accounting, root.population, root.collection_live));
         self.epoch.0 = self
             .epoch
             .0

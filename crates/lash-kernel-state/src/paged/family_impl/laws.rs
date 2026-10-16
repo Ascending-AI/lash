@@ -119,6 +119,42 @@ fn a_noop_next_cell_copies_nothing() {
     assert_eq!(list(get(&next, "root")), id);
     eprintln!("100001 objects: next-cell reads={reads}, seals={writes}");
 }
+/// FIG-6482: garbage from replaced session values pays for collection;
+/// carrying a large live value must not defer every collection to pressure.
+#[test]
+fn fifty_overwrites_of_a_megabyte_keep_the_census_within_twice_live() {
+    let (mut heap, pages) = fresh();
+    let text = "x".repeat(1_000_000);
+    let mut worst = 0;
+    let before = crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get);
+    for turn in 0..50 {
+        let payload = heap.text(&text).expect("payload");
+        let id = heap
+            .allocate_object(ObjectInit::List(vec![Value::Text(payload)]))
+            .expect("replacement");
+        let root = bindings(&mut heap, [binding("value", Value::List(id))]);
+        let live = heap
+            .entity_cost(id)
+            .expect("local cost")
+            .expect("entity")
+            .local
+            .0
+            + heap.session_root().cost();
+        heap.release_statement_roots().expect("release");
+        let (after, _) = next(&mut heap, &pages, root);
+        heap = after;
+        let retained = heap.certificate().upper.0;
+        worst = worst.max(retained);
+        assert!(
+            retained <= 2 * live,
+            "turn {turn}: retained {retained} bytes, live {live} bytes"
+        );
+        assert_eq!(list(get(&heap, "value")), id);
+    }
+    let traced = crate::paged::census_graph::TRACED_ROWS.with(std::cell::Cell::get) - before;
+    assert!(traced <= 100, "{traced} rows traced over 50 replacements");
+    eprintln!("50 overwrites: peak census {worst} bytes, {traced} rows traced");
+}
 /// FIG-6425: a no-op cold carry traces no body row, however long the one
 /// scalar list the session holds: the cell left nothing unreachable, and
 /// one entity is no bound on the elements a trace would walk.
