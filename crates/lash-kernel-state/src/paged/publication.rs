@@ -15,6 +15,11 @@ use lash_kernel_doc::heap::*;
 /// its last live estimate, amortizing tracing against intervening allocation.
 pub(super) const CARRY_COLLECTION_BYTES: u64 = 4096 * MIN_ENTITY_COST.0;
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static RELEASE_DELTA_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// What the machine holds outside the heap's trees: the running
 /// statement's roots and holds, what it holds for its frames since it last
 /// published, and whether the installed roots are its current ones.
@@ -227,8 +232,14 @@ impl PagedHeap {
         Ok(())
     }
     pub fn release_statement_roots(&mut self) -> Result<(), HeapFault> {
+        if self.holdings.temporary.is_empty() && self.holdings.reserved == 0 {
+            self.holdings.fresh.clear();
+            return Ok(());
+        }
         let before = self.accounting;
         if let Some(census) = &mut self.census {
+            #[cfg(test)]
+            RELEASE_DELTA_CALLS.with(|calls| calls.set(calls.get() + 1));
             census
                 .changed(
                     LogicalBytes(checked_sum(

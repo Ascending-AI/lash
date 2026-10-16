@@ -1279,3 +1279,24 @@ representation, and no stored shape changes.
 Leaf and index aggregates of a nested tree also change by the edited
 row's delta, not by re-summing the node (FIG-6465). Law:
 `paged::laws::heap::a_list_append_neither_locates_nor_reencodes_its_directory_row`.
+
+
+### S4/S7 amendment: interpreter call costs (FIG-6480)
+
+The activation caches at most 64 tasks in 32 indexed buckets of two slots.
+Each slot carries the full ordinal. A cold read restores the requested task
+from its canonical tree row and a collision publishes the replaced task.
+The running task stays resident through its step: after it consumes incoming
+state, its in-flight continuation cannot be reconstructed from Ready alone.
+A bucket's other slot can serve a colliding task without evicting that frame.
+The table never grows with the number of tasks. Holdings and coordinate
+publication flush resident tasks in ordinal order.
+
+Charge formulas measure register arguments and results by reference. A formula
+reading a parked library frame's arguments still reads their canonical tree;
+measurement order, saturating arithmetic and the first heap failure are the
+same on both paths. No charge or descriptor summary changes.
+
+Releasing a statement with no temporary roots and no reservation clears its
+fresh-root list directly. There is no census delta to publish. Nonempty
+releases retain the checked sum, subtraction and certificate update.

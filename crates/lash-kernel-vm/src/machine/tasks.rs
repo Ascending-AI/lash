@@ -7,10 +7,15 @@ use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_state::paged::directory::ordinal_key;
 use lash_kernel_state::paged::tree::{Access, Cell, Tree};
 use lash_kernel_state::paged::{IncomingRecord, TaskRecord, TaskStateRecord};
-use std::collections::{BTreeMap, btree_map::Entry};
 use std::sync::Arc;
 
 const CACHED_TASKS: usize = 64;
+const WAYS: usize = 2;
+
+fn bucket(index: u64) -> std::ops::Range<usize> {
+    let first = index as usize % (CACHED_TASKS / WAYS) * WAYS;
+    first..first + WAYS
+}
 
 impl Task {
     pub(super) fn fresh(
@@ -99,7 +104,10 @@ impl std::ops::DerefMut for Task {
 
 pub(super) struct Tasks {
     rows: Tree<TaskRecord>,
-    cache: BTreeMap<u64, Task>,
+    cache: Vec<Option<(u64, Box<Task>)>>,
+    protected: Option<TaskId>,
+    #[cfg(test)]
+    cache_probes: usize,
     access: Access<'static>,
     exe: Arc<Executable>,
 }
@@ -111,7 +119,10 @@ impl Tasks {
     ) -> Self {
         Self {
             rows,
-            cache: BTreeMap::new(),
+            protected: None,
+            #[cfg(test)]
+            cache_probes: 0,
+            cache: (0..CACHED_TASKS).map(|_| None).collect(),
             access,
             exe,
         }
@@ -122,43 +133,84 @@ impl Tasks {
     pub(super) fn len(&self) -> usize {
         self.rows.len() as usize
     }
+    #[inline(always)]
     pub(super) fn get_mut(&mut self, index: usize) -> Result<Option<&mut Task>, HeapFault> {
-        let index = index as u64;
-        if self.cache.len() >= CACHED_TASKS && !self.cache.contains_key(&index) {
-            self.make_room()?;
+        #[cfg(test)]
+        {
+            self.cache_probes += 1;
         }
-        let task = match self.cache.entry(index) {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                let Some(record) = self.rows.get(&ordinal_key(index), &self.access)? else {
-                    return Ok(None);
-                };
-                let frames = Frames::open(
-                    record.frames.clone(),
-                    self.access.clone(),
-                    Arc::clone(&self.exe),
-                    ParkKind::of(&record.state),
-                );
-                entry.insert(Task {
-                    published: Some(record.clone()),
-                    record,
-                    frames,
-                })
-            }
+        let index = index as u64;
+        let range = bucket(index);
+        let slot = match self.cache[range.clone()]
+            .iter()
+            .position(|entry| entry.as_ref().is_some_and(|(id, _)| *id == index))
+        {
+            Some(way) => range.start + way,
+            None => match self.load(index)? {
+                Some(slot) => slot,
+                None => return Ok(None),
+            },
         };
-        Ok(Some(task))
+        Ok(self.cache[slot].as_mut().map(|(_, task)| task.as_mut()))
+    }
+    /// The running statement may have consumed its incoming state before it
+    /// finishes reading another task. Its frame must remain resident until
+    /// the step completes: Ready alone cannot restore that in-flight resume.
+    pub(super) fn protect(&mut self, task: Option<TaskId>) {
+        self.protected = task;
+    }
+    fn replacement(&self, index: u64) -> Result<usize, HeapFault> {
+        let range = bucket(index);
+        let way = self.cache[range.clone()]
+            .iter()
+            .position(Option::is_none)
+            .or_else(|| {
+                self.cache[range.clone()].iter().position(|entry| {
+                    entry
+                        .as_ref()
+                        .is_some_and(|(id, _)| Some(TaskId(*id)) != self.protected)
+                })
+            })
+            .ok_or_else(|| HeapFault::Malformed("a task bucket has no unprotected slot".into()))?;
+        Ok(range.start + way)
+    }
+    /// Cold task reads and collisions publish the replaced task before its
+    /// slot is reused. Two ways leave room beside the running task.
+    #[cold]
+    fn load(&mut self, index: u64) -> Result<Option<usize>, HeapFault> {
+        let Some(record) = self.rows.get(&ordinal_key(index), &self.access)? else {
+            return Ok(None);
+        };
+        let slot = self.replacement(index)?;
+        self.evict(slot)?;
+        let frames = Frames::open(
+            record.frames.clone(),
+            self.access.clone(),
+            Arc::clone(&self.exe),
+            ParkKind::of(&record.state),
+        );
+        self.cache[slot] = Some((
+            index,
+            Box::new(Task {
+                published: Some(record.clone()),
+                record,
+                frames,
+            }),
+        ));
+        Ok(Some(slot))
     }
     pub(super) fn push(&mut self, mut task: Task) -> Result<(), HeapFault> {
-        self.make_room()?;
         let index = self.rows.len();
+        let slot = self.replacement(index)?;
+        self.evict(slot)?;
         self.rows
             .write(ordinal_key(index), task.record.clone(), &self.access)?;
         task.published = Some(task.record.clone());
-        self.cache.insert(index, task);
+        self.cache[slot] = Some((index, Box::new(task)));
         Ok(())
     }
     pub(super) fn after_refinement(&mut self, rows: Tree<TaskRecord>) -> Result<(), HeapFault> {
-        for (index, task) in &mut self.cache {
+        for (index, task) in self.cache.iter_mut().flatten() {
             // The refined rows replace those last written.
             task.published = None;
             if matches!(task.record.state, TaskStateRecord::Ended(_))
@@ -176,7 +228,9 @@ impl Tasks {
     /// they stand left as last published: what pressure accounting and a
     /// trace read (FIG-6318).
     pub(super) fn holdings(&mut self) -> Result<Tree<TaskRecord>, HeapFault> {
-        for (index, task) in &mut self.cache {
+        let mut cached: Vec<_> = self.cache.iter_mut().flatten().collect();
+        cached.sort_unstable_by_key(|(index, _)| *index);
+        for (index, task) in cached {
             task.frames.flush_holdings()?;
             task.record.frames = task.frames.rows.clone();
             put(&mut self.rows, *index, task, &self.access)?;
@@ -184,7 +238,9 @@ impl Tasks {
         Ok(self.rows.clone())
     }
     pub(super) fn roots(&mut self) -> Result<Tree<TaskRecord>, HeapFault> {
-        for (index, task) in &mut self.cache {
+        let mut cached: Vec<_> = self.cache.iter_mut().flatten().collect();
+        cached.sort_unstable_by_key(|(index, _)| *index);
+        for (index, task) in cached {
             task.frames.flush()?;
             task.record.frames = task.frames.rows.clone();
             put(&mut self.rows, *index, task, &self.access)?;
@@ -227,21 +283,16 @@ impl Tasks {
     /// A cold stack loads its frames as execution reaches them. `None` when
     /// the task is not cached.
     pub(super) fn cached_frames(&self, id: TaskId) -> Option<(usize, Vec<(usize, &super::Frame)>)> {
-        self.cache
-            .get(&id.0)
-            .map(|task| (task.frames.len(), task.frames.cached()))
+        self.cache[bucket(id.0)]
+            .iter()
+            .flatten()
+            .find(|(index, _)| *index == id.0)
+            .map(|(_, task)| (task.frames.len(), task.frames.cached()))
     }
-    fn make_room(&mut self) -> Result<(), HeapFault> {
-        if self.cache.len() < CACHED_TASKS {
-            return Ok(());
-        }
-        let Some(index) = self.cache.keys().next().copied() else {
+    fn evict(&mut self, slot: usize) -> Result<(), HeapFault> {
+        let Some((index, mut task)) = self.cache[slot].take() else {
             return Ok(());
         };
-        let mut task = self
-            .cache
-            .remove(&index)
-            .ok_or_else(|| HeapFault::Malformed("selected cached task is absent".into()))?;
         task.frames.flush()?;
         task.record.frames = task.frames.rows.clone();
         put(&mut self.rows, index, &mut task, &self.access)
@@ -265,4 +316,43 @@ fn put(
         task.published = Some(task.record.clone());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod laws {
+    use super::*;
+    use crate::laws::embedder::Embedder;
+    use lash_kernel_state::paged::{SiteRef, TaskIdentityRef};
+
+    /// FIG-6480: a resident task takes one indexed probe, even when the
+    /// execution cache is full; the canonical task tree stays cold.
+    #[test]
+    fn a_warm_task_read_uses_one_cache_probe_at_capacity() {
+        let mut embedder = Embedder::new("main { return null }");
+        let machine = &mut embedder.machine;
+        let access = machine.heap.pages().clone();
+        let site = SiteRef::new(&machine.exe.code(machine.exe.main).site, &access).unwrap();
+        for index in 1..CACHED_TASKS {
+            let identity =
+                TaskIdentityRef::spawn(TaskIdentityRef::MAIN, site.clone(), index as u64, &access)
+                    .unwrap();
+            machine
+                .tasks
+                .push(Task::fresh(
+                    identity,
+                    access.clone(),
+                    Arc::clone(&machine.exe),
+                ))
+                .unwrap();
+        }
+        let before = machine.tasks.cache_probes;
+        for _ in 0..128 {
+            assert!(machine.tasks.get_mut(0).unwrap().is_some());
+        }
+        assert_eq!(
+            machine.tasks.cache_probes - before,
+            128,
+            "a resident task must take one cache probe per read"
+        );
+    }
 }

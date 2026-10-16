@@ -422,11 +422,12 @@ impl KernelMachine {
         }
         self.formula_source(
             &exe.lib(lib).charge,
-            |index| {
-                args.get(
+            |index, measure| {
+                let value = args.get(
                     &lash_kernel_state::paged::directory::ordinal_key(index as u64),
                     self.heap.pages(),
-                )
+                )?;
+                self.measure(value.as_ref(), measure)
             },
             result,
         )
@@ -438,13 +439,17 @@ impl KernelMachine {
         args: &[Value],
         result: Option<&Value>,
     ) -> Result<u64, Halt> {
-        self.formula_source(plan, |index| Ok(args.get(index).cloned()), result)
+        self.formula_source(
+            plan,
+            |index, measure| self.measure(args.get(index), measure),
+            result,
+        )
     }
 
     fn formula_source(
         &self,
         plan: &Plan,
-        mut argument: impl FnMut(usize) -> Result<Option<Value>, HeapFault>,
+        mut argument: impl FnMut(usize, Measure) -> Result<u64, HeapFault>,
         result: Option<&Value>,
     ) -> Result<u64, Halt> {
         let mut fault = None;
@@ -454,23 +459,10 @@ impl KernelMachine {
             if fault.is_some() {
                 return 0;
             }
-            let value = match source {
-                Source::Arg(index) => match argument(index) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        fault = Some(error);
-                        return 0;
-                    }
-                },
-                Source::Result => result.cloned(),
-                Source::Nothing => None,
-            };
-            let amount = match (value.as_ref(), measure) {
-                (None, _) => Ok(0),
-                (Some(value), Measure::Size) => size(&self.heap, value),
-                (Some(value), Measure::DeepSize) => deep_size(&self.heap, value),
-                (Some(value), Measure::NestedSize) => nested_size(&self.heap, value),
-                (Some(value), Measure::Magnitude) => Ok(magnitude(value)),
+            let amount = match source {
+                Source::Arg(index) => argument(index, measure),
+                Source::Result => self.measure(result, measure),
+                Source::Nothing => Ok(0),
             };
             match amount {
                 Ok(units) => units,
@@ -481,6 +473,23 @@ impl KernelMachine {
             }
         });
         fault.map_or(Ok(units), |error| Err(Halt::from(error)))
+    }
+
+    fn measure(&self, value: Option<&Value>, measure: Measure) -> Result<u64, HeapFault> {
+        #[cfg(test)]
+        if let Some(value) = value {
+            self.storage
+                .formula_sources
+                .borrow_mut()
+                .push(std::ptr::from_ref(value).addr());
+        }
+        match (value, measure) {
+            (None, _) => Ok(0),
+            (Some(value), Measure::Size) => size(&self.heap, value),
+            (Some(value), Measure::DeepSize) => deep_size(&self.heap, value),
+            (Some(value), Measure::NestedSize) => nested_size(&self.heap, value),
+            (Some(value), Measure::Magnitude) => Ok(magnitude(value)),
+        }
     }
 
     /// Pushes a frame that runs `code` with the call's arguments bound to

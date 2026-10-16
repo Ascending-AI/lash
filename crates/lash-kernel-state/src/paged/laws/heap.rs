@@ -1477,3 +1477,26 @@ fn a_list_append_neither_locates_nor_reencodes_its_directory_row() {
         (N - 1) as i64
     ));
 }
+
+/// FIG-6480: an empty statement release changes no census facts. A real
+/// reservation is still released once, with the exact original certificate.
+#[test]
+fn empty_statement_releases_do_not_publish_census_deltas() {
+    use super::super::publication::RELEASE_DELTA_CALLS;
+    let (mut heap, _) = fresh();
+    let before = heap.certificate();
+    RELEASE_DELTA_CALLS.with(|calls| calls.set(0));
+    for _ in 0..128 {
+        heap.release_statement_roots().unwrap();
+    }
+    assert_eq!(heap.certificate(), before);
+    assert_eq!(
+        RELEASE_DELTA_CALLS.with(std::cell::Cell::get),
+        0,
+        "empty releases called the census"
+    );
+    assert!(heap.hold(16, false).unwrap());
+    heap.release_statement_roots().unwrap();
+    assert_eq!(heap.certificate(), before);
+    assert_eq!(RELEASE_DELTA_CALLS.with(std::cell::Cell::get), 1);
+}
