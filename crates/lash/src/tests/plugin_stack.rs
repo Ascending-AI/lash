@@ -417,7 +417,8 @@ async fn builder_configured_tools_and_hooks_are_never_discarded_on_postgres() ->
 
 /// D-DEFAULTS2: a standard session's tool docs and catalogue advertisements
 /// use the host's non-default presentation values: the standard presenter's
-/// config, admitted over its standard one.
+/// config, admitted over its standard one. Exhausted schema import budgets
+/// refuse with a typed cause instead of silently widening the contract.
 #[test]
 fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
     let definition = crate::tools::ToolDefinition::raw(
@@ -429,7 +430,7 @@ fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
     let mut host = crate::plugins::StandardProtocolConfig::standard();
     let base = host.tool_docs(&catalog).expect("the standard presentation");
     host.tool_presentation =
-        serde_json::json!({ "example_limit": 1, "example_chars": 8, "schema_depth": 0 });
+        serde_json::json!({ "example_limit": 1, "example_chars": 8, "schema_depth": 4 });
     let selected = host.tool_docs(&catalog).expect("the selected presentation");
     let examples = selected
         .text
@@ -445,8 +446,19 @@ fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
         host.recorded_behaviour()
             .expect("the selected presentation admits")
             .tool_presenter
-            .config["schema_depth"],
-        0
+            .config,
+        host.tool_presentation
+    );
+    host.tool_presentation["schema_depth"] = serde_json::json!(0);
+    assert_eq!(
+        host.tool_docs(&catalog)
+            .expect_err("an exhausted import budget must refuse presentation"),
+        crate::tools::PresentationRefusal::Shape {
+            cause: crate::tools::ShapeImportRefusal::ResourceExhausted {
+                resource: "depth".into(),
+                limit: 0,
+            },
+        }
     );
     #[cfg(feature = "rlm")]
     {
