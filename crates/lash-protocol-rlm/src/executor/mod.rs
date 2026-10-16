@@ -264,6 +264,23 @@ fn host_failure(message: impl Into<String>) -> Refused {
     )))
 }
 
+/// Where the session an ended cell's recorded end names stands: under a
+/// lease on the cell's ended root `root`, fenced by the activation that
+/// resumes it. None for a store that publishes no heap pages.
+fn ended_root_pages(
+    snapshots: &lash_vm_broker::DurableSnapshotStore,
+    root: lash_core_store::checkpoint_graph::NodeId,
+) -> Option<lash_core::plugin::SessionPages> {
+    let cx = snapshots.context();
+    Some(lash_core::plugin::SessionPages {
+        store: cx.pages().ok()?,
+        actor: cx.actor().clone(),
+        epoch: cx.epoch(),
+        owner: lash_durable::domain::graph::RootOwner::Exec(snapshots.exec().clone()),
+        root,
+    })
+}
+
 /// Lowers a fresh cell against what the session offers now, or takes a
 /// resumed cell as its first activation recorded it.
 async fn link_cell(
@@ -272,6 +289,7 @@ async fn link_cell(
     code: &str,
     services: &CellServices,
     session_projected_bindings: CodeModeProjectedBindings,
+    snapshots: &lash_vm_broker::DurableSnapshotStore,
     resumed: Option<envelope::ResumedCell>,
 ) -> Result<LinkedCell, Refused> {
     if let Some(resumed) = resumed {
@@ -290,8 +308,11 @@ async fn link_cell(
         // An end an earlier activation recorded names the session as that
         // activation left it, which a read-back end does not carry: the
         // session adopts it, and reads its pages under a lease on the
-        // cell's ended root, which the turn names once the cell answers
-        // (FIG-6315).
+        // cell's ended root (FIG-6315), which the turn names once the cell
+        // answers. The session names that root itself as it adopts the
+        // end: its own reads before the turn's next one (the live catalog
+        // check of the next sync) reach the pages no run of it holds
+        // (FIG-6442).
         if let Some(session) = &resumed.session {
             state
                 .restore_execution_graph(
@@ -303,6 +324,7 @@ async fn link_cell(
                         "the session the cell's recorded end names does not restore: {error}"
                     ))
                 })?;
+            state.note_pages(ended_root_pages(snapshots, resumed.root).as_ref());
         }
         return Ok(LinkedCell {
             document: envelope.document().map_err(host_failure)?,
@@ -677,6 +699,7 @@ async fn run_linked_cell(
         code,
         services,
         session_projected_bindings,
+        snapshots,
         resumed,
     )
     .await

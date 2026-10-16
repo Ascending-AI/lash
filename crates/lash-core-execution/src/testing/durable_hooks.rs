@@ -1,5 +1,6 @@
 //! [`DurableCommitHook`]: a durable store that runs a test's hook before
-//! each owner commit reaches the store it wraps.
+//! each owner commit reaches the store it wraps, a candidate's publication
+//! through its page store among them.
 //!
 //! The hook sees the transaction and its label. It may answer an error in
 //! the store's place (the commit then applies nothing), hold the commit
@@ -11,6 +12,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+use lash_durable::domain::pages::{
+    CandidatePublication, CandidateReceipt, PageStore, RetirementBacklog, RetirementBudget,
+    RetirementProgress, RootLease, RootLeaseId, RootLeaseRequest, StoredPage,
+};
 use lash_durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, PromptCallKey,
     PromptSnapshotRow, PromptText, RootOwner, RunFacts, RunSeq, ScopeKey, SessionCloseRow,
@@ -35,9 +40,10 @@ type CommitHook = Arc<
 
 /// A durable store that runs its armed [`CommitHook`] before each owner
 /// commit. See the module documentation.
+#[derive(Clone)]
 pub struct DurableCommitHook {
     inner: Arc<dyn DurableStore>,
-    hook: Mutex<Option<CommitHook>>,
+    hook: Arc<Mutex<Option<CommitHook>>>,
 }
 
 impl DurableCommitHook {
@@ -46,7 +52,7 @@ impl DurableCommitHook {
     pub fn over(inner: Arc<dyn DurableStore>) -> Self {
         Self {
             inner,
-            hook: Mutex::new(None),
+            hook: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -65,6 +71,83 @@ impl DurableCommitHook {
     /// Pass every commit through again.
     pub fn disarm(&self) {
         *self.hook.lock_recover() = None;
+    }
+
+    /// Runs the armed hook, if any, before `tx` commits under `label`.
+    async fn before_commit(&self, tx: &ActorTx, label: CommitLabel) -> Result<(), DurableError> {
+        let hook = self.hook.lock_recover().clone();
+        match hook {
+            Some(hook) => hook(tx, label).await,
+            None => Ok(()),
+        }
+    }
+
+    fn page_store(&self) -> Result<Arc<dyn PageStore>, DurableError> {
+        self.inner.pages().ok_or_else(|| {
+            DurableError::Store(lash_durable::StoreFailure {
+                kind: lash_durable::StoreFailureKind::Unavailable,
+                message: "the wrapped store publishes no heap pages".to_owned(),
+            })
+        })
+    }
+}
+
+/// The wrapped store's page publication, a candidate's commit under the
+/// hook as every owner commit is; leases, reads and retirement pass
+/// through.
+#[async_trait::async_trait]
+impl PageStore for DurableCommitHook {
+    async fn acquire_root_lease(
+        &self,
+        request: RootLeaseRequest,
+    ) -> Result<RootLease, DurableError> {
+        self.page_store()?.acquire_root_lease(request).await
+    }
+
+    async fn renew_root_lease(&self, lease: &RootLease) -> Result<RootLease, DurableError> {
+        self.page_store()?.renew_root_lease(lease).await
+    }
+
+    async fn release_root_lease(&self, lease: RootLeaseId) -> Result<(), DurableError> {
+        self.page_store()?.release_root_lease(lease).await
+    }
+
+    async fn read_pages(
+        &self,
+        lease: &RootLease,
+        pages: &[NodeId],
+    ) -> Result<Vec<StoredPage>, DurableError> {
+        self.page_store()?.read_pages(lease, pages).await
+    }
+
+    async fn commit_candidate(
+        &self,
+        tx: ActorTx,
+        candidate: CandidatePublication,
+        label: CommitLabel,
+    ) -> Result<CandidateReceipt, DurableError> {
+        let pages = self.page_store()?;
+        self.before_commit(&tx, label).await?;
+        pages.commit_candidate(tx, candidate, label).await
+    }
+
+    async fn candidate_state(
+        &self,
+        exec: &ExecKey,
+    ) -> Result<Option<(NodeId, lash_durable::domain::checkpoint_graph::CommitId)>, DurableError>
+    {
+        self.page_store()?.candidate_state(exec).await
+    }
+
+    async fn retire_step(
+        &self,
+        budget: RetirementBudget,
+    ) -> Result<RetirementProgress, DurableError> {
+        self.page_store()?.retire_step(budget).await
+    }
+
+    async fn retirement_backlog(&self) -> Result<RetirementBacklog, DurableError> {
+        self.page_store()?.retirement_backlog().await
     }
 }
 
@@ -200,8 +283,10 @@ impl DurableStore for DurableCommitHook {
         self.inner.now().await
     }
 
+    /// The wrapped store's page publication under the hook.
     fn pages(&self) -> Option<std::sync::Arc<dyn lash_durable::domain::pages::PageStore>> {
-        self.inner.pages()
+        self.inner.pages()?;
+        Some(Arc::new(self.clone()))
     }
 
     async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
@@ -253,10 +338,7 @@ impl DurableStore for DurableCommitHook {
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
-        let hook = self.hook.lock_recover().clone();
-        if let Some(hook) = hook {
-            hook(&tx, label).await?;
-        }
+        self.before_commit(&tx, label).await?;
         self.inner.commit(tx, label).await
     }
 

@@ -195,6 +195,8 @@ impl lash_vm_broker::kernel::graph::Projections for EntryProjections<'_> {
 /// host's records, prints and started processes, and the host graph its
 /// next park builds on.
 pub(super) struct ResumedCell {
+    /// The cell's root this was read from.
+    pub root: NodeId,
     pub cell: CellEnvelope,
     pub prints: Vec<Datum>,
     pub ledgers: CellHostLedgers,
@@ -332,6 +334,7 @@ pub(super) fn load_cell(
         .collect();
     graph.state = state;
     Ok(ResumedCell {
+        root,
         cell,
         prints,
         ledgers,
