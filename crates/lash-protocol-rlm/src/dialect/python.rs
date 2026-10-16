@@ -56,12 +56,21 @@ impl DialectPrompts for PythonPrompts {
         Ok(name)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "inferred and projected history shapes contain only supported reference-free types"
+    )]
     fn schema_type(&self, shape: &SchemaShape) -> String {
-        render_shape(shape)
+        render_shape(shape).expect("reference-free Python host type")
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "the mode supplies a valid host name and a supported reference-free shape"
+    )]
     fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String {
         lash_tool_presenter_python::schema_definition(name, shape)
+            .expect("reference-free Python host definition")
     }
 
     fn prompt_vocabulary(&self) -> DialectPromptVocabulary {
@@ -127,6 +136,10 @@ impl DialectPrompts for PythonPrompts {
 Built-in names cannot be reused by top-level bindings. Top-level variables persist across executions as data. A function bound to a top-level name persists as a self-contained copy: its captures are frozen when its cell ends, so later changes to those variables are not seen and changes the function makes to them are not kept. Functions capturing tasks, and functions held inside data, are not carried. Keep a task's result, not the task. A saved function can start a durable process with `await processes_start({{"definition": saved_fn, "args": {{"parameter": value}}}})` when the process tools are offered.
 
 This is a Python subset, not CPython: there are no imports beyond `asyncio`, and no file, network or process access except through the tools.
+
+### Type reference
+
+Tool declarations describe values and calls. `TypedDict`, aliases and the typing names shown there do not install classes or imports in the cell runtime.
 
 ### Host API
 
