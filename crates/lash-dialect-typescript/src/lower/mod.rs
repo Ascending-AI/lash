@@ -419,6 +419,7 @@ pub(crate) fn lower(
                 })
                 .map(|(name, _)| name.as_str().to_string())
                 .collect(),
+            environment.effects,
         ),
         assigned: &program.assigned,
         narrowed: Vec::new(),
