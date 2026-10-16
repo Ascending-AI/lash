@@ -1,7 +1,7 @@
 //! Host narrowing of native recursive safety ceilings; never durable run state.
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(try_from = "LimitsWire")]
 pub struct KernelDataLimits {
     document_depth: usize,
@@ -65,13 +65,18 @@ impl Default for KernelDataLimits {
         Self::standard()
     }
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct LimitsWire {
+    #[schemars(range(max = 64))]
     document_depth: usize,
+    #[schemars(range(max = 352))]
     document_json_depth: usize,
+    #[schemars(range(max = 512))]
     decode_depth: u64,
+    #[schemars(range(max = 512))]
     state_json_depth: usize,
+    #[schemars(range(min = 1, max = 128))]
     value_depth: usize,
 }
 impl TryFrom<LimitsWire> for KernelDataLimits {

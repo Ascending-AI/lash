@@ -437,3 +437,100 @@ fn deployment_name_limits_are_honored_before_io() {
         config
     );
 }
+
+/// Law S1: a rendered node never silently acquires new retirement defaults.
+#[test]
+fn offline_validation_names_the_missing_retirement_path() {
+    let mut json = serde_json::to_value(PostgresHostConfig::standard()).unwrap();
+    json["node"].as_object_mut().unwrap().remove("retirement");
+    let error = validate_host_config(&json.to_string()).unwrap_err();
+    assert_eq!(error.path, "node.retirement");
+    assert_eq!(error.kind, HostConfigErrorKind::Missing);
+}
+
+/// Closed config objects identify the rejected key at any nesting depth.
+#[test]
+fn offline_validation_names_unknown_field_paths() {
+    for (parent, path) in [
+        ("", "typo"),
+        ("/node", "node.typo"),
+        ("/node/retirement", "node.retirement.typo"),
+        ("/node/graph_reads", "node.graph_reads.typo"),
+        (
+            "/node/graph_reads/kernel_data",
+            "node.graph_reads.kernel_data.typo",
+        ),
+        ("/roles/work", "roles.work.typo"),
+        ("/name_limits", "name_limits.typo"),
+    ] {
+        let mut json = serde_json::to_value(PostgresHostConfig::standard()).unwrap();
+        json.pointer_mut(parent).unwrap()["typo"] = serde_json::json!(1);
+        let error = validate_host_config(&json.to_string()).unwrap_err();
+        assert_eq!(error.path, path);
+        assert_eq!(error.kind, HostConfigErrorKind::Unknown);
+    }
+}
+
+/// Offline admission uses the connection path's parser and value rules,
+/// including refusing trailing input rather than accepting its first value.
+#[test]
+fn offline_validation_applies_parser_and_value_rules() {
+    assert!(validate_host_config("{}").is_ok());
+    let json = serde_json::to_string(&PostgresHostConfig::standard()).unwrap();
+    assert!(validate_host_config(&json).is_ok());
+    for (json, path) in [
+        (r#"{"roles":{"served_nodes":"one"}}"#, "roles.served_nodes"),
+        (r#"{"roles":{"served_nodes":0}}"#, "roles.served_nodes"),
+        (
+            r#"{"connection":{"topology":"typo"}}"#,
+            "connection.topology",
+        ),
+        ("{} {}", "$"),
+        ("{", "$"),
+    ] {
+        let error = validate_host_config(json).unwrap_err();
+        assert_eq!(error.path, path);
+        assert_eq!(error.kind, HostConfigErrorKind::Invalid);
+    }
+}
+
+/// The published structural contract admits serde's milliseconds, nullable
+/// durations and timeout words, and refuses missing or unknown node fields.
+#[test]
+fn the_host_schema_agrees_with_serde_json_shapes() {
+    let schema =
+        lash_sansio::json_schema::JsonSchema::admit(serde_json::from_str(JSON_SCHEMA).unwrap())
+            .unwrap();
+    let standard = serde_json::to_value(PostgresHostConfig::standard()).unwrap();
+    let development = serde_json::to_value(PostgresHostConfig::development()).unwrap();
+    let mut cases = vec![serde_json::json!({}), standard.clone(), development];
+    for timeout in [
+        serde_json::json!("inherit"),
+        serde_json::json!("disabled"),
+        serde_json::json!(1_000),
+    ] {
+        let mut json = standard.clone();
+        json["guards"]["ordinary"]["lock_timeout"] = timeout;
+        json["roles"]["work"]["idle_timeout_ms"] = serde_json::Value::Null;
+        cases.push(json);
+    }
+    let mut missing = standard.clone();
+    missing["node"]
+        .as_object_mut()
+        .unwrap()
+        .remove("retirement");
+    cases.push(missing);
+    let mut unknown = standard.clone();
+    unknown["node"]["retirement"]["typo"] = serde_json::json!(1);
+    cases.push(unknown);
+    let mut seconds_object = standard;
+    seconds_object["node"]["retirement"]["every_ms"] = serde_json::json!({"secs": 1, "nanos": 0});
+    cases.push(seconds_object);
+    for json in cases {
+        assert_eq!(
+            schema.validate(&json).is_ok(),
+            serde_json::from_value::<PostgresHostConfig>(json.clone()).is_ok(),
+            "{json}"
+        );
+    }
+}

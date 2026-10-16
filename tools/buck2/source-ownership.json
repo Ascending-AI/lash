@@ -135,6 +135,7 @@
   },
   "crates/lash-postgres-store": {
     "compile_data": [
+      "postgres-host-config-v1.schema.json",
       "schema.sql",
       "teardown.sql",
       "schema-shape.txt"

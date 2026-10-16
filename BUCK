@@ -185,6 +185,7 @@ test_suite(
         "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__unit_test",
         "//crates/lash-postgres-store:conformance__test",
         "//crates/lash-postgres-store:durable_read_fixture__test",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin",
         "//crates/lash-postgres-store:host_provisioned_rollout__test",
         "//crates/lash-postgres-store:integration__test",
         "//crates/lash-postgres-store:lash-postgres-store[static]",
@@ -621,6 +622,7 @@ test_suite(
         "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__unit_test__rust_test__metadata[check]",
         "//crates/lash-postgres-store:conformance__test__rust_test__metadata[check]",
         "//crates/lash-postgres-store:durable_read_fixture__test__rust_test__metadata[check]",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin__metadata[check]",
         "//crates/lash-postgres-store:host_provisioned_rollout__test__rust_test__metadata[check]",
         "//crates/lash-postgres-store:integration__test__rust_test__metadata[check]",
         "//crates/lash-postgres-store:lash-postgres-store__fv_29b9b5ba__metadata[check]",
@@ -2427,6 +2429,7 @@ test_suite(
         "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__unit_test__clippy[clippy.txt]",
         "//crates/lash-postgres-store:conformance__test__clippy[clippy.txt]",
         "//crates/lash-postgres-store:durable_read_fixture__test__clippy[clippy.txt]",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin__clippy[clippy.txt]",
         "//crates/lash-postgres-store:host_provisioned_rollout__test__clippy[clippy.txt]",
         "//crates/lash-postgres-store:integration__test__clippy[clippy.txt]",
         "//crates/lash-postgres-store:lash-postgres-store__clippy[clippy.txt]",
@@ -3034,6 +3037,9 @@ test_suite(
         "//crates/lash-postgres-store:durable_read_fixture__test__fv_190f2ecf__rust_test__metadata[check]",
         "//crates/lash-postgres-store:durable_read_fixture__test__fv_5b55533b__rust_test__metadata[check]",
         "//crates/lash-postgres-store:durable_read_fixture__test__fv_eaec5040__rust_test__metadata[check]",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin__fv_190f2ecf__metadata[check]",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin__fv_5b55533b__metadata[check]",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin__fv_eaec5040__metadata[check]",
         "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_190f2ecf__rust_test__metadata[check]",
         "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_5b55533b__rust_test__metadata[check]",
         "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_eaec5040__rust_test__metadata[check]",
@@ -4092,6 +4098,9 @@ test_suite(
         "//crates/lash-postgres-store:durable_read_fixture__test__fv_190f2ecf__rust_test__metadata[check]",
         "//crates/lash-postgres-store:durable_read_fixture__test__fv_5b55533b__rust_test__metadata[check]",
         "//crates/lash-postgres-store:durable_read_fixture__test__fv_eaec5040__rust_test__metadata[check]",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin__fv_190f2ecf__metadata[check]",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin__fv_5b55533b__metadata[check]",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin__fv_eaec5040__metadata[check]",
         "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_190f2ecf__rust_test__metadata[check]",
         "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_5b55533b__rust_test__metadata[check]",
         "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_eaec5040__rust_test__metadata[check]",
@@ -5280,6 +5289,7 @@ schema_documents(
         "//crates/lash-kernel-doc:kernel_schema_generator__bin",
         "//crates/lash-kernel-edit:kernel_edit_schema_generator__bin",
         "//crates/lash-kernel-view:kernel_view_schema_generator__bin",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin",
     ],
     script = "scripts/generate-workflow-schemas.py",
 )
@@ -5287,7 +5297,9 @@ schema_documents(
 schema_check(
     name = "host_schema_check",
     documents = ":host_schema_documents",
-    checked = glob(["schemas/host/*/*.schema.json", "schemas/host/*/*.d.ts"]),
+    checked = glob(["schemas/host/*/*.schema.json", "schemas/host/*/*.d.ts"]) + [
+        "//crates/lash-postgres-store:postgres-host-config-v1.schema.json",
+    ],
     script = "scripts/generate-workflow-schemas.py",
 )
 

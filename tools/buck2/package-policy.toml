@@ -579,7 +579,7 @@ test262_corpus = { glob = [
 # it a symlinked directory instead.
 [exported_files]
 # The schema `postgres_action_runner.py` applies to a hermetic test's database.
-lash-internal-postgres-store = ["schema.sql"]
+lash-internal-postgres-store = ["schema.sql", "postgres-host-config-v1.schema.json"]
 
 # --- trybuild fixtures ---------------------------------------------------------
 

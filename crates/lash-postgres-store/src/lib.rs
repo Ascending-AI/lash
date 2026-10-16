@@ -938,9 +938,10 @@ pub mod host;
 pub use durable::{PostgresDurableStore, PostgresNodeWakes};
 use guarded_tx::begin_guarded;
 pub use host::{
-    ConnectionRole, ConnectionTopology, PostgresConnectionFactory, PostgresEndpoints,
-    PostgresHostConfig, PostgresHostConfigError, PostgresHostError, PostgresPoolMetrics,
-    PostgresPoolSet, PostgresRolePoolMetrics, TransactionPrelude,
+    ConnectionRole, ConnectionTopology, HostConfigError, HostConfigErrorKind, JSON_SCHEMA,
+    PostgresConnectionFactory, PostgresEndpoints, PostgresHostConfig, PostgresHostConfigError,
+    PostgresHostError, PostgresPoolMetrics, PostgresPoolSet, PostgresRolePoolMetrics,
+    TransactionPrelude, validate_host_config,
 };
 pub use migrate::{MigrateError, MigrationPhase, MigrationRefusal, MigrationReport, MigrationStep};
 mod connection_budget;

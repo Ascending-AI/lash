@@ -265,7 +265,16 @@ pub(crate) async fn synthetic_next_findings(
 /// could not be overridden for the clock row would be a valve that cannot be used
 /// to work around a checker bug, which is its entire purpose.
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SchemaCheck {

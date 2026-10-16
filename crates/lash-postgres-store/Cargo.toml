@@ -38,6 +38,8 @@ lash-core-execution = { workspace = true }
 rmp-serde = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_path_to_error = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync", "macros"] }
 tracing = { workspace = true }
@@ -105,3 +107,8 @@ path = "tests/migrate.rs"
 [[test]]
 name = "schema_constraints"
 path = "tests/schema_constraints.rs"
+
+[[bin]]
+name = "host_config_schema_generator"
+path = "src/bin/host_config_schema_generator.rs"
+test = false

@@ -19,14 +19,24 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use lash_durable::{DurableSettings, GroupCommit, LeaseSettings, Notifier, RetirementSettings};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::serde_ms;
 use crate::SchemaCheck;
 
+/// The generated JSON Schema for [`PostgresHostConfig`], also committed as
+/// `schemas/host/postgres-host-config/v1.schema.json`.
+///
+/// Hosts can validate rendered JSON in CI without starting a node. This
+/// describes the JSON shape; [`super::validate_host_config`] also checks value
+/// and cross-field rules. Regenerate with `scripts/generate-workflow-schemas.py`;
+/// `//:schema_checks` checks both committed copies for drift.
+pub const JSON_SCHEMA: &str = include_str!("../../postgres-host-config-v1.schema.json");
+
 /// Every lash PostgreSQL connection role's sizes, guards, retries and
 /// names, and the durable node settings, validated together.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct PostgresHostConfig {
     /// Transport policy every role shares.
@@ -37,6 +47,7 @@ pub struct PostgresHostConfig {
     /// The durable substrate's parameters, the node lease's included. The
     /// durable backend takes them from here and from nowhere else.
     #[serde(with = "DurableSettingsDef")]
+    #[schemars(with = "DurableSettingsDef")]
     pub node: DurableSettings,
     /// SQL guards and whole-operation deadlines, by operation role.
     pub guards: GuardPolicies,
@@ -110,7 +121,7 @@ impl PostgresHostConfig {
 }
 
 /// Transport policy shared by every role.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ConnectionPolicy {
     /// Each connection's `application_name` is this prefix and its role:
@@ -139,7 +150,7 @@ impl Default for ConnectionPolicy {
 
 /// TLS settings applied over the endpoint's. An absent value keeps the
 /// endpoint's own.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct TransportOverrides {
     /// The TLS mode; production hosts usually want `verify_full`.
@@ -153,7 +164,7 @@ pub struct TransportOverrides {
 }
 
 /// PostgreSQL's `sslmode`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SslMode {
     Disable,
@@ -165,7 +176,7 @@ pub enum SslMode {
 }
 
 /// How the endpoints reach the server.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionTopology {
     /// Directly, or through a session-mode pooler: every connection is one
@@ -181,7 +192,7 @@ pub enum ConnectionTopology {
 }
 
 /// A pooled role's sizing and recycling.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PoolPolicy {
     /// The most connections the pool opens; at least 1.
@@ -190,13 +201,16 @@ pub struct PoolPolicy {
     pub min_connections: u32,
     /// How long a checkout may wait, connecting included.
     #[serde(rename = "acquire_timeout_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub acquire_timeout: Duration,
     /// Close a connection idle this long; `null` never closes it for
     /// idleness.
     #[serde(rename = "idle_timeout_ms", with = "serde_ms::option")]
+    #[schemars(with = "Option<u64>")]
     pub idle_timeout: Option<Duration>,
     /// Recycle a connection this old; `null` never recycles it for age.
     #[serde(rename = "max_lifetime_ms", with = "serde_ms::option")]
+    #[schemars(with = "Option<u64>")]
     pub max_lifetime: Option<Duration>,
     /// Ping every connection before handing it out. Default false: only a
     /// connection idle for 10 s or longer is pinged, so a checkout on the
@@ -219,11 +233,12 @@ impl PoolPolicy {
 
 /// A role served by connections of its own, one per served node, that are
 /// never recycled for idleness or age.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DedicatedConnectionPolicy {
     /// How long opening (or reopening) the connection may take.
     #[serde(rename = "acquire_timeout_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub acquire_timeout: Duration,
 }
 
@@ -234,7 +249,7 @@ pub struct DedicatedConnectionPolicy {
 /// and liveness probes on the scheduler pool; reap, node release, hand-back
 /// and every cancel and terminal commit on the critical pool; everything
 /// else on the work pool.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct RolePolicies {
     /// Store calls and ordinary durable commits. Default 16 connections,
@@ -319,7 +334,7 @@ impl Serialize for ServerTimeout {
 
 impl<'de> Deserialize<'de> for ServerTimeout {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
+        #[derive(Deserialize, JsonSchema)]
         #[serde(untagged)]
         enum Wire {
             Millis(u64),
@@ -339,7 +354,7 @@ impl<'de> Deserialize<'de> for ServerTimeout {
 }
 
 /// The limits one kind of transaction runs under.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransactionGuards {
     /// `lock_timeout`: the longest one lock wait, the first one included.
@@ -359,6 +374,7 @@ pub struct TransactionGuards {
     /// The client's bound on the whole operation: admission, checkout,
     /// every statement and commit. `null` only for explicit operator work.
     #[serde(rename = "operation_deadline_ms", with = "serde_ms::option")]
+    #[schemars(with = "Option<u64>")]
     pub operation_deadline: Option<Duration>,
 }
 
@@ -375,7 +391,7 @@ impl TransactionGuards {
 }
 
 /// The guard profile of each kind of transaction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct GuardPolicies {
     /// Store transactions and reads on the work pool. Default lock 10 s,
@@ -401,6 +417,7 @@ pub struct GuardPolicies {
     /// The whole store open: capacity check, pools, schema verification.
     /// Default 30 s.
     #[serde(rename = "store_startup_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub store_startup: Duration,
 }
 
@@ -422,16 +439,18 @@ impl Default for GuardPolicies {
 /// back, run by [`RetryPolicy::run`] around one complete, immutable
 /// transaction. Never a retry of a tool or model call, and never of a
 /// `COMMIT` whose outcome is unknown.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RetryPolicy {
     /// Attempts, the first included; at least 1.
     pub attempts: u32,
     /// The pause before the second attempt; each later pause doubles it.
     #[serde(rename = "initial_delay_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub initial_delay: Duration,
     /// The longest pause; at least the initial delay.
     #[serde(rename = "max_delay_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub max_delay: Duration,
     /// Draw each pause at random from its upper half, so contending
     /// writers do not retry in step.
@@ -450,7 +469,7 @@ impl RetryPolicy {
 }
 
 /// The retry policy of each kind of database work.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct RetryPolicies {
     /// Contended store maintenance transactions. Default 4 attempts, 5 to
@@ -483,14 +502,16 @@ impl Default for RetryPolicies {
 }
 
 /// How a lost listener session is reopened.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReconnectPolicy {
     /// The first wait after a lost session; each failed attempt doubles it.
     #[serde(rename = "initial_delay_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub initial_delay: Duration,
     /// The longest wait between attempts.
     #[serde(rename = "max_delay_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub max_delay: Duration,
     /// Draw each wait at random from its upper half.
     pub jitter: bool,
@@ -498,7 +519,7 @@ pub struct ReconnectPolicy {
 
 /// The durable notification listener's policy. Durable polling stays
 /// authoritative while a listener reconnects.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct SignalPolicy {
     /// Default 250 ms to 5 s with jitter.
@@ -518,7 +539,7 @@ impl Default for SignalPolicy {
 }
 
 /// Whether a replay store creates its tables or only checks them.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReplaySchemaMode {
     /// Create the schema and its tables when absent, from the published
@@ -532,7 +553,7 @@ pub enum ReplaySchemaMode {
 
 /// Where the live replay store keeps its tables, how it batches and what it
 /// retains.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReplayDataPolicy {
     /// The schema holding the tables; it also names the notification
@@ -544,6 +565,7 @@ pub struct ReplayDataPolicy {
     /// How long a replica gathers publications before one transaction
     /// writes them. Default 5 ms, 0 to 1 s.
     #[serde(rename = "publish_tick_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub publish_tick: Duration,
     /// Publish transactions at once. Default 4; 1 to the data pool's
     /// `max_connections`.
@@ -555,6 +577,7 @@ pub struct ReplayDataPolicy {
     pub max_events_per_session: usize,
     /// How long an event stays replayable. Default 120 s, 1 ms to 24 h.
     #[serde(rename = "max_age_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub max_age: Duration,
     /// Encoded bytes retained per session; a larger single publication is
     /// refused. Default 8 MiB, 1 KiB to 1 GiB.
@@ -564,10 +587,12 @@ pub struct ReplayDataPolicy {
     /// session keeps its window while this plus `cleanup_jitter` is below
     /// `max_age`. Default 30 s, 100 ms to 1 h.
     #[serde(rename = "cleanup_interval_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub cleanup_interval: Duration,
     /// The most a cleanup run is delayed past its interval, drawn at random.
     /// Default 10 s; at most the interval.
     #[serde(rename = "cleanup_jitter_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub cleanup_jitter: Duration,
     /// Rows one cleanup statement reclaims. Default 256, 1 to 65536.
     pub cleanup_batch: usize,
@@ -592,7 +617,7 @@ impl Default for ReplayDataPolicy {
 }
 
 /// The live replay store: its data, its data pool and its own listener.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct LiveReplayPolicy {
     pub data: ReplayDataPolicy,
@@ -632,7 +657,7 @@ impl Default for LiveReplayPolicy {
 /// A process's window is cut by whichever bound it reaches first, so the
 /// replay it can offer lasts about
 /// `min(max_age, max_events / events per second, max_bytes / bytes per second)`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProcessReplayDataPolicy {
     /// The schema holding the tables; `<schema>_process_replay` names the
@@ -644,6 +669,7 @@ pub struct ProcessReplayDataPolicy {
     /// How long a replica gathers publications before one transaction
     /// writes them. Default 5 ms, 0 to 1 s.
     #[serde(rename = "publish_tick_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub publish_tick: Duration,
     /// Publish transactions at once. Default 4; 1 to the data pool's
     /// `max_connections`.
@@ -662,6 +688,7 @@ pub struct ProcessReplayDataPolicy {
     /// How long an event stays replayable, whether or not the process has
     /// ended. Default 120 s, 1 ms to 24 h.
     #[serde(rename = "max_age_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub max_age: Duration,
     /// Encoded bytes retained per process; a larger single publication is
     /// refused. Default 8 MiB, 1 KiB to 1 GiB.
@@ -681,10 +708,12 @@ pub struct ProcessReplayDataPolicy {
     /// accessed: a followed process keeps its window while this plus
     /// `cleanup_jitter` is below `max_age`. Default 30 s, 100 ms to 1 h.
     #[serde(rename = "cleanup_interval_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub cleanup_interval: Duration,
     /// The most a cleanup run is delayed past its interval, drawn at random.
     /// Default 10 s; at most the interval.
     #[serde(rename = "cleanup_jitter_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub cleanup_jitter: Duration,
     /// Rows one cleanup statement reclaims. Default 256, 1 to 65536.
     pub cleanup_batch: usize,
@@ -715,7 +744,7 @@ impl Default for ProcessReplayDataPolicy {
 
 /// The process replay store: its data, its data pool and its own listener.
 /// It shares nothing with the live replay store.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProcessReplayPolicy {
     pub data: ProcessReplayDataPolicy,
@@ -749,7 +778,7 @@ impl Default for ProcessReplayPolicy {
 }
 
 /// Operator work and the store's detached sessions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct MaintenancePolicy {
     /// A preflight probe's pool. Default 2 connections, 5 s acquire.
@@ -758,11 +787,13 @@ pub struct MaintenancePolicy {
     pub migration_pool: PoolPolicy,
     /// How long a migration waits for the schema lock. Default 30 s.
     #[serde(rename = "migration_lock_timeout_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub migration_lock_timeout: Duration,
     /// Migration statements' `statement_timeout`. Default `inherit`.
     pub migration_statement_timeout: ServerTimeout,
     /// The whole migration job's deadline. Default none.
     #[serde(rename = "migration_deadline_ms", with = "serde_ms::option")]
+    #[schemars(with = "Option<u64>")]
     pub migration_deadline: Option<Duration>,
     /// Rows one backfill batch moves. Default 500.
     pub migration_batch_rows: u32,
@@ -772,6 +803,7 @@ pub struct MaintenancePolicy {
     pub max_schema_sessions: u32,
     /// The sweep's liveness probe lock wait. Default 500 ms.
     #[serde(rename = "sweep_liveness_probe_timeout_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     pub sweep_liveness_probe_timeout: Duration,
     /// Rows one process-event release page reads. Default 256.
     pub process_event_release_page_rows: u32,
@@ -804,7 +836,7 @@ impl Default for MaintenancePolicy {
 /// What a deployment runs beside one process's lash connections, for the
 /// server-wide budget. The process's own connection count is derived from
 /// the rest of the configuration, never entered by hand.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DeploymentBudget {
     /// Processes of one release running at once.
@@ -821,82 +853,99 @@ pub struct DeploymentBudget {
     pub operator_connections: u32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(remote = "LeaseSettings", deny_unknown_fields)]
 struct LeaseSettingsDef {
     #[serde(rename = "ttl_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     ttl: Duration,
     #[serde(rename = "heartbeat_every_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     heartbeat_every: Duration,
     #[serde(rename = "self_stop_after_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     self_stop_after: Duration,
     #[serde(rename = "reap_every_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     reap_every: Duration,
     #[serde(rename = "claim_poll_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     claim_poll: Duration,
     #[serde(rename = "claim_backoff_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     claim_backoff: Duration,
     #[serde(rename = "startup_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     startup: Duration,
     #[serde(rename = "shutdown_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     shutdown: Duration,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(remote = "GroupCommit", deny_unknown_fields)]
 struct GroupCommitDef {
     max_members: usize,
     #[serde(rename = "window_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     window: Duration,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(remote = "Notifier", rename_all = "snake_case")]
 enum NotifierDef {
     PollOnly,
     AfterCommit,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(remote = "RetirementSettings", deny_unknown_fields)]
 struct RetirementSettingsDef {
     #[serde(rename = "every_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     every: Duration,
     batch_nodes: u64,
     steps_per_sweep: u32,
     backlog_limit: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(remote = "DurableSettings", deny_unknown_fields)]
 struct DurableSettingsDef {
     graph_reads: lash_core_store::checkpoint_graph::GraphReadPolicy,
     #[serde(with = "LeaseSettingsDef")]
+    #[schemars(with = "LeaseSettingsDef")]
     lease: LeaseSettings,
     claim_batch: usize,
     max_active: usize,
     #[serde(rename = "idle_evict_ms", with = "serde_ms")]
+    #[schemars(with = "u64")]
     idle_evict: Duration,
     activation_loop_budget: u32,
     #[serde(with = "GroupCommitDef")]
+    #[schemars(with = "GroupCommitDef")]
     group_commit: GroupCommit,
     snapshot_every_fuel: u64,
     cascade_batch: usize,
     #[serde(with = "NotifierDef")]
+    #[schemars(with = "NotifierDef")]
     notifier: Notifier,
+    /// Required when `node` is supplied. Hosts can write
+    /// [`RetirementSettings::standard()`] as their explicit baseline.
     #[serde(with = "RetirementSettingsDef")]
+    #[schemars(with = "RetirementSettingsDef")]
     retirement: RetirementSettings,
 }
 
 /// Host name admission within PostgreSQL's 63-byte identifier space. The
 /// remaining bytes are reserved for connection-role and channel suffixes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(try_from = "NameLimitsWire")]
 pub struct PostgresNameLimits {
     application_prefix: usize,
     replay_schema: usize,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct NameLimitsWire {
     application_prefix: usize,
@@ -932,5 +981,20 @@ impl TryFrom<NameLimitsWire> for PostgresNameLimits {
     fn try_from(wire: NameLimitsWire) -> Result<Self, Self::Error> {
         Self::new(wire.application_prefix, wire.replay_schema)
             .ok_or("name limits exceed their 32/48-byte safety ceilings")
+    }
+}
+
+impl JsonSchema for ServerTimeout {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ServerTimeout".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "anyOf": [
+                {"type": "string", "enum": ["inherit", "disabled"]},
+                {"type": "integer", "minimum": 0, "maximum": u64::MAX}
+            ]
+        })
     }
 }

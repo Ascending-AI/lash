@@ -20,16 +20,18 @@ use sqlx::{PgPool, Postgres, Transaction};
 use tokio::sync::Semaphore;
 
 pub(crate) mod config;
+mod json;
 pub(crate) mod serde_ms;
 pub(crate) mod validate;
 
 pub use config::{
     ConnectionPolicy, ConnectionTopology, DedicatedConnectionPolicy, DeploymentBudget,
-    GuardPolicies, LiveReplayPolicy, MaintenancePolicy, PoolPolicy, PostgresHostConfig,
-    PostgresNameLimits, ProcessReplayDataPolicy, ProcessReplayPolicy, ReconnectPolicy,
-    ReplayDataPolicy, ReplaySchemaMode, RetryPolicies, RetryPolicy, RolePolicies, ServerTimeout,
-    SignalPolicy, SslMode, TransactionGuards, TransportOverrides,
+    GuardPolicies, JSON_SCHEMA, LiveReplayPolicy, MaintenancePolicy, PoolPolicy,
+    PostgresHostConfig, PostgresNameLimits, ProcessReplayDataPolicy, ProcessReplayPolicy,
+    ReconnectPolicy, ReplayDataPolicy, ReplaySchemaMode, RetryPolicies, RetryPolicy, RolePolicies,
+    ServerTimeout, SignalPolicy, SslMode, TransactionGuards, TransportOverrides,
 };
+pub use json::{HostConfigError, HostConfigErrorKind, validate_host_config};
 pub use validate::PostgresHostConfigError;
 
 use crate::{

@@ -1227,6 +1227,7 @@ schema_documents(
         "//crates/lash-kernel-doc:kernel_schema_generator__bin",
         "//crates/lash-kernel-edit:kernel_edit_schema_generator__bin",
         "//crates/lash-kernel-view:kernel_view_schema_generator__bin",
+        "//crates/lash-postgres-store:host_config_schema_generator__bin",
     ],
     script = "scripts/generate-workflow-schemas.py",
 )
@@ -1234,7 +1235,9 @@ schema_documents(
 schema_check(
     name = "host_schema_check",
     documents = ":host_schema_documents",
-    checked = glob(["schemas/host/*/*.schema.json", "schemas/host/*/*.d.ts"]),
+    checked = glob(["schemas/host/*/*.schema.json", "schemas/host/*/*.d.ts"]) + [
+        "//crates/lash-postgres-store:postgres-host-config-v1.schema.json",
+    ],
     script = "scripts/generate-workflow-schemas.py",
 )
 

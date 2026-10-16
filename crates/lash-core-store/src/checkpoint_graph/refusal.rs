@@ -169,7 +169,9 @@ impl GraphRefusal {
 }
 
 /// Deployment graph-read admission, independent of write-side commit admission.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(try_from = "GraphReadPolicyWire")]
 pub struct GraphReadPolicy {
     owner_bytes: u64,
@@ -227,12 +229,13 @@ impl Default for GraphReadPolicy {
         Self::standard()
     }
 }
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct GraphReadPolicyWire {
     owner_bytes: u64,
     engine_bytes: u64,
     execution_bytes: u64,
+    #[schemars(range(max = 64))]
     depth: u64,
     kernel_data: lash_kernel_doc::KernelDataLimits,
 }

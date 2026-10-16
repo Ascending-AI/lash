@@ -454,3 +454,28 @@ Protocol and identity limits stay fixed: the 7900-byte notification payload
 cap, the 16384-element checkpoint bind chunk, advisory lock namespaces, the
 sweep generation's three mint attempts, the live replay head's create-or-raise
 race loop, and the commit-label routing above.
+
+## Validate rendered host configuration in CI
+
+`lash::postgres::JSON_SCHEMA` (or `lash_postgres_store::JSON_SCHEMA`) ships the
+JSON Schema generated from `PostgresHostConfig` and its serde wire types. The
+same document is published at `schemas/host/postgres-host-config/v1.schema.json`
+in the repository. `kiln build //:schema_checks` checks both committed copies
+against fresh generation. Regenerate them with
+`python3 scripts/generate-workflow-schemas.py`.
+
+Before rollout, hosts can call
+`lash::postgres::validate_host_config(&rendered_json)` without opening a
+connection or starting a node. It uses the real serde parser, then the same
+`PostgresHostConfig::validate` value and cross-field rules as connect. A
+`HostConfigError` carries `path`, `kind` (`Missing`, `Unknown`, or `Invalid`)
+and `reason`. Paths use dot-separated JSON fields; `$` means the document
+itself. The schema describes JSON structure; use the function for value and
+cross-field admission rules too.
+
+When supplying `node`, hosts must supply its complete shape, including
+`node.retirement`. Write `lash::durable::RetirementSettings::standard()` as the
+explicit baseline: `every_ms = 1000`, `batch_nodes = 256`,
+`steps_per_sweep = 16`, and `backlog_limit = 10000`. Missing retirement is
+refused with `path = "node.retirement"`, `kind = Missing`; it has no silent
+default. An omitted `node` section retains the existing standard preset.

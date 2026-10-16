@@ -1,0 +1,1569 @@
+{
+  "$defs": {
+    "ConnectionPolicy": {
+      "additionalProperties": false,
+      "description": "Transport policy shared by every role.",
+      "properties": {
+        "application_name_prefix": {
+          "default": "lash",
+          "description": "Each connection's `application_name` is this prefix and its role:\n`lash/work`, `lash/renewal`, ... Default `lash`; 1 to 32 characters of\n`[A-Za-z0-9_-]`.",
+          "type": "string"
+        },
+        "statement_cache_capacity": {
+          "default": 100,
+          "description": "Prepared statements each connection caches. Default 100 (SQLx's);\n0 disables caching for a pooler that cannot carry them.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "topology": {
+          "$ref": "#/$defs/ConnectionTopology",
+          "default": "direct",
+          "description": "How the endpoints reach the server."
+        },
+        "transport": {
+          "$ref": "#/$defs/TransportOverrides",
+          "default": {
+            "ssl_client_cert": null,
+            "ssl_client_key": null,
+            "ssl_mode": null,
+            "ssl_root_cert": null
+          },
+          "description": "TLS settings that override the endpoint's own; none by default."
+        }
+      },
+      "type": "object"
+    },
+    "ConnectionTopology": {
+      "description": "How the endpoints reach the server.",
+      "oneOf": [
+        {
+          "const": "direct",
+          "description": "Directly, or through a session-mode pooler: every connection is one\nserver session for its life. Roles install their guards as session\ndefaults as well as per transaction.",
+          "type": "string"
+        },
+        {
+          "const": "transaction_pool",
+          "description": "The primary endpoint is a transaction-mode pooler. Guards are\ninstalled per transaction only, and every role that needs a session\nof its own (the listeners, schema and sweep sessions, preflight and\nmigration) connects through the separate session endpoint.",
+          "type": "string"
+        }
+      ]
+    },
+    "DedicatedConnectionPolicy": {
+      "additionalProperties": false,
+      "description": "A role served by connections of its own, one per served node, that are\nnever recycled for idleness or age.",
+      "properties": {
+        "acquire_timeout_ms": {
+          "description": "How long opening (or reopening) the connection may take.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "acquire_timeout_ms"
+      ],
+      "type": "object"
+    },
+    "DeploymentBudget": {
+      "additionalProperties": false,
+      "description": "What a deployment runs beside one process's lash connections, for the\nserver-wide budget. The process's own connection count is derived from\nthe rest of the configuration, never entered by hand.",
+      "properties": {
+        "admin_headroom": {
+          "description": "Slots kept for administration; at least the server's reserved slots.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "generations": {
+          "description": "Releases that overlap during a rollout; at least 2.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operator_connections": {
+          "description": "Operator pools that may overlap a process (preflight, migration).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "other_clients": {
+          "description": "Other clients of the server, other databases' included.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "other_host_connections": {
+          "description": "Other pools each process opens on the server (a host's own).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processes_per_generation": {
+          "description": "Processes of one release running at once.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "processes_per_generation",
+        "generations",
+        "other_clients",
+        "admin_headroom",
+        "other_host_connections",
+        "operator_connections"
+      ],
+      "type": "object"
+    },
+    "DurableSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "activation_loop_budget": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cascade_batch": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "claim_batch": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "graph_reads": {
+          "$ref": "#/$defs/GraphReadPolicy"
+        },
+        "group_commit": {
+          "$ref": "#/$defs/GroupCommit"
+        },
+        "idle_evict_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lease": {
+          "$ref": "#/$defs/LeaseSettings"
+        },
+        "max_active": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "notifier": {
+          "$ref": "#/$defs/Notifier"
+        },
+        "retirement": {
+          "$ref": "#/$defs/RetirementSettings",
+          "description": "Required when `node` is supplied. Hosts can write\n[`RetirementSettings::standard()`] as their explicit baseline."
+        },
+        "snapshot_every_fuel": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "graph_reads",
+        "lease",
+        "claim_batch",
+        "max_active",
+        "idle_evict_ms",
+        "activation_loop_budget",
+        "group_commit",
+        "snapshot_every_fuel",
+        "cascade_batch",
+        "notifier",
+        "retirement"
+      ],
+      "type": "object"
+    },
+    "GraphReadPolicy": {
+      "additionalProperties": false,
+      "description": "Deployment graph-read admission, independent of write-side commit admission.",
+      "properties": {
+        "depth": {
+          "format": "uint64",
+          "maximum": 64,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "engine_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "execution_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kernel_data": {
+          "$ref": "#/$defs/KernelDataLimits"
+        },
+        "owner_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "owner_bytes",
+        "engine_bytes",
+        "execution_bytes",
+        "depth",
+        "kernel_data"
+      ],
+      "type": "object"
+    },
+    "GroupCommit": {
+      "additionalProperties": false,
+      "properties": {
+        "max_members": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "window_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_members",
+        "window_ms"
+      ],
+      "type": "object"
+    },
+    "GuardPolicies": {
+      "additionalProperties": false,
+      "description": "The guard profile of each kind of transaction.",
+      "properties": {
+        "durable": {
+          "$ref": "#/$defs/TransactionGuards",
+          "default": {
+            "idle_in_transaction_timeout": 5000,
+            "lock_timeout": 2000,
+            "operation_deadline_ms": 10000,
+            "statement_timeout": 5000,
+            "transaction_timeout": "inherit"
+          },
+          "description": "Durable engine commits on the work and critical pools. Default lock\n2 s, statement 5 s, idle 5 s, operation 10 s."
+        },
+        "inspection": {
+          "$ref": "#/$defs/TransactionGuards",
+          "default": {
+            "idle_in_transaction_timeout": 30000,
+            "lock_timeout": 5000,
+            "operation_deadline_ms": 30000,
+            "statement_timeout": 30000,
+            "transaction_timeout": "inherit"
+          },
+          "description": "Schema verification and preflight inspection. Default lock 5 s,\nstatement 30 s, idle 30 s, operation 30 s."
+        },
+        "ordinary": {
+          "$ref": "#/$defs/TransactionGuards",
+          "default": {
+            "idle_in_transaction_timeout": 30000,
+            "lock_timeout": 10000,
+            "operation_deadline_ms": 60000,
+            "statement_timeout": 30000,
+            "transaction_timeout": "inherit"
+          },
+          "description": "Store transactions and reads on the work pool. Default lock 10 s,\nstatement 30 s, idle 30 s, operation 60 s."
+        },
+        "renewal": {
+          "$ref": "#/$defs/TransactionGuards",
+          "default": {
+            "idle_in_transaction_timeout": 1000,
+            "lock_timeout": 250,
+            "operation_deadline_ms": 2000,
+            "statement_timeout": 1000,
+            "transaction_timeout": "inherit"
+          },
+          "description": "Node registration and heartbeat. Default lock 250 ms, statement 1 s,\nidle 1 s, operation 2 s; the operation deadline must be shorter than\nthe heartbeat interval."
+        },
+        "replay": {
+          "$ref": "#/$defs/TransactionGuards",
+          "default": {
+            "idle_in_transaction_timeout": 30000,
+            "lock_timeout": 10000,
+            "operation_deadline_ms": 60000,
+            "statement_timeout": 30000,
+            "transaction_timeout": "inherit"
+          },
+          "description": "Live replay and process replay transactions. Default lock 10 s,\nstatement 30 s, idle 30 s, operation 60 s."
+        },
+        "scheduler": {
+          "$ref": "#/$defs/TransactionGuards",
+          "default": {
+            "idle_in_transaction_timeout": 1000,
+            "lock_timeout": 250,
+            "operation_deadline_ms": 2000,
+            "statement_timeout": 1000,
+            "transaction_timeout": "inherit"
+          },
+          "description": "Claims and the scheduler's other operations, which hold the node row\n`FOR SHARE`. Default lock 250 ms, statement 1 s, idle 1 s, operation\n2 s."
+        },
+        "store_startup_ms": {
+          "default": 30000,
+          "description": "The whole store open: capacity check, pools, schema verification.\nDefault 30 s.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "KernelDataLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "decode_depth": {
+          "format": "uint64",
+          "maximum": 512,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "document_depth": {
+          "format": "uint",
+          "maximum": 64,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "document_json_depth": {
+          "format": "uint",
+          "maximum": 352,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state_json_depth": {
+          "format": "uint",
+          "maximum": 512,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value_depth": {
+          "format": "uint",
+          "maximum": 128,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "document_depth",
+        "document_json_depth",
+        "decode_depth",
+        "state_json_depth",
+        "value_depth"
+      ],
+      "type": "object"
+    },
+    "LeaseSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_backoff_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "claim_poll_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "heartbeat_every_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reap_every_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "self_stop_after_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shutdown_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startup_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ttl_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ttl_ms",
+        "heartbeat_every_ms",
+        "self_stop_after_ms",
+        "reap_every_ms",
+        "claim_poll_ms",
+        "claim_backoff_ms",
+        "startup_ms",
+        "shutdown_ms"
+      ],
+      "type": "object"
+    },
+    "LiveReplayPolicy": {
+      "additionalProperties": false,
+      "description": "The live replay store: its data, its data pool and its own listener.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ReplayDataPolicy",
+          "default": {
+            "cleanup_batch": 256,
+            "cleanup_interval_ms": 30000,
+            "cleanup_jitter_ms": 10000,
+            "max_age_ms": 120000,
+            "max_batch_events": 1024,
+            "max_bytes_per_session": 8388608,
+            "max_events_per_session": 2048,
+            "publish_concurrency": 4,
+            "publish_tick_ms": 5,
+            "schema": "lash_live_replay",
+            "schema_mode": "verify_only"
+          }
+        },
+        "listener": {
+          "$ref": "#/$defs/DedicatedConnectionPolicy",
+          "default": {
+            "acquire_timeout_ms": 5000
+          },
+          "description": "The replay listener's own session. Default 5 s acquire."
+        },
+        "pool": {
+          "$ref": "#/$defs/PoolPolicy",
+          "default": {
+            "acquire_timeout_ms": 5000,
+            "idle_timeout_ms": 600000,
+            "max_connections": 7,
+            "max_lifetime_ms": 1800000,
+            "min_connections": 0,
+            "test_before_acquire": false
+          },
+          "description": "Publication, reads, cleanup and reloads. Default 7 connections, 5 s\nacquire, no checkout ping."
+        },
+        "reconnect": {
+          "$ref": "#/$defs/ReconnectPolicy",
+          "default": {
+            "initial_delay_ms": 100,
+            "jitter": true,
+            "max_delay_ms": 5000
+          },
+          "description": "Default 100 ms to 5 s with jitter."
+        }
+      },
+      "type": "object"
+    },
+    "MaintenancePolicy": {
+      "additionalProperties": false,
+      "description": "Operator work and the store's detached sessions.",
+      "properties": {
+        "checkpoint_ref_chunk": {
+          "default": 16384,
+          "description": "Checkpoint refs/bodies in one query; standard 16,384 (around 1 MiB\nof hash text). No workload measurement establishes this chunk size.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_schema_sessions": {
+          "default": 1,
+          "description": "Schema verification sessions open at once per storage. Default 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_sweep_sessions": {
+          "default": 1,
+          "description": "Attachment sweep sessions open at once per storage. Default 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "migration_batch_rows": {
+          "default": 500,
+          "description": "Rows one backfill batch moves. Default 500.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "migration_deadline_ms": {
+          "default": null,
+          "description": "The whole migration job's deadline. Default none.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "migration_lock_timeout_ms": {
+          "default": 30000,
+          "description": "How long a migration waits for the schema lock. Default 30 s.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "migration_pool": {
+          "$ref": "#/$defs/PoolPolicy",
+          "default": {
+            "acquire_timeout_ms": 30000,
+            "idle_timeout_ms": 600000,
+            "max_connections": 2,
+            "max_lifetime_ms": 1800000,
+            "min_connections": 0,
+            "test_before_acquire": false
+          },
+          "description": "`lash migrate`'s pool. Default 2 connections, 30 s acquire."
+        },
+        "migration_statement_timeout": {
+          "$ref": "#/$defs/ServerTimeout",
+          "default": "inherit",
+          "description": "Migration statements' `statement_timeout`. Default `inherit`."
+        },
+        "preflight_pool": {
+          "$ref": "#/$defs/PoolPolicy",
+          "default": {
+            "acquire_timeout_ms": 5000,
+            "idle_timeout_ms": 600000,
+            "max_connections": 2,
+            "max_lifetime_ms": 1800000,
+            "min_connections": 0,
+            "test_before_acquire": false
+          },
+          "description": "A preflight probe's pool. Default 2 connections, 5 s acquire."
+        },
+        "process_event_release_page_rows": {
+          "default": 256,
+          "description": "Rows one process-event release page reads. Default 256.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sweep_liveness_probe_timeout_ms": {
+          "default": 500,
+          "description": "The sweep's liveness probe lock wait. Default 500 ms.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sweep_mint_attempts": {
+          "default": 3,
+          "description": "Sweep-generation collision retries; standard 3, unmeasured.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Notifier": {
+      "enum": [
+        "poll_only",
+        "after_commit"
+      ],
+      "type": "string"
+    },
+    "PoolPolicy": {
+      "additionalProperties": false,
+      "description": "A pooled role's sizing and recycling.",
+      "properties": {
+        "acquire_timeout_ms": {
+          "description": "How long a checkout may wait, connecting included.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "idle_timeout_ms": {
+          "description": "Close a connection idle this long; `null` never closes it for\nidleness.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_connections": {
+          "description": "The most connections the pool opens; at least 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_lifetime_ms": {
+          "description": "Recycle a connection this old; `null` never recycles it for age.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min_connections": {
+          "description": "Connections kept open while idle; at most `max_connections`.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "test_before_acquire": {
+          "description": "Ping every connection before handing it out. Default false: only a\nconnection idle for 10 s or longer is pinged, so a checkout on the\nhot path costs no round trip.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "max_connections",
+        "min_connections",
+        "acquire_timeout_ms",
+        "test_before_acquire"
+      ],
+      "type": "object"
+    },
+    "PostgresNameLimits": {
+      "additionalProperties": false,
+      "description": "Host name admission within PostgreSQL's 63-byte identifier space. The\nremaining bytes are reserved for connection-role and channel suffixes.",
+      "properties": {
+        "application_prefix": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "replay_schema": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "application_prefix",
+        "replay_schema"
+      ],
+      "type": "object"
+    },
+    "ProcessReplayDataPolicy": {
+      "additionalProperties": false,
+      "description": "Where the process replay store keeps its tables, how it batches and what\nit retains. The retention values are a provisional preset: no measurement\nbacks them.\n\nA process's window is cut by whichever bound it reaches first, so the\nreplay it can offer lasts about\n`min(max_age, max_events / events per second, max_bytes / bytes per second)`.",
+      "properties": {
+        "cleanup_batch": {
+          "default": 256,
+          "description": "Rows one cleanup statement reclaims. Default 256, 1 to 65536.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cleanup_interval_ms": {
+          "default": 30000,
+          "description": "How often a replica reclaims expired events, idle windows and unused\nreservations, and counts the processes its subscribers follow as\naccessed: a followed process keeps its window while this plus\n`cleanup_jitter` is below `max_age`. Default 30 s, 100 ms to 1 h.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cleanup_jitter_ms": {
+          "default": 10000,
+          "description": "The most a cleanup run is delayed past its interval, drawn at random.\nDefault 10 s; at most the interval.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_age_ms": {
+          "default": 120000,
+          "description": "How long an event stays replayable, whether or not the process has\nended. Default 120 s, 1 ms to 24 h.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_batch_events": {
+          "default": 1024,
+          "description": "The events a tick gathers into one transaction; a single\npublication is never split. Default 1024, 1 to 65536.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_bytes_per_process": {
+          "default": 8388608,
+          "description": "Encoded bytes retained per process; a larger single publication is\nrefused. Default 8 MiB, 1 KiB to 1 GiB.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_events_per_process": {
+          "default": 2048,
+          "description": "Events retained per process. Default 2048, 1 to 1,000,000.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_pending_bytes": {
+          "default": 16777216,
+          "description": "Encoded bytes a replica holds between `publish` and their tick; a\npublisher past it waits. Default 16 MiB, 1 KiB to 1 GiB.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_pending_events": {
+          "default": 8192,
+          "description": "Events a replica holds between `publish` and their tick; a publisher\npast it waits. Default 8192, 1 to 1,000,000.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_processes": {
+          "default": 4096,
+          "description": "Processes with a window at once, across every replica; the idlest\nwindow is evicted to admit another. Default 4096, 1 to 1,000,000.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_retained_bytes": {
+          "default": 268435456,
+          "description": "Encoded bytes reserved across every process's window, across every\nreplica. Default 256 MiB; `max_bytes_per_process` to 1 TiB.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "publish_concurrency": {
+          "default": 4,
+          "description": "Publish transactions at once. Default 4; 1 to the data pool's\n`max_connections`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "publish_tick_ms": {
+          "default": 5,
+          "description": "How long a replica gathers publications before one transaction\nwrites them. Default 5 ms, 0 to 1 s.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reservation_bytes": {
+          "default": 65536,
+          "description": "The step a process's share of `max_retained_bytes` grows and shrinks\nby: a window takes the aggregate lock once per step, not per event.\nDefault 64 KiB; 1 KiB to `max_bytes_per_process`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema": {
+          "default": "lash_process_replay",
+          "description": "The schema holding the tables; `<schema>_process_replay` names the\nnotification channel. Default `lash_process_replay`; a lowercase\nidentifier of at most 48 characters.",
+          "type": "string"
+        },
+        "schema_mode": {
+          "$ref": "#/$defs/ReplaySchemaMode",
+          "default": "verify_only",
+          "description": "Default `verify_only`."
+        }
+      },
+      "type": "object"
+    },
+    "ProcessReplayPolicy": {
+      "additionalProperties": false,
+      "description": "The process replay store: its data, its data pool and its own listener.\nIt shares nothing with the live replay store.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ProcessReplayDataPolicy",
+          "default": {
+            "cleanup_batch": 256,
+            "cleanup_interval_ms": 30000,
+            "cleanup_jitter_ms": 10000,
+            "max_age_ms": 120000,
+            "max_batch_events": 1024,
+            "max_bytes_per_process": 8388608,
+            "max_events_per_process": 2048,
+            "max_pending_bytes": 16777216,
+            "max_pending_events": 8192,
+            "max_processes": 4096,
+            "max_retained_bytes": 268435456,
+            "publish_concurrency": 4,
+            "publish_tick_ms": 5,
+            "reservation_bytes": 65536,
+            "schema": "lash_process_replay",
+            "schema_mode": "verify_only"
+          }
+        },
+        "listener": {
+          "$ref": "#/$defs/DedicatedConnectionPolicy",
+          "default": {
+            "acquire_timeout_ms": 5000
+          },
+          "description": "The process replay listener's own session. Default 5 s acquire."
+        },
+        "pool": {
+          "$ref": "#/$defs/PoolPolicy",
+          "default": {
+            "acquire_timeout_ms": 5000,
+            "idle_timeout_ms": 600000,
+            "max_connections": 7,
+            "max_lifetime_ms": 1800000,
+            "min_connections": 0,
+            "test_before_acquire": false
+          },
+          "description": "Publication, reads and cleanup. Default 7 connections, 5 s acquire,\nno checkout ping."
+        },
+        "reconnect": {
+          "$ref": "#/$defs/ReconnectPolicy",
+          "default": {
+            "initial_delay_ms": 100,
+            "jitter": true,
+            "max_delay_ms": 5000
+          },
+          "description": "Default 100 ms to 5 s with jitter."
+        }
+      },
+      "type": "object"
+    },
+    "ReconnectPolicy": {
+      "additionalProperties": false,
+      "description": "How a lost listener session is reopened.",
+      "properties": {
+        "initial_delay_ms": {
+          "description": "The first wait after a lost session; each failed attempt doubles it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "jitter": {
+          "description": "Draw each wait at random from its upper half.",
+          "type": "boolean"
+        },
+        "max_delay_ms": {
+          "description": "The longest wait between attempts.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "initial_delay_ms",
+        "max_delay_ms",
+        "jitter"
+      ],
+      "type": "object"
+    },
+    "ReplayDataPolicy": {
+      "additionalProperties": false,
+      "description": "Where the live replay store keeps its tables, how it batches and what it\nretains.",
+      "properties": {
+        "cleanup_batch": {
+          "default": 256,
+          "description": "Rows one cleanup statement reclaims. Default 256, 1 to 65536.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cleanup_interval_ms": {
+          "default": 30000,
+          "description": "How often a replica reclaims expired events and idle sessions, and\ncounts the sessions its subscribers follow as accessed: a followed\nsession keeps its window while this plus `cleanup_jitter` is below\n`max_age`. Default 30 s, 100 ms to 1 h.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cleanup_jitter_ms": {
+          "default": 10000,
+          "description": "The most a cleanup run is delayed past its interval, drawn at random.\nDefault 10 s; at most the interval.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_age_ms": {
+          "default": 120000,
+          "description": "How long an event stays replayable. Default 120 s, 1 ms to 24 h.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_batch_events": {
+          "default": 1024,
+          "description": "The events a tick gathers into one transaction; a single\npublication is never split. Default 1024, 1 to 65536.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_bytes_per_session": {
+          "default": 8388608,
+          "description": "Encoded bytes retained per session; a larger single publication is\nrefused. Default 8 MiB, 1 KiB to 1 GiB.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_events_per_session": {
+          "default": 2048,
+          "description": "Events retained per session. Default 2048, 1 to 1,000,000.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "publish_concurrency": {
+          "default": 4,
+          "description": "Publish transactions at once. Default 4; 1 to the data pool's\n`max_connections`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "publish_tick_ms": {
+          "default": 5,
+          "description": "How long a replica gathers publications before one transaction\nwrites them. Default 5 ms, 0 to 1 s.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema": {
+          "default": "lash_live_replay",
+          "description": "The schema holding the tables; it also names the notification\nchannel. Default `lash_live_replay`; a lowercase identifier of at\nmost 48 characters.",
+          "type": "string"
+        },
+        "schema_mode": {
+          "$ref": "#/$defs/ReplaySchemaMode",
+          "default": "verify_only",
+          "description": "Default `verify_only`."
+        }
+      },
+      "type": "object"
+    },
+    "ReplaySchemaMode": {
+      "description": "Whether a replay store creates its tables or only checks them.",
+      "oneOf": [
+        {
+          "const": "install",
+          "description": "Create the schema and its tables when absent, from the published\nDDL verbatim. Needs `CREATE` on the database.",
+          "type": "string"
+        },
+        {
+          "const": "verify_only",
+          "description": "Run no DDL: the host applied the published artifact itself. Absent\nor different tables refuse the connect.",
+          "type": "string"
+        }
+      ]
+    },
+    "RetirementSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "backlog_limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "batch_nodes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "every_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "steps_per_sweep": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "every_ms",
+        "batch_nodes",
+        "steps_per_sweep",
+        "backlog_limit"
+      ],
+      "type": "object"
+    },
+    "RetryPolicies": {
+      "additionalProperties": false,
+      "description": "The retry policy of each kind of database work.",
+      "properties": {
+        "durable": {
+          "$ref": "#/$defs/RetryPolicy",
+          "default": {
+            "attempts": 4,
+            "initial_delay_ms": 5,
+            "jitter": true,
+            "max_delay_ms": 20
+          },
+          "description": "Contended durable owner and mailbox commits. Default 4 attempts, 5\nto 20 ms."
+        },
+        "live_replay": {
+          "$ref": "#/$defs/RetryPolicy",
+          "default": {
+            "attempts": 8,
+            "initial_delay_ms": 5,
+            "jitter": true,
+            "max_delay_ms": 100
+          },
+          "description": "Contended live replay publications and trims. Default 8 attempts,\n5 to 100 ms."
+        },
+        "process_replay": {
+          "$ref": "#/$defs/RetryPolicy",
+          "default": {
+            "attempts": 8,
+            "initial_delay_ms": 5,
+            "jitter": true,
+            "max_delay_ms": 100
+          },
+          "description": "Contended process replay publications and trims. Default 8\nattempts, 5 to 100 ms."
+        },
+        "store": {
+          "$ref": "#/$defs/RetryPolicy",
+          "default": {
+            "attempts": 4,
+            "initial_delay_ms": 5,
+            "jitter": true,
+            "max_delay_ms": 20
+          },
+          "description": "Contended store maintenance transactions. Default 4 attempts, 5 to\n20 ms."
+        },
+        "wait_resolution": {
+          "$ref": "#/$defs/RetryPolicy",
+          "default": {
+            "attempts": 3,
+            "initial_delay_ms": 5,
+            "jitter": true,
+            "max_delay_ms": 20
+          },
+          "description": "Contended wait resolutions and due-wait settlements. Default 3\nattempts, 5 to 20 ms."
+        }
+      },
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "additionalProperties": false,
+      "description": "A bounded retry of database work whose attempt is known to have rolled\nback, run by [`RetryPolicy::run`] around one complete, immutable\ntransaction. Never a retry of a tool or model call, and never of a\n`COMMIT` whose outcome is unknown.",
+      "properties": {
+        "attempts": {
+          "description": "Attempts, the first included; at least 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "initial_delay_ms": {
+          "description": "The pause before the second attempt; each later pause doubles it.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "jitter": {
+          "description": "Draw each pause at random from its upper half, so contending\nwriters do not retry in step.",
+          "type": "boolean"
+        },
+        "max_delay_ms": {
+          "description": "The longest pause; at least the initial delay.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempts",
+        "initial_delay_ms",
+        "max_delay_ms",
+        "jitter"
+      ],
+      "type": "object"
+    },
+    "RolePolicies": {
+      "additionalProperties": false,
+      "description": "Each role's capacity.\n\nThe routing is lash's, not the host's: node registration and heartbeat\nrun on the renewal connections; claim, adoption, owned scans, node drain\nand liveness probes on the scheduler pool; reap, node release, hand-back\nand every cancel and terminal commit on the critical pool; everything\nelse on the work pool.",
+      "properties": {
+        "critical": {
+          "$ref": "#/$defs/PoolPolicy",
+          "default": {
+            "acquire_timeout_ms": 2000,
+            "idle_timeout_ms": 600000,
+            "max_connections": 3,
+            "max_lifetime_ms": 1800000,
+            "min_connections": 0,
+            "test_before_acquire": false
+          },
+          "description": "Reap, release, hand-back, cancels and terminals. Default 3\nconnections, 2 s acquire."
+        },
+        "listener": {
+          "$ref": "#/$defs/DedicatedConnectionPolicy",
+          "default": {
+            "acquire_timeout_ms": 2000
+          },
+          "description": "The notification listener, one session per served node, which also\nholds the node's liveness lock. Default 2 s acquire."
+        },
+        "max_store_operations": {
+          "default": 16,
+          "description": "Durable engine operations on the work pool at once; the rest of the\nwork pool serves store API calls. Admission is taken before checkout\nand released with the connection, never held across a tool or model\nbody. Default 16; 1 to `work.max_connections`.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "renewal": {
+          "$ref": "#/$defs/DedicatedConnectionPolicy",
+          "default": {
+            "acquire_timeout_ms": 500
+          },
+          "description": "Lease renewal: one connection per served node. Default 500 ms acquire."
+        },
+        "scheduler": {
+          "$ref": "#/$defs/PoolPolicy",
+          "default": {
+            "acquire_timeout_ms": 500,
+            "idle_timeout_ms": 600000,
+            "max_connections": 1,
+            "max_lifetime_ms": 1800000,
+            "min_connections": 0,
+            "test_before_acquire": false
+          },
+          "description": "Claims, adoption, liveness. Default 1 connection, 500 ms acquire."
+        },
+        "served_nodes": {
+          "default": 1,
+          "description": "Nodes this process serves over one storage; each has its own renewal\nconnection and listener session. Default 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "work": {
+          "$ref": "#/$defs/PoolPolicy",
+          "default": {
+            "acquire_timeout_ms": 30000,
+            "idle_timeout_ms": 600000,
+            "max_connections": 16,
+            "max_lifetime_ms": 1800000,
+            "min_connections": 0,
+            "test_before_acquire": false
+          },
+          "description": "Store calls and ordinary durable commits. Default 16 connections,\n30 s acquire."
+        }
+      },
+      "type": "object"
+    },
+    "SchemaCheck": {
+      "description": "What a [`crate::PostgresStorage`] does when the live schema does not match\nthe shape this build expects.\n\nThe default is [`SchemaCheck::Enforce`]: a mismatch is a hard error at open,\nbecause the guards it protects (the exactly-once dedup unique index, the\ncascade foreign keys) fail silently rather than loudly when they are absent.\n[`SchemaCheck::WarnOnly`] exists for the one failure this crate cannot rule\nout by testing \u2014 a bug in the expectation artifact itself against a\nPostgreSQL build lash has not seen. It is deliberately an API-level choice a\nhost commits to in reviewed code, never an environment variable an operator\ncan flip at 3am.\n\n# What no `SchemaCheck` relaxes\n\nThis governs the catalog comparison and nothing else. Two preconditions sit\noutside it:\n\n- **The component version stamp.** It is the supported-range boundary\n  (FIG-3797): a stamp outside `[MIN_SUPPORTED_SCHEMA_VERSION,\n  SCHEMA_VERSION]` is refused unconditionally, whichever direction it\n  differs in, so a valve adopted for a structural false positive cannot\n  silently run one build against another schema generation.\n- **The catalog identity row.** Without it there is no identity to hand\n  the session catalogs open builds, so there is nothing for open to return:\n  no identity, no store.\n\nThe `lash_process_change_clock` seed row is deliberately *not* in that list.\nIt is reported as an ordinary finding, so [`SchemaCheck::WarnOnly`] opens\nwithout it and every process-registry write then fails at runtime. The\nasymmetry is not that one row matters more than the other \u2014 both are required\n\u2014 it is that the identity is something open must physically read and hand back,\nwhile the clock row is only something writes will later need. A valve that\ncould not be overridden for the clock row would be a valve that cannot be used\nto work around a checker bug, which is its entire purpose.",
+      "oneOf": [
+        {
+          "enum": [
+            "warn_only"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "enforce",
+          "description": "Reject the open with a per-object diff when the live schema drifts.",
+          "type": "string"
+        }
+      ]
+    },
+    "ServerTimeout": {
+      "anyOf": [
+        {
+          "enum": [
+            "inherit",
+            "disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        }
+      ]
+    },
+    "SignalPolicy": {
+      "additionalProperties": false,
+      "description": "The durable notification listener's policy. Durable polling stays\nauthoritative while a listener reconnects.",
+      "properties": {
+        "reconnect": {
+          "$ref": "#/$defs/ReconnectPolicy",
+          "default": {
+            "initial_delay_ms": 250,
+            "jitter": true,
+            "max_delay_ms": 5000
+          },
+          "description": "Default 250 ms to 5 s with jitter."
+        }
+      },
+      "type": "object"
+    },
+    "SslMode": {
+      "description": "PostgreSQL's `sslmode`.",
+      "enum": [
+        "disable",
+        "allow",
+        "prefer",
+        "require",
+        "verify_ca",
+        "verify_full"
+      ],
+      "type": "string"
+    },
+    "TransactionGuards": {
+      "additionalProperties": false,
+      "description": "The limits one kind of transaction runs under.",
+      "properties": {
+        "idle_in_transaction_timeout": {
+          "$ref": "#/$defs/ServerTimeout",
+          "description": "`idle_in_transaction_session_timeout`: the longest a transaction\nmay sit idle; the server ends the session after it."
+        },
+        "lock_timeout": {
+          "$ref": "#/$defs/ServerTimeout",
+          "description": "`lock_timeout`: the longest one lock wait, the first one included."
+        },
+        "operation_deadline_ms": {
+          "description": "The client's bound on the whole operation: admission, checkout,\nevery statement and commit. `null` only for explicit operator work.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "statement_timeout": {
+          "$ref": "#/$defs/ServerTimeout",
+          "description": "`statement_timeout`: the longest one statement."
+        },
+        "transaction_timeout": {
+          "$ref": "#/$defs/ServerTimeout",
+          "description": "`transaction_timeout` (PostgreSQL 17+): the longest whole\ntransaction; the server ends the session after it."
+        }
+      },
+      "required": [
+        "lock_timeout",
+        "statement_timeout",
+        "idle_in_transaction_timeout",
+        "transaction_timeout"
+      ],
+      "type": "object"
+    },
+    "TransportOverrides": {
+      "additionalProperties": false,
+      "description": "TLS settings applied over the endpoint's. An absent value keeps the\nendpoint's own.",
+      "properties": {
+        "ssl_client_cert": {
+          "default": null,
+          "description": "The client certificate file; given together with `ssl_client_key`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ssl_client_key": {
+          "default": null,
+          "description": "The client key file; given together with `ssl_client_cert`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ssl_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SslMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The TLS mode; production hosts usually want `verify_full`."
+        },
+        "ssl_root_cert": {
+          "default": null,
+          "description": "The trusted root certificate file.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://lash.dev/schemas/postgres-host-config/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Every lash PostgreSQL connection role's sizes, guards, retries and\nnames, and the durable node settings, validated together.",
+  "properties": {
+    "connection": {
+      "$ref": "#/$defs/ConnectionPolicy",
+      "default": {
+        "application_name_prefix": "lash",
+        "statement_cache_capacity": 100,
+        "topology": "direct",
+        "transport": {
+          "ssl_client_cert": null,
+          "ssl_client_key": null,
+          "ssl_mode": null,
+          "ssl_root_cert": null
+        }
+      },
+      "description": "Transport policy every role shares."
+    },
+    "deployment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeploymentBudget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The deployment's connection budget. `None` skips the server\ncapacity check. Both presets leave this optional; a host can declare it."
+    },
+    "guards": {
+      "$ref": "#/$defs/GuardPolicies",
+      "default": {
+        "durable": {
+          "idle_in_transaction_timeout": 5000,
+          "lock_timeout": 2000,
+          "operation_deadline_ms": 10000,
+          "statement_timeout": 5000,
+          "transaction_timeout": "inherit"
+        },
+        "inspection": {
+          "idle_in_transaction_timeout": 30000,
+          "lock_timeout": 5000,
+          "operation_deadline_ms": 30000,
+          "statement_timeout": 30000,
+          "transaction_timeout": "inherit"
+        },
+        "ordinary": {
+          "idle_in_transaction_timeout": 30000,
+          "lock_timeout": 10000,
+          "operation_deadline_ms": 60000,
+          "statement_timeout": 30000,
+          "transaction_timeout": "inherit"
+        },
+        "renewal": {
+          "idle_in_transaction_timeout": 1000,
+          "lock_timeout": 250,
+          "operation_deadline_ms": 2000,
+          "statement_timeout": 1000,
+          "transaction_timeout": "inherit"
+        },
+        "replay": {
+          "idle_in_transaction_timeout": 30000,
+          "lock_timeout": 10000,
+          "operation_deadline_ms": 60000,
+          "statement_timeout": 30000,
+          "transaction_timeout": "inherit"
+        },
+        "scheduler": {
+          "idle_in_transaction_timeout": 1000,
+          "lock_timeout": 250,
+          "operation_deadline_ms": 2000,
+          "statement_timeout": 1000,
+          "transaction_timeout": "inherit"
+        },
+        "store_startup_ms": 30000
+      },
+      "description": "SQL guards and whole-operation deadlines, by operation role."
+    },
+    "live_replay": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LiveReplayPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The live replay store; `None` opens no replay pool or listener."
+    },
+    "maintenance": {
+      "$ref": "#/$defs/MaintenancePolicy",
+      "default": {
+        "checkpoint_ref_chunk": 16384,
+        "max_schema_sessions": 1,
+        "max_sweep_sessions": 1,
+        "migration_batch_rows": 500,
+        "migration_deadline_ms": null,
+        "migration_lock_timeout_ms": 30000,
+        "migration_pool": {
+          "acquire_timeout_ms": 30000,
+          "idle_timeout_ms": 600000,
+          "max_connections": 2,
+          "max_lifetime_ms": 1800000,
+          "min_connections": 0,
+          "test_before_acquire": false
+        },
+        "migration_statement_timeout": "inherit",
+        "preflight_pool": {
+          "acquire_timeout_ms": 5000,
+          "idle_timeout_ms": 600000,
+          "max_connections": 2,
+          "max_lifetime_ms": 1800000,
+          "min_connections": 0,
+          "test_before_acquire": false
+        },
+        "process_event_release_page_rows": 256,
+        "sweep_liveness_probe_timeout_ms": 500,
+        "sweep_mint_attempts": 3
+      },
+      "description": "Preflight, migration and detached-session limits."
+    },
+    "name_limits": {
+      "$ref": "#/$defs/PostgresNameLimits",
+      "default": {
+        "application_prefix": 32,
+        "replay_schema": 48
+      }
+    },
+    "node": {
+      "$ref": "#/$defs/DurableSettings",
+      "default": {
+        "activation_loop_budget": 8,
+        "cascade_batch": 256,
+        "claim_batch": 16,
+        "graph_reads": {
+          "depth": 64,
+          "engine_bytes": 17179869184,
+          "execution_bytes": 17179869184,
+          "kernel_data": {
+            "decode_depth": 512,
+            "document_depth": 64,
+            "document_json_depth": 352,
+            "state_json_depth": 512,
+            "value_depth": 128
+          },
+          "owner_bytes": 4294967296
+        },
+        "group_commit": {
+          "max_members": 64,
+          "window_ms": 5
+        },
+        "idle_evict_ms": 60000,
+        "lease": {
+          "claim_backoff_ms": 25,
+          "claim_poll_ms": 250,
+          "heartbeat_every_ms": 3000,
+          "reap_every_ms": 2000,
+          "self_stop_after_ms": 10000,
+          "shutdown_ms": 2000,
+          "startup_ms": 2000,
+          "ttl_ms": 15000
+        },
+        "max_active": 256,
+        "notifier": "after_commit",
+        "retirement": {
+          "backlog_limit": 10000,
+          "batch_nodes": 256,
+          "every_ms": 1000,
+          "steps_per_sweep": 16
+        },
+        "snapshot_every_fuel": 1000000
+      },
+      "description": "The durable substrate's parameters, the node lease's included. The\ndurable backend takes them from here and from nowhere else."
+    },
+    "process_replay": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProcessReplayPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The process replay store; `None` opens no process replay pool or\nlistener."
+    },
+    "retry": {
+      "$ref": "#/$defs/RetryPolicies",
+      "default": {
+        "durable": {
+          "attempts": 4,
+          "initial_delay_ms": 5,
+          "jitter": true,
+          "max_delay_ms": 20
+        },
+        "live_replay": {
+          "attempts": 8,
+          "initial_delay_ms": 5,
+          "jitter": true,
+          "max_delay_ms": 100
+        },
+        "process_replay": {
+          "attempts": 8,
+          "initial_delay_ms": 5,
+          "jitter": true,
+          "max_delay_ms": 100
+        },
+        "store": {
+          "attempts": 4,
+          "initial_delay_ms": 5,
+          "jitter": true,
+          "max_delay_ms": 20
+        },
+        "wait_resolution": {
+          "attempts": 3,
+          "initial_delay_ms": 5,
+          "jitter": true,
+          "max_delay_ms": 20
+        }
+      },
+      "description": "Bounded retries of known-aborted database work."
+    },
+    "roles": {
+      "$ref": "#/$defs/RolePolicies",
+      "default": {
+        "critical": {
+          "acquire_timeout_ms": 2000,
+          "idle_timeout_ms": 600000,
+          "max_connections": 3,
+          "max_lifetime_ms": 1800000,
+          "min_connections": 0,
+          "test_before_acquire": false
+        },
+        "listener": {
+          "acquire_timeout_ms": 2000
+        },
+        "max_store_operations": 16,
+        "renewal": {
+          "acquire_timeout_ms": 500
+        },
+        "scheduler": {
+          "acquire_timeout_ms": 500,
+          "idle_timeout_ms": 600000,
+          "max_connections": 1,
+          "max_lifetime_ms": 1800000,
+          "min_connections": 0,
+          "test_before_acquire": false
+        },
+        "served_nodes": 1,
+        "work": {
+          "acquire_timeout_ms": 30000,
+          "idle_timeout_ms": 600000,
+          "max_connections": 16,
+          "max_lifetime_ms": 1800000,
+          "min_connections": 0,
+          "test_before_acquire": false
+        }
+      },
+      "description": "Each pooled and dedicated role's capacity."
+    },
+    "schema_check": {
+      "$ref": "#/$defs/SchemaCheck",
+      "default": "enforce",
+      "description": "What open does when the live schema drifts."
+    },
+    "signals": {
+      "$ref": "#/$defs/SignalPolicy",
+      "default": {
+        "reconnect": {
+          "initial_delay_ms": 250,
+          "jitter": true,
+          "max_delay_ms": 5000
+        }
+      },
+      "description": "The durable notification listener's reconnect policy."
+    }
+  },
+  "title": "PostgresHostConfig",
+  "type": "object"
+}

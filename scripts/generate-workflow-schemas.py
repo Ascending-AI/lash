@@ -20,6 +20,9 @@ OUTPUT = ROOT / "schemas" / "host"
 # include_str!, so a host that vendors lash can check its copies hermetically.
 # The crate's drift law checks both copies against the repository schemas.
 CRATE_DECLARATIONS = {
+    Path("postgres-host-config") / "v1.schema.json": Path("crates")
+    / "lash-postgres-store"
+    / "postgres-host-config-v1.schema.json",
     Path("kernel-workflow-view") / "v1.d.ts": Path("crates")
     / "lash-kernel-view"
     / "kernel-workflow-view-v1.d.ts",
@@ -183,6 +186,13 @@ def generate(
             else:
                 if actual != expected:
                     stale.append(f"{path} differs")
+            if relative == Path("postgres-host-config/v1.schema.json"):
+                crate_path = ROOT / CRATE_DECLARATIONS[relative]
+                try:
+                    if crate_path.read_text(encoding="utf-8") != expected:
+                        stale.append(f"{crate_path} differs")
+                except OSError as error:
+                    stale.append(f"{crate_path} cannot be read: {error}")
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(expected, encoding="utf-8")
