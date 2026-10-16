@@ -568,9 +568,8 @@ impl LashRuntime {
     /// observers (FIG-5397) to exactly the observers it records, and take
     /// it from resident state, so the session's next head commit retires it
     /// (FIG-6164). An observer the deployment declared retired has its
-    /// share retired as undeliverable, recorded in the head beside the
-    /// change's revision. A runtime whose plugins are not built, or that
-    /// cannot resolve every observer the change is owed to, delivers
+    /// share retired as undeliverable. A runtime whose plugins are not built,
+    /// or that cannot resolve every observer the change is owed to, delivers
     /// nothing and leaves the change owed: it is never retired against an
     /// empty or partial roster.
     pub(super) async fn deliver_undelivered_config_change(&mut self) {
@@ -623,18 +622,6 @@ impl LashRuntime {
         if let Some(error) = delivery.failures {
             tracing::warn!(?error, "session config observer failed");
         }
-        self.state
-            .retired_config_deliveries
-            .extend(
-                delivery
-                    .retired
-                    .into_iter()
-                    .map(|observer| crate::RetiredConfigDelivery {
-                        revision,
-                        observer,
-                        retired_by: delivery.retired_by.clone(),
-                    }),
-            );
         self.state.undelivered_config_change = None;
     }
 }

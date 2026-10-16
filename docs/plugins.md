@@ -382,7 +382,7 @@ plugin in these durable records:
 - The session prompt plan's section ids, and a model call's resolved prompt
   sections, wrappers and recorded text. Message origins, plugin events and
   plugin-produced turn outputs can also retain plugin provenance.
-- Config-change delivery observers and retired-delivery receipts. An outstanding
+- Pending config-change delivery observers. An outstanding
   observer has its own `retire_config_observer` declaration; retiring its plugin
   does not retire that delivery.
 

@@ -443,15 +443,12 @@ impl PluginDispatchContext<'_> {
         let capabilities = self.session.capabilities();
         let retired = self.session.host.retired_config_observers();
         let recorded = capabilities.composition.recorded();
-        let mut delivery = super::ConfigChangeDelivery {
-            retired_by: retired.retired_by().to_owned(),
-            ..super::ConfigChangeDelivery::default()
-        };
+        let mut delivery = super::ConfigChangeDelivery::default();
         let mut owed = Vec::new();
         for observer in observers {
             match recorded.resolve(observer, &capabilities.contributions.runtime_event_hooks) {
                 Ok(registered) => owed.push(registered),
-                Err(_) if retired.contains(observer) => delivery.retired.push(observer.clone()),
+                Err(_) if retired.contains(observer) => {}
                 Err(unavailable) => return Err(unavailable),
             }
         }

@@ -18,8 +18,7 @@ impl LashCoreBuilder {
     /// requirements carry those identities too. Plugin transitions retain writer
     /// admissions and namespace postimages; prompt snapshots retain section
     /// and wrapper owners, and messages/events retain plugin provenance.
-    /// Config-change deliveries name their observers, including completed
-    /// retirement receipts; an undelivered
+    /// Pending config-change deliveries name their observers; an undelivered
     /// observer needs its own [`Self::retire_config_observer`] declaration.
     ///
     /// A plugin that leaves none of these references needs no retirement: a
@@ -43,11 +42,9 @@ impl LashCoreBuilder {
     /// deployment uninstalled for good (FIG-6164): exactly that owner and
     /// key. A session whose head owes a config change to it is claimed by
     /// this core's node, and its delivery retires the observer's share as
-    /// undeliverable, recorded in the head as a
-    /// [`RetiredConfigDelivery`](crate::persistence::RetiredConfigDelivery)
-    /// naming the change's revision, the observer and this core's lease
-    /// owner. Its other observers are delivered as ever. The retirement
-    /// resolves config-change deliveries only. The build refuses an identity
+    /// undeliverable. Its next head commit clears the owed change without
+    /// retaining delivery history. Its other observers are delivered as ever.
+    /// The retirement resolves config-change deliveries only. The build refuses an identity
     /// that names no lifecycle observer, or one an installed plugin still
     /// registers.
     pub fn retire_config_observer(

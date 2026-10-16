@@ -6,8 +6,7 @@ use lash_core::plugin::{PluginCallbackIdentity, PluginHost, RetiredConfigObserve
 
 use crate::{EmbedError, Result, RetiredConfigObserverRefusal};
 
-/// `observers` retired by the node of lease owner `owner`, checked against
-/// the plugins `host` installs.
+/// `observers` declared retired, checked against the plugins `host` installs.
 ///
 /// # Errors
 ///
@@ -15,7 +14,6 @@ use crate::{EmbedError, Result, RetiredConfigObserverRefusal};
 /// lifecycle observer, or one `host` installs.
 pub(super) fn checked(
     host: &PluginHost,
-    owner: &lash_core::LeaseOwnerIdentity,
     observers: Vec<PluginCallbackIdentity>,
 ) -> Result<RetiredConfigObservers> {
     if observers.is_empty() {
@@ -35,8 +33,5 @@ pub(super) fn checked(
             refusal,
         });
     }
-    Ok(RetiredConfigObservers::new(
-        owner.owner_id.clone(),
-        observers,
-    ))
+    Ok(RetiredConfigObservers::new(observers))
 }

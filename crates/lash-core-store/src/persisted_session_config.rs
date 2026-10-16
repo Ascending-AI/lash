@@ -61,13 +61,6 @@ pub struct PersistedSessionConfig {
     /// session's state, a run's recorded config among them, holds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub undelivered_change: Option<Box<UndeliveredConfigChange>>,
-    /// The deliveries of applied changes a deployment retired as
-    /// undeliverable, in the order they were retired: each the share of a
-    /// change owed to an observer the deployment uninstalled for good and
-    /// declared retired. Like [`Self::undelivered_change`], only the head
-    /// carries them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub retired_config_deliveries: Vec<RetiredConfigDelivery>,
 }
 
 /// A committed change of a session's policy its config-change observers
@@ -92,20 +85,6 @@ pub struct UndeliveredConfigChange {
     /// session config-change observer installed when it committed, then
     /// every one the change it superseded was still owed.
     pub observers: Vec<crate::store::plugin_writers::PluginCallbackIdentity>,
-}
-
-/// The share of an applied change owed to an observer a deployment
-/// uninstalled for good, retired as undeliverable by a node of the
-/// deployment that declared the observer retired (FIG-6164).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RetiredConfigDelivery {
-    /// The revision of the change whose share was retired.
-    pub revision: u64,
-    /// The observer the share was owed to.
-    pub observer: crate::store::plugin_writers::PluginCallbackIdentity,
-    /// The lease owner of the node that retired it.
-    pub retired_by: String,
 }
 
 impl PersistedSessionConfig {
@@ -162,7 +141,6 @@ impl PersistedSessionConfig {
             plugin_config: crate::PluginConfig::default(),
             config_revision: 0,
             undelivered_change: None,
-            retired_config_deliveries: Vec::new(),
         }
     }
 
@@ -185,7 +163,6 @@ impl PersistedSessionConfig {
             // (`persisted_session_config_from_state`).
             config_revision: 0,
             undelivered_change: None,
-            retired_config_deliveries: Vec::new(),
         }
     }
 }

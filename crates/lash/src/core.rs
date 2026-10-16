@@ -1291,7 +1291,6 @@ impl LashCoreBuilder {
         core.control.retired_session_plugins = Arc::new(self.retired_session_plugins);
         core.control.retired_config_observers = Arc::new(retired_observers::checked(
             &build_plugin_host(protocol_factory.as_ref(), &plugin_factories, &core)?,
-            &runtime_owner,
             std::mem::take(&mut self.retired_config_observers),
         )?);
         let default_plugin_host = Arc::new(build_plugin_host(

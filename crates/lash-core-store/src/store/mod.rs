@@ -470,9 +470,6 @@ impl RuntimeCommit {
         config
             .undelivered_change
             .clone_from(&state.undelivered_config_change);
-        config
-            .retired_config_deliveries
-            .clone_from(&state.retired_config_deliveries);
         Ok(Self {
             commit_budget,
             session_id: state.session_id.clone(),

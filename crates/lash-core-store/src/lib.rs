@@ -121,8 +121,8 @@ pub(crate) use queued_drain_policy::{
     QueuedDrainCandidate, QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest,
 };
 pub(crate) use session_graph::{
-    PersistedSessionConfig, PersistedTurnState, RetiredConfigDelivery, SessionGraph,
-    SessionNodePayload, SessionNodeRecord, UndeliveredConfigChange,
+    PersistedSessionConfig, PersistedTurnState, SessionGraph, SessionNodePayload,
+    SessionNodeRecord, UndeliveredConfigChange,
 };
 pub(crate) use store::{
     AppendRequestIdentity, BlobRef, CheckpointComponentDescriptor, GraphAppend,

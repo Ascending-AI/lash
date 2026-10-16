@@ -19,34 +19,22 @@ use super::{
 };
 
 /// The session config-change observers a deployment uninstalled for good
-/// and declared retired, each by its exact identity, and the lease owner of
-/// the node that retires their shares.
+/// and declared retired, each by its exact identity.
 ///
 /// A retired observer's token is a session lifecycle observer's: only a
 /// config change's delivery owes one, so serving it serves nothing else.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RetiredConfigObservers {
-    retired_by: String,
     observers: BTreeSet<PluginCallbackIdentity>,
 }
 
 impl RetiredConfigObservers {
-    /// `observers` retired by the node whose lease owner is `retired_by`.
+    /// The observers the deployment declares retired.
     #[must_use]
-    pub fn new(
-        retired_by: impl Into<String>,
-        observers: impl IntoIterator<Item = PluginCallbackIdentity>,
-    ) -> Self {
+    pub fn new(observers: impl IntoIterator<Item = PluginCallbackIdentity>) -> Self {
         Self {
-            retired_by: retired_by.into(),
             observers: observers.into_iter().collect(),
         }
-    }
-
-    /// The lease owner of the node that retires the shares.
-    #[must_use]
-    pub fn retired_by(&self) -> &str {
-        &self.retired_by
     }
 
     /// Whether `observer` is retired.
@@ -70,14 +58,11 @@ impl RetiredConfigObservers {
     }
 }
 
-/// What a delivery of a config change did: the observers it retired as
-/// undeliverable, in recorded order, under the lease owner `retired_by`;
-/// every other observer it was owed to was invoked, and `failures` are
-/// theirs, typed causes in that order.
+/// The typed failures of the installed observers invoked by a config-change
+/// delivery, in recorded order. Explicitly retired shares require no callback
+/// or retained delivery history.
 #[derive(Debug, Default)]
 pub struct ConfigChangeDelivery {
-    pub retired: Vec<PluginCallbackIdentity>,
-    pub retired_by: String,
     pub failures: Option<PluginError>,
 }
 

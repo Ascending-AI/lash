@@ -761,9 +761,8 @@ pub use session::{
     RuntimeExecutionContext, SessionError, ToolDispatchSurface, tool_dispatch_surface,
 };
 pub use session_graph::{
-    PersistedSessionConfig, PersistedTurnState, RetiredConfigDelivery,
-    SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph, SessionNodePayload, SessionNodeRecord,
-    UndeliveredConfigChange,
+    PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
+    SessionNodePayload, SessionNodeRecord, UndeliveredConfigChange,
 };
 
 /// Declared reads (ADR 0144): what answers a `Read` tool's calls inside a

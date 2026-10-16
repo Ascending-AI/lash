@@ -470,8 +470,7 @@ async fn requires(backend: &lash::Backend, name: &str) -> Vec<String> {
 /// change stays owed and P sees nothing, so it is never retired against a
 /// partial roster. A node that installs P and retires O, which the
 /// deployment uninstalled for good, claims it: P is delivered the change
-/// exactly once, O's share is retired as undeliverable, recorded in the
-/// head with the change's revision and the retiring node, and nothing is
+/// exactly once, O's share is retired as undeliverable, and nothing is
 /// owed after it. A deployment cannot retire an observer it installs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_retired_on_sqlite_memory()
@@ -536,7 +535,7 @@ async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_r
     drop(waiting);
     drop(held);
 
-    // A node that retires O delivers P once and records O's share retired.
+    // A node that retires O delivers P once and clears the owed change.
     world
         .restart("retiring-gone", observing(&[&kept], &[&gone]))
         .await;
@@ -571,15 +570,6 @@ async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_r
         "the change is retired"
     );
     assert_eq!(
-        head.config.retired_config_deliveries,
-        vec![lash::persistence::RetiredConfigDelivery {
-            revision: base + 1,
-            observer: gone.identity(),
-            retired_by: "tool-semantics-deployment".to_owned(),
-        }],
-        "O's share is recorded retired by the node that retired it"
-    );
-    assert_eq!(
         requires(&world.backend, name).await,
         Vec::<String>::new(),
         "nothing is owed once the change is retired"
@@ -607,6 +597,105 @@ async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_r
         ),
         "a node cannot both serve and retire one observer"
     );
+    world.shutdown().await;
+}
+
+/// CONFIG-RETIREMENT-IS-NOT-CONFIG: acknowledged retirement clears only
+/// the owed callbacks. Repeated deployments must not carry their retired
+/// delivery history into subsequent configuration or restore it on reopen.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn config_retirement_is_not_config_on_sqlite_memory() {
+    let kept = Observer::default();
+    let gone = [
+        Observer::named("retired-0"),
+        Observer::named("retired-1"),
+        Observer::named("retired-2"),
+        Observer::named("retired-3"),
+        Observer::named("retired-4"),
+        Observer::named("retired-5"),
+        Observer::named("retired-6"),
+        Observer::named("retired-7"),
+    ];
+    let retired: Vec<_> = gone.iter().collect();
+    let installed: Vec<_> = std::iter::once(&kept).chain(gone.iter()).collect();
+    let Some(mut world) = World::new(Tier::SqliteMemory, observing(&installed, &[])).await else {
+        return;
+    };
+    let name = "config-retirement-is-not-config";
+    drop(world.session(name, served::spec(BEFORE)).await);
+    gone[0].failing.store(true, Ordering::SeqCst);
+
+    for round in 0..4 {
+        if round > 0 {
+            world
+                .restart(&format!("installed-{round}"), observing(&installed, &[]))
+                .await;
+        }
+        let session = open(&world, name).await;
+        let base = revision(&session).await;
+        let outcome = set_limit(&session, &format!("change-{round}"), base, AFTER + round).await;
+        assert!(
+            matches!(outcome, ConfigTransactionOutcome::Applied { .. }),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            owed(&world.backend, name).await.unwrap().observers.len(),
+            installed.len()
+        );
+        drop(session);
+
+        world
+            .restart(&format!("retiring-{round}"), observing(&[&kept], &retired))
+            .await;
+        let session = world
+            .core
+            .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+            .durable()
+            .await
+            .expect("the session reopens");
+        world.send(&session, "retire the owed callbacks").await;
+        assert_eq!(
+            kept.seen().len(),
+            round + 1,
+            "the installed observer receives each change once"
+        );
+        assert!(gone.iter().all(|observer| observer.seen().is_empty()));
+        assert_eq!(owed(&world.backend, name).await, None);
+        assert!(requires(&world.backend, name).await.is_empty());
+        drop(session);
+
+        // A later deployment installs neither the old observers nor their
+        // retirement declarations. Only pending shares require either one.
+        world
+            .restart(&format!("reopened-{round}"), observing(&[&kept], &[]))
+            .await;
+        let session = world
+            .core
+            .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+            .durable()
+            .await
+            .expect("the settled session reopens");
+        world.send(&session, "after retirement and reopen").await;
+        let head = world
+            .backend
+            .stores()
+            .session_store_factory()
+            .load_session_head_meta(&lash::SessionId::try_from(name.to_owned()).unwrap())
+            .await
+            .expect("read the reopened head")
+            .expect("the session has a head");
+        assert_eq!(head.config.undelivered_change, None);
+        let config = serde_json::to_value(&head.config).expect("the config encodes");
+        assert!(
+            config.get("retired_config_deliveries").is_none(),
+            "CONFIG-RETIREMENT-IS-NOT-CONFIG: retired history survived reopen: {config}"
+        );
+        assert_eq!(
+            kept.seen().len(),
+            round + 1,
+            "reopen does not redeliver a settled change"
+        );
+    }
     world.shutdown().await;
 }
 

@@ -719,11 +719,6 @@ pub struct RuntimeSessionState {
     /// `PersistedSessionConfig`.
     #[serde(skip)]
     pub undelivered_config_change: Option<Box<crate::UndeliveredConfigChange>>,
-    /// The resident mirror of the head's retired config-change deliveries
-    /// (FIG-6164): restored with the head, extended by the delivery that
-    /// retires an observer's share, and written back by every head commit.
-    #[serde(skip)]
-    pub retired_config_deliveries: Vec<crate::RetiredConfigDelivery>,
     /// Node ids known to exist durably. This is deliberately independent of
     /// the resident graph: partial residency omits durable off-path nodes,
     /// while host-side edits can add resident nodes before they commit.
@@ -751,7 +746,6 @@ impl RuntimeSessionState {
             head_revision: 0,
             config_revision: 0,
             undelivered_config_change: None,
-            retired_config_deliveries: Vec::new(),
             persisted_node_ids: crate::PersistedNodeIds::default(),
         }
     }
@@ -799,7 +793,6 @@ impl RuntimeSessionState {
             head_revision: 0,
             config_revision: 0,
             undelivered_config_change: None,
-            retired_config_deliveries: Vec::new(),
             persisted_node_ids: crate::PersistedNodeIds::default(),
         };
         state.ensure_agent_frame_initialized();
@@ -1330,9 +1323,6 @@ pub fn adopt_durable_head(
     // is superseded with the view.
     state.authority.run_view = None;
     state.undelivered_config_change = config.undelivered_change.clone();
-    state
-        .retired_config_deliveries
-        .clone_from(&config.retired_config_deliveries);
     adopt_session_config(state, &config);
     apply_session_checkpoint(state, checkpoint, fleet_format)
 }
