@@ -5,8 +5,7 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{
-    Document, Name, Node, Site, SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span,
-    Stmt, Unit,
+    Name, Node, Site, SourceLanguage, SourceMap, SourceMapRefusal, SourceSite, Span, Stmt, Unit,
 };
 
 use crate::Written;
@@ -70,7 +69,7 @@ impl Note {
 /// The map's refusal when a span is not within `source` or a note names no
 /// node: a front end's defect.
 pub fn site_layers(
-    document: &Document,
+    document: &lash_kernel_doc::IdentifiedDocument,
     source: &str,
     language: SourceLanguage,
     main: &[Note],
@@ -87,7 +86,7 @@ pub fn site_layers(
             );
         }
     }
-    let map = SourceMap::new(document, source, language, layers.sites)?;
+    let map = SourceMap::new_identified(document, source, language, layers.sites)?;
     Ok((map, layers.written))
 }
 

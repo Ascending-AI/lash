@@ -85,22 +85,61 @@ impl SourceMap {
         document: &Document,
         source: &str,
         language: SourceLanguage,
+        sites: Vec<SourceSite>,
+    ) -> Result<Self, SourceMapRefusal> {
+        Self::of(document, document.identity(), source, language, sites)
+    }
+
+    /// [`Self::new`] for a document whose identity is already taken.
+    pub fn new_identified(
+        document: &crate::IdentifiedDocument,
+        source: &str,
+        language: SourceLanguage,
+        sites: Vec<SourceSite>,
+    ) -> Result<Self, SourceMapRefusal> {
+        Self::of(document, document.id(), source, language, sites)
+    }
+
+    fn of(
+        document: &Document,
+        identity: DocumentId,
+        source: &str,
+        language: SourceLanguage,
         mut sites: Vec<SourceSite>,
     ) -> Result<Self, SourceMapRefusal> {
         sites.sort_by(|a, b| a.site.cmp(&b.site));
         let map = Self {
             source: Sha256::digest(source.as_bytes()).into(),
-            document: document.identity(),
+            document: identity,
             language,
             sites,
         };
-        map.validate(document, source)?;
+        map.check(document, identity, source)?;
         Ok(map)
     }
 
     /// Check against the actual document and UTF-8 source, in a stable order.
     pub fn validate(&self, document: &Document, source: &str) -> Result<(), SourceMapRefusal> {
-        if self.document != document.identity() {
+        self.check(document, document.identity(), source)
+    }
+
+    /// [`Self::validate`] against a document whose identity is already
+    /// taken: nothing is encoded.
+    pub fn validate_identified(
+        &self,
+        document: &crate::IdentifiedDocument,
+        source: &str,
+    ) -> Result<(), SourceMapRefusal> {
+        self.check(document, document.id(), source)
+    }
+
+    fn check(
+        &self,
+        document: &Document,
+        identity: DocumentId,
+        source: &str,
+    ) -> Result<(), SourceMapRefusal> {
+        if self.document != identity {
             return Err(SourceMapRefusal::Document);
         }
         if self.source != <[u8; 32]>::from(Sha256::digest(source.as_bytes())) {

@@ -366,7 +366,7 @@ impl Embedder {
             extensions(&mut self.registry).map_err(EmbedError::Registry)?;
         }
         let helpers =
-            ValidatedFunctions::from_json(built.helpers).map_err(|error| registry(&error))?;
+            ValidatedFunctions::from_tokens(built.helpers).map_err(|error| registry(&error))?;
         let operations: Vec<FunctionId> = helpers.iter().map(|(function, _)| *function).collect();
         self.registry
             .register_validated(helpers)
@@ -375,7 +375,7 @@ impl Embedder {
         // The functions of the releases the dialect retains, validated
         // against exactly what it holds now, under no name: they are found
         // by identity alone (FIG-5799).
-        let retained = ValidatedFunctions::from_json(built.retained_functions)
+        let retained = ValidatedFunctions::from_tokens(built.retained_functions)
             .map_err(|error| registry(&error))?;
         self.retained
             .extend(retained.iter().map(|(function, _)| *function));
@@ -603,7 +603,7 @@ pub(crate) mod tests {
         let tuning = WorkerTuning::standard();
         let helpers = |dialect: &str| -> BTreeSet<FunctionId> {
             let built = lash_vm_releases::dialect(dialect).expect("the built dialect");
-            ValidatedFunctions::from_json(built.helpers)
+            ValidatedFunctions::from_tokens(built.helpers)
                 .expect("the built helpers")
                 .iter()
                 .map(|(function, _)| *function)
@@ -715,7 +715,7 @@ pub(crate) mod tests {
                 .map(|definition| (definition.identity(), definition))
                 .collect();
             let built = lash_vm_releases::dialect(dialect).expect("the built dialect");
-            let built = ValidatedFunctions::from_json(built.helpers).expect("the built helpers");
+            let built = ValidatedFunctions::from_tokens(built.helpers).expect("the built helpers");
             let built: Vec<_> = built
                 .iter()
                 .map(|(function, definition)| (*function, definition.clone()))

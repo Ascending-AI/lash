@@ -10,7 +10,7 @@ use crate::embedding::Embedding;
 use crate::host::{PagePort, Wire, WireHost, WirePageSource, grant_of, link_grant};
 use lash_kernel_doc::graph_tokens::{ChildRef, decode_body};
 use lash_kernel_doc::heap::{LogicalBytes, PageId, PageRef};
-use lash_kernel_doc::{Datum, Document};
+use lash_kernel_doc::{Datum, IdentifiedDocument};
 use lash_kernel_state::AdmittedWait;
 use lash_kernel_state::paged::census_impl::Census;
 use lash_kernel_state::paged::{
@@ -56,16 +56,14 @@ pub(crate) struct Server<'embedding> {
     hosted: Option<Hosted>,
     /// Immutable preparation survives reset, scoped to this embedding's
     /// fixed registry. Exact wire content includes format and helper ids.
-    /// At most sixteen documents and eight MiB of encoded input are held;
+    /// At most sixteen documents and eight MiB of token bodies are held;
     /// a larger document runs normally without becoming resident.
-    documents: VecDeque<(EncodedPayload, Program, String)>,
+    documents: VecDeque<(EncodedPayload, Program)>,
     fences: Arc<Mutex<Fences>>,
     owner: Option<VmOwner>,
     /// Whether the lease's one `Prepare` crossed, and no run started since.
     prepared: bool,
     cpu_ceiling: Option<libc::rlim_t>,
-    #[cfg(test)]
-    document_decodes: usize,
 }
 
 pub(crate) struct Fences {
@@ -155,8 +153,6 @@ impl<'embedding> Server<'embedding> {
             owner: None,
             prepared: false,
             cpu_ceiling: None,
-            #[cfg(test)]
-            document_decodes: 0,
         };
         server.send(WorkerMessage::Ready {
             protocol_version: WORKER_PROTOCOL_VERSION,
@@ -505,14 +501,13 @@ impl<'embedding> Server<'embedding> {
                 dialect: start.dialect,
             }));
         }
-        self.codec.check_payload(&start.document.0)?;
         let undecodable = |input: RunInput, error: &dyn std::fmt::Display| {
             PoolError::refused(RunRefusal::Undecodable {
                 input,
                 detail: Detail::new(error),
             })
         };
-        let (mut program, identity) = self.program(&start.document)?;
+        let mut program = self.program(&start.document)?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
         let bounds = Bounds {
             charge: start.bounds.charge,
@@ -655,7 +650,6 @@ impl<'embedding> Server<'embedding> {
         } else {
             lash_kernel_vm::Observe::Off
         });
-        let _ = identity;
         if let Some(save) = save {
             machine.set_cell_save(Box::new(save));
         }
@@ -672,38 +666,29 @@ impl<'embedding> Server<'embedding> {
             path,
         })
     }
-    /// The content key is verified bytes rather than a claimed identity.
-    /// Holding the same Arc also reuses PreparedLibrary's admission and code;
-    /// eviction lets its weak document entries be reclaimed on admission.
-    fn program(&mut self, encoded: &EncodedPayload) -> Result<(Program, String), PoolError> {
+    /// The content key is the token body itself rather than a claimed
+    /// identity. Holding the same Arc also reuses PreparedLibrary's
+    /// admission and code; eviction lets its weak document entries be
+    /// reclaimed on admission. A miss decodes the body once, under the
+    /// worker's data limits; nothing is encoded or identified here.
+    fn program(&mut self, encoded: &EncodedPayload) -> Result<Program, PoolError> {
         if let Some(index) = self
             .documents
             .iter()
-            .position(|(bytes, _, _)| bytes == encoded)
+            .position(|(bytes, _)| bytes == encoded)
             && let Some(hit) = self.documents.remove(index)
         {
-            let result = (hit.1.clone(), hit.2.clone());
+            let program = hit.1.clone();
             self.documents.push_back(hit);
-            return Ok(result);
+            return Ok(program);
         }
-        let undecodable = |input: RunInput, error: &dyn std::fmt::Display| {
-            PoolError::refused(RunRefusal::Undecodable {
-                input,
-                detail: Detail::new(error),
-            })
-        };
-        #[cfg(test)]
-        {
-            self.document_decodes += 1;
-        }
-        let document = wire::unwrap(PayloadKind::Document, encoded)?;
-        let document = std::str::from_utf8(&document)
-            .map_err(|error| undecodable(RunInput::Document, &error))
-            .and_then(|text| {
-                Document::from_json_with_limits(text, self.bootstrap.tuning.kernel_data)
-                    .map_err(|error| undecodable(RunInput::Document, &error))
+        let document = IdentifiedDocument::decode(&encoded.0, self.bootstrap.tuning.kernel_data)
+            .map_err(|error| {
+                PoolError::refused(RunRefusal::Undecodable {
+                    input: RunInput::Document,
+                    detail: Detail::new(error),
+                })
             })?;
-        let identity = document.identity().to_string();
         let kernel = document.manifest.kernel;
         let library = self.embedding.prepared_for(kernel).map_err(|error| {
             PoolError::breach(ProtocolBreach::Machine {
@@ -713,7 +698,7 @@ impl<'embedding> Server<'embedding> {
         // A run's start names the release it pins.
         let program = Program {
             release: PageId([0; 32]),
-            document: Arc::new(document),
+            document: Arc::clone(document.shared()),
             library: library.clone(),
         };
         const BYTES: usize = 8 * 1024 * 1024;
@@ -722,17 +707,16 @@ impl<'embedding> Server<'embedding> {
                 || self
                     .documents
                     .iter()
-                    .map(|(bytes, _, _)| bytes.0.len())
+                    .map(|(bytes, _)| bytes.0.len())
                     .sum::<usize>()
                     + encoded.0.len()
                     > BYTES
             {
                 self.documents.pop_front();
             }
-            self.documents
-                .push_back((encoded.clone(), program.clone(), identity.clone()));
+            self.documents.push_back((encoded.clone(), program.clone()));
         }
-        Ok((program, identity))
+        Ok(program)
     }
 
     /// Runs the machine one slice and says where the run stands. What it
@@ -1122,11 +1106,7 @@ mod tests {
         let start = Start {
             owner: VmOwner::new("process:law"),
             dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
-            document: wire::wrap(
-                PayloadKind::Document,
-                document.to_json().expect("json").as_bytes(),
-            )
-            .expect("document payload"),
+            document: EncodedPayload(document.canonical_bytes()),
             from: StartFrom::Fresh(
                 wire::encode(
                     PayloadKind::Start,
@@ -1152,11 +1132,13 @@ mod tests {
     }
 
     /// FIG-6148: activations of one process prepare identical content once
-    /// per worker, without changing charge.
+    /// per worker, without changing charge. FIG-6257: the one preparation
+    /// is one token decode of the `Start`'s body, and no JSON.
     #[test]
     fn process_activations_decode_one_document_per_worker() {
         let (config, _codec, embedding, mut server, _parent) = ready_server();
         let (document, start) = work_start(&config, embedding);
+        let _ = lash_kernel_doc::document_work::take();
         struct Quiet;
         impl lash_kernel_vm::Host for Quiet {
             fn clock(&mut self) -> lash_kernel_doc::Timestamp {
@@ -1194,23 +1176,24 @@ mod tests {
         assert_eq!(second.machine.meters().charged, meters.charged);
         drop(second);
         assert_eq!(
-            server.document_decodes, 1,
-            "two activations share one preparation"
+            lash_kernel_doc::document_work::take(),
+            lash_kernel_doc::document_work::DocumentWork {
+                token_decodes: 1,
+                ..Default::default()
+            },
+            "two activations share one token decode"
         );
         // Another format cannot reuse the earlier document's preparation.
         let mut changed = document;
         changed.manifest.kernel = 999;
         let mut other = start.clone();
-        other.document = wire::wrap(
-            PayloadKind::Document,
-            changed.to_json().expect("json").as_bytes(),
-        )
-        .expect("document payload");
+        other.document = EncodedPayload(changed.canonical_bytes());
+        let _ = lash_kernel_doc::document_work::take();
         assert!(server.start(other).is_err());
         server
             .start(start)
             .expect("original preparation remains valid");
-        assert_eq!(server.document_decodes, 2);
+        assert_eq!(lash_kernel_doc::document_work::take().token_decodes, 1);
         // Distinct identities evict old residency rather than growing it.
         for n in 0..17 {
             let next = lash_kernel_doc::parse_document(&format!(
@@ -1218,13 +1201,7 @@ mod tests {
             ))
             .expect("document");
             server
-                .program(
-                    &wire::wrap(
-                        PayloadKind::Document,
-                        next.to_json().expect("json").as_bytes(),
-                    )
-                    .expect("payload"),
-                )
+                .program(&EncodedPayload(next.canonical_bytes()))
                 .expect("preparation");
         }
         assert_eq!(server.documents.len(), 16);

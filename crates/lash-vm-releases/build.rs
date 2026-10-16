@@ -147,7 +147,7 @@ fn dialect(
     let ids: Vec<_> = validated.iter().map(|(function, _)| *function).collect();
     implement(&mut registry, &ids)?;
     sets::validate(&registry, &helper_names, dialect == "typescript")?;
-    write("helpers.json", &validated.to_json()?)?;
+    write("helpers.bin", &validated.to_tokens())?;
 
     let corpus = corpus::Corpus::recorded()?;
     let building = declared::RETAINED_HELPER_RELEASES
@@ -179,7 +179,7 @@ fn dialect(
     .map_err(|error| format!("dialect `{dialect}`: {error}"))?;
     let (held, retained) = held;
     let retained = registry.validate_functions(retained)?;
-    write("retained_functions.json", &retained.to_json()?)?;
+    write("retained_functions.bin", &retained.to_tokens())?;
     let index: Vec<HelperReleaseIndex> = held.retained.iter().map(HelperRelease::index).collect();
     write("helper_releases.json", &serde_json::to_vec(&index)?)?;
     write("held_releases.json", &serde_json::to_vec(&held)?)?;

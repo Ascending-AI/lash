@@ -611,8 +611,8 @@ fn helper_release_census_matches_checked_call_graph() {
     dialects.sort_by_key(|built| built.dialect);
     assert_eq!(dialects.len(), 2, "the census checks both shipped dialects");
     for built in dialects {
-        let helpers =
-            lash_kernel_doc::ValidatedFunctions::from_json(built.helpers).expect("helpers decode");
+        let helpers = lash_kernel_doc::ValidatedFunctions::from_tokens(built.helpers)
+            .expect("helpers decode");
         let exports = helpers.iter().map(|(id, _)| *id).collect();
         let held = built.held_releases().expect("releases decode");
         let definitions: BTreeMap<_, _> = held

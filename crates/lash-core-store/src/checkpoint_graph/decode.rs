@@ -155,6 +155,12 @@ impl<'s> GraphDecoder<'s> {
         }
     }
 
+    /// The limits every read of this decoder is held to.
+    #[must_use]
+    pub fn limits(&self) -> DecodeLimits {
+        self.limits
+    }
+
     /// Nodes and envelope bytes read so far: a restore's read cost.
     #[must_use]
     pub fn read(&self) -> (u64, u64) {

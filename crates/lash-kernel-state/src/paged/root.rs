@@ -360,8 +360,9 @@ pub struct BindingRecord {
 pub struct FunctionRecord {
     /// The name the function is declared under.
     pub name: NameRef,
-    /// A text value: the saved function's canonical description, which its
-    /// dialect reads back to declare it in a later cell's document.
+    /// A bytes value: the saved function's canonical description, a token
+    /// body that holds its document's token body, which its dialect reads
+    /// back to declare it in a later cell's document.
     pub meta: Value,
     pub release: PageRef,
     /// Each variable the function reads, by name.

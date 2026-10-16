@@ -125,12 +125,12 @@ impl SessionEditor {
     ///
     /// # Errors
     ///
-    /// The heap's faults, and a description that is not text.
+    /// The heap's faults, and a description that is not bytes.
     pub fn changed_functions(
         &self,
         older: &KeyedRoot,
         newer: &KeyedRoot,
-    ) -> Result<BTreeMap<Name, Option<String>>, HeapFault> {
+    ) -> Result<BTreeMap<Name, Option<Vec<u8>>>, HeapFault> {
         let older = Tree::<FunctionRecord>::of_keyed(older);
         let newer = Tree::<FunctionRecord>::of_keyed(newer);
         let mut changed = Vec::new();
@@ -149,12 +149,12 @@ impl SessionEditor {
             .collect()
     }
 
-    fn meta(&self, name: &Name, record: &FunctionRecord) -> Result<String, HeapFault> {
+    fn meta(&self, name: &Name, record: &FunctionRecord) -> Result<Vec<u8>, HeapFault> {
         match crate::data::copy_out(&self.heap, &record.meta) {
-            Ok(Datum::Text(meta)) => Ok(meta),
+            Ok(Datum::Bytes(meta)) => Ok(meta.as_slice().to_vec()),
             Err(crate::data::CopyError::Heap(fault)) => Err(fault),
             Ok(_) | Err(crate::data::CopyError::Raised(_)) => Err(HeapFault::Malformed(format!(
-                "saved function `{name}`'s description is not text"
+                "saved function `{name}`'s description is not bytes"
             ))),
         }
     }
@@ -272,12 +272,12 @@ impl SessionEditor {
     }
 
     /// Every saved function the session holds, by its declared name, with
-    /// the text its dialect described it in.
+    /// the bytes its dialect described it in.
     ///
     /// # Errors
     ///
-    /// The heap's faults, and a description that is not text.
-    pub fn functions(&self) -> Result<BTreeMap<Name, String>, HeapFault> {
+    /// The heap's faults, and a description that is not bytes.
+    pub fn functions(&self) -> Result<BTreeMap<Name, Vec<u8>>, HeapFault> {
         let mut records = Vec::new();
         Tree::<FunctionRecord>::of_keyed(&self.functions).visit(
             self.heap.pages(),

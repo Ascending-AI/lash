@@ -31,7 +31,7 @@ use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
 use lash_durable::domain::graph::RootOwner;
 use lash_durable::domain::pages::{RootLease, RootLeaseRequest};
 use lash_durable::{DurableError, DurableInstant};
-use lash_kernel_doc::{DocumentId, EncodeError, ErrorDatum};
+use lash_kernel_doc::{DocumentId, ErrorDatum};
 use lash_kernel_vm::{
     Bound, BoundExceeded, Bounds, DeliverError, EffectRequest, End, MachineError, OpenError,
     Outcome, Request, RunError, StartError, WaitId,
@@ -386,8 +386,6 @@ pub enum KernelFailure {
         stated: u32,
         ceiling: u32,
     },
-    #[error("the document has no identity: {0}")]
-    Document(#[from] EncodeError),
     #[error(transparent)]
     Start(#[from] StartError),
     #[error("the run's checkpoint root is refused: {0}")]

@@ -43,14 +43,15 @@ fn an_admitted_baseline_cell_starts_with_at_most_one_thousand_allocations() {
         .unwrap();
     let program = Program {
         release: pages::RELEASE,
-        document: Arc::new(
+        document: Arc::clone(
             lash_dialect_typescript::lower(
                 &source,
                 &environment,
                 lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
             )
             .unwrap()
-            .document,
+            .document
+            .shared(),
         ),
         library: PreparedLibrary::new(registry),
     };
@@ -120,14 +121,15 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
     for (name, source) in gate_six::programs() {
         let program = Program {
             release: pages::RELEASE,
-            document: Arc::new(
+            document: Arc::clone(
                 lash_dialect_typescript::lower(
                     &source,
                     &environment,
                     lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
                 )
                 .unwrap()
-                .document,
+                .document
+                .shared(),
             ),
             library: prepared.clone(),
         };
@@ -272,14 +274,15 @@ fn a_host_json_cell_bounds_allocations_on_both_serializer_paths() {
         let source = format!("const result = await echo(null); console.log({expression});");
         let program = Program {
             release: pages::RELEASE,
-            document: Arc::new(
+            document: Arc::clone(
                 lash_dialect_typescript::lower(
                     &source,
                     &environment,
                     lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
                 )
                 .unwrap()
-                .document,
+                .document
+                .shared(),
             ),
             library: prepared.clone(),
         };

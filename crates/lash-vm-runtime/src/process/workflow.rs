@@ -236,7 +236,8 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         let document = lash_kernel_doc::Document::from_json(&module.bytes).map_err(|error| {
             unresolvable(format!("the declared module does not decode: {error}"))
         })?;
-        let identity = document.identity();
+        let document = lash_kernel_doc::IdentifiedDocument::new(document);
+        let identity = document.id();
         if identity.to_string() != module.module_ref {
             return Err(unresolvable(format!(
                 "the declared module `{}` is the document `{identity}`",
@@ -369,7 +370,11 @@ impl lash_core::ProcessDocumentProvider for KernelDocumentProvider {
         .map_err(|refusal| store_fault(refusal.into()))?;
         self.engine
             .documents
-            .publish(claim, document.document(), &declarations)
+            .publish(
+                claim,
+                &lash_kernel_doc::IdentifiedDocument::new(document.document().clone()),
+                &declarations,
+            )
             .await
             .map_err(store_fault)?;
         Ok(lash_core::ProcessDocument::new(

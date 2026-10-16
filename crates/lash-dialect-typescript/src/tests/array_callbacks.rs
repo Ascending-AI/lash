@@ -228,7 +228,7 @@ fn lowered(kernel: &Kernel, source: &str) -> Program {
     .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Program {
         release: super::pages::RELEASE,
-        document: Arc::new(lowered.document),
+        document: Arc::clone(lowered.document.shared()),
         library: kernel.prepared.clone(),
     }
 }

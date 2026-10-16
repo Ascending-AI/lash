@@ -708,7 +708,7 @@ fn authored_typescript_corpus_reprints_without_generic_body_forms() {
         "let i = 0; while (i < 3) { i = i + 1; if (i === 2) { continue; } console.log(i); }",
         "try { throw 'bad'; } catch (error) { console.log(error); } finally { console.log('done'); }",
         "let result = await echo(4); console.log(result);",
-    ].into_iter().map(|source| lash_kernel_dialect::readability::Case { name: "authored-typescript", document: super::lower_with_effects(source).unwrap().document }).collect();
+    ].into_iter().map(|source| lash_kernel_dialect::readability::Case { name: "authored-typescript", document: super::lower_with_effects(source).unwrap().document.into_document() }).collect();
     let report = lash_kernel_dialect::readability::check(
         &cases,
         &[lash_kernel_dialect::readability::Dialect {

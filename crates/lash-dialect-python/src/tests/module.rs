@@ -36,6 +36,7 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
         .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"))
         .document
         .entries
+        .clone()
 }
 
 fn refusal(source: &str) -> String {

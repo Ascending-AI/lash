@@ -36,6 +36,7 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
         .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"))
         .document
         .entries
+        .clone()
 }
 
 /// FIG-6507: a list-valued tool result admits as an array callback receiver.

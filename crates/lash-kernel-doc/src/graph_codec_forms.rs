@@ -860,6 +860,7 @@ impl TokenCodec for Manifest {
 /// identity, [`Document::identity`], is this body's logical digest.
 impl TokenCodec for Document {
     fn encode(&self, out: &mut TokenWriter) {
+        crate::document_work::note(|work| work.token_encodes += 1);
         out.seq(5);
         self.manifest.encode(out);
         self.functions.encode(out);
@@ -869,6 +870,7 @@ impl TokenCodec for Document {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        crate::document_work::note(|work| work.token_decodes += 1);
         input.expect_struct(5)?;
         Ok(Self {
             manifest: Manifest::decode(input)?,

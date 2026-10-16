@@ -11,8 +11,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::{
-    Document, EncodeError, FunctionCatalog, FunctionDeclarations, FunctionDefinition, FunctionId,
-    FunctionName,
+    Document, FunctionCatalog, FunctionDeclarations, FunctionDefinition, FunctionId, FunctionName,
 };
 
 /// Why a set of declarations is not the one a document uses.
@@ -161,8 +160,8 @@ pub fn required_declarations(
 }
 
 /// The declarations of the library functions a document lists, checked
-/// against it, each with the JSON it is stored as. A registered
-/// definition's identity and JSON are the ones its registration holds, so
+/// against it, each with the token body it is stored as. A registered
+/// definition's identity and body are the ones its registration holds, so
 /// a holder that retains a document's helpers for every cell identifies
 /// and encodes each of them once (FIG-6457).
 #[derive(Clone, Debug)]
@@ -173,7 +172,7 @@ pub struct CheckedDeclarations {
 #[derive(Clone, Debug)]
 struct CheckedDeclaration {
     definition: Arc<FunctionDefinition>,
-    image: Result<Arc<str>, EncodeError>,
+    image: Arc<[u8]>,
 }
 
 impl CheckedDeclarations {
@@ -197,7 +196,7 @@ impl CheckedDeclarations {
                 },
                 None => CheckedDeclaration {
                     definition: Arc::new(definition.clone()),
-                    image: definition.to_json().map(Arc::from),
+                    image: Arc::from(crate::graph_tokens::encode_body(definition)),
                 },
             };
             held.insert(function, declaration);
@@ -218,18 +217,13 @@ impl CheckedDeclarations {
         })
     }
 
-    /// Each declaration's function and the JSON it is stored as, in
+    /// Each declaration's function and the token body it is stored as, in
     /// identity order.
-    ///
-    /// # Errors
-    ///
-    /// The first declaration with no JSON encoding.
-    pub fn images(&self) -> Result<Vec<(FunctionId, Arc<str>)>, EncodeError> {
+    #[must_use]
+    pub fn images(&self) -> Vec<(FunctionId, Arc<[u8]>)> {
         self.held
             .iter()
-            .map(|(function, declaration)| {
-                declaration.image.clone().map(|image| (*function, image))
-            })
+            .map(|(function, declaration)| (*function, Arc::clone(&declaration.image)))
             .collect()
     }
 }

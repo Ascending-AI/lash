@@ -147,7 +147,7 @@ impl Runner {
         lash_kernel_check::admit(&lowered.document, &admission).map_err(|e| format!("{e:?}"))?;
         Ok(Lowered::Program(Program {
             release: crate::pages::RELEASE,
-            document: Arc::new(lowered.document),
+            document: Arc::clone(lowered.document.shared()),
             library: self.prepared.clone(),
         }))
     }

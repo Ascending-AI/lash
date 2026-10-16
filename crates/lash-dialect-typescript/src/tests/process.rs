@@ -41,7 +41,10 @@ const handle = await processes.start({ definition: review, args: { request: "x" 
 
 #[test]
 fn a_named_process_arrow_is_an_entry_under_its_typed_signature_and_its_value_is_a_reference() {
-    let document = lower(REVIEW).expect("the cell lowers").document;
+    let document = lower(REVIEW)
+        .expect("the cell lowers")
+        .document
+        .into_document();
     let review = Name::new("review");
     assert_eq!(
         document.entries.get(&review),
@@ -102,7 +105,10 @@ fn a_process_written_as_an_objects_definition_is_an_entry_of_its_own() {
 
 #[test]
 fn an_entry_runs_the_arrows_body_with_its_start_arguments() {
-    let document = lower(REVIEW).expect("the cell lowers").document;
+    let document = lower(REVIEW)
+        .expect("the cell lowers")
+        .document
+        .into_document();
     let (asked, ended) = machine::end_of_entry(
         document,
         "review",
@@ -116,7 +122,8 @@ fn an_entry_runs_the_arrows_body_with_its_start_arguments() {
 fn a_process_that_returns_nothing_ends_with_null() {
     let document = lower("const quiet = async () => { await echo(\"once\"); };")
         .expect("the cell lowers")
-        .document;
+        .document
+        .into_document();
     let (asked, ended) = machine::end_of_entry(document, "quiet", Vec::new());
     assert_eq!(asked, ["echo:once"]);
     assert_eq!(ended, Datum::Null);
@@ -189,7 +196,10 @@ const work = async () => {
 "#;
     for declaration in ["const w", "const w: any[]"] {
         let source = source.replace("const w =", &format!("{declaration} ="));
-        let document = lower(&source).expect("the definition lowers").document;
+        let document = lower(&source)
+            .expect("the definition lowers")
+            .document
+            .into_document();
         lash_kernel_check::derive(&document, super::library()).expect("the definition body links");
         let (_, ended) = machine::end_of_entry(document, "work", vec![]);
         assert_eq!(

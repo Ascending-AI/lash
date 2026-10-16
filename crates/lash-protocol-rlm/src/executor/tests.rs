@@ -2,6 +2,7 @@
 //! through the production entry, in a worker, on a claimed session actor
 //! over a SQLite durable store.
 
+mod document_trips;
 mod finish_value;
 mod graph;
 mod python;

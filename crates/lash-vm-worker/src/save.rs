@@ -56,9 +56,7 @@ impl CellSave for DialectSave {
             ..SavedCell::default()
         };
         for (name, Kept { function, aliases }) in kept {
-            let meta = serde_json::to_string(&LowerFunction::from(&function)).map_err(|error| {
-                HeapFault::Malformed(format!("saved function `{name}` does not encode: {error}"))
-            })?;
+            let meta = LowerFunction::from(&function).description();
             let (before, after) = function
                 .token
                 .as_ref()
@@ -66,7 +64,7 @@ impl CellSave for DialectSave {
                 .unwrap_or_default();
             let record = FunctionRecord {
                 name: NameRef::new(&function.name, heap.pages())?,
-                meta: Value::Text(heap.text(&meta).map_err(native)?),
+                meta: Value::Bytes(heap.bytes(&meta).map_err(native)?),
                 release: function.release,
                 captures: function.captures.clone(),
                 before,

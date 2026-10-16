@@ -126,7 +126,7 @@ fn lower_against(
     let text = print_document(&lowered.document);
     assert_eq!(
         parse_document(&text).as_ref(),
-        Ok(&lowered.document),
+        Ok(lowered.document.document()),
         "{text}"
     );
     Ok(lowered)

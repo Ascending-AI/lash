@@ -404,6 +404,7 @@ pub(crate) fn lower(
             format!("the program lowers to a document the kernel refuses: {invalid}"),
         )
     })?;
+    let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let (source_map, written) = lash_kernel_dialect::site_layers(
         &document,
         source,

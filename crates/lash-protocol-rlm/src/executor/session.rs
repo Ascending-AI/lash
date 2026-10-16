@@ -551,13 +551,14 @@ impl CodeModeExecutionState {
 
     /// A saved function's description as a cell is lowered against it,
     /// carried to this build's kernel version.
-    fn lower_function(&self, name: &Name, meta: &str) -> Result<LowerFunction, String> {
-        let function: LowerFunction = serde_json::from_str(meta)
-            .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
+    fn lower_function(&self, name: &Name, meta: &[u8]) -> Result<LowerFunction, String> {
+        let function =
+            LowerFunction::from_description(meta, lash_kernel_doc::KernelDataLimits::standard())
+                .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
         match self.kernel.saved_function(&function.clone().into_saved()) {
             Ok(None) => Ok(function),
             Ok(Some(carried)) => Ok(LowerFunction {
-                document: carried.document,
+                document: lash_kernel_doc::IdentifiedDocument::new(carried.document),
                 ..function
             }),
             Err(refusal) => Err(refusal.to_string()),

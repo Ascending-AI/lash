@@ -84,12 +84,12 @@ macro_rules! built {
     ($dialect:literal) => {
         DialectReleases {
             dialect: $dialect,
-            helpers: include_bytes!(concat!(env!("OUT_DIR"), "/", $dialect, "_helpers.json")),
+            helpers: include_bytes!(concat!(env!("OUT_DIR"), "/", $dialect, "_helpers.bin")),
             retained_functions: include_bytes!(concat!(
                 env!("OUT_DIR"),
                 "/",
                 $dialect,
-                "_retained_functions.json"
+                "_retained_functions.bin"
             )),
             helper_release_index: include_bytes!(concat!(
                 env!("OUT_DIR"),

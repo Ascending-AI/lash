@@ -51,14 +51,14 @@ pub enum Request {
         controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
-    /// Print `document` (its JSON encoding) in the selected generated format.
+    /// Print `document` (its token body) in the selected generated format.
     Print {
         format: lash_kernel_dialect::SourceFormat,
         #[serde(with = "serde_bytes")]
         document: Vec<u8>,
         options: lash_kernel_dialect::PrintOptions,
     },
-    /// Read exported source back against `base` (its JSON encoding), the
+    /// Read exported source back against `base` (its token body), the
     /// document it was printed from, without admission or helper resolution.
     Read {
         format: lash_kernel_dialect::SourceFormat,
@@ -72,11 +72,15 @@ pub enum Request {
 /// A saved function as lowering reads it: its code and what it requires.
 /// Its frozen captures and token members stay in heap pages; lowering never
 /// reads them (S8), so they do not cross.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// It is stored in the session's function record, and crosses to the
+/// worker that lowers a cell, as its description: one token body that
+/// holds the document's own body verbatim ([`Self::description`]), so
+/// neither hop encodes the document again.
+#[derive(Clone, Debug)]
 pub struct LowerFunction {
     pub name: Name,
-    pub document: lash_kernel_doc::Document,
+    pub document: lash_kernel_doc::IdentifiedDocument,
     pub helper_owners: BTreeSet<Name>,
     pub references: BTreeSet<Name>,
     pub written: Option<lash_kernel_dialect::Written>,
@@ -88,7 +92,7 @@ impl From<&lash_kernel_dialect::SavedFunction> for LowerFunction {
     fn from(function: &lash_kernel_dialect::SavedFunction) -> Self {
         Self {
             name: function.name.clone(),
-            document: function.document.clone(),
+            document: lash_kernel_doc::IdentifiedDocument::new(function.document.clone()),
             helper_owners: function.helper_owners.clone(),
             references: function.references.clone(),
             written: function.written.clone(),
@@ -104,7 +108,7 @@ impl LowerFunction {
     pub fn into_saved(self) -> lash_kernel_dialect::SavedFunction {
         lash_kernel_dialect::SavedFunction {
             name: self.name,
-            document: self.document,
+            document: self.document.into_document(),
             captures: BTreeMap::new(),
             release: lash_kernel_doc::heap::PageRef {
                 id: lash_kernel_doc::heap::PageId([0; 32]),
@@ -119,6 +123,65 @@ impl LowerFunction {
                 after: Vec::new(),
             }),
         }
+    }
+
+    /// The function's description: a token sequence of its name, its
+    /// document's token body (copied, not encoded), its helper owners, its
+    /// references, what its source wrote and its token's tag.
+    #[must_use]
+    pub fn description(&self) -> Vec<u8> {
+        use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter};
+        let mut out = TokenWriter::with_capacity(self.document.body().len() + 64);
+        out.seq(6);
+        self.name.encode(&mut out);
+        out.raw(self.document.body());
+        self.helper_owners.encode(&mut out);
+        self.references.encode(&mut out);
+        self.written.encode(&mut out);
+        self.token.encode(&mut out);
+        out.into_bytes()
+    }
+
+    /// Reads what [`Self::description`] wrote, under `limits`: the
+    /// document is decoded once, and identified by its body's digest.
+    ///
+    /// # Errors
+    ///
+    /// Any token the description does not hold.
+    pub fn from_description(
+        description: &[u8],
+        limits: lash_kernel_doc::KernelDataLimits,
+    ) -> Result<Self, lash_kernel_doc::graph_tokens::TokenError> {
+        use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenReader};
+        let mut input = TokenReader::new(description).with_data_limits(limits);
+        input.expect_struct(6)?;
+        let name = Name::decode(&mut input)?;
+        let document = lash_kernel_doc::IdentifiedDocument::decode(input.tree()?, limits)?;
+        let function = Self {
+            name,
+            document,
+            helper_owners: BTreeSet::decode(&mut input)?,
+            references: BTreeSet::decode(&mut input)?,
+            written: Option::decode(&mut input)?,
+            token: Option::decode(&mut input)?,
+        };
+        input.finish()?;
+        Ok(function)
+    }
+}
+
+/// A saved function crosses the worker IPC as its description's bytes.
+impl Serialize for LowerFunction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(&self.description())
+    }
+}
+
+impl<'de> Deserialize<'de> for LowerFunction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
+        Self::from_description(&bytes, lash_kernel_doc::KernelDataLimits::standard())
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -140,7 +203,7 @@ pub struct DialectRefusal {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
     Lowered {
-        /// The document's JSON encoding.
+        /// The document's token body (`K-ID-003`).
         #[serde(with = "serde_bytes")]
         document: Vec<u8>,
         /// Where each statement of the document came from in the source,
@@ -162,6 +225,7 @@ pub enum Response {
     },
     Printed(lash_kernel_dialect::PrintedSource),
     Read {
+        /// The document's token body.
         #[serde(with = "serde_bytes")]
         document: Vec<u8>,
     },
@@ -214,7 +278,6 @@ pub struct Service {
     receipts: Option<Arc<Mutex<Vec<WorkerReceipt>>>>,
     #[cfg(feature = "testing")]
     call_hold: Option<CallHold>,
-    pub(crate) documents: Arc<Mutex<crate::machine::DocumentEncodings>>,
     config: Arc<PoolConfig>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
     /// The parent's staging directory, opened on first use.
@@ -242,7 +305,6 @@ impl Service {
             receipts: None,
             #[cfg(feature = "testing")]
             call_hold: None,
-            documents: Arc::new(Mutex::new(crate::machine::DocumentEncodings::default())),
             config: Arc::new(config),
             pool: Arc::new(Mutex::new(None)),
             spools: Arc::default(),

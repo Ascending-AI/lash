@@ -13,15 +13,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::RuntimeExecutionContext;
-use lash_kernel_doc::{Datum, Document, DocumentId, Name, SourceMap};
+use lash_kernel_doc::{Datum, IdentifiedDocument, Name, SourceMap};
 use lash_vm_runtime::{KernelProcessDefinition, definition_draft, definition_of_entry};
 
 use super::session::CodeModeExecutionState;
 
 /// The document a cell's function references name entries of.
 pub(super) struct CellEntries {
-    pub document: Document,
-    pub identity: DocumentId,
+    pub document: IdentifiedDocument,
 }
 
 impl CellEntries {
@@ -36,7 +35,7 @@ impl CellEntries {
             return Ok(value.clone());
         }
         lash_vm_runtime::with_definitions(value, &|function| {
-            let definition = definition_of_entry(&self.document, self.identity, function)?;
+            let definition = definition_of_entry(&self.document, self.document.id(), function)?;
             lash_vm_broker::kernel::datum_from_json(&definition.to_string())
                 .map_err(|error| error.to_string())
         })
@@ -49,7 +48,8 @@ impl CellEntries {
             .entries
             .keys()
             .filter_map(|entry| {
-                let definition = definition_of_entry(&self.document, self.identity, entry).ok()?;
+                let definition =
+                    definition_of_entry(&self.document, self.document.id(), entry).ok()?;
                 let datum =
                     lash_vm_broker::kernel::datum_from_json(&definition.to_string()).ok()?;
                 Some((entry.clone(), datum))
@@ -58,7 +58,7 @@ impl CellEntries {
     }
 }
 
-/// The cell's document `document` (its JSON) with every saved function a
+/// The cell's document `document` with every saved function a
 /// process of one of its entries runs declared with its captures as
 /// constants, read from the session's pages, and `source_map` locating
 /// that document: a process starts with no session, so a saved function
@@ -70,21 +70,21 @@ impl CellEntries {
 /// The session's pages' faults, or a capture with no constant, as text.
 pub(super) async fn declare_saved_captures(
     state: &mut CodeModeExecutionState,
-    document: String,
+    document: IdentifiedDocument,
     mut source_map: Option<SourceMap>,
-) -> Result<(String, Option<SourceMap>), String> {
-    // A document that is not one is refused where the cell reads it.
-    let Ok(mut lowered) = Document::from_json(&document) else {
-        return Ok((document, source_map));
-    };
-    if lowered.entries.is_empty() {
+) -> Result<(IdentifiedDocument, Option<SourceMap>), String> {
+    if document.entries.is_empty() {
         return Ok((document, source_map));
     }
     let saved: BTreeSet<Name> = state
         .lowering_functions()
         .into_keys()
-        .filter(|name| lowered.functions.contains_key(name))
+        .filter(|name| document.functions.contains_key(name))
         .collect();
+    if saved.is_empty() {
+        return Ok((document, source_map));
+    }
+    let mut lowered = document.document().clone();
     let mut declared = BTreeSet::new();
     let mut changed = false;
     // A capture that names another saved function reaches it too.
@@ -108,10 +108,10 @@ pub(super) async fn declare_saved_captures(
     if !changed {
         return Ok((document, source_map));
     }
+    let document = IdentifiedDocument::new(lowered);
     if let Some(map) = &mut source_map {
-        map.document = lowered.identity();
+        map.document = document.id();
     }
-    let document = lowered.to_json().map_err(|error| error.to_string())?;
     Ok((document, source_map))
 }
 
@@ -188,7 +188,7 @@ pub(super) async fn publish_entries(
         return Ok(());
     }
     let module = lash_core::DeclaredModuleArtifact {
-        module_ref: entries.identity.to_string(),
+        module_ref: entries.document.id().to_string(),
         bytes: entries
             .document
             .to_json()
@@ -197,7 +197,7 @@ pub(super) async fn publish_entries(
     for entry in entries.document.entries.keys() {
         let draft = definition_draft(&KernelProcessDefinition::of(
             &entries.document,
-            entries.identity,
+            entries.document.id(),
             entry.clone(),
         ))
         .map_err(|error| error.to_string())?;

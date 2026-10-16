@@ -211,7 +211,7 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName, root: Option<&str>)
         )
         .expect("the dialect is installed")
         .unwrap_or_else(|diagnostic| panic!("the {dialect} cell lowers: {diagnostic:?}"));
-    let document = lowered.document;
+    let document = lowered.document.into_document();
     let library = embedding
         .prepared_for(document.manifest.kernel)
         .expect("the document's library")

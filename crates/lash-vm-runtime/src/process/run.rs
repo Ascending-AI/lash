@@ -608,13 +608,11 @@ fn worker_failure(failure_: KernelFailure) -> Result<Answered, Unsettled> {
         return Err(Unsettled::Capacity(cause, failure_.to_string()));
     }
     match &failure_ {
-        KernelFailure::Start(_) | KernelFailure::Open(_) | KernelFailure::Document(_) => {
-            ended(failure(
-                KernelProcessFailureCode::RunRefused,
-                failure_.to_string(),
-                None,
-            ))
-        }
+        KernelFailure::Start(_) | KernelFailure::Open(_) => ended(failure(
+            KernelProcessFailureCode::RunRefused,
+            failure_.to_string(),
+            None,
+        )),
         KernelFailure::Worker {
             outcome: InfrastructureOutcome::RunRefused { refusal },
         } => ended(failure(

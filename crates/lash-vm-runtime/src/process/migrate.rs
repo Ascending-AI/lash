@@ -217,6 +217,7 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
             lash_core::ArtifactReferrer::ProcessRecord(process.clone()),
         )
         .map_err(retried)?;
+        let document = lash_kernel_doc::IdentifiedDocument::new(document);
         let declarations =
             lash_kernel_doc::CheckedDeclarations::required(&document, engine.functions.as_ref())
                 .map_err(|refusal| {

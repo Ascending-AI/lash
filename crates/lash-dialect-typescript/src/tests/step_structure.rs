@@ -212,7 +212,7 @@ fn the_prepared_step_structure_is_the_one_the_frame_shows() {
         .unwrap_or_else(|diagnostic| panic!("{name}: {diagnostic}"));
         let program = Program {
             release: super::pages::RELEASE,
-            document: std::sync::Arc::new(lowered.document),
+            document: std::sync::Arc::clone(lowered.document.shared()),
             library: super::machine::prepared().clone(),
         };
         gate += verified_run(name, program);

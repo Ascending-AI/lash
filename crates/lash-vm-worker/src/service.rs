@@ -49,7 +49,7 @@ pub(crate) fn perform(
                 None => Response::UnknownDialect { dialect },
                 Some(Ok(lowered)) => Response::Lowered {
                     reads: reached(&lowered.document, library, reads),
-                    document: encoded(lowered.document.to_json())?,
+                    document: lowered.document.body().to_vec(),
                     source_map: lowered.source_map,
                     written: lowered.written,
                     function_values: embedding
@@ -79,7 +79,7 @@ pub(crate) fn perform(
                     dialect: dialect_name(language).into(),
                 },
                 Some(Ok(lowered)) => Response::Lowered {
-                    document: encoded(lowered.document.to_json())?,
+                    document: lowered.document.body().to_vec(),
                     source_map: lowered.source_map,
                     written: lowered.written,
                     function_values: None,
@@ -120,7 +120,7 @@ pub(crate) fn perform(
             },
             Some(package) => match (package.read)(&source, &decoded_document(base)?, limits) {
                 Ok(document) => Response::Read {
-                    document: encoded(document.to_json())?,
+                    document: document.canonical_bytes(),
                 },
                 Err(error) => Response::DialectRefused(refusal(error)),
             },
@@ -241,22 +241,14 @@ fn reached(
     }
 }
 
-/// A document a request carries as its JSON encoding.
-fn decoded_document(json: Vec<u8>) -> Result<Document, PoolError> {
-    std::str::from_utf8(&json)
-        .map_err(|error| error.to_string())
-        .and_then(|text| Document::from_json(text).map_err(|error| error.to_string()))
-        .map_err(|error| {
-            PoolError::refused(RunRefusal::Undecodable {
-                input: RunInput::Document,
-                detail: Detail::new(error),
-            })
+/// A document a request carries as its token body.
+fn decoded_document(body: Vec<u8>) -> Result<Document, PoolError> {
+    lash_kernel_doc::graph_tokens::decode_body(&body).map_err(|error| {
+        PoolError::refused(RunRefusal::Undecodable {
+            input: RunInput::Document,
+            detail: Detail::new(error),
         })
-}
-
-fn encoded(json: Result<String, impl std::fmt::Display>) -> Result<Vec<u8>, PoolError> {
-    json.map(String::into_bytes)
-        .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))
+    })
 }
 
 fn refusal(diagnostic: Diagnostic) -> DialectRefusal {
@@ -273,6 +265,69 @@ fn refusal(diagnostic: Diagnostic) -> DialectRefusal {
 mod tests {
     use super::*;
     use lash_kernel_dialect::{GeneratedSourceLimits, PrintOptions, SourceFormat};
+
+    /// FIG-6257: a document crosses the worker IPC as its canonical token
+    /// body, never as JSON: `Lowered` answers the body its source map's
+    /// identity is the digest of, and a saved function in `Lower` carries
+    /// its document's body verbatim.
+    #[test]
+    fn documents_cross_the_worker_ipc_as_token_bodies() {
+        let embedding =
+            crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
+        let lower = |functions| Request::Lower {
+            dialect: "typescript".to_owned(),
+            source: "function advance(value) { return value + 2; }".to_owned(),
+            effects: Default::default(),
+            tool_roots: Default::default(),
+            controls: Default::default(),
+            bindings: Default::default(),
+            functions,
+            helpers: lash_vm_library::HELPER_RELEASE,
+            reads: Default::default(),
+        };
+        let encoded =
+            EncodedPayload(rmp_serde::to_vec_named(&lower(Default::default())).expect("request"));
+        let response = perform(&embedding, &encoded).expect("lowered");
+        let Response::Lowered {
+            document,
+            source_map,
+            ..
+        } = rmp_serde::from_slice(&response.0).expect("response")
+        else {
+            panic!("the cell lowers");
+        };
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&document).is_err(),
+            "the document is not JSON"
+        );
+        let identified =
+            lash_kernel_doc::IdentifiedDocument::decode_standard(&document).expect("a token body");
+        assert_eq!(identified.body(), &document[..]);
+        assert_eq!(identified.id(), identified.document().identity());
+        assert_eq!(source_map.expect("a source map").document, identified.id());
+
+        let name = lash_kernel_doc::Name::new("advance");
+        let function = lash_vm_client::service::LowerFunction {
+            name: name.clone(),
+            document: identified.clone(),
+            helper_owners: Default::default(),
+            references: Default::default(),
+            written: None,
+            token: None,
+        };
+        let wire =
+            rmp_serde::to_vec_named(&lower([(name.clone(), function)].into())).expect("request");
+        assert!(
+            wire.windows(document.len())
+                .any(|bytes| bytes == &document[..]),
+            "the saved function's document crosses as its token body"
+        );
+        let Request::Lower { functions, .. } = rmp_serde::from_slice(&wire).expect("request")
+        else {
+            panic!("a lowering request");
+        };
+        assert_eq!(functions[&name].document.id(), identified.id());
+    }
 
     std::thread_local! {
         static READER_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -310,7 +365,7 @@ mod tests {
             for source_map in [false, true] {
                 let request = Request::Print {
                     format,
-                    document: document.to_json().expect("json").into_bytes(),
+                    document: document.canonical_bytes(),
                     options: PrintOptions {
                         source_map,
                         ..Default::default()
@@ -352,7 +407,7 @@ mod tests {
                 rmp_serde::to_vec_named(&Request::Read {
                     format,
                     source: String::new(),
-                    base: document.to_json().expect("json").into_bytes(),
+                    base: document.canonical_bytes(),
                     limits: Default::default(),
                 })
                 .expect("request"),

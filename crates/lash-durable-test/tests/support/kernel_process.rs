@@ -10,7 +10,7 @@ pub async fn payload(backend: &lash::Backend, text: &str, entry: &str) -> serde_
                 lash_core::HostArtifactPin::mint(),
             ))
             .expect("a host pin is unguarded"),
-            &document,
+            &lash_kernel_doc::IdentifiedDocument::new(document.clone()),
             &lash_vm_runtime::standard_functions()
                 .ok()
                 .and_then(|functions| {

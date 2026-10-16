@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::Written;
-use lash_kernel_doc::{Datum, Document, EffectName, Signature, Site};
+use lash_kernel_doc::{Datum, EffectName, IdentifiedDocument, Signature, Site};
 use lash_vm_runtime::{HostBoundary, HostEffect};
 
 use super::host::{CellHostLedgers, HostGraph, LedgerCall, LedgerCallState};
@@ -38,16 +38,16 @@ pub struct RecordedEffect {
 }
 
 /// What a cell is, recorded when it was lowered and the same at every park.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone)]
 pub struct CellEnvelope {
     /// The digest of the cell's source: a parked run under the cell's
     /// execution holds this source's state.
     pub code: String,
     /// The dialect the source was lowered from.
     pub dialect: String,
-    /// The kernel document the cell runs, as JSON.
-    pub document: String,
+    /// The kernel document the cell runs, decoded once where it was lowered
+    /// or read back, with its identity and token body.
+    pub document: IdentifiedDocument,
     /// Where each statement of the document came from in the source, when
     /// the dialect gave a map: what a failure locates its tasks by, at
     /// whichever activation the cell ends. Nothing a run or a save needs is
@@ -56,7 +56,6 @@ pub struct CellEnvelope {
     /// What the source wrote of each function the document makes, by the
     /// site of its closure: what the cell saves a function it leaves with
     /// ([`lash_kernel_dialect::Lowered::written`]).
-    #[serde(with = "lash_kernel_dialect::written_table")]
     pub written: BTreeMap<Site, Written>,
     /// What the dialect's function values are, where its sessions keep the
     /// functions a cell binds ([`lash_kernel_dialect::Package::function_values`]).
@@ -75,7 +74,6 @@ pub struct CellEnvelope {
     /// for it. The cell performs these as reads, answered inside their
     /// statements and recorded nowhere but the cell's saved state; its
     /// roots owe each provider's reader while the cell lives.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub reads: BTreeMap<EffectName, lash_core::ProviderKey>,
 }
 
@@ -146,11 +144,6 @@ impl CellEnvelope {
                 .map_err(|error| error.to_string())?;
         }
         Ok(boundary)
-    }
-
-    /// The document the cell runs.
-    pub(super) fn document(&self) -> Result<Document, String> {
-        Document::from_json(&self.document).map_err(|error| error.to_string())
     }
 }
 
@@ -247,10 +240,8 @@ pub(super) fn load_cell(
     };
     let (cell, _) = CellEnvelope::load(&mut decoder, envelope).map_err(text)?;
     let state = HostState::load(&mut decoder, host).map_err(text)?;
-    let document = cell.document()?;
     let entries = super::processes::CellEntries {
-        identity: document.identity(),
-        document,
+        document: cell.document.clone(),
     };
     let projections = EntryProjections(&entries);
     let mut ledgers = CellHostLedgers {
@@ -435,7 +426,6 @@ pub(crate) fn recorded_cell_ledger(
 pub(crate) fn check_cell_snapshot(cell: &lash_core::plugin::StoredCell) -> Result<(), String> {
     use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
     let loaded = load_cell(&cell.graph, cell.row.root, cell.read_limits)?;
-    loaded.cell.document()?;
     loaded.cell.boundary()?;
     let mut decoder = GraphDecoder::new(&cell.graph, cell.read_limits);
     let body: ExecRoot = decoder
@@ -636,21 +626,17 @@ impl CellEnvelope {
     ///
     /// # Errors
     ///
-    /// [`GraphRefusal::InvalidBody`] for a document that does not decode or
-    /// a map of another document, or any refusal of the staging area.
+    /// [`GraphRefusal::InvalidBody`] for a map of another document, or any
+    /// refusal of the staging area.
     pub fn stage(
         &self,
         staging: &mut GraphStaging,
         release: NodeId,
     ) -> Result<NodeId, GraphRefusal> {
-        let document = self
-            .document()
-            .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?;
         // The document's identity is the digest of the logical body its
-        // node is encoded from (`K-ID-001`): encode it once for both.
-        let logical = document.canonical_bytes();
-        let logical = TypedBody::logical(&logical);
-        let document_id = lash_kernel_doc::DocumentId::from_bytes(logical.digest());
+        // node is encoded from (`K-ID-001`): the envelope holds both.
+        let logical = TypedBody::logical(self.document.body());
+        let document_id = self.document.id();
         if self
             .source_map
             .as_ref()
@@ -702,8 +688,13 @@ impl CellEnvelope {
     ) -> Result<(Self, NodeId), GraphRefusal> {
         let body: EnvelopeBody = decoder.decode(id, NodeKind::CELL_ENVELOPE)?;
         decoder.child_kind(id, body.release, &[NodeKind::RELEASE_MANIFEST])?;
-        let document: Document = decoder.decode(body.document, NodeKind::DOCUMENT)?;
-        if document.identity() != body.document_id {
+        let logical = decoder.logical_body(body.document, NodeKind::DOCUMENT)?;
+        let document = IdentifiedDocument::decode(&logical, decoder.limits().kernel_data).map_err(
+            |error| {
+                GraphRefusal::from_token(error, Some(body.document), Some(NodeKind::DOCUMENT.0))
+            },
+        )?;
+        if document.id() != body.document_id {
             return Err(graph_invalid(
                 NodeKind::CELL_ENVELOPE,
                 "the document is not the one its identity names",
@@ -728,9 +719,7 @@ impl CellEnvelope {
         let envelope = Self {
             code: body.code,
             dialect: body.dialect,
-            document: document
-                .to_json()
-                .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?,
+            document,
             source_map,
             written,
             function_values: body.function_values,

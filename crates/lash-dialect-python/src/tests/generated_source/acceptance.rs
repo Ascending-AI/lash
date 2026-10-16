@@ -462,7 +462,7 @@ fn authored_python_corpus_has_no_avoidable_generic_forms() {
         let lowered = super::super::machine::lower(source).unwrap();
         cases.push(Case {
             name: "authored-python",
-            document: lowered.document,
+            document: lowered.document.into_document(),
         });
     }
     let rules = unavoidable();
@@ -499,7 +499,10 @@ fn exported_python_corpora_compile_under_cpython() {
                 .unwrap();
             cases.push(Case {
                 name: "authored-python",
-                document: super::super::machine::lower(source).unwrap().document,
+                document: super::super::machine::lower(source)
+                    .unwrap()
+                    .document
+                    .into_document(),
             });
         }
     }

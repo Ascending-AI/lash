@@ -1,6 +1,7 @@
 //! Host-owned source operations, isolated in the service's worker pool.
 use lash_kernel_dialect::{GeneratedSourceLimits, PrintOptions, PrintedSource, SourceFormat};
 use lash_kernel_doc::Document;
+use lash_kernel_doc::graph_tokens::decode_body;
 
 use super::{DialectRefusal, Request, Response, Service, runtime_ops::ServiceRuntimeOps as _};
 use crate::PoolError;
@@ -12,8 +13,6 @@ use lash_vm_protocol::{PayloadKind, SequenceFault};
 pub enum SourceServiceError {
     #[error(transparent)]
     Worker(#[from] PoolError),
-    #[error(transparent)]
-    Encode(#[from] lash_kernel_doc::EncodeError),
     #[error(transparent)]
     Print(#[from] lash_kernel_dialect::PrintError),
     #[error("generated source refused: {0:?}")]
@@ -37,7 +36,7 @@ impl Service {
         let response = self
             .request_accounted(Request::Print {
                 format,
-                document: document.to_json()?.into_bytes(),
+                document: document.canonical_bytes(),
                 options,
             })
             .await?;
@@ -74,9 +73,7 @@ impl Service {
                 source_map,
                 ..
             } => {
-                let document = std::str::from_utf8(&document)
-                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
-                let document = Document::from_json(document)
+                let document = decode_body::<Document>(&document)
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
                 // A module import answers the map of the source it read.
                 let map = source_map.ok_or_else(|| {
@@ -124,17 +121,13 @@ impl Service {
             .request_accounted(Request::Read {
                 format,
                 source: source.to_owned(),
-                base: base.to_json()?.into_bytes(),
+                base: base.canonical_bytes(),
                 limits,
             })
             .await?;
         match response {
-            Response::Read { document } => {
-                let text = std::str::from_utf8(&document)
-                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
-                Document::from_json(text)
-                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error).into())
-            }
+            Response::Read { document } => decode_body::<Document>(&document)
+                .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error).into()),
             other => Err(refused(other)),
         }
     }

@@ -246,7 +246,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
     let start = Start {
         owner: VmOwner::new("codemode:session"),
         dialect: DIALECT.into(),
-        document: wire::wrap(PayloadKind::Document, &document).expect("document"),
+        document: EncodedPayload(document),
         from: StartFrom::Fresh(
             wire::encode(
                 PayloadKind::Start,

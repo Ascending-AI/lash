@@ -487,7 +487,8 @@ impl KernelProcessEngine {
     pub(crate) async fn entry(
         &self,
         definition: &KernelProcessDefinition,
-    ) -> Result<Result<(Arc<Document>, Signature), String>, DocumentStoreError> {
+    ) -> Result<Result<(lash_kernel_doc::IdentifiedDocument, Signature), String>, DocumentStoreError>
+    {
         let Some(document) = self.documents.get_shared(&definition.document).await? else {
             return Ok(Err(format!(
                 "document `{}` is not published",

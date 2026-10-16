@@ -106,7 +106,10 @@ pub enum EffectControl {
 /// A source text as a kernel program.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lowered {
-    pub document: Document,
+    /// The document, identified where it was lowered: its source map's
+    /// identity and the body that crosses to the host are the ones made
+    /// here, once.
+    pub document: lash_kernel_doc::IdentifiedDocument,
     /// Where each statement and action of the document's own code came from
     /// in the source, checked against both. It never changes behaviour or
     /// the document's identity (`K-ID-001`), and nothing a run or a save

@@ -195,7 +195,10 @@ impl Document {
         encode_body(self)
     }
 
+    /// The host's readable form (`K-DOC-004`). Lash's own components pass
+    /// a document as its token body ([`crate::IdentifiedDocument`]).
     pub fn to_json(&self) -> Result<String, EncodeError> {
+        crate::document_work::note(|work| work.json_encodes += 1);
         to_json(self)
     }
 
@@ -207,6 +210,7 @@ impl Document {
         text: &str,
         limits: crate::KernelDataLimits,
     ) -> Result<Self, DecodeError> {
+        crate::document_work::note(|work| work.json_decodes += 1);
         from_versioned_json_with_limits(text, limits)
     }
 }

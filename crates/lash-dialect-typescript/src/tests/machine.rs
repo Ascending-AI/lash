@@ -321,7 +321,7 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
     }
     let program = Program {
         release: super::pages::RELEASE,
-        document: Arc::new(lowered.document),
+        document: Arc::clone(lowered.document.shared()),
         library: prepared().clone(),
     };
     let start = CellStart {
@@ -448,10 +448,11 @@ pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
 fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, usize) {
     let program = Program {
         release: super::pages::RELEASE,
-        document: Arc::new(
+        document: Arc::clone(
             super::lower_with_effects(source)
                 .expect("law source")
-                .document,
+                .document
+                .shared(),
         ),
         library: prepared().clone(),
     };

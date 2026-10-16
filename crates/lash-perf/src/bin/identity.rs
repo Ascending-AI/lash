@@ -185,7 +185,7 @@ fn lower(
             lash_kernel_dialect::Mode::Cell(cell),
         )?
         .ok()
-        .map(|lowered| lowered.document)
+        .map(|lowered| lowered.document.into_document())
 }
 
 const AGENT_CELLS: &[&str] = &[

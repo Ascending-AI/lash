@@ -182,7 +182,7 @@ impl<M: Machine> Executor for OnMachine<M> {
     fn run(&self, lowered: &Lowered) -> Result<Execution, String> {
         let program = Program {
             release: pages::RELEASE,
-            document: Arc::new(lowered.document.clone()),
+            document: Arc::clone(lowered.document.shared()),
             library: self.library.clone(),
         };
         let session = pages::Session::default();
@@ -1021,7 +1021,7 @@ fn async_tests_are_judged_by_done_completion() {
         let lowered = Lowered {
             source_map: None,
             written: Default::default(),
-            document,
+            document: document.into(),
         };
         let end = executor().run(&lowered).unwrap();
         assert_eq!(judge(end, &meta) == Observed::Pass, expected, "{prints}");

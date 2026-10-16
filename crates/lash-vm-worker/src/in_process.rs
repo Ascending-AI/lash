@@ -70,7 +70,7 @@ impl<H> InProcess<H> {
     ///
     /// # Errors
     ///
-    /// [`KernelFailure::Document`] when the document has no identity.
+    /// None today: the run's identity is the document's own.
     pub fn new(
         program: Program,
         dialect: &str,

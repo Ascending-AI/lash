@@ -9,10 +9,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use serde::{Deserialize, Serialize};
-
-use crate::document::DecodeError;
-use crate::document::EncodeError;
 use crate::function::FunctionDefinition;
 use crate::heap::NativeFunction;
 use crate::name::{FunctionId, FunctionName};
@@ -94,8 +90,9 @@ pub struct RegisteredFunction {
     native: Option<Arc<dyn NativeFunction>>,
     function: FunctionId,
     callees: Arc<OnceLock<BTreeSet<FunctionId>>>,
-    /// The definition's JSON, encoded once for every holder that stores it.
-    image: Arc<OnceLock<Result<Arc<str>, EncodeError>>>,
+    /// The definition's token body, encoded once for every holder that
+    /// stores it.
+    image: Arc<OnceLock<Arc<[u8]>>>,
     // Consumers own their derived types. Erasure keeps the document vocabulary
     // independent of the checker while registry clones share each result.
     derived: Arc<Mutex<DerivedFacts>>,
@@ -133,16 +130,14 @@ impl RegisteredFunction {
         self.function
     }
 
-    /// The definition's JSON ([`FunctionDefinition::to_json`]), encoded
-    /// once per registration and shared by the registry's clones.
-    ///
-    /// # Errors
-    ///
-    /// The definition's encoding refusal.
-    pub fn image(&self) -> Result<Arc<str>, EncodeError> {
-        self.image
-            .get_or_init(|| self.definition.to_json().map(Arc::from))
-            .clone()
+    /// The definition's token body ([`crate::graph_tokens::encode_body`]),
+    /// the bytes its checkpoint graph node is encoded from, encoded once per
+    /// registration and shared by the registry's clones.
+    pub fn image(&self) -> Arc<[u8]> {
+        Arc::clone(
+            self.image
+                .get_or_init(|| Arc::from(crate::graph_tokens::encode_body(&*self.definition))),
+        )
     }
 
     /// The functions the body actually calls or spawns, including nested expressions.
@@ -469,8 +464,7 @@ impl FunctionRegistry {
 /// Functions validated against the contents of a registry, for another
 /// registry holding exactly those contents to take without validating them
 /// again ([`FunctionRegistry::register_validated`]).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidatedFunctions {
     /// Every function the registry held when they were validated.
     basis: Vec<FunctionId>,
@@ -488,41 +482,62 @@ impl ValidatedFunctions {
             .map(|validated| (&validated.function, &validated.definition))
     }
 
-    /// The JSON a build keeps them as. It is read back only by
-    /// [`ValidatedFunctions::from_json`] in the same build, so it is the
-    /// derived encoding, not a stored spelling.
-    ///
-    /// # Errors
-    ///
-    /// [`EncodeError`], which no definition raises.
-    pub fn to_json(&self) -> Result<Vec<u8>, EncodeError> {
-        serde_json::to_vec(self).map_err(|error| EncodeError {
-            message: error.to_string(),
-        })
+    /// The token body a build keeps them as: each definition in its
+    /// canonical token encoding, the body of its helper-definition graph
+    /// node, beside its identity. It is read back only by
+    /// [`ValidatedFunctions::from_tokens`] in the same build.
+    #[must_use]
+    pub fn to_tokens(&self) -> Vec<u8> {
+        crate::graph_tokens::encode_body(self)
     }
 
-    /// Reads what [`ValidatedFunctions::to_json`] wrote. A body nests as
-    /// deep as its definition does.
+    /// Reads what [`ValidatedFunctions::to_tokens`] wrote.
     ///
     /// # Errors
     ///
-    /// [`DecodeError::Invalid`].
-    pub fn from_json(json: &[u8]) -> Result<Self, DecodeError> {
-        let mut decoder = serde_json::Deserializer::from_slice(json);
-        decoder.disable_recursion_limit();
-        let invalid = |error: serde_json::Error| DecodeError::Invalid {
-            message: error.to_string(),
-            line: error.line(),
-            column: error.column(),
-        };
-        let validated = Self::deserialize(&mut decoder).map_err(invalid)?;
-        decoder.end().map_err(invalid)?;
-        Ok(validated)
+    /// Any token the encoding does not hold.
+    pub fn from_tokens(body: &[u8]) -> Result<Self, crate::graph_tokens::TokenError> {
+        crate::graph_tokens::decode_body(body)
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+impl crate::graph_tokens::TokenCodec for ValidatedFunctions {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(2);
+        self.basis.encode(out);
+        self.functions.encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            basis: Vec::decode(input)?,
+            functions: Vec::decode(input)?,
+        })
+    }
+}
+
+impl crate::graph_tokens::TokenCodec for ValidatedFunction {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(2);
+        self.function.encode(out);
+        self.definition.encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            function: FunctionId::decode(input)?,
+            definition: FunctionDefinition::decode(input)?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ValidatedFunction {
     function: FunctionId,
     definition: FunctionDefinition,

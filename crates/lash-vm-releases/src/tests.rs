@@ -206,7 +206,7 @@ fn the_build_holds_the_releases_it_declares_for_each_dialect() {
                 .map(HelperRelease::index)
                 .collect::<Vec<_>>()
         );
-        let helpers = lash_kernel_doc::ValidatedFunctions::from_json(built.helpers)
+        let helpers = lash_kernel_doc::ValidatedFunctions::from_tokens(built.helpers)
             .expect("the helpers decode");
         let building = held.retained.last().expect("the release the tree builds");
         for (function, _) in helpers.iter() {
@@ -224,7 +224,7 @@ fn the_build_holds_the_releases_it_declares_for_each_dialect() {
 #[test]
 fn a_dialects_release_holds_none_of_another_dialects_helpers() {
     let helpers = |built: &DialectReleases| -> std::collections::BTreeSet<_> {
-        lash_kernel_doc::ValidatedFunctions::from_json(built.helpers)
+        lash_kernel_doc::ValidatedFunctions::from_tokens(built.helpers)
             .expect("the helpers decode")
             .iter()
             .map(|(function, _)| *function)

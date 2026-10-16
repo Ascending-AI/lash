@@ -481,6 +481,7 @@ pub(crate) fn lower(
             environment.library,
         );
     }
+    let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let (source_map, written) = lash_kernel_dialect::site_layers(
         &document,
         source,

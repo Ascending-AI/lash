@@ -131,11 +131,7 @@ fn document(body: &str) -> (String, EncodedPayload) {
     let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
     (
         document.identity().to_string(),
-        wire::wrap(
-            PayloadKind::Document,
-            document.to_json().expect("json").as_bytes(),
-        )
-        .expect("payload"),
+        EncodedPayload(document.canonical_bytes()),
     )
 }
 
@@ -624,13 +620,11 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
     else {
         panic!("the cell lowers")
     };
-    let identity = lash_kernel_doc::Document::from_json(
-        std::str::from_utf8(&document).expect("document text"),
-    )
-    .expect("document")
-    .identity()
-    .to_string();
-    let document = wire::wrap(PayloadKind::Document, &document).expect("payload");
+    let identity = lash_kernel_doc::IdentifiedDocument::decode_standard(&document)
+        .expect("document")
+        .id()
+        .to_string();
+    let document = EncodedPayload(document);
     let mut parent = Parent::new(DIALECT);
     let (end, asked) =
         killed_at_a_park_and_resumed(&pool, &mut parent, DIALECT, &identity, &document);
@@ -738,13 +732,11 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
     else {
         panic!("the cell lowers")
     };
-    let identity = lash_kernel_doc::Document::from_json(
-        std::str::from_utf8(&document).expect("document text"),
-    )
-    .expect("document")
-    .identity()
-    .to_string();
-    let document = wire::wrap(PayloadKind::Document, &document).expect("payload");
+    let identity = lash_kernel_doc::IdentifiedDocument::decode_standard(&document)
+        .expect("document")
+        .id()
+        .to_string();
+    let document = EncodedPayload(document);
     worker.release().expect("reset");
     // Its first park seals its root and the worker is killed: another
     // resumes it only on the release it pinned, which holds Python's
@@ -1408,10 +1400,8 @@ fn go(h) {
 main {}"#,
     );
     let document = Arc::new(
-        lash_kernel_doc::Document::from_json(
-            &String::from_utf8(wire::unwrap(PayloadKind::Document, &encoded).unwrap()).unwrap(),
-        )
-        .unwrap(),
+        lash_kernel_doc::graph_tokens::decode_body::<lash_kernel_doc::Document>(&encoded.0)
+            .unwrap(),
     );
     struct Uncommitted;
     impl lash_vm_broker::kernel::pages::CommittedPages for Uncommitted {
@@ -1525,7 +1515,7 @@ main {}"#,
             OwnerEpoch(1),
             FrameEpoch(1),
             host.clone(),
-            &document,
+            &lash_kernel_doc::IdentifiedDocument::from_shared(Arc::clone(&document)),
             DIALECT,
             start(),
             roomy,

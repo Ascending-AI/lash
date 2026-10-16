@@ -72,7 +72,7 @@ fn drive(source: &str, expected: &[Vec<Datum>]) -> End {
         lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
     )
     .unwrap_or_else(|error| panic!("{error}\n{source}"));
-    drive_document(lowered.document, expected, source)
+    drive_document(lowered.document.into_document(), expected, source)
 }
 
 fn drive_document(
@@ -171,7 +171,7 @@ fn discarded_push_charges_only_the_append_body() {
         let mut machine = super::pages::start(
             Program {
                 release: super::pages::RELEASE,
-                document: Arc::new(lowered.document),
+                document: Arc::clone(lowered.document.shared()),
                 library: kernel().prepared.clone(),
             },
             Bounds {

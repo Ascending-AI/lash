@@ -40,6 +40,8 @@ pub mod graph_tokens;
 /// The persistent semantic heap's frozen target vocabulary (FIG-6195): the
 /// heap cutover moves it to the crate root.
 pub mod heap;
+mod identified;
+pub use identified::{IdentifiedDocument, document_work};
 mod identity;
 mod observation;
 pub use observation::{RanCounts, ReplayPath, RunObservation, TaskPath};

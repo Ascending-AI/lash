@@ -300,7 +300,7 @@ fn start(
     }
     let program = Program {
         release: pages::RELEASE,
-        document: Arc::new(lowered.document),
+        document: Arc::clone(lowered.document.shared()),
         library: installed().prepared.clone(),
     };
     let machine = pages::start(program, BOUNDS, &session);
@@ -314,7 +314,7 @@ fn builtin_range_loop_uses_constant_space() {
     let lowered = lower("for i in range(100000):\n    print(i)\n    break\nprint(i)\n").unwrap();
     let program = Program {
         release: pages::RELEASE,
-        document: Arc::new(lowered.document),
+        document: Arc::clone(lowered.document.shared()),
         library: installed().prepared.clone(),
     };
     let mut machine = pages::start(
@@ -347,7 +347,7 @@ fn dict_same_size_key_replacement_raises_within_charge_bound() {
             format!("d = {initial}\nfor k in d:\n    print(k)\n    del d[k]\n    d[k + 'x'] = 1\n");
         let lowered = lower(&source).unwrap();
         let program = Program {
-            document: Arc::new(lowered.document),
+            document: Arc::clone(lowered.document.shared()),
             library: installed().prepared.clone(),
             release: pages::RELEASE,
         };
@@ -759,7 +759,7 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
         .expect("the arithmetic witness lowers");
         let program = Program {
             release: pages::RELEASE,
-            document: Arc::new(lowered.document),
+            document: Arc::clone(lowered.document.shared()),
             library: prepared.clone(),
         };
         let straight = execution_observation(program.clone(), BOUNDS, false);
@@ -986,7 +986,7 @@ print(s)
     let lowered = lower(source).expect("the integer loop lowers");
     let program = Program {
         release: pages::RELEASE,
-        document: Arc::new(lowered.document),
+        document: Arc::clone(lowered.document.shared()),
         library: installed().prepared.clone(),
     };
     let straight = execution_observation(program.clone(), BOUNDS, false);

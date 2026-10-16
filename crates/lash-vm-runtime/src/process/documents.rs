@@ -1,10 +1,12 @@
 //! The admitted documents processes run, in the store set's module port.
 //!
-//! A document is stored once, as its canonical JSON, under its identity:
-//! the hash of its content, kernel version and manifest included
-//! (`K-DOC-003`). [`KernelDocuments::publish`] is the one writer: beside the
-//! document it holds the definition of every library function the
-//! document lists, each under its own identity, so a reader draws the
+//! A document is stored once, as its canonical token body, under its
+//! identity: the digest of that body, kernel version and manifest included
+//! (`K-DOC-003`), the same bytes and key its checkpoint graph node (kind 10)
+//! is encoded from. [`KernelDocuments::publish`] is the one writer: beside
+//! the document it holds the definition of every library function the
+//! document lists, each as its token body (a helper-definition node's)
+//! under its own identity, so a reader draws the
 //! document from what it retains and never from its own build's registry
 //! (FIG-6379). Equal helper sets are stored once, whichever documents list
 //! them.
@@ -23,9 +25,11 @@ use lash_core::{
     ArtifactName, ArtifactStoreError, ModuleArtifactHold, ModuleArtifactStore, ReferrerClaim,
 };
 use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
+use lash_kernel_doc::graph_tokens::decode_body;
 use lash_kernel_doc::{
     CheckedDeclarations, Correspondence, Document, DocumentId, FunctionDeclarations,
-    FunctionDefinition, FunctionId, SourceMap, SourceMapId, WorkflowDocumentRef,
+    FunctionDefinition, FunctionId, IdentifiedDocument, SourceMap, SourceMapId,
+    WorkflowDocumentRef,
 };
 
 /// The module artifact a document is stored under.
@@ -161,20 +165,15 @@ pub struct KernelDocuments {
     /// Pure content residency, shared by clones and a hosting factory's
     /// runtime bindings. Reads still fetch current
     /// bytes, so residency neither retains an artifact nor hides corruption.
-    decoded: Arc<Mutex<VecDeque<DecodedDocument>>>,
-}
-
-struct DecodedDocument {
-    identity: DocumentId,
-    bytes: Vec<u8>,
-    document: Arc<Document>,
+    /// Each entry is keyed by its token body.
+    decoded: Arc<Mutex<VecDeque<IdentifiedDocument>>>,
 }
 
 /// The hosting factory outlives its per-activation engine bindings. Only
 /// pure preparations cross those bindings; each keeps its current store port.
 #[derive(Default)]
 pub(crate) struct ProcessPreparations {
-    decoded: Arc<Mutex<VecDeque<DecodedDocument>>>,
+    decoded: Arc<Mutex<VecDeque<IdentifiedDocument>>>,
     effects: Arc<Mutex<EffectPreparations>>,
 }
 
@@ -285,9 +284,9 @@ impl KernelDocuments {
         }
     }
 
-    /// Stores `document` under its identity with `declarations`, the
-    /// definition of every library function it lists, each under its own
-    /// identity, and adds `claim`'s edge to each, in one store transaction:
+    /// Stores `document` under its identity as its token body, with
+    /// `declarations`, the definition of every library function it lists,
+    /// each under its own identity as its token body, and adds `claim`'s edge to each, in one store transaction:
     /// the one writer of kernel documents. The declarations are checked
     /// against the document first; a declaration already stored is only
     /// acquired.
@@ -299,7 +298,7 @@ impl KernelDocuments {
     pub async fn publish(
         &self,
         claim: &ReferrerClaim,
-        document: &Document,
+        document: &IdentifiedDocument,
         declarations: &CheckedDeclarations,
     ) -> Result<DocumentId, DocumentStoreError> {
         self.publish_held(claim, None, document, declarations).await
@@ -322,7 +321,7 @@ impl KernelDocuments {
         &self,
         claim: &ReferrerClaim,
         retainer: &ReferrerClaim,
-        document: &Document,
+        document: &IdentifiedDocument,
         declarations: &CheckedDeclarations,
     ) -> Result<DocumentId, DocumentStoreError> {
         self.publish_held(claim, Some(retainer), document, declarations)
@@ -335,28 +334,27 @@ impl KernelDocuments {
         &self,
         claim: &ReferrerClaim,
         retainer: Option<&ReferrerClaim>,
-        document: &Document,
+        document: &IdentifiedDocument,
         declarations: &CheckedDeclarations,
     ) -> Result<DocumentId, DocumentStoreError> {
         declarations.check(document)?;
-        let identity = document.identity();
-        let functions: Vec<(ArtifactName, Arc<str>)> = declarations
-            .images()?
+        let identity = document.id();
+        let functions: Vec<(ArtifactName, Arc<[u8]>)> = declarations
+            .images()
             .into_iter()
             .map(|(function, image)| (function_artifact(&function), image))
             .collect();
         let document_ref = identity.to_string();
-        let document_bytes = document.to_json()?;
         let mut artifacts: Vec<ModuleArtifactHold<'_>> = functions
             .iter()
             .map(|(name, image)| ModuleArtifactHold::Acquire {
                 module_ref: &name.artifact_ref,
-                bytes: image.as_bytes(),
+                bytes: image,
             })
             .collect();
         let document_hold = ModuleArtifactHold::Publish {
             module_ref: &document_ref,
-            bytes: document_bytes.as_bytes(),
+            bytes: document.body(),
         };
         match retainer {
             None => {
@@ -419,13 +417,9 @@ impl KernelDocuments {
                 artifact: artifact.clone(),
                 message,
             };
-            let definition = match std::str::from_utf8(&bytes)
-                .map_err(|error| error.to_string())
-                .and_then(|text| {
-                    FunctionDefinition::from_json(text).map_err(|error| error.to_string())
-                }) {
+            let definition = match decode_body::<FunctionDefinition>(&bytes) {
                 Ok(definition) => definition,
-                Err(message) => return Ok(Err(corrupt(message))),
+                Err(error) => return Ok(Err(corrupt(error.to_string()))),
             };
             held.insert(*function, definition);
         }
@@ -616,8 +610,8 @@ impl KernelDocuments {
         let Ok(source) = String::from_utf8(bytes) else {
             return corrupt(artifact, "the source is not UTF-8".to_owned());
         };
-        let checked = match self.get(&map.document).await? {
-            Some(document) => map.validate(&document, &source),
+        let checked = match self.get_shared(&map.document).await? {
+            Some(document) => map.validate_identified(&document, &source),
             None => map.validate_source(&source),
         };
         match checked {
@@ -650,15 +644,17 @@ impl KernelDocuments {
     pub async fn get(&self, identity: &DocumentId) -> Result<Option<Document>, DocumentStoreError> {
         self.get_shared(identity)
             .await
-            .map(|document| document.map(|document| (*document).clone()))
+            .map(|document| document.map(IdentifiedDocument::into_document))
     }
 
     /// Reuses the immutable document across process activations. The key
     /// includes the stored bytes as well as their checked content identity.
+    /// A miss decodes the stored token body once; its digest is checked
+    /// against the identity it was read under.
     pub(crate) async fn get_shared(
         &self,
         identity: &DocumentId,
-    ) -> Result<Option<Arc<Document>>, DocumentStoreError> {
+    ) -> Result<Option<IdentifiedDocument>, DocumentStoreError> {
         let Some(bytes) = self
             .store
             .get_module_artifact(&identity.to_string())
@@ -672,43 +668,42 @@ impl KernelDocuments {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(index) = decoded
             .iter()
-            .position(|entry| entry.identity == *identity && entry.bytes == bytes)
+            .position(|entry| entry.id() == *identity && entry.body() == bytes.as_slice())
             && let Some(hit) = decoded.remove(index)
         {
-            let document = Arc::clone(&hit.document);
+            let document = hit.clone();
             decoded.push_back(hit);
             return Ok(Some(document));
         }
-        let corrupt = |message: String| DocumentStoreError::Corrupt {
-            document: *identity,
-            message,
-        };
-        let text = std::str::from_utf8(&bytes).map_err(|error| corrupt(error.to_string()))?;
-        let document = Document::from_json(text).map_err(|error| corrupt(error.to_string()))?;
-        let found = document.identity();
+        let document = IdentifiedDocument::decode_standard(&bytes).map_err(|error| {
+            DocumentStoreError::Corrupt {
+                document: *identity,
+                message: error.to_string(),
+            }
+        })?;
+        let found = document.id();
         if found != *identity {
             return Err(DocumentStoreError::Identity {
                 document: *identity,
                 found,
             });
         }
-        let document = Arc::new(document);
         // Residency is an optimization, never an admission limit. Oversized
         // input runs uncached. The bound covers sixteen decoded documents
         // whose encoded content totals at most eight MiB.
         const BYTES: usize = 8 * 1024 * 1024;
         if bytes.len() <= BYTES {
             while decoded.len() >= 16
-                || decoded.iter().map(|entry| entry.bytes.len()).sum::<usize>() + bytes.len()
+                || decoded
+                    .iter()
+                    .map(|entry| entry.body().len())
+                    .sum::<usize>()
+                    + bytes.len()
                     > BYTES
             {
                 decoded.pop_front();
             }
-            decoded.push_back(DecodedDocument {
-                identity: *identity,
-                bytes,
-                document: Arc::clone(&document),
-            });
+            decoded.push_back(document.clone());
         }
         Ok(Some(document))
     }
@@ -834,8 +829,8 @@ mod tests {
 
     /// DECLARATIONS-RETAIN-ONCE (FIG-6457): a cell retains its document and
     /// the K helper declarations it lists in one fenced store write, handing
-    /// the store the JSON the registry encoded once, every cell alike; the
-    /// declarations still read back with the document.
+    /// the store the token bodies the registry encoded once, every cell
+    /// alike; the declarations still read back with the document.
     #[tokio::test]
     async fn declarations_retain_once_in_one_fenced_batch() {
         let mut registry = lash_kernel_doc::FunctionRegistry::new();
@@ -865,10 +860,12 @@ mod tests {
         // could not reuse the address of the one before.
         let mut checked = Vec::new();
         for cell in [7, 8] {
-            let document = lash_kernel_doc::parse_document(&format!(
-                "{header}main {{ {calls}return {cell} }}"
-            ))
-            .expect("document");
+            let document = IdentifiedDocument::new(
+                lash_kernel_doc::parse_document(&format!(
+                    "{header}main {{ {calls}return {cell} }}"
+                ))
+                .expect("document"),
+            );
             let claim = ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
                 lash_core::HostArtifactPin::mint(),
             ))
@@ -902,6 +899,85 @@ mod tests {
         );
     }
 
+    /// FIG-6257: however many process definitions publish a document, the
+    /// store holds it once, as the token body its checkpoint graph node
+    /// (kind 10) is encoded from, under the digest that keys that node; each
+    /// helper it lists is held as its own token body. A read decodes that
+    /// body once, and nothing is JSON.
+    #[tokio::test]
+    async fn a_document_is_stored_once_as_its_graph_node_body() {
+        let mut registry = lash_kernel_doc::FunctionRegistry::new();
+        let helper = registry
+            .register(
+                lash_kernel_doc::parse_definition(
+                    "function helper() -> Any\nkernel 1\ncharge 1\nbody { return 7 }",
+                )
+                .expect("helper"),
+                None,
+            )
+            .expect("registered");
+        let document = IdentifiedDocument::new(
+            lash_kernel_doc::parse_document(&format!(
+                "kernel 1\nnumbers float\nuse helper = @{helper}\nentry one() -> Any\nentry two() -> Any\nfn one() {{ let n = invoke helper() return n }}\nfn two() {{ let n = invoke helper() return n }}\nmain {{ }}",
+            ))
+            .expect("document"),
+        );
+        let declarations = CheckedDeclarations::required(&document, &registry).expect("listed");
+        let store = Arc::new(Counted::default());
+        let documents = KernelDocuments::new(store.clone());
+        let claim = ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("a host pin is unguarded");
+        // One definition per entry, each publishing the document it runs.
+        for _ in document.entries.keys() {
+            assert_eq!(
+                documents
+                    .publish(&claim, &document, &declarations)
+                    .await
+                    .expect("published"),
+                document.id()
+            );
+        }
+        let held = store.stored.lock().expect("store").clone();
+        let stored: Vec<_> = held
+            .iter()
+            .filter(|(_, bytes)| decode_body::<Document>(bytes).is_ok())
+            .collect();
+        assert_eq!(stored.len(), 1, "one stored document: {:?}", held.keys());
+        let (name, bytes) = stored[0];
+        assert_eq!(name, &document.id().to_string());
+        assert_eq!(bytes.as_slice(), document.body());
+        assert_eq!(
+            &lash_kernel_doc::graph_tokens::logical_digest(bytes),
+            document.id().as_bytes(),
+            "the stored bytes are the body the graph keys by the document's id"
+        );
+        let definition =
+            decode_body::<FunctionDefinition>(&held[&function_artifact(&helper).artifact_ref])
+                .expect("the helper is stored as its token body");
+        assert_eq!(definition.identity(), helper);
+        assert!(
+            held.values()
+                .all(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).is_err()),
+            "nothing is stored as JSON"
+        );
+        let _ = lash_kernel_doc::document_work::take();
+        let read = documents
+            .get_shared(&document.id())
+            .await
+            .expect("read")
+            .expect("retained");
+        assert_eq!(read, document);
+        assert_eq!(
+            lash_kernel_doc::document_work::take(),
+            lash_kernel_doc::document_work::DocumentWork {
+                token_decodes: 1,
+                ..Default::default()
+            }
+        );
+    }
+
     /// FIG-6148, K-DOC-003: repeated activations share decoding, but the
     /// cache cannot keep a reclaimed document runnable or hide changed bytes.
     #[tokio::test]
@@ -910,9 +986,7 @@ mod tests {
             lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return 7 }")
                 .expect("document");
         let identity = document.identity();
-        let store = Arc::new(Stored(Mutex::new(Some(
-            document.to_json().expect("json").into_bytes(),
-        ))));
+        let store = Arc::new(Stored(Mutex::new(Some(document.canonical_bytes()))));
         let documents = KernelDocuments::new(store.clone());
         let first = documents
             .get_shared(&identity)
@@ -925,7 +999,7 @@ mod tests {
             .await
             .expect("read")
             .expect("retained");
-        assert!(Arc::ptr_eq(&first, &repeated));
+        assert!(Arc::ptr_eq(first.shared(), repeated.shared()));
         *store.0.lock().expect("store") = None;
         assert!(
             documents
@@ -941,7 +1015,7 @@ mod tests {
         ));
         let other = lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return 8 }")
             .expect("document");
-        *store.0.lock().expect("store") = Some(other.to_json().expect("json").into_bytes());
+        *store.0.lock().expect("store") = Some(other.canonical_bytes());
         assert!(matches!(
             documents.get_shared(&identity).await,
             Err(DocumentStoreError::Identity { .. })
@@ -967,9 +1041,7 @@ mod tests {
             "kernel 1\nnumbers float\nuse helper = @{helper}\neffect ping(x: Any) -> Any\nentry work() -> Any\nfn work() {{ let n = invoke helper() let x = perform ping(n) as Any return x }}\nmain {{ }}",
         )).expect("document");
         let identity = document.identity();
-        let store = Arc::new(Stored(Mutex::new(Some(
-            document.to_json().expect("json").into_bytes(),
-        ))));
+        let store = Arc::new(Stored(Mutex::new(Some(document.canonical_bytes()))));
         let config =
             lash_vm_client::PoolConfig::codemode(lash_vm_client::WorkerEntry::helper("unused"));
         let factory = crate::process_plugin::KernelProcessPluginFactory::new(
@@ -1019,7 +1091,7 @@ mod tests {
             .expect("document")
             .expect("retained");
         assert!(
-            Arc::ptr_eq(&decoded, &rebound),
+            Arc::ptr_eq(decoded.shared(), rebound.shared()),
             "decoding survives runtime rebinding too"
         );
         let absent = factory

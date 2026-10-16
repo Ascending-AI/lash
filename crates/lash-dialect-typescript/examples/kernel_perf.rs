@@ -498,7 +498,7 @@ fn main() -> Result<(), String> {
         let functions = lowered.manifest.functions.len();
         let program = Program {
             release: pages::RELEASE,
-            document: Arc::new(lowered),
+            document: Arc::clone(lowered.shared()),
             library: prepared.clone(),
         };
         match &mode {
@@ -1082,7 +1082,7 @@ fn host_json_probe() -> Result<(), String> {
         .map_err(|e| format!("{e:?}"))?;
         let program = Program {
             release: pages::RELEASE,
-            document: Arc::new(lowered.document),
+            document: Arc::clone(lowered.document.shared()),
             library: prepared.clone(),
         };
         for iteration in 0..iterations {

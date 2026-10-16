@@ -277,7 +277,8 @@ pub struct Start {
     /// ([`crate::RunRefusal::DialectNotInstalled`]), and a new run pins
     /// that dialect's helper release (FIG-5990).
     pub dialect: String,
-    /// The admitted document, in its JSON encoding. The worker validates
+    /// The admitted document, as its canonical token body (`K-ID-003`),
+    /// the body of its checkpoint graph node. The worker decodes, validates
     /// and compiles it: the parent never compiles model code.
     pub document: EncodedPayload,
     pub from: StartFrom,

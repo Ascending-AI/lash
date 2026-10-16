@@ -113,7 +113,7 @@ impl KernelCarry {
             return Err(state("a parked cell root lacks its envelope".to_owned()));
         };
         let (carried_cell, _) = CellEnvelope::load(&mut decoder, envelope).map_err(graph)?;
-        let base = carried_cell.document().map_err(state)?;
+        let base = carried_cell.document;
         if base.manifest.kernel >= self.writes.number() {
             return Ok(());
         }
@@ -152,6 +152,14 @@ pub fn cell_migration_refusal(
 /// cell a session's open turn stopped in.
 pub fn cell_snapshot_functions(cell: &StoredCell) -> Option<BTreeSet<FunctionId>> {
     let loaded = super::envelope::load_cell(&cell.graph, cell.row.root, cell.read_limits).ok()?;
-    let document = loaded.cell.document().ok()?;
-    Some(document.manifest.functions.keys().copied().collect())
+    Some(
+        loaded
+            .cell
+            .document
+            .manifest
+            .functions
+            .keys()
+            .copied()
+            .collect(),
+    )
 }

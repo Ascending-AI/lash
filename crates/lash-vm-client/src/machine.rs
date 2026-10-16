@@ -13,7 +13,7 @@ use std::sync::Arc;
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_kernel_doc::heap::PageGrant;
 use lash_kernel_doc::{
-    Datum, Document, DocumentId, EffectName, ErrorDatum, Handle, Site, Timestamp,
+    Datum, DocumentId, EffectName, ErrorDatum, Handle, IdentifiedDocument, Site, Timestamp,
 };
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Target, WaitId};
@@ -116,56 +116,6 @@ pub trait RunHost: Send + Sync {
     fn print(&self, value: Datum) -> Result<(), ParentFault>;
 }
 
-/// Transport preparation belongs to one service, shared by its executions.
-/// Exact content equality is allocation-free and avoids canonicalizing warm
-/// documents to rediscover their hash. No caller-supplied hash is trusted.
-#[derive(Default)]
-pub(crate) struct DocumentEncodings(std::collections::VecDeque<Arc<DocumentEncoding>>);
-
-struct DocumentEncoding {
-    document: Document,
-    identity: DocumentId,
-    encoded: Arc<Vec<u8>>,
-}
-
-impl DocumentEncodings {
-    fn prepare(&mut self, document: &Document) -> Result<Arc<DocumentEncoding>, KernelFailure> {
-        if let Some(index) = self.0.iter().position(|entry| entry.document == *document)
-            && let Some(hit) = self.0.remove(index)
-        {
-            self.0.push_back(Arc::clone(&hit));
-            return Ok(hit);
-        }
-        let prepared = Arc::new(DocumentEncoding {
-            document: document.clone(),
-            identity: document.identity(),
-            encoded: Arc::new(
-                wire::wrap(PayloadKind::Document, document.to_json()?.as_bytes())
-                    .map_err(worker)?
-                    .0,
-            ),
-        });
-        // A cache limit never refuses input: oversized documents run uncached.
-        // Each service retains at most sixteen ASTs and eight MiB of encoding.
-        const BYTES: usize = 8 * 1024 * 1024;
-        if prepared.encoded.len() <= BYTES {
-            while self.0.len() >= 16
-                || self
-                    .0
-                    .iter()
-                    .map(|entry| entry.encoded.len())
-                    .sum::<usize>()
-                    + prepared.encoded.len()
-                    > BYTES
-            {
-                self.0.pop_front();
-            }
-            self.0.push_back(Arc::clone(&prepared));
-        }
-        Ok(prepared)
-    }
-}
-
 /// One run's machines: each a checkout of `service`'s pool, started on
 /// `document` or resumed from the run's parked state.
 pub struct RemoteMachines {
@@ -179,7 +129,8 @@ pub struct RemoteMachines {
     /// process recorded it: the worker refuses one its embedding lacks, and
     /// a new run pins that dialect's helper release.
     dialect: String,
-    encoded: Arc<Vec<u8>>,
+    /// The document's token body, as every checkout's `Start` carries it.
+    body: Arc<[u8]>,
     start: RunStart,
     bounds: Bounds,
     releases: std::sync::OnceLock<Result<ReleaseGraph, GraphStateFailure>>,
@@ -189,11 +140,13 @@ impl RemoteMachines {
     /// The run of `document`, written in `dialect`, from `start`, held to
     /// `bounds`.
     /// `dialect` is recorded configuration: what the run's session or
-    /// process recorded at creation, never a live read.
+    /// process recorded at creation, never a live read. The document
+    /// crosses to each checkout as the token body it already holds:
+    /// nothing is encoded here.
     ///
     /// # Errors
     ///
-    /// [`KernelFailure::Document`] when the document has no JSON encoding.
+    /// [`KernelFailure`] when `start`'s host metadata is refused.
     #[expect(clippy::too_many_arguments, reason = "one run's whole identity")]
     pub fn new(
         service: Service,
@@ -201,7 +154,7 @@ impl RemoteMachines {
         owner_epoch: OwnerEpoch,
         frame_epoch: FrameEpoch,
         host: Arc<dyn RunHost>,
-        document: &Document,
+        document: &IdentifiedDocument,
         dialect: &str,
         start: RunStart,
         bounds: Bounds,
@@ -209,20 +162,15 @@ impl RemoteMachines {
         lash_kernel_vm::CellStart::admit_host_metadata(
             start.host.iter().map(|(name, _)| name.as_str()),
         )?;
-        let prepared = service
-            .documents
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .prepare(document)?;
         Ok(Self {
             service,
             owner,
             owner_epoch,
             frame_epoch,
             host,
-            document: prepared.identity,
+            document: document.id(),
             dialect: dialect.to_owned(),
-            encoded: Arc::clone(&prepared.encoded),
+            body: Arc::clone(document.shared_body()),
             start,
             bounds,
             releases: std::sync::OnceLock::new(),
@@ -251,7 +199,7 @@ impl RemoteMachines {
         let start = lash_vm_protocol::Start {
             owner: self.owner.clone(),
             dialect: self.dialect.clone(),
-            document: EncodedPayload(self.encoded.as_ref().clone()),
+            document: EncodedPayload(self.body.to_vec()),
             from,
             bounds: RunBounds {
                 charge: self.bounds.charge,
@@ -837,50 +785,5 @@ mod reservation_tests {
             })
             .unwrap();
         assert_eq!(start_reservation(&start, &codec).unwrap(), actual.len());
-    }
-}
-
-#[cfg(test)]
-mod preparation_tests {
-    use super::*;
-
-    /// FIG-6148: transport preparation follows content, including a kernel
-    /// or helper change, and its residency is bounded without refusing input.
-    #[test]
-    fn transport_preparation_reuses_content_and_evicts_old_documents() {
-        let document =
-            lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return 7 }")
-                .expect("document");
-        let mut cache = DocumentEncodings::default();
-        let first = cache.prepare(&document).expect("preparation");
-        let repeated = cache.prepare(&document.clone()).expect("same content");
-        assert!(Arc::ptr_eq(&first, &repeated));
-        let mut changed = document.clone();
-        changed.manifest.kernel += 1;
-        let changed = cache.prepare(&changed).expect("different format");
-        assert_ne!(first.identity, changed.identity);
-        assert!(!Arc::ptr_eq(&first.encoded, &changed.encoded));
-        let mut helpers = document.clone();
-        helpers.manifest.functions.insert(
-            lash_kernel_doc::FunctionId::from_bytes([9; 32]),
-            lash_kernel_doc::FunctionName::new("num.add").expect("helper name"),
-        );
-        let helpers = cache.prepare(&helpers).expect("different helpers");
-        assert_ne!(first.identity, helpers.identity);
-        assert!(!Arc::ptr_eq(&first.encoded, &helpers.encoded));
-        for n in 0..16 {
-            let next = lash_kernel_doc::parse_document(&format!(
-                "kernel 1\nnumbers float\nmain {{ return {} }}",
-                n + 20,
-            ))
-            .expect("document");
-            cache.prepare(&next).expect("preparation");
-        }
-        assert_eq!(cache.0.len(), 16);
-        assert!(!Arc::ptr_eq(
-            &first,
-            &cache.prepare(&document).expect("evicted content")
-        ));
-        assert_eq!(cache.0.len(), 16);
     }
 }

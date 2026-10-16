@@ -71,14 +71,16 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
         lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
     )
     .expect("TS origin")
-    .document;
+    .document
+    .into_document();
     let py = lash::python::lower(
         "answer = [1, 2]\nanswer.append(3)\n",
         &environment,
         lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
     )
     .expect("Python origin")
-    .document;
+    .document
+    .into_document();
     let mut host = k::parse_document(super::GUARDED).expect("host tree");
     host.private_bindings.insert(k::Name::new("日本語"));
     // Exceed the ordinary cell cap. This is a whole-workflow operation.
@@ -295,14 +297,15 @@ fn a_reader_draws_labelled_typescript_and_python_callees_from_shipped_declaratio
         "export async function digest(items: string[], count: number) { let total = count; for (const item of items) { total = total + item.length; } return total; }",
         &environment,
         lash::dialect::Mode::Module,
-    ).expect("import TypeScript workflow").document;
+    ).expect("import TypeScript workflow").document.into_document();
     let python = lash::python::lower(
         "answer = [1, 2]\nanswer.append(3)\nshown = str(answer)\n",
         &environment,
         lash::dialect::Mode::Cell(lash::dialect::CellEnvironment::first()),
     )
     .expect("lower Python")
-    .document;
+    .document
+    .into_document();
     let shipped = [
         (
             serde_json::to_vec(&typescript).expect("ship TypeScript document"),

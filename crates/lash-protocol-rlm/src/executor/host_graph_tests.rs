@@ -262,7 +262,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     let envelope = CellEnvelope {
         code: CellEnvelope::code_digest("1"),
         dialect: "typescript".to_owned(),
-        document: document.to_json().unwrap(),
+        document: lash_kernel_doc::IdentifiedDocument::new(document.clone()),
         source_map: Some(source_map),
         written: std::collections::BTreeMap::new(),
         function_values: None,

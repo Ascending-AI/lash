@@ -5,6 +5,9 @@
 //! types are not serialisable themselves, so each crosses as the mirror
 //! here. Numbers keep their tokens and objects their identities, so nothing
 //! is reduced on the way.
+//!
+//! A document is not one of these: it crosses as its canonical token body
+//! (`lash_kernel_doc::IdentifiedDocument::body`), never as JSON.
 
 use std::time::Duration;
 

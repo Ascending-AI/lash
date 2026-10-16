@@ -45,7 +45,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
-use lash_kernel_doc::{Datum, Document, Name};
+use lash_kernel_doc::{Datum, IdentifiedDocument, Name};
 use lash_kernel_vm::{Bounds, End, Target};
 use lash_sansio::sync::MutexExt;
 use lash_vm_broker::kernel::run::PagePlan;
@@ -225,7 +225,7 @@ fn clean_model_code(code: &str) -> String {
 /// holds of it.
 struct LinkedCell {
     envelope: CellEnvelope,
-    document: Document,
+    document: IdentifiedDocument,
     boundary: HostBoundary,
     /// The host's read-only bindings, which `main` starts with over the
     /// session's.
@@ -327,7 +327,7 @@ async fn link_cell(
             state.note_pages(ended_root_pages(snapshots, resumed.root).as_ref());
         }
         return Ok(LinkedCell {
-            document: envelope.document().map_err(host_failure)?,
+            document: envelope.document.clone(),
             boundary: envelope.boundary().map_err(host_failure)?,
             envelope,
             // The machine resumes from its parked state, not from a start.
@@ -498,16 +498,17 @@ async fn link_cell(
         }
     };
     emit_step_trace(ctx, Ok(()));
-    let text = |bytes: Vec<u8>, what: &str| {
-        String::from_utf8(bytes)
-            .map_err(|error| host_failure(format!("the worker's {what} is not text: {error}")))
-    };
+    // The worker's token body is decoded here, once: the identity is its
+    // digest, and the envelope, the store and every checkout share all
+    // three.
+    let document =
+        IdentifiedDocument::decode(&document, lash_kernel_doc::KernelDataLimits::standard())
+            .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
     // A saved function a process of the cell runs crosses into it by
     // value, with its captures.
-    let (document, source_map) =
-        processes::declare_saved_captures(state, text(document, "document")?, source_map)
-            .await
-            .map_err(|error| host_failure(format!("a saved function cannot start: {error}")))?;
+    let (document, source_map) = processes::declare_saved_captures(state, document, source_map)
+        .await
+        .map_err(|error| host_failure(format!("a saved function cannot start: {error}")))?;
     let envelope = CellEnvelope {
         code: CellEnvelope::code_digest(code),
         dialect: state.dialect().to_owned(),
@@ -524,11 +525,9 @@ async fn link_cell(
             .filter(|(effect, _)| reached.contains(effect))
             .collect(),
     };
-    let document = envelope
-        .document()
-        .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
+    let document = envelope.document.clone();
     if let Some(map) = &envelope.source_map {
-        map.validate(&document, code).map_err(|error| {
+        map.validate_identified(&document, code).map_err(|error| {
             host_failure(format!(
                 "the worker's source map is not the cell's: {error}"
             ))
@@ -782,7 +781,7 @@ async fn run_linked_cell(
     // The map the cell was lowered with, stored in its envelope: a resumed
     // cell's failure locates its tasks by it, never by lowering again.
     let source_map = envelope.source_map.clone();
-    let document_identity = document.identity();
+    let document_identity = document.id();
     let segment = match snapshots.root().await {
         Ok(root) => root.map_or_else(|| "start".to_owned(), |root| root.root.to_string()),
         Err(error) => {
@@ -802,7 +801,6 @@ async fn run_linked_cell(
     }
     let entries = Arc::new(processes::CellEntries {
         document: document.clone(),
-        identity: document_identity,
     });
     let published = if runs_on {
         Ok(())
@@ -1133,16 +1131,15 @@ async fn run_linked_cell(
             ),
             End::Error(error) => {
                 let observation = CellObservation::of_run_error(error, &state.not_carried());
-                respond(lash_core::CellOutcome::Failed(
-                    observation.failure(
-                        code,
-                        source_map
-                            .as_ref()
-                            .filter(|map| map.validate(&host.entries.document, code).is_ok()),
-                        services.channel,
-                        services.prompts.as_ref(),
-                    ),
-                ))
+                respond(lash_core::CellOutcome::Failed(observation.failure(
+                    code,
+                    source_map.as_ref().filter(|map| {
+                        map.validate_identified(&host.entries.document, code)
+                            .is_ok()
+                    }),
+                    services.channel,
+                    services.prompts.as_ref(),
+                )))
             }
             End::Cancelled => failed(
                 lash_core::CellFailureKind::Host,

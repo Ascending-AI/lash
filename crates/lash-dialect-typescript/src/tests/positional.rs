@@ -117,7 +117,7 @@ fn direct_calls_charge_only_emitted_statements_atoms_and_body_expressions() {
     let lowered = super::lower("function f(a: number) { return a; } f(1); f(); f(1, 2);").unwrap();
     let mut machine = start(Program {
         release: super::pages::RELEASE,
-        document: Arc::new(lowered.document),
+        document: Arc::clone(lowered.document.shared()),
         library: machine::prepared().clone(),
     });
     assert!(matches!(
@@ -155,11 +155,10 @@ fn returning_branch(stmts: &mut [Stmt]) -> Option<&mut Vec<Stmt>> {
 
 #[test]
 fn a_paged_positional_stack_resumes_with_a_new_layout() {
-    let mut lowered = super::lower_with_effects("function descend(n) { if (n < 1) return n; return descend(n - 1); } console.log(descend(60));").unwrap();
+    let mut document = super::lower_with_effects("function descend(n) { if (n < 1) return n; return descend(n - 1); } console.log(descend(60));").unwrap().document.into_document();
     // A host may edit the kernel document. Insert the wait at the base case
     // so the synchronous positional entry itself parks with the whole stack.
-    let body = lowered
-        .document
+    let body = document
         .main
         .iter_mut()
         .find_map(|stmt| match stmt {
@@ -171,7 +170,7 @@ fn a_paged_positional_stack_resumes_with_a_new_layout() {
         })
         .expect("the shared positional body");
     let block = returning_branch(body).expect("the recursive base case");
-    lowered.document.manifest.effects.insert(
+    document.manifest.effects.insert(
         lash_kernel_doc::EffectName::new("echo").unwrap(),
         machine::effects()[&lash_kernel_doc::EffectName::new("echo").unwrap()].clone(),
     );
@@ -194,7 +193,7 @@ fn a_paged_positional_stack_resumes_with_a_new_layout() {
     ];
     let program = Program {
         release: super::pages::RELEASE,
-        document: Arc::new(lowered.document),
+        document: Arc::new(document),
         library: machine::prepared().clone(),
     };
     let source = super::pages::Source::default();
@@ -306,7 +305,7 @@ fn mutually_recursive_positional_functions_save_as_one_bundle() {
     let saved = std::rc::Rc::default();
     let mut machine = start(Program {
         release: super::pages::RELEASE,
-        document: Arc::new(lowered.document),
+        document: Arc::clone(lowered.document.shared()),
         library: machine::prepared().clone(),
     });
     machine.set_cell_save(Box::new(Saving {

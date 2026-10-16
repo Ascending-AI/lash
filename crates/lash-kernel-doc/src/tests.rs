@@ -720,7 +720,7 @@ fn validated_functions_join_only_the_registry_they_were_validated_against() {
     let validated = built
         .validate_functions(vec![definition("helper.joined", false)])
         .unwrap();
-    let validated = ValidatedFunctions::from_json(&validated.to_json().unwrap()).unwrap();
+    let validated = ValidatedFunctions::from_tokens(&validated.to_tokens()).unwrap();
     let mut same = holding("helper.base");
     same.register_validated(validated.clone()).unwrap();
     assert!(
@@ -823,7 +823,7 @@ fn registered_declarations_check_without_identifying_again() {
         0,
         "registered declarations are identified again"
     );
-    let (first, second) = (first.images().unwrap(), second.images().unwrap());
+    let (first, second) = (first.images(), second.images());
     assert_eq!(first.len(), 3);
     assert!(
         first
@@ -834,6 +834,6 @@ fn registered_declarations_check_without_identifying_again() {
     );
     for (function, image) in &first {
         let definition = registry.get(function).unwrap().definition();
-        assert_eq!(&**image, definition.to_json().unwrap());
+        assert_eq!(&**image, crate::graph_tokens::encode_body(&**definition));
     }
 }
