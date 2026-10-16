@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 85,
-  "cargo_target_count": 341,
+  "cargo_target_count": 342,
   "facade_production_check_targets": [
     "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_46e42243__metadata[check]",
@@ -594,6 +594,8 @@
     "//crates/lash-s3-store:lash-s3-store__fv_6c5942bc[static]",
     "//crates/lash-s3-store:lash-s3-store__fv_921d644b[static]",
     "//crates/lash-s3-store:lash-s3-store__fv_fc31d4b3[static]",
+    "//crates/lash-sansio:blake3_domains__test__fv_95add2ee",
+    "//crates/lash-sansio:blake3_domains__test__fv_a18efb18",
     "//crates/lash-sansio:lash-sansio[static]",
     "//crates/lash-sansio:lash-sansio__fv_1b411d70[static]",
     "//crates/lash-sansio:lash-sansio__fv_477c7b15[static]",
@@ -1618,6 +1620,8 @@
     "//crates/lash-s3-store:lash-s3-store__fv_6c5942bc__metadata[check]",
     "//crates/lash-s3-store:lash-s3-store__fv_921d644b__metadata[check]",
     "//crates/lash-s3-store:lash-s3-store__fv_fc31d4b3__metadata[check]",
+    "//crates/lash-sansio:blake3_domains__test__fv_95add2ee__rust_test__metadata[check]",
+    "//crates/lash-sansio:blake3_domains__test__fv_a18efb18__rust_test__metadata[check]",
     "//crates/lash-sansio:lash-sansio__metadata[check]",
     "//crates/lash-sansio:lash-sansio__fv_1b411d70__metadata[check]",
     "//crates/lash-sansio:lash-sansio__fv_477c7b15__metadata[check]",
@@ -2642,6 +2646,8 @@
     "//crates/lash-s3-store:lash-s3-store__fv_6c5942bc",
     "//crates/lash-s3-store:lash-s3-store__fv_921d644b",
     "//crates/lash-s3-store:lash-s3-store__fv_fc31d4b3",
+    "//crates/lash-sansio:blake3_domains__test__fv_95add2ee",
+    "//crates/lash-sansio:blake3_domains__test__fv_a18efb18",
     "//crates/lash-sansio:lash-sansio",
     "//crates/lash-sansio:lash-sansio__fv_1b411d70",
     "//crates/lash-sansio:lash-sansio__fv_477c7b15",
@@ -47275,6 +47281,26 @@
       "package": "lash-internal-s3-store"
     },
     {
+      "build_label": "//crates/lash-sansio:blake3_domains__test__fv_95add2ee",
+      "check_label": "//crates/lash-sansio:blake3_domains__test__fv_95add2ee__rust_test__metadata[check]",
+      "clippy_label": "//crates/lash-sansio:blake3_domains__test__fv_95add2ee__clippy[clippy.txt]",
+      "features": [
+        "synthetic-next"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-sansio:blake3_domains__test__fv_95add2ee",
+      "package": "lash-internal-sansio"
+    },
+    {
+      "build_label": "//crates/lash-sansio:blake3_domains__test__fv_a18efb18",
+      "check_label": "//crates/lash-sansio:blake3_domains__test__fv_a18efb18__rust_test__metadata[check]",
+      "clippy_label": "//crates/lash-sansio:blake3_domains__test__fv_a18efb18__clippy[clippy.txt]",
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash-sansio:blake3_domains__test__fv_a18efb18",
+      "package": "lash-internal-sansio"
+    },
+    {
       "build_label": "//crates/lash-sansio:lash-sansio[static]",
       "check_label": "//crates/lash-sansio:lash-sansio__metadata[check]",
       "clippy_label": "//crates/lash-sansio:lash-sansio__clippy[clippy.txt]",
@@ -71427,6 +71453,8 @@
       "//crates/lash-rlm-types:lash-rlm-types__fv_261c56ca",
       "//crates/lash-rlm-types:lash-rlm-types__fv_6db14848",
       "//crates/lash-rlm-types:lash-rlm-types__fv_b8ba2da0",
+      "//crates/lash-sansio:blake3_domains__test__fv_95add2ee",
+      "//crates/lash-sansio:blake3_domains__test__fv_a18efb18",
       "//crates/lash-sansio:lash-sansio",
       "//crates/lash-sansio:lash-sansio__fv_1b411d70",
       "//crates/lash-sansio:lash-sansio__fv_477c7b15",
@@ -71531,7 +71559,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 435,
+  "generated_label_count": 436,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -71807,9 +71835,11 @@
     "//crates/lash-regress:unicodesets__test__fv_7f10c809",
     "//crates/lash-render:test_batch",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
-    "//crates/lash-sansio:lash-sansio__unit_test",
+    "//crates/lash-sansio:blake3_domains__test__fv_95add2ee",
+    "//crates/lash-sansio:blake3_domains__test__fv_a18efb18",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_95add2ee",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_a18efb18",
+    "//crates/lash-sansio:test_batch",
     "//crates/lash-sim:chaos_soak__test",
     "//crates/lash-sim:crash_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
@@ -72473,6 +72503,9 @@
     "//crates/lash-render:lash-render__unit_test",
     "//crates/lash-render:render__test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
+    "//crates/lash-sansio:blake3_domains__test",
+    "//crates/lash-sansio:blake3_domains__test__fv_95add2ee",
+    "//crates/lash-sansio:blake3_domains__test__fv_a18efb18",
     "//crates/lash-sansio:lash-sansio__unit_test",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_95add2ee",
     "//crates/lash-sansio:lash-sansio__unit_test__fv_a18efb18",
@@ -72873,7 +72906,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1406,
+  "metadata_target_count": 1409,
   "packages": [
     {
       "declared_features": [
@@ -76719,11 +76752,23 @@
           "kind": "unit-test",
           "label": "//crates/lash-sansio:lash-sansio__unit_test",
           "tags": []
+        },
+        {
+          "build_label": "//crates/lash-sansio:blake3_domains__test",
+          "cargo": "blake3_domains",
+          "check_label": "//crates/lash-sansio:blake3_domains__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-sansio:blake3_domains__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-sansio:blake3_domains__test",
+          "tags": []
         }
       ],
       "test_batch": {
-        "label": null,
-        "members": []
+        "label": "//crates/lash-sansio:test_batch",
+        "members": [
+          "//crates/lash-sansio:blake3_domains__test",
+          "//crates/lash-sansio:lash-sansio__unit_test"
+        ]
       }
     },
     {
@@ -80391,9 +80436,13 @@
     "//crates/lash-render:test_batch": 300,
     "//crates/lash-rlm-types:lash-rlm-types__unit_test": 300,
     "//crates/lash-s3-store:lash-s3-store__unit_test": 300,
+    "//crates/lash-sansio:blake3_domains__test": 300,
+    "//crates/lash-sansio:blake3_domains__test__fv_95add2ee": 300,
+    "//crates/lash-sansio:blake3_domains__test__fv_a18efb18": 300,
     "//crates/lash-sansio:lash-sansio__unit_test": 300,
     "//crates/lash-sansio:lash-sansio__unit_test__fv_95add2ee": 300,
     "//crates/lash-sansio:lash-sansio__unit_test__fv_a18efb18": 300,
+    "//crates/lash-sansio:test_batch": 300,
     "//crates/lash-sim:chaos_soak__test": 300,
     "//crates/lash-sim:crash_matrix__test": 300,
     "//crates/lash-sim:cross_backend_store_differential__test": 300,
@@ -81025,6 +81074,7 @@
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-s3-store:lash-s3-store[static]",
     "//crates/lash-s3-store:lash-s3-store__unit_test",
+    "//crates/lash-sansio:blake3_domains__test",
     "//crates/lash-sansio:lash-sansio[static]",
     "//crates/lash-sansio:lash-sansio__unit_test",
     "//crates/lash-sim:chaos_soak__test",
@@ -81495,6 +81545,7 @@
     "//crates/lash-s3-store:lash-s3-store__fv_921d644b__metadata[check]",
     "//crates/lash-s3-store:lash-s3-store__metadata[check]",
     "//crates/lash-s3-store:lash-s3-store__unit_test__rust_test__metadata[check]",
+    "//crates/lash-sansio:blake3_domains__test__rust_test__metadata[check]",
     "//crates/lash-sansio:lash-sansio__fv_a9b27561__metadata[check]",
     "//crates/lash-sansio:lash-sansio__metadata[check]",
     "//crates/lash-sansio:lash-sansio__unit_test__rust_test__metadata[check]",
@@ -81948,6 +81999,7 @@
     "//crates/lash-rlm-types:lash-rlm-types__unit_test__clippy[clippy.txt]",
     "//crates/lash-s3-store:lash-s3-store__clippy[clippy.txt]",
     "//crates/lash-s3-store:lash-s3-store__unit_test__clippy[clippy.txt]",
+    "//crates/lash-sansio:blake3_domains__test__clippy[clippy.txt]",
     "//crates/lash-sansio:lash-sansio__clippy[clippy.txt]",
     "//crates/lash-sansio:lash-sansio__unit_test__clippy[clippy.txt]",
     "//crates/lash-sim:chaos_soak__test__clippy[clippy.txt]",
@@ -82302,6 +82354,7 @@
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-s3-store:lash-s3-store",
     "//crates/lash-s3-store:lash-s3-store__unit_test",
+    "//crates/lash-sansio:blake3_domains__test",
     "//crates/lash-sansio:lash-sansio",
     "//crates/lash-sansio:lash-sansio__unit_test",
     "//crates/lash-sim:chaos_soak__test",
@@ -82658,6 +82711,7 @@
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-s3-store:lash-s3-store",
     "//crates/lash-s3-store:lash-s3-store__unit_test",
+    "//crates/lash-sansio:blake3_domains__test",
     "//crates/lash-sansio:lash-sansio",
     "//crates/lash-sansio:lash-sansio__unit_test",
     "//crates/lash-sim:chaos_soak__test",
@@ -83003,7 +83057,7 @@
     "//crates/lash-regress:test_batch",
     "//crates/lash-render:test_batch",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
-    "//crates/lash-sansio:lash-sansio__unit_test",
+    "//crates/lash-sansio:test_batch",
     "//crates/lash-sim:chaos_soak__test",
     "//crates/lash-sim:crash_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
@@ -83199,7 +83253,7 @@
     "//crates/lash-regress:test_batch",
     "//crates/lash-render:test_batch",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
-    "//crates/lash-sansio:lash-sansio__unit_test",
+    "//crates/lash-sansio:test_batch",
     "//crates/lash-sim:chaos_soak__test",
     "//crates/lash-sim:crash_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
@@ -83427,6 +83481,7 @@
     "//crates/lash-render:lash-render__unit_test",
     "//crates/lash-render:render__test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
+    "//crates/lash-sansio:blake3_domains__test",
     "//crates/lash-sansio:lash-sansio__unit_test",
     "//crates/lash-sim:chaos_soak__test",
     "//crates/lash-sim:crash_matrix__test",
@@ -83738,6 +83793,10 @@
       "//crates/lash-render:lash-render__unit_test",
       "//crates/lash-render:render__test"
     ],
+    "//crates/lash-sansio:test_batch": [
+      "//crates/lash-sansio:blake3_domains__test",
+      "//crates/lash-sansio:lash-sansio__unit_test"
+    ],
     "//crates/lash-trace:test_batch": [
       "//crates/lash-trace:lash-trace__unit_test",
       "//crates/lash-trace:schema__test",
@@ -83891,7 +83950,7 @@
     "//crates/lash-regress:test_batch",
     "//crates/lash-render:test_batch",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
-    "//crates/lash-sansio:lash-sansio__unit_test",
+    "//crates/lash-sansio:test_batch",
     "//crates/lash-sim:chaos_soak__test",
     "//crates/lash-sim:crash_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
@@ -84124,6 +84183,7 @@
     "//crates/lash-render:render__test",
     "//crates/lash-rlm-types:lash-rlm-types__unit_test",
     "//crates/lash-s3-store:lash-s3-store__unit_test",
+    "//crates/lash-sansio:blake3_domains__test",
     "//crates/lash-sansio:lash-sansio__unit_test",
     "//crates/lash-sim:chaos_soak__test",
     "//crates/lash-sim:crash_matrix__test",

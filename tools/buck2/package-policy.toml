@@ -301,7 +301,8 @@ compile_data = ["//:perf_guard_budgets", "//:perf_duration_level_shifts"]
 
 [[rule]]
 packages = ["lash-internal-sansio"]
-kinds = ["unit-test"]
+kinds = ["test"]
+targets = ["blake3_domains"]
 compile_data = ["//:workspace_rust_sources"]
 
 

@@ -531,6 +531,9 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-render:render__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-rlm-types:lash-rlm-types__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-s3-store:lash-s3-store__unit_test": {"cpu_count": 1, "memory_kb": 1048576},
+    "//crates/lash-sansio:blake3_domains__test": {"cpu_count": 2, "memory_kb": 524288},
+    "//crates/lash-sansio:blake3_domains__test__fv_95add2ee": {"cpu_count": 2, "memory_kb": 524288},
+    "//crates/lash-sansio:blake3_domains__test__fv_a18efb18": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-sansio:lash-sansio__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-sansio:lash-sansio__unit_test__fv_95add2ee": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-sansio:lash-sansio__unit_test__fv_a18efb18": {"cpu_count": 1, "memory_kb": 262144},
@@ -940,6 +943,7 @@ BATCH_BUDGETS = {
     "//crates/lash-provider-anthropic:test_batch": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-regress:test_batch": {"cpu_count": 2, "memory_kb": 262144},
     "//crates/lash-render:test_batch": {"cpu_count": 1, "memory_kb": 262144},
+    "//crates/lash-sansio:test_batch": {"cpu_count": 3, "memory_kb": 786432},
     "//crates/lash-trace:test_batch": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-vm-protocol:test_batch": {"cpu_count": 1, "memory_kb": 262144},
 }
