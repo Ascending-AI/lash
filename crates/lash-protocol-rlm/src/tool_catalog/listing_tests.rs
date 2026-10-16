@@ -247,7 +247,7 @@ fn a_discovered_tool_carries_its_field_notes() {
         )
     );
     assert!(
-        found.contains("- `sort[].field: string` — The issue field to order by."),
+        found.contains("- `input.sort[].field` — The issue field to order by."),
         "{found}"
     );
     let text = discovery_text(

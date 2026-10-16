@@ -738,12 +738,12 @@ mod tests {
                 "Promise<{ issues: Array<{ id: number; title: string }> }>`\n",
                 "[MCP tracker] Search issues.\n",
                 "Parameters:\n",
-                "- `query: string` (min length 1)\n",
-                "- `page?: number | null` (>= 1)\n",
-                "- `sort?: Array<Record<string, unknown>>` — Sort keys, most significant first.\n",
-                "- `sort[].descending?: boolean` (default false)\n",
+                "- `input.query` (min length 1)\n",
+                "- `input.page` (>= 1)\n",
+                "- `input.sort` — Sort keys, most significant first.\n",
+                "- `input.sort[].descending` (default false)\n",
                 "Return fields:\n",
-                "- `issues[].id: number` — Stable issue id."
+                "- `output.issues[].id` — Stable issue id."
             )
         );
     }

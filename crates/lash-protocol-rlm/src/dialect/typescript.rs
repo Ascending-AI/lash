@@ -32,12 +32,22 @@ impl DialectPrompts for TypescriptPrompts {
         Ok(call_path)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "inferred and projected history shapes are reference-free"
+    )]
     fn schema_type(&self, shape: &lash_tool_shape::SchemaShape) -> String {
         lash_tool_presenter_typescript::render_schema_shape(shape)
+            .expect("inferred and history shapes contain no document-local references")
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "inferred and projected history shapes are reference-free"
+    )]
     fn schema_definition(&self, name: &str, shape: &lash_tool_shape::SchemaShape) -> String {
         lash_tool_presenter_typescript::schema_definition(name, shape)
+            .expect("inferred and history shapes contain no document-local references")
     }
 
     fn prompt_vocabulary(&self) -> DialectPromptVocabulary {

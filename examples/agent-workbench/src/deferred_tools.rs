@@ -387,24 +387,22 @@ impl DeferredSearchResult {
     )]
     fn new(call_path: &str, definition: &ToolDefinition) -> Self {
         use lash::rlm::typescript_tool_presenter::{
-            TypescriptPresenterConfig, render_tool_example, tool_signature,
+            TypescriptPresenterConfig, render_tool_example,
         };
-        use lash::tools::inline_schema;
+        use lash::rlm::{CellDialect, discovered_tool_signature};
         let config = TypescriptPresenterConfig::standard();
         let contract = definition.contract();
-        let shape = |schema: &serde_json::Value| {
-            inline_schema(schema, config.schema_depth)
-                .expect("built-in deferred tool schemas are representable")
-        };
         let input = &contract.input_schema.canonical;
         Self {
             call_path: call_path.to_string(),
-            signature: tool_signature(
-                call_path,
-                &shape(input.as_value()),
-                input.accepts_empty_object(),
-                &shape(contract.output_schema.canonical.as_value()),
-            ),
+            signature: discovered_tool_signature(
+                &CellDialect::typescript(),
+                &json!({}),
+                &ToolBinding::from_path(call_path),
+                input,
+                &contract.output_schema.canonical,
+            )
+            .expect("built-in deferred tool schemas are representable"),
             description: definition.description().trim().to_string(),
             examples: lash::tools::presenter_listing::compact_examples(
                 &contract.examples,

@@ -2,18 +2,58 @@
 //! prompt shows: what the TypeScript presenter writes, and nothing a cell's
 //! lowering reads.
 
-use lash_tool_shape::{ExtraKeys, ObjectShape, SchemaShape, ShapeKind};
+use std::collections::BTreeMap;
 
-/// A schema shape as a TypeScript type.
+use lash_tool_shape::{
+    DefinitionId, ExtraKeys, ObjectShape, SchemaShape, ShapeImportRefusal, ShapeKind,
+};
+
+/// Document-local references mapped to their allocated TypeScript names.
 ///
-/// The shape is the contract layer's one reading of a JSON Schema; this is
-/// TypeScript's spelling of it and reads no schema itself. An object keeps
-/// its fields whether or not it is closed, and gains an index signature only
-/// when the schema says extra keys are allowed.
-pub fn render_schema_shape(shape: &SchemaShape) -> String {
-    match &shape.kind {
+/// ```rust,ignore
+/// let names = pool.prepare(&document)?.names;
+/// let text = render_type_expression(&document.roots[0], &names)?;
+/// ```
+pub type DefinitionNames = BTreeMap<DefinitionId, String>;
+
+/// Spell a reference-free shape (for example an inferred runtime value).
+///
+/// ```rust,ignore
+/// assert_eq!(render_schema_shape(&ShapeKind::Str.into())?, "string");
+/// ```
+///
+/// # Errors
+/// Refuses local references without a definitions context and unsupported kinds.
+pub fn render_schema_shape(shape: &SchemaShape) -> Result<String, ShapeImportRefusal> {
+    render_type_expression(shape, &DefinitionNames::new())
+}
+
+/// Spell a type expression, retaining references as names rather than expanding.
+/// Names come from the document's prepared definition pool.
+///
+/// ```rust,ignore
+/// let prepared = pool.prepare(&document)?;
+/// let text = render_type_expression(&document.roots[0], &prepared.names)?;
+/// ```
+///
+/// # Errors
+/// Refuses missing reference names and unsupported shape kinds.
+pub fn render_type_expression(
+    shape: &SchemaShape,
+    names: &DefinitionNames,
+) -> Result<String, ShapeImportRefusal> {
+    let render = |shape: &SchemaShape| render_type_expression(shape, names);
+    Ok(match &shape.kind {
         ShapeKind::Unknown => "unknown".to_string(),
         ShapeKind::Never => "never".to_string(),
+        ShapeKind::Ref(id) => {
+            names
+                .get(id)
+                .cloned()
+                .ok_or_else(|| ShapeImportRefusal::MissingReference {
+                    reference: format!("definition {}", id.0),
+                })?
+        }
         ShapeKind::Null => "null".to_string(),
         ShapeKind::Bool => "boolean".to_string(),
         ShapeKind::Int | ShapeKind::Float => "number".to_string(),
@@ -21,17 +61,23 @@ pub fn render_schema_shape(shape: &SchemaShape) -> String {
         ShapeKind::Literals(values) => {
             render_union(values.iter().map(serde_json::Value::to_string))
         }
-        ShapeKind::List(item) => format!("Array<{}>", render_schema_shape(item)),
+        ShapeKind::List(item) => format!("Array<{}>", render(item)?),
         ShapeKind::Tuple(items) => format!(
             "[{}]",
             items
                 .iter()
-                .map(render_schema_shape)
-                .collect::<Vec<_>>()
+                .map(render)
+                .collect::<Result<Vec<_>, _>>()?
                 .join(", ")
         ),
-        ShapeKind::Object(object) => render_object(object),
-        ShapeKind::Union(members) => render_union(members.iter().map(render_schema_shape)),
+        ShapeKind::Object(object) => render_object(object, names)?,
+        ShapeKind::Union(members) => render_union(
+            members
+                .iter()
+                .map(render)
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter(),
+        ),
         ShapeKind::Named(name) => render_type_name(name),
         ShapeKind::Process(None) => "Process".to_string(),
         ShapeKind::Process(Some(signature)) => format!(
@@ -39,19 +85,23 @@ pub fn render_schema_shape(shape: &SchemaShape) -> String {
             signature
                 .params
                 .iter()
-                .map(|param| format!("{}: {}", param.name, render_schema_shape(&param.shape)))
-                .collect::<Vec<_>>()
+                .map(|param| Ok(format!(
+                    "{}: {}",
+                    render_property_name(&param.name),
+                    render(&param.shape)?
+                )))
+                .collect::<Result<Vec<_>, ShapeImportRefusal>>()?
                 .join(", "),
-            render_schema_shape(&signature.output)
+            render(&signature.output)?
         ),
-        // `ShapeKind` is non-exhaustive: a kind this dialect has no spelling
-        // for yet is shown as the widest type rather than guessed at.
-        _ => "unknown".to_string(),
-    }
+        _ => {
+            return Err(ShapeImportRefusal::UnsupportedConstruct {
+                keyword: "TypeScript shape kind".into(),
+            });
+        }
+    })
 }
 
-/// Alternatives joined with `|`. `int` and `float` are both `number`, so
-/// members that spell the same are shown once.
 fn render_union(members: impl Iterator<Item = String>) -> String {
     let mut spelled = Vec::<String>::new();
     for member in members {
@@ -59,41 +109,50 @@ fn render_union(members: impl Iterator<Item = String>) -> String {
             spelled.push(member);
         }
     }
-    spelled.join(" | ")
+    if spelled.is_empty() {
+        "never".into()
+    } else {
+        spelled.join(" | ")
+    }
 }
 
-fn render_object(object: &ObjectShape) -> String {
+fn render_object(
+    object: &ObjectShape,
+    names: &DefinitionNames,
+) -> Result<String, ShapeImportRefusal> {
     let extra = match &object.extra_keys {
         ExtraKeys::Closed => None,
-        // A schema that names its fields and says nothing about other keys
-        // is shown as those fields; one that names none accepts anything.
         ExtraKeys::Unstated if object.fields.is_empty() => Some("unknown".to_string()),
         ExtraKeys::Unstated => None,
-        ExtraKeys::Open(extra) => Some(render_schema_shape(extra)),
-        _ => Some("unknown".to_string()),
+        ExtraKeys::Open(extra) => Some(render_type_expression(extra, names)?),
+        _ => {
+            return Err(ShapeImportRefusal::UnsupportedConstruct {
+                keyword: "TypeScript extra keys".into(),
+            });
+        }
     };
     if object.fields.is_empty() {
-        return match extra {
+        return Ok(match extra {
             Some(extra) => format!("Record<string, {extra}>"),
             None => "Record<string, never>".to_string(),
-        };
+        });
     }
     let mut members = object
         .fields
         .iter()
         .map(|field| {
-            format!(
+            Ok(format!(
                 "{}{}: {}",
                 render_property_name(&field.name),
                 if field.required { "" } else { "?" },
-                render_schema_shape(&field.shape)
-            )
+                render_type_expression(&field.shape, names)?
+            ))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, ShapeImportRefusal>>()?;
     if let Some(extra) = extra {
         members.push(format!("[key: string]: {extra}"));
     }
-    format!("{{ {} }}", members.join("; "))
+    Ok(format!("{{ {} }}", members.join("; ")))
 }
 
 /// A named host type as an identifier this dialect can write.
@@ -105,6 +164,10 @@ fn render_object(object: &ObjectShape) -> String {
 /// against the declaration above it. A name still not writable — a reserved
 /// word, or one colliding with the generated-binding namespace — takes the
 /// generated encoding instead.
+///
+/// ```rust,ignore
+/// assert_eq!(render_type_name("cron.Tick"), "cron_Tick");
+/// ```
 pub fn render_type_name(name: &str) -> String {
     render_identifier(&name.replace('.', "_"))
 }
@@ -136,6 +199,10 @@ fn render_property_name(name: &str) -> String {
 }
 
 /// Whether `name` is a TypeScript identifier.
+///
+/// ```rust,ignore
+/// assert!(is_identifier("Filter"));
+/// ```
 pub fn is_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars
@@ -146,6 +213,10 @@ pub fn is_identifier(name: &str) -> bool {
 }
 
 /// Whether `name` is a word this dialect declines in identifier position.
+///
+/// ```rust,ignore
+/// assert!(is_reserved_word("class"));
+/// ```
 pub fn is_reserved_word(name: &str) -> bool {
     RESERVED_WORDS.contains(&name)
 }
@@ -239,6 +310,10 @@ const RESERVED_WORDS: &[&str] = &[
 ];
 
 /// Every word this dialect declines to render in identifier position.
+///
+/// ```rust,ignore
+/// assert!(reserved_words().contains(&"class"));
+/// ```
 pub fn reserved_words() -> &'static [&'static str] {
     RESERVED_WORDS
 }

@@ -5,18 +5,24 @@
 //! The mode validates every call path before it gets here; this crate only
 //! spells.
 
+mod definitions;
+mod notes;
 mod types;
+
+pub use definitions::{PreparedDefinitions, TypescriptDefinitions, emit_definition};
+pub use notes::note_rows;
 
 use lash_sansio::{JsonSchema, ToolContract, ToolManifest};
 use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, listing,
 };
-use lash_tool_shape::SchemaShape;
+use lash_tool_shape::{SchemaDocument, SchemaShape, ShapeImportRefusal};
 use serde_json::Value;
 
 pub use types::{
-    is_identifier, is_reserved_word, render_schema_shape, render_type_name, reserved_words,
+    DefinitionNames, is_identifier, is_reserved_word, render_schema_shape, render_type_expression,
+    render_type_name, reserved_words,
 };
 
 /// The TypeScript presenter's id.
@@ -63,26 +69,22 @@ impl TypescriptToolPresenter {
         tool: &ToolPresentationEntry<'_>,
         config: TypescriptPresenterConfig,
     ) -> Result<String, PresentationRefusal> {
-        let input = &tool.contract.input_schema.canonical;
-        let output = &tool.contract.output_schema.canonical;
-        let signature = signature(tool.call_path, input, output, config.schema_depth)?;
-        // Authored examples are Lash VM source; this presenter spells them.
-        let examples = listing::compact_examples(
-            &tool.contract.examples,
-            config.example_limit,
-            config.example_chars,
-        )
-        .iter()
-        .map(|example| render_tool_example(example))
-        .collect::<Vec<_>>();
-        Ok(listing::code_mode_tool_doc(
-            &signature,
-            tool.manifest,
-            &lash_tool_presenter_api::inline_schema(input.as_value(), config.schema_depth)?,
-            &lash_tool_presenter_api::inline_schema(output.as_value(), config.schema_depth)?,
-            &render_schema_shape,
-            &examples,
-        ))
+        let input = SchemaDocument::from_json_schema(
+            tool.contract.input_schema.canonical.as_value(),
+            config.schema_depth,
+        )?;
+        let output = SchemaDocument::from_json_schema(
+            tool.contract.output_schema.canonical.as_value(),
+            config.schema_depth,
+        )?;
+        let mut pool = TypescriptDefinitions::new(
+            tool.call_path
+                .split('.')
+                .chain([tool.manifest.name.as_str()]),
+        );
+        pool.reserve_document(&input);
+        pool.reserve_document(&output);
+        render_tool_doc(tool, config, &input, &output, &mut pool)
     }
 }
 
@@ -104,12 +106,57 @@ impl ToolPresenter for TypescriptToolPresenter {
         request: ToolPresentationRequest<'_>,
     ) -> Result<PresentedToolSection, PresentationRefusal> {
         let config = Self::config(request.config)?;
+        let documents = request
+            .tools
+            .iter()
+            .map(|tool| {
+                Ok((
+                    SchemaDocument::from_json_schema(
+                        tool.contract.input_schema.canonical.as_value(),
+                        config.schema_depth,
+                    )?,
+                    SchemaDocument::from_json_schema(
+                        tool.contract.output_schema.canonical.as_value(),
+                        config.schema_depth,
+                    )?,
+                ))
+            })
+            .collect::<Result<Vec<_>, ShapeImportRefusal>>()?;
+        let mut pool = TypescriptDefinitions::new(request.tools.iter().flat_map(|tool| {
+            tool.call_path
+                .split('.')
+                .chain([tool.manifest.name.as_str()])
+        }));
+        for (input, output) in &documents {
+            pool.reserve_document(input);
+            pool.reserve_document(output);
+        }
+        // Selection owns budget accounting; only selected tools consume the
+        // actual listing's pool. A standalone doc always carries its closure.
         let docs = request
             .tools
             .iter()
             .map(|tool| Self::doc(tool, config))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(listing::list(request.tools, docs, request.disclosure))
+        let selected = listing::list(request.tools, docs, request.disclosure);
+        let tools = request
+            .tools
+            .iter()
+            .zip(&documents)
+            .filter(|(tool, _)| selected.listed.contains(&tool.manifest.id))
+            .collect::<Vec<_>>();
+        let docs = tools
+            .iter()
+            .map(|(tool, (input, output))| render_tool_doc(tool, config, input, output, &mut pool))
+            .collect::<Result<Vec<_>, _>>()?;
+        let entries = tools.iter().map(|(tool, _)| **tool).collect::<Vec<_>>();
+        let text = listing::list(
+            &entries,
+            docs,
+            lash_tool_presenter_api::ToolDisclosure::Complete,
+        )
+        .text;
+        Ok(PresentedToolSection { text, ..selected })
     }
 
     fn tool_doc(
@@ -136,8 +183,109 @@ impl ToolPresenter for TypescriptToolPresenter {
         contract: &ToolContract,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        listing::discovery_text(manifest, contract, Self::config(config)?.schema_depth)
+        let depth = Self::config(config)?.schema_depth;
+        let mut lines = vec![
+            manifest.name.clone(),
+            manifest.description.trim().to_string(),
+        ];
+        for schema in [
+            &contract.input_schema.canonical,
+            &contract.output_schema.canonical,
+        ] {
+            let document = SchemaDocument::from_json_schema(schema.as_value(), depth)?;
+            for (shape, prefix) in document
+                .roots
+                .iter()
+                .map(|root| (root, "".to_string()))
+                .chain(
+                    document
+                        .reachable_closure(&document.roots)
+                        .into_iter()
+                        .map(|id| {
+                            let definition = &document.definitions[id.0];
+                            (&definition.shape, format!("{}.", definition.pointer))
+                        }),
+                )
+            {
+                if let Some(description) = &shape.description {
+                    lines.push(format!("{prefix}: {description}"));
+                }
+                for row in shape.rows() {
+                    let path = format!("{prefix}{}", row.path);
+                    lines.push(match row.shape.description {
+                        Some(description) => format!("{path}: {description}"),
+                        None => path,
+                    });
+                }
+            }
+        }
+        Ok(lines.join("\n"))
     }
+}
+
+/// Render a tool's document using a listing-local definition pool. Input and
+/// output graphs must have been imported under the admitted depth limit; reserve
+/// all surrounding host names before the first call. A fresh pool makes a
+/// discovery response self-contained.
+///
+/// ```rust,ignore
+/// let mut pool = TypescriptDefinitions::new(["HistoryItem"]);
+/// pool.reserve_document(&input);
+/// pool.reserve_document(&output);
+/// let text = render_tool_doc(&tool, config, &input, &output, &mut pool)?;
+/// ```
+///
+/// # Errors
+/// Returns a typed refusal for missing references or unsupported shapes.
+pub fn render_tool_doc(
+    tool: &ToolPresentationEntry<'_>,
+    config: TypescriptPresenterConfig,
+    input: &SchemaDocument,
+    output: &SchemaDocument,
+    pool: &mut TypescriptDefinitions,
+) -> Result<String, PresentationRefusal> {
+    let input_definitions = pool.prepare(input)?;
+    let output_definitions = pool.prepare(output)?;
+    let signature = tool_signature(
+        tool.call_path,
+        input,
+        &input_definitions.names,
+        tool.contract.input_schema.canonical.accepts_empty_object(),
+        output,
+        &output_definitions.names,
+    )?;
+    let mut sections = input_definitions.declarations;
+    sections.extend(output_definitions.declarations);
+    sections.push(format!("`{signature}`"));
+    let description = tool.manifest.description.trim();
+    if !description.is_empty() {
+        sections.push(description.to_string());
+    }
+    for (title, document, names, path) in [
+        ("Parameters", input, &input_definitions.names, "input"),
+        ("Return fields", output, &output_definitions.names, "output"),
+    ] {
+        // A referenced # already owns its root notes in its declaration.
+        if names.contains_key(&lash_tool_shape::DefinitionId(0)) {
+            continue;
+        }
+        let rows = note_rows(&document.roots[0], path);
+        if !rows.is_empty() {
+            sections.push(format!("{title}:\n{}", rows.join("\n")));
+        }
+    }
+    let examples = listing::compact_examples(
+        &tool.contract.examples,
+        config.example_limit,
+        config.example_chars,
+    )
+    .iter()
+    .map(|example| render_tool_example(example))
+    .collect::<Vec<_>>();
+    if !examples.is_empty() {
+        sections.push(format!("Examples: {}", examples.join("; ")));
+    }
+    Ok(sections.join("\n"))
 }
 
 fn signature(
@@ -146,59 +294,70 @@ fn signature(
     output: &JsonSchema,
     depth: usize,
 ) -> Result<String, PresentationRefusal> {
-    Ok(tool_signature(
+    let input_document = SchemaDocument::from_json_schema(input.as_value(), depth)?;
+    let output_document = SchemaDocument::from_json_schema(output.as_value(), depth)?;
+    let mut pool = TypescriptDefinitions::new(call_path.split('.'));
+    pool.reserve_document(&input_document);
+    pool.reserve_document(&output_document);
+    let input_definitions = pool.prepare(&input_document)?;
+    let output_definitions = pool.prepare(&output_document)?;
+    let mut sections = input_definitions.declarations;
+    sections.extend(output_definitions.declarations);
+    sections.push(tool_signature(
         call_path,
-        &lash_tool_presenter_api::inline_schema(input.as_value(), depth)?,
+        &input_document,
+        &input_definitions.names,
         input.accepts_empty_object(),
-        &lash_tool_presenter_api::inline_schema(output.as_value(), depth)?,
+        &output_document,
+        &output_definitions.names,
+    )?);
+    Ok(sections.join("\n"))
+}
+
+/// One reference-free named definition (for inferred runtime shapes).
+/// The declaration and every host reference apply the same identifier escaping.
+///
+/// ```rust,ignore
+/// assert_eq!(schema_definition("Query", &ShapeKind::Str.into())?, "type Query = string");
+/// ```
+///
+/// # Errors
+/// Refuses local references without a document and unsupported kinds.
+pub fn schema_definition(name: &str, shape: &SchemaShape) -> Result<String, ShapeImportRefusal> {
+    Ok(format!(
+        "type {} = {}",
+        render_type_name(name),
+        render_schema_shape(shape)?
     ))
 }
 
-/// One named definition: `type Name = <type>`.
+/// Emit a tool signature using names allocated for both graphs. The input can
+/// be omitted exactly when canonical validation accepts the empty object.
+/// Include the prepared definitions beside the signature when showing it alone.
 ///
 /// ```rust,ignore
-/// let shape = lash_tool_presenter_api::inline_schema(&json!({"type": "string"}), 8)?;
-/// assert_eq!(schema_definition("Query", &shape), "type Query = string");
+/// let text = tool_signature("tools.lookup", &input, &input_names, false, &output, &output_names)?;
 /// ```
-pub fn schema_definition(name: &str, shape: &SchemaShape) -> String {
-    format!("type {name} = {}", render_schema_shape(shape))
-}
-
-/// The note rows of `shape`'s fields that say more than their type, with
-/// their types in TypeScript: `- `limit?: number` (>= 1) — Page size.`
 ///
-/// ```rust,ignore
-/// let rows = note_rows(&lash_tool_presenter_api::inline_schema(&input_schema, 8)?);
-/// ```
-pub fn note_rows(shape: &SchemaShape) -> Vec<String> {
-    listing::noted_field_rows(shape, &render_schema_shape)
-}
-
-/// A tool's callable signature in TypeScript. When `input_omittable`, the
-/// tool's input schema accepts the empty object, and a call may leave the
-/// input out to pass exactly `{}`.
-///
-/// ```rust,ignore
-/// let signature = tool_signature("tools.lookup", &input, false, &output);
-/// assert_eq!(signature, "tools.lookup({ query: string }): Promise<string>");
-/// ```
+/// # Errors
+/// Refuses missing reference names and unsupported kinds.
 pub fn tool_signature(
     call_path: &str,
-    input: &SchemaShape,
+    input: &SchemaDocument,
+    input_names: &DefinitionNames,
     input_omittable: bool,
-    output: &SchemaShape,
-) -> String {
-    let input = render_schema_shape(input);
-    // An omitted input is exactly `{}`: the default the call shows. A
-    // tool whose only input is `{}` is called with nothing.
+    output: &SchemaDocument,
+    output_names: &DefinitionNames,
+) -> Result<String, ShapeImportRefusal> {
+    let input = definitions::root_expression(input, input_names)?;
     let input = match (input.as_str(), input_omittable) {
         ("Record<string, never>", true) => String::new(),
         ("Record<string, never>", false) => "{}".to_owned(),
         (_, true) => format!("{input} = {{}}"),
         (_, false) => input,
     };
-    let output = render_schema_shape(output);
-    format!("{call_path}({input}): Promise<{output}>")
+    let output = definitions::root_expression(output, output_names)?;
+    Ok(format!("{call_path}({input}): Promise<{output}>"))
 }
 
 fn is_plain_identifier(text: &str) -> bool {
@@ -259,3 +418,6 @@ pub fn render_tool_example(example: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+#[cfg(test)]
+mod tests;
