@@ -274,6 +274,19 @@ edges until the frame ends. Every definition in the frame's globals thus
 has the frame's protection, the I-frame invariant
 (`crates/lash-protocol-rlm/src/executor/mod.rs:184-194,938-1037`).
 
+The frame also retains the declaration of every library helper its cells'
+documents list, `function:<id>` (FIG-6481). A cell acquires them under the
+frame before it publishes its document under its execution. An acquisition
+the frame already holds writes no row, so a cell writes only the
+declarations its frame does not hold yet. They go with the frame's end: its
+switch, the session's deletion, or a fork's own frame end for the copies a
+fork took. A frame never drops a declaration while it lives, so a document
+an unsettled execution names still reads once the build that wrote it has
+retired its helper release. A cell of a process has no frame: its execution
+holds its declarations beside its document
+(`crates/lash-protocol-rlm/src/executor/processes.rs`,
+`crates/lash-vm-runtime/src/process/documents.rs`).
+
 Every committed frame open clears execution state. Its seed determines
 which definitions carry into the successor; bare module references and
 copied digest strings carry none. All frame authors call the same seed
@@ -455,8 +468,9 @@ RLM publication and realized tool intents hold artifacts under the enclosing
 execution's `Execution` referrer. Every cell publishes its module there,
 whether or not it declares a process: the cell's `ExecutionStarted` names
 its workflow document by that module's reference, and a host reads it while
-the execution is unsettled. Only a module that declares a process also takes
-the frame's edge (§3.1). The first acquisition arms `AwaitJournal`;
+the execution is unsettled. The helper declarations the document lists are
+the frame's (§3.1). Only a module that declares a process also takes the
+frame's edge (§3.1). The first acquisition arms `AwaitJournal`;
 its end requires the execution to be `Settled` (§2.5). A terminal durable
 fact alone cannot authorize cleanup while that execution may still resume
 (`crates/lash-protocol-rlm/src/executor/mod.rs:955-979`,

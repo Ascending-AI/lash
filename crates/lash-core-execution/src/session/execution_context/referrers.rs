@@ -32,7 +32,8 @@ impl RuntimeExecutionContext<'_> {
 
     /// The frame-environment referrer of the frame this execution's turn was
     /// admitted on (ADR 0113 §3.1): what holds every artifact a global of
-    /// that frame references until the frame ends. Only a turn admitted on
+    /// that frame references, and every helper declaration its cells'
+    /// documents list, until the frame ends. Only a turn admitted on
     /// the frame writes it, and a write after the frame's switch commit fails
     /// `ReferrerEnded`.
     ///

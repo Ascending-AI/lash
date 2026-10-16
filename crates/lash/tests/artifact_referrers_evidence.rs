@@ -1147,6 +1147,131 @@ async fn created_definition_is_reclaimed_after_session_deletion(backend: Backend
     }
 }
 
+/// A cell whose document lists library helpers: `map` reaches them.
+fn helper_cell(answer: u32) -> String {
+    format!(
+        "const doubled = [1, 2].map((value) => value * 2); await control.finish(doubled[0] + {answer});"
+    )
+}
+
+/// Wait until no execution holds a kernel document any more: each cell's
+/// execution has settled and released what it held.
+async fn wait_executions_released(fixture: &Fixture) -> Vec<Edge> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let edges = fixture.kernel_document_edges().await;
+        if edges.iter().all(|edge| edge.kind != "execution") {
+            return edges;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "an execution still holds a kernel document: {edges:#?}"
+        );
+        fixture.settle().await;
+    }
+}
+
+/// DECLARATIONS-RETAINED (FIG-6481): a cell writes only the declarations it
+/// adds. Two cells in one frame list the same helpers: the first stores each
+/// declaration once, held by the frame, and the second writes no
+/// declaration pointer or edge, so no declaration blob either.
+#[tokio::test]
+async fn a_second_cell_with_unchanged_declarations_writes_no_declaration_row() {
+    let fixture = Fixture::new(Backend::Sqlite).await;
+    fixture.record_declaration_writes();
+    let core = rlm_core(
+        &fixture,
+        vec![response(&helper_cell(1)), response(&helper_cell(2))],
+    );
+    let session = created_session(&core, "declarations-retained")
+        .await
+        .open()
+        .await
+        .expect("session");
+    let first = session
+        .send(TurnInput::text("first cell"))
+        .output()
+        .await
+        .expect("first turn");
+    assert!(first.is_success(), "the first cell: {first:?}");
+    let held = wait_executions_released(&fixture).await;
+    let first_writes = fixture.declaration_writes();
+    assert!(
+        first_writes
+            .iter()
+            .any(|write| write.starts_with("artifact_refs INSERT")),
+        "the first cell stores the declarations it lists: {first_writes:#?}"
+    );
+    let second = session
+        .send(TurnInput::text("second cell"))
+        .output()
+        .await
+        .expect("second turn");
+    assert!(second.is_success(), "the second cell: {second:?}");
+    assert_eq!(
+        wait_executions_released(&fixture).await,
+        held,
+        "the frame holds the same declarations after the second cell"
+    );
+    let second_writes = &fixture.declaration_writes()[first_writes.len()..];
+    assert!(
+        second_writes.is_empty(),
+        "the second cell lists the same declarations and writes none of them: {second_writes:#?}"
+    );
+}
+
+/// FIG-6481: the frame that retains its cells' declarations ends with its
+/// session, and the relay reclaims every declaration with it: deleting the
+/// session leaves no kernel-document pointer and no edge.
+async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
+    let fixture = Fixture::new(backend).await;
+    let core = rlm_core(&fixture, vec![response(&helper_cell(1))]);
+    let session_id = "declarations-deleted";
+    let session = created_session(&core, session_id)
+        .await
+        .open()
+        .await
+        .expect("session");
+    let ran = session
+        .send(TurnInput::text("cell"))
+        .output()
+        .await
+        .expect("cell turn");
+    assert!(ran.is_success(), "the cell: {ran:?}");
+    let held = wait_executions_released(&fixture).await;
+    assert!(
+        held.iter()
+            .any(|edge| edge.kind == "frame_environment"
+                && edge.artifact_ref.starts_with("function:")),
+        "the frame retains the cell's declarations: {held:#?}"
+    );
+    drop(session);
+    let administration = core.session_administration().await;
+    let deletion = LashCore::delete_session(
+        administration
+            .delete_context(session_id)
+            .expect("delete context"),
+    )
+    .await;
+    assert!(
+        matches!(deletion, Ok(lash::SessionDeletion::Requested { .. })),
+        "the delete runs in the call: {deletion:?}"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let edges = fixture.kernel_document_edges().await;
+        let pointers = fixture.kernel_document_pointers().await;
+        if edges.is_empty() && pointers.is_empty() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the deleted session left kernel-document rows: {edges:#?} {pointers:#?}"
+        );
+        fixture.settle().await;
+    }
+}
+
 /// FIG-5772: a saved function started as a process outlives the cell and
 /// the session that started it. One cell binds a function, which the
 /// session keeps as a saved function; a later cell starts it with
@@ -1313,6 +1438,7 @@ tiered!(
     host_pin_keeps_a_definition_across_an_uncarried_switch,
     created_definition_survives_cold_reopen_and_starts_by_value,
     created_definition_is_reclaimed_after_session_deletion,
+    a_deleted_session_leaves_no_declaration_row,
     a_saved_function_started_as_a_process_finishes_after_its_session_is_deleted,
     a_python_saved_function_process_outlives_its_session,
     continue_as_carries_only_seeded_definition,

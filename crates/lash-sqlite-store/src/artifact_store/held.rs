@@ -1,11 +1,13 @@
 //! Module artifacts held and reclaimed as sets (FIG-6457, FIG-6467).
 //!
-//! A cell holds its document with the declaration of every helper it lists,
-//! about ninety artifacts, and its execution's end releases them all. Both
-//! run as a handful of statements over the set: one read of the pointers
-//! already stored, bounded multi-row blob inserts, one pointer insert and
-//! one edge insert; at the end, one read of the edges still held, one
-//! delete of every pointer no edge holds and one peel of their blobs.
+//! A cell's frame retains the declaration of every helper its cells list,
+//! some hundreds of artifacts, and a cell holds its document under its
+//! execution, whose end releases it (FIG-6481). A hold runs as a handful of
+//! statements over the set: one read of the acquisitions the referrer
+//! already holds, which it skips, one read of the pointers already stored,
+//! bounded multi-row blob inserts, one pointer insert and one edge insert; a
+//! referrer's end runs one read of the edges still held, one delete of every
+//! pointer no edge holds and one peel of their blobs.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -21,6 +23,15 @@ lash_store_sql::statements! {
         /// The blob each reference of JSON `?2` in namespace `?1` points at.
         select_blob_refs = "SELECT artifact_ref, blob_ref FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref IN (SELECT value FROM json_each(?2))";
+
+        /// Each reference of JSON `?2` in namespace `?1` that referrer
+        /// `?3`/`?4` holds no edge to.
+        select_unheld = "SELECT value FROM json_each(?2) AS wanted
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM artifact_referrer_edges AS edge
+                 WHERE edge.namespace = ?1 AND edge.artifact_ref = wanted.value
+                   AND edge.referrer_kind = ?3 AND edge.referrer_id = ?4
+             )";
 
         /// Point each `[reference, blob]` of JSON `?2` in namespace `?1`. An
         /// artifact is immutable: a pointer already there is kept.
@@ -96,7 +107,9 @@ pub(super) struct HeldArtifact {
 impl SqliteStore {
     /// Hold every module artifact under the claim in one transaction: the
     /// referrer's fence and the claim's guard once, then each artifact
-    /// stored as its hold says, then the claim's edge to each.
+    /// stored as its hold says, then the claim's edge to each. An
+    /// acquisition the referrer already holds writes nothing: its edge
+    /// keeps the stored bytes, whatever they are.
     pub(super) async fn hold_module_artifact_batch(
         &self,
         claim: ReferrerClaim,
@@ -122,6 +135,33 @@ impl SqliteStore {
                     crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms)
                         .map_err(sqlite_conversion_error)?;
                 }
+                let acquired: Vec<&str> = artifacts
+                    .iter()
+                    .filter(|artifact| !artifact.verified)
+                    .map(|artifact| artifact.artifact_ref.as_str())
+                    .collect();
+                let unheld: BTreeSet<String> = if acquired.is_empty() {
+                    BTreeSet::new()
+                } else {
+                    tx.prepare_cached(HELD_SQL.held.select_unheld.sql())?
+                        .query_map(
+                            params![
+                                MODULE_ARTIFACT_NAMESPACE,
+                                json_set(&acquired)?,
+                                referrer.kind().as_str(),
+                                referrer.canonical_id()
+                            ],
+                            |row| row.get(0),
+                        )?
+                        .collect::<rusqlite::Result<_>>()?
+                };
+                let artifacts: Vec<&HeldArtifact> = artifacts
+                    .iter()
+                    .filter(|artifact| artifact.verified || unheld.contains(&artifact.artifact_ref))
+                    .collect();
+                if artifacts.is_empty() {
+                    return Ok(());
+                }
                 let refs = json_set(
                     &artifacts
                         .iter()
@@ -136,7 +176,7 @@ impl SqliteStore {
                     .collect::<rusqlite::Result<_>>()?;
                 let mut pointers = Vec::new();
                 let mut blobs = Vec::new();
-                for artifact in &artifacts {
+                for artifact in artifacts.iter().copied() {
                     match stored.get(&artifact.artifact_ref) {
                         Some(blob_ref) => {
                             if artifact.verified

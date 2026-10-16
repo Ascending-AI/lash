@@ -328,6 +328,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-durable-test:attachment_delivery_secret__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:attachment_ref_laws__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:attachment_referrer_laws__test": {"cpu_count": 2, "memory_kb": 524288},
+    "//crates/lash-durable-test:cell_declaration_crash_laws__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:cell_dialect_releases__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:cell_process_handles__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:cell_read_laws__test": {"cpu_count": 2, "memory_kb": 524288},

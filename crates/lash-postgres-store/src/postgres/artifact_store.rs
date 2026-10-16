@@ -31,6 +31,12 @@ lash_store_sql::statements! {
              VALUES (?1, ?2, 0, ?3) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
         select_bytes = "SELECT artifact_bytes FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2";
+        /// Each reference of `?2` in namespace `?1` that referrer `?3`/`?4`
+        /// holds no edge to.
+        select_unheld = "SELECT wanted.artifact_ref FROM unnest(?2::TEXT[]) AS wanted(artifact_ref)
+             WHERE NOT EXISTS (SELECT 1 FROM artifact_referrer_edges AS edge
+                 WHERE edge.namespace = ?1 AND edge.artifact_ref = wanted.artifact_ref
+                   AND edge.referrer_kind = ?3 AND edge.referrer_id = ?4)";
         exists = "SELECT EXISTS (SELECT 1 FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2)";
         list_namespace_page = "SELECT artifact_ref, artifact_bytes FROM lash_vm_artifacts
@@ -331,7 +337,9 @@ impl PostgresLashVmArtifactStore {
 
     /// Hold every module artifact under the claim in one transaction: the
     /// referrer's lock, fence and guard once, every artifact's lock in key
-    /// order, each artifact stored as its hold says, then every edge.
+    /// order, each artifact stored as its hold says, then every edge. An
+    /// acquisition the referrer already holds writes nothing: the referrer's
+    /// lock keeps its edge, and the edge keeps the stored bytes.
     async fn hold_module_artifact_batch(
         &self,
         claim: &ReferrerClaim,
@@ -353,9 +361,44 @@ impl PostgresLashVmArtifactStore {
                 referrer: claim.referrer(),
             });
         }
+        let acquired: Vec<&str> = artifacts
+            .iter()
+            .filter(|artifact| {
+                matches!(
+                    artifact,
+                    lash_core_execution::ModuleArtifactHold::Acquire { .. }
+                )
+            })
+            .map(lash_core_execution::ModuleArtifactHold::module_ref)
+            .collect();
+        let unheld: BTreeSet<String> = if acquired.is_empty() {
+            BTreeSet::new()
+        } else {
+            crate::observed_sql::query_scalar::<_, String>(
+                artifact_sql().lash_vm_artifacts.select_unheld.sql(),
+            )
+            .bind(MODULE_ARTIFACT_NAMESPACE)
+            .bind(&acquired)
+            .bind(claim.referrer().kind().as_str())
+            .bind(claim.referrer().canonical_id())
+            .fetch_all(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(backend)?
+            .into_iter()
+            .collect()
+        };
+        let artifacts: Vec<&lash_core_execution::ModuleArtifactHold<'_>> = artifacts
+            .iter()
+            .filter(|artifact| match artifact {
+                lash_core_execution::ModuleArtifactHold::Publish { .. } => true,
+                lash_core_execution::ModuleArtifactHold::Acquire { module_ref, .. } => {
+                    unheld.contains(*module_ref)
+                }
+            })
+            .collect();
         let mut locked: Vec<&str> = artifacts
             .iter()
-            .map(lash_core_execution::ModuleArtifactHold::module_ref)
+            .map(|artifact| artifact.module_ref())
             .collect();
         locked.sort_unstable();
         locked.dedup();

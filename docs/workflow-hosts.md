@@ -148,8 +148,9 @@ match read {
 A stored document is held with the definition of every library function it
 lists, each under its own identity, and every read links it against those:
 never against the reading build's library. A process keeps them for as long
-as it keeps its document, so a build that retired the helper release a
-document was written against still reads and draws it. A declaration that is
+as it keeps its document, and a code cell's frame keeps them for as long as
+the frame lives, across its cells, so a build that retired the helper
+release a document was written against still reads and draws it. A declaration that is
 gone or does not hash to its identity is `WorkflowUnavailable::Artifact` or
 `WorkflowUnavailable::Corrupt`, not a fallback to another definition.
 

@@ -85,11 +85,13 @@ impl Fixture {
         }
     }
 
-    /// Every edge to a kernel document. A document is held with the
-    /// declaration of each helper it lists, `function:<id>` beside it under
-    /// the same referrer (FIG-6379): those edges are checked here, so a
-    /// declaration held by a referrer that holds no document fails every
-    /// law that reads edges, and are left out of the answer.
+    /// Every edge to a kernel document. A document is read with the
+    /// declaration of each helper it lists, `function:<id>` (FIG-6379),
+    /// held beside it under the same referrer or by the frame whose cells
+    /// listed it, which retains it across those cells (FIG-6481): those
+    /// edges are checked here, so a declaration held by any other referrer
+    /// that holds no document fails every law that reads edges, and are left
+    /// out of the answer.
     pub async fn edges(&self) -> Vec<Edge> {
         let (declarations, documents): (Vec<Edge>, Vec<Edge>) = self
             .kernel_document_edges()
@@ -102,20 +104,117 @@ impl Fixture {
             .collect();
         let stray: Vec<&Edge> = declarations
             .iter()
-            .filter(|edge| !holders.contains(&(edge.kind.as_str(), edge.id.as_str())))
+            .filter(|edge| {
+                edge.kind != "frame_environment"
+                    && !holders.contains(&(edge.kind.as_str(), edge.id.as_str()))
+            })
             .collect();
         assert!(
             stray.is_empty(),
-            "declarations held by a referrer that holds no document: {stray:#?}"
+            "declarations held by a referrer that is no frame and holds no document: {stray:#?}"
         );
         documents
+    }
+
+    /// SQLite only: from here on, record every insert and delete of a
+    /// declaration's pointer or edge, whichever connection writes it. A
+    /// declaration's blob is stored with its pointer and peeled with it.
+    #[expect(
+        clippy::expect_used,
+        reason = "acceptance fixture installs its write witness"
+    )]
+    pub fn record_declaration_writes(&self) {
+        let Database::Sqlite(uri) = &self.database else {
+            panic!("the declaration write witness reads SQLite");
+        };
+        let connection = rusqlite::Connection::open_with_flags(
+            uri,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )
+        .expect("open SQLite durable core for the write witness");
+        let mut batch = String::from("CREATE TABLE law_declaration_writes (write TEXT NOT NULL);");
+        for (table, event, row) in [
+            ("artifact_refs", "INSERT", "NEW"),
+            ("artifact_refs", "DELETE", "OLD"),
+            ("artifact_referrer_edges", "INSERT", "NEW"),
+            ("artifact_referrer_edges", "DELETE", "OLD"),
+        ] {
+            batch.push_str(&format!(
+                "CREATE TRIGGER law_{table}_{event} AFTER {event} ON {table}
+                 WHEN {row}.namespace = 'kernel_document' AND {row}.artifact_ref LIKE 'function:%'
+                 BEGIN INSERT INTO law_declaration_writes
+                     VALUES ('{table} {event} ' || {row}.artifact_ref); END;"
+            ));
+        }
+        connection
+            .execute_batch(&batch)
+            .expect("install the declaration write witness");
+    }
+
+    /// Every declaration write recorded since
+    /// [`Self::record_declaration_writes`], in order.
+    #[expect(
+        clippy::expect_used,
+        reason = "acceptance fixture reads its write witness"
+    )]
+    pub fn declaration_writes(&self) -> Vec<String> {
+        let Database::Sqlite(uri) = &self.database else {
+            panic!("the declaration write witness reads SQLite");
+        };
+        let connection = rusqlite::Connection::open_with_flags(
+            uri,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )
+        .expect("open SQLite durable core for the write witness");
+        let mut statement = connection
+            .prepare("SELECT write FROM law_declaration_writes ORDER BY rowid")
+            .expect("prepare the witness read");
+        statement
+            .query_map([], |row| row.get(0))
+            .expect("read the write witness")
+            .map(|row| row.expect("decode a witnessed write"))
+            .collect()
+    }
+
+    /// Every kernel-document pointer the store keeps, by reference.
+    #[expect(
+        clippy::expect_used,
+        reason = "acceptance fixture reads the durable pointer table"
+    )]
+    pub async fn kernel_document_pointers(&self) -> Vec<String> {
+        const SQLITE_QUERY: &str = "SELECT artifact_ref FROM artifact_refs
+            WHERE namespace = 'kernel_document' ORDER BY artifact_ref";
+        const POSTGRES_QUERY: &str = "SELECT artifact_ref FROM lash_lash_vm_artifacts
+            WHERE namespace = 'kernel_document' ORDER BY artifact_ref";
+        match &self.database {
+            Database::Sqlite(uri) => {
+                let connection = rusqlite::Connection::open_with_flags(
+                    uri,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                        | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+                )
+                .expect("open SQLite durable core for pointer inspection");
+                let mut statement = connection
+                    .prepare(SQLITE_QUERY)
+                    .expect("prepare pointer read");
+                statement
+                    .query_map([], |row| row.get(0))
+                    .expect("read SQLite pointers")
+                    .map(|row| row.expect("decode SQLite pointer"))
+                    .collect()
+            }
+            Database::Postgres { storage, .. } => sqlx::query_scalar::<_, String>(POSTGRES_QUERY)
+                .fetch_all(storage.pool())
+                .await
+                .expect("read PostgreSQL pointers"),
+        }
     }
 
     #[expect(
         clippy::expect_used,
         reason = "acceptance fixture reads the durable edge table"
     )]
-    async fn kernel_document_edges(&self) -> Vec<Edge> {
+    pub async fn kernel_document_edges(&self) -> Vec<Edge> {
         const SQLITE_QUERY: &str = "SELECT artifact_ref, referrer_kind, referrer_id
             FROM artifact_referrer_edges WHERE namespace = 'kernel_document'
             ORDER BY artifact_ref, referrer_kind, referrer_id";

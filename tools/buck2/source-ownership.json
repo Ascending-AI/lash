@@ -497,6 +497,13 @@
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
+      "cell_declaration_crash_laws": [
+        "tests/cell_declaration_crash_laws.rs",
+        "tests/support/dialect.rs",
+        "tests/support/matrix.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
       "cell_dialect_releases": [
         "tests/cell_dialect_releases.rs",
         "tests/support/served.rs",

@@ -302,6 +302,42 @@ impl KernelDocuments {
         document: &Document,
         declarations: &CheckedDeclarations,
     ) -> Result<DocumentId, DocumentStoreError> {
+        self.publish_held(claim, None, document, declarations).await
+    }
+
+    /// [`Self::publish`], with the declarations held by `retainer` and the
+    /// document by `claim`: a referrer that outlives `claim` and retains
+    /// what many documents list, such as the frame whose cells list the
+    /// same helpers (FIG-6481). An acquisition `retainer` already holds
+    /// writes nothing, so a document whose declarations are all retained
+    /// writes only itself. The declarations are held first, so a stored
+    /// document's are always held; a refusal of the document leaves them
+    /// to `retainer`, which reclaims them at its end.
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentStoreError`]; a fenced referrer is the store's
+    /// `ReferrerEnded`.
+    pub async fn publish_retained(
+        &self,
+        claim: &ReferrerClaim,
+        retainer: &ReferrerClaim,
+        document: &Document,
+        declarations: &CheckedDeclarations,
+    ) -> Result<DocumentId, DocumentStoreError> {
+        self.publish_held(claim, Some(retainer), document, declarations)
+            .await
+    }
+
+    /// The one writer: `document` under `claim`, its declarations under
+    /// `retainer`, or beside it in the same transaction when there is none.
+    async fn publish_held(
+        &self,
+        claim: &ReferrerClaim,
+        retainer: Option<&ReferrerClaim>,
+        document: &Document,
+        declarations: &CheckedDeclarations,
+    ) -> Result<DocumentId, DocumentStoreError> {
         declarations.check(document)?;
         let identity = document.identity();
         let functions: Vec<(ArtifactName, Arc<str>)> = declarations
@@ -311,18 +347,31 @@ impl KernelDocuments {
             .collect();
         let document_ref = identity.to_string();
         let document_bytes = document.to_json()?;
-        let artifacts: Vec<ModuleArtifactHold<'_>> = functions
+        let mut artifacts: Vec<ModuleArtifactHold<'_>> = functions
             .iter()
             .map(|(name, image)| ModuleArtifactHold::Acquire {
                 module_ref: &name.artifact_ref,
                 bytes: image.as_bytes(),
             })
-            .chain(std::iter::once(ModuleArtifactHold::Publish {
-                module_ref: &document_ref,
-                bytes: document_bytes.as_bytes(),
-            }))
             .collect();
-        self.store.hold_module_artifacts(claim, &artifacts).await?;
+        let document_hold = ModuleArtifactHold::Publish {
+            module_ref: &document_ref,
+            bytes: document_bytes.as_bytes(),
+        };
+        match retainer {
+            None => {
+                artifacts.push(document_hold);
+                self.store.hold_module_artifacts(claim, &artifacts).await?;
+            }
+            Some(retainer) => {
+                self.store
+                    .hold_module_artifacts(retainer, &artifacts)
+                    .await?;
+                self.store
+                    .hold_module_artifacts(claim, &[document_hold])
+                    .await?;
+            }
+        }
         Ok(identity)
     }
 
