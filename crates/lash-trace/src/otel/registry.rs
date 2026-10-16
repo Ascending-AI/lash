@@ -141,6 +141,7 @@ attributes! {
             TraceSpanKindSet::of(&[K::Tool, K::Process, K::ToolIntent])),
         CellId => ("lash.cell.id", String, TraceSpanKindSet::of(&[K::Cell])),
         CellLanguage => ("lash.cell.language", String, TraceSpanKindSet::of(&[K::Cell])),
+        CellTrailingDiscarded => ("lash.cell.trailing_discarded", Integer, TraceSpanKindSet::of(&[K::Cell])),
         CellToolCalls => ("lash.cell.tool_calls", Integer, TraceSpanKindSet::of(&[K::Cell])),
         InputTokens => ("gen_ai.usage.input_tokens", Integer, MODEL),
         OutputTokens => ("gen_ai.usage.output_tokens", Integer, MODEL),

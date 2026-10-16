@@ -416,6 +416,7 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         exec_code_completed_event(),
         TraceEvent::ExecCodeFailed {
+            trailing_discarded: 0,
             code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,
@@ -424,6 +425,7 @@ fn event_samples() -> Vec<TraceEvent> {
             error: "boom".to_string(),
         },
         TraceEvent::ExecCodeDiscarded {
+            trailing_discarded: 0,
             code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,
@@ -515,6 +517,7 @@ fn trace_event_vocabulary_names_no_seam_implementation() {
 #[test]
 fn exec_code_failed_carries_a_closed_reason_code() {
     let event = TraceEvent::ExecCodeFailed {
+        trailing_discarded: 0,
         code: String::new(),
         language: "python".to_string(),
         started_at_ms: 0,
@@ -558,6 +561,7 @@ fn exec_code_failed_carries_a_closed_reason_code() {
 
 fn exec_code_completed_event() -> TraceEvent {
     TraceEvent::ExecCodeCompleted {
+        trailing_discarded: 0,
         code: String::new(),
         language: "python".to_string(),
         started_at_ms: 0,
@@ -924,6 +928,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::ExecCodeDiscarded {
+            trailing_discarded: 0,
             code: CONTENT.into(),
             language: "typescript".into(),
             started_at_ms: 0,
@@ -1092,6 +1097,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             attempts: failed_tool_attempt(),
         },
         TraceEvent::ExecCodeCompleted {
+            trailing_discarded: 0,
             code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,
@@ -1118,6 +1124,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             }],
         },
         TraceEvent::ExecCodeFailed {
+            trailing_discarded: 0,
             code: String::new(),
             language: "python".to_string(),
             started_at_ms: 0,

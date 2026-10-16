@@ -185,6 +185,167 @@ fn a_well_formed_cell_runs_in_every_position_the_cell_grammar_allows() {
     assert_answers(false, cases);
 }
 
+/// FIG-6432 provider replay: a model predicts another cell or the answer
+/// immediately after the first block's close. Only the first program runs.
+#[test]
+fn a_provider_reply_glued_to_the_first_close_runs_only_the_first_cell() {
+    assert_answers(
+        false,
+        vec![
+            (
+                "glued next cell",
+                concat!(
+                    "<typescript>\n",
+                    code!(),
+                    "\n</typescript><typescript>\nprint(\"predicted\");\n</typescript>"
+                ),
+                LlmTerminalReason::Stop,
+                Next::Ran(CODE.to_string()),
+            ),
+            (
+                "glued answer",
+                concat!("<typescript>\n", code!(), "\n</typescript>Sent a joke…"),
+                LlmTerminalReason::Stop,
+                Next::Ran(CODE.to_string()),
+            ),
+        ],
+    );
+}
+
+/// FIG-6432 / S1: observed tails are typed evidence, and only the executed
+/// cell enters the next request. The journaled stream and full reply agree.
+#[test]
+fn discarded_continuations_are_recorded_and_excluded_from_history_in_both_dialects() {
+    for (dialect, open, close) in [
+        (
+            crate::dialect::CellDialect::typescript(),
+            "<typescript>",
+            "</typescript>",
+        ),
+        (
+            crate::dialect::CellDialect::python(),
+            "<python>",
+            "</python>",
+        ),
+    ] {
+        let first = format!("Before.\n{open}\nprint(1)\n{close}");
+        for tail in [
+            String::new(),
+            format!("{open}\nprint(999)\n{close}"),
+            "Sent a joke…".to_string(),
+            "\nPredicted results.".to_string(),
+        ] {
+            let raw = format!("{first}{tail}");
+            for streamed in [false, true] {
+                let config = || {
+                    super::tests::config_with_dialect(
+                        false,
+                        lash_core::TerminationMode::Natural.into(),
+                        dialect.clone(),
+                    )
+                };
+                let mut machine = TurnMachine::new(config(), Vec::new(), Default::default(), 0);
+                let initial = drain(&mut machine);
+                let id = initial
+                    .iter()
+                    .find_map(|e| match e {
+                        Effect::LlmCall { id, .. } => Some(*id),
+                        _ => None,
+                    })
+                    .unwrap();
+                let reply = if streamed {
+                    crate::stream_mask::streamed_reply_for_test(dialect.clone(), &[&raw])
+                } else {
+                    lash_core::LlmResponse {
+                        parts: vec![text(&raw)],
+                        terminal_reason: LlmTerminalReason::Stop,
+                        ..Default::default()
+                    }
+                };
+                machine.handle_response(Response::LlmComplete {
+                    id,
+                    text_streamed: streamed,
+                    result: Ok(reply),
+                });
+                let effects = drain(&mut machine);
+                let execs = effects
+                    .iter()
+                    .filter_map(|e| match e {
+                        Effect::ExecCode { id, code, .. } => Some((*id, code)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(execs.len(), 1);
+                assert_eq!(execs[0].1, "print(1)");
+                assert_eq!(machine.cell_trailing_discarded().unwrap(), tail.len());
+                let diagnostic = machine
+                    .events()
+                    .iter()
+                    .find_map(|record| {
+                        let lash_core::SessionHistoryRecord::Protocol(event) = record else {
+                            return None;
+                        };
+                        match crate::projection::decode_rlm_protocol_event(event).unwrap() {
+                            Some(RlmProtocolEvent::RlmDiagnostic(d)) => Some(d.payload),
+                            _ => None,
+                        }
+                    })
+                    .unwrap();
+                if tail.is_empty() {
+                    assert!(diagnostic.get("discarded_after_cell").is_none());
+                } else {
+                    let note: lash_core::llm::types::DiscardedAfterCell =
+                        serde_json::from_value(diagnostic["discarded_after_cell"].clone()).unwrap();
+                    assert_eq!(note.bytes, tail.len());
+                    assert_eq!(
+                        note.reason,
+                        lash_core::llm::types::DiscardReason::PredictedContinuation
+                    );
+                }
+                let id = execs[0].0;
+                // The note also survives the cell's checkpoint boundary.
+                machine =
+                    TurnMachine::restore_from_checkpoint(config(), machine.checkpoint(), None)
+                        .unwrap();
+                drain(&mut machine);
+                machine.handle_response(Response::ExecResult {
+                    id,
+                    result: Ok(super::tests::response(None)),
+                });
+                let mut effects = drain(&mut machine);
+                let request = loop {
+                    if let Some(request) = effects.iter().find_map(|e| match e {
+                        Effect::LlmCall { request, .. } => Some(request),
+                        _ => None,
+                    }) {
+                        break request.clone();
+                    }
+                    let id = effects
+                        .iter()
+                        .find_map(|e| match e {
+                            Effect::Checkpoint { id, .. } => Some(*id),
+                            _ => None,
+                        })
+                        .expect("continuation checkpoint");
+                    machine.handle_response(Response::Checkpoint {
+                        id,
+                        delivery: Default::default(),
+                    });
+                    effects = drain(&mut machine);
+                };
+                let history = serde_json::to_string(&request.messages).unwrap();
+                assert!(history.contains("print(1)"));
+                assert!(
+                    !history.contains("999")
+                        && !history.contains("Sent a joke")
+                        && !history.contains("Predicted results"),
+                    "{history}"
+                );
+            }
+        }
+    }
+}
+
 /// A cell the grammar refuses is refused out loud on a natural turn too, rather
 /// than read as the prose answer and committed verbatim.
 ///

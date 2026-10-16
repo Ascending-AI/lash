@@ -319,3 +319,50 @@ async fn a_turn_cancel_discards_its_running_cell_under_its_turn() -> Result<()> 
     core.shutdown().await?;
     Ok(())
 }
+
+/// FIG-6432 / S1: a predicted answer after the cell close is never the turn's
+/// answer, and its discard count is visible without capturing model content.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_discarded_prediction_is_counted_on_its_cell_span() -> Result<()> {
+    let tail = "Sent a joke…";
+    let reply = text_response(&format!(
+        "<typescript>\nawait tools.{ECHO}({{}});\n</typescript>{tail}"
+    ));
+    let (observed, core) = observed_core(
+        sqlite_memory_store_backend().await,
+        &Tools::default(),
+        vec![reply, text_response("Real answer.")],
+    )?;
+    let session = core
+        .session(SessionId::fixture("trace-cell-discard"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let output = session
+        .send(TurnInput::text("call the tool"))
+        .output()
+        .await?;
+    assert!(output.is_success(), "{:?}", output.result.outcome);
+    observed
+        .until("the turn is exported", |observed| {
+            observed.spans("invoke_agent").len() == 1
+        })
+        .await;
+    let cells = observed.spans("execute_tool typescript");
+    let [cell] = &cells[..] else {
+        panic!("one cell span: {cells:#?}")
+    };
+    assert_eq!(
+        attribute(cell, "lash.cell.trailing_discarded"),
+        Some(tail.len().to_string())
+    );
+    assert_eq!(
+        attribute(cell, "lash.cell.tool_calls").as_deref(),
+        Some("1")
+    );
+    assert_eq!(observed.spans(&format!("execute_tool {ECHO}")).len(), 1);
+    drop(session);
+    core.shutdown().await?;
+    Ok(())
+}

@@ -1495,11 +1495,11 @@ pub mod provider {
     /// re-exported so hosts can implement provider decorators (admission
     /// gates, metrics taps) against the facade alone.
     pub use lash_core::{
-        AttemptOutcome, AttemptUsageOutcome, ChargeSafetyDecision, ExecutionEvidence,
-        ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, LlmRequest,
-        LlmRequestOwner, LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTurnScope,
-        NormalizedError, ProtocolPosition, ProviderEndpointError, RetryClass, RetryDecision,
-        RetryDeclineCause, RetryWait, facade_support::LlmTransportError,
+        AttemptOutcome, AttemptUsageOutcome, ChargeSafetyDecision, DiscardReason,
+        DiscardedAfterCell, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
+        ExecutionEvidenceMergeError, LlmRequest, LlmRequestOwner, LlmRequestScope, LlmResponse,
+        LlmStreamEvidence, LlmTurnScope, NormalizedError, ProtocolPosition, ProviderEndpointError,
+        RetryClass, RetryDecision, RetryDeclineCause, RetryWait, facade_support::LlmTransportError,
     };
     /// The namespaced failure code carried on
     /// [`LlmTransportError`](facade_support::LlmTransportError) and attempt

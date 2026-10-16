@@ -233,6 +233,34 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         super::cell::project_visible_assistant_prose_with_tags(text, self.dialect.cell_tags())
     }
 
+    fn cell_trailing_discarded(
+        &self,
+        events: &[SessionHistoryRecord],
+    ) -> Result<usize, lash_core::StoredDataCorruption> {
+        for record in events.iter().rev() {
+            let SessionHistoryRecord::Protocol(event) = record else {
+                continue;
+            };
+            if let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
+                crate::projection::decode_rlm_protocol_event(event)?
+                && diagnostic.phase == LLM_EXTRACTION_PHASE
+            {
+                let Some(note) = diagnostic.payload.get("discarded_after_cell") else {
+                    return Ok(0);
+                };
+                let note: crate::cell_scan::DiscardedAfterCell =
+                    serde_json::from_value(note.clone()).map_err(|error| {
+                        lash_core::StoredDataCorruption {
+                            record_kind: "discarded_after_cell".into(),
+                            message: error.to_string(),
+                        }
+                    })?;
+                return Ok(note.bytes);
+            }
+        }
+        Ok(0)
+    }
+
     fn handles_output_limit_response(&self) -> bool {
         true
     }
@@ -334,7 +362,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         let assistant_text = projected.assistant_text;
         let reasoning = projected.reasoning;
         let fingerprint = reply_fingerprint(&assistant_text);
-        let extraction = extract_cell(&assistant_text, tags);
+        let extraction = extract_cell(&assistant_text, tags).map(|cell| {
+            cell.map(|mut cell| {
+                if cell.discarded_after_cell.is_none() {
+                    cell.discarded_after_cell = llm_response.discarded_after_cell;
+                }
+                cell
+            })
+        });
         let visible_prose = project_visible_assistant_prose_with_tags(
             if matches!(&extraction, Ok(Some(_))) {
                 &assistant_text
@@ -451,7 +486,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
 
         actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
             LLM_EXTRACTION_PHASE,
-            llm_extraction_payload(
+            ExtractionDiagnostic::new(
                 ctx.turn_id(),
                 &fingerprint,
                 &self.dialect.execution_diagnostic_name(),
@@ -462,7 +497,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     &reasoning,
                     &cell,
                 ),
-            ),
+            )
+            .with_discarded_after_cell(cell.discarded_after_cell)
+            .payload(),
             lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
         )]));
 

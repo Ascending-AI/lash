@@ -10,6 +10,7 @@ pub(super) struct CellExtraction {
     pub(super) prose: String,
     pub(super) code: String,
     pub(super) cell_count: usize,
+    pub(super) discarded_after_cell: Option<crate::cell_scan::DiscardedAfterCell>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,5 +43,6 @@ pub(super) fn extract_cell(
         prose: text[..span.start_tag_start].trim_end().to_string(),
         code,
         cell_count: 1,
+        discarded_after_cell: crate::cell_scan::discarded_tail(&text[span.end_tag_end..]),
     }))
 }

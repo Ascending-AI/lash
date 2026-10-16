@@ -76,6 +76,7 @@ fn transform_final_response(
     }
 
     let spliced = detector.spliced_response_text();
+    response.discarded_after_cell = detector.discarded_after_cell;
     response
         .parts
         .retain(|part| !matches!(part, lash_core::LlmOutputPart::Text { .. }));
@@ -109,6 +110,7 @@ struct CellDetector {
     dialect: Arc<SessionDialect>,
     scan: CellScan,
     visible_prose: String,
+    discarded_after_cell: Option<crate::cell_scan::DiscardedAfterCell>,
 }
 
 /// The detector's end state as the stream's finish hands it: what the
@@ -118,6 +120,8 @@ struct CellDetector {
 struct RecordedCellScan {
     scan: CellScan,
     visible_prose: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    discarded_after_cell: Option<crate::cell_scan::DiscardedAfterCell>,
 }
 
 impl CellDetector {
@@ -135,6 +139,7 @@ impl CellDetector {
                 pending: String::new(),
             },
             visible_prose: String::new(),
+            discarded_after_cell: None,
         }
     }
 
@@ -147,6 +152,7 @@ impl CellDetector {
         let RecordedCellScan {
             scan,
             visible_prose,
+            discarded_after_cell,
         } = serde_json::from_value(recorded).map_err(|error| {
             PluginError::Session(format!(
                 "the journaled stream-mask state does not decode: {error}"
@@ -156,6 +162,7 @@ impl CellDetector {
             dialect,
             scan,
             visible_prose,
+            discarded_after_cell,
         })
     }
 
@@ -182,6 +189,7 @@ impl CellDetector {
             },
         );
         let visible_prose = std::mem::take(&mut self.visible_prose);
+        let discarded_after_cell = self.discarded_after_cell.take();
         if !produced_response
             || matches!(&scan, CellScan::Scanning { pending } if pending.is_empty())
         {
@@ -190,6 +198,7 @@ impl CellDetector {
         serde_json::to_value(RecordedCellScan {
             scan,
             visible_prose,
+            discarded_after_cell,
         })
         .map(Some)
         .map_err(|error| {
@@ -211,6 +220,11 @@ impl CellDetector {
     fn process_chunk(&mut self, chunk: &str) -> AssistantStreamTransform {
         match self.scan {
             CellScan::Closed { .. } => {
+                if let Some(note) = &mut self.discarded_after_cell {
+                    note.bytes += chunk.len();
+                } else {
+                    self.discarded_after_cell = crate::cell_scan::discarded_tail(chunk);
+                }
                 return AssistantStreamTransform {
                     chunk: String::new(),
                     reasoning_deltas: Vec::new(),
@@ -296,18 +310,18 @@ impl CellDetector {
             unreachable!("body chunks are captured only inside a cell");
         };
         body.push_str(chunk);
-        // `allow_eof` stays false: a chunk boundary is not response EOF, which
-        // is what makes the mask — not the provider's stop — own the boundary.
-        let abort_stream =
-            if let Some(span) = complete_end_tag_span(body, false, self.dialect.cell_tags()) {
-                body.truncate(span.body_end);
-                let body = std::mem::take(body);
-                self.scan = CellScan::Closed { body };
-                events.push(self.end_event());
-                true
-            } else {
-                false
-            };
+        // A line-leading closing tag owns the boundary as soon as it arrives.
+        let abort_stream = if let Some(span) = complete_end_tag_span(body, self.dialect.cell_tags())
+        {
+            self.discarded_after_cell = crate::cell_scan::discarded_tail(&body[span.end_tag_end..]);
+            body.truncate(span.body_end);
+            let body = std::mem::take(body);
+            self.scan = CellScan::Closed { body };
+            events.push(self.end_event());
+            true
+        } else {
+            false
+        };
 
         AssistantStreamTransform {
             chunk: visible_chunk,
@@ -325,6 +339,7 @@ impl CellDetector {
         };
         let prose_before = pending[..span.start_tag_start].to_string();
         self.visible_prose.push_str(&prose_before);
+        self.discarded_after_cell = crate::cell_scan::discarded_tail(&pending[span.end_tag_end..]);
         let body = pending[span.body_start..span.body_end].to_string();
         self.scan = CellScan::Closed { body };
         prose_before
@@ -337,8 +352,7 @@ impl CellDetector {
                 // No cell has opened and no more text is coming, so a held line
                 // that could still have closed as an inline cell now either is
                 // one or is prose. This is the inline shape's EOF leg, the
-                // counterpart of the one `complete_end_tag_span` has always had
-                // for the block shape.
+                // response EOF rule for inline cells.
                 let tags = self.dialect.cell_tags();
                 if let Some(StreamedCellStart::Inline(span)) =
                     complete_cell_start(pending, true, tags)
@@ -356,17 +370,9 @@ impl CellDetector {
                 self.visible_prose.push_str(&held);
                 Vec::new()
             }
-            CellScan::Body { body } => {
-                // Genuine response EOF, so a closing tag at the buffer end
-                // counts.
-                let Some(span) = complete_end_tag_span(body, true, self.dialect.cell_tags()) else {
-                    return Vec::new();
-                };
-                body.truncate(span.body_end);
-                let body = std::mem::take(body);
-                self.scan = CellScan::Closed { body };
-                vec![self.end_event()]
-            }
+            // Every complete block close was consumed on its arriving chunk.
+            // Response EOF leaves an unclosed block for the final parser.
+            CellScan::Body { .. } => Vec::new(),
         }
     }
 
@@ -383,6 +389,28 @@ impl CellDetector {
             payload: serde_json::json!({}),
         }
     }
+}
+
+/// Exercise the journaled streaming handoff in the cell reply laws.
+#[cfg(test)]
+pub(crate) fn streamed_reply_for_test(
+    dialect: crate::dialect::CellDialect,
+    chunks: &[&str],
+) -> lash_core::LlmResponse {
+    let dialect = Arc::new(SessionDialect::prompt_only(dialect));
+    let mut detector = CellDetector::with_dialect(Arc::clone(&dialect));
+    for chunk in chunks {
+        if detector.process_chunk(chunk).abort_stream {
+            break;
+        }
+    }
+    let state = detector
+        .finish_stream(lash_core::plugin::AssistantStreamFinishReason::Complete)
+        .unwrap()
+        .unwrap();
+    let mut detector = CellDetector::from_recorded(dialect, state).unwrap();
+    detector.finish_response();
+    transform_final_response(&detector, lash_core::LlmResponse::default())
 }
 
 #[cfg(test)]
@@ -774,6 +802,28 @@ mod tests {
         assert_eq!(body(&d), "finish 1");
     }
 
+    /// FIG-6432: a block closes without waiting for a newline or any predicted tail.
+    #[test]
+    fn the_first_line_leading_close_aborts_before_the_tail_arrives() {
+        for dialect in [
+            crate::dialect::CellDialect::typescript(),
+            crate::dialect::CellDialect::python(),
+        ] {
+            let dialect = Arc::new(SessionDialect::prompt_only(dialect));
+            let tags = dialect.cell_tags();
+            let prefix = format!("Before.\n{}\nprint(1)\n  {}", tags.open, tags.close);
+            for split in 0..=prefix.len() {
+                let mut detector = CellDetector::with_dialect(Arc::clone(&dialect));
+                let first = detector.process_chunk(&prefix[..split]);
+                let last = detector.process_chunk(&prefix[split..]);
+                assert!(first.abort_stream || last.abort_stream, "split {split}");
+                assert!(closed(&detector));
+                assert_eq!(body(&detector), "print(1)");
+                assert_eq!(detector.discarded_after_cell, None);
+            }
+        }
+    }
+
     fn stream_chunks(chunks: &[&str]) -> (CellDetector, String) {
         let (mut d, visible) = stream_only(chunks);
         d.finish_response();
@@ -960,6 +1010,8 @@ mod tests {
         );
         assert!(inside(&d));
         assert!(!closed(&d));
+
+        assert!(d.finish_response().is_empty());
 
         let response = response_with_text("Visible.\n<typescript>\nfinish 1");
         let transformed = transform_final_response(&d, response.clone());

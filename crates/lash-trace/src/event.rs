@@ -194,6 +194,9 @@ pub enum TraceEvent {
     /// its span. `started_at_ms` is the cell's first start, which a
     /// suspension or a re-run keeps; `duration_ms` runs from it.
     ExecCodeCompleted {
+        /// Observed bytes discarded after the model reply's first cell.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        trailing_discarded: usize,
         code: String,
         language: String,
         started_at_ms: u64,
@@ -209,6 +212,9 @@ pub enum TraceEvent {
     /// A code cell answered with a failure, and the commit that consumed its
     /// answer closes its span, from its first start.
     ExecCodeFailed {
+        /// Observed bytes discarded after the model reply's first cell.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        trailing_discarded: usize,
         code: String,
         language: String,
         started_at_ms: u64,
@@ -223,6 +229,9 @@ pub enum TraceEvent {
     /// terminal's owner closes its span, from its first start. A discard is
     /// not a failure.
     ExecCodeDiscarded {
+        /// Observed bytes discarded after the model reply's first cell.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        trailing_discarded: usize,
         code: String,
         language: String,
         started_at_ms: u64,
@@ -390,4 +399,8 @@ impl TraceEventKind {
     pub fn as_str(self) -> &'static str {
         self.into()
     }
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }

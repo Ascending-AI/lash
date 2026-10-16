@@ -139,7 +139,7 @@ const EXECUTION_PROSE: &str = r##"Use prose for conversation; use a paired `<typ
 
 ### Response shape
 
-Put one program after any commentary, between standalone `<typescript>` and `</typescript>` lines. Markdown fences do not execute. A standalone `</typescript>` line ends the program even inside a multiline string; keep that line out of string contents.
+Put one program after any commentary, between standalone `<typescript>` and `</typescript>` lines. Markdown fences do not execute. A line starting with `</typescript>` after whitespace ends the first program even inside a multiline string; keep that line out of string contents. Everything after that closing tag is discarded; wait for real results before continuing.
 
 ### Example cell
 

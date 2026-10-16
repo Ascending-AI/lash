@@ -156,6 +156,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
+    /// The current cell's recorded trailing-discard count, for its trace.
+    pub fn cell_trailing_discarded(&self) -> Result<usize, crate::StoredDataCorruption> {
+        if self.waiting_exec().is_none() {
+            return Ok(0);
+        }
+        self.config
+            .protocol_driver
+            .cell_trailing_discarded(self.events.as_slice())
+    }
+
     /// The effect of the model call the machine waits on, if that is what
     /// it waits on: a restored machine re-delivers this call.
     pub fn waiting_model_call(&self) -> Option<EffectId> {

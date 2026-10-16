@@ -303,7 +303,7 @@ pub(crate) fn catalogue_label(
 /// Shared cell transport teaching; native transport replaces this whole section.
 pub(crate) fn cell_response_shape(tags: CellTags) -> String {
     format!(
-        "### Response shape\n\nPut one program after any commentary, between standalone `{open}` and `{close}` lines. Markdown fences do not execute. A standalone `{close}` line ends the program even inside a multiline string; keep that line out of string contents.\n",
+        "### Response shape\n\nPut one program after any commentary, between standalone `{open}` and `{close}` lines. Markdown fences do not execute. A line starting with `{close}` after whitespace ends the first program even inside a multiline string; keep that line out of string contents. Everything after that closing tag is discarded; wait for real results before continuing.\n",
         open = tags.open,
         close = tags.close
     )
@@ -709,7 +709,7 @@ impl SessionDialect {
         let vocabulary = self.prompt_vocabulary();
         let tags = vocabulary.cell_tags;
         format!(
-            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must stand alone on a later line. To mention a tag in prose instead, wrap it in backticks.",
+            "That reply opened a line with `{open}` in a position the {noun} grammar could not read, so nothing ran and no code was executed. The tag lines are what this depends on: `{open}` must stand alone on its own line with nothing else on it, the source goes on the lines after it, and `{close}` must start a later line after any whitespace. Everything after that close is discarded. To mention a tag in prose instead, wrap it in backticks.",
             noun = vocabulary.cell_noun,
             open = tags.open,
             close = tags.close,
@@ -1171,7 +1171,7 @@ mod tests {
             assert!(!feedback.contains("</typescript>"), "{feedback}");
             match channel {
                 crate::plugin::RlmChannel::Cell => assert!(
-                    feedback.contains("standalone `</fixture>` line"),
+                    feedback.contains("line starting with `</fixture>`"),
                     "{feedback}"
                 ),
                 crate::plugin::RlmChannel::NativeTool => assert!(
@@ -1219,7 +1219,10 @@ mod tests {
         assert!(!native.contains("</typescript>"), "{native}");
 
         let cell = Box::pin(parse_failure_feedback(crate::plugin::RlmChannel::Cell)).await;
-        assert!(cell.contains("standalone `</typescript>` line"), "{cell}");
+        assert!(
+            cell.contains("line starting with `</typescript>`"),
+            "{cell}"
+        );
     }
 }
 

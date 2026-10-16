@@ -191,6 +191,8 @@ pub(crate) struct ExtractionDiagnostic<'a> {
     reply_fingerprint: &'a str,
     termination: &'static str,
     counts: ExtractionCounts<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    discarded_after_cell: Option<crate::cell_scan::DiscardedAfterCell>,
 }
 
 impl<'a> ExtractionDiagnostic<'a> {
@@ -207,7 +209,16 @@ impl<'a> ExtractionDiagnostic<'a> {
             reply_fingerprint,
             termination: termination_diagnostic_name(termination),
             counts,
+            discarded_after_cell: None,
         }
+    }
+
+    pub(crate) fn with_discarded_after_cell(
+        mut self,
+        note: Option<crate::cell_scan::DiscardedAfterCell>,
+    ) -> Self {
+        self.discarded_after_cell = note;
+        self
     }
 
     #[expect(

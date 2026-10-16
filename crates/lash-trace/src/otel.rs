@@ -921,6 +921,21 @@ fn cell_attributes(
     {
         out.push(A::CellLanguage.value(language.clone()));
     }
+    if let TraceEvent::ExecCodeCompleted {
+        trailing_discarded, ..
+    }
+    | TraceEvent::ExecCodeFailed {
+        trailing_discarded, ..
+    }
+    | TraceEvent::ExecCodeDiscarded {
+        trailing_discarded, ..
+    } = &record.event
+        && *trailing_discarded > 0
+    {
+        out.push(
+            A::CellTrailingDiscarded.value(i64::try_from(*trailing_discarded).unwrap_or(i64::MAX)),
+        );
+    }
     if let Some(calls) = tool_calls {
         out.push(A::CellToolCalls.value(i64::try_from(calls).unwrap_or(i64::MAX)));
     }

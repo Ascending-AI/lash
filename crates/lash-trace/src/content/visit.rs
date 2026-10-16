@@ -394,6 +394,7 @@ impl TraceEvent {
                 code_chars: _,
             } => {}
             Self::ExecCodeCompleted {
+                trailing_discarded: _,
                 code,
                 output,
                 error,
@@ -444,6 +445,7 @@ impl TraceEvent {
                 );
             }
             Self::ExecCodeFailed {
+                trailing_discarded: _,
                 code,
                 error,
                 language: _,
@@ -495,6 +497,7 @@ impl TraceEvent {
                 | TraceLanguageExecutionPayload::Ran { segment: _, ran: _ } => {}
             },
             Self::ExecCodeDiscarded {
+                trailing_discarded: _,
                 code,
                 language: _,
                 started_at_ms: _,

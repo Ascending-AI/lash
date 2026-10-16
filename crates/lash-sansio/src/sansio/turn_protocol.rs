@@ -1004,6 +1004,15 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
         text.to_string()
     }
 
+    /// Observed bytes the protocol discarded after the current cell, as its
+    /// extraction records report. The runtime emits this fact on the cell span.
+    fn cell_trailing_discarded(
+        &self,
+        _events: &[SessionHistoryRecord<M::Event>],
+    ) -> Result<usize, crate::StoredDataCorruption> {
+        Ok(0)
+    }
+
     /// Whether a completed response that hit the provider output limit should
     /// still reach the protocol. Most protocols treat it as an incomplete
     /// terminal turn; protocols with a partial-response grammar can convert it

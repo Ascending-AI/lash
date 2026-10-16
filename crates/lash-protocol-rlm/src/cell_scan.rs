@@ -6,7 +6,8 @@
 //!
 //! The *block* shape: visible assistant prose, then a line whose trimmed
 //! content is exactly `<open>`, then source, then a later line
-//! whose trimmed content is exactly `</close>`.
+//! whose content starts with `</close>` after leading whitespace. The first
+//! such close ends the cell immediately; all following text is discarded.
 //!
 //! The *inline* shape: one **complete** line — terminated, or ended by the
 //! response itself — whose trimmed content starts with `<open>` and ends
@@ -20,8 +21,8 @@
 //! exactly like a finished inline cell: `<open>print 1</close> ok` is
 //! prose, and reading it as a cell the instant the closing tag arrives would
 //! let the provider's chunk boundaries decide what executed. Streaming passes
-//! `allow_eof: false` until the response ends, mirroring the block shape's own
-//! end-tag rule (ADR 0074: the mask owns the cell boundary, not the transport).
+//! `allow_eof: false` until the response ends. A block close, in contrast,
+//! completes as soon as its line-leading tag arrives (ADR 0074).
 //!
 //! Two residues follow from the shape, both deliberate:
 //!
@@ -64,9 +65,18 @@ pub(crate) struct CellSpan {
     pub(crate) body_end: usize,
     /// Byte offset of the first byte of the closing tag line.
     pub(crate) end_tag_start: usize,
-    /// Byte offset immediately after the closing tag line terminator, or
-    /// EOF if the closing tag is the final line.
+    /// Byte offset immediately after the block closing tag, or the inline
+    /// cell line. Everything after this boundary is discarded.
     pub(crate) end_tag_end: usize,
+}
+
+pub(crate) use lash_core::llm::types::{DiscardReason, DiscardedAfterCell};
+
+pub(crate) fn discarded_tail(tail: &str) -> Option<DiscardedAfterCell> {
+    (!tail.trim().is_empty()).then_some(DiscardedAfterCell {
+        bytes: tail.len(),
+        reason: DiscardReason::PredictedContinuation,
+    })
 }
 
 /// Locate the first complete executable cell for `tags` in `text`, if any.
@@ -81,7 +91,7 @@ pub(crate) fn first_cell_span(text: &str, tags: CellTags) -> Option<CellSpan> {
         let line = logical_line(text, pos);
         if line.text.trim() == tags.open && line.has_terminator {
             let body_start = line.next_pos;
-            if let Some(end) = first_end_tag_after(text, body_start, true, tags) {
+            if let Some(end) = first_end_tag_after(text, body_start, tags) {
                 return Some(CellSpan {
                     start_tag_start: pos,
                     body_start,
@@ -187,8 +197,8 @@ pub(crate) enum StreamedCellStart {
 /// reinterpreted because some *later* line happens to be a complete inline
 /// cell.
 ///
-/// `allow_eof` is reserved for genuine response EOF, exactly as in
-/// [`complete_end_tag_span`]: only then is an unterminated last line known to be
+/// `allow_eof` is reserved for genuine response EOF: only then is an
+/// unterminated inline line known to be
 /// the whole line. Passing `true` at a chunk boundary would hand the provider's
 /// framing the power to decide whether a cell executed.
 pub(crate) fn complete_cell_start(
@@ -242,14 +252,10 @@ pub(crate) fn malformed_cell_fence(text: &str, tags: CellTags) -> bool {
     })
 }
 
-/// Locate a closing tag line inside a cell body. `allow_eof` is reserved for
-/// genuine response EOF; an ordinary provider chunk boundary is not EOF.
-pub(crate) fn complete_end_tag_span(
-    text: &str,
-    allow_eof: bool,
-    tags: CellTags,
-) -> Option<CellSpan> {
-    first_end_tag_after(text, 0, allow_eof, tags).map(|end| CellSpan {
+/// Locate the first line-leading close inside a block body. A complete tag
+/// owns the boundary immediately, without waiting for a newline or response EOF.
+pub(crate) fn complete_end_tag_span(text: &str, tags: CellTags) -> Option<CellSpan> {
+    first_end_tag_after(text, 0, tags).map(|end| CellSpan {
         start_tag_start: 0,
         body_start: 0,
         body_end: source_body_end(text, 0, end.line_start),
@@ -323,19 +329,15 @@ fn inline_cell_span(
     })
 }
 
-fn first_end_tag_after(
-    text: &str,
-    start: usize,
-    allow_eof: bool,
-    tags: CellTags,
-) -> Option<EndTagLine> {
+fn first_end_tag_after(text: &str, start: usize, tags: CellTags) -> Option<EndTagLine> {
     let mut pos = start;
     while pos <= text.len() {
         let line = logical_line(text, pos);
-        if line.text.trim() == tags.close && (line.has_terminator || allow_eof) {
+        let trimmed = line.text.trim_start();
+        if trimmed.starts_with(tags.close) {
             return Some(EndTagLine {
                 line_start: pos,
-                next_pos: line.next_pos,
+                next_pos: pos + line.text.len() - trimmed.len() + tags.close.len(),
             });
         }
         if !line.has_terminator {
@@ -427,7 +429,7 @@ mod tests {
         assert!(first_cell_span_for_tests("<typescript>finish 1</typescript> — done.").is_none());
     }
 
-    /// Inline closes are greedy; block closes use the first standalone tag line.
+    /// Inline closes are greedy; block closes use the first line-leading close.
     #[test]
     fn one_line_cell_closes_at_the_last_closing_tag() {
         // A closing tag inside a string survives, which non-greedy would truncate.

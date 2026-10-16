@@ -140,7 +140,12 @@ identities do not enter default span names or metric dimensions.
 
 A code cell exports as `execute_tool {language}` (`gen_ai.tool.type =
 function`, `lash.cell.id` its graph key, `lash.cell.language`,
-`lash.cell.tool_calls` once it answered and `lash.outcome`). It is its turn's
+`lash.cell.tool_calls` once it answered and `lash.outcome`). When a model
+reply has text after its first complete cell, `lash.cell.trailing_discarded`
+reports the discarded byte count even with content capture disabled. The
+turn's RLM extraction diagnostic records the typed `discarded_after_cell`
+note (`bytes`, `reason: predicted_continuation`); the tail never enters the
+next model request. It is its turn's
 child and the parent of the tool calls it makes, and it spans from its first
 start, which the `Tools` phase that holds the cell retains, to the end of
 the execution that answered it, across suspensions and re-runs. A failed

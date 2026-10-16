@@ -251,6 +251,7 @@ pub(crate) fn benchmark_provider_with_control(
                     usage,
                     terminal_reason: lash_core::LlmTerminalReason::Stop,
                     terminal_diagnostic: None,
+                    discarded_after_cell: None,
                     provider_usage: None,
                     request_body: None,
                     http_summary: None,

@@ -168,6 +168,7 @@ pub fn response_from_stream_state(
         usage: state.usage,
         terminal_reason,
         terminal_diagnostic: None,
+        discarded_after_cell: None,
         provider_usage: state.provider_usage,
         request_body,
         http_summary: Some(http_summary),

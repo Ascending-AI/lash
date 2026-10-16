@@ -285,6 +285,7 @@ pub(super) fn emit_remaining_metrics(adapter: &OtelTelemetry) {
         (
             TraceSpanKind::Cell,
             TraceEvent::ExecCodeDiscarded {
+                trailing_discarded: 0,
                 code: String::new(),
                 language: "typescript".into(),
                 started_at_ms: 1,

@@ -467,14 +467,14 @@ pub use lash_core_execution::{
 pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;
 pub use lash_sansio::llm::types::{
     AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
-    ChargeSafetyDenialReason, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
-    ExecutionEvidenceMergeError, GenerationOptionOutcome, GenerationOptions, GenerationReceipt,
-    LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest, LlmRequestOwner, LlmRequestScope,
-    LlmResponse, LlmStreamEvidence, LlmTerminalReason, LlmTurnScope, NonNegativeFiniteF64,
-    NormalizedError, ProtocolPosition, ProviderEndpointError, ProviderReplayDrop,
-    ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity, RecordedRequestTemplate,
-    ResponseContext, ResponseContract, RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
-    ToolCallContract,
+    ChargeSafetyDenialReason, DiscardReason, DiscardedAfterCell, ExecutionEvidence,
+    ExecutionEvidenceCollectionInterruption, ExecutionEvidenceMergeError, GenerationOptionOutcome,
+    GenerationOptions, GenerationReceipt, LlmCallId, LlmCallRecord, LlmOutputPart, LlmRequest,
+    LlmRequestOwner, LlmRequestScope, LlmResponse, LlmStreamEvidence, LlmTerminalReason,
+    LlmTurnScope, NonNegativeFiniteF64, NormalizedError, ProtocolPosition, ProviderEndpointError,
+    ProviderReplayDrop, ProviderReplayDropReason, ProviderReplayKind, ProviderRouteIdentity,
+    RecordedRequestTemplate, ResponseContext, ResponseContract, RetryClass, RetryDecision,
+    RetryDeclineCause, RetryWait, ToolCallContract,
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,

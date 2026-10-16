@@ -872,6 +872,7 @@ impl CodexProvider {
                 usage,
                 terminal_reason,
                 terminal_diagnostic: None,
+                discarded_after_cell: None,
                 provider_usage,
                 request_body,
                 http_summary: Some(format!("HTTP POST {}", self.responses_url)),

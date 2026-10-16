@@ -777,6 +777,7 @@ fn tool_and_code_completions_export_their_retained_times_and_the_policys_content
         (
             TraceSpanKind::Cell,
             TraceEvent::ExecCodeCompleted {
+                trailing_discarded: 0,
                 code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
@@ -869,6 +870,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
     let events = [
         (
             TraceEvent::ExecCodeCompleted {
+                trailing_discarded: 0,
                 code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
@@ -888,6 +890,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeFailed {
+                trailing_discarded: 0,
                 code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
@@ -899,6 +902,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeCompleted {
+                trailing_discarded: 0,
                 code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
@@ -918,6 +922,7 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
         ),
         (
             TraceEvent::ExecCodeCompleted {
+                trailing_discarded: 0,
                 code: String::new(),
                 language: "python".to_string(),
                 started_at_ms: 0,
@@ -986,6 +991,7 @@ fn a_discarded_cell_is_a_tool_span_that_did_not_fail() {
         cell,
         8000,
         TraceEvent::ExecCodeDiscarded {
+            trailing_discarded: 0,
             code: String::new(),
             language: "typescript".into(),
             started_at_ms: 1000,

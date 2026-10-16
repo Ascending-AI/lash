@@ -93,6 +93,7 @@ fn tool(outcome: TraceToolCallOutcome, duration_ms: u64) -> TraceEvent {
 
 fn failure() -> TraceEvent {
     TraceEvent::ExecCodeFailed {
+        trailing_discarded: 0,
         code: String::new(),
         language: "python".to_string(),
         started_at_ms: 0,

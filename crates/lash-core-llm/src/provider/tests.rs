@@ -20,6 +20,7 @@ fn bare_ok_response() -> LlmResponse {
         usage: LlmUsage::default(),
         terminal_reason: crate::LlmTerminalReason::Stop,
         terminal_diagnostic: None,
+        discarded_after_cell: None,
         provider_usage: None,
         request_body: None,
         http_summary: None,

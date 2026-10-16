@@ -5916,6 +5916,12 @@
           },
           "type": "array"
         },
+        "trailing_discarded": {
+          "description": "Observed bytes discarded after the model reply's first cell.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "type": {
           "const": "exec_code_completed",
           "type": "string"
@@ -5962,6 +5968,12 @@
           "minimum": 0,
           "type": "integer"
         },
+        "trailing_discarded": {
+          "description": "Observed bytes discarded after the model reply's first cell.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "type": {
           "const": "exec_code_failed",
           "type": "string"
@@ -5994,6 +6006,12 @@
         },
         "started_at_ms": {
           "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trailing_discarded": {
+          "description": "Observed bytes discarded after the model reply's first cell.",
+          "format": "uint",
           "minimum": 0,
           "type": "integer"
         },

@@ -20,7 +20,18 @@ impl From<lash_core::TerminationMode> for Ending {
 }
 
 pub(super) fn config(native: bool, ending: impl Into<Ending>) -> TurnMachineConfig {
-    let ending = ending.into();
+    config_with_dialect(
+        native,
+        ending.into(),
+        crate::dialect::CellDialect::typescript(),
+    )
+}
+
+pub(super) fn config_with_dialect(
+    native: bool,
+    ending: Ending,
+    dialect: crate::dialect::CellDialect,
+) -> TurnMachineConfig {
     let factory = crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
             .channel(if native {
@@ -31,7 +42,7 @@ pub(super) fn config(native: bool, ending: impl Into<Ending>) -> TurnMachineConf
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
-        crate::dialect::CellDialect::typescript(),
+        dialect,
     );
     let host = lash_core::facade_support::PluginHost::new(
         vec![Arc::new(factory)],
@@ -302,7 +313,7 @@ fn run(
 }
 /// What the executor answers for a cell: one that ran to its end, or one
 /// that `control.finish(value)` ended, with that call's settled record.
-fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
+pub(super) fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
     let call_id = lash_core::ToolCallId::fixture("finish-call");
     lash_core::ExecResponse {
         prints_retained: None,

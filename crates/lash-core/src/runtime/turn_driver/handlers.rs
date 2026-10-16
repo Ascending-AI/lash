@@ -526,6 +526,7 @@ impl RuntimeTurnDriver<'_> {
                         .selected(lash_trace::TraceSpanKind::Agent, &context.ids());
                     let content = standing.content();
                     let event = lash_trace::TraceEvent::ExecCodeFailed {
+                        trailing_discarded: 0,
                         code: content.capture(lash_trace::ContentCategory::Code, || code.clone()),
                         language: language.clone(),
                         started_at_ms,
@@ -600,6 +601,14 @@ impl RuntimeTurnDriver<'_> {
             let context = cell_trace.context.clone();
             self.emit_cell_trace(held.as_ref(), standing, true, move || (context, event));
         }
+        let discarded_bytes = machine.cell_trailing_discarded().map_err(|error| {
+            let mut failure =
+                RuntimeError::new(RuntimeErrorCode::RuntimeStoreCorrupt, error.to_string());
+            failure.cause = Some(crate::RuntimeErrorCause::StoredDataCorrupt {
+                corruption: Box::new(error),
+            });
+            failure
+        })?;
         // The cell's own observation lane: every CodeBlock* event this driver
         // publishes for the cell sequences under the cell's replay key.
         let mut code_observations = crate::engine::ObservationCursor::new(
@@ -797,6 +806,7 @@ impl RuntimeTurnDriver<'_> {
                             );
                         }
                         lash_trace::TraceEvent::ExecCodeCompleted {
+                            trailing_discarded: discarded_bytes,
                             code: content
                                 .capture(lash_trace::ContentCategory::Code, || code.clone()),
                             language: language.clone(),
@@ -840,6 +850,7 @@ impl RuntimeTurnDriver<'_> {
                         }
                     }
                     Err(error) => lash_trace::TraceEvent::ExecCodeFailed {
+                        trailing_discarded: discarded_bytes,
                         code: content.capture(lash_trace::ContentCategory::Code, || code.clone()),
                         language: language.clone(),
                         started_at_ms: first_started_at_ms,
@@ -1033,6 +1044,7 @@ impl RuntimeTurnDriver<'_> {
                     .map(|(_, code, _)| code.to_owned())
                     .unwrap_or_default()
             });
+        let trailing_discarded = machine.cell_trailing_discarded().unwrap_or(0);
         let clock = Arc::clone(self.host.core.tracing.clock());
         let CellTrace {
             language,
@@ -1046,6 +1058,7 @@ impl RuntimeTurnDriver<'_> {
                 (
                     context,
                     lash_trace::TraceEvent::ExecCodeDiscarded {
+                        trailing_discarded,
                         code,
                         language,
                         started_at_ms: first_started_at_ms,

@@ -236,6 +236,7 @@ pub(super) fn response(parts: Vec<LlmOutputPart>) -> LlmResponse {
         usage,
         terminal_reason: LlmTerminalReason::Stop,
         terminal_diagnostic: None,
+        discarded_after_cell: None,
         provider_usage: None,
         request_body: None,
         http_summary: None,
