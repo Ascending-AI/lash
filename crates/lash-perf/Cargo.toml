@@ -97,7 +97,7 @@ flate2 = "=1.1.9"
 crc32fast = "=1.5.0"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres"] }
+sqlx = { workspace = true, features = ["runtime-tokio", "postgres"] }
 opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 stats_alloc = "0.1"
 dhat = { version = "0.3", optional = true }

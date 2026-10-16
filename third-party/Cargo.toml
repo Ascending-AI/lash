@@ -1794,7 +1794,7 @@ features = ["alloc", "default", "fs", "std", "time"]
 package = "rustls"
 version = "=0.23.45"
 default-features = false
-features = ["aws-lc-rs", "aws_lc_rs", "ring", "std", "tls12"]
+features = ["aws-lc-rs", "aws_lc_rs", "std", "tls12"]
 
 [dependencies.p0298]
 package = "rustls-native-certs"
@@ -1824,7 +1824,7 @@ features = []
 package = "rustls-webpki"
 version = "=0.103.15"
 default-features = false
-features = ["alloc", "aws-lc-rs", "ring", "std"]
+features = ["alloc", "aws-lc-rs", "std"]
 
 [dependencies.p0303]
 package = "rustversion"
@@ -2064,25 +2064,25 @@ features = ["mutex", "once", "rwlock", "spin_mutex"]
 package = "sqlx"
 version = "=0.8.6"
 default-features = false
-features = ["_rt-tokio", "postgres", "runtime-tokio", "runtime-tokio-rustls", "sqlx-postgres", "tls-rustls-ring", "tls-rustls-ring-webpki"]
+features = ["_rt-tokio", "postgres", "runtime-tokio", "sqlx-postgres", "tls-rustls-aws-lc-rs"]
 
 [dependencies.p0343]
 package = "sqlx-core"
 version = "=0.8.6"
 default-features = false
-features = ["_rt-tokio", "_tls-rustls", "_tls-rustls-ring-webpki", "any", "crc", "default", "json", "migrate", "offline", "rustls", "serde", "serde_json", "sha2", "tokio", "tokio-stream", "webpki-roots"]
+features = ["_rt-tokio", "_tls-rustls", "_tls-rustls-aws-lc-rs", "any", "crc", "default", "json", "migrate", "offline", "rustls", "serde", "serde_json", "sha2", "tokio", "tokio-stream", "webpki-roots"]
 
 [dependencies.p0344]
 package = "sqlx-macros"
 version = "=0.8.6"
 default-features = false
-features = ["_rt-tokio", "_tls-rustls-ring-webpki", "default", "postgres"]
+features = ["_rt-tokio", "_tls-rustls-aws-lc-rs", "default", "postgres"]
 
 [dependencies.p0345]
 package = "sqlx-macros-core"
 version = "=0.8.6"
 default-features = false
-features = ["_rt-tokio", "_tls-rustls-ring-webpki", "default", "postgres", "sqlx-postgres", "tokio"]
+features = ["_rt-tokio", "_tls-rustls-aws-lc-rs", "default", "postgres", "sqlx-postgres", "tokio"]
 
 [dependencies.p0346]
 package = "sqlx-postgres"

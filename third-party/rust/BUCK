@@ -17244,7 +17244,6 @@ third_party_rust_library(
     features = [
         "aws-lc-rs",
         "aws_lc_rs",
-        "ring",
         "std",
         "tls12",
     ],
@@ -17259,7 +17258,6 @@ third_party_rust_library(
     deps = [
         ":aws-lc-rs-1",
         ":once_cell-1",
-        ":ring-0.17",
         ":rustls-webpki-0.103",
         ":subtle-2",
         ":zeroize-1",
@@ -17292,7 +17290,6 @@ third_party_rust_binary(
     features = [
         "aws-lc-rs",
         "aws_lc_rs",
-        "ring",
         "std",
         "tls12",
     ],
@@ -17306,7 +17303,7 @@ third_party_buildscript_run(
     name = "rustls-0.23-build-script-run",
     package_name = "rustls",
     buildscript_rule = ":rustls-0.23-build-script-build",
-    env_srcs = [":aws-lc-rs-1-build-script-run[metadata]", ":ring-0.17-build-script-run[metadata]"],
+    env_srcs = [":aws-lc-rs-1-build-script-run[metadata]"],
     env = {
         "CARGO_PKG_AUTHORS": "",
         "CARGO_PKG_DESCRIPTION": "Rustls is a modern TLS library written in Rust.",
@@ -17322,7 +17319,6 @@ third_party_buildscript_run(
     features = [
         "aws-lc-rs",
         "aws_lc_rs",
-        "ring",
         "std",
         "tls12",
     ],
@@ -17564,7 +17560,6 @@ third_party_rust_library(
     features = [
         "alloc",
         "aws-lc-rs",
-        "ring",
         "std",
     ],
     named_deps = {
@@ -17576,7 +17571,6 @@ third_party_rust_library(
     visibility = [],
     deps = [
         ":aws-lc-rs-1",
-        ":ring-0.17",
         ":untrusted-0.9",
     ],
 )
@@ -19764,10 +19758,8 @@ third_party_rust_library(
         "_rt-tokio",
         "postgres",
         "runtime-tokio",
-        "runtime-tokio-rustls",
         "sqlx-postgres",
-        "tls-rustls-ring",
-        "tls-rustls-ring-webpki",
+        "tls-rustls-aws-lc-rs",
     ],
     platform = {
         "linux-x86_64": dict(),
@@ -19819,7 +19811,7 @@ third_party_rust_library(
     features = [
         "_rt-tokio",
         "_tls-rustls",
-        "_tls-rustls-ring-webpki",
+        "_tls-rustls-aws-lc-rs",
         "any",
         "crc",
         "default",
@@ -19909,7 +19901,7 @@ third_party_rust_library(
     },
     features = [
         "_rt-tokio",
-        "_tls-rustls-ring-webpki",
+        "_tls-rustls-aws-lc-rs",
         "default",
         "postgres",
     ],
@@ -19966,7 +19958,7 @@ third_party_rust_library(
     },
     features = [
         "_rt-tokio",
-        "_tls-rustls-ring-webpki",
+        "_tls-rustls-aws-lc-rs",
         "default",
         "postgres",
         "sqlx-postgres",

@@ -51,7 +51,7 @@ lash-vm-client = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }
-sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util = { workspace = true }
