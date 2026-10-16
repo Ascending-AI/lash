@@ -5,9 +5,9 @@ use lash::LashCore;
 use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
 use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
-use lash::workflow::document::{Document, EffectIdentity, Name, Site};
+use lash::workflow::document::{Document, EffectIdentity, Name, Site, TaskIdentity};
 use lash::workflow::edit::Draft;
-use lash::workflow::view::WorkflowCoverage;
+use lash::workflow::view::{ActionObservation, ActionState, WorkflowCoverage, WorkflowView};
 use lash::workflow::{
     ProcessWorkflowOverlay, ReplaySegments, SegmentAnswer, WorkflowDocument, WorkflowDocumentRead,
     WorkflowEnvironment, WorkflowExecutionOverlayAccumulator, WorkflowOverlayFact,
@@ -30,6 +30,8 @@ pub(crate) enum RunError {
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Environment(#[from] ProcessEnvRefusal),
+    #[error(transparent)]
+    Activity(#[from] lash::workflow::view::ActivityRefusal),
     #[error("{0}")]
     Invalid(String),
 }
@@ -123,7 +125,7 @@ pub(crate) async fn publish(
     let pin = HostArtifactPin::mint();
     let artifacts = core.host_artifacts();
     let environment = environment()?;
-    // Choose statement counts once, with the settings the published start records.
+    // Choose run counts once, with the settings the published start records.
     let settings = Some(
         core.processes()
             .kernel_engine_defaults()?
@@ -222,6 +224,29 @@ pub(crate) async fn observe(
                     input: record.args,
                     output: record.output.value_for_projection(),
                 });
+                if let Some(identity) = event.occurrence.clone()
+                    && overlay.view.action_node(&identity.site).is_some()
+                {
+                    let evidence = ActionObservation {
+                        identity: identity.clone(),
+                        state: if record.output.is_success() {
+                            ActionState::Completed
+                        } else {
+                            ActionState::Failed
+                        },
+                        outcome: event.call.as_ref().map(|call| call.output.clone()),
+                    };
+                    event.activity = overlay
+                        .view
+                        .activity(overlay.view.document, &[evidence])?
+                        .into_iter()
+                        .find(|activity| activity.site == identity.site);
+                }
+            }
+            if event.coverage.is_some()
+                && let Some(workflow) = workflow.as_ref()
+            {
+                event.node_coverage = Some(overlay.view.coverage(&workflow.ran_counts()));
             }
             if sender.send(Ok(event)).await.is_err() {
                 return Ok(());
@@ -267,8 +292,7 @@ pub(crate) async fn observe(
                 }
                 // The admitted body of a tool step started: its site runs.
                 ProcessObservationEventPayload::StepBodyStarted(observation) => {
-                    overlay.accumulator.step_body_started(observation)?;
-                    (overlay.changed(), false)
+                    (overlay.step_body_started(observation)?, false)
                 }
                 ProcessObservationEventPayload::Committed { event } => (
                     overlay.durable(event)?,
@@ -378,7 +402,9 @@ fn settlement(
 /// One run as this host shows it: lash's execution overlay of the process,
 /// reduced to a status per site, beside the host's own display state.
 struct Overlay {
+    view: WorkflowView,
     accumulator: WorkflowExecutionOverlayAccumulator,
+    identities: BTreeMap<(Site, TaskIdentity), EffectIdentity>,
     process: lash::ProcessId,
     workflow_version: u64,
     definition: String,
@@ -405,7 +431,10 @@ impl Overlay {
         let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
         accumulator.set_document(lash::workflow::WorkflowOverlayDocument::of(document));
         Ok(Self {
+            view: lash::workflow::view::derive(document)
+                .map_err(|error| RunError::Invalid(error.to_string()))?,
             accumulator,
+            identities: BTreeMap::new(),
             process,
             workflow_version,
             definition,
@@ -446,6 +475,9 @@ impl Overlay {
             output: None,
             coverage: None,
             path: None,
+            activity: None,
+            occurrence: None,
+            node_coverage: None,
         }
     }
 
@@ -471,6 +503,7 @@ impl Overlay {
 
     fn reset_after_gap(&mut self) -> Vec<RunEvent> {
         self.accumulator.reset_live();
+        self.identities.clear();
         self.completed_calls.clear();
         self.shown.clear();
         let mut event = self.event(
@@ -486,50 +519,117 @@ impl Overlay {
         vec![event]
     }
 
+    fn remember(&mut self, at: &EffectIdentity) {
+        if self.view.action_node(&at.site).is_none() {
+            return;
+        }
+        let key = (at.site.clone(), at.task.clone());
+        if self
+            .identities
+            .get(&key)
+            .is_none_or(|held| held.occurrence <= at.occurrence)
+        {
+            self.identities.insert(key, at.clone());
+        }
+    }
+
+    fn step_body_started(
+        &mut self,
+        observation: &StepBodyStartedObservation,
+    ) -> Result<Vec<RunEvent>, RunError> {
+        self.remember(&observation.step.at);
+        self.accumulator.step_body_started(observation)?;
+        self.changed()
+    }
+
     /// The sites whose state in lash's overlay changed since they were last
     /// sent. A site shows its task in flight, else its latest ended one.
-    fn changed(&mut self) -> Vec<RunEvent> {
+    fn changed(&mut self) -> Result<Vec<RunEvent>, RunError> {
         let Some(overlay) = self.accumulator.snapshot() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let mut nodes = BTreeMap::<Site, (u8, RunStatus, Option<String>, u64, u64)>::new();
-        for site in &overlay.sites {
-            let (rank, status, error) = match &site.state.occurrence {
-                WorkflowOverlayOccurrence::Unobserved => continue,
-                WorkflowOverlayOccurrence::Running { .. } => (3, RunStatus::Started, None),
-                WorkflowOverlayOccurrence::Waiting { .. } => (3, RunStatus::Waiting, None),
-                WorkflowOverlayOccurrence::Failed { failure, .. } => {
-                    (2, RunStatus::Failed, Some(failure.message().to_owned()))
-                }
-                WorkflowOverlayOccurrence::Cancelled { .. } => {
-                    (2, RunStatus::Failed, Some("cancelled".to_owned()))
-                }
-                WorkflowOverlayOccurrence::Completed { .. } => (1, RunStatus::Succeeded, None),
-                WorkflowOverlayOccurrence::Incomplete { .. } => (
-                    2,
-                    RunStatus::Incomplete,
-                    Some("The run ended without a recorded outcome for this occurrence.".into()),
-                ),
-            };
-            let node = nodes
-                .entry(site.site.site.clone())
-                .or_insert((0, status, None, 0, 0));
-            if rank > node.0 {
-                (node.0, node.1, node.2) = (rank, status, error);
-            }
-            node.3 += site.state.summary.started_count;
-            node.4 += site.state.summary.terminal_count;
-        }
+        self.identities.retain(|(site, task), _| {
+            overlay
+                .sites
+                .iter()
+                .any(|row| row.site.site == *site && row.site.task == *task)
+        });
+        let observations: Vec<_> = overlay
+            .sites
+            .iter()
+            .filter_map(|site| {
+                let (state, outcome) = match &site.state.occurrence {
+                    WorkflowOverlayOccurrence::Unobserved => return None,
+                    WorkflowOverlayOccurrence::Running { .. } => (ActionState::Running, None),
+                    WorkflowOverlayOccurrence::Waiting { .. } => (ActionState::Waiting, None),
+                    WorkflowOverlayOccurrence::Completed { .. } => (ActionState::Completed, None),
+                    WorkflowOverlayOccurrence::Failed { failure, .. } => (
+                        ActionState::Failed,
+                        Some(serde_json::json!({"message": failure.message(), "cause": failure})),
+                    ),
+                    WorkflowOverlayOccurrence::Cancelled { .. } => (
+                        ActionState::Cancelled,
+                        Some(serde_json::json!({"message": "cancelled"})),
+                    ),
+                    WorkflowOverlayOccurrence::Incomplete { .. } => (ActionState::Incomplete, None),
+                };
+                Some(ActionObservation {
+                    identity: self
+                        .identities
+                        .get(&(site.site.site.clone(), site.site.task.clone()))
+                        .filter(|identity| {
+                            Some(identity.occurrence) == site.state.occurrence.occurrence()
+                        })?
+                        .clone(),
+                    state,
+                    outcome,
+                })
+            })
+            .collect();
+        let activity = self.view.activity(self.view.document, &observations)?;
         let mut events = Vec::new();
-        for (node, (_, status, error, started, ended)) in nodes {
+        for node in activity {
+            let Some(state) = node.state else {
+                continue;
+            };
+            let status = match state {
+                ActionState::Running => RunStatus::Started,
+                ActionState::Waiting => RunStatus::Waiting,
+                ActionState::Completed => RunStatus::Succeeded,
+                ActionState::Failed | ActionState::Cancelled => RunStatus::Failed,
+                ActionState::Incomplete => RunStatus::Incomplete,
+            };
+            let error = node
+                .occurrences
+                .iter()
+                .filter_map(|occurrence| occurrence.outcome.as_ref())
+                .find_map(|outcome| outcome.get("message").and_then(serde_json::Value::as_str))
+                .map(str::to_owned);
+            let (started, ended) = overlay
+                .sites
+                .iter()
+                .filter(|site| site.site.site == node.site)
+                .fold((0, 0), |(started, ended), site| {
+                    (
+                        started + site.state.summary.started_count,
+                        ended + site.state.summary.terminal_count,
+                    )
+                });
             let shown = (status, started, ended);
-            if self.shown.get(&node) == Some(&shown) {
+            if self.shown.get(&node.site) == Some(&shown) {
                 continue;
             }
-            self.shown.insert(node.clone(), shown);
-            events.push(self.event(Some(node), status, DisplayDelta::default(), error));
+            self.shown.insert(node.site.clone(), shown);
+            let mut event = self.event(
+                Some(node.site.clone()),
+                status,
+                DisplayDelta::default(),
+                error,
+            );
+            event.activity = Some(node);
+            events.push(event);
         }
-        events
+        Ok(events)
     }
 
     fn durable(&mut self, event: &ObservedProcessEvent) -> Result<Vec<RunEvent>, RunError> {
@@ -553,7 +653,7 @@ impl Overlay {
                 {
                     self.accumulator.settle(settlement);
                 }
-                events.extend(self.changed());
+                events.extend(self.changed()?);
                 events.extend(self.deliver_display()?);
                 let mut event = self.event(
                     None,
@@ -574,6 +674,7 @@ impl Overlay {
     /// A committed effect outcome: durable evidence of one call at a site,
     /// which outlives the provisional overlay.
     fn effect(&mut self, occurrence: &ProcessEffectOccurrence) -> Vec<RunEvent> {
+        self.remember(&occurrence.at);
         let status = match occurrence.outcome_class {
             ProcessEffectOutcomeClass::Success => {
                 if let Some(call) = &occurrence.call_id {
@@ -592,6 +693,7 @@ impl Overlay {
             DisplayDelta::default(),
             occurrence.code.as_ref().map(ToString::to_string),
         );
+        event.occurrence = Some(occurrence.at.clone());
         event.call_id = occurrence.call_id.clone();
         event.call_only = true;
         let observed = self.accumulator.snapshot().is_some_and(|overlay| {
@@ -602,12 +704,14 @@ impl Overlay {
         });
         let mut events = vec![event];
         if !observed {
-            events.push(self.event(
+            let mut event = self.event(
                 Some(occurrence.at.site.clone()),
                 status,
                 DisplayDelta::default(),
                 occurrence.code.as_ref().map(ToString::to_string),
-            ));
+            );
+            event.occurrence = Some(occurrence.at.clone());
+            events.push(event);
         }
         events
     }
@@ -619,6 +723,7 @@ impl Overlay {
             DisplayDelta::default(),
             None,
         );
+        event.occurrence = wait.site.clone();
         if let WaitKind::Call { call_id, .. } = &wait.kind {
             event.approval_key = self.host.approval_key(&self.process, call_id.as_str());
         }
@@ -654,6 +759,11 @@ impl Overlay {
                 "the process is no longer retained".into(),
             ));
         };
+        if let Some(workflow) = &view.workflow {
+            for site in &workflow.sites {
+                self.remember(&site.at);
+            }
+        }
         let mut events = Vec::new();
         for node in view.effects.report.nodes() {
             for occurrence in &node.occurrences {
@@ -667,7 +777,7 @@ impl Overlay {
         ) {
             self.accumulator.settle(settlement);
         }
-        events.extend(self.changed());
+        events.extend(self.changed()?);
         let status = match view.process.status() {
             ProcessStatus::Completed => RunStatus::Succeeded,
             ProcessStatus::Failed | ProcessStatus::Cancelled | ProcessStatus::Abandoned => {
@@ -724,7 +834,10 @@ impl Overlay {
         // VM terminals may omit the call id. The admitted body's exact
         // occurrence supplies it while that observation remains retained.
         self.accumulator.observe(observation)?;
-        let mut events = self.changed();
+        if let TraceLanguageExecutionPayload::Node { at, .. } = &observation.execution.payload {
+            self.remember(at);
+        }
+        let mut events = self.changed()?;
         if let TraceLanguageExecutionPayload::Node { at, fact } = &observation.execution.payload {
             let call = match fact {
                 TraceNodeFact::Completed { call_id } => call_id
@@ -749,6 +862,7 @@ impl Overlay {
                     error,
                 );
                 event.call_id = Some(call);
+                event.occurrence = Some(at.clone());
                 event.call_only = true;
                 events.push(event);
             }
@@ -842,8 +956,23 @@ mod tests {
     use lash::workflow::{WorkflowDocumentEntry, WorkflowDocumentRef};
 
     fn overlay() -> Overlay {
+        overlay_for("kernel 1\nnumbers float\nmain { do sleep 1 } fn callee() { do sleep 1 }")
+    }
+
+    fn overlay_for(text: &str) -> Overlay {
+        let document = lash::workflow::document::parse_document(text).unwrap();
+        let holder = WorkflowDocument::derive(
+            document,
+            lash::workflow::WorkflowDocumentEntry::Main,
+            &lash::workflow::document::FunctionRegistry::default(),
+        )
+        .unwrap();
+        let mut view = lash::workflow::view::derive(&holder).unwrap();
+        view.document = DocumentId::from_bytes([1; 32]);
         Overlay {
+            view,
             accumulator: WorkflowExecutionOverlayAccumulator::default(),
+            identities: BTreeMap::new(),
             process: lash::ProcessId::fixture("adapter"),
             workflow_version: 1,
             definition: DocumentId::from_bytes([1; 32]).to_string(),
@@ -879,7 +1008,7 @@ mod tests {
                 payload: TraceLanguageExecutionPayload::Node {
                     at: EffectIdentity {
                         task: TaskIdentity::Main,
-                        site: Site::new(Unit::Main, [0]),
+                        site: Site::new(Unit::Main, [0, 0]),
                         occurrence,
                         loops: Vec::new(),
                     },
@@ -896,7 +1025,7 @@ mod tests {
                 process_id: lash::ProcessId::fixture("adapter"),
                 at: EffectIdentity {
                     task: TaskIdentity::Main,
-                    site: Site::new(Unit::Main, [0]),
+                    site: Site::new(Unit::Main, [0, 0]),
                     occurrence,
                     loops: Vec::new(),
                 },
@@ -904,6 +1033,43 @@ mod tests {
                 attempt: 1,
             },
         }
+    }
+
+    /// COARSE-CALL: another callable's observed action does not become a
+    /// caller tile or invalidate the caller's activity snapshot.
+    #[test]
+    fn coarse_call_keeps_callee_observations_outside_the_caller_view() {
+        let mut overlay = overlay();
+        let mut callee = observation(0, TraceNodeFact::Started { call_id: None });
+        if let TraceLanguageExecutionPayload::Node { at, .. } = &mut callee.execution.payload {
+            at.site = Site::new(
+                Unit::Function(lash::workflow::document::Name::new("callee")),
+                [0, 0],
+            );
+        }
+        assert!(overlay.language_observation(&callee).unwrap().is_empty());
+    }
+
+    /// COARSE-RESUME: the exact observed occurrence includes its loop ancestry.
+    #[test]
+    fn coarse_resume_keeps_the_observed_loop_identity() {
+        let mut overlay =
+            overlay_for("kernel 1\nnumbers float\nmain { for item in [1] { do sleep 1 } }");
+        let mut running = observation(3, TraceNodeFact::Started { call_id: None });
+        let TraceLanguageExecutionPayload::Node { at, .. } = &mut running.execution.payload else {
+            panic!("node fixture");
+        };
+        at.site = Site::new(Unit::Main, [0, 1, 0, 0]);
+        at.loops = vec![lash::workflow::document::LoopIteration {
+            site: Site::new(Unit::Main, [0]),
+            iteration: 3,
+        }];
+        let identity = at.clone();
+        let events = overlay.language_observation(&running).unwrap();
+        assert_eq!(
+            events[0].activity.as_ref().unwrap().occurrences[0].identity,
+            identity
+        );
     }
 
     #[test]
@@ -916,7 +1082,7 @@ mod tests {
             terminal: WorkflowOverlayTerminal::Completed,
             occurred_at: None,
         });
-        let events = overlay.changed();
+        let events = overlay.changed().unwrap();
         assert_eq!(
             serde_json::to_value(&events[0]).unwrap()["status"],
             "incomplete"
@@ -961,7 +1127,6 @@ mod tests {
         for occurrence in 0..=retained {
             let call = lash::ToolCallId::fixture(&format!("call-{occurrence}"));
             overlay
-                .accumulator
                 .step_body_started(&body_start(occurrence, call.clone()))
                 .unwrap();
             let other_call = lash::ToolCallId::fixture(&format!("other-task-{occurrence}"));
@@ -969,7 +1134,7 @@ mod tests {
             if let TraceLanguageExecutionPayload::Node { at, .. } = &running.execution.payload {
                 concurrent.step.at.task = at.task.clone();
             }
-            overlay.accumulator.step_body_started(&concurrent).unwrap();
+            overlay.step_body_started(&concurrent).unwrap();
             let events = overlay
                 .language_observation(&observation(
                     occurrence,
@@ -994,7 +1159,7 @@ mod tests {
                 vocabulary_version: 1,
                 at: EffectIdentity {
                     task: TaskIdentity::Main,
-                    site: Site::new(Unit::Main, [0]),
+                    site: Site::new(Unit::Main, [0, 0]),
                     occurrence,
                     loops: Vec::new(),
                 },
@@ -1023,7 +1188,6 @@ mod tests {
         );
         let failed = lash::ToolCallId::fixture("failed-after-cap");
         overlay
-            .accumulator
             .step_body_started(&body_start(retained + 1, failed.clone()))
             .unwrap();
         let events = overlay
@@ -1049,7 +1213,7 @@ mod tests {
             terminal: WorkflowOverlayTerminal::Completed,
             occurred_at: None,
         });
-        overlay.changed();
+        overlay.changed().unwrap();
         assert!(
             overlay
                 .effect(&last_durable.unwrap())

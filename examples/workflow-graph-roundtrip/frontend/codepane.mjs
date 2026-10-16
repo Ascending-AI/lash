@@ -1,42 +1,18 @@
-// The code pane: light syntax colouring, and the statement each line shows
-// where lash gives one. Nothing here parses a language: TypeScript lines
-// come from the printer's source map, kernel lines from the kernel printer's
-// layout, checked statement by statement.
+// Syntax colouring and canonical-node selection from printer line ranges.
+// The browser neither parses source nor reconstructs statement boundaries.
 
 const siteKey = (site) => JSON.stringify([site.unit, site.path ?? []]);
 
-// The keyword the kernel printer starts each statement with.
-const KERNEL_KEYWORDS = {
-  let: "let",
-  assign: "set",
-  remove: "remove",
-  do: "do",
-  if: "if",
-  for: "for",
-  while: "while",
-  try: "try",
-  return: "return",
-  throw: "throw",
-  print: "print",
-  finish: "finish",
-  fail: "fail",
-  break: "break",
-  continue: "continue",
-};
-
-const tagOf = (statement) =>
-  typeof statement === "string" ? statement : Object.keys(statement)[0];
-
-// A statement ↔ line correspondence: `lines(site)` is the first and last
-// line (0-based) a statement spans, `siteAt(line)` the statement a click on
-// `line` means, and `step(key, delta)` the statement an arrow key moves to.
+// A node ↔ line correspondence: `lines(site)` is the first and last
+// line (0-based) a node spans, `siteAt(line)` the node a click on
+// `line` means, and `step(key, delta)` the node an arrow key moves to.
 function linking(spans) {
   const bySite = new Map(spans.map((span) => [span.key, span]));
   const ordered = [...spans].sort((a, b) => a.start - b.start);
   return {
     lines: (site) => bySite.get(siteKey(site)),
-    // The statement starting on the next (`delta` 1) or previous (-1)
-    // statement line; from an unlinked key, the first or last.
+    // The node starting on the next (`delta` 1) or previous (-1)
+    // node line; from an unlinked key, the first or last.
     step(key, delta) {
       const at = ordered.findIndex((span) => span.key === key);
       const next =
@@ -44,8 +20,8 @@ function linking(spans) {
       return ordered[next]?.key;
     },
     siteAt(line) {
-      // The innermost statement starting on the line, else the innermost
-      // one spanning it.
+      // A carrier starting on this line, else one spanning it. Keyboard
+      // navigation retains every carrier, including shared-line actions.
       let starting, spanning;
       for (const span of spans) {
         if (span.start === line) starting = span;
@@ -56,83 +32,19 @@ function linking(spans) {
   };
 }
 
-// The kernel printer writes every statement on a line of its own, in
-// document order, and only `}` begins a line that closes or continues a
-// block. Each statement of the entry's view is matched to the next such
-// line of the entry's function and checked against its keyword; any
-// mismatch means no linking.
-export function kernelLinking(text, view, entry) {
-  const lines = text.split("\n");
-  const header = lines.findIndex((line) => line.startsWith(`fn ${entry}(`));
-  if (header < 0) return undefined;
-  const statements = view.statements;
-  const spans = [];
-  let next = 0;
-  for (let line = header + 1; line < lines.length; line++) {
-    if (lines[line] === "}") break;
-    const code = lines[line].trimStart();
-    if (!code || code.startsWith("}")) continue;
-    const statement = statements[next++];
-    if (!statement) return undefined;
-    const keyword = KERNEL_KEYWORDS[tagOf(statement.statement)];
-    if (!keyword || (code !== keyword && !code.startsWith(keyword + " ")))
-      return undefined;
-    spans.push({
-      key: siteKey(statement.site),
-      start: line,
-      end: blockEnd(lines, line),
-    });
-  }
-  return next === statements.length ? linking(spans) : undefined;
+// Both lenses use ranges supplied by the view. Canvas membership and
+// canonical locations survive a readable printer's refusal.
+export function kernelLinking(text, view) {
+  if (text !== view.canonical_source) return undefined;
+  return linking(view.nodes.map((node) => ({ key: siteKey(node.site),
+    start: node.canonical.first - 1, end: node.canonical.last - 1 })));
 }
-
-const indent = (line) => line.length - line.trimStart().length;
-// The last line of the statement starting at `start`: its nested lines are
-// indented deeper, and a `}` at its own indent closes or continues it.
-function blockEnd(lines, start) {
-  const depth = indent(lines[start]);
-  let end = start;
-  for (let line = start + 1; line < lines.length; line++) {
-    const deeper = indent(lines[line]) > depth;
-    const closing =
-      indent(lines[line]) === depth && lines[line].trimStart().startsWith("}");
-    if (!deeper && !closing) break;
-    end = line;
-  }
-  return end;
-}
-
-// Lash's TypeScript source map gives byte ranges of the printed source for
-// each site; a statement spans the lines of its first range.
-export function sourceMapLinking(source, sourceMap, view) {
-  if (!sourceMap) return undefined;
-  const encoder = new TextEncoder();
-  const starts = [0];
-  for (const line of source.split("\n"))
-    starts.push(starts.at(-1) + encoder.encode(line).length + 1);
-  const lineOf = (offset) => {
-    let low = 0,
-      high = starts.length - 2;
-    while (low < high) {
-      const middle = (low + high + 1) >> 1;
-      if (starts[middle] <= offset) low = middle;
-      else high = middle - 1;
-    }
-    return low;
-  };
-  const ranges = new Map(
-    sourceMap.sites.map((entry) => [siteKey(entry.site), entry.ranges[0]]),
-  );
-  const spans = [];
-  for (const statement of view.statements) {
-    const range = ranges.get(siteKey(statement.site));
-    if (!range) continue;
-    spans.push({
-      key: siteKey(statement.site),
-      start: lineOf(range.start),
-      end: lineOf(Math.max(range.start, range.end - 1)),
-    });
-  }
+export function readableLinking(view) {
+  if (view.readable?.kind !== "available") return undefined;
+  const spans = view.nodes.filter((node) => node.readable.length).map((node) => ({
+    key: siteKey(node.site), start: Math.min(...node.readable.map((range) => range.first)) - 1,
+    end: Math.max(...node.readable.map((range) => range.last)) - 1,
+  }));
   return spans.length ? linking(spans) : undefined;
 }
 

@@ -2,6 +2,7 @@ export const siteKey = (site) => JSON.stringify([site.unit, site.path ?? []]);
 // Lash's view is absent when the document does not link; it then has nothing.
 const NO_VIEW = {
   statements: [],
+  nodes: [], callables: [],
   scopes: [],
   dataflow: {
     bindings: [],
@@ -14,17 +15,10 @@ const NO_VIEW = {
   execution_sites: [],
 };
 export const viewOf = (workflow) => workflow.view ?? NO_VIEW;
-// The actions a statement issues, as lash's view lists them: its own and
-// those nested in its expressions, in issue order, each with its kind,
-// callee and arguments.
-export function actionsOf(workflow, s) {
-  const actions = viewOf(workflow).dataflow.actions;
-  return (s.actions ?? [])
-    .map((site) => actions.find((a) => siteKey(a.site) === siteKey(site)))
-    .filter(Boolean);
-}
-// The action a statement's node shows: the last one it issues.
-export const actionOf = (workflow, s) => actionsOf(workflow, s).at(-1);
+// An action carrier is keyed by its exact action Site. Statement payloads
+// remain context; they never select a representative action for a tile.
+export const actionOf = (workflow, carrier) =>
+  viewOf(workflow).dataflow.actions.find((action) => siteKey(action.site) === siteKey(carrier.site));
 // The effect a statement's node performs, if its action is a `perform`.
 export function effectOf(workflow, s) {
   const action = actionOf(workflow, s);

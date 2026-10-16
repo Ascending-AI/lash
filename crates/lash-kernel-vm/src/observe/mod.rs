@@ -29,8 +29,10 @@ use crate::compile::{CodeId, LibId, StmtId};
 
 pub use lash_kernel_doc::RunObservation as Observe;
 
-/// Nonzero statement starts and empty-block entries, keyed by
-/// [`lash_kernel_doc::Document::site_ordinals`]. Deltas add across frames
+/// Nonzero statement starts, empty-block entries, action issues and while
+/// tests, keyed by [`lash_kernel_doc::Document::site_ordinals`],
+/// [`lash_kernel_doc::Document::action_ordinals`] and
+/// [`lash_kernel_doc::Document::condition_ordinals`]. Deltas add across frames
 /// and committed run segments. Counts use u64 throughout.
 pub type RanDelta = Vec<(u32, u64)>;
 

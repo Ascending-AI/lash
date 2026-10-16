@@ -57,6 +57,7 @@ impl KernelMachine {
         action: &Action,
         out: Reg,
     ) -> Status {
+        self.observe_action(exe, &action.site);
         if !matches!(action.site.unit, lash_kernel_doc::Unit::Library(_))
             && matches!(
                 action.kind,
@@ -201,6 +202,9 @@ impl KernelMachine {
         let count = args.len as usize;
         let args = args.start.0 as usize;
         let site = &entry.site;
+        if !matches!(entry.kind, NestedKind::Body(_)) {
+            self.observe_action(exe, site);
+        }
         let library = matches!(site.unit, lash_kernel_doc::Unit::Library(_));
         match &entry.kind {
             NestedKind::Call(callee) => {

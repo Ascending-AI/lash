@@ -425,7 +425,12 @@ fn counted_run(
             *histogram.entry(ordinals[&site]).or_default() += 1;
         }
         assert_eq!(
-            delta, histogram,
+            delta
+                .iter()
+                .filter(|(ordinal, _)| **ordinal < ordinals.len() as u32)
+                .map(|(ordinal, count)| (*ordinal, *count))
+                .collect::<std::collections::BTreeMap<_, _>>(),
+            histogram,
             "slice {slice}, layout {layout:?}, hop {hops}"
         );
         assert!(embedder.machine.take_ran().is_empty());
@@ -872,3 +877,48 @@ main {
   return (mine, theirs, other)
 }
 "#;
+
+/// COARSE-COUNTS: a statement start is not an issue of either lazy action.
+#[test]
+fn coarse_counts_actions_are_distinct_from_statement_starts() {
+    use lash_kernel_doc::{Expr, Node, Site, Unit};
+    let mut embedder = Embedder::new(
+        "main { let x = if(true, call answer(), call answer()) return x } fn answer() { return 7 }",
+    );
+    let (program, _) = embedder.program(true);
+    let mut sites = Vec::new();
+    let mut pending = vec![(
+        Site::new(Unit::Main, vec![]),
+        Node::Block(&program.document.main),
+    )];
+    while let Some((site, node)) = pending.pop() {
+        if matches!(node, Node::Expr(Expr::Act(_))) {
+            sites.push(site.clone());
+        }
+        pending.extend(
+            node.children()
+                .into_iter()
+                .enumerate()
+                .map(|(i, node)| (site.child(i as u32), node)),
+        );
+    }
+    sites.sort();
+    let base = program.document.site_ordinals().len() as u32;
+    let actions: Vec<_> = (0..sites.len()).map(|i| base + i as u32).collect();
+    assert_eq!(actions.len(), 2);
+    embedder.machine.set_observe(crate::Observe::Counts);
+    assert!(matches!(embedder.run(), Step::Ended(End::Finished(_))));
+    let ran = ran_map(embedder.machine.take_ran());
+    assert_eq!(
+        ran.get(&actions[0]).copied().unwrap_or(0),
+        1,
+        "the chosen call issued once"
+    );
+    assert_eq!(
+        ran.get(&actions[1]).copied().unwrap_or(0),
+        0,
+        "the alternative never issued"
+    );
+    let statement = program.document.site_ordinals()[&Site::new(Unit::Main, vec![0])];
+    assert_eq!(ran[&statement], 1);
+}

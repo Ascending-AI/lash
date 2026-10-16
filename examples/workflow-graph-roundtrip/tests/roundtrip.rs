@@ -131,10 +131,19 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     else {
         panic!("lash holds the published definition");
     };
+    let mut expected_view = lash::workflow::view::derive(&published.document).expect("the view");
+    let source_map = serde_json::from_value(opened["sourceMap"].clone()).expect("the printer map");
+    expected_view
+        .readable_ranges(
+            published.document.document(),
+            "generated_typescript".into(),
+            source,
+            &source_map,
+        )
+        .expect("printer ranges belong to the published document");
     assert_eq!(
-        served,
-        lash::workflow::view::derive(&published.document).expect("the view"),
-        "the view is lash's read of the published document"
+        served, expected_view,
+        "the view is lash's read with the printer's readable ranges"
     );
 
     // The message the workflow shows first is the text literal of the record

@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Statement starts and scope entries of one entry of a document.
+/// Statement starts, scope entries, action issues and while tests of one entry.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowCoverage {
@@ -15,11 +15,15 @@ pub struct WorkflowCoverage {
     pub observation: Option<RunObservation>,
     /// Each statement of the entry, in document order.
     pub statements: Vec<StatementCoverage>,
+    /// Issues at exact action sites, independent of statement starts.
+    pub actions: Vec<StatementCoverage>,
+    /// While header evaluations, including the final false test.
+    pub conditions: Vec<StatementCoverage>,
     /// Each block of the entry, in document order.
     pub scopes: Vec<ScopeCoverage>,
 }
 
-/// One statement of the entry and how often it ran.
+/// One exact statement, action or while-test coordinate and its observed count.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StatementCoverage {
@@ -52,10 +56,28 @@ pub fn coverage(document: &Document, entry: &Unit, counts: &RanCounts) -> Workfl
         (counts.observation == Some(RunObservation::Counts))
             .then(|| ran.get(&ordinal).copied().unwrap_or(0))
     };
-    let entry = entry_nodes(document, entry);
+    let nodes = entry_nodes(document, entry);
     WorkflowCoverage {
         observation: counts.observation,
-        statements: entry
+        actions: document
+            .action_ordinals()
+            .into_iter()
+            .filter(|(site, _)| site.unit == *entry)
+            .map(|(site, ordinal)| StatementCoverage {
+                site,
+                runs: count(ordinal),
+            })
+            .collect(),
+        conditions: document
+            .condition_ordinals()
+            .into_iter()
+            .filter(|(site, _)| site.unit == *entry)
+            .map(|(site, ordinal)| StatementCoverage {
+                site,
+                runs: count(ordinal),
+            })
+            .collect(),
+        statements: nodes
             .statements
             .iter()
             .map(|(site, ordinal)| StatementCoverage {
@@ -63,7 +85,7 @@ pub fn coverage(document: &Document, entry: &Unit, counts: &RanCounts) -> Workfl
                 runs: count(*ordinal),
             })
             .collect(),
-        scopes: entry
+        scopes: nodes
             .scopes
             .iter()
             .map(|(block, entered)| ScopeCoverage {
@@ -154,4 +176,69 @@ pub fn path(document: &Document, entry: &Unit, replay: &ReplayPath) -> Vec<PathS
         }
     }
     steps
+}
+
+/// Coverage ready for a coarse node; loop iterations remain arm entries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NodeCoverage {
+    pub site: Site,
+    /// Action issues, control starts, or code-group entries (first member only).
+    pub runs: Option<u64>,
+    pub condition_tests: Option<u64>,
+    pub arms: Vec<ScopeCoverage>,
+}
+
+impl crate::WorkflowView {
+    /// Read counts collected for this view's document. No host-side grouping,
+    /// copying a statement count onto actions, or summing code members.
+    pub fn coverage(&self, counts: &RanCounts) -> Vec<NodeCoverage> {
+        if self.callables.is_empty() {
+            return Vec::new();
+        }
+        let mut ran = BTreeMap::<u32, u64>::new();
+        for (ordinal, count) in &counts.ran {
+            *ran.entry(*ordinal).or_default() += count;
+        }
+        let count = |ordinal: Option<u32>| {
+            (counts.observation == Some(RunObservation::Counts)).then(|| {
+                ordinal
+                    .and_then(|ordinal| ran.get(&ordinal).copied())
+                    .unwrap_or(0)
+            })
+        };
+        // The document count helper carries the same canonical action order;
+        // the ordinals are stored on the view rather than re-derived in a host.
+        self.nodes
+            .iter()
+            .map(|node| NodeCoverage {
+                site: node.site.clone(),
+                runs: count(Some(node.ordinal)),
+                condition_tests: node
+                    .condition_ordinal
+                    .and_then(|ordinal| count(Some(ordinal))),
+                arms: node
+                    .arms
+                    .iter()
+                    .map(|arm| {
+                        let first = self
+                            .statements
+                            .iter()
+                            .find(|statement| statement.block == arm.block)
+                            .map(|statement| statement.ordinal)
+                            .or_else(|| {
+                                self.scopes
+                                    .iter()
+                                    .find(|scope| scope.block == arm.block)
+                                    .map(|scope| scope.ordinal)
+                            });
+                        ScopeCoverage {
+                            block: arm.block.clone(),
+                            entries: count(first),
+                        }
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
 }

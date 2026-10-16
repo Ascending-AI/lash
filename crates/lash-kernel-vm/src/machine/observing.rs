@@ -63,6 +63,16 @@ impl KernelMachine {
         }
     }
 
+    /// Dispatch is reached once after operands, never by delivery or resume.
+    #[inline(always)]
+    pub(super) fn observe_action(&mut self, exe: &Executable, site: &lash_kernel_doc::Site) {
+        if !self.ran.is_empty()
+            && let Some(ordinal) = exe.action_ordinals.get(site)
+        {
+            self.ran[*ordinal as usize] += 1;
+        }
+    }
+
     #[inline(always)]
     pub(super) fn observe_empty_block(&mut self, task: TaskId, block: BlockId, exe: &Executable) {
         if !self.ran.is_empty()

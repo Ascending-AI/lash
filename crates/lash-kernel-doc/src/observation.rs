@@ -25,6 +25,8 @@ impl RunObservation {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RanCounts {
     pub observation: Option<RunObservation>,
+    /// Statement/block ordinals, followed by action issues and while tests
+    /// (`Document::action_ordinals` and `Document::condition_ordinals`).
     pub ran: Vec<(u32, u64)>,
 }
 

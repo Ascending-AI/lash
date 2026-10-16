@@ -159,7 +159,11 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
             let mut total = BTreeMap::<u32, u64>::new();
             loop {
                 let step = machine.run(&mut Console, slice).unwrap();
-                let delta: BTreeMap<_, _> = machine.take_ran().into_iter().collect();
+                let delta: BTreeMap<_, _> = machine
+                    .take_ran()
+                    .into_iter()
+                    .filter(|(ordinal, _)| *ordinal < ordinals.len() as u32)
+                    .collect();
                 let mut trace = BTreeMap::<u32, u64>::new();
                 for site in machine
                     .take_path()

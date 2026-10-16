@@ -5,13 +5,19 @@
  * One entry of a document as a canvas reads it.
  */
 export type WorkflowView = {
+  "callables": Array<CallableView>;
+  "canonical_source": string;
   "dataflow": Dataflow;
+  "document": DocumentId;
   /**
    * Every action of the document a run can report an occurrence at, in
    * node order. An entry may call and spawn any declared function, so
    * these are the sites of every unit.
    */
   "execution_sites": Array<ExecutionSiteView>;
+  "flow": Array<FlowEdge>;
+  "nodes": Array<WorkflowNode>;
+  "readable": ReadableLens;
   /**
    * Every block of the entry, including empty ones, in document order.
    */
@@ -115,6 +121,24 @@ export type Action = ({
     "value": Atom;
   };
 });
+
+export type ActionActivity = {
+  "occurrences": Array<ActionObservation>;
+  "site": Site;
+  "state"?: (ActionState | null);
+};
+
+/**
+ * Outcome data stays on the exact occurrence the observer supplies, never on
+ * every action of its statement. `T` can retain the host's typed result/cause.
+ */
+export type ActionObservation = {
+  "identity": EffectIdentity;
+  "outcome"?: unknown;
+  "state": ActionState;
+};
+
+export type ActionState = ("running" | "waiting" | "completed" | "failed" | "cancelled" | "incomplete");
 
 /**
  * One action.
@@ -238,6 +262,14 @@ export type BindingView = {
 export type Bytes = string;
 
 /**
+ * A lexical callable is projected once, independently of its invocations.
+ */
+export type CallableView = {
+  "block": Site;
+  "site": Site;
+};
+
+/**
  * What a call or a `spawn` runs.
  */
 export type Callee = ({
@@ -283,6 +315,21 @@ export type Closure = {
 };
 
 /**
+ * A control retains empty arms and the distinction between body entries and
+ * header actions. Header actions live under `header`, not before the control.
+ */
+export type ControlArm = {
+  "block": Site;
+  "role": ScopeKind;
+};
+
+export type ControlHeader = {
+  "actions": Array<Site>;
+  "expression": Site;
+  "role": HeaderRole;
+};
+
+/**
  * What a variable is and where values flow in the entry.
  */
 export type Dataflow = {
@@ -311,6 +358,28 @@ export type Dataflow = {
    * Every `return` and `finish` of the entry and the callable it ends.
    */
   "returns": Array<ReturnView>;
+};
+
+export type DocumentId = string;
+
+/**
+ * Which wait of a run: one execution of a `perform` or a `sleep`.
+ */
+export type EffectIdentity = {
+  /**
+   * The loops the task was inside when it ran the site, outermost first,
+   * across its active calls.
+   */
+  "loops"?: Array<LoopIteration>;
+  /**
+   * How many times the task had run that site before, from 0.
+   */
+  "occurrence": number;
+  /**
+   * The site of the `perform` or the `sleep`.
+   */
+  "site": Site;
+  "task": TaskIdentity;
 };
 
 /**
@@ -412,11 +481,46 @@ export type ExpressionView = {
 
 export type Float = string;
 
+/**
+ * Canonical routes at exact member Sites, including finally-unwind routes.
+ * Hosts must not invent a fallthrough between coarse groups.
+ */
+export type FlowEdge = {
+  "from": Site;
+  "kind": FlowKind;
+  "to": FlowTarget;
+};
+
+export type FlowKind = ("next" | "then" | "else" | "body" | "break" | "continue" | "return" | "throw" | "catch" | "finally" | "end" | "call" | "spawn" | "reference");
+
+export type FlowTarget = (("leave" | "end") | {
+  "site": Site;
+});
+
 export type FunctionId = string;
+
+export type HeaderRole = ("condition" | "iterable");
 
 export type Integer = string;
 
 export type JoinMode = ("all" | "all_settled" | "race" | "any");
+
+/**
+ * An expression alternative that guards an action's evaluation. These are
+ * ancestry, not scheduling edges: static issue order never implies both arms run.
+ */
+export type LazyArm = {
+  "arm": number;
+  "expression": Site;
+};
+
+/**
+ * Inclusive, one-based lines in an explicitly named printed lens.
+ */
+export type LineRange = {
+  "first": number;
+  "last": number;
+};
 
 export type Literal = (("null" | "absent") | {
   "bool": boolean;
@@ -431,6 +535,20 @@ export type Literal = (("null" | "absent") | {
 } | {
   "function": Name;
 });
+
+/**
+ * One enclosing loop and the iteration it was on.
+ */
+export type LoopIteration = {
+  /**
+   * The iteration, from 0.
+   */
+  "iteration": number;
+  /**
+   * The site of the `for` or the `while`.
+   */
+  "site": Site;
+};
 
 export type MapEntry = {
   "key": Expr;
@@ -465,6 +583,19 @@ export type Member = ({
  */
 export type Name = string;
 
+/**
+ * Coverage ready for a coarse node; loop iterations remain arm entries.
+ */
+export type NodeCoverage = {
+  "arms": Array<ScopeCoverage>;
+  "condition_tests"?: (number | null);
+  /**
+   * Action issues, control starts, or code-group entries (first member only).
+   */
+  "runs"?: (number | null);
+  "site": Site;
+};
+
 export type Param = {
   "name": Name;
   /**
@@ -493,6 +624,37 @@ export type ProjectionRead = {
 };
 
 export type QualifiedName = string;
+
+/**
+ * A failed readable lens does not invalidate canonical membership or ranges.
+ */
+export type ReadableLens = ({
+  "kind": "unrequested";
+} | {
+  "kind": "available";
+  "name": string;
+} | {
+  "cause": ReadableRefusal;
+  "kind": "refused";
+  "name": string;
+});
+
+/**
+ * Typed printer refusal. Projection and the canonical lens remain available.
+ */
+export type ReadableRefusal = ({
+  "kind": "bytes";
+  "limit": number;
+} | {
+  "kind": "depth";
+  "limit": number;
+} | {
+  "kind": "encoding";
+  "message": string;
+} | {
+  "kind": "invalid";
+  "message": string;
+});
 
 export type RecordEntry = {
   "field": string;
@@ -614,8 +776,23 @@ export type Site = {
  */
 export type SiteKind = (("call" | "perform" | "sleep" | "join" | "join_many" | "yield" | "spawn" | "cancel") | "await");
 
+export type SpawnIdentity = {
+  /**
+   * How many times the parent had run that site before, from 0.
+   */
+  "occurrence": number;
+  /**
+   * The task that ran the `spawn`.
+   */
+  "parent": TaskIdentity;
+  /**
+   * The site of the `spawn`.
+   */
+  "site": Site;
+};
+
 /**
- * One statement of the entry and how often it ran.
+ * One exact statement, action or while-test coordinate and its observed count.
  */
 export type StatementCoverage = {
   /**
@@ -714,6 +891,14 @@ export type Stmt = (("break" | "continue") | {
   };
 });
 
+/**
+ * Which task of a run: `main`, or the task one execution of a `spawn`
+ * started.
+ */
+export type TaskIdentity = (("main") | {
+  "spawned": SpawnIdentity;
+});
+
 export type TryStmt = {
   "body": Array<Stmt>;
   "catch"?: (Catch | null);
@@ -760,9 +945,17 @@ export type Use = {
 };
 
 /**
- * Statement starts and scope entries of one entry of a document.
+ * Statement starts, scope entries, action issues and while tests of one entry.
  */
 export type WorkflowCoverage = {
+  /**
+   * Issues at exact action sites, independent of statement starts.
+   */
+  "actions": Array<StatementCoverage>;
+  /**
+   * While header evaluations, including the final false test.
+   */
+  "conditions": Array<StatementCoverage>;
   /**
    * The observation the counts came under; absent is an unobserved run.
    */
@@ -776,3 +969,41 @@ export type WorkflowCoverage = {
    */
   "statements": Array<StatementCoverage>;
 };
+
+/**
+ * Identity is (view.document, kind, block, site, last member). Ranges are
+ * display metadata. Supporting statements and dataflow remain addressable.
+ */
+export type WorkflowNode = {
+  "arms": Array<ControlArm>;
+  "bindings": Array<number>;
+  "block": Site;
+  "callable": Site;
+  "canonical": LineRange;
+  "condition_ordinal"?: (number | null);
+  "departures": Array<Site>;
+  "falls_through": boolean;
+  "header"?: (ControlHeader | null);
+  "kind": WorkflowNodeKind;
+  "lazy": Array<LazyArm>;
+  /**
+   * Each statement has exactly one carrier. Additional actions in a
+   * statement have no members, but retain their owning `statement`.
+   */
+  "members": Array<Site>;
+  /**
+   * The node's authoritative count coordinate in RanCounts.
+   */
+  "ordinal": number;
+  "readable": Array<LineRange>;
+  "reads": Array<number>;
+  "site": Site;
+  /**
+   * The owning statement for actions/controls; first member for code.
+   */
+  "statement": Site;
+  "within"?: (Site | null);
+  "writes": Array<number>;
+};
+
+export type WorkflowNodeKind = ("action" | "control" | "code");

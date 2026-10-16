@@ -126,7 +126,7 @@
       ]
     },
     "ProcessWorkflowRan": {
-      "description": "How many times one document statement started, or one empty block was\nentered, by its document site ordinal. `committed` sums the process's\n`process.ran` events; `provisional` is what live frames reported since\nthe latest of them, which the next commit replaces.",
+      "description": "How many times a document statement started, an empty block was entered,\nan action issued or a while condition was tested, by its document count ordinal. `committed` sums the process's\n`process.ran` events; `provisional` is what live frames reported since\nthe latest of them, which the next commit replaces.",
       "properties": {
         "committed": {
           "format": "uint64",

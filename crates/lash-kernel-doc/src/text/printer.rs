@@ -16,6 +16,14 @@ use crate::types::{Signature, Type};
 /// Writes a document as kernel text. [`super::parse_document`] reads the
 /// text back to an equal document.
 pub fn print_document(document: &Document) -> String {
+    print_document_with_ranges(document).0
+}
+
+/// Canonical text and exact byte ranges of every statement, including closure
+/// bodies. Locations describe these printed bytes and this document only.
+pub fn print_document_with_ranges(
+    document: &Document,
+) -> (String, BTreeMap<crate::Site, crate::Span>) {
     let mut printer = Printer::new(&document.manifest.functions);
     let out = &mut printer.out;
     out.push_str(&format!("kernel {}\n", document.manifest.kernel));
@@ -52,7 +60,17 @@ pub fn print_document(document: &Document) -> String {
     printer.out.push_str("\nmain ");
     printer.block(&document.main);
     printer.out.push('\n');
-    printer.out
+    let ranges = document
+        .ordinal_nodes()
+        .into_iter()
+        .filter_map(|(site, node)| {
+            let crate::Node::Stmt(stmt) = node else {
+                return None;
+            };
+            Some((site, printer.ranges[&std::ptr::from_ref(stmt)]))
+        })
+        .collect();
+    (printer.out, ranges)
 }
 
 /// Writes a library-function definition as kernel text.
@@ -111,6 +129,7 @@ pub fn print_definition(definition: &FunctionDefinition) -> String {
 struct Printer<'a> {
     out: String,
     indent: usize,
+    ranges: BTreeMap<*const Stmt, crate::Span>,
     /// The functions a call may be written by name: those whose name one
     /// `use` line alone gives.
     named: BTreeMap<FunctionId, &'a FunctionName>,
@@ -131,6 +150,7 @@ impl<'a> Printer<'a> {
         Self {
             out: String::new(),
             indent: 0,
+            ranges: BTreeMap::new(),
             named,
         }
     }
@@ -196,6 +216,18 @@ impl<'a> Printer<'a> {
     }
 
     fn stmt(&mut self, stmt: &Stmt) {
+        let start = self.out.len();
+        self.statement(stmt);
+        self.ranges.insert(
+            std::ptr::from_ref(stmt),
+            crate::Span {
+                start,
+                end: self.out.len(),
+            },
+        );
+    }
+
+    fn statement(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Let { name, value } => {
                 self.out.push_str("let ");

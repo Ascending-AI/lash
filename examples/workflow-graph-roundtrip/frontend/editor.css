@@ -1377,3 +1377,28 @@ dialog::backdrop {
   color: var(--muted);
   padding: 12px;
 }
+
+.data-node.code {
+  background: #f8f9fb;
+}
+.data-node .control-arm {
+  display: block;
+  width: calc(100% - 24px);
+  height: 30px;
+  margin: 0 12px;
+  padding: 4px 2px;
+  border: 0;
+  border-top: 1px solid #e8ebee;
+  border-radius: 0;
+  background: transparent;
+  color: #44515e;
+  text-align: left;
+  font-size: 11px;
+}
+.data-node .control-arm:hover {
+  background: #f0f3f6;
+}
+.data-node .control-arm:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}

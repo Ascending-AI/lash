@@ -83,8 +83,8 @@ pub enum ProcessWorkflowLiveCoverage {
 
 pub use lash_kernel_doc::RunObservation as ProcessWorkflowObservation;
 
-/// How many times one document statement started, or one empty block was
-/// entered, by its document site ordinal. `committed` sums the process's
+/// How many times a document statement started, an empty block was entered,
+/// an action issued or a while condition was tested, by its document count ordinal. `committed` sums the process's
 /// `process.ran` events; `provisional` is what live frames reported since
 /// the latest of them, which the next commit replaces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -1683,6 +1683,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "src/workflow/document_example.rs",
         "tests/workflow_laws.rs",
+        "tests/workflow_laws/coarse.rs",
         "tests/workflow_laws/documents.rs",
         "tests/workflow_laws/generated_source.rs",
         "tests/workflow_laws/node_spans.rs",

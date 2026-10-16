@@ -1712,3 +1712,6 @@ mod node_spans;
 
 #[path = "workflow_laws/documents.rs"]
 mod documents;
+
+#[path = "workflow_laws/coarse.rs"]
+mod coarse;

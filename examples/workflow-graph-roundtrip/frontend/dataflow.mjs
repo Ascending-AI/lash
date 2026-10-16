@@ -1,4 +1,4 @@
-import { actionOf, siteKey, statementsIn, viewOf } from "./projection.mjs";
+import { siteKey, statementsIn, viewOf } from "./projection.mjs";
 
 export function typeName(type) {
   if (!type) return "Any";
@@ -142,171 +142,57 @@ export function buildDataflow(workflow, block) {
     ];
   }
   function nodesIn(scope) {
-    const nodes = [];
-    for (const s of statementsIn(workflow, scope)) {
-      const binding = data.bindings.find(
-        (b) => b.kind === "let" && siteKey(b.site) === siteKey(s.site),
-      );
-      const action = actionOf(workflow, s);
-      const returned = data.returns.find(
-        (r) => siteKey(r.statement) === siteKey(s.site),
-      );
-      const assignment = data.assignments.find(
-        (a) => siteKey(a.statement) === siteKey(s.site),
-      );
+    return view.nodes.filter((node) => siteKey(node.block) === siteKey(scope)).map((carrier) => {
+      const owner = rows.get(siteKey(carrier.statement));
+      const action = carrier.kind === "action"
+        ? data.actions.find((action) => siteKey(action.site) === siteKey(carrier.site))
+        : undefined;
+      // Selection keeps the exact canvas Site; the statement is supporting
+      // inspection/edit context, never a request to pick its last action.
+      const s = { ...owner, site: carrier.site, statement_site: owner.site,
+        node_kind: carrier.kind, members: carrier.members,
+        actions: action ? [action.site] : [] };
       const wholeInputs = [];
-      let inputs = [],
-        outputs = [],
-        kind = "control";
+      let inputs = [], outputs = [];
+      const binding = action && data.bindings.find((binding) =>
+        binding.value_site && siteKey(binding.value_site) === siteKey(action.site));
       if (action) {
-        kind = "action";
         inputs = action.args.flatMap((arg, index) => {
           const name = arg.name ?? `argument${index + 1}`;
           const targetBinding = bindings.get(arg.binding);
-          // A whole argument is set on its action, which takes any
-          // expression; a record written in place also edits field by field.
           const whole = {
-            id: `${siteKey(action.site)}:${index}`,
-            name,
-            type: arg.type,
-            expression: arg.expression,
-            target: { action: action.site, index },
-            context: { statement: s.site, block: s.block },
-            references: targetBinding ? [targetBinding.id] : [],
-            available: action.available ?? [],
+            id: `${siteKey(action.site)}:${index}`, name, type: arg.type,
+            expression: arg.expression, target: { action: action.site, index },
+            context: { statement: owner.site, block: owner.block },
+            references: targetBinding ? [targetBinding.id] : [], available: action.available,
           };
           const record = arg.site && expressions.get(siteKey(arg.site));
           if (!record?.expression.record) return [whole];
-          if (record.expression.record.length)
-            wholeInputs.push({
-              ...whole,
-              references: record.references,
-              available: record.available,
-            });
+          if (record.expression.record.length) wholeInputs.push({ ...whole,
+            references: record.references, available: record.available });
           return recordPorts(record, arg.type);
         });
         outputs = outputPorts(binding, action.result_type);
-        if (!binding)
-          outputs = [
-            {
-              name: action.destination
-                ? `writes ${expressionName(action.destination)}`
-                : "result",
-              type: action.result_type,
-              discarded: !action.destination,
-              stored: !!action.destination,
-              path: [],
-            },
-          ];
-      } else if (returned) {
-        kind = "output";
-        const expr = expressions.get(siteKey(returned.expression_site));
-        if (expr)
-          inputs = [
-            {
-              ...expressionPort("result", returned.type, expr),
-              acceptsType: returned.expected_type ?? "any",
-            },
-          ];
-      } else if (binding) {
-        kind = "value";
-        const expr =
-          binding.value_site && expressions.get(siteKey(binding.value_site));
-        if (expr)
-          inputs = expr.expression.record
-            ? recordPorts(expr, binding.type)
-            : [expressionPort("value", binding.type, expr)];
-        inputs = inputs.map((port) => ({ ...port, acceptsType: "any" }));
-        if (expr?.expression.record?.length)
-          wholeInputs.push({
-            ...expressionPort("value", binding.type, expr),
-            acceptsType: "any",
-          });
-        outputs = outputPorts(binding);
-      } else if (assignment) {
-        kind = "write";
-        const expr = expressions.get(siteKey(assignment.value_site));
-        if (expr)
-          inputs = [
-            { ...expressionPort("value", expr.type, expr), acceptsType: "any" },
-          ];
-        outputs = [
-          {
-            name: `writes ${expressionName(assignment.destination)}`,
-            type: expr?.type ?? "any",
-            stored: true,
-            path: [],
-          },
-        ];
-      } else if (s.statement.if || s.statement.while) {
-        const expr = data.expressions.find(
-          (e) =>
-            siteKey(e.statement) === siteKey(s.site) &&
-            siteKey(e.site) ===
-              siteKey({ ...s.site, path: [...s.site.path, 0] }),
-        );
-        if (expr) inputs = [expressionPort("condition", "bool", expr)];
-      } else {
-        const owned = data.expressions.filter(
-          (e) => siteKey(e.statement) === siteKey(s.site),
-        );
-        const roots = owned.filter(
-          (expr) =>
-            !owned.some(
-              (parent) =>
-                parent.site.path.length < expr.site.path.length &&
-                parent.site.path.every(
-                  (part, index) => part === expr.site.path[index],
-                ),
-            ),
-        );
-        const tag =
-          typeof s.statement === "string"
-            ? s.statement
-            : Object.keys(s.statement)[0];
-        inputs = roots.map((expr, index) =>
-          expressionPort(
-            tag === "for"
-              ? "iterable"
-              : roots.length === 1
-                ? "value"
-                : `input ${index + 1}`,
-            expr.type,
-            expr,
-          ),
-        );
+        if (!binding) outputs = [{ name: "result", type: action.result_type,
+          discarded: !action.destination, stored: !!action.destination, path: [] }];
+      } else if (carrier.kind === "code") {
+        outputs = [...new Set([...carrier.bindings, ...carrier.writes])].flatMap((id) => outputPorts(bindings.get(id)));
+        inputs = carrier.reads.filter((id) => !carrier.bindings.includes(id)).map((id) => ({
+          name: bindings.get(id)?.name ?? "value", type: bindings.get(id)?.type ?? "any",
+          expression: { variable: bindings.get(id)?.name }, references: [id], available: [],
+        }));
+      } else if (carrier.header) {
+        const expr = expressions.get(siteKey(carrier.header.expression));
+        if (expr) inputs = [expressionPort(carrier.header.role, expr.type, expr)];
       }
-      const node = {
-        s,
-        binding,
-        kind,
-        inputs,
-        outputs,
-        wholeInputs,
-        terminal: returned
-          ? s.statement.finish
-            ? "finish"
-            : "return"
-          : undefined,
-        workflowOutput: returned ? !returned.callable?.path?.length : false,
-      };
-      if (s.statement.if) {
+      const node = { s, carrier, site: carrier.site, action, binding,
+        kind: carrier.kind, inputs, outputs, wholeInputs };
+      if (carrier.kind === "control" && owner.statement.if) {
         node.branch = true;
-        node.children = [1, 2].map((i) =>
-          nodesIn({ ...s.site, path: [...s.site.path, i] }),
-        );
+        node.children = carrier.arms.map((arm) => nodesIn(arm.block));
       }
-      nodes.push(node);
-      const tag =
-        typeof s.statement === "string"
-          ? s.statement
-          : Object.keys(s.statement)[0];
-      if (
-        ["return", "throw", "finish", "fail", "break", "continue"].includes(tag)
-      )
-        break;
-    }
-    return nodes;
+      return node;
+    });
   }
   const nodes = nodesIn(block);
   const parameters = data.parameters

@@ -21,6 +21,8 @@ fn main() -> Result<(), String> {
         "kernel-workflow-view",
         |generator| {
             generator.subschema_for::<WorkflowCoverage>();
+            generator.subschema_for::<lash_kernel_view::NodeCoverage>();
+            generator.subschema_for::<lash_kernel_view::ActionActivity<Value>>();
         },
     )?];
     println!("{}", Value::Array(documents));

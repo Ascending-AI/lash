@@ -440,7 +440,27 @@ impl ProcessFeedSource {
                 .map_err(process_replay_error)?
             {
                 lash_core::ProcessReplayOutcome::Replayed(events) => {
-                    for event in events {
+                    // read_view already includes committed counts. The publisher
+                    // admits language frames and their subsequent commit in FIFO
+                    // order, so Ran frames through the last retained count commit
+                    // belong to that durable prefix. Replaying those deltas would
+                    // count it twice; retain the node evidence and later frames.
+                    let counts_through = events.iter().rposition(|event| {
+                        matches!(
+                            &event.payload,
+                            ProcessObservationEventPayload::Committed { event }
+                                if event.sequence <= view.process.last_event_sequence
+                                    && matches!(event.fact, lash_core::ProcessLifecycleFact::Ran(_))
+                        )
+                    });
+                    for (position, event) in events.into_iter().enumerate() {
+                        if counts_through.is_some_and(|through| position <= through)
+                            && matches!(&event.payload,
+                                ProcessObservationEventPayload::LanguageExecution(observation)
+                                    if matches!(observation.execution.payload, crate::tracing::TraceLanguageExecutionPayload::Ran { .. }))
+                        {
+                            continue;
+                        }
                         // A commit after the row revision belongs to the feed,
                         // never to this snapshot's durable projection.
                         if matches!(&event.payload, ProcessObservationEventPayload::Committed { event }

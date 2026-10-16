@@ -26,7 +26,7 @@ import { approvalControl } from "./approvals.mjs";
 import {
   highlightLine,
   kernelLinking,
-  sourceMapLinking,
+  readableLinking,
 } from "./codepane.mjs";
 import {
   clampZoom,
@@ -188,10 +188,10 @@ function show(next, correspondence) {
     correspondence?.entries?.find(
       (item) => key(item.from) === key(previousScope),
     )?.to;
-  activeScope =
-    viewOf(next).scopes.find(
-      (scope) => mappedScope && key(scope.block) === key(mappedScope),
-    )?.block ?? viewOf(next).scopes[0]?.block;
+  const scopes = canvasScopes();
+  activeScope = scopes.find(
+    (scope) => mappedScope && key(scope.block) === key(mappedScope),
+  )?.block ?? scopes[0]?.block;
   renderScopes();
   renderCanvas();
   renderPlacement();
@@ -481,12 +481,13 @@ const elapsed = () => Math.round(performance.now() - runStarted);
 // The statement an event's site is: the action site a run reports, or the
 // statement's own site.
 function statementAt(site) {
-  const statements = viewOf(workflow).statements;
-  return (
-    statements.find((s) => s.actions.some((a) => key(a) === key(site))) ??
-    statements.find((s) => key(s.site) === key(site))
-  );
+  const node = viewOf(workflow).nodes.find((node) => key(node.site) === key(site));
+  if (!node) return;
+  const owner = viewOf(workflow).statements.find((statement) => key(statement.site) === key(node.statement));
+  return { ...owner, site: node.site, block: node.block, statement_site: owner.site, node_kind: node.kind,
+    actions: node.kind === "action" ? [node.site] : [] };
 }
+
 function traceNote(note, error = false) {
   traceRows.push({ at: elapsed(), note, error });
 }
@@ -603,9 +604,7 @@ function scrub(position) {
       : undefined;
   renderScrubber();
   renderCanvas();
-  const statement =
-    replay &&
-    viewOf(workflow).statements.find((s) => key(s.site) === replay.active);
+  const statement = replay && statementOfItem(replay.active);
   if (statement) revealStatement(statement);
 }
 // Keeps the node at `site` in view while the user has not panned since the
@@ -664,7 +663,7 @@ async function run() {
       renderInvocationOutput();
       if (selected) renderCallData(selected);
     }
-    if (event.coverage) runCounts = counts(event.coverage);
+    if (event.coverage) runCounts = counts(event.coverage, event.nodeCoverage);
     if (event.path) runPath = event.path;
     if (event.output !== undefined) {
       finalOutput = event.output;
@@ -891,23 +890,33 @@ const SCOPE_LABELS = {
   catch: "Catch block",
   finally: "Finally block",
 };
-function renderScopes() {
-  $("scope").replaceChildren(
-    ...viewOf(workflow).scopes.map((scope, index) => {
-      const option = el(
-        "option",
-        null,
-        scope.kind === "entry"
-          ? "Workflow entry"
-          : `${SCOPE_LABELS[scope.kind]} ${index}`,
-      );
-      option.value = String(index);
-      option.selected = key(scope.block) === key(activeScope);
-      return option;
-    }),
-  );
+function canvasScopes() {
+  const view = viewOf(workflow);
+  return [
+    ...view.callables.map((callable) => view.scopes.find((scope) => key(scope.block) === key(callable.block))),
+    ...view.nodes.filter((node) => node.kind === "control").flatMap((node) => [
+      ...node.arms.map((arm) => ({ block: arm.block, kind: arm.role, statement: node.statement })),
+      ...(node.header?.actions.length ? [{ block: node.header.expression, kind: node.header.role, statement: node.statement }] : []),
+    ]),
+  ];
 }
+
+function renderScopes() {
+  $("scope").replaceChildren(...canvasScopes().map((scope, index) => {
+    const option = el("option", null, scope.kind === "entry" ? "Workflow entry"
+      : ["condition", "iterable"].includes(scope.kind) ? `${scope.kind} actions ${index}` : `${SCOPE_LABELS[scope.kind]} ${index}`);
+    option.value = String(index); option.selected = key(scope.block) === key(activeScope);
+    return option;
+  }));
+}
+
 function model(s) {
+  if (s.node_kind === "code") {
+    const carrier = viewOf(workflow).nodes.find((node) => node.kind === "code" && key(node.site) === key(s.site));
+    const range = carrier.canonical;
+    return { s, info: { name: "Code", app: "Code", icon: "status" },
+      title: "Code", subtitle: `Kernel lines ${range.first}–${range.last} · ${carrier.members.length} statements`, generic: true };
+  }
   const effect = effectOf(workflow, s);
   if (effect) {
     const info = catalog[effect] ?? {
@@ -1008,8 +1017,13 @@ function project() {
   return decorate(dataView.nodes);
 }
 function positionAfter(s) {
-  const index = viewOf(workflow).statements.indexOf(s);
-  const next = viewOf(workflow).statements
+  const view = viewOf(workflow);
+  const carrier = view.nodes.find((node) => key(node.site) === key(s.site));
+  const last = carrier?.kind === "code"
+    ? carrier.members.filter((site) => view.statements.some((row) => key(row.site) === key(site) && key(row.block) === key(s.block))).at(-1)
+    : s.statement_site;
+  const index = view.statements.findIndex((row) => key(row.site) === key(last ?? s.site));
+  const next = view.statements
     .slice(index + 1)
     .find((t) => key(t.block) === key(s.block));
   return { block: s.block, ...(next ? { before: next.site } : {}) };
@@ -1033,7 +1047,8 @@ function nodeHeight(node) {
     74 +
     (node.inputs.length + node.outputs.length) * 27 +
     (node.inputs.length ? 21 : 0) +
-    (node.outputs.length ? 21 : 0)
+    (node.outputs.length ? 21 : 0) +
+    (node.kind === "control" ? (node.carrier.arms.length + Number((node.carrier.header?.actions.length ?? 0) > 0)) * 30 : 0)
   );
 }
 // A canvas item's key: its statement's site key, `node:<kind>` for a node
@@ -1043,9 +1058,7 @@ const itemOf = (node) => (node.s ? key(node.s.site) : `node:${node.kind}`);
 // with, or the workflow's return value on its Return or Finish node.
 function runResult(node, shown) {
   if (shown.state === "failed" && shown.error) return shown.error;
-  const occurrences = (node.s?.actions ?? [])
-    .map((site) => calls.get(key(site)))
-    .findLast(Boolean);
+  const occurrences = node.kind === "action" ? calls.get(key(node.site)) : undefined;
   const last = occurrences && [...occurrences.values()].at(-1);
   if (last?.call) return chip(last.call.output);
   if (node.kind === "output" && node.workflowOutput && finalOutput !== undefined)
@@ -1137,12 +1150,12 @@ function drawNode(node, x, y) {
       // connection from it.
       button.ondblclick = (event) => {
         event.stopPropagation();
-        if (direction === "input") openPortOf(node, port);
+        if (direction === "input" && port.target) openPortOf(node, port);
         else openItem(item);
       };
       button.onclick = () => {
         if (direction === "input") {
-          if (connecting) connectPort(port, connecting);
+          if (connecting && port.target) connectPort(port, connecting);
           else selectItem(item, "code");
         } else if (port.discarded || port.stored) selectItem(item, "code");
         else {
@@ -1167,6 +1180,19 @@ function drawNode(node, x, y) {
         button.title += " · result is discarded by this statement";
       card.append(button);
       row += 27;
+    }
+  }
+  if (node.kind === "control") {
+    for (const arm of node.carrier.arms) {
+      const entries = runCounts.scopes.get(key(arm.block));
+      const button = el("button", "control-arm", `${arm.role}${entries === undefined ? "" : ` · ${entries} entries`}`);
+      button.onclick = () => { activeScope = arm.block; renderScopes(); renderCanvas(); fit(); };
+      card.append(button);
+    }
+    if (node.carrier.header?.actions.length) {
+      const button = el("button", "control-arm", "Inspect header actions");
+      button.onclick = () => { activeScope = node.carrier.header.expression; renderScopes(); renderCanvas(); fit(); };
+      card.append(button);
     }
   }
   $("flow").append(card);
@@ -1222,7 +1248,9 @@ function layout(nodes, x, y, incoming) {
   let ends = incoming;
   for (const node of nodes) {
     const placed = drawNode(node, x, y);
-    for (const prior of ends) controlWire(prior, placed, prior.label);
+    for (const prior of ends) {
+      if (!node.carrier?.lazy.length && !prior.carrier?.lazy.length) controlWire(prior, placed, prior.label);
+    }
     if (node.branch) {
       const top = y - branchHeight(node.children[0]) / 2,
         bottom = y + branchHeight(node.children[1]) / 2;
@@ -1240,15 +1268,7 @@ function layout(nodes, x, y, incoming) {
       ends = outputs;
       x = Math.max(...outputs.map((p) => p.x)) + 300;
     } else {
-      const tag =
-        typeof node.s?.statement === "string"
-          ? node.s.statement
-          : Object.keys(node.s?.statement ?? {})[0];
-      if (
-        node.kind === "output" ||
-        ["throw", "fail", "finish", "break", "continue"].includes(tag)
-      )
-        return [];
+      if (node.carrier?.falls_through === false) { ends = []; x += 300; continue; }
       ends = [placed];
       x += 300;
     }
@@ -1370,7 +1390,7 @@ function renderCanvas() {
   $("scene").style.height = graphHeight + "px";
   setZoom(zoom);
   $("node-count").textContent =
-    `${visualNodes.length} nodes · ${viewOf(workflow).statements.length} statements · ${viewOf(workflow).scopes.length} scopes`;
+    `${viewOf(workflow).nodes.length} coarse nodes · ${viewOf(workflow).statements.length} statements · ${viewOf(workflow).callables.length} callables`;
   document.querySelector("h1").textContent = workflow.entry.replaceAll(
     "_",
     " ",
@@ -1997,6 +2017,13 @@ function openNode(node) {
         : "NODE SETTINGS",
   );
   identity(container, node.info);
+  if (node.kind === "code") {
+    const range = node.carrier.canonical;
+    const source = viewOf(workflow).canonical_source.split("\n").slice(range.first - 1, range.last).join("\n");
+    container.append(el("p", "help", "Edit this code in source. This group is entered once per first-statement start; individual lines may return or fail earlier."), el("pre", "code-fragment", source));
+    controls();
+    return;
+  }
   if (node.kind === "input") renderInvocationInputs(container);
   else if (node.kind === "scope-input") {
     container.append(
@@ -2018,7 +2045,8 @@ function openNode(node) {
         el("span", "port-type", typeName(port.type)),
         el("small", null, expressionName(port.expression)),
       );
-      button.onclick = () => openPort(node, port);
+      button.disabled = !port.target;
+      button.onclick = () => { if (port.target) openPort(node, port); };
       container.append(button);
     }
     for (const port of node.wholeInputs ?? []) {
@@ -2218,7 +2246,7 @@ function zoomToSelection() {
   );
 }
 // The code pane: the workflow as authored source, lash's TypeScript or
-// kernel text, linked to canvas statements where lash gives the lines.
+// kernel text, linked to canonical nodes through printer line ranges.
 function codeText() {
   if (!workflow) return undefined;
   if (codeView === "source") return workflow.authored?.text;
@@ -2239,7 +2267,7 @@ function codeNote() {
     return workflow.source
       ? `Lash's exact TypeScript printer${codeLinking ? " · linked through its source map" : ""}`
       : `No TypeScript: ${workflow.sourceUnavailable}`;
-  return `Kernel document text${codeLinking ? " · linked by statement" : " · not linked: its lines do not match the view"}`;
+  return `Kernel document text${codeLinking ? " · linked to coarse nodes" : " · not linked: no matching printer ranges"}`;
 }
 function renderCode() {
   if (!workflow) return;
@@ -2251,9 +2279,9 @@ function renderCode() {
   const text = codeText();
   codeLinking =
     codeView === "typescript" && workflow.source
-      ? sourceMapLinking(workflow.source, workflow.sourceMap, viewOf(workflow))
+      ? readableLinking(viewOf(workflow))
       : codeView === "kernel"
-        ? kernelLinking(workflow.text, viewOf(workflow), workflow.entry)
+        ? kernelLinking(workflow.text, viewOf(workflow))
         : undefined;
   $("code-note").textContent = codeNote();
   $("code-note").title = codeNote();
@@ -2298,7 +2326,9 @@ function statementOfItem(item) {
   if (item === undefined) return undefined;
   const wire = wireItems.get(item);
   if (wire) return wire.node.s;
-  return viewOf(workflow).statements.find((s) => key(s.site) === item);
+  const carrier = viewOf(workflow).nodes.find((node) => key(node.site) === item || node.members.some((member) => key(member) === item));
+  if (carrier) return statementAt(carrier.site);
+  return undefined;
 }
 // The one place selection and focus change. `reveal` names the pane to
 // scroll to the counterpart: "code", "canvas" or "both"; the pane the user
@@ -2317,6 +2347,10 @@ function setFocus(next, reveal) {
   controls();
 }
 function selectItem(item, reveal) {
+  if (item && !visualNodes.some((node) => itemOf(node) === item)) {
+    const carrier = viewOf(workflow).nodes.find((node) => node.members.some((site) => key(site) === item));
+    if (carrier) item = key(carrier.site);
+  }
   setFocus(select(focus, item), reveal);
 }
 // Opens an item's inspector: a node's settings, or a connection's input.
@@ -2375,9 +2409,7 @@ function revealItem(item) {
 // Shows a statement's scope on the canvas and its node in view.
 function revealStatement(statement) {
   if (key(statement.block) !== key(activeScope)) {
-    const scope = viewOf(workflow).scopes.find(
-      (s) => key(s.block) === key(statement.block),
-    );
+    const scope = canvasScopes().find((scope) => key(scope.block) === key(statement.block));
     if (!scope) return;
     activeScope = scope.block;
     renderScopes();
@@ -2391,8 +2423,8 @@ function selectStatementKey(siteKey, reveal) {
   const statement = statementOfItem(siteKey);
   if (!statement || busy) return;
   if (reveal === "canvas" || reveal === "both") revealStatement(statement);
-  setFocus(select(focus, siteKey), reveal);
-  if (!visualNodes.some((node) => itemOf(node) === siteKey))
+  selectItem(key(statement.site), reveal);
+  if (!visualNodes.some((node) => itemOf(node) === key(statement.site)))
     report(`${summary(statement.statement)} is not drawn as its own node in this scope.`);
 }
 const LAYOUT_KEY = "workflow-editor.layout",
@@ -2477,7 +2509,7 @@ function setupCodePane() {
 }
 function setupVisual() {
   $("scope").onchange = () => {
-    activeScope = viewOf(workflow).scopes[Number($("scope").value)].block;
+    activeScope = canvasScopes()[Number($("scope").value)].block;
     setFocus(close(focus));
     renderCanvas();
     fit();

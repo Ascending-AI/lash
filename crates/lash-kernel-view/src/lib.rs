@@ -3,13 +3,14 @@
 //!
 //! [`derive`] projects a checked [`WorkflowDocument`] (its document, the
 //! [`Graph`] the checker derived from it and the library declarations it
-//! linked against) into a [`WorkflowView`]: the entry's statements with
-//! their exact sites and payloads, the blocks a host can select with what
-//! opens each, the dataflow a host draws ports and wires from, and every
-//! execution site a run reports at. The projection is one walk of the
-//! entry's graph nodes beside their document nodes, each in
-//! [`Node::children`] order, and it matches every statement and expression
-//! kind: a new kernel form fails to compile here, not in a host.
+//! linked against) into a [`WorkflowView`]: canonical action, control and code
+//! nodes, lexical callable roots, control roles and exact flow destinations.
+//! Statements, scopes, dataflow and execution sites support selection and ports;
+//! hosts render the supplied nodes. Action issue order follows runtime evaluation,
+//! including RHS-before-place assignment, rather than universal child order.
+//! Canonical printer lines and optional readable-lens ranges belong to this
+//! document revision. Every kernel form is matched here, so a new form fails to
+//! compile here instead of requiring a host to learn it.
 //!
 //! The view is data. It serialises, and its schema is the
 //! `kernel-workflow-view` host schema. Ids name bindings within one
@@ -28,9 +29,17 @@
 
 use std::collections::BTreeMap;
 
+mod activity;
+pub use activity::{ActionActivity, ActionObservation, ActionState, ActivityRefusal};
+mod coarse;
+pub use coarse::{
+    CallableView, ControlArm, ControlHeader, FlowEdge, FlowKind, FlowTarget, HeaderRole, LazyArm,
+    LineRange, ReadableLens, ReadableRefusal, WorkflowNode, WorkflowNodeKind,
+};
 mod coverage;
 pub use coverage::{
-    PathSite, PathStep, ScopeCoverage, StatementCoverage, WorkflowCoverage, coverage, path,
+    NodeCoverage, PathSite, PathStep, ScopeCoverage, StatementCoverage, WorkflowCoverage, coverage,
+    path,
 };
 pub use lash_kernel_doc::{RanCounts, ReplayPath, RunObservation, TaskPath};
 
@@ -75,6 +84,12 @@ pub const JSON_SCHEMA: &str = include_str!("../kernel-workflow-view-v1.schema.js
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowView {
+    pub document: lash_kernel_doc::DocumentId,
+    pub nodes: Vec<WorkflowNode>,
+    pub callables: Vec<CallableView>,
+    pub flow: Vec<FlowEdge>,
+    pub canonical_source: String,
+    pub readable: ReadableLens,
     /// The entry's statements in document order, nested blocks after the
     /// statement that holds them.
     pub statements: Vec<StatementView>,
@@ -383,7 +398,19 @@ pub enum ViewError {
 ///
 /// The holder's graph or declarations do not describe its document.
 pub fn derive(document: &WorkflowDocument) -> Result<WorkflowView, ViewError> {
-    let entry = &document.entry_unit();
+    derive_callable(document, &document.entry_unit())
+}
+
+/// Open a declared callable without publishing it as an entry or inlining it
+/// into its caller. Library implementations are outside the document view.
+///
+/// # Errors
+///
+/// The checked document has no such unit, or its graph/declarations mismatch.
+pub fn derive_callable(
+    document: &WorkflowDocument,
+    entry: &Unit,
+) -> Result<WorkflowView, ViewError> {
     let graph = document.graph();
     let functions = document.declarations();
     let document = document.document();
@@ -412,6 +439,12 @@ pub fn derive(document: &WorkflowDocument) -> Result<WorkflowView, ViewError> {
             expected: expected.unwrap_or(Type::Any),
         },
         view: WorkflowView {
+            document: document.identity(),
+            nodes: Vec::new(),
+            callables: Vec::new(),
+            flow: Vec::new(),
+            canonical_source: String::new(),
+            readable: ReadableLens::Unrequested,
             statements: Vec::new(),
             scopes: Vec::new(),
             dataflow: Dataflow {
@@ -465,6 +498,7 @@ pub fn derive(document: &WorkflowDocument) -> Result<WorkflowView, ViewError> {
             }
         })
         .collect();
+    coarse::project(document, graph, &mut view);
     Ok(view)
 }
 
@@ -948,7 +982,12 @@ fn issued(graph: &Graph, statement: &GraphNode) -> Vec<Site> {
         }
     }
     let mut out = Vec::new();
-    for child in statement.children() {
+    let mut children = statement.children();
+    // K-FORM-005/006: RHS before the member place, unlike Site order.
+    if matches!(statement.kind, NodeKind::Stmt(StmtNode::Assign { .. })) && children.len() > 1 {
+        children.rotate_right(1);
+    }
+    for child in children {
         let child = graph.node(child);
         if !matches!(child.kind, NodeKind::Block(_)) {
             walk(graph, child, &mut out);

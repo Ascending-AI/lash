@@ -7,11 +7,9 @@ const siteKey = (site) => JSON.stringify([site.unit, site.path ?? []]);
 
 // Coverage by site key: how often each statement ran and each scope was
 // entered. A statement or scope lash did not observe stays undefined.
-export function counts(coverage) {
+export function counts(coverage, nodes) {
   return {
-    statements: new Map(
-      (coverage?.statements ?? []).map((s) => [siteKey(s.site), s.runs ?? undefined]),
-    ),
+    nodes: new Map((nodes ?? []).map((node) => [siteKey(node.site), node])),
     scopes: new Map(
       (coverage?.scopes ?? []).map((s) => [siteKey(s.block), s.entries ?? undefined]),
     ),
@@ -34,51 +32,24 @@ export function replayAt(steps, index) {
   return { statements, scopes, active };
 }
 
-// What `statement`'s node shows of `run`: its state (active, waiting,
-// failed, incomplete, done or skipped; undefined while it has not run, or
-// when nothing observed it) and how often it ran, read from the statuses
-// of every action it issues. `run` holds the site statuses and errors by
-// action site, the counts, whether the run ended,
-// and, while the path is being replayed, the replay step.
-export function nodeState(statement, run) {
-  const site = siteKey(statement.site);
-  const total = run.counts.statements.get(site);
+// Canonical node coverage and exact action state. Statement replay never
+// supplies action issues; an absent observation remains unknown.
+export function nodeState(node, run) {
+  const action = node.node_kind === "action";
+  const site = siteKey(node.site);
+  const total = run.counts.nodes.get(site)?.runs ?? undefined;
+  // Statement replay has no action-issue trace. Leave action evidence unknown
+  // while replaying, rather than manufacturing action counts from starts.
   if (run.replay) {
+    if (action) return {};
     const runs = run.replay.statements.get(site) ?? 0;
-    const state =
-      run.replay.active === site
-        ? "active"
-        : runs
-          ? "done"
-          : total === 0
-            ? "skipped"
-            : undefined;
-    return { state, runs };
+    return { runs, state: run.replay.active === site ? "active" : runs ? "done" : total === 0 ? "skipped" : undefined };
   }
-  // A statement's state is its most telling action's: a failure, then a
-  // wait, then one under way.
-  const actions = (statement.actions ?? []).map(siteKey);
-  const statuses = actions.map((action) => run.statuses.get(action));
-  const status = ["failed", "waiting", "started", "incomplete", "succeeded"].find(
-    (candidate) => statuses.includes(candidate),
-  );
-  const error = actions
-    .map((action) => run.errors.get(action))
-    .find((error) => error !== undefined);
-  const state =
-    status === "failed"
-      ? "failed"
-      : status === "started"
-        ? "active"
-        : status === "waiting"
-          ? "waiting"
-          : status === "incomplete"
-            ? "incomplete"
-            : status === "succeeded" || total > 0
-              ? "done"
-              : run.ended && total === 0
-                ? "skipped"
-                : undefined;
+  const status = action ? run.statuses.get(site) : undefined;
+  const error = action ? run.errors.get(site) : undefined;
+  const state = { failed: "failed", started: "active", waiting: "waiting",
+    incomplete: "incomplete", succeeded: "done" }[status]
+    ?? (total > 0 ? "done" : run.ended && total === 0 ? "skipped" : undefined);
   return { state, runs: total, error };
 }
 

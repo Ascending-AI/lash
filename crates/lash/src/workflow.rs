@@ -253,11 +253,14 @@ pub use lash_kernel_edit::authoring;
 #[cfg(feature = "workflow-view")]
 pub mod view {
     pub use lash_kernel_view::{
-        ActionView, ArgumentView, AssignmentView, BindingKind, BindingView, CalleeView, Dataflow,
-        ExecutionSiteView, ExpressionView, JSON_SCHEMA, PathSite, PathStep, RanCounts, ReplayPath,
-        ReturnView, RunObservation, ScopeCoverage, ScopeKind, ScopeView, SiteKind,
-        StatementCoverage, StatementView, TYPESCRIPT_DECLARATION, TaskPath, Use, ViewError,
-        WorkflowCoverage, WorkflowView, coverage, derive, path,
+        ActionActivity, ActionObservation, ActionState, ActionView, ActivityRefusal, ArgumentView,
+        AssignmentView, BindingKind, BindingView, CallableView, CalleeView, ControlArm,
+        ControlHeader, Dataflow, ExecutionSiteView, ExpressionView, FlowEdge, FlowKind, FlowTarget,
+        HeaderRole, JSON_SCHEMA, LazyArm, LineRange, NodeCoverage, PathSite, PathStep, RanCounts,
+        ReadableLens, ReadableRefusal, ReplayPath, ReturnView, RunObservation, ScopeCoverage,
+        ScopeKind, ScopeView, SiteKind, StatementCoverage, StatementView, TYPESCRIPT_DECLARATION,
+        TaskPath, Use, ViewError, WorkflowCoverage, WorkflowNode, WorkflowNodeKind, WorkflowView,
+        coverage, derive, derive_callable, path,
     };
 }
 

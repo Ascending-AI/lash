@@ -134,6 +134,54 @@ impl Document {
             .collect()
     }
 
+    /// Action issue counters share the run-count channel with statement starts.
+    /// They follow the statement/block ordinals, in Site order, so existing
+    /// statement and replay coordinates keep their meaning.
+    pub fn action_ordinals(&self) -> BTreeMap<Site, u32> {
+        let mut sites = std::collections::BTreeSet::new();
+        let mut pending = vec![(
+            Site::new(crate::Unit::Main, vec![]),
+            Node::Block(&self.main),
+        )];
+        pending.extend(self.functions.iter().map(|(name, function)| {
+            (
+                Site::new(crate::Unit::Function(name.clone()), vec![]),
+                Node::Block(&function.body),
+            )
+        }));
+        while let Some((site, node)) = pending.pop() {
+            if matches!(node, Node::Action(_) | Node::Expr(crate::Expr::Act(_))) {
+                sites.insert(site.clone());
+            }
+            pending.extend(
+                node.children()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, child)| (site.child(index as u32), child)),
+            );
+        }
+        let base = self.ordinal_nodes().len() as u32;
+        sites
+            .into_iter()
+            .enumerate()
+            .map(|(i, site)| (site, base + i as u32))
+            .collect()
+    }
+
+    /// While-condition evaluations, separate from statement starts and body
+    /// entries. Each test is counted before evaluation, including the last false test.
+    pub fn condition_ordinals(&self) -> BTreeMap<Site, u32> {
+        let base = self.ordinal_nodes().len() + self.action_ordinals().len();
+        self.ordinal_nodes()
+            .into_iter()
+            .filter_map(|(site, node)| {
+                matches!(node, Node::Stmt(crate::Stmt::While { .. })).then_some(site)
+            })
+            .enumerate()
+            .map(|(i, site)| (site, (base + i) as u32))
+            .collect()
+    }
+
     /// The document's behavioural identity (`K-ID-001`): the digest of its
     /// canonical bytes, which is the checkpoint graph's digest of its
     /// logical body.

@@ -209,6 +209,12 @@ pub struct RunEvent {
     /// replay verified it, or why it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<RunPath>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<lash::workflow::view::ActionActivity<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence: Option<lash::workflow::document::EffectIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_coverage: Option<Vec<lash::workflow::view::NodeCoverage>>,
 }
 
 /// A finished run's path through its document: each verified segment's steps

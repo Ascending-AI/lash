@@ -441,8 +441,31 @@ mod tests {
                 .then(|| ran.get(&ordinal).copied().unwrap_or(0))
         };
         let first = first_statements(view);
+        let mut actions: Vec<_> = view
+            .dataflow
+            .actions
+            .iter()
+            .map(|action| StatementCoverage {
+                site: action.site.clone(),
+                runs: count(view.action_node(&action.site).unwrap().ordinal),
+            })
+            .collect();
+        actions.sort_by_key(|action| action.site.clone());
+        let mut conditions: Vec<_> = view
+            .nodes
+            .iter()
+            .filter_map(|node| {
+                node.condition_ordinal.map(|ordinal| StatementCoverage {
+                    site: node.site.clone(),
+                    runs: count(ordinal),
+                })
+            })
+            .collect();
+        conditions.sort_by_key(|condition| condition.site.clone());
         WorkflowCoverage {
             observation: counts.observation,
+            actions,
+            conditions,
             statements: view
                 .statements
                 .iter()
@@ -526,10 +549,12 @@ mod tests {
             let unit = Unit::Function(workflow.entry.clone());
             let view = entry_view(&workflow.document, &workflow.entry, environment.functions())
                 .expect("the example's view");
-            let n = workflow.document.site_ordinals().len() as u32;
+            let n = (workflow.document.site_ordinals().len()
+                + workflow.document.action_ordinals().len()
+                + workflow.document.condition_ordinals().len()) as u32;
 
             // Every ordinal the document does not count stays ignored: n and
-            // n + 1 reach past the document's sites, and the duplicate second
+            // n + 1 reach past statement, action and condition sites. The duplicate second
             // entry of each even ordinal exercises summing.
             let ran: Vec<(u32, u64)> = (0..n + 2)
                 .filter(|ordinal| ordinal % 3 != 0)

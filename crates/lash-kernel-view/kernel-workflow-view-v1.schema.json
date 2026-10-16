@@ -358,6 +358,64 @@
         }
       ]
     },
+    "ActionActivity": {
+      "additionalProperties": false,
+      "properties": {
+        "occurrences": {
+          "items": {
+            "$ref": "#/$defs/ActionObservation"
+          },
+          "type": "array"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "site",
+        "occurrences"
+      ],
+      "type": "object"
+    },
+    "ActionObservation": {
+      "additionalProperties": false,
+      "description": "Outcome data stays on the exact occurrence the observer supplies, never on\nevery action of its statement. `T` can retain the host's typed result/cause.",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/EffectIdentity"
+        },
+        "outcome": true,
+        "state": {
+          "$ref": "#/$defs/ActionState"
+        }
+      },
+      "required": [
+        "identity",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ActionState": {
+      "enum": [
+        "running",
+        "waiting",
+        "completed",
+        "failed",
+        "cancelled",
+        "incomplete"
+      ],
+      "type": "string"
+    },
     "ActionView": {
       "additionalProperties": false,
       "description": "One action.",
@@ -608,6 +666,23 @@
       "pattern": "^([0-9a-f]{2})*$",
       "type": "string"
     },
+    "CallableView": {
+      "additionalProperties": false,
+      "description": "A lexical callable is projected once, independently of its invocations.",
+      "properties": {
+        "block": {
+          "$ref": "#/$defs/Site"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "site",
+        "block"
+      ],
+      "type": "object"
+    },
     "Callee": {
       "description": "What a call or a `spawn` runs.",
       "oneOf": [
@@ -747,6 +822,46 @@
       ],
       "type": "object"
     },
+    "ControlArm": {
+      "additionalProperties": false,
+      "description": "A control retains empty arms and the distinction between body entries and\nheader actions. Header actions live under `header`, not before the control.",
+      "properties": {
+        "block": {
+          "$ref": "#/$defs/Site"
+        },
+        "role": {
+          "$ref": "#/$defs/ScopeKind"
+        }
+      },
+      "required": [
+        "role",
+        "block"
+      ],
+      "type": "object"
+    },
+    "ControlHeader": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/Site"
+          },
+          "type": "array"
+        },
+        "expression": {
+          "$ref": "#/$defs/Site"
+        },
+        "role": {
+          "$ref": "#/$defs/HeaderRole"
+        }
+      },
+      "required": [
+        "role",
+        "expression",
+        "actions"
+      ],
+      "type": "object"
+    },
     "Dataflow": {
       "additionalProperties": false,
       "description": "What a variable is and where values flow in the entry.",
@@ -803,6 +918,42 @@
         "parameters",
         "returns",
         "assignments"
+      ],
+      "type": "object"
+    },
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "EffectIdentity": {
+      "additionalProperties": false,
+      "description": "Which wait of a run: one execution of a `perform` or a `sleep`.",
+      "properties": {
+        "loops": {
+          "description": "The loops the task was inside when it ran the site, outermost first,\nacross its active calls.",
+          "items": {
+            "$ref": "#/$defs/LoopIteration"
+          },
+          "type": "array"
+        },
+        "occurrence": {
+          "description": "How many times the task had run that site before, from 0.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `perform` or the `sleep`."
+        },
+        "task": {
+          "$ref": "#/$defs/TaskIdentity"
+        }
+      },
+      "required": [
+        "task",
+        "site",
+        "occurrence"
       ],
       "type": "object"
     },
@@ -1157,8 +1308,78 @@
       "pattern": "^(nan|-?inf|-?(0|[1-9][0-9]*)\\.[0-9]+|-?[1-9](\\.[0-9]+)?e-?[1-9][0-9]*)$",
       "type": "string"
     },
+    "FlowEdge": {
+      "additionalProperties": false,
+      "description": "Canonical routes at exact member Sites, including finally-unwind routes.\nHosts must not invent a fallthrough between coarse groups.",
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/Site"
+        },
+        "kind": {
+          "$ref": "#/$defs/FlowKind"
+        },
+        "to": {
+          "$ref": "#/$defs/FlowTarget"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "FlowKind": {
+      "enum": [
+        "next",
+        "then",
+        "else",
+        "body",
+        "break",
+        "continue",
+        "return",
+        "throw",
+        "catch",
+        "finally",
+        "end",
+        "call",
+        "spawn",
+        "reference"
+      ],
+      "type": "string"
+    },
+    "FlowTarget": {
+      "oneOf": [
+        {
+          "enum": [
+            "leave",
+            "end"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "site": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "site"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "HeaderRole": {
+      "enum": [
+        "condition",
+        "iterable"
+      ],
       "type": "string"
     },
     "Integer": {
@@ -1188,6 +1409,46 @@
           "type": "string"
         }
       ]
+    },
+    "LazyArm": {
+      "additionalProperties": false,
+      "description": "An expression alternative that guards an action's evaluation. These are\nancestry, not scheduling edges: static issue order never implies both arms run.",
+      "properties": {
+        "arm": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expression": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "expression",
+        "arm"
+      ],
+      "type": "object"
+    },
+    "LineRange": {
+      "additionalProperties": false,
+      "description": "Inclusive, one-based lines in an explicitly named printed lens.",
+      "properties": {
+        "first": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "first",
+        "last"
+      ],
+      "type": "object"
     },
     "Literal": {
       "oneOf": [
@@ -1272,6 +1533,27 @@
           "type": "object"
         }
       ]
+    },
+    "LoopIteration": {
+      "additionalProperties": false,
+      "description": "One enclosing loop and the iteration it was on.",
+      "properties": {
+        "iteration": {
+          "description": "The iteration, from 0.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `for` or the `while`."
+        }
+      },
+      "required": [
+        "site",
+        "iteration"
+      ],
+      "type": "object"
     },
     "MapEntry": {
       "additionalProperties": false,
@@ -1364,6 +1646,43 @@
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
     },
+    "NodeCoverage": {
+      "additionalProperties": false,
+      "description": "Coverage ready for a coarse node; loop iterations remain arm entries.",
+      "properties": {
+        "arms": {
+          "items": {
+            "$ref": "#/$defs/ScopeCoverage"
+          },
+          "type": "array"
+        },
+        "condition_tests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "runs": {
+          "description": "Action issues, control starts, or code-group entries (first member only).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "site",
+        "arms"
+      ],
+      "type": "object"
+    },
     "Param": {
       "additionalProperties": false,
       "properties": {
@@ -1433,6 +1752,139 @@
     "QualifiedName": {
       "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
       "type": "string"
+    },
+    "ReadableLens": {
+      "description": "A failed readable lens does not invalidate canonical membership or ranges.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "unrequested",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "available",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/ReadableRefusal"
+            },
+            "kind": {
+              "const": "refused",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "cause"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ReadableRefusal": {
+      "description": "Typed printer refusal. Projection and the canonical lens remain available.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "bytes",
+              "type": "string"
+            },
+            "limit": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "limit"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "depth",
+              "type": "string"
+            },
+            "limit": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "limit"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "encoding",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "invalid",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "RecordEntry": {
       "additionalProperties": false,
@@ -1739,9 +2191,34 @@
         }
       ]
     },
+    "SpawnIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "occurrence": {
+          "description": "How many times the parent had run that site before, from 0.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parent": {
+          "$ref": "#/$defs/TaskIdentity",
+          "description": "The task that ran the `spawn`."
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `spawn`."
+        }
+      },
+      "required": [
+        "parent",
+        "site",
+        "occurrence"
+      ],
+      "type": "object"
+    },
     "StatementCoverage": {
       "additionalProperties": false,
-      "description": "One statement of the entry and how often it ran.",
+      "description": "One exact statement, action or while-test coordinate and its observed count.",
       "properties": {
         "runs": {
           "description": "None is unobserved; Some(0) is an observed statement that did not run.",
@@ -2127,6 +2604,29 @@
         }
       ]
     },
+    "TaskIdentity": {
+      "description": "Which task of a run: `main`, or the task one execution of a `spawn`\nstarted.",
+      "oneOf": [
+        {
+          "enum": [
+            "main"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "spawned": {
+              "$ref": "#/$defs/SpawnIdentity"
+            }
+          },
+          "required": [
+            "spawned"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TryStmt": {
       "additionalProperties": false,
       "properties": {
@@ -2379,8 +2879,22 @@
     },
     "WorkflowCoverage": {
       "additionalProperties": false,
-      "description": "Statement starts and scope entries of one entry of a document.",
+      "description": "Statement starts, scope entries, action issues and while tests of one entry.",
       "properties": {
+        "actions": {
+          "description": "Issues at exact action sites, independent of statement starts.",
+          "items": {
+            "$ref": "#/$defs/StatementCoverage"
+          },
+          "type": "array"
+        },
+        "conditions": {
+          "description": "While header evaluations, including the final false test.",
+          "items": {
+            "$ref": "#/$defs/StatementCoverage"
+          },
+          "type": "array"
+        },
         "observation": {
           "anyOf": [
             {
@@ -2409,9 +2923,155 @@
       },
       "required": [
         "statements",
+        "actions",
+        "conditions",
         "scopes"
       ],
       "type": "object"
+    },
+    "WorkflowNode": {
+      "additionalProperties": false,
+      "description": "Identity is (view.document, kind, block, site, last member). Ranges are\ndisplay metadata. Supporting statements and dataflow remain addressable.",
+      "properties": {
+        "arms": {
+          "items": {
+            "$ref": "#/$defs/ControlArm"
+          },
+          "type": "array"
+        },
+        "bindings": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "block": {
+          "$ref": "#/$defs/Site"
+        },
+        "callable": {
+          "$ref": "#/$defs/Site"
+        },
+        "canonical": {
+          "$ref": "#/$defs/LineRange"
+        },
+        "condition_ordinal": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "departures": {
+          "items": {
+            "$ref": "#/$defs/Site"
+          },
+          "type": "array"
+        },
+        "falls_through": {
+          "type": "boolean"
+        },
+        "header": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ControlHeader"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/WorkflowNodeKind"
+        },
+        "lazy": {
+          "items": {
+            "$ref": "#/$defs/LazyArm"
+          },
+          "type": "array"
+        },
+        "members": {
+          "description": "Each statement has exactly one carrier. Additional actions in a\nstatement have no members, but retain their owning `statement`.",
+          "items": {
+            "$ref": "#/$defs/Site"
+          },
+          "type": "array"
+        },
+        "ordinal": {
+          "description": "The node's authoritative count coordinate in RanCounts.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "readable": {
+          "items": {
+            "$ref": "#/$defs/LineRange"
+          },
+          "type": "array"
+        },
+        "reads": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        },
+        "statement": {
+          "$ref": "#/$defs/Site",
+          "description": "The owning statement for actions/controls; first member for code."
+        },
+        "within": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Site"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "writes": {
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "site",
+        "block",
+        "callable",
+        "statement",
+        "ordinal",
+        "members",
+        "bindings",
+        "reads",
+        "writes",
+        "canonical",
+        "readable",
+        "lazy",
+        "arms",
+        "departures",
+        "falls_through"
+      ],
+      "type": "object"
+    },
+    "WorkflowNodeKind": {
+      "enum": [
+        "action",
+        "control",
+        "code"
+      ],
+      "type": "string"
     }
   },
   "$id": "https://lash.dev/schemas/kernel-workflow-view/v1",
@@ -2419,8 +3079,20 @@
   "additionalProperties": false,
   "description": "One entry of a document as a canvas reads it.",
   "properties": {
+    "callables": {
+      "items": {
+        "$ref": "#/$defs/CallableView"
+      },
+      "type": "array"
+    },
+    "canonical_source": {
+      "type": "string"
+    },
     "dataflow": {
       "$ref": "#/$defs/Dataflow"
+    },
+    "document": {
+      "$ref": "#/$defs/DocumentId"
     },
     "execution_sites": {
       "description": "Every action of the document a run can report an occurrence at, in\nnode order. An entry may call and spawn any declared function, so\nthese are the sites of every unit.",
@@ -2428,6 +3100,21 @@
         "$ref": "#/$defs/ExecutionSiteView"
       },
       "type": "array"
+    },
+    "flow": {
+      "items": {
+        "$ref": "#/$defs/FlowEdge"
+      },
+      "type": "array"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/$defs/WorkflowNode"
+      },
+      "type": "array"
+    },
+    "readable": {
+      "$ref": "#/$defs/ReadableLens"
     },
     "scopes": {
       "description": "Every block of the entry, including empty ones, in document order.",
@@ -2445,6 +3132,12 @@
     }
   },
   "required": [
+    "document",
+    "nodes",
+    "callables",
+    "flow",
+    "canonical_source",
+    "readable",
     "statements",
     "scopes",
     "dataflow",

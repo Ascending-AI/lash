@@ -40,37 +40,20 @@ const coverage = {
 const live = (fields = {}) => ({
   statuses: new Map(),
   errors: new Map(),
-  counts: counts(coverage),
+  counts: counts(coverage, coverage.statements),
   ended: false,
   ...fields,
 });
 
-test("a node is active, waiting or failed by its actions' statuses, else done once it ran", () => {
-  const statuses = new Map([[key(urgent.actions[0]), "started"]]);
-  assert.deepEqual(nodeState(urgent, live({ statuses })), {
-    state: "active",
-    runs: 2,
-    error: undefined,
-  });
-  statuses.set(key(urgent.actions[0]), "waiting");
-  assert.equal(nodeState(urgent, live({ statuses })).state, "waiting");
-  const errors = new Map([[key(urgent.actions[0]), "mock failure"]]);
-  statuses.set(key(urgent.actions[0]), "failed");
-  assert.deepEqual(nodeState(urgent, live({ statuses, errors })), {
-    state: "failed",
-    runs: 2,
-    error: "mock failure",
-  });
-  assert.equal(nodeState(choice, live()).state, "done", "counted runs mean done");
-  // A nested action is part of its statement's node.
-  statuses.set(key(fetched), "waiting");
-  assert.equal(nodeState(shown, live({ statuses })).state, "waiting");
-  statuses.set(key(fetched), "succeeded");
-  statuses.set(key(shown.actions[1]), "started");
-  assert.equal(nodeState(shown, live({ statuses })).state, "active");
-  errors.set(key(fetched), "fetch failed");
-  statuses.set(key(fetched), "failed");
-  assert.equal(nodeState(shown, live({ statuses, errors })).error, "fetch failed");
+test("COARSE-COUNTS keeps a waiting operand distinct from its unissued parent", () => {
+  const operand = { site: fetched, node_kind: "action" };
+  const parent = { site: shown.actions[1], node_kind: "action" };
+  const run = live({ counts: counts({ actions: [{ site: fetched, runs: 1 }, { site: parent.site, runs: 0 }], statements: [{site: shown.site, runs: 1}] }, [{ site: fetched, runs: 1 }, { site: parent.site, runs: 0 }]),
+    statuses: new Map([[key(fetched), "waiting"]]) });
+  assert.deepEqual(nodeState(operand, run), { state: "waiting", runs: 1, error: undefined });
+  assert.deepEqual(nodeState(parent, run), { state: undefined, runs: 0, error: undefined });
+  const off = live({ ended: true, counts: counts({observation: "off"}, [{site: parent.site, runs: null}]) });
+  assert.deepEqual(nodeState(parent, off), { state: undefined, runs: undefined, error: undefined });
 });
 
 test("a node that did not run is dimmed only once the run has ended", () => {

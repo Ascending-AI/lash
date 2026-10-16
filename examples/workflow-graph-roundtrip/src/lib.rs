@@ -95,7 +95,7 @@ impl SavedWorkflow {
         );
         let (view, view_unavailable, printed, source_unavailable) = match &derived {
             Ok(derived) => {
-                let (view, view_unavailable) = match lash::workflow::view::derive(derived) {
+                let (mut view, view_unavailable) = match lash::workflow::view::derive(derived) {
                     Ok(view) => (Some(view), None),
                     Err(error) => (None, Some(error.to_string())),
                 };
@@ -103,11 +103,53 @@ impl SavedWorkflow {
                     source_map: true,
                     ..Default::default()
                 };
-                let (printed, source_unavailable) =
+                let (printed, source_unavailable, cause) =
                     match lash::typescript::print(derived.document(), options) {
-                        Ok(printed) => (Some(printed), None),
-                        Err(error) => (None, Some(error.to_string())),
+                        Ok(printed) => (Some(printed), None, None),
+                        Err(error) => {
+                            use lash::dialect::PrintError;
+                            use lash::workflow::view::ReadableRefusal;
+                            let cause = match &error {
+                                PrintError::Bytes { limit } => {
+                                    ReadableRefusal::Bytes { limit: *limit }
+                                }
+                                PrintError::Depth { limit } => {
+                                    ReadableRefusal::Depth { limit: *limit }
+                                }
+                                PrintError::Encode(error) => ReadableRefusal::Encoding {
+                                    message: error.to_string(),
+                                },
+                                PrintError::Invalid(message) => ReadableRefusal::Invalid {
+                                    message: message.clone(),
+                                },
+                            };
+                            (None, Some(error.to_string()), Some(cause))
+                        }
                     };
+                if let Some(view) = &mut view {
+                    if let Some(printed) = &printed {
+                        if let Some(map) = &printed.source_map
+                            && let Err(refusal) = view.readable_ranges(
+                                &document,
+                                "generated_typescript".into(),
+                                &printed.source,
+                                map,
+                            )
+                        {
+                            view.readable = lash::workflow::view::ReadableLens::Refused {
+                                name: "generated_typescript".into(),
+                                cause: lash::workflow::view::ReadableRefusal::Invalid {
+                                    message: refusal.to_string(),
+                                },
+                            };
+                        }
+                    } else if let Some(cause) = cause {
+                        view.readable = lash::workflow::view::ReadableLens::Refused {
+                            name: "generated_typescript".into(),
+                            cause,
+                        };
+                    }
+                }
                 (view, view_unavailable, printed, source_unavailable)
             }
             Err(refusal) => (

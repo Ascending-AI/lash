@@ -701,6 +701,12 @@ impl KernelMachine {
             }
             Some(Control::While { stmt, .. }) => {
                 let running = Running::new(task, exe, *stmt);
+                if !self.ran.is_empty()
+                    && let Some(statement) = running.stmt.ordinal
+                    && let Some(ordinal) = exe.condition_ordinals.get(&statement.get())
+                {
+                    self.ran[*ordinal as usize] += 1;
+                }
                 let Form::While { test, .. } = &running.stmt.form else {
                     return Err(fault("a `while` loop is not at a `while`").into());
                 };

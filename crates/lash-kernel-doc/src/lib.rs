@@ -90,7 +90,7 @@ pub use number::{
 };
 pub use text::{
     ParseError, ParseErrorReason, parse_definition, parse_definition_with_limits, parse_document,
-    parse_document_with_limits, print_definition, print_document,
+    parse_document_with_limits, print_definition, print_document, print_document_with_ranges,
 };
 pub use types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
 pub use validate::{

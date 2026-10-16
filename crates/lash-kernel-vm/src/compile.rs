@@ -408,6 +408,8 @@ pub(crate) struct DocumentCode {
     tables: Tables,
     pub(crate) block_ordinals: Vec<u32>,
     pub(crate) site_count: usize,
+    pub(crate) action_ordinals: BTreeMap<Site, u32>,
+    pub(crate) condition_ordinals: BTreeMap<u32, u32>,
     pub(crate) main: CodeId,
     pub(crate) declared: BTreeMap<Name, CodeId>,
     /// The functions the bodies of the library functions the document
@@ -1118,12 +1120,20 @@ fn compile_document(
             ordinals[&block.site]
         })
         .collect();
+    let action_ordinals = document.action_ordinals();
+    let condition_sites = document.condition_ordinals();
+    let condition_ordinals: BTreeMap<_, _> = condition_sites
+        .iter()
+        .map(|(site, count)| (ordinals[site], *count))
+        .collect();
     Ok(DocumentCode {
         tables,
         main,
         declared,
         block_ordinals,
-        site_count: ordinals.len(),
+        site_count: ordinals.len() + action_ordinals.len() + condition_ordinals.len(),
+        condition_ordinals,
+        action_ordinals,
         reached: std::sync::OnceLock::new(),
     })
 }
