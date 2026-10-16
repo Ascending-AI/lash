@@ -202,3 +202,127 @@ fn gate_six_counts_equal_statement_trace_at_every_slice_geometry() {
         }
     }
 }
+
+/// FIG-6444: a native result's JSON walk shares its immutable code and read
+/// paths, and keeps its working nested trees owned. Exercise the generic path so
+/// native classification cannot mask a regression in interpreted cells.
+#[test]
+fn a_host_json_cell_bounds_allocations_on_both_serializer_paths() {
+    use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Timestamp};
+    use lash_kernel_vm::{End, Host, Outcome, Request, Step};
+    struct Console(Vec<Datum>);
+    impl Host for Console {
+        fn clock(&mut self) -> Timestamp {
+            Timestamp {
+                nanoseconds: Integer::from(0),
+            }
+        }
+        fn random(&mut self) -> u64 {
+            0
+        }
+        fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
+            unreachable!()
+        }
+        fn print(&mut self, value: &Datum) {
+            self.0.push(value.clone());
+        }
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+    fn datum(value: serde_json::Value) -> Datum {
+        match value {
+            serde_json::Value::Null => Datum::Null,
+            serde_json::Value::Bool(v) => Datum::Bool(v),
+            serde_json::Value::Number(v) => Datum::Float(Float::new(v.as_f64().unwrap())),
+            serde_json::Value::String(v) => Datum::Text(v),
+            serde_json::Value::Array(v) => Datum::List(v.into_iter().map(datum).collect()),
+            serde_json::Value::Object(v) => {
+                Datum::Record(v.into_iter().map(|(k, v)| (k, datum(v))).collect())
+            }
+        }
+    }
+    let json = serde_json::Value::Array((0..20).map(|i| serde_json::json!({
+        "id": i, "name": format!("record-{i}"), "title": "A nested host tool result with ordinary fields",
+        "description": "The value arrives from a native tool and is printed by the cell",
+        "score": i * 13, "ratio": 1.25, "state": "ready",
+        "tags": ["sqlite", "typescript", "nested"],
+        "details": {"owner": "benchmark", "values": [i,i+1,i+2]}
+    })).collect());
+    let expected = Datum::Text(json.to_string());
+    let payload = datum(json);
+    let registry = gate_six_registry::registry();
+    let library = NamedLibrary::from_registry(&registry).unwrap();
+    let prepared = PreparedLibrary::new(registry);
+    let effects = gate_six::effects();
+    let environment = Environment {
+        library: &library,
+        effects: &effects,
+        controls: &BTreeMap::new(),
+        tool_roots: &BTreeSet::new(),
+    };
+    for (path, expression, ceiling) in [
+        ("generic", "JSON.stringify(result, null)", 450 * 180),
+        ("plain", "JSON.stringify(result)", 450 * 180),
+    ] {
+        let source = format!("const result = await echo(null); console.log({expression});");
+        let program = Program {
+            release: pages::RELEASE,
+            document: Arc::new(
+                lash_dialect_typescript::lower(
+                    &source,
+                    &environment,
+                    lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+                )
+                .unwrap()
+                .document,
+            ),
+            library: prepared.clone(),
+        };
+        let bounds = Bounds {
+            charge: 10_000_000,
+            memory: 64 << 20,
+            call_depth: 200,
+            live_tasks: 10,
+            requests_per_park: 10,
+            join_members: 10,
+        };
+        let mut machine = pages::start(
+            program,
+            bounds,
+            CellStart {
+                target: Target::Main,
+                args: Vec::new(),
+                session: None,
+                owner: pages::OWNER,
+                modes: Default::default(),
+                host: Vec::new(),
+            },
+        )
+        .unwrap();
+        let mut console = Console(Vec::new());
+        let Step::Parked(park) = machine.run(&mut console, u64::MAX).unwrap() else {
+            panic!("tool park")
+        };
+        let [Request::Effect(effect)] = park.requests.as_slice() else {
+            panic!("native tool request")
+        };
+        let answer = payload.clone();
+        let allocations = stats_alloc::Region::new(ALLOCATOR);
+        machine
+            .deliver(effect.wait, Outcome::Completed(answer))
+            .unwrap();
+        let step = machine.run(&mut console, u64::MAX).unwrap();
+        let allocations = allocations.change().allocations;
+        assert!(matches!(step, Step::Ended(End::Finished(_))), "{step:?}");
+        assert_eq!(console.0.as_slice(), std::slice::from_ref(&expected));
+        // The 20-record, nine-field fixture has 180 properties. This bounds
+        // admission, interpretation and publication together at 450 system
+        // allocations per outer property, rather than the regressed ~1,520.
+        eprintln!("host JSON {path}: allocations={allocations} ceiling={ceiling}");
+        assert!(
+            allocations <= ceiling,
+            "{path}: {allocations} allocations, ceiling {ceiling}"
+        );
+    }
+}

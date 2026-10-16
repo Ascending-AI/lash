@@ -279,12 +279,16 @@ impl NativeHeap for PagedHeap {
         self.limits.value_depth()
     }
     fn len(&self, object: EntityId) -> Result<u64, HeapFault> {
-        Ok(self.head(object)?.map_or(0, |h| h.len()))
+        self.read_head(object, |head| Ok(head.map_or(0, |h| h.len())))
     }
     fn list_get(&self, list: EntityId, index: u64) -> Result<Option<Value>, HeapFault> {
-        Ok(match self.head(list)?.map(|h| h.body) {
-            Some(Body::List { rows, .. }) => rows.rank_get(index, &self.access)?.map(|(_, v)| v),
-            _ => None,
+        self.read_head(list, |head| {
+            Ok(match head.map(|h| &h.body) {
+                Some(Body::List { rows, .. }) => {
+                    rows.rank_get(index, &self.access)?.map(|(_, v)| v)
+                }
+                _ => None,
+            })
         })
     }
     fn map_get(&self, map: EntityId, key: &Value) -> Result<Option<Value>, HeapFault> {

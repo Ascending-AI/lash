@@ -23,6 +23,15 @@
 //! second run, for a profiler. Split shares describe this altered dispatch
 //! geometry, perturbed by sealing changed pages between steps; they are neither exact
 //! inclusive CPU shares nor shares of the ordinary unsplit run.
+//! `kernel_perf host-json [all|nested|generic|silent|nulls] [iterations]`
+//! separates admission, interpretation through the console print, and terminal
+//! carry, with allocator counts for each boundary. Page-counter tuples contain
+//! port read calls, pages read, seals, and token bytes.
+//! `generic` supplies an explicit null replacer to exercise the interpreted
+//! serializer even when the plain-data classifier admits the same value.
+//! This probe uses the kernel's page port; the FIG-6444 replay evidence uses
+//! the same native-result fixture through real SQLite sessions.
+//!
 //! Raw iteration times and allocator call counts
 //! accompany every row, with executable and source hashes and build identity.
 //! Counts exclude machine destruction and receipt construction. `KERNEL_PERF_FIXED=1`
@@ -340,6 +349,9 @@ fn start_observed(
     reason = "benchmark entry point: it reads its arguments, its program files and its switches, and reports on stdout"
 )]
 fn main() -> Result<(), String> {
+    if std::env::args().nth(1).as_deref() == Some("host-json") {
+        return host_json_probe();
+    }
     let mut args = std::env::args().skip(1).peekable();
     if args.peek().is_some_and(|arg| arg == "--list-programs") {
         args.next();
@@ -943,4 +955,197 @@ fn describe(frame: &str, symbols: &GuestSymbols) -> (String, String, String) {
         ),
         None => ("marker".to_string(), "-".to_string(), "-".to_string()),
     }
+}
+
+#[expect(
+    clippy::print_stdout,
+    clippy::unwrap_used,
+    clippy::disallowed_methods,
+    reason = "the phase measurement CLI reads arguments and prints its counted receipts"
+)]
+fn host_json_probe() -> Result<(), String> {
+    fn datum(v: Json) -> Datum {
+        match v {
+            Json::Null => Datum::Null,
+            Json::Bool(v) => Datum::Bool(v),
+            Json::Number(v) => Datum::Float(lash_kernel_doc::Float::new(v.as_f64().unwrap())),
+            Json::String(v) => Datum::Text(v),
+            Json::Array(v) => Datum::List(v.into_iter().map(datum).collect()),
+            Json::Object(v) => Datum::Record(v.into_iter().map(|(k, v)| (k, datum(v))).collect()),
+        }
+    }
+    let payload = datum(Json::Array((0..20).map(|i| json!({
+        "id": i, "name": format!("record-{i}"), "title": "A nested host tool result with ordinary fields",
+        "description": "The value arrives from a native tool and is printed by the cell",
+        "score": i * 13, "ratio": 1.25, "state": "ready",
+        "tags": ["sqlite", "typescript", "nested"],
+        "details": {"owner": "benchmark", "values": [i,i+1,i+2]}
+    })).collect()));
+    type Counts = std::rc::Rc<std::cell::Cell<[u64; 4]>>;
+    fn delta(now: [u64; 4], before: [u64; 4]) -> [u64; 4] {
+        std::array::from_fn(|i| now[i] - before[i])
+    }
+    struct Source {
+        inner: pages::Source,
+        counts: Counts,
+    }
+    impl lash_kernel_state::paged::PageSource for Source {
+        fn read(
+            &mut self,
+            pages: &[lash_kernel_doc::heap::PageRef],
+        ) -> Result<Vec<lash_kernel_state::paged::PageAnswer>, lash_kernel_doc::heap::HeapFault>
+        {
+            let mut count = self.counts.get();
+            count[0] += 1;
+            count[1] += pages.len() as u64;
+            self.counts.set(count);
+            self.inner.read(pages)
+        }
+        fn seal(
+            &mut self,
+            body: lash_kernel_state::paged::PageBody,
+        ) -> Result<lash_kernel_doc::heap::PageRef, lash_kernel_doc::heap::HeapFault> {
+            let mut count = self.counts.get();
+            count[2] += 1;
+            count[3] += body.tokens.len() as u64;
+            self.counts.set(count);
+            self.inner.seal(body)
+        }
+    }
+    struct Output {
+        console: Console,
+        began: Instant,
+        counts: stats_alloc::Region<'static, std::alloc::System>,
+        printed: Option<(u128, usize, [u64; 4])>,
+        pages: Counts,
+        from: [u64; 4],
+    }
+    impl Host for Output {
+        fn clock(&mut self) -> Timestamp {
+            self.console.clock()
+        }
+        fn random(&mut self) -> u64 {
+            0
+        }
+        fn read(&mut self, h: &Handle, r: &Datum) -> Result<Datum, ErrorDatum> {
+            self.console.read(h, r)
+        }
+        fn print(&mut self, v: &Datum) {
+            self.printed = Some((
+                self.began.elapsed().as_nanos(),
+                self.counts.change().allocations,
+                delta(self.pages.get(), self.from),
+            ));
+            self.console.print(v);
+        }
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+    let registry = registry();
+    let library = NamedLibrary::from_registry(&registry).unwrap();
+    let prepared = PreparedLibrary::new(Arc::clone(&registry));
+    let effects = effects();
+    let env = Environment {
+        library: &library,
+        effects: &effects,
+        tool_roots: &BTreeSet::new(),
+        controls: &BTreeMap::new(),
+    };
+    let selected = std::env::args().nth(2);
+    let iterations: usize = std::env::args()
+        .nth(3)
+        .map(|n| n.parse().unwrap())
+        .unwrap_or(1);
+    for (name, tail) in [
+        ("nested", "console.log(JSON.stringify(result));"),
+        ("generic", "console.log(JSON.stringify(result, null));"),
+        ("silent", ""),
+        (
+            "nulls",
+            "console.log(JSON.stringify([null,null,null,null]));",
+        ),
+    ] {
+        if selected.as_ref().is_some_and(|v| v != name && v != "all") {
+            continue;
+        }
+        let code = format!("const result = await echo(null); {tail}");
+        let lowered = lash_dialect_typescript::lower(
+            &code,
+            &env,
+            lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
+        )
+        .map_err(|e| format!("{e:?}"))?;
+        let program = Program {
+            release: pages::RELEASE,
+            document: Arc::new(lowered.document),
+            library: prepared.clone(),
+        };
+        for iteration in 0..iterations {
+            let counts = Counts::default();
+            let source = Source {
+                inner: pages::Source::default(),
+                counts: counts.clone(),
+            };
+            let mut machine = KernelMachine::start(
+                program.clone(),
+                BOUNDS,
+                CellStart {
+                    owner: pages::OWNER,
+                    target: Target::Main,
+                    args: Vec::new(),
+                    session: None,
+                    modes: lash_kernel_vm::EffectModes::recorded(),
+                    host: Vec::new(),
+                },
+                Box::new(source),
+                pages::Session::default().census(BOUNDS.memory),
+            )
+            .unwrap();
+            let mut output = Output {
+                console: Console::default(),
+                began: Instant::now(),
+                counts: stats_alloc::Region::new(ALLOCATOR),
+                printed: None,
+                pages: counts.clone(),
+                from: counts.get(),
+            };
+            let Step::Parked(park) = machine.run(&mut output, u64::MAX).unwrap() else {
+                panic!("tool park")
+            };
+            let Request::Effect(effect) = &park.requests[0] else {
+                panic!("effect")
+            };
+            let answer = payload.clone();
+            let admission_pages = counts.get();
+            let admission_counts = stats_alloc::Region::new(ALLOCATOR);
+            let began = Instant::now();
+            machine
+                .deliver(effect.wait, Outcome::Completed(answer))
+                .unwrap();
+            let admission_ns = began.elapsed().as_nanos();
+            let admission_allocs = admission_counts.change().allocations;
+            let admission_pages = delta(counts.get(), admission_pages);
+            output.from = counts.get();
+            output.counts = stats_alloc::Region::new(ALLOCATOR);
+            output.began = Instant::now();
+            let step = machine.run(&mut output, u64::MAX).unwrap();
+            let run_ns = output.began.elapsed().as_nanos();
+            let run_allocs = output.counts.change().allocations;
+            assert!(matches!(step, Step::Ended(End::Finished(_))), "{step:?}");
+            let run_pages = delta(counts.get(), output.from);
+            let after_print = output.printed.map(|(ns, allocations, pages)| {
+                (
+                    run_ns - ns,
+                    run_allocs - allocations,
+                    delta(run_pages, pages),
+                )
+            });
+            println!(
+                "{}",
+                json!({"admission_pages":admission_pages,"run_pages":run_pages,"after_print":after_print,"case":name,"iteration":iteration,"admission_ns":admission_ns,"admission_allocs":admission_allocs,"run_ns":run_ns,"run_allocs":run_allocs,"print":output.printed,"charge":machine.meters().charged})
+            );
+        }
+    }
+    Ok(())
 }

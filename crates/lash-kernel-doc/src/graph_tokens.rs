@@ -504,6 +504,11 @@ impl TokenWriter {
         self.out.extend_from_slice(tokens);
     }
 
+    /// Discards the current body while retaining its buffer for the next one.
+    pub fn clear(&mut self) {
+        self.out.clear();
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.out.len()

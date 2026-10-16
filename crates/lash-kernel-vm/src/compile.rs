@@ -621,7 +621,7 @@ pub(crate) enum Var {
 #[derive(Default)]
 pub(crate) struct Stream {
     pub(crate) ops: Vec<Op>,
-    pub(crate) consts: Vec<doc::Literal>,
+    pub(crate) consts: Vec<Constant>,
     pub(crate) names: Vec<Name>,
     pub(crate) fields: Vec<String>,
     pub(crate) field_lists: Vec<Box<[String]>>,
@@ -740,7 +740,7 @@ pub(crate) enum Callee {
 
 pub(crate) enum Atom {
     Var(Var),
-    Literal(doc::Literal),
+    Literal(Constant),
 }
 
 /// A program the machine cannot compile: a function the registry lacks.
@@ -1457,5 +1457,37 @@ impl Placer<'_> {
                 self.var(var);
             }
         }
+    }
+}
+
+/// Immutable inline literals belong to compiled code. Reading one shares its
+/// resident descriptor; only a value that needs pages is admitted by a heap.
+pub(crate) enum Constant {
+    Resident(doc::Value),
+    Deferred(doc::Literal),
+}
+impl From<doc::Literal> for Constant {
+    fn from(literal: doc::Literal) -> Self {
+        use doc::heap::{BytesRef, IMMUTABLE_INLINE_MAX, Payload};
+        let resident = match &literal {
+            doc::Literal::Text(text) if text.len() as u64 <= IMMUTABLE_INLINE_MAX => {
+                Some(doc::Value::text(text.as_str()))
+            }
+            doc::Literal::Function(name) if name.as_str().len() as u64 <= IMMUTABLE_INLINE_MAX => {
+                let doc::Value::Text(text) = doc::Value::text(name.as_str()) else {
+                    unreachable!()
+                };
+                Some(doc::Value::Function(text))
+            }
+            doc::Literal::Bytes(bytes) if bytes.as_slice().len() as u64 <= IMMUTABLE_INLINE_MAX => {
+                Some(doc::Value::Bytes(BytesRef {
+                    normal: Default::default(),
+                    len: bytes.as_slice().len() as u64,
+                    body: Payload::Resident(Arc::from(bytes.as_slice())),
+                }))
+            }
+            _ => None,
+        };
+        resident.map_or_else(|| Self::Deferred(literal), Self::Resident)
     }
 }

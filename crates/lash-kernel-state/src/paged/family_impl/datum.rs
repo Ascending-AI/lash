@@ -286,7 +286,7 @@ impl Freezer<'_> {
         };
         if let Some(Ordinal(ordinal)) = lookup.get(&normal, &self.heap.access)? {
             let mut row = rows
-                .get(&ordinal_key(ordinal), &self.heap.access)?
+                .get(&ordinal.to_be_bytes(), &self.heap.access)?
                 .ok_or_else(|| invalid("frozen lookup has no row"))?;
             row.0.value = value;
             rows.write(ordinal_key(ordinal), row, &self.heap.access)?;

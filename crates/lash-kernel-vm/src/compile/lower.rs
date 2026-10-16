@@ -373,7 +373,7 @@ impl Compiler<'_> {
     fn atom(&mut self, atom: &doc::Atom) -> Atom {
         match atom {
             doc::Atom::Variable(name) => Atom::Var(self.resolve(name)),
-            doc::Atom::Literal(literal) => Atom::Literal(literal.clone()),
+            doc::Atom::Literal(literal) => Atom::Literal(literal.clone().into()),
         }
     }
 
@@ -560,7 +560,7 @@ impl Compiler<'_> {
 
     fn constant(&mut self, value: lash_kernel_doc::Literal) -> ConstIx {
         let c = ConstIx(self.stream.consts.len() as u32);
-        self.stream.consts.push(value);
+        self.stream.consts.push(value.into());
         c
     }
 

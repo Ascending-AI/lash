@@ -356,8 +356,14 @@ pub fn value_grants(value: &mut Value, children: &[PageRef]) -> Result<(), HeapF
     }
     Ok(())
 }
+pub(super) fn entity_bytes(entity: EntityId) -> [u8; 16] {
+    let mut key = [0; 16];
+    key[..8].copy_from_slice(&entity.family.0.to_be_bytes());
+    key[8..].copy_from_slice(&entity.ordinal.to_be_bytes());
+    key
+}
 pub fn entity_key(entity: EntityId) -> Vec<u8> {
-    [entity.family.0.to_be_bytes(), entity.ordinal.to_be_bytes()].concat()
+    entity_bytes(entity).to_vec()
 }
 pub fn ordinal_key(ordinal: u64) -> Vec<u8> {
     ordinal.to_be_bytes().to_vec()
@@ -821,7 +827,7 @@ impl PagedHeap {
         ordinal: u64,
     ) -> Result<bool, HeapFault> {
         let tree = Tree::<MembershipRun>::of_keyed(&family.membership);
-        let rank = tree.passed(&ordinal_key(ordinal), &self.access)?;
+        let rank = tree.passed(&ordinal.to_be_bytes(), &self.access)?;
         let Some((_, run)) = rank
             .checked_sub(1)
             .map(|i| tree.rank_get(i, &self.access))
@@ -897,13 +903,13 @@ impl PagedHeap {
     pub(super) fn sweep_family_member(&mut self, entity: EntityId) -> Result<(), HeapFault> {
         let Some(mut family) = self
             .families
-            .get(&ordinal_key(entity.family.0), &self.access)?
+            .get(&entity.family.0.to_be_bytes(), &self.access)?
         else {
             return Ok(());
         };
         let mut runs = Tree::<MembershipRun>::of_keyed(&family.membership);
         let live_before = runs.live_members(&self.access)?;
-        let rank = runs.passed(&ordinal_key(entity.ordinal), &self.access)?;
+        let rank = runs.passed(&entity.ordinal.to_be_bytes(), &self.access)?;
         let Some((key, run)) = rank
             .checked_sub(1)
             .map(|i| runs.rank_get(i, &self.access))
@@ -934,7 +940,7 @@ impl PagedHeap {
         let mut start = entity.ordinal;
         let mut len = 1;
         if let Some((key, previous)) = runs.rank_get(
-            runs.passed(&ordinal_key(start), &self.access)?
+            runs.passed(&start.to_be_bytes(), &self.access)?
                 .saturating_sub(1),
             &self.access,
         )? && !previous.live
@@ -960,7 +966,7 @@ impl PagedHeap {
                 &self.access,
             )?;
         } else if let Some((key, next)) =
-            runs.after(Some(&ordinal_key(entity.ordinal)), &self.access)?
+            runs.after(Some(&entity.ordinal.to_be_bytes()), &self.access)?
             && !next.live
             && next.start == tail
         {
@@ -987,7 +993,7 @@ impl PagedHeap {
         }
         if live_before == 1 {
             self.families
-                .remove(&ordinal_key(entity.family.0), &self.access)?;
+                .remove(&entity.family.0.to_be_bytes(), &self.access)?;
             if !family.base.summary.data_only {
                 self.population.closure_entities = self
                     .population

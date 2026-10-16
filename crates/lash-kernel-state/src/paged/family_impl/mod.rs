@@ -230,7 +230,7 @@ impl FamilyBase for FrozenBase {
             .get(&frozen.root.id)
             .ok_or_else(|| invalid("frozen header cache missing"))?
             .1;
-        let head = header.objects.get(&ordinal_key(entity.ordinal), access)?;
+        let head = header.objects.get(&entity.ordinal.to_be_bytes(), access)?;
         Ok(head.map(|mut head| {
             head.family = entity.family;
             match &mut head.body {

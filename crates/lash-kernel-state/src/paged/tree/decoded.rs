@@ -14,6 +14,7 @@ type CacheKey = (Location, TypeId, Option<FamilyId>, bool);
 struct Decoded {
     node: Box<dyn Any>,
     summary: Summary,
+    encoded: usize,
     _inline: Option<Arc<[u8]>>,
 }
 #[derive(Default)]
@@ -28,18 +29,35 @@ impl Access<'_> {
     pub(super) fn decoded_node<T: Cell>(
         &self,
         page: PageRef,
-        family: Option<FamilyId>,
+        branch: &Branch<T>,
         sequence: bool,
-    ) -> Option<(Rc<Node<T>>, Summary)> {
+    ) -> Result<Option<Rc<Node<T>>>, HeapFault> {
         let cache = self.decoded.borrow();
-        let entry =
-            cache
-                .nodes
-                .get(&(Location::Page(page.id), TypeId::of::<T>(), family, sequence))?;
-        Some((
-            Rc::clone(entry.node.downcast_ref::<Rc<Node<T>>>()?),
-            entry.summary,
-        ))
+        let Some(entry) = cache.nodes.get(&(
+            Location::Page(page.id),
+            TypeId::of::<T>(),
+            branch.family,
+            sequence,
+        )) else {
+            return Ok(None);
+        };
+        let Some(node) = entry.node.downcast_ref::<Rc<Node<T>>>() else {
+            return Ok(None);
+        };
+        if branch
+            .encoded_bytes
+            .is_some_and(|bytes| bytes != entry.encoded as u64)
+        {
+            return Err(corrupt(page, "tree root byte count mismatch"));
+        }
+        if branch
+            .is_leaf
+            .is_some_and(|leaf| leaf != matches!(&**node, Node::Leaf(_)))
+        {
+            return Err(corrupt(page, "tree root kind mismatch"));
+        }
+        validate_summary(branch, entry.summary, page)?;
+        Ok(Some(Rc::clone(node)))
     }
     pub(super) fn retain_decoded<T: Cell>(
         &self,
@@ -61,6 +79,7 @@ impl Access<'_> {
             Decoded {
                 node: Box::new(Rc::clone(node)),
                 summary,
+                encoded,
                 _inline: None,
             },
         );
@@ -100,6 +119,7 @@ impl Access<'_> {
             Decoded {
                 node: Box::new(Rc::clone(&node)),
                 summary: branch.summary,
+                encoded: tokens.len(),
                 _inline: Some(tokens.clone()),
             },
         );
@@ -250,8 +270,11 @@ impl RowSums {
     }
 }
 pub(super) fn row_sums<T: Cell>(rows: &[(Key, T)]) -> RowSums {
+    let mut out = TokenWriter::new();
     rows.iter().fold(RowSums::default(), |sums, (k, v)| {
-        sums.add(RowSize::of(k, encode_body(v).len()))
+        out.clear();
+        v.encode(&mut out);
+        sums.add(RowSize::of(k, out.len()))
     })
 }
 /// [`node_weight`] of a node decoded from `encoded` token bytes, which

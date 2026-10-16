@@ -1388,3 +1388,41 @@ fn table_accounting_through_writes_equals_a_recount() {
         }
     }
 }
+
+/// FIG-6444: JSON's fragment list appends must copy only changed paths,
+/// not allocate a fresh key for every unchanged element on every write.
+#[test]
+fn a_growing_list_does_not_copy_its_leaf_at_every_append() {
+    const N: u64 = 1024;
+    let (mut heap, _) = fresh();
+    let list = heap
+        .allocate_object(ObjectInit::List(vec![int(-1)]))
+        .expect("list");
+    let super::super::directory::Body::List { rows: prior, .. } =
+        heap.head(list).expect("head").expect("list").body
+    else {
+        panic!("list")
+    };
+    super::super::tree::take_key_copies();
+    for i in 0..N {
+        heap.list_write(list, i + 1, int(i as i64)).expect("append");
+    }
+    let copies = super::super::tree::take_key_copies();
+    // Two shallow trees (directory and list): first-key refreshes on their
+    // paths, plus amortized splits. Twelve per append leaves room for both
+    // depths and split copies, independently of the leaf's row population.
+    println!("list appends={N} key copies={copies} bound={}", 12 * N);
+    assert!(copies <= 12 * N, "{copies} key copies for {N} appends");
+    assert_eq!(prior.len(), 1);
+    assert!(is_int(
+        prior
+            .rank_get(0, heap.pages())
+            .expect("prior")
+            .map(|(_, v)| v),
+        -1
+    ));
+    assert!(is_int(
+        heap.list_get(list, N).expect("last"),
+        (N - 1) as i64
+    ));
+}

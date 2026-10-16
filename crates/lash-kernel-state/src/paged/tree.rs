@@ -55,6 +55,7 @@ pub struct Access<'a> {
     bytes: Rc<RefCell<usize>>,
     dirty: Rc<RefCell<residency::DirtyResidency>>,
     decoded: Rc<RefCell<decoded::DecodedResidency>>,
+    sizing: Rc<RefCell<TokenWriter>>,
 }
 impl<'a> Access<'a> {
     pub fn new(source: Box<dyn PageSource>) -> Self {
@@ -64,6 +65,7 @@ impl<'a> Access<'a> {
             bytes: Rc::new(RefCell::new(0)),
             dirty: Default::default(),
             decoded: Default::default(),
+            sizing: Default::default(),
         }
     }
     fn borrowed(source: &'a mut dyn PageSource) -> Self {
@@ -73,7 +75,20 @@ impl<'a> Access<'a> {
             bytes: Rc::new(RefCell::new(0)),
             dirty: Default::default(),
             decoded: Default::default(),
+            sizing: Default::default(),
         }
+    }
+    /// Packing and residency need the encoded length, not an owned body.
+    /// Reuse one bounded buffer after each non-reentrant codec traversal.
+    fn encoded_len<T: TokenCodec>(&self, value: &T) -> usize {
+        let mut out = self.sizing.borrow_mut();
+        out.clear();
+        value.encode(&mut out);
+        let len = out.len();
+        if len > 65_536 {
+            *out = TokenWriter::new();
+        }
+        len
     }
     pub fn read(&self, page: PageRef) -> Result<PageAnswer, HeapFault> {
         if let Some(answer) = self.cache.borrow().get(&page.id) {
@@ -409,6 +424,9 @@ impl<T: Cell> Tree<T> {
                 access.inline_node(branch, tokens, children, sequence)
             }
             Link::Sealed(p) => {
+                if let Some(node) = access.decoded_node::<T>(*p, branch, sequence)? {
+                    return Ok(node);
+                }
                 let answer = access.read(*p)?;
                 if branch
                     .encoded_bytes
@@ -431,11 +449,6 @@ impl<T: Cell> Tree<T> {
                     .is_some_and(|hint| hint != (answer.kind == leaf))
                 {
                     return Err(corrupt(*p, "tree root kind mismatch"));
-                }
-                if let Some((node, summary)) = access.decoded_node::<T>(*p, branch.family, sequence)
-                {
-                    decoded::validate_summary(branch, summary, *p)?;
-                    return Ok(node);
                 }
                 let mut node = if answer.kind == leaf {
                     {
@@ -552,63 +565,81 @@ impl<T: Cell> Tree<T> {
         }
     }
     pub fn get(&self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
-        let Some(mut branch) = self.root.clone() else {
-            return Ok(None);
-        };
-        loop {
-            match &*Self::load_node(&branch, access, self.sequence)?.node() {
+        self.get_with(key, access, |cell| cell.cloned())
+    }
+    /// Inspect the cell while its page is borrowed. A scalar read does not
+    /// copy a nested tree descriptor or make its working pages shared.
+    pub(crate) fn get_with<R>(
+        &self,
+        key: &[u8],
+        access: &Access<'_>,
+        read: impl FnOnce(Option<&T>) -> R,
+    ) -> Result<R, HeapFault> {
+        fn walk<T: Cell, R>(
+            branch: &Branch<T>,
+            key: &[u8],
+            access: &Access<'_>,
+            sequence: bool,
+            read: impl FnOnce(Option<&T>) -> R,
+        ) -> Result<R, HeapFault> {
+            match &*Tree::load_node(branch, access, sequence)?.node() {
                 Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => {
-                    return Ok(rows
-                        .binary_search_by(|(k, _)| k.as_slice().cmp(key))
+                Node::Leaf(rows) => Ok(read(
+                    rows.binary_search_by(|(k, _)| k.as_slice().cmp(key))
                         .ok()
-                        .map(|i| rows[i].1.clone()));
-                }
-                Node::Index(rows) => {
-                    branch = rows[rows
+                        .map(|i| &rows[i].1),
+                )),
+                Node::Index(rows) => walk(
+                    &rows[rows
                         .partition_point(|r| r.first.as_slice() <= key)
-                        .saturating_sub(1)]
-                    .clone()
-                }
+                        .saturating_sub(1)],
+                    key,
+                    access,
+                    sequence,
+                    read,
+                ),
             }
+        }
+        match self.root.as_ref() {
+            Some(branch) => walk(branch, key, access, self.sequence, read),
+            None => Ok(read(None)),
         }
     }
     pub fn rank_get(
         &self,
-        mut rank: u64,
+        rank: u64,
         access: &Access<'_>,
     ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
-        if rank >= self.len() {
-            return Ok(None);
-        }
-        let Some(mut branch) = self.root.clone() else {
-            return Ok(None);
-        };
-        loop {
-            match &*Self::load_node(&branch, access, self.sequence)?.node() {
+        fn walk<T: Cell>(
+            branch: &Branch<T>,
+            mut rank: u64,
+            access: &Access<'_>,
+            sequence: bool,
+        ) -> Result<Option<(Vec<u8>, T)>, HeapFault> {
+            match &*Tree::load_node(branch, access, sequence)?.node() {
                 Node::Staged(..) => unreachable!("loaded staged node"),
-                Node::Leaf(rows) => {
-                    return Ok(rows
-                        .get(rank as usize)
-                        .map(|(k, v)| (k.0.clone(), v.clone())));
-                }
+                Node::Leaf(rows) => Ok(rows
+                    .get(rank as usize)
+                    .map(|(k, v)| (k.0.clone(), v.clone()))),
                 Node::Index(rows) => {
-                    let mut chosen = None;
                     for row in rows {
                         if rank < row.summary.len {
-                            chosen = Some(row);
-                            break;
+                            return walk(row, rank, access, sequence);
                         }
                         rank -= row.summary.len;
                     }
-                    branch = chosen
-                        .ok_or_else(|| {
-                            HeapFault::Malformed("tree rank summary is inconsistent".into())
-                        })?
-                        .clone();
+                    Err(HeapFault::Malformed(
+                        "tree rank summary is inconsistent".into(),
+                    ))
                 }
             }
         }
+        if rank >= self.len() {
+            return Ok(None);
+        }
+        self.root
+            .as_ref()
+            .map_or(Ok(None), |branch| walk(branch, rank, access, self.sequence))
     }
     pub fn after(
         &self,
@@ -681,11 +712,11 @@ impl<T: Cell> Tree<T> {
             match &mut *node {
                 Node::Staged(..) => unreachable!("loaded staged node"),
                 Node::Leaf(rows) => {
-                    let encoded = encode_body(&value).len();
+                    let encoded = access.encoded_len(&value);
                     let (at, before) = match rows.binary_search_by(|(k, _)| k.cmp(&key)) {
                         Ok(i) => {
                             let before =
-                                decoded::RowSize::of(&rows[i].0, encode_body(&rows[i].1).len());
+                                decoded::RowSize::of(&rows[i].0, access.encoded_len(&rows[i].1));
                             rows[i].1 = value;
                             (i, Some(before))
                         }
@@ -746,6 +777,87 @@ impl<T: Cell> Tree<T> {
         }
         access.stage_pressure()?;
         Ok(())
+    }
+    /// Edits a cell through its owning path. A caller that first clones the
+    /// cell would make its nested trees shared and copy their leaves on every
+    /// edit, even though no published version still needs them (FIG-6444).
+    /// The callback must preflight guest refusals; a fault aborts the edit.
+    pub(crate) fn update_existing(
+        &mut self,
+        key: &[u8],
+        access: &Access<'_>,
+        update: &mut impl FnMut(&mut T) -> Result<(), HeapFault>,
+    ) -> Result<(), HeapFault> {
+        fn edit<T: Cell>(
+            branch: &mut Branch<T>,
+            key: &[u8],
+            access: &Access<'_>,
+            seq: bool,
+            update: &mut impl FnMut(&mut T) -> Result<(), HeapFault>,
+        ) -> Result<Option<Branch<T>>, HeapFault> {
+            let page = make_dirty(branch, access, seq)?;
+            let mut node = page.borrow_mut();
+            match &mut *node {
+                Node::Staged(..) => unreachable!("loaded staged node"),
+                Node::Leaf(rows) => {
+                    let i = rows
+                        .binary_search_by(|(k, _)| k.as_slice().cmp(key))
+                        .map_err(|_| HeapFault::Malformed("updated cell is missing".into()))?;
+                    let before = decoded::RowSize::of(&rows[i].0, access.encoded_len(&rows[i].1));
+                    update(&mut rows[i].1)?;
+                    let after = decoded::RowSize::of(&rows[i].0, access.encoded_len(&rows[i].1));
+                    let bytes = access.track_row(&page, rows, seq, Some(before), after);
+                    if bytes > PAGE_TARGET_BYTES as usize {
+                        if rows.len() == 1 {
+                            return Err(HeapFault::Malformed("unbounded tree cell".into()));
+                        }
+                        let right = rows.split_off(rows.len() / 2);
+                        refresh(branch, &node)?;
+                        access.track(&page, &node, seq);
+                        return Ok(Some(dirty(Node::Leaf(right), access, seq)?));
+                    }
+                    refresh(branch, &node)?;
+                    return Ok(None);
+                }
+                Node::Index(rows) => {
+                    let i = rows
+                        .partition_point(|r| r.first.as_slice() <= key)
+                        .saturating_sub(1);
+                    if let Some(right) = edit(&mut rows[i], key, access, seq, update)? {
+                        rows.insert(i + 1, right);
+                    }
+                    if rows.len() > INDEX_FANOUT as usize {
+                        let right = rows.split_off(rows.len() / 2);
+                        refresh(branch, &node)?;
+                        access.track(&page, &node, seq);
+                        return Ok(Some(dirty(Node::Index(right), access, seq)?));
+                    }
+                }
+            }
+            refresh(branch, &node)?;
+            access.track(&page, &node, seq);
+            Ok(None)
+        }
+        // A nested edit can reach dirty pressure while the enclosing leaf is
+        // borrowed. Stage only after every enclosing edit releases its leaf.
+        let deferred = access.defer_staging();
+        let result = (|| {
+            let root = self
+                .root
+                .as_mut()
+                .ok_or_else(|| HeapFault::Malformed("updated tree is empty".into()))?;
+            if let Some(right) = edit(root, key, access, self.sequence, update)? {
+                self.root = Some(dirty(
+                    Node::Index(vec![root.clone(), right]),
+                    access,
+                    self.sequence,
+                )?);
+            }
+            Ok(())
+        })();
+        drop(deferred);
+        result?;
+        access.stage_pressure()
     }
     pub fn remove(&mut self, key: &[u8], access: &Access<'_>) -> Result<Option<T>, HeapFault> {
         fn edit<T: Cell>(
@@ -991,9 +1103,13 @@ fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFa
     branch.summary = match node {
         Node::Staged(..) => unreachable!("refresh staged node"),
         Node::Leaf(rows) => {
-            branch.first = rows
-                .first()
-                .map_or_else(|| Key(Vec::new()), |r| r.0.clone());
+            if let Some((first, _)) = rows.first() {
+                if branch.first != *first {
+                    branch.first = first.clone();
+                }
+            } else {
+                branch.first = Key(Vec::new());
+            }
             Summary {
                 len: rows.len() as u64,
                 cost: checked_sum(rows.iter().map(|r| r.1.cost()))?,
@@ -1002,9 +1118,13 @@ fn refresh<T: Cell>(branch: &mut Branch<T>, node: &Node<T>) -> Result<(), HeapFa
             }
         }
         Node::Index(rows) => {
-            branch.first = rows
-                .first()
-                .map_or_else(|| Key(Vec::new()), |r| r.first.clone());
+            if let Some(first) = rows.first() {
+                if branch.first != first.first {
+                    branch.first = first.first.clone();
+                }
+            } else {
+                branch.first = Key(Vec::new());
+            }
             Summary {
                 len: checked_sum(rows.iter().map(|r| r.summary.len))?,
                 cost: checked_sum(rows.iter().map(|r| r.summary.cost))?,
@@ -1061,8 +1181,23 @@ impl SealWork {
 }
 // Keys are bytes tokens, not a Vec<u8> sequence, keeping cells packed.
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Key(Vec<u8>);
+#[cfg(test)]
+thread_local! {
+    static KEY_COPIES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+pub(crate) fn take_key_copies() -> u64 {
+    KEY_COPIES.replace(0)
+}
+impl Clone for Key {
+    fn clone(&self) -> Self {
+        #[cfg(test)]
+        KEY_COPIES.set(KEY_COPIES.get() + 1);
+        Self(self.0.clone())
+    }
+}
 impl Key {
     fn as_slice(&self) -> &[u8] {
         &self.0

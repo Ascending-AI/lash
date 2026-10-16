@@ -64,10 +64,14 @@ impl<'a> Call<'a> {
 }
 
 impl KernelMachine {
-    /// Literals remain admitted code data until the operation reads them.
-    /// Long immutable values enter canonical payload pages at that read.
-    pub(super) fn literal(&mut self, literal: &lash_kernel_doc::Literal) -> Eval<Value> {
+    /// Inline literals share compiled descriptors. Long immutable values enter
+    /// canonical payload pages when the operation reads them.
+    pub(super) fn literal(&mut self, literal: &crate::compile::Constant) -> Eval<Value> {
         use lash_kernel_doc::Literal;
+        let literal = match literal {
+            crate::compile::Constant::Resident(value) => return Ok(value.clone()),
+            crate::compile::Constant::Deferred(literal) => literal,
+        };
         Ok(match literal {
             Literal::Null => Value::Null,
             Literal::Absent => Value::Absent,

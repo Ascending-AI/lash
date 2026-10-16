@@ -49,7 +49,7 @@ fn project(
             validate_occurrence(value, header.summary.entities)?;
             let head = header
                 .objects
-                .get(&ordinal_key(id.ordinal), &heap.access)?
+                .get(&id.ordinal.to_be_bytes(), &heap.access)?
                 .ok_or_else(|| invalid("frozen occurrence is missing"))?;
             match (value, head.body) {
                 (Value::List(_), Body::List { rows, .. }) => {

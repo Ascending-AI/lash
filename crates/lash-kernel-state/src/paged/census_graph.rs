@@ -136,7 +136,7 @@ impl CensusGraph for PagedHeap {
         task: TaskId,
         out: &mut dyn FnMut(Identity) -> Result<(), HeapFault>,
     ) -> Result<LogicalBytes, HeapFault> {
-        let Some(task) = self.tasks.get(&ordinal_key(task.0), &self.access)? else {
+        let Some(task) = self.tasks.get(&task.0.to_be_bytes(), &self.access)? else {
             return Ok(LogicalBytes(0));
         };
         let value = match &task.state {
@@ -169,7 +169,7 @@ impl CensusGraph for PagedHeap {
             }
         }
         for task in &unreachable.ended_task_results {
-            if let Some(mut row) = self.tasks.get(&ordinal_key(task.0), &self.access)? {
+            if let Some(mut row) = self.tasks.get(&task.0.to_be_bytes(), &self.access)? {
                 let old_edges = row.task_edges();
                 row.state = match row.state {
                     TaskStateRecord::Ended(EndedTask::Returned(_)) => {
@@ -240,7 +240,7 @@ impl CensusGraph for PagedHeap {
                 .and_then(|id| id.ordinal.checked_add(1))
                 .unwrap_or(0);
             let mut rank = runs
-                .passed(&ordinal_key(first), &self.access)?
+                .passed(&first.to_be_bytes(), &self.access)?
                 .saturating_sub(1);
             while entities.len() < limit {
                 let Some((_, run)) = runs.rank_get(rank, &self.access)? else {
