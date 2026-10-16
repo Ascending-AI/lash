@@ -10,8 +10,9 @@
 //! added (FIG-5955): the others an earlier phase of the turn stored, and the
 //! root requires them by the node the machine was told each is stored as.
 //! The root's checkpoint text is the phase's JSON without its content. The
-//! run's recorded configuration rides beside it as TurnContent nodes the
-//! root names, staged by the first phase that holds them (FIG-6021).
+//! run's resolved shape rides beside it as configuration graph nodes shared
+//! with retained revisions; its tool surface is a TurnContent node. The
+//! first phase that holds them stages them (FIG-6021, FIG-6599).
 
 use lash_core_store::checkpoint_graph::bodies::PhaseRoot as PhaseRootBody;
 use lash_core_store::checkpoint_graph::{
@@ -56,7 +57,7 @@ struct PhaseRead {
 }
 
 /// Kind 39's body: one content blob's canonical JSON text.
-struct ContentText(String);
+pub(super) struct ContentText(pub(super) String);
 
 impl TokenCodec for ContentText {
     fn encode(&self, out: &mut TokenWriter) {
@@ -118,13 +119,7 @@ impl StagedPhase {
         let config = checkpoint
             .config
             .as_ref()
-            .map(|config| {
-                config.stage(|text| {
-                    staging
-                        .encode_value(NodeKind::TURN_CONTENT, &ContentText(text))
-                        .map_err(|error| refused(error.into()))
-                })
-            })
+            .map(|config| config.stage(&mut staging))
             .transpose()?;
         let text = serde_json::to_string(&PhaseText {
             checkpoint: &checkpoint.saved.checkpoint,
@@ -257,20 +252,26 @@ pub(super) fn load(
             .map_err(|error| error.to_string())?;
         stored.push((digest, CheckpointContentPin::new(node.0)));
     }
-    let mut node_text = |node: NodeId| {
-        decoder
-            .child_kind(root, node, &[NodeKind::TURN_CONTENT])
-            .map_err(text)?;
-        let ContentText(body) = decoder.decode(node, NodeKind::TURN_CONTENT).map_err(text)?;
-        Ok::<_, String>((node, body))
-    };
     let config = match body.run {
         None => None,
         Some(run) => {
-            let run = node_text(run)?;
-            let surface = body.surface.map(&mut node_text).transpose()?;
+            decoder
+                .child_kind(root, run, &[NodeKind::CONFIG_VALUE])
+                .map_err(text)?;
+            let resolved = lash_core_store::checkpoint_graph::config::load(&mut decoder, run)?;
+            let surface = body
+                .surface
+                .map(|node| {
+                    decoder
+                        .child_kind(root, node, &[NodeKind::TURN_CONTENT])
+                        .map_err(text)?;
+                    let ContentText(body) =
+                        decoder.decode(node, NodeKind::TURN_CONTENT).map_err(text)?;
+                    Ok::<_, String>((node, body))
+                })
+                .transpose()?;
             Some(RecordedRunConfig::load(
-                (run.0, &run.1),
+                (run, resolved),
                 surface.as_ref().map(|(node, text)| (*node, text.as_str())),
             )?)
         }

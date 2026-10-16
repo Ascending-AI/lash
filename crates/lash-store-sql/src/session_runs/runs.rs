@@ -90,11 +90,10 @@ crate::statements! {
         /// head document, revision, leaf, checkpoint and the frame its leaf
         /// row names. No row when the run has no terminal or its terminal
         /// names no window.
-        select_terminal_window = "SELECT config.content, ended.terminal_window_revision,
+        select_terminal_window = "SELECT ended.terminal_window_config_ref, ended.terminal_window_revision,
                     ended.terminal_window_leaf_node_id,
                     ended.terminal_window_checkpoint_ref, leaf.frame_node_id
              FROM session_runs AS ended
-             LEFT JOIN blobs AS config ON config.hash = ended.terminal_window_config_ref
              LEFT JOIN graph_nodes AS leaf
                ON leaf.node_id = ended.terminal_window_leaf_node_id
              WHERE ended.session_id = ?1 AND ended.run = ?2

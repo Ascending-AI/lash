@@ -333,7 +333,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         // forked in its place.
         let retained = crate::observed_sql::query_as::<
             _,
-            (Option<String>, Option<String>, Option<Vec<u8>>),
+            (Option<String>, Option<String>, Option<String>),
         >(session_sql().revisions_postgres.select_for_share.sql())
         .bind(source_session_id.as_str())
         .bind(sql_revision)

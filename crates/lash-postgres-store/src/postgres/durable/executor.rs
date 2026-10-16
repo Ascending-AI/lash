@@ -236,7 +236,6 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &head_commit::LEAF,
         &head_commit::OCCUPIED,
         &head_commit::NODES,
-        &head_commit::CONFIG,
         &head_commit::REVISION,
         &head_commit::HEAD_CAS,
         &head_commit::TOUCH,

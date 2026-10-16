@@ -95,7 +95,7 @@ pub struct RuntimeCommitBudgetMeasurement {
     pub adopted_intent_rows: usize,
     /// Saturating sum of graph and attachment-adoption rows.
     pub total_rows: usize,
-    /// Persisted JSON encoding of the session configuration, including prompt.
+    /// Logical JSON size of the session configuration, including prompt.
     pub session_config_bytes: usize,
     pub graph_delta_bytes: usize,
     /// Named-MessagePack size of the hydrated checkpoint.

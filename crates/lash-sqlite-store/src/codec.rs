@@ -201,7 +201,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
             params![session_id.as_str()],
             |row| {
                 Ok((
-                    row.get::<_, Option<Vec<u8>>>(0)?,
+                    row.get::<_, Option<String>>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
@@ -217,7 +217,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     };
     assemble_session_head_meta(
         session_id,
-        head_json.as_deref(),
+        load_config_conn(conn, head_json.as_deref(), fleet)?,
         head_revision,
         leaf_node_id,
         checkpoint_ref,
@@ -233,12 +233,12 @@ pub(crate) fn try_load_session_head_meta_from_conn(
 /// this way.
 pub(crate) fn assemble_session_head_meta(
     session_id: &SessionId,
-    head_json: Option<&[u8]>,
+    payload: SessionHeadPayload,
     head_revision: i64,
     leaf_node_id: Option<String>,
     checkpoint_ref: Option<String>,
     current_frame_node_id: Option<String>,
-    fleet: lash_core_execution::FleetFormat,
+    _fleet: lash_core_execution::FleetFormat,
 ) -> Result<SessionHeadMeta, StoreError> {
     let head_revision = u64::try_from(head_revision).map_err(|_| {
         stored_data_corrupt(
@@ -246,15 +246,6 @@ pub(crate) fn assemble_session_head_meta(
             format!("head_revision must be non-negative, got {head_revision}"),
         )
     })?;
-    let head_json = head_json.ok_or_else(|| {
-        stored_data_corrupt("SessionHeadMeta", "head pointer names a missing revision")
-    })?;
-    let payload: SessionHeadPayload = SessionHeadPayload::decode_for_fleet(
-        std::str::from_utf8(head_json)
-            .map_err(|error| stored_data_corrupt("SessionHeadMeta", error))?,
-        fleet,
-    )
-    .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
     if let Some(leaf) = &leaf_node_id
         && current_frame_node_id.is_none()
     {
@@ -296,6 +287,26 @@ pub(crate) fn encode_msgpack<T: serde::Serialize>(
 
 pub(crate) fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Option<T> {
     rmp_serde::from_slice(bytes).ok()
+}
+
+/// Read a revision's canonical configuration graph in the caller's snapshot.
+pub(crate) fn load_config_conn(
+    conn: &Connection,
+    reference: Option<&str>,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<SessionHeadPayload, StoreError> {
+    use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeId, config};
+    let corrupt = |message: String| stored_data_corrupt("SessionHeadMeta", message);
+    let root = reference
+        .and_then(NodeId::from_hex)
+        .ok_or_else(|| corrupt("revision names a missing config reference".to_owned()))?;
+    let limits = DecodeLimits::within_total(1 << 32);
+    let graph = crate::durable::graph_closure(conn, root, &limits)
+        .map_err(sqlite_error)?
+        .map_err(|error| corrupt(error.to_string()))?;
+    let value: serde_json::Value =
+        config::load(&mut GraphDecoder::new(&graph, limits), root).map_err(corrupt)?;
+    SessionHeadPayload::decode_for_fleet(&value.to_string(), fleet)
 }
 
 #[cfg(test)]

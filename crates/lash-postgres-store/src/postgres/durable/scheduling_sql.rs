@@ -120,7 +120,7 @@ lash_store_sql::statements! {
                     h.head_revision, v.leaf_node_id, leaf.generation, leaf.frame_node_id,
                     NOT leaf.tombstoned,
                     (SELECT jsonb_agg(jsonb_build_array(plugin_id, min_format, max_format))
-                       FROM fleet_plugin_writers)
+                       FROM fleet_plugin_writers), v.config_ref
              FROM actors a
              LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
              LEFT JOIN session_runs r ON r.session_id = ?2 AND r.admission_json IS NOT NULL

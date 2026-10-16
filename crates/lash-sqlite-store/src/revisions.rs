@@ -23,13 +23,36 @@ pub(crate) fn record_revision_conn(
     checkpoint_ref: Option<&str>,
     head_json: &str,
 ) -> Result<(), StoreError> {
-    let config_ref = BlobRef::for_content(head_json.as_bytes());
-    crate::conn::cached_execute(
-        tx,
-        session_sql().revisions.insert_config.sql(),
-        params![config_ref.as_str(), head_json.as_bytes()],
-    )
-    .map_err(sqlite_error)?;
+    let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+        lash_core_store::checkpoint_graph::EncodeBudget::new(
+            lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+        ),
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(head_json).map_err(|error| StoreError::Backend(error.to_string()))?;
+    let root = lash_core_store::checkpoint_graph::config::stage(&mut staging, &value).map_err(
+        |message| StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message,
+        },
+    )?;
+    let config_ref = root.blob_ref();
+    let held: Option<String> = tx
+        .query_row(
+            session_sql().revisions.select_config_ref.sql(),
+            [session_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    if held.as_deref() != Some(config_ref.as_str()) {
+        crate::durable::install_staged(tx, staging.nodes())
+            .map_err(sqlite_error)?
+            .map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message: error.to_string(),
+            })?;
+    }
     crate::conn::cached_execute(
         tx,
         session_sql().revisions.insert.sql(),
@@ -218,7 +241,7 @@ struct RevisionRow {
     head_revision: u64,
     leaf_node_id: Option<String>,
     checkpoint_ref: Option<String>,
-    head_json: Option<Vec<u8>>,
+    config_ref: Option<String>,
 }
 
 impl RevisionRow {
@@ -229,24 +252,10 @@ impl RevisionRow {
     /// window `F` names.
     fn config(
         &self,
+        conn: &Connection,
         fleet: lash_core_execution::FleetFormat,
     ) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
-        let config = self
-            .head_json
-            .as_deref()
-            .ok_or_else(|| StoreError::StoredDataCorrupt {
-                record_kind: "SessionHeadMeta",
-                message: "revision names a missing config body".to_owned(),
-            })?;
-        let payload: lash_core_execution::store::SessionHeadPayload =
-            SessionHeadPayload::decode_for_fleet(
-                std::str::from_utf8(config).map_err(|error| StoreError::StoredDataCorrupt {
-                    record_kind: "SessionHeadMeta",
-                    message: error.to_string(),
-                })?,
-                fleet,
-            )
-            .map_err(|error| crate::map_record_decode_error("SessionHeadMeta", error))?;
+        let payload = crate::codec::load_config_conn(conn, self.config_ref.as_deref(), fleet)?;
         Ok(payload.config)
     }
 }
@@ -268,7 +277,7 @@ fn revision_row_conn(
                 head_revision,
                 leaf_node_id: row.get(0)?,
                 checkpoint_ref: row.get(1)?,
-                head_json: row.get(2)?,
+                config_ref: row.get(2)?,
             })
         },
     )
@@ -305,6 +314,7 @@ fn resolved_pins_conn(
 }
 
 fn retained_revision(
+    conn: &Connection,
     session_id: &SessionId,
     row: RevisionRow,
     head_revision: u64,
@@ -314,7 +324,7 @@ fn retained_revision(
     Ok(RetainedRevision {
         session_id: session_id.clone(),
         head_revision: row.head_revision,
-        config: row.config(fleet)?,
+        config: row.config(conn, fleet)?,
         head: row.head_revision == head_revision,
         pinned_by: pins
             .iter()
@@ -344,7 +354,7 @@ pub(crate) fn resolve_target_conn(
     })?;
     let head_revision = head_revision_conn(conn, session_id)?;
     let pins = resolved_pins_conn(conn, session_id)?;
-    retained_revision(session_id, row, head_revision, &pins, fleet)
+    retained_revision(conn, session_id, row, head_revision, &pins, fleet)
 }
 
 /// Every retained revision of `session_id`, oldest first.
@@ -368,7 +378,7 @@ pub(crate) fn revisions_conn(
                     )?,
                     leaf_node_id: row.get(1)?,
                     checkpoint_ref: row.get(2)?,
-                    head_json: row.get(3)?,
+                    config_ref: row.get(3)?,
                 })
             })
             .map_err(sqlite_error)?;
@@ -377,7 +387,7 @@ pub(crate) fn revisions_conn(
     let head_revision = head_revision_conn(conn, session_id)?;
     let pins = resolved_pins_conn(conn, session_id)?;
     rows.into_iter()
-        .map(|row| retained_revision(session_id, row, head_revision, &pins, fleet))
+        .map(|row| retained_revision(conn, session_id, row, head_revision, &pins, fleet))
         .collect()
 }
 

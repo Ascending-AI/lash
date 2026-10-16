@@ -385,16 +385,6 @@ fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64, StoreErro
     })
 }
 
-fn map_record_decode_error(record_kind: &'static str, error: StoreError) -> StoreError {
-    match error {
-        StoreError::UnsupportedRecordSchemaVersion { .. }
-        | StoreError::MissingRecordSchemaVersion { .. }
-        | StoreError::InvalidRecordSchemaVersion { .. }
-        | StoreError::StoredDataCorrupt { .. } => error,
-        error => stored_data_corrupt(record_kind, error),
-    }
-}
-
 impl SqliteStore {
     fn read_connection(&self) -> &SqliteConnection {
         let index = self.next_reader.fetch_add(1, AtomicOrdering::Relaxed) as usize;

@@ -78,6 +78,9 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
         Some(run)
     );
     connection
+        .execute_batch(crate::durable::GRAPH_TABLES)
+        .expect("graph schema");
+    connection
         .execute(
             "UPDATE session_runs SET terminal_kind = 'answered', terminal_cause_json = '{\"cause\":\"commands_applied\"}',
                  terminal_at_ms = 42, terminal_head_revision = 1",
@@ -141,18 +144,20 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
         vec![2],
         "collection releases the unpinned revision"
     );
-    assert_eq!(
-        connection
-            .query_row(
-                "SELECT config.content FROM session_revisions AS revision
-                 JOIN blobs AS config ON config.hash = revision.config_ref
-                 WHERE revision.session_id = 'session' AND revision.head_revision = 2",
-                [],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .expect("the head retains the shared config"),
-        b"{}"
-    );
+    let root: String = connection.query_row(
+        "SELECT config_ref FROM session_revisions WHERE session_id = 'session' AND head_revision = 2", [], |row| row.get(0)
+    ).expect("the head retains its config graph");
+    let root = lash_core_store::checkpoint_graph::NodeId::from_hex(&root).expect("node id");
+    let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 20);
+    let graph = crate::durable::graph_closure(&connection, root, &limits)
+        .expect("SQL")
+        .expect("closure");
+    let value: serde_json::Value = lash_core_store::checkpoint_graph::config::load(
+        &mut lash_core_store::checkpoint_graph::GraphDecoder::new(&graph, limits),
+        root,
+    )
+    .expect("recorded config");
+    assert_eq!(value, serde_json::json!({}));
     collect();
     assert_eq!(
         connection
@@ -1539,6 +1544,12 @@ async fn unchanged_config_is_stored_once_across_retained_revisions() {
         .expect("store");
     let session = SessionId::from("shared-revision-config");
     let mut state = durable_state(&store, &session).await;
+    store.conn.call(|conn| {
+        conn.execute_batch("CREATE TRIGGER refuse_config_resubmission BEFORE INSERT ON blobs
+            WHEN EXISTS (SELECT 1 FROM session_revisions WHERE config_ref = NEW.hash)
+            BEGIN SELECT RAISE(ABORT, 'RECORDED-CONFIG-SHARING: known config body resubmitted'); END")?;
+        Ok(())
+    }).await.expect("guard already-held config bodies");
     for _ in 0..8 {
         let result = store
             .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
@@ -1551,8 +1562,15 @@ async fn unchanged_config_is_stored_once_across_retained_revisions() {
         .await
         .expect("read")
         .expect("head");
-    let body = serde_json::to_vec(&head.payload()).expect("head document");
-    let reference = BlobRef::for_content(&body);
+    let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+        lash_core_store::checkpoint_graph::EncodeBudget::new(
+            lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+        ),
+    );
+    let root = lash_core_store::checkpoint_graph::config::stage(&mut staging, &head.payload())
+        .expect("head graph");
+    let reference = root.blob_ref();
+    let body = staging.get(&root).expect("root").bytes.to_vec();
     let (revisions, bodies) = store
         .conn
         .call(move |conn| {
@@ -1588,6 +1606,8 @@ fn last_turns_pruning_work_and_statement_count_ignore_old_runs() {
         conn.execute_batch(crate::schema::SCHEMA).expect("schema");
         conn.execute_batch(crate::schema_fragments::SESSION_RUNS_TABLES)
             .expect("runs schema");
+        conn.execute_batch(crate::durable::GRAPH_TABLES)
+            .expect("graph schema");
         conn.execute("INSERT INTO session_meta (session_id, relation_kind, retention_kind, retention_last_turns) VALUES ('prune', 'root', 'last_turns', 2)", []).expect("policy");
         for revision in 1..=size {
             conn.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_head_revision) VALUES ('prune', ?1, 'answered', '{\"cause\":\"commands_applied\"}', 0, ?2)", params![format!("run-{revision}"), revision]).expect("old run");

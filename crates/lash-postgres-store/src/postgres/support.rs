@@ -609,7 +609,7 @@ pub(crate) async fn load_session_head_meta_tx(
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
-    decode_session_head_meta_row(session_id, row, fleet)
+    decode_session_head_meta_row(tx, session_id, row, fleet).await
 }
 
 /// The head that run `run`'s terminal named as its window (FIG-5931), read
@@ -634,10 +634,11 @@ pub(crate) async fn load_terminal_head_meta_tx(
     .fetch_optional(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
-    decode_session_head_meta_row(session_id, row, fleet)
+    decode_session_head_meta_row(tx, session_id, row, fleet).await
 }
 
-fn decode_session_head_meta_row(
+async fn decode_session_head_meta_row(
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     row: Option<sqlx::postgres::PgRow>,
     fleet: lash_core_execution::FleetFormat,
@@ -646,11 +647,8 @@ fn decode_session_head_meta_row(
         return Ok(None);
     };
     let head_revision = u64_from_sql("SessionHeadMeta", "head_revision", row.get(1))?;
-    let head_json: Option<Vec<u8>> = row.get(0);
-    let head_json = head_json.ok_or_else(|| StoreError::StoredDataCorrupt {
-        record_kind: "SessionHeadMeta",
-        message: "head pointer names a missing revision".to_owned(),
-    })?;
+    let config_ref: Option<String> = row.get(0);
+    let payload = load_config_tx(tx, config_ref.as_deref(), fleet).await?;
     let current_frame_node_id = row
         .try_get::<Option<String>, _>(4)
         .map_err(store_sqlx_error)?;
@@ -673,13 +671,6 @@ fn decode_session_head_meta_row(
         })?;
     let leaf_node_id: Option<String> = row.get(2);
     let checkpoint_ref: Option<String> = row.get(3);
-    let payload: SessionHeadPayload = SessionHeadPayload::decode_for_fleet(
-        std::str::from_utf8(&head_json).map_err(|error| StoreError::StoredDataCorrupt {
-            record_kind: "SessionHeadMeta",
-            message: error.to_string(),
-        })?,
-        fleet,
-    )?;
     Ok(Some(SessionHeadMeta::assemble(
         session_id,
         payload,
@@ -690,6 +681,59 @@ fn decode_session_head_meta_row(
             .transpose()?,
         current_frame_node_id,
     )?))
+}
+
+/// Read a revision's canonical configuration graph in the caller's snapshot.
+pub(crate) async fn load_config_tx(
+    tx: &mut sqlx::PgConnection,
+    reference: Option<&str>,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<SessionHeadPayload, StoreError> {
+    use lash_core_store::checkpoint_graph::{DecodeLimits, GraphDecoder, NodeId, config};
+    let corrupt = |message: String| StoreError::StoredDataCorrupt {
+        record_kind: "SessionHeadMeta",
+        message,
+    };
+    let root = reference
+        .and_then(NodeId::from_hex)
+        .ok_or_else(|| corrupt("revision names a missing config reference".to_owned()))?;
+    let limits = DecodeLimits::within_total(1 << 32);
+    let graph = crate::durable::graph_closure(tx, root, &limits)
+        .await
+        .map_err(config_store_error)?;
+    let value: serde_json::Value =
+        config::load(&mut GraphDecoder::new(&graph, limits), root).map_err(corrupt)?;
+    SessionHeadPayload::decode_for_fleet(&value.to_string(), fleet)
+}
+
+/// Configuration admission and reads preserve database failures as store failures.
+pub(crate) fn config_store_error(
+    error: lash_core_store::checkpoint_graph::GraphRefusal,
+) -> StoreError {
+    use lash_core_store::checkpoint_graph::GraphRefusal;
+    match error {
+        GraphRefusal::Backend(failure)
+            if failure.kind == lash_durable::StoreFailureKind::Contended =>
+        {
+            StoreError::Contended
+        }
+        GraphRefusal::Backend(failure)
+            if failure.kind == lash_durable::StoreFailureKind::Corrupt =>
+        {
+            StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message: failure.message,
+            }
+        }
+        GraphRefusal::Backend(failure) => StoreError::StorageFailure {
+            backend: "postgres",
+            message: failure.message,
+        },
+        error => StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message: error.to_string(),
+        },
+    }
 }
 
 #[cfg(test)]

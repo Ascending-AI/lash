@@ -261,7 +261,7 @@ fn terminal_head(
     .map_err(sqlite_error)?
     .query_row(params![session.as_str(), run.as_str()], |row| {
         Ok((
-            row.get::<_, Option<Vec<u8>>>(0)?,
+            row.get::<_, Option<String>>(0)?,
             row.get::<_, i64>(1)?,
             row.get::<_, Option<String>>(2)?,
             row.get::<_, Option<String>>(3)?,
@@ -273,7 +273,7 @@ fn terminal_head(
     .map(|(head_json, revision, leaf, checkpoint, frame)| {
         crate::codec::assemble_session_head_meta(
             session,
-            head_json.as_deref(),
+            crate::codec::load_config_conn(conn, head_json.as_deref(), fleet)?,
             revision,
             leaf,
             checkpoint,

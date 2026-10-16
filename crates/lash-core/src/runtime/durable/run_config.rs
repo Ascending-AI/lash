@@ -4,7 +4,8 @@
 //! A run resolves its spec once, before its first durable effect, and its
 //! first phase commit records the result: the run's [`ResolvedRun`], spec
 //! included, and the tool surface its latest environment sync installed.
-//! Each is one TurnContent node the PhaseRoot names. A phase stages a node
+//! The run is a field-addressed configuration graph shared with revisions;
+//! the surface is one TurnContent node. The PhaseRoot names both. A phase stages a node
 //! only when it holds something no earlier phase of the turn stored; every
 //! other phase requires the stored node, so a large spec or surface is
 //! written once per turn, and counts against the commit that writes it.
@@ -16,7 +17,8 @@
 
 use std::sync::Arc;
 
-use lash_core_store::checkpoint_graph::NodeId;
+use super::phase_root::ContentText;
+use lash_core_store::checkpoint_graph::{GraphStaging, NodeId, NodeKind, config};
 
 use crate::ResolvedRun;
 
@@ -109,12 +111,9 @@ fn text<T: serde::Serialize + ?Sized>(value: &T, what: &str) -> Result<String, S
 }
 
 impl RecordedRunConfig {
-    /// Stage what `staging` must add of this configuration, as TurnContent
-    /// nodes `encode` writes, and name the nodes an earlier phase stored.
-    pub(super) fn stage(
-        &self,
-        mut encode: impl FnMut(String) -> Result<NodeId, String>,
-    ) -> Result<StagedRunConfig, String> {
+    /// Stage this run as shared configuration objects and its surface as a
+    /// TurnContent node, naming the nodes an earlier phase stored.
+    pub(super) fn stage(&self, staging: &mut GraphStaging) -> Result<StagedRunConfig, String> {
         let mut held = Vec::new();
         let mut stored = RunConfigStored::default();
         let run = match self.run_stored {
@@ -123,7 +122,7 @@ impl RecordedRunConfig {
                 node
             }
             None => {
-                let node = encode(text(&*self.run, "resolved shape")?)?;
+                let node = config::stage(staging, &*self.run)?;
                 stored.run = Some(node);
                 node
             }
@@ -135,7 +134,12 @@ impl RecordedRunConfig {
                 Some(node)
             }
             (Some(surface), None) => {
-                let node = encode(text(&**surface, "tool surface")?)?;
+                let node = staging
+                    .encode_value(
+                        NodeKind::TURN_CONTENT,
+                        &ContentText(text(&**surface, "tool surface")?),
+                    )
+                    .map_err(|error| error.to_string())?;
                 stored.surface = Some(node);
                 Some(node)
             }
@@ -149,13 +153,12 @@ impl RecordedRunConfig {
     }
 
     /// The configuration a PhaseRoot names, read back from its nodes'
-    /// texts, each with the node it is stored as.
+    /// data, each with the node it is stored as.
     pub(super) fn load(
-        run: (NodeId, &str),
+        run: (NodeId, ResolvedRun),
         surface: Option<(NodeId, &str)>,
     ) -> Result<Self, String> {
-        let resolved: ResolvedRun = serde_json::from_str(run.1)
-            .map_err(|error| format!("the run's resolved shape does not decode: {error}"))?;
+        let resolved = run.1;
         let surface = surface
             .map(|(node, text)| {
                 serde_json::from_str::<crate::RecordedSurface>(text)

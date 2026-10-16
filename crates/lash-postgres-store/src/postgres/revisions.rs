@@ -25,13 +25,31 @@ pub(crate) async fn record_revision_tx(
     checkpoint_ref: Option<&str>,
     head_json: &str,
 ) -> Result<(), StoreError> {
-    let config_ref = BlobRef::for_content(head_json.as_bytes());
-    crate::observed_sql::query(session_sql().revisions.insert_config.sql())
-        .bind(config_ref.as_str())
-        .bind(head_json.as_bytes())
-        .execute(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?;
+    let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+        lash_core_store::checkpoint_graph::EncodeBudget::new(
+            lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+        ),
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(head_json).map_err(|error| StoreError::Backend(error.to_string()))?;
+    let root = lash_core_store::checkpoint_graph::config::stage(&mut staging, &value).map_err(
+        |message| StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message,
+        },
+    )?;
+    let config_ref = root.blob_ref();
+    let held: Option<String> =
+        crate::observed_sql::query_scalar(session_sql().revisions.select_config_ref.sql())
+            .bind(session_id.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?;
+    if held.as_deref() != Some(config_ref.as_str()) {
+        crate::durable::install_staged(tx, staging.nodes())
+            .await
+            .map_err(crate::support::config_store_error)?;
+    }
     crate::observed_sql::query(session_sql().revisions.insert.sql())
         .bind(session_id.as_str())
         .bind(head_revision)
@@ -225,7 +243,7 @@ struct RevisionRow {
     head_revision: u64,
     leaf_node_id: Option<String>,
     checkpoint_ref: Option<String>,
-    head_json: Option<Vec<u8>>,
+    config_ref: Option<String>,
 }
 
 impl RevisionRow {
@@ -234,25 +252,13 @@ impl RevisionRow {
     /// since the frame opened is part of what a fork copies. `fleet` is the
     /// store's recorded `F`: the head document admits the `[N-1, N]` reader
     /// window `F` names.
-    fn config(
+    async fn config(
         &self,
+        conn: &mut PgConnection,
         fleet: lash_core_execution::FleetFormat,
     ) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
-        let config = self
-            .head_json
-            .as_deref()
-            .ok_or_else(|| StoreError::StoredDataCorrupt {
-                record_kind: "SessionHeadMeta",
-                message: "revision names a missing config body".to_owned(),
-            })?;
-        let payload: lash_core_execution::store::SessionHeadPayload =
-            SessionHeadPayload::decode_for_fleet(
-                std::str::from_utf8(config).map_err(|error| StoreError::StoredDataCorrupt {
-                    record_kind: "SessionHeadMeta",
-                    message: error.to_string(),
-                })?,
-                fleet,
-            )?;
+        let payload =
+            crate::support::load_config_tx(conn, self.config_ref.as_deref(), fleet).await?;
         Ok(payload.config)
     }
 }
@@ -281,7 +287,8 @@ async fn resolved_pins_tx(
     Ok(resolved)
 }
 
-fn retained_revision(
+async fn retained_revision(
+    conn: &mut PgConnection,
     session_id: &SessionId,
     row: RevisionRow,
     head_revision: u64,
@@ -291,7 +298,7 @@ fn retained_revision(
     Ok(RetainedRevision {
         session_id: session_id.clone(),
         head_revision: row.head_revision,
-        config: row.config(fleet)?,
+        config: row.config(conn, fleet).await?,
         head: row.head_revision == head_revision,
         pinned_by: pins
             .iter()
@@ -339,7 +346,7 @@ impl PostgresStore {
         let row = match i64::try_from(revision) {
             Ok(sql_revision) => crate::observed_sql::query_as::<
                 _,
-                (Option<String>, Option<String>, Option<Vec<u8>>),
+                (Option<String>, Option<String>, Option<String>),
             >(session_sql().revisions.select.sql())
             .bind(session_id.as_str())
             .bind(sql_revision)
@@ -356,17 +363,19 @@ impl PostgresStore {
         let head_revision = head_revision_tx(&mut tx, session_id).await?;
         let pins = resolved_pins_tx(&mut tx, session_id).await?;
         let retained = retained_revision(
+            &mut tx,
             session_id,
             RevisionRow {
                 head_revision: revision,
                 leaf_node_id,
                 checkpoint_ref,
-                head_json,
+                config_ref: head_json,
             },
             head_revision,
             &pins,
             fleet,
-        )?;
+        )
+        .await?;
         crate::observed_sql::control("COMMIT", tx.commit())
             .await
             .map_err(store_sqlx_error)?;
@@ -382,7 +391,7 @@ impl PostgresStore {
         require_session_tx(&mut tx, session_id).await?;
         let rows = crate::observed_sql::query_as::<
             _,
-            (i64, Option<String>, Option<String>, Option<Vec<u8>>),
+            (i64, Option<String>, Option<String>, Option<String>),
         >(session_sql().revisions.select_by_session.sql())
         .bind(session_id.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -394,20 +403,16 @@ impl PostgresStore {
                 head_revision: u64_from_sql("SessionRevision", "head_revision", head_revision)?,
                 leaf_node_id,
                 checkpoint_ref,
-                head_json,
+                config_ref: head_json,
             });
         }
         let head_revision = head_revision_tx(&mut tx, session_id).await?;
         let pins = resolved_pins_tx(&mut tx, session_id).await?;
         let mut revisions = Vec::with_capacity(stored.len());
         for row in stored {
-            revisions.push(retained_revision(
-                session_id,
-                row,
-                head_revision,
-                &pins,
-                fleet,
-            )?);
+            revisions.push(
+                retained_revision(&mut tx, session_id, row, head_revision, &pins, fleet).await?,
+            );
         }
         crate::observed_sql::control("COMMIT", tx.commit())
             .await

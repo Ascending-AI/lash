@@ -521,8 +521,11 @@ its turn checkpoint.
   plugin contributions; no session is activated first. Every phase checkpoint
   (the `PhaseRoot`) names the result, the whole `ResolvedRun` with its spec,
   and the tool surface the run's latest environment sync installed. Each is a
-  content-addressed `TurnContent` node, staged only by the phase that first
-  holds it and counted against that commit's budget. A resume, a lost
+  content-addressed graph: the resolved shape uses field-addressed
+  `ConfigValue` nodes shared with retained revision configurations (FIG-6599),
+  and the tool surface uses a `TurnContent` node. Unchanged objects retain
+  their references, including across one-field run overrides. They are staged
+  only by the phase that first holds them and counted against its budget. A resume, a lost
   acknowledgement and a cancel read the record and resolve nothing. A redeploy
   of the definition, an owner or a renderer, or a changed live tool source,
   never reshapes a committed run. A crash before the first phase commit leaves

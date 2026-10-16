@@ -519,6 +519,13 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "shape": "Enveloped"
     },
     {
+      "bound": 65536,
+      "kind": 43,
+      "name": "ConfigValue",
+      "owner": "Stores",
+      "shape": "Enveloped"
+    },
+    {
       "bound": 4096,
       "kind": 1000,
       "name": "CheckpointRoot",

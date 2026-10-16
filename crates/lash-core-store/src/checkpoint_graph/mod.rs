@@ -40,6 +40,7 @@
 
 pub mod bodies;
 pub mod commit;
+pub mod config;
 pub mod decode;
 pub use lash_checkpoint_encoder::encode;
 pub use lash_checkpoint_encoder::node;

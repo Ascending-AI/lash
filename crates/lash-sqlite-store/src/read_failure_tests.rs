@@ -777,19 +777,24 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         "SessionHeadMeta",
     );
 
-    raw.execute(
-        "UPDATE blobs SET content = ?1 WHERE hash = 'corrupt-config'",
-        params![
-            encode_json(&SessionHeadPayload {
-                session_id: SessionId::from("corrupt"),
-                ..Default::default()
-            })
-            .expect("encode session head")
-            .into_bytes()
-        ],
+    crate::revisions::record_revision_conn(
+        &raw,
+        &session_id,
+        1,
+        None,
+        Some("missing-checkpoint-manifest"),
+        &encode_json(&SessionHeadPayload {
+            session_id: SessionId::from("corrupt"),
+            ..Default::default()
+        })
+        .expect("encode session head"),
     )
-    .expect("install dangling checkpoint reference");
-    raw.execute("UPDATE session_revisions SET checkpoint_ref = 'missing-checkpoint-manifest' WHERE session_id = 'corrupt' AND head_revision = 0", []).expect("dangling checkpoint");
+    .expect("install a valid configuration graph with a dangling checkpoint");
+    raw.execute(
+        "UPDATE session_head SET head_revision = 1 WHERE session_id = 'corrupt'",
+        [],
+    )
+    .expect("publish dangling checkpoint");
     let dangling = store
         .load_session_window(&session_id, WindowSelector::Current)
         .await;

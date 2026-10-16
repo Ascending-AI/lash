@@ -128,11 +128,6 @@ pub(super) static NODES: Entry = Entry::new(
     ],
     Shape::Returning,
 );
-pub(super) static CONFIG: Entry = Entry::new(
-    || &session_sql().revisions.insert_config,
-    &[Ty::Text, Ty::Bytes],
-    Shape::Exec,
-);
 pub(super) static REVISION: Entry = Entry::new(
     || &session_sql().revisions.insert,
     &[Ty::Text, Ty::Int, Ty::Text, Ty::Text, Ty::Text],
@@ -283,6 +278,7 @@ pub(super) enum Refusal {
 /// The facts a head commit is planned on.
 #[derive(Clone, Debug)]
 pub(crate) struct HeadFacts {
+    pub(crate) config_ref: Option<String>,
     /// Whether the session has a head row.
     pub(crate) exists: bool,
     /// The published head's revision: 0 when the session has none.
@@ -337,6 +333,7 @@ impl SessionFacts {
         };
         Some(Self {
             head: HeadFacts {
+                config_ref: row.try_get(first + 6).ok()?,
                 exists: revision.is_some(),
                 revision: u64::try_from(revision.unwrap_or(0)).ok()?,
                 leaf,
@@ -602,7 +599,20 @@ pub(super) fn program(
             },
         },
     };
+    let mut config_staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+        lash_core_store::checkpoint_graph::EncodeBudget::new(
+            lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+        ),
+    );
+    let config_root =
+        lash_core_store::checkpoint_graph::config::stage(&mut config_staging, &meta.payload())
+            .map_err(|message| StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message,
+            })?;
+    let config_ref = config_root.to_hex();
     let after = after_leaf.map(|leaf| HeadFacts {
+        config_ref: Some(config_ref.clone()),
         exists: true,
         revision: plan.next_head_revision(),
         leaf,
@@ -735,18 +745,9 @@ pub(super) fn program(
         );
     }
     // The published head is a retained revision from this commit on.
-    let head_json = crate::support::encode_json(&meta.payload())?;
-    let config_ref = lash_core_execution::BlobRef::for_content(head_json.as_bytes());
-    program.push(
-        Step::any(
-            &CONFIG,
-            vec![
-                text(config_ref.as_str()),
-                Value::Bytes(Some(head_json.into_bytes())),
-            ],
-        ),
-        Refusal::Backstop,
-    );
+    if facts.config_ref.as_deref() != Some(config_ref.as_str()) {
+        program.checkpoint.nodes.extend(config_staging.into_nodes());
+    }
     program.push(
         Step::one(
             &REVISION,
@@ -1171,7 +1172,24 @@ pub(super) async fn read_facts(
             }
         }
     };
+    let config_ref = existing
+        .as_ref()
+        .map(|head| {
+            let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
+                lash_core_store::checkpoint_graph::EncodeBudget::new(
+                    lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
+                ),
+            );
+            lash_core_store::checkpoint_graph::config::stage(&mut staging, &head.payload())
+                .map(|node| node.to_hex())
+                .map_err(|message| StoreError::StoredDataCorrupt {
+                    record_kind: "SessionHeadMeta",
+                    message,
+                })
+        })
+        .transpose()?;
     let head = HeadFacts {
+        config_ref,
         exists: existing.is_some(),
         revision: existing.as_ref().map_or(0, |head| head.head_revision),
         frame: existing
@@ -1369,6 +1387,9 @@ pub(super) async fn apply(
             "the explicit head commit read every fact its plan needs".to_owned(),
         ));
     };
+    super::install_staged(tx, &program.checkpoint.nodes)
+        .await
+        .map_err(crate::support::graph_store_error)?;
     let slots = match super::steps::run_capturing(tx, &program.steps, context)
         .await
         .map_err(super::steps::Failure::into_store)?

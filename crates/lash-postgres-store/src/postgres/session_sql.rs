@@ -116,11 +116,10 @@ lash_store_sql::statements! {
     pub(crate) struct SessionHeadPostgresStatements @ "session_head" {
 
         /// The published head of `?1`, row-locked.
-        select_meta_for_update = "SELECT config.content, head.head_revision, revision.leaf_node_id, revision.checkpoint_ref,
+        select_meta_for_update = "SELECT revision.config_ref, head.head_revision, revision.leaf_node_id, revision.checkpoint_ref,
                 leaf.frame_node_id
          FROM session_head AS head LEFT JOIN session_revisions AS revision
                  ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
-             LEFT JOIN blobs AS config ON config.hash = revision.config_ref
              LEFT JOIN graph_nodes AS leaf
              ON leaf.node_id = revision.leaf_node_id
          WHERE head.session_id = ?1 FOR UPDATE OF head";
@@ -213,13 +212,7 @@ lash_store_sql::statements! {
                     )
              FROM removed_sessions";
 
-        /// The stored head document of `?1`, row-locked, for a test that wants
-        /// to read or rewrite it behind the store's back.
-        select_head_json_for_update = "SELECT config.content FROM session_head AS head
-             JOIN session_revisions AS revision
-               ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
-             LEFT JOIN blobs AS config ON config.hash = revision.config_ref
-             WHERE head.session_id = ?1 FOR UPDATE OF revision";
+
     }
 }
 
@@ -231,9 +224,8 @@ lash_store_sql::statements! {
         /// the fork's own head roots the checkpoint before the row can go.
         /// SQLite reads the same row with the shared statement, under its
         /// single-writer lock.
-        select_for_share = "SELECT revision.leaf_node_id, revision.checkpoint_ref, config.content
+        select_for_share = "SELECT revision.leaf_node_id, revision.checkpoint_ref, revision.config_ref
              FROM session_revisions AS revision
-             LEFT JOIN blobs AS config ON config.hash = revision.config_ref
              WHERE revision.session_id = ?1 AND revision.head_revision = ?2
              FOR SHARE OF revision";
     }

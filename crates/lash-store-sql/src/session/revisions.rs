@@ -26,9 +26,10 @@ pub const INSERT_COLUMNS: &str =
 crate::statements! {
     /// `session_revisions` statements both backends issue verbatim.
     pub struct SessionRevisionStatements @ "session_revision" {
-        /// Store config body `?2` once under its content hash `?1`.
-        insert_config = "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)
-             ON CONFLICT (hash) DO NOTHING";
+        /// The already-held configuration of session `?1`'s current revision.
+        select_config_ref = "SELECT revision.config_ref FROM session_head AS head
+             JOIN session_revisions AS revision USING (session_id, head_revision)
+             WHERE head.session_id = ?1";
 
         /// Record revision `?2` of session `?1`: leaf `?3`, checkpoint root
         /// `?4` and the config reference `?5` it was published with.
@@ -37,9 +38,8 @@ crate::statements! {
              VALUES (?1, ?2, ?3, ?4, ?5)";
 
         /// Revision `?2` of session `?1`, if it is retained.
-        select = "SELECT revision.leaf_node_id, revision.checkpoint_ref, config.content
+        select = "SELECT revision.leaf_node_id, revision.checkpoint_ref, revision.config_ref
              FROM session_revisions AS revision
-             LEFT JOIN blobs AS config ON config.hash = revision.config_ref
              WHERE revision.session_id = ?1 AND revision.head_revision = ?2";
 
         /// The published pointer of session `?1`: its head.
@@ -47,9 +47,8 @@ crate::statements! {
              WHERE session_id = ?1";
 
         /// Every retained revision of session `?1`, oldest first.
-        select_by_session = "SELECT revision.head_revision, revision.leaf_node_id, revision.checkpoint_ref, config.content
+        select_by_session = "SELECT revision.head_revision, revision.leaf_node_id, revision.checkpoint_ref, revision.config_ref
              FROM session_revisions AS revision
-             LEFT JOIN blobs AS config ON config.hash = revision.config_ref
              WHERE revision.session_id = ?1
              ORDER BY revision.head_revision";
 

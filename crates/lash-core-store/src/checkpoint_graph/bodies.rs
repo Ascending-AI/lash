@@ -162,7 +162,8 @@ discriminator! {
 /// Kind 33: a turn phase's checkpoint root. Its checkpoint text is the
 /// phase's JSON without its content, which it names by digest, each a
 /// TurnContent node, ascending; its run's recorded configuration is the
-/// TurnContent nodes of its resolved shape and its installed tool surface.
+/// shared ConfigValue graph of its resolved shape and the TurnContent node
+/// of its installed tool surface.
 /// The integrator owns the text. A phase root owes nothing: the receipt of
 /// a model call whose derivation is owed is its own root
 /// (`turn_phases.answer_ref`), never a field of the phase's.

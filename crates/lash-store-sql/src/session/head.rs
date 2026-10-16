@@ -23,11 +23,10 @@ crate::statements! {
     pub struct SessionHeadStatements @ "session_head" {
 
         /// The published head of `?1`.
-        select_meta = "SELECT config.content, head.head_revision, revision.leaf_node_id, revision.checkpoint_ref,
+        select_meta = "SELECT revision.config_ref, head.head_revision, revision.leaf_node_id, revision.checkpoint_ref,
                     leaf.frame_node_id
              FROM session_head AS head LEFT JOIN session_revisions AS revision
                  ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
-             LEFT JOIN blobs AS config ON config.hash = revision.config_ref
              LEFT JOIN graph_nodes AS leaf
                  ON leaf.node_id = revision.leaf_node_id
              WHERE head.session_id = ?1";
