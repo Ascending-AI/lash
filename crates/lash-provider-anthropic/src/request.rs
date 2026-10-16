@@ -11,13 +11,51 @@ use lash_core::llm::types::LlmMessage;
 use lash_sansio::core_support::Blake3DomainHasher;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct BreakpointAddress {
-    pub(crate) message_index: usize,
-    pub(crate) block_index: usize,
+/// The wire messages of a request, decided before any is built: each
+/// one's source messages, merged in order, and where the request's cache
+/// control lands.
+pub(crate) struct MessagePlan {
+    /// Every unit's members, in order: a source message's index and
+    /// whether it is native feedback.
+    members: Vec<(usize, bool)>,
+    units: Vec<WireUnit>,
+    /// Whether some message carries the cache control.
+    cache_emitted: bool,
 }
 
-type BuiltMessages = (Option<String>, Vec<TemplateJson>, Option<BreakpointAddress>);
+/// One wire message of the `messages` array.
+struct WireUnit {
+    members: std::ops::Range<usize>,
+    role: &'static str,
+    /// How many content blocks its members emit.
+    blocks: usize,
+    cache_at: Option<CacheTarget>,
+}
+
+/// Where a wire message carries the request's cache control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CacheTarget {
+    /// The block a host marked, by its index before results move first.
+    Marked(usize),
+    /// The message's last block: the fallback when nothing is marked.
+    Last,
+}
+
+/// The request-wide wire ids of tool calls and results.
+pub(crate) enum ToolIds {
+    /// Every id is already legal on the wire and is sent as it is.
+    Identity,
+    Mapped(HashMap<String, String>),
+}
+
+impl ToolIds {
+    fn get<'a>(&'a self, id: &'a str) -> Option<&'a str> {
+        match self {
+            Self::Identity => Some(id),
+            Self::Mapped(mapped) => mapped.get(id).map(String::as_str),
+        }
+    }
+}
 
 impl AnthropicProvider {
     fn role_name(role: &LlmRole) -> &'static str {
@@ -55,7 +93,7 @@ impl AnthropicProvider {
     /// empty text block — Anthropic 400s on those).
     fn content_block_value(
         block: &LlmContentBlock,
-        tool_ids: &HashMap<String, String>,
+        tool_ids: &ToolIds,
     ) -> Result<Option<TemplateJson>, LlmTransportError> {
         Ok(match block {
             LlmContentBlock::Attachment { reference } => Some(Self::attachment_block_value(
@@ -118,7 +156,7 @@ impl AnthropicProvider {
     /// The wire shape of a block that can hold no attachment.
     fn plain_block_value(
         block: &LlmContentBlock,
-        tool_ids: &HashMap<String, String>,
+        tool_ids: &ToolIds,
     ) -> Result<Option<Value>, LlmTransportError> {
         match block {
             LlmContentBlock::Text { text, .. } => {
@@ -170,18 +208,24 @@ impl AnthropicProvider {
         }
     }
 
-    fn message_has_content(msg: &LlmMessage) -> bool {
-        msg.blocks.iter().any(|block| match block {
+    /// Whether `block` has a wire form (see [`Self::content_block_value`]).
+    fn block_emits(block: &LlmContentBlock) -> bool {
+        match block {
             LlmContentBlock::Text { text, .. } => !text.trim().is_empty(),
-            LlmContentBlock::Attachment { .. } => true,
-            LlmContentBlock::ToolCall { .. } | LlmContentBlock::ToolResult { .. } => true,
+            LlmContentBlock::Attachment { .. }
+            | LlmContentBlock::ToolCall { .. }
+            | LlmContentBlock::ToolResult { .. } => true,
             LlmContentBlock::Reasoning { text, replay, .. } => {
                 !text.trim().is_empty()
                     || replay
                         .as_ref()
                         .is_some_and(|meta| meta.redacted && meta.signature.is_some())
             }
-        })
+        }
+    }
+
+    fn message_has_content(msg: &LlmMessage) -> bool {
+        msg.blocks.iter().any(Self::block_emits)
     }
 
     fn native_feedback_content(msg: &LlmMessage) -> bool {
@@ -195,8 +239,7 @@ impl AnthropicProvider {
 
     // Judge the emitted neighbors: a tagged fallback is a user block, not
     // part of a native section. Lash has no server-tool-result variant.
-    fn native_feedback_position(req: &LlmRequest, index: usize, out: &[TemplateJson]) -> bool {
-        let before = out.last().and_then(|message| message.str_field("role"));
+    fn native_feedback_position(req: &LlmRequest, index: usize, before: Option<&str>) -> bool {
         let after = req.messages[index + 1..].iter().find(|msg| {
             !Self::native_feedback_content(msg)
                 && (matches!(msg.role, LlmRole::System) || Self::message_has_content(msg))
@@ -205,35 +248,117 @@ impl AnthropicProvider {
             && after.is_none_or(|msg| matches!(msg.role, LlmRole::Assistant))
     }
 
-    /// Build the `messages` array for Anthropic Messages API. Each lash
-    /// `LlmMessage` becomes one wire message; adjacent same-role messages
-    /// get merged to match Anthropic's alternation rules.
-    pub(crate) fn build_messages(
-        &self,
-        req: &LlmRequest,
-    ) -> Result<BuiltMessages, LlmTransportError> {
-        let system_prompt = req.instructions.as_deref().map(str::to_owned);
-        let tool_ids = provider_call_id_map(req)?;
-        let mut out: Vec<TemplateJson> = Vec::new();
+    /// Whether each block `msg` emits is marked for the cache, in order.
+    /// Feedback sent as user content is one tagged text block, marked when
+    /// any of its text was, then its other blocks.
+    fn emitted_marks(msg: &LlmMessage, native: bool) -> impl Iterator<Item = bool> + '_ {
+        let marked = |block: &LlmContentBlock| {
+            matches!(
+                block,
+                LlmContentBlock::Text {
+                    cache_breakpoint: true,
+                    ..
+                }
+            )
+        };
+        let tagged = matches!(msg.role, LlmRole::System) && !native;
+        tagged
+            .then(|| msg.blocks.iter().any(marked))
+            .into_iter()
+            .chain(
+                msg.blocks
+                    .iter()
+                    .filter(move |block| !tagged || !matches!(block, LlmContentBlock::Text { .. }))
+                    .filter(|block| Self::block_emits(block))
+                    .map(marked),
+            )
+    }
+
+    /// Plan the `messages` array. Each lash `LlmMessage` becomes one wire
+    /// message; adjacent same-role messages merge to match Anthropic's
+    /// alternation rules (which keeps replay valid when a reasoning-only
+    /// message precedes a text message from the same role). The cache
+    /// control goes to the last marked block, else to a last user or
+    /// system message's last block.
+    fn plan_messages(req: &LlmRequest, cache_control: bool) -> MessagePlan {
+        let native_capable = req
+            .model
+            .metadata()
+            .capability
+            .native_mid_conversation_system;
+        let mut members = Vec::with_capacity(req.messages.len());
+        let mut units: Vec<WireUnit> = Vec::new();
         let mut breakpoint = None;
         for (index, msg) in req.messages.iter().enumerate() {
-            let feedback = matches!(msg.role, LlmRole::System);
-            let native = Self::native_feedback_content(msg)
-                && req
-                    .model
-                    .metadata()
-                    .capability
-                    .native_mid_conversation_system
-                && Self::native_feedback_position(req, index, &out);
-            let wire_role = if native {
+            let native = native_capable
+                && Self::native_feedback_content(msg)
+                && Self::native_feedback_position(req, index, units.last().map(|unit| unit.role));
+            let role = if native {
                 "system"
             } else {
                 Self::role_name(&msg.role)
             };
-            let mut blocks: Vec<TemplateJson> = Vec::new();
-            let mut marked_block_index = None;
+            let mut count = 0;
+            let mut marked = None;
+            for is_marked in Self::emitted_marks(msg, native) {
+                if is_marked {
+                    marked = Some(count);
+                }
+                count += 1;
+            }
+            if count == 0 {
+                continue;
+            }
+            if units.last().is_none_or(|unit| unit.role != role) {
+                units.push(WireUnit {
+                    members: members.len()..members.len(),
+                    role,
+                    blocks: 0,
+                    cache_at: None,
+                });
+            }
+            let unit_index = units.len() - 1;
+            let unit = &mut units[unit_index];
+            if let Some(marked) = marked {
+                breakpoint = Some((unit_index, unit.blocks + marked));
+            }
+            members.push((index, native));
+            unit.members.end = members.len();
+            unit.blocks += count;
+        }
+        let mut cache_emitted = false;
+        if cache_control {
+            if let Some((unit, block)) = breakpoint {
+                units[unit].cache_at = Some(CacheTarget::Marked(block));
+                cache_emitted = true;
+            } else if let Some(last) = units.last_mut()
+                && matches!(last.role, "user" | "system")
+            {
+                last.cache_at = Some(CacheTarget::Last);
+                cache_emitted = true;
+            }
+        }
+        MessagePlan {
+            members,
+            units,
+            cache_emitted,
+        }
+    }
+
+    /// The wire message of `unit`: its members' blocks, merged, a user
+    /// message's tool results first, and `ctrl` where the plan put it.
+    fn unit_message(
+        req: &LlmRequest,
+        members: &[(usize, bool)],
+        unit: &WireUnit,
+        tool_ids: &ToolIds,
+        ctrl: Option<&Value>,
+    ) -> Result<TemplateJson, LlmTransportError> {
+        let mut blocks: Vec<TemplateJson> = Vec::with_capacity(unit.blocks);
+        for &(index, native) in members {
+            let msg = &req.messages[index];
             let tagged;
-            let source_blocks = if feedback && !native {
+            let source_blocks = if matches!(msg.role, LlmRole::System) && !native {
                 let mut fallback = vec![LlmContentBlock::Text {
                     text: format!(
                         "<runtime_feedback>{}</runtime_feedback>",
@@ -241,15 +366,7 @@ impl AnthropicProvider {
                     )
                     .into(),
                     response_meta: None,
-                    cache_breakpoint: msg.blocks.iter().any(|block| {
-                        matches!(
-                            block,
-                            LlmContentBlock::Text {
-                                cache_breakpoint: true,
-                                ..
-                            }
-                        )
-                    }),
+                    cache_breakpoint: false,
                 }];
                 fallback.extend(
                     msg.blocks
@@ -263,84 +380,89 @@ impl AnthropicProvider {
                 msg.blocks.as_slice()
             };
             for block in source_blocks {
-                if let Some(value) = Self::content_block_value(block, &tool_ids)? {
-                    if matches!(
-                        block,
-                        LlmContentBlock::Text {
-                            cache_breakpoint: true,
-                            ..
-                        }
-                    ) {
-                        marked_block_index = Some(blocks.len());
-                    }
+                if let Some(value) = Self::content_block_value(block, tool_ids)? {
                     blocks.push(value);
                 }
             }
-            if blocks.is_empty() {
-                continue;
-            }
-
-            // Merge with previous turn if same role — keeps replay valid
-            // when a reasoning-only message immediately precedes a text
-            // message from the same role.
-            let message_count = out.len();
-            if let Some(prev) = out.last_mut()
-                && prev.str_field("role") == Some(wire_role)
-                && let Some(prev_content) = prev
-                    .field_mut("content")
-                    .and_then(TemplateJson::as_array_mut)
-            {
-                if let Some(block_index) = marked_block_index {
-                    breakpoint = Some(BreakpointAddress {
-                        message_index: message_count - 1,
-                        block_index: prev_content.len() + block_index,
-                    });
-                }
-                prev_content.extend(blocks);
-                continue;
-            }
-
-            if let Some(block_index) = marked_block_index {
-                breakpoint = Some(BreakpointAddress {
-                    message_index: message_count,
-                    block_index,
-                });
-            }
-            out.push(TemplateJson::object([
-                ("role", json!(wire_role).into()),
-                ("content", blocks.into()),
-            ]));
         }
-
+        let mut target = unit.cache_at;
         // A coalesced user turn may start with feedback injected between a
         // tool call and its results. Anthropic requires every result first.
-        for (message_index, message) in out.iter_mut().enumerate() {
-            if message.str_field("role") != Some("user") {
-                continue;
-            }
-            #[expect(
-                clippy::expect_used,
-                reason = "every message this builder emits carries a `content` array"
-            )]
-            let blocks = message
-                .field_mut("content")
-                .and_then(TemplateJson::as_array_mut)
-                .expect("content blocks");
+        if unit.role == "user" {
             let is_result = |block: &TemplateJson| block.str_field("type") == Some("tool_result");
-            if let Some(address) = breakpoint.as_mut()
-                && address.message_index == message_index
-            {
-                let old = address.block_index;
-                address.block_index = if is_result(&blocks[old]) {
+            if let Some(CacheTarget::Marked(old)) = target {
+                target = Some(CacheTarget::Marked(if is_result(&blocks[old]) {
                     blocks[..old].iter().filter(|b| is_result(b)).count()
                 } else {
                     blocks.iter().filter(|b| is_result(b)).count()
                         + blocks[..old].iter().filter(|b| !is_result(b)).count()
-                };
+                }));
             }
             blocks.sort_by_key(|block| !is_result(block));
         }
-        Ok((system_prompt, out, breakpoint))
+        if let (Some(target), Some(ctrl)) = (target, ctrl) {
+            #[expect(
+                clippy::expect_used,
+                reason = "the plan counted the blocks this message emits"
+            )]
+            let block = match target {
+                CacheTarget::Marked(index) => blocks.get_mut(index),
+                CacheTarget::Last => blocks.last_mut(),
+            }
+            .expect("the planned cache target is a surviving content block");
+            block.set("cache_control", ctrl.clone());
+        }
+        Ok(TemplateJson::object([
+            ("role", json!(unit.role).into()),
+            ("content", blocks.into()),
+        ]))
+    }
+
+    /// Build the `messages` array, each wire message written by `units`:
+    /// reused whole when its members, their native placement, its cache
+    /// control and the wire ids it names are those of a message lowered
+    /// before. Returns whether a message carries `ctrl`.
+    pub(crate) fn build_messages(
+        req: &LlmRequest,
+        ctrl: Option<&Value>,
+        units: &mut UnitWriter<'_>,
+    ) -> Result<(Vec<TemplateJson>, bool), LlmTransportError> {
+        let tool_ids = provider_call_id_map(req)?;
+        let plan = Self::plan_messages(req, ctrl.is_some());
+        let mut messages = Vec::with_capacity(plan.units.len());
+        for unit in &plan.units {
+            let members = &plan.members[unit.members.clone()];
+            messages.extend(units.unit(
+                |mut key| {
+                    for &(index, native) in members {
+                        let msg = &req.messages[index];
+                        key = key.message(msg).u64(u64::from(native));
+                        if let ToolIds::Mapped(_) = tool_ids {
+                            for block in msg.blocks.iter() {
+                                if let LlmContentBlock::ToolCall { call_id, .. }
+                                | LlmContentBlock::ToolResult { call_id, .. } = block
+                                {
+                                    key = key.str(tool_ids.get(call_id).unwrap_or_default());
+                                }
+                            }
+                        }
+                    }
+                    key = key.str(unit.role);
+                    match (unit.cache_at, ctrl) {
+                        (Some(CacheTarget::Marked(index)), Some(ctrl)) => {
+                            key.u64(1).u64(index as u64).str(&ctrl.to_string())
+                        }
+                        (Some(CacheTarget::Last), Some(ctrl)) => key.u64(2).str(&ctrl.to_string()),
+                        _ => key.u64(0),
+                    }
+                },
+                || {
+                    Self::unit_message(req, members, unit, &tool_ids, ctrl)
+                        .map(|message| vec![message])
+                },
+            )?);
+        }
+        Ok((messages, plan.cache_emitted))
     }
 
     fn projection_error(err: SchemaResolutionError) -> LlmTransportError {
@@ -391,19 +513,10 @@ impl AnthropicProvider {
         }
     }
 
-    fn apply_cache_control(
-        &self,
-        cache_retention: CacheRetention,
-        system: &mut Option<Value>,
-        messages: &mut [TemplateJson],
-        tools: &mut [Value],
-        breakpoint: Option<BreakpointAddress>,
-    ) -> bool {
-        let Some(ctrl) = Self::cache_control_value(cache_retention) else {
-            return false;
-        };
+    /// Mark the system prompt and the last tool with `ctrl`. Returns
+    /// whether either carries it.
+    fn apply_cache_control(ctrl: &Value, system: &mut Option<Value>, tools: &mut [Value]) -> bool {
         let mut cache_control_emitted = false;
-
         if let Some(sys) = system
             && let Some(arr) = sys.as_array_mut()
             && let Some(last) = arr.last_mut()
@@ -412,38 +525,10 @@ impl AnthropicProvider {
             last["cache_control"] = ctrl.clone();
             cache_control_emitted = true;
         }
-
-        #[expect(
-            clippy::expect_used,
-            reason = "the address was recorded from `messages` earlier in this call and nothing removes blocks in between"
-        )]
-        if let Some(address) = breakpoint {
-            let block = messages
-                .get_mut(address.message_index)
-                .and_then(|message| message.field_mut("content"))
-                .and_then(TemplateJson::as_array_mut)
-                .and_then(|content| content.get_mut(address.block_index))
-                .expect("breakpoint address points to a surviving content block");
-            block.set("cache_control", ctrl.clone());
-            cache_control_emitted = true;
-        }
-
-        if breakpoint.is_none()
-            && let Some(last_msg) = messages.last_mut()
-            && matches!(last_msg.str_field("role"), Some("user" | "system"))
-            && let Some(content) = last_msg
-                .field_mut("content")
-                .and_then(TemplateJson::as_array_mut)
-            && let Some(last_block) = content.last_mut()
-            && last_block.set("cache_control", ctrl.clone())
-        {
-            cache_control_emitted = true;
-        }
-
         if let Some(last_tool) = tools.last_mut()
             && last_tool.is_object()
         {
-            last_tool["cache_control"] = ctrl;
+            last_tool["cache_control"] = ctrl.clone();
             cache_control_emitted = true;
         }
         cache_control_emitted
@@ -479,15 +564,17 @@ impl AnthropicProvider {
         &self,
         req: &LlmRequest,
     ) -> Result<(Value, GenerationReceipt), LlmTransportError> {
-        self.build_request_tree(req)
+        self.build_request_tree(req, &mut UnitWriter::Plain)
             .map(|(body, receipt)| (body.redacted(), receipt))
     }
 
-    /// The request body and the receipt of the host settings it carries.
-    /// Every refusal happens here, before the caller does any I/O.
+    /// The request body and the receipt of the host settings it carries,
+    /// each wire message written by `units`. Every refusal happens here,
+    /// before the caller does any I/O.
     pub(crate) fn build_request_tree(
         &self,
         req: &LlmRequest,
+        units: &mut UnitWriter<'_>,
     ) -> Result<(TemplateJson, GenerationReceipt), LlmTransportError> {
         let serving_route = self.route_identity(req.model.wire_model());
         let safe_request = req
@@ -527,26 +614,20 @@ impl AnthropicProvider {
             // when resolution asks for the summary.
             emission.thinking_summary = policy.request_thinking_summary;
         }
-        let (system_text, mut messages, breakpoint) = self.build_messages(req)?;
+        // Cache control: mark system, the marked or last user message, and
+        // last tool as ephemeral to benefit from prompt caching.
+        let ctrl = Self::cache_control_value(policy.cache_retention);
+        let (messages, messages_cached) = Self::build_messages(req, ctrl.as_ref(), units)?;
         let mut tools = self.build_tools(req)?;
-
-        let mut system_value: Option<Value> = system_text.map(|text| {
+        let mut system_value: Option<Value> = req.instructions.as_deref().map(|text| {
             json!([{
                 "type": "text",
                 "text": text,
             }])
         });
-
-        // Cache control: mark system, last user message, and last tool as
-        // ephemeral to benefit from prompt caching. Applied before the body
-        // is assembled so we only serialize the final state once.
-        emission.cache = self.apply_cache_control(
-            policy.cache_retention,
-            &mut system_value,
-            &mut messages,
-            &mut tools,
-            breakpoint,
-        );
+        emission.cache = ctrl.as_ref().is_some_and(|ctrl| {
+            Self::apply_cache_control(ctrl, &mut system_value, &mut tools) | messages_cached
+        });
 
         let mut body = json!({
             "model": req.model.wire_model(),
@@ -674,27 +755,33 @@ fn collect_text(blocks: &[LlmContentBlock]) -> String {
 
 /// Look up the request-wide wire ID shared by a tool call and its result.
 fn mapped_tool_call_id<'a>(
-    id: &str,
-    tool_ids: &'a HashMap<String, String>,
+    id: &'a str,
+    tool_ids: &'a ToolIds,
 ) -> Result<&'a str, LlmTransportError> {
-    tool_ids.get(id).map(String::as_str).ok_or_else(|| {
+    tool_ids.get(id).ok_or_else(|| {
         LlmTransportError::new("Anthropic tool identity must not be empty")
             .with_kind(ProviderFailureKind::Validation)
             .with_retry_verdict(TransportRetryVerdict::NotRetryable)
     })
 }
 
-fn provider_call_id_map(req: &LlmRequest) -> Result<HashMap<String, String>, LlmTransportError> {
-    let ids: BTreeSet<&str> = req
-        .messages
-        .iter()
-        .flat_map(|message| message.blocks.iter())
-        .filter_map(|block| match block {
-            LlmContentBlock::ToolCall { call_id, .. }
-            | LlmContentBlock::ToolResult { call_id, .. } => Some(call_id.as_str()),
-            _ => None,
-        })
-        .collect();
+fn provider_call_id_map(req: &LlmRequest) -> Result<ToolIds, LlmTransportError> {
+    let call_ids = || {
+        req.messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                LlmContentBlock::ToolCall { call_id, .. }
+                | LlmContentBlock::ToolResult { call_id, .. } => Some(call_id.as_str()),
+                _ => None,
+            })
+    };
+    // Legal ids are sent as they are; only an illegal one needs the map,
+    // which a mapped id's collision avoidance reads whole.
+    if call_ids().all(legal_tool_call_id) {
+        return Ok(ToolIds::Identity);
+    }
+    let ids: BTreeSet<&str> = call_ids().collect();
     if ids.contains("") {
         return Err(
             LlmTransportError::new("Anthropic tool identity must not be empty")
@@ -733,7 +820,7 @@ fn provider_call_id_map(req: &LlmRequest) -> Result<HashMap<String, String>, Llm
             }
         }
     }
-    Ok(mapped)
+    Ok(ToolIds::Mapped(mapped))
 }
 
 fn legal_tool_call_id(id: &str) -> bool {

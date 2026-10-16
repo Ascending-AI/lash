@@ -184,6 +184,7 @@ impl OpenAiProvider {
             req,
             stream,
             &self.route_identity(req.model.wire_model()),
+            &mut UnitWriter::Plain,
         )
     }
 }
@@ -260,8 +261,9 @@ impl Provider for OpenAiCompatibleProvider {
     async fn lower(
         &mut self,
         req: &LlmRequest,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        lower(self, req, CompletionEndpoint::ChatCompletions).await
+        lower(self, req, CompletionEndpoint::ChatCompletions, cache).await
     }
 
     async fn send(
@@ -338,8 +340,9 @@ impl Provider for OpenAiProvider {
     async fn lower(
         &mut self,
         req: &LlmRequest,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        lower(&self.inner, req, CompletionEndpoint::Responses).await
+        lower(&self.inner, req, CompletionEndpoint::Responses, cache).await
     }
 
     async fn send(
@@ -366,7 +369,7 @@ impl Provider for OpenAiProvider {
             .as_ref()
             .filter(|resume| {
                 resume.request_key.request_id == context.scope.request_id
-                    && responses_request_fingerprint(body) == resume.request_key.fingerprint
+                    && request_fingerprint(body) == resume.request_key.fingerprint
             })
             .map_or(GenerationRetryGuarantee::None, |_| {
                 GenerationRetryGuarantee::Resumable

@@ -245,14 +245,17 @@ call is its run and ordinal, and an owned call (§8) is its owner's execution
 scope and its stable key there, with no turn required. The root also holds
 the call's request template (§6): one content-addressed binary fragment
 index over exact literal segments and ordered attachment slots (FIG-5956),
-rather than a list of the full request's chunks. Fragment boundaries follow groups of eight messages in the top-level
-history array once the current fragment reaches 8 KiB, so appending rewrites
-only a bounded unfinished group. Earlier completed groups remain immutable. The opening envelope rides
-in the first group; the closing envelope stays together. Long rendered history
-strings also split at groups of eight escaped line boundaries within each
-string, once both that string and its current fragment reach 4 KiB. Short
-multiline tool results stay in their message group. A large
-segment splits on UTF-8 boundaries at 32 KiB from its own start. JSON fields
+rather than a list of the full request's chunks. Fragment boundaries follow
+the template's segments (§6, FIG-6443): each history item, with the comma
+before it, is its own fragment, encoded once and kept with the item, so
+appending encodes only the new items and earlier fragments remain immutable.
+Text segments (the envelope, or a body a plugin rewrote as one value) split
+as before: at groups of eight messages in a top-level history array once the
+current fragment reaches 8 KiB, with the opening envelope in the first group
+and the closing envelope together. Long rendered history strings also split
+at groups of eight escaped line boundaries within each string, once both
+that string and its current fragment reach 4 KiB. A large segment splits on
+UTF-8 boundaries at 32 KiB from its own start. JSON fields
 and punctuation within a message are not separate index nodes. Index branches name two children. The canonical tree
 keeps each completed power-of-two prefix subtree unchanged on append, so a
 new call installs only new fragments and logarithmic index paths. Stores
@@ -307,7 +310,13 @@ Before admission the call is prepared once: its prompt is composed, the
 protocol's before-call hook runs, and the provider of its route lowers the
 request to a `RecordedRequestTemplate` (`Provider::lower`): the exact literal
 JSON text it sends, with one `AttachmentSlot` wherever an attachment value
-goes. A slot pins the attachment's ref, its position, the delivery forms the
+goes. The template is a sequence of shared, immutable segments: text, and
+items (each one complete JSON value that stands as an array element, with a
+`,` written between adjacent items). A provider lowers each unit of history
+once and reuses it from the `SegmentCache` it is handed while the messages it
+was lowered from are retained, so an unchanged prefix is not built again;
+the bytes are those a whole lowering writes (FIG-6443,
+`docs/design/provider-body-segments.md`). A slot pins the attachment's ref, its position, the delivery forms the
 route accepts for it (ADR 0135 §2) and the codec, by name and revision, that
 encodes a delivery into the slot. Every slot's ref is acquired under the
 call's owner before the admission commits (ADR 0135 §7).
@@ -315,8 +324,9 @@ call's owner before the admission commits (ADR 0135 §7).
 Each attempt fills the slots and sends. The host store delivers each slot's
 ref in an accepted form (ADR 0135 §3), the provider encodes each delivery
 through the slot's pinned codec (`Provider::encode_slot`), and the provider
-sends the literals with the encoded values in place (`Provider::send`). The
-deliveries live only in that attempt (ADR 0135 §4).
+sends the literals with the encoded values in place (`Provider::send`),
+reading the body's chunks (`LiveRequestBody::wire_chunks`) rather than one
+copied string. The deliveries live only in that attempt (ADR 0135 §4).
 
 `Provider::send` takes the filled body and a `ResponseContext`, and no
 request (FIG-5479). The body is the only statement of what the call asks. A

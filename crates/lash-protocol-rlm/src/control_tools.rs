@@ -715,9 +715,8 @@ mod tests {
         else {
             panic!("expected seed globals event");
         };
-        let Some(RlmProtocolEvent::RlmSeed(seed)) =
-            decode_rlm_protocol_event(protocol_event).expect("valid history fixture")
-        else {
+        let decoded = decode_rlm_protocol_event(protocol_event).expect("valid history fixture");
+        let Some(RlmProtocolEvent::RlmSeed(seed)) = decoded.as_deref() else {
             panic!("expected RlmSeed");
         };
         assert_eq!(seed.globals["x"], json!(1));
@@ -842,9 +841,8 @@ mod tests {
         else {
             panic!("expected seed globals event");
         };
-        let Some(RlmProtocolEvent::RlmSeed(seed)) =
-            decode_rlm_protocol_event(protocol_event).expect("valid history fixture")
-        else {
+        let decoded = decode_rlm_protocol_event(protocol_event).expect("valid history fixture");
+        let Some(RlmProtocolEvent::RlmSeed(seed)) = decoded.as_deref() else {
             panic!("expected RlmSeed");
         };
         assert_eq!(seed.globals.len(), 1, "only `glob` should land as a global");
@@ -908,9 +906,8 @@ mod tests {
         else {
             panic!("expected seed globals event");
         };
-        let Some(RlmProtocolEvent::RlmSeed(seed)) =
-            decode_rlm_protocol_event(protocol_event).expect("valid history fixture")
-        else {
+        let decoded = decode_rlm_protocol_event(protocol_event).expect("valid history fixture");
+        let Some(RlmProtocolEvent::RlmSeed(seed)) = decoded.as_deref() else {
             panic!("expected RlmSeed");
         };
         assert_eq!(

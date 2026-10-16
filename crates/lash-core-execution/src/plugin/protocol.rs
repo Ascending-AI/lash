@@ -104,8 +104,9 @@ pub struct ProtocolSessionRestoreView {
     /// failure. Restore implementations retain responsibility for reporting
     /// that failure.
     pub execution_state: Result<Option<HydratedExecutionGraph>, crate::StoreError>,
-    /// Active history to replay protocol seed and globals events.
-    pub active_events: Vec<crate::SessionHistoryRecord>,
+    /// Active history to replay protocol seed and globals events: the
+    /// session's own records, shared, never copied for a restore.
+    pub active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
     /// Where the session's committed head holds its execution state, when
     /// the caller reads it over a store: a stored-state check looks a
     /// tool's namespace root up in the stored binding tree through these
@@ -160,7 +161,7 @@ impl ProtocolSessionRestoreView {
         Self {
             current_frame_node_id: state.current_frame_node_id.clone(),
             execution_state: state.execution_state_hydration(),
-            active_events: state.read_model().active_events.to_vec(),
+            active_events: state.read_model().active_events.clone(),
             pages: reader.and_then(|reader| reader.session_pages(state)),
         }
     }

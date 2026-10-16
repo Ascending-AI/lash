@@ -646,7 +646,7 @@ mod append_request_identity_tests {
             ancestor: Some("whole-ancestor"),
             node: crate::SessionAppendNode::protocol_event(crate::ProtocolEvent {
                 plugin_id: "whole-protocol".to_string(),
-                payload: serde_json::json!({"event": true}),
+                payload: serde_json::json!({"event": true}).into(),
             }),
             trailing_nodes: [],
         },
@@ -790,7 +790,7 @@ mod append_request_identity_tests {
                 "protocol_event",
                 crate::SessionAppendNode::protocol_event(crate::ProtocolEvent {
                     plugin_id: "protocol-plugin".to_string(),
-                    payload: serde_json::json!({"z": [true, null], "a": "event"}),
+                    payload: serde_json::json!({"z": [true, null], "a": "event"}).into(),
                 }),
             ),
             (

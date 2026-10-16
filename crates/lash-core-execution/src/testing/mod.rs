@@ -320,7 +320,8 @@ pub fn stage_execution_graph(
 
 type CompletionFuture =
     Pin<Box<dyn Future<Output = Result<LlmResponse, LlmTransportError>> + Send>>;
-type CompletionFn = dyn Fn(LlmRequest, String) -> CompletionFuture + Send + Sync;
+/// The handler's request, and the exact wire when the handler reads it.
+type CompletionFn = dyn Fn(LlmRequest, Option<String>) -> CompletionFuture + Send + Sync;
 type AnswerFn =
     dyn Fn(lash_sansio::llm::types::ResponseContext, String) -> CompletionFuture + Send + Sync;
 type TemplateFn =
@@ -343,6 +344,9 @@ pub struct TestProvider {
     /// Optional template builder for admission laws; otherwise canonical refs.
     template: Option<Arc<TemplateFn>>,
     complete: Arc<CompletionFn>,
+    /// Whether `complete` reads the wire: only then does a send write the
+    /// whole body as one string.
+    complete_reads_wire: bool,
     /// Set by [`TestProviderBuilder::answer`]: it answers instead of
     /// `complete`, from the wire and no decoded request.
     answer: Option<Arc<AnswerFn>>,
@@ -389,6 +393,7 @@ impl TestProviderBuilder {
                 serialize_config: Arc::new(empty_provider_config),
                 template: None,
                 answer: None,
+                complete_reads_wire: false,
                 complete: Arc::new(|_request, _body| {
                     Box::pin(async {
                         Err(LlmTransportError::new(
@@ -442,6 +447,7 @@ impl TestProviderBuilder {
         Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
     {
         self.provider.complete = Arc::new(move |request, _body| Box::pin(complete(request)));
+        self.provider.complete_reads_wire = false;
         self
     }
 
@@ -452,7 +458,9 @@ impl TestProviderBuilder {
         F: Fn(LlmRequest, String) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
     {
-        self.provider.complete = Arc::new(move |request, body| Box::pin(send(request, body)));
+        self.provider.complete =
+            Arc::new(move |request, body| Box::pin(send(request, body.unwrap_or_default())));
+        self.provider.complete_reads_wire = true;
         self
     }
 
@@ -488,6 +496,7 @@ impl TestProviderBuilder {
             let message = Arc::clone(&message);
             Box::pin(async move { Err(LlmTransportError::new(message.as_str())) })
         });
+        self.provider.complete_reads_wire = false;
         self
     }
 
@@ -540,12 +549,14 @@ impl Provider for TestProvider {
     async fn lower(
         &mut self,
         request: &LlmRequest,
+        cache: &lash_sansio::llm::types::SegmentCache,
     ) -> Result<lash_sansio::llm::types::RecordedRequestTemplate, LlmTransportError> {
         match &self.template {
             Some(template) => Ok(template(request)),
             None => lash_sansio::llm::types::RecordedRequestTemplate::of_request(
                 self.route_identity(request.model.wire_model()),
                 request,
+                cache,
             )
             .map_err(crate::provider::attachment_wire::template_error),
         }
@@ -557,9 +568,12 @@ impl Provider for TestProvider {
         context: lash_sansio::llm::types::ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError> {
         let answered = match &self.answer {
-            Some(answer) => answer(context, body.wire()).await,
+            Some(answer) => answer(context, body.to_wire_string()).await,
             None => match crate::provider::canonical_request(body, context) {
-                Ok(request) => (self.complete)(request, body.wire()).await,
+                Ok(request) => {
+                    let wire = self.complete_reads_wire.then(|| body.to_wire_string());
+                    (self.complete)(request, wire).await
+                }
                 Err(error) => Err(error),
             },
         };

@@ -140,7 +140,12 @@ async fn url_attachment_calls_stream_deltas_and_provider_traces() {
         req.provider_trace = Some(LlmProviderTraceSender::new(move |event| {
             sink.lock().unwrap().push(event)
         }));
-        let template = Arc::new(provider.lower(&req).await.unwrap());
+        let template = Arc::new(
+            provider
+                .lower(&req, &SegmentCache::disabled())
+                .await
+                .unwrap(),
+        );
         let delivery = Delivery::Url {
             url: DeliverySecret::new(URL.into()),
             valid_until_ms: None,

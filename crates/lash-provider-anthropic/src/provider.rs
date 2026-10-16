@@ -92,13 +92,31 @@ impl Provider for AnthropicProvider {
     async fn lower(
         &mut self,
         req: &LlmRequest,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.validate_route_and_headers(req.model.wire_model())?;
-        let (body, receipt) = self.build_request_tree(req)?;
-        let mut template = lower_attachment_json(
-            |mime, position| self.attachment_accepts(req.model.wire_model(), mime, position),
+        let route = self.route_identity(req.model.wire_model());
+        let accepts =
+            |mime: &lash_sansio::MediaType, position| self.attachment_accepts("", mime, position);
+        // A wire message reads, besides its own messages, the route, the
+        // host's acceptance and this provider's file scope (its slots).
+        let context = segment_context("lash.anthropic.message/1", req, &route)
+            .json(&self.file_scope())
+            .finish();
+        let mut units = UnitWriter::cached(
+            cache,
+            context,
+            accepts,
             req,
-            self.route_identity(req.model.wire_model()),
+            ANTHROPIC_PROVIDER_KIND,
+            crate::attachment_delivery::CODEC,
+        );
+        let (body, receipt) = self.build_request_tree(req, &mut units)?;
+        drop(units);
+        let mut template = lower_attachment_json(
+            accepts,
+            req,
+            route,
             (true, Some(receipt)),
             &body,
             crate::attachment_delivery::CODEC,
@@ -206,7 +224,7 @@ impl AnthropicProvider {
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
 
         let generation_disposition = admitted.generation();
-        let request_body_bytes = admitted.wire().into_bytes();
+        let request_body_bytes = admitted.to_wire_string().into_bytes();
         let redacted = admitted.redacted();
         emit_provider_request_trace(
             provider_trace.as_ref(),

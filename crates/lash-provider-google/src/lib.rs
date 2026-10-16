@@ -31,6 +31,7 @@ mod tests {
     use request_support::{request, request_with_capability};
     mod epilogue;
     mod generation_tests;
+    mod wire_bytes;
     use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
     use lash_sansio::sync::MutexExt;
 

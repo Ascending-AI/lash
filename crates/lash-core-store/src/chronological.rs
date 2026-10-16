@@ -249,7 +249,7 @@ mod tests {
     fn protocol_event(value: &str) -> ProtocolEvent {
         ProtocolEvent {
             plugin_id: "test_protocol".to_string(),
-            payload: serde_json::json!({ "value": value }),
+            payload: serde_json::json!({ "value": value }).into(),
         }
     }
 

@@ -265,7 +265,7 @@ pub fn admission_record(
                     .get(hash)
                     .map(|fragment| fragment.children.clone())
                     .unwrap_or_default(),
-                text: text.clone(),
+                text: text.as_str().into(),
             })
             .collect()
     });
@@ -570,7 +570,7 @@ async fn verified_texts(
         {
             return Err(AdmittedCallLoadError::TextMismatch { hash: stored.hash });
         }
-        texts.insert(BlobRef(stored.hash), stored.text);
+        texts.insert(BlobRef(stored.hash), stored.text.to_string());
     }
     Ok(texts)
 }

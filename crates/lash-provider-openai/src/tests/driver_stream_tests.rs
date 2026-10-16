@@ -941,7 +941,7 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
         .await
         .expect_err("a response id without a sequence cursor remains interrupted");
     let no_sequence_body = no_sequence
-        .lower(&no_sequence_request)
+        .lower(&no_sequence_request, &SegmentCache::disabled())
         .await
         .expect("the request lowers");
     assert_eq!(
@@ -955,7 +955,10 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
 
     let mut chat = openrouter_provider();
     let chat_request = streamed_request(Arc::new(std::sync::Mutex::new(Vec::new())));
-    let chat_body = chat.lower(&chat_request).await.expect("the request lowers");
+    let chat_body = chat
+        .lower(&chat_request, &SegmentCache::disabled())
+        .await
+        .expect("the request lowers");
     assert_eq!(
         chat.generation_retry_guarantee(&ResponseContext::of_request(&chat_request), &chat_body),
         GenerationRetryGuarantee::None,

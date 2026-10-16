@@ -52,12 +52,28 @@ thread_local! {
 /// Read the RLM event a session-history protocol event carries: `None` for
 /// another plugin's event, typed corruption for an unstamped, foreign-format or
 /// undecodable payload. The inverse of [`rlm_protocol_event`].
+///
+/// The event is decoded once per retained payload and shared by every
+/// reader of it: the transcript, the history index and a restore read the
+/// same decode, and a rewritten payload decodes afresh (FIG-6443).
 pub fn decode_rlm_protocol_event(
     event: &lash_core::ProtocolEvent,
-) -> Result<Option<RlmProtocolEvent>, lash_core::StoredDataCorruption> {
+) -> Result<Option<std::sync::Arc<RlmProtocolEvent>>, lash_core::StoredDataCorruption> {
     if event.plugin_id != crate::plugin::RLM_PROTOCOL_PLUGIN_ID {
         return Ok(None);
     }
+    let decoded = event
+        .payload
+        .derived(|payload| DecodedRlmEvent(decode_rlm_payload(payload).map(std::sync::Arc::new)));
+    decoded.0.clone().map(Some)
+}
+
+/// What one retained RLM payload decodes to, kept with the payload.
+struct DecodedRlmEvent(Result<std::sync::Arc<RlmProtocolEvent>, lash_core::StoredDataCorruption>);
+
+fn decode_rlm_payload(
+    payload: &serde_json::Value,
+) -> Result<RlmProtocolEvent, lash_core::StoredDataCorruption> {
     #[cfg(test)]
     EVENT_DECODES.with(|count| count.set(count.get() + 1));
     let corrupt = |message: String| lash_core::StoredDataCorruption {
@@ -68,8 +84,8 @@ pub fn decode_rlm_protocol_event(
     struct Stamp {
         format: u32,
     }
-    let stamp: Stamp = serde::Deserialize::deserialize(&event.payload)
-        .map_err(|error| corrupt(error.to_string()))?;
+    let stamp: Stamp =
+        serde::Deserialize::deserialize(payload).map_err(|error| corrupt(error.to_string()))?;
     if !lash_core::store::upcast_chain_covers(
         lash_core::surface_format!(RLM_PROTOCOL_EVENT_VERSION),
         stamp.format,
@@ -80,9 +96,9 @@ pub fn decode_rlm_protocol_event(
             stamp.format
         )));
     }
-    let envelope: RlmEventEnvelope = serde::Deserialize::deserialize(&event.payload)
-        .map_err(|error| corrupt(error.to_string()))?;
-    Ok(Some(envelope.event))
+    let envelope: RlmEventEnvelope =
+        serde::Deserialize::deserialize(payload).map_err(|error| corrupt(error.to_string()))?;
+    Ok(envelope.event)
 }
 
 #[derive(Clone, Debug)]
@@ -106,7 +122,7 @@ impl RlmHistoryProjection {
     pub(crate) fn from_entries(
         entries: &[lash_core::facade_support::ChronologicalEntry],
     ) -> Result<Self, lash_core::StoredDataCorruption> {
-        let decoder = super::EventCache::default();
+        let decoder = super::EventDecoder;
         let index = super::HistoryIndex::from_owned_entries(entries, &decoder)?;
         let mut history = Vec::with_capacity(entries.len());
         #[cfg(test)]
@@ -326,7 +342,7 @@ mod tests {
         use lash_core::transcript::TranscriptDecoderPlugin as _;
         let foreign = lash_core::ProtocolEvent {
             plugin_id: "foreign".into(),
-            payload: serde_json::json!(null),
+            payload: serde_json::json!(null).into(),
         };
         assert!(
             decode_rlm_protocol_event(&foreign)
@@ -340,7 +356,7 @@ mod tests {
         ] {
             let event = lash_core::ProtocolEvent {
                 plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.into(),
-                payload,
+                payload: payload.into(),
             };
             let error = decode_rlm_protocol_event(&event).expect_err("our corrupt event refuses");
             assert_eq!(error.record_kind, "RLM protocol event");
@@ -421,7 +437,7 @@ mod tests {
                 )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(Box::new(terminal)),
+                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(terminal)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
@@ -441,7 +457,7 @@ mod tests {
                 )),
             ),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(Box::new(retained)),
+                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(retained)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
@@ -520,13 +536,13 @@ mod tests {
                 )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(Box::new(intermediate)),
+                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(intermediate)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),
             )),
             lash_core::SessionHistoryRecord::Protocol(rlm_protocol_event(
-                RlmProtocolEvent::RlmTrajectoryEntry(Box::new(terminal)),
+                RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(terminal)),
                 lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
                     crate::RLM_PROTOCOL_EVENT_VERSION
                 )),

@@ -393,6 +393,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "tokio": "//third-party/rust:p0381"
         },
         "normal": {

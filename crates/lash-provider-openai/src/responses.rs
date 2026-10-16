@@ -21,7 +21,7 @@ impl OpenAiCompatibleProvider {
         stream: bool,
     ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
         let serving_route = self.route_identity(req.model.wire_model());
-        self.build_responses_request_for_route(req, stream, &serving_route)
+        self.build_responses_request_for_route(req, stream, &serving_route, &mut UnitWriter::Plain)
     }
 
     /// What Responses, as this endpoint's compat configures it, can carry.
@@ -43,6 +43,7 @@ impl OpenAiCompatibleProvider {
         req: &LlmRequest,
         stream: bool,
         serving_route: &ProviderRouteIdentity,
+        units: &mut UnitWriter<'_>,
     ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
         let safe_request = req
             .reasoning_retention_safe_for(
@@ -68,7 +69,7 @@ impl OpenAiCompatibleProvider {
         }
         let tools =
             shared::build_tools_with_capabilities(PROVIDER, req, &compat.schema_capabilities)?;
-        let input = shared::build_responses_input(req);
+        let input = shared::build_responses_input(req, units)?;
         let mut body = json!({
             "model": req.model.wire_model(),
             // Set last: the input holds the request's attachment slots.

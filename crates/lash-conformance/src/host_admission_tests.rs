@@ -77,8 +77,9 @@ impl Provider for HostAdmission {
     async fn lower(
         &mut self,
         request: &LlmRequest,
+        cache: &lash_sansio::llm::types::SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        self.inner.lower(request).await
+        self.inner.lower(request, cache).await
     }
     async fn send(
         &mut self,

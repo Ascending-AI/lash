@@ -137,8 +137,9 @@ impl Provider for LoggedProvider {
     async fn lower(
         &mut self,
         request: &LlmRequest,
+        cache: &lash::provider::SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        self.inner.lower(request).await
+        self.inner.lower(request, cache).await
     }
     #[expect(
         clippy::expect_used,

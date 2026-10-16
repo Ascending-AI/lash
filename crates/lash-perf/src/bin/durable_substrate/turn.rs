@@ -552,8 +552,12 @@ impl TurnDrive for BenchDrive {
             endpoint: "https://perf.test/v1".into(),
             model: "scripted".into(),
         };
-        let template = RecordedRequestTemplate::of_request(route, &request)
-            .map_err(|error| TurnError::Exec(error.to_string()))?;
+        let template = RecordedRequestTemplate::of_request(
+            route,
+            &request,
+            &lash_sansio::llm::types::SegmentCache::disabled(),
+        )
+        .map_err(|error| TurnError::Exec(error.to_string()))?;
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request,
             prompt: None,

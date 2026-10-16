@@ -657,7 +657,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
     };
     let text = |hash: &str| PromptText {
         hash: hash.to_owned(),
-        text: format!("text of {hash}"),
+        text: format!("text of {hash}").into(),
         children: Vec::new(),
     };
     let record = |call: PromptCallKey, hashes: &[&str]| {

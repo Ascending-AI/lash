@@ -52,7 +52,7 @@ impl Provider for RejectOnceProvider {
     ) -> Result<LlmResponse, LlmTransportError> {
         let first = {
             let mut wires = self.wires.lock_recover();
-            wires.push(body.wire());
+            wires.push(body.to_wire_string());
             wires.len() == 1
         };
         if first {
@@ -430,7 +430,7 @@ async fn inline_deliveries_refuse_content_length_acceptance_and_budget_mismatche
 async fn canonical_call_recovers_the_admitted_slots_without_a_second_backend_read() {
     use crate::provider::{AttachmentReadPolicy, canonical_call};
     use lash_sansio::llm::attachment_delivery::{DeliveryForms, ProviderFileScope};
-    use lash_sansio::llm::types::RequestSegment;
+    use lash_sansio::llm::types::SegmentCache;
     let reference = inline_reference(b"abc");
     let scope = ProviderFileScope {
         provider: "slots".into(),
@@ -472,15 +472,10 @@ async fn canonical_call_recovers_the_admitted_slots_without_a_second_backend_rea
             }],
         }],
     });
-    let template = RecordedRequestTemplate::of_request(slot_route(), &request).unwrap();
-    let mut segments = template.segments().to_vec();
-    for segment in &mut segments {
-        if let RequestSegment::Attachment { slot } = segment {
-            slot.accepts.provider_file = Some(scope.clone());
-        }
-    }
     let template = Arc::new(
-        RecordedRequestTemplate::from_segments(slot_route(), false, None, segments.clone())
+        RecordedRequestTemplate::of_request(slot_route(), &request, &SegmentCache::disabled())
+            .unwrap()
+            .map_slots(|slot| slot.accepts.provider_file = Some(scope.clone()))
             .unwrap(),
     );
     let live_values = [
@@ -589,16 +584,14 @@ async fn canonical_call_recovers_the_admitted_slots_without_a_second_backend_rea
         .is_err()
     );
     for foreign in [true, false] {
-        let mut invalid_segments = segments.clone();
-        if foreign {
-            for segment in &mut invalid_segments {
-                if let RequestSegment::Attachment { slot } = segment {
-                    slot.codec.name = "host.foreign".into();
-                }
-            }
-        }
         let invalid_template = Arc::new(
-            RecordedRequestTemplate::from_segments(slot_route(), false, None, invalid_segments)
+            (*template)
+                .clone()
+                .map_slots(|slot| {
+                    if foreign {
+                        slot.codec.name = "host.foreign".into();
+                    }
+                })
                 .unwrap(),
         );
         let invalid_values = invalid_template

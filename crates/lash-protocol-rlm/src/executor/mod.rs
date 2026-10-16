@@ -63,7 +63,7 @@ use crate::projection::CodeModeProjectedBindings;
 /// What a cell needs of the session that runs it, beside its state.
 #[derive(Clone)]
 pub(crate) struct CellServices {
-    pub events: Arc<crate::projection::EventCache>,
+    pub events: Arc<crate::projection::EventDecoder>,
     /// The workers that lower the cell and host its machine.
     pub workers: lash_vm_client::service::Service,
     pub execution_bounds: crate::plugin::ExecutionBounds,

@@ -1,7 +1,7 @@
 use crate::responses_shared as shared;
 use crate::support::*;
 use lash_core::facade_support::{ModelToolReturnPart, SchemaResolutionRequest, resolve_schema};
-use lash_core::llm::types::ExecutionEvidenceMergeError;
+use lash_core::llm::types::{ExecutionEvidenceMergeError, LlmMessage};
 use lash_llm_transport::tool_result_text;
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::borrow::Cow;
@@ -14,6 +14,27 @@ pub(crate) struct CacheBreakpointDiagnostics {
     pub(crate) emitted: usize,
     pub(crate) dropped: usize,
     pub(crate) cache_control_emitted: bool,
+}
+
+/// Where a Chat Completions body carries the request's cache control.
+#[derive(Default)]
+struct ChatCachePlan {
+    ctrl: Option<Value>,
+    /// Whether the instruction message carries it.
+    instructions: bool,
+    target: Option<ChatCacheTarget>,
+}
+
+/// The message part that carries the cache control besides the
+/// instruction message and the last tool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChatCacheTarget {
+    /// The last marked text part of the source message at this index.
+    Marked(usize),
+    /// The last text part of the source message at this index.
+    LastText(usize),
+    /// The instruction message's text: no history message has text.
+    Instructions,
 }
 
 impl OpenAiCompatibleProvider {
@@ -44,13 +65,91 @@ impl OpenAiCompatibleProvider {
         ])
     }
 
-    fn build_chat_messages(req: &LlmRequest) -> Vec<TemplateJson> {
+    /// Build the `messages` array: the instruction message, then the
+    /// history, each group of messages written by `units`.
+    ///
+    /// A group starts at an assistant message, which ends the feedback a
+    /// tool message is placed before, so a group's wire messages are the
+    /// same alone as within the whole array, and a group lowered before,
+    /// with the same cache control, is reused whole.
+    fn build_chat_messages(
+        req: &LlmRequest,
+        cache: &ChatCachePlan,
+        units: &mut UnitWriter<'_>,
+    ) -> Result<Vec<TemplateJson>, LlmTransportError> {
         let mut messages: Vec<TemplateJson> = Vec::new();
         if let Some(instructions) = &req.instructions {
-            messages.push(json!({"role": req.model.metadata().capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}).into());
+            let mut message: TemplateJson = json!({"role": req.model.metadata().capability.instruction_role.as_str(), "content": [{"type": "text", "text": instructions}]}).into();
+            if let Some(ctrl) = &cache.ctrl
+                && (cache.instructions || cache.target == Some(ChatCacheTarget::Instructions))
+            {
+                Self::add_cache_control_to_text_content(&mut message, ctrl);
+            }
+            messages.push(message);
         }
+        let mut start = 0;
+        for end in 1..=req.messages.len() {
+            if end < req.messages.len() && !matches!(req.messages[end].role, LlmRole::Assistant) {
+                continue;
+            }
+            let group = start..end;
+            let target = match cache.target {
+                Some(ChatCacheTarget::Marked(index)) if group.contains(&index) => {
+                    Some((index, true))
+                }
+                Some(ChatCacheTarget::LastText(index)) if group.contains(&index) => {
+                    Some((index, false))
+                }
+                _ => None,
+            };
+            messages.extend(units.unit(
+                |key| {
+                    let key = req.messages[group.clone()]
+                        .iter()
+                        .fold(key, |key, msg| key.message(msg));
+                    match (target, &cache.ctrl) {
+                        (Some((index, marked)), Some(ctrl)) => key
+                            .u64((index - group.start) as u64)
+                            .u64(u64::from(marked))
+                            .str(&ctrl.to_string()),
+                        _ => key.u64(u64::MAX),
+                    }
+                },
+                || {
+                    Ok(Self::build_chat_group(
+                        req,
+                        group.clone(),
+                        target,
+                        cache.ctrl.as_ref(),
+                    ))
+                },
+            )?);
+            start = end;
+        }
+        Ok(messages)
+    }
+
+    /// The wire messages of the source messages in `group`, the one at
+    /// `target` carrying `ctrl`: on its last marked text part, or on its
+    /// last text part.
+    fn build_chat_group(
+        req: &LlmRequest,
+        group: std::ops::Range<usize>,
+        target: Option<(usize, bool)>,
+        ctrl: Option<&Value>,
+    ) -> Vec<TemplateJson> {
+        let mut messages: Vec<TemplateJson> = Vec::new();
         let mut feedback_start = None;
-        for msg in &req.messages {
+        for (index, msg) in req
+            .messages
+            .iter()
+            .enumerate()
+            .skip(group.start)
+            .take(group.len())
+        {
+            let target = target
+                .filter(|(at, _)| *at == index)
+                .and_then(|(_, marked)| Some((marked, ctrl?)));
             shared::feedback_boundary(msg, messages.len(), &mut feedback_start);
             let fallback = shared::attachment_feedback(msg);
             let msg = fallback.as_ref().unwrap_or(msg);
@@ -74,6 +173,7 @@ impl OpenAiCompatibleProvider {
                             cache_breakpoint: true,
                             ..
                         } = block
+                            && matches!(target, Some((true, _)))
                         {
                             part["__lash_cache_breakpoint"] = json!(true);
                         }
@@ -180,6 +280,21 @@ impl OpenAiCompatibleProvider {
                 if !text_parts.is_empty() {
                     wire_message.set("content", text_parts);
                 }
+                match target {
+                    Some((true, ctrl)) => {
+                        Self::add_cache_control_to_marked_text_content(&mut wire_message, ctrl);
+                        // Only the last marked part carries the control.
+                        if let Some(parts) = Self::content_parts(&mut wire_message) {
+                            for part in parts {
+                                part.remove("__lash_cache_breakpoint");
+                            }
+                        }
+                    }
+                    Some((false, ctrl)) => {
+                        Self::add_cache_control_to_text_content(&mut wire_message, ctrl);
+                    }
+                    None => {}
+                }
                 messages.push(wire_message);
             }
         }
@@ -262,22 +377,47 @@ impl OpenAiCompatibleProvider {
         false
     }
 
-    fn strip_internal_cache_markers(messages: &mut [TemplateJson]) {
-        for message in messages {
-            if let Some(parts) = Self::content_parts(message) {
-                for part in parts {
-                    part.remove("__lash_cache_breakpoint");
+    /// Whether `msg`'s wire message has a marked text part, and whether it
+    /// has a text part at all. Feedback carrying attachments is one tagged
+    /// text part, marked when any of its text was.
+    fn chat_text_parts(msg: &LlmMessage) -> (bool, bool) {
+        let marked = |block: &LlmContentBlock| {
+            matches!(
+                block,
+                LlmContentBlock::Text {
+                    cache_breakpoint: true,
+                    ..
                 }
-            }
+            )
+        };
+        if matches!(msg.role, LlmRole::System)
+            && msg
+                .blocks
+                .iter()
+                .any(|block| matches!(block, LlmContentBlock::Attachment { .. }))
+        {
+            return (msg.blocks.iter().any(marked), true);
         }
+        let text = |block: &LlmContentBlock| matches!(block, LlmContentBlock::Text { text, .. } if !text.is_empty());
+        (
+            msg.blocks.iter().any(|block| text(block) && marked(block)),
+            msg.blocks.iter().any(|block| {
+                text(block)
+                    || matches!(block, LlmContentBlock::ToolResult { content, .. }
+                        if content.iter().any(|part| part.attachment().is_some()))
+            }),
+        )
     }
 
-    fn apply_chat_cache_control(
+    /// Where the request's cache control goes, decided before any message
+    /// is built: the last marked text part, else the last text part of a
+    /// message, the instruction message's included; and, except in the
+    /// Gemini dialect, the instruction message and the last tool too.
+    fn plan_chat_cache_control(
         req: &LlmRequest,
         cache_retention: CacheRetention,
-        messages: &mut [TemplateJson],
         tools: &mut [Value],
-    ) -> CacheBreakpointDiagnostics {
+    ) -> (ChatCachePlan, CacheBreakpointDiagnostics) {
         let requested = req
             .messages
             .iter()
@@ -292,91 +432,60 @@ impl OpenAiCompatibleProvider {
                 )
             })
             .count();
-        let Some(dialect) = req.model.metadata().capability.cache_control else {
-            Self::strip_internal_cache_markers(messages);
-            return CacheBreakpointDiagnostics {
+        let unplanned = (
+            ChatCachePlan::default(),
+            CacheBreakpointDiagnostics {
                 requested,
                 emitted: 0,
                 dropped: requested,
                 cache_control_emitted: false,
-            };
+            },
+        );
+        let Some(dialect) = req.model.metadata().capability.cache_control else {
+            return unplanned;
         };
         let extended_ttl = matches!(dialect, CacheControlDialect::Anthropic);
         let Some(cache_control) = Self::chat_cache_control_value(cache_retention, extended_ttl)
         else {
-            Self::strip_internal_cache_markers(messages);
-            return CacheBreakpointDiagnostics {
-                requested,
-                emitted: 0,
-                dropped: requested,
-                cache_control_emitted: false,
-            };
+            return unplanned;
         };
-
-        if matches!(dialect, CacheControlDialect::Gemini) {
-            let applied_explicit_breakpoint = messages.iter_mut().rev().any(|message| {
-                Self::add_cache_control_to_marked_text_content(message, &cache_control)
-            });
-            let fallback_emitted = !applied_explicit_breakpoint
-                && messages.iter_mut().rev().any(|message| {
-                    matches!(
-                        message.str_field("role"),
-                        Some("user" | "assistant" | "system" | "developer")
-                    ) && Self::add_cache_control_to_text_content(message, &cache_control)
-                });
-            Self::strip_internal_cache_markers(messages);
-            let emitted = usize::from(applied_explicit_breakpoint);
-            return CacheBreakpointDiagnostics {
-                requested,
-                emitted,
-                dropped: requested.saturating_sub(emitted),
-                cache_control_emitted: applied_explicit_breakpoint || fallback_emitted,
-            };
-        }
-
-        let mut cache_control_emitted = false;
-        if req.instructions.is_some()
-            && let Some(message) = messages.first_mut()
-        {
-            cache_control_emitted |=
-                Self::add_cache_control_to_text_content(message, &cache_control);
-        }
-        if let Some(last_tool) = tools.last_mut() {
+        let gemini = matches!(dialect, CacheControlDialect::Gemini);
+        let marked = req
+            .messages
+            .iter()
+            .rposition(|message| Self::chat_text_parts(message).0);
+        let target = match marked {
+            Some(index) => Some(ChatCacheTarget::Marked(index)),
+            None => req
+                .messages
+                .iter()
+                .rposition(|message| Self::chat_text_parts(message).1)
+                .map(ChatCacheTarget::LastText)
+                .or(req
+                    .instructions
+                    .is_some()
+                    .then_some(ChatCacheTarget::Instructions)),
+        };
+        let instructions = !gemini && req.instructions.is_some();
+        let mut cache_control_emitted = target.is_some() || instructions;
+        if !gemini && let Some(last_tool) = tools.last_mut() {
             last_tool["cache_control"] = cache_control.clone();
             cache_control_emitted = true;
         }
-        let mut applied_explicit_breakpoint = false;
-        for message in messages.iter_mut().rev() {
-            if matches!(
-                message.str_field("role"),
-                Some("user" | "assistant" | "system" | "developer")
-            ) && Self::add_cache_control_to_marked_text_content(message, &cache_control)
-            {
-                applied_explicit_breakpoint = true;
-                cache_control_emitted = true;
-                break;
-            }
-        }
-        if !applied_explicit_breakpoint {
-            for message in messages.iter_mut().rev() {
-                if matches!(
-                    message.str_field("role"),
-                    Some("user" | "assistant" | "system" | "developer")
-                ) && Self::add_cache_control_to_text_content(message, &cache_control)
-                {
-                    cache_control_emitted = true;
-                    break;
-                }
-            }
-        }
-        Self::strip_internal_cache_markers(messages);
-        let emitted = usize::from(applied_explicit_breakpoint);
-        CacheBreakpointDiagnostics {
-            requested,
-            emitted,
-            dropped: requested.saturating_sub(emitted),
-            cache_control_emitted,
-        }
+        let emitted = usize::from(marked.is_some());
+        (
+            ChatCachePlan {
+                ctrl: Some(cache_control),
+                instructions,
+                target,
+            },
+            CacheBreakpointDiagnostics {
+                requested,
+                emitted,
+                dropped: requested.saturating_sub(emitted),
+                cache_control_emitted,
+            },
+        )
     }
 
     #[cfg(test)]
@@ -387,6 +496,16 @@ impl OpenAiCompatibleProvider {
     ) -> Result<Value, LlmTransportError> {
         self.build_chat_request_body_with_diagnostics(req, stream)
             .map(|(built, _)| built.body.redacted())
+    }
+
+    /// [`Self::build_chat_request`] with every message built as JSON.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn build_chat_request_body_with_diagnostics(
+        &self,
+        req: &LlmRequest,
+        stream: bool,
+    ) -> Result<(BuiltRequest<TemplateJson>, CacheBreakpointDiagnostics), LlmTransportError> {
+        self.build_chat_request(req, stream, &mut UnitWriter::Plain)
     }
 
     /// What Chat Completions, as this endpoint's compat configures it, can
@@ -406,10 +525,13 @@ impl OpenAiCompatibleProvider {
         }
     }
 
-    pub(crate) fn build_chat_request_body_with_diagnostics(
+    /// The Chat Completions body and the diagnostics of its cache
+    /// breakpoints, each group of history messages written by `units`.
+    pub(crate) fn build_chat_request(
         &self,
         req: &LlmRequest,
         stream: bool,
+        units: &mut UnitWriter<'_>,
     ) -> Result<(BuiltRequest<TemplateJson>, CacheBreakpointDiagnostics), LlmTransportError> {
         let serving_route = self.route_identity(req.model.wire_model());
         let safe_request = req
@@ -444,10 +566,10 @@ impl OpenAiCompatibleProvider {
             )?;
             emission.reasoning = true;
         }
-        let mut messages = Self::build_chat_messages(req);
         let mut tools = Self::build_chat_tools(req, &compat.schema_capabilities)?;
-        let cache_diagnostics =
-            Self::apply_chat_cache_control(req, policy.cache_retention, &mut messages, &mut tools);
+        let (cache_plan, cache_diagnostics) =
+            Self::plan_chat_cache_control(req, policy.cache_retention, &mut tools);
+        let messages = Self::build_chat_messages(req, &cache_plan, units)?;
         emission.cache = cache_diagnostics.cache_control_emitted;
         let mut body = json!({
             "model": req.model.wire_model(),

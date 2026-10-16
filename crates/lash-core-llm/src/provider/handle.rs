@@ -51,6 +51,11 @@ pub struct ProviderComponents {
     pub provider: Box<dyn Provider>,
     pub failure_classifier: Arc<dyn ProviderFailureClassifier>,
     pub rate_limiter: Arc<ProviderRateLimiter>,
+    /// What the provider lowered for earlier calls, reused by the next
+    /// ([`Provider::lower`]). Shared across clones of this bundle, like its
+    /// limiter: one session's calls, and a resumed call, reuse each other's
+    /// unchanged history.
+    pub segment_cache: SegmentCache,
 }
 
 impl ProviderComponents {
@@ -59,7 +64,15 @@ impl ProviderComponents {
             provider,
             failure_classifier: Arc::new(DefaultProviderFailureClassifier),
             rate_limiter: Arc::new(ProviderRateLimiter::new()),
+            segment_cache: SegmentCache::new(),
         }
+    }
+
+    /// Lower through `cache` instead: a host that bounds or shares reuse
+    /// across bundles, or turns it off ([`SegmentCache::disabled`]).
+    pub fn with_segment_cache(mut self, cache: SegmentCache) -> Self {
+        self.segment_cache = cache;
+        self
     }
 
     pub fn map_provider(
@@ -90,6 +103,7 @@ impl Clone for ProviderComponents {
             provider: self.provider.clone_boxed(),
             failure_classifier: Arc::clone(&self.failure_classifier),
             rate_limiter: Arc::clone(&self.rate_limiter),
+            segment_cache: self.segment_cache.clone(),
         }
     }
 }
@@ -231,10 +245,16 @@ impl ProviderHandle {
                 .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
                 .with_retry_verdict(TransportRetryVerdict::Forbidden)
         })?;
-        let lowered =
-            std::panic::AssertUnwindSafe(async { self.components.provider.lower(request).await })
-                .catch_unwind()
-                .await;
+        let lowered = std::panic::AssertUnwindSafe(async {
+            let ProviderComponents {
+                provider,
+                segment_cache,
+                ..
+            } = &mut self.components;
+            provider.lower(request, segment_cache).await
+        })
+        .catch_unwind()
+        .await;
         let template = match lowered {
             Ok(lowered) => {
                 lowered.map_err(|failure| self.components.failure_classifier.classify(failure))?

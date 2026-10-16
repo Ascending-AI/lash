@@ -739,7 +739,12 @@ mod facade_settings {
             let request = request();
             // Lower before the timed send: this law checks transport ceilings,
             // not whether the blocking pool can schedule preparation in 7 ms.
-            let template = Arc::new(provider.lower(&request).await.unwrap());
+            let template = Arc::new(
+                provider
+                    .lower(&request, &lash_sansio::llm::types::SegmentCache::disabled())
+                    .await
+                    .unwrap(),
+            );
             let body = LiveRequestBody::fill(template, Vec::new()).unwrap();
             let result = provider
                 .send(&body, ResponseContext::of_request(&request))
@@ -837,7 +842,13 @@ mod facade_settings {
         }
         use futures_util::FutureExt as _;
         let mut unrestricted = crate::testing::TestProvider::builder().build();
-        let template = unrestricted.lower(&request()).await.unwrap();
+        let template = unrestricted
+            .lower(
+                &request(),
+                &lash_sansio::llm::types::SegmentCache::disabled(),
+            )
+            .await
+            .unwrap();
         let limiter = crate::provider::ProviderRateLimiter::new();
         for _ in 0..2 {
             assert!(
@@ -864,7 +875,13 @@ mod facade_settings {
                 })
                 .build();
             let limiter = crate::provider::ProviderRateLimiter::new();
-            let template = provider.lower(&request()).await.unwrap();
+            let template = provider
+                .lower(
+                    &request(),
+                    &lash_sansio::llm::types::SegmentCache::disabled(),
+                )
+                .await
+                .unwrap();
             let start = Instant::now();
             drop(limiter.admit(&provider, &template).await);
             drop(
@@ -1051,6 +1068,7 @@ impl lash_core::provider::Provider for RefusedLower {
     async fn lower(
         &mut self,
         _request: &LlmRequest,
+        _cache: &lash_sansio::llm::types::SegmentCache,
     ) -> std::result::Result<lash_sansio::llm::types::RecordedRequestTemplate, LlmTransportError>
     {
         Err(LlmTransportError::new("request cannot be lowered")

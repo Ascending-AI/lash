@@ -29,6 +29,7 @@ pub(crate) use lash_sansio::{
 pub(crate) fn recorded_rlm_event(event: &lash_core::ProtocolEvent) -> Option<RlmProtocolEvent> {
     lash_protocol_rlm::decode_rlm_protocol_event(event)
         .unwrap_or_else(|error| panic!("recorded RLM event is corrupt: {error:?}"))
+        .map(|event| RlmProtocolEvent::clone(&event))
 }
 
 pub(crate) fn test_config() -> TurnMachineConfig {
@@ -184,7 +185,9 @@ pub(crate) fn machine_trajectory(machine: &TurnMachine) -> Vec<CellRecord> {
         .iter()
         .filter_map(|event| match event {
             lash_core::SessionHistoryRecord::Protocol(event) => match recorded_rlm_event(event) {
-                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) => Some(*entry),
+                Some(RlmProtocolEvent::RlmTrajectoryEntry(entry)) => {
+                    Some(CellRecord::clone(&entry))
+                }
                 _ => None,
             },
             _ => None,

@@ -879,7 +879,7 @@ fn rlm_contract_events(
                 ))
             })?
         {
-            events.push(event);
+            events.push(RlmProtocolEvent::clone(&event));
         }
     }
     Ok(events)

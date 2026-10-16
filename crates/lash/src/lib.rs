@@ -1486,12 +1486,19 @@ pub mod provider {
     /// The admitted request template and the transient body filled for one attempt
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
     pub use lash_sansio::llm::types::{
-        AttachmentSlot, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
-        RequestTemplateBuilder, SlotCodec, TemplateError, TemplateJson, TransientJson,
+        AttachmentSlot, BodyPart, LiveRequestBody, LoweredItem, RecordedRequestTemplate,
+        RequestSegment, RequestTemplateBuilder, SegmentKind, SegmentPart, SlotCodec, TemplateError,
+        TemplateJson, TransientJson, WireChunk,
     };
     pub use lash_sansio::llm::types::{
         LlmProviderTraceDirection, LlmProviderTraceEvent, LlmProviderTraceSender,
         ProviderReasoningRetentionSupport,
+    };
+    /// Reuse of what a provider lowered before: each unit of history by the
+    /// identity of the messages it was lowered from (FIG-6443).
+    pub use lash_sansio::llm::types::{
+        LoweredUnit, SEGMENT_CACHE_BUDGET_BYTES, SegmentCache, SegmentCacheStats, SegmentContext,
+        SegmentContextKey, SegmentKey,
     };
     /// What a provider's `send` reads its response under, beside the body:
     /// the call's scope, its recorded contract and the send's live senders.

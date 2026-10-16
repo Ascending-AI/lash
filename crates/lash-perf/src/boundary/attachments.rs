@@ -6,8 +6,8 @@ use lash_core::attachments::{
 };
 use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
 use lash_core::llm::types::{
-    LiveRequestBody, LlmRequest, LlmResponse, RecordedRequestTemplate, RequestSegment,
-    ResponseContext,
+    LiveRequestBody, LlmRequest, LlmResponse, RecordedRequestTemplate, ResponseContext,
+    SegmentCache,
 };
 use lash_core::provider::{Provider, ProviderComponents, ProviderHandle, ProviderOptions};
 use lash_core::{
@@ -191,29 +191,23 @@ impl Provider for WireProvider {
     async fn lower(
         &mut self,
         request: &LlmRequest,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         let start = Instant::now();
-        let template = RecordedRequestTemplate::of_request(
+        let result = RecordedRequestTemplate::of_request(
             self.route_identity(request.model.wire_model()),
             request,
+            cache,
         )
-        .map_err(lash_core::provider::attachment_wire::template_error)?;
-        let mut segments = template.segments().to_vec();
-        for segment in &mut segments {
-            if let RequestSegment::Attachment { slot } = segment {
+        .and_then(|template| {
+            template.map_slots(|slot| {
                 slot.accepts = ProviderAccepts {
                     bytes: false,
                     url: false,
                     provider_file: Some(scope()),
                 };
-            }
-        }
-        let result = RecordedRequestTemplate::from_segments(
-            template.route.clone(),
-            template.stream(),
-            template.generation,
-            segments,
-        )
+            })
+        })
         .map_err(lash_core::provider::attachment_wire::template_error);
         self.meter.operation(
             "attachment.template.lower",

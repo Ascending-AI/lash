@@ -7,6 +7,7 @@ use lash_core::attachments::{
     AttachmentStore, ProviderFileCacheLimits, ProviderFileDelivery, RuntimeAttachmentStore,
 };
 use lash_core::facade_support::LlmTransportError;
+use lash_core::llm::types::SegmentCache;
 use lash_core::llm::types::{AdmittedSend, LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::provider::{
     Provider, ProviderHandle, ProviderOptions, ProviderReliability, ProviderToken,
@@ -139,7 +140,12 @@ async fn call(
         )],
         ..request
     };
-    let template = Arc::new(provider.lower(&request).await.unwrap());
+    let template = Arc::new(
+        provider
+            .lower(&request, &SegmentCache::disabled())
+            .await
+            .unwrap(),
+    );
     assert!(
         template
             .slots()

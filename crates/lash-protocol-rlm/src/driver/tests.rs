@@ -20,7 +20,7 @@ fn user_event(id: &str, text: &str) -> SessionHistoryRecord {
 
 fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(CellRecord {
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
             id: format!("lash_vm_step_{protocol_iteration}"),
@@ -50,7 +50,7 @@ fn terminal_step_event(
     final_output: serde_json::Value,
 ) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(CellRecord {
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
             id: format!("lash_vm_step_{protocol_iteration}"),
@@ -597,7 +597,7 @@ fn plugin_origin_is_not_rendered_in_history() {
 fn printed_images_render_as_llm_image_blocks() {
     let projector = projector(1000);
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(CellRecord {
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
             id: "lash_vm_step_1".to_string(),
@@ -712,8 +712,10 @@ fn rlm_prompt_projects_history_as_chat_messages_with_rolling_cache_breakpoint() 
     ));
 }
 
-/// A growing turn validates each unchanged event once per live projector,
-/// rather than decoding its tool-value graph again at every model call.
+/// A growing turn validates each retained event once, rather than decoding
+/// its tool-value graph again at every model call; a fresh projector over
+/// the same events decodes nothing again (FIG-6443). A rewritten payload is
+/// a new value and is validated again.
 #[test]
 fn growing_turn_decodes_only_new_history_events() {
     let projector = projector(100);
@@ -734,12 +736,12 @@ fn growing_turn_decodes_only_new_history_events() {
     project_iteration_request(&fresh, &events, 16, "test-model");
     assert_eq!(
         crate::projection::EVENT_DECODES.with(std::cell::Cell::get),
-        decodes + events.len()
+        decodes
     );
     let SessionHistoryRecord::Protocol(first) = &mut events[0] else {
         unreachable!()
     };
-    first.payload["format"] = serde_json::json!(0);
+    first.payload.make_mut()["format"] = serde_json::json!(0);
     let config = projection_test_config("test-model", Default::default(), None);
     let error = projector
         .project(ProjectorContext {

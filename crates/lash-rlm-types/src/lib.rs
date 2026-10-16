@@ -623,8 +623,8 @@ impl RlmGlobalsPatchPluginBody {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum RlmProtocolEvent {
     RlmAssistantContent(RlmAssistantContent),
-    /// One executed cell: the record the transcript returns.
-    RlmTrajectoryEntry(Box<CellRecord>),
+    /// One executed cell: the record the transcript returns, shared with it.
+    RlmTrajectoryEntry(std::sync::Arc<CellRecord>),
     RlmGlobalsPatch(RlmGlobalsPatchPluginBody),
     RlmSeed(RlmSeedPluginBody),
     RlmDiagnostic(RlmDiagnosticEvent),

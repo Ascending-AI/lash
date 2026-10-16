@@ -74,7 +74,7 @@ pub(in crate::runtime) fn protocol_step_trace_event(
 ) -> lash_trace::TraceEvent {
     lash_trace::TraceEvent::ProtocolStep {
         plugin_id: protocol_event.plugin_id.clone(),
-        payload: protocol_event.payload.clone(),
+        payload: protocol_event.payload.value().clone(),
     }
 }
 

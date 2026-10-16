@@ -7,8 +7,8 @@ pub fn recorded_extraction_decisions(
         let lash_core::SessionHistoryRecord::Protocol(event) = record else {
             continue;
         };
-        let Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-            super::context::decode_rlm_protocol_event(event)?
+        let decoded = super::context::decode_rlm_protocol_event(event)?;
+        let Some(lash_rlm_types::RlmProtocolEvent::RlmDiagnostic(diagnostic)) = decoded.as_deref()
         else {
             continue;
         };
@@ -19,12 +19,10 @@ pub fn recorded_extraction_decisions(
         ) {
             continue;
         }
-        let payload =
-            serde_json::from_value::<ExtractionDecision>(diagnostic.payload).map_err(|error| {
-                lash_core::StoredDataCorruption {
-                    record_kind: "RLM extraction diagnostic".into(),
-                    message: error.to_string(),
-                }
+        let payload = serde_json::from_value::<ExtractionDecision>(diagnostic.payload.clone())
+            .map_err(|error| lash_core::StoredDataCorruption {
+                record_kind: "RLM extraction diagnostic".into(),
+                message: error.to_string(),
             })?;
         decisions.push(payload.decision);
     }

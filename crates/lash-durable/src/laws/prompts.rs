@@ -14,7 +14,7 @@ use lash_sansio::{SessionId, TurnId};
 fn text(name: &str) -> PromptText {
     PromptText {
         hash: format!("hash-{name}"),
-        text: format!("text {name}"),
+        text: format!("text {name}").into(),
         children: Vec::new(),
     }
 }

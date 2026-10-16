@@ -242,7 +242,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 continue;
             };
             if let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
-                crate::projection::decode_rlm_protocol_event(event)?
+                crate::projection::decode_rlm_protocol_event(event)?.as_deref()
                 && diagnostic.phase == LLM_EXTRACTION_PHASE
             {
                 let Some(note) = diagnostic.payload.get("discarded_after_cell") else {
@@ -717,7 +717,7 @@ fn conversation_event(message: Message) -> SessionHistoryRecord {
 
 fn trajectory_event(entry: CellRecord, schema_version: u32) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(entry)),
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(entry)),
         schema_version,
     ))
 }

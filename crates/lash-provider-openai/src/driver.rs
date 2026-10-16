@@ -118,6 +118,7 @@ pub(crate) fn build_request_body(
     endpoint: CompletionEndpoint,
     stream: bool,
     origin_route: &ProviderRouteIdentity,
+    units: &mut UnitWriter<'_>,
 ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
     let mut reserved_headers = vec![
         provider.wire.auth_header_name.as_str(),
@@ -130,13 +131,9 @@ pub(crate) fn build_request_body(
     validate_extra_headers(&provider.wire.extra_headers, &reserved_headers, false)?;
     let mut built = match endpoint {
         CompletionEndpoint::Responses => {
-            provider.build_responses_request_for_route(req, stream, origin_route)?
+            provider.build_responses_request_for_route(req, stream, origin_route, units)?
         }
-        CompletionEndpoint::ChatCompletions => {
-            provider
-                .build_chat_request_body_with_diagnostics(req, stream)?
-                .0
-        }
+        CompletionEndpoint::ChatCompletions => provider.build_chat_request(req, stream, units)?.0,
     };
     if provider.resolved_compat(endpoint).cache_session_affinity {
         built.body.set(
@@ -147,22 +144,28 @@ pub(crate) fn build_request_body(
     Ok(built)
 }
 
-fn request_fingerprint(body: &[u8]) -> ResponsesRequestFingerprint {
-    lash_sansio::core_support::blake3_domain_hash(
-        LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION,
-        body,
-    )
-}
-
-/// The fingerprint of `body`: the bytes a resumed Responses stream belongs to.
+/// The fingerprint of `body`: the bytes a resumed Responses stream belongs
+/// to, its serialized template, hashed as it is written.
 #[expect(
     clippy::expect_used,
     reason = "the template contains only infallibly serializable JSON primitives"
 )]
-pub(crate) fn responses_request_fingerprint(
-    body: &RecordedRequestTemplate,
-) -> ResponsesRequestFingerprint {
-    request_fingerprint(&serde_json::to_vec(body).expect("template serialization is infallible"))
+pub(crate) fn request_fingerprint(body: &RecordedRequestTemplate) -> ResponsesRequestFingerprint {
+    struct Hashing(lash_sansio::core_support::Blake3DomainHasher);
+    impl std::io::Write for Hashing {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut hashing = Hashing(lash_sansio::core_support::Blake3DomainHasher::new(
+        LASH_OPENAI_RESPONSES_REQUEST_DOMAIN_VERSION,
+    ));
+    serde_json::to_writer(&mut hashing, body).expect("template serialization is infallible");
+    hashing.0.finalize()
 }
 
 impl CompletionEndpoint {
@@ -224,12 +227,40 @@ impl CompletionEndpoint {
     }
 }
 
+/// What `endpoint` accepts for an attachment of `mime` at `position`, its
+/// provider files in `scope`.
+fn endpoint_accepts(
+    endpoint: CompletionEndpoint,
+    scope: &Option<ProviderFileScope>,
+    mime: &lash_sansio::MediaType,
+    position: AttachmentPosition,
+) -> ProviderAccepts {
+    match endpoint {
+        CompletionEndpoint::Responses => {
+            crate::attachment_delivery::responses_accepts(mime, scope.clone())
+        }
+        CompletionEndpoint::ChatCompletions => {
+            if position == AttachmentPosition::Message && crate::attachment_delivery::image(mime) {
+                ProviderAccepts {
+                    bytes: true,
+                    url: true,
+                    provider_file: None,
+                }
+            } else {
+                ProviderAccepts::NONE
+            }
+        }
+    }
+}
+
 /// Lower `req` to the exact body `endpoint` sends for it: reasoning from
-/// another route dropped, the body built and serialized once.
+/// another route dropped, the body built once, each group of history it
+/// lowered before reused from `cache`.
 pub(crate) async fn lower(
     provider: &OpenAiCompatibleProvider,
     req: &LlmRequest,
     endpoint: CompletionEndpoint,
+    cache: &SegmentCache,
 ) -> Result<RecordedRequestTemplate, LlmTransportError> {
     let route = ProviderRouteIdentity::for_endpoint(
         endpoint.provider_kind(),
@@ -256,16 +287,15 @@ pub(crate) async fn lower(
         transport: provider.transport.clone(),
         responses_resume: None,
     };
-    let build_route = route.clone();
-    let stream = req.stream_events.is_some();
-    let BuiltRequest { body, receipt } =
-        run(needs_blocking(req, provider.request_work), move || {
-            build_request_body(&builder, &safe, endpoint, stream, &build_route)
-        })
-        .await??;
-    let codec = match endpoint {
-        CompletionEndpoint::Responses => crate::attachment_delivery::RESPONSES_CODEC,
-        CompletionEndpoint::ChatCompletions => crate::attachment_delivery::CHAT_CODEC,
+    let (codec, namespace) = match endpoint {
+        CompletionEndpoint::Responses => (
+            crate::attachment_delivery::RESPONSES_CODEC,
+            "lash.openai.responses-input/1",
+        ),
+        CompletionEndpoint::ChatCompletions => (
+            crate::attachment_delivery::CHAT_CODEC,
+            "lash.openai.chat-messages/1",
+        ),
     };
     let scope = provider
         .attachment_credential_scope
@@ -275,24 +305,35 @@ pub(crate) async fn lower(
             endpoint: route.endpoint.to_string(),
             credential_scope: credential_scope.clone(),
         });
-    let accepts = |mime: &lash_sansio::MediaType, position| match endpoint {
-        CompletionEndpoint::Responses => {
-            crate::attachment_delivery::responses_accepts(mime, scope.clone())
-        }
-        CompletionEndpoint::ChatCompletions => {
-            if position == AttachmentPosition::Message && crate::attachment_delivery::image(mime) {
-                ProviderAccepts {
-                    bytes: true,
-                    url: true,
-                    provider_file: None,
-                }
-            } else {
-                ProviderAccepts::NONE
-            }
-        }
-    };
+    // A group of history reads, besides its messages, the route, the
+    // host's acceptance, the endpoint's file scope and the instruction role.
+    let context = segment_context(namespace, &safe, &route)
+        .json(&scope)
+        .str(safe.model.metadata().capability.instruction_role.as_str())
+        .finish();
+    let build_route = route.clone();
+    let build_scope = scope.clone();
+    let build_cache = cache.clone();
+    let stream = req.stream_events.is_some();
+    let BuiltRequest { body, receipt } =
+        run(needs_blocking(req, provider.request_work), move || {
+            let mut units = UnitWriter::cached(
+                &build_cache,
+                context,
+                |mime: &lash_sansio::MediaType, position| {
+                    endpoint_accepts(endpoint, &build_scope, mime, position)
+                },
+                &safe,
+                endpoint.provider_kind(),
+                codec,
+            );
+            build_request_body(&builder, &safe, endpoint, stream, &build_route, &mut units)
+        })
+        .await??;
     lower_attachment_json(
-        accepts,
+        |mime: &lash_sansio::MediaType, position| {
+            endpoint_accepts(endpoint, &scope, mime, position)
+        },
         req,
         route,
         (req.stream_events.is_some(), Some(receipt)),
@@ -309,7 +350,7 @@ pub(crate) async fn complete(
     req: LlmRequest,
     endpoint: CompletionEndpoint,
 ) -> Result<LlmResponse, LlmTransportError> {
-    let template = lower(provider, &req, endpoint).await?;
+    let template = lower(provider, &req, endpoint, &SegmentCache::disabled()).await?;
     let body =
         LiveRequestBody::fill(std::sync::Arc::new(template), Vec::new()).map_err(template_error)?;
     send(provider, &body, ResponseContext::of_request(&req), endpoint).await
@@ -390,16 +431,15 @@ async fn send_attempt(
         .stream_termination
         .unwrap_or(compat.stream_termination);
     let request_id = context.scope.request_id.clone();
-    let wire = body.wire();
-    let blocking = crate::request_work::bytes_need_blocking(wire.len(), provider.request_work);
+    let blocking = crate::request_work::bytes_need_blocking(body.wire_len(), provider.request_work);
     let generation_disposition = body.generation();
-    let fingerprint = responses_request_fingerprint(body.template());
+    let fingerprint = request_fingerprint(body.template());
     let request_body_for_error = body.redacted();
     emit_provider_request_trace(
         context.provider_trace.as_ref(),
         "openai_compatible",
         endpoint.request_trace_name(),
-        body.redacted().as_bytes(),
+        request_body_for_error.as_bytes(),
     );
     let tool_argument_decoder = crate::responses_shared::ToolArgumentDecoder::for_contract(
         endpoint.provider_kind(),
@@ -423,7 +463,7 @@ async fn send_attempt(
         provider.responses_resume = None;
         None
     };
-    let request_body = bytes::Bytes::from(wire.into_bytes());
+    let request_body = bytes::Bytes::from(body.to_wire_string().into_bytes());
     let base_url = provider.base_url.trim_end_matches('/');
     let mut creation_url = match base_url.split_once('?') {
         Some((base_path, query)) => format!("{}/{}?{}", base_path, endpoint.path(), query),

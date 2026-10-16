@@ -26,6 +26,7 @@ mod tests {
     mod runtime_feedback;
     mod stream_bounds;
     mod tool_identity;
+    mod wire_bytes;
     use runtime_feedback::request_with_instructions;
     mod epilogue;
     mod generation_tests;

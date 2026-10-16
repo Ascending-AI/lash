@@ -5,6 +5,7 @@ mod request_work_tests;
 use request_support::request;
 mod runtime_feedback;
 mod schema_projection;
+mod wire_bytes;
 use crate::support::*;
 use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{LlmJsonSchema, LlmMessage, LlmToolChoice, LlmToolSpec};
@@ -248,6 +249,7 @@ fn openai_route_headers_refuse_case_variant_of_adapter_header() {
         CompletionEndpoint::ChatCompletions,
         false,
         &route,
+        &mut UnitWriter::Plain,
     )
     .unwrap_err();
     assert_eq!(
@@ -263,6 +265,7 @@ fn openai_route_headers_refuse_case_variant_of_adapter_header() {
         CompletionEndpoint::Responses,
         false,
         &route,
+        &mut UnitWriter::Plain,
     )
     .unwrap_err();
     assert_eq!(

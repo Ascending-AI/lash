@@ -11,6 +11,7 @@ use lash_core::GoogleDialect;
 use lash_core::facade_support::{
     ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionRequest, resolve_schema,
 };
+use lash_core::llm::types::LlmMessage;
 use lash_sansio::llm::capability::ReasoningRetentionSelection;
 
 fn user_prompt_id(req: &LlmRequest) -> uuid::Uuid {
@@ -65,25 +66,95 @@ impl GoogleOAuthProvider {
         req: &LlmRequest,
     ) -> Result<Vec<Value>, LlmTransportError> {
         Ok(self
-            .build_contents(req)?
+            .build_contents(req, &mut UnitWriter::Plain)?
             .iter()
             .map(TemplateJson::redacted)
             .collect())
     }
 
+    /// Whether `msg` writes a part (see [`Self::message_parts`]).
+    fn message_writes_part(msg: &LlmMessage) -> bool {
+        matches!(msg.role, LlmRole::System)
+            || msg.blocks.iter().any(|block| match block {
+                LlmContentBlock::Text { text, .. } => !text.is_empty(),
+                LlmContentBlock::Attachment { .. } => matches!(msg.role, LlmRole::User),
+                LlmContentBlock::ToolCall { .. } | LlmContentBlock::ToolResult { .. } => true,
+                LlmContentBlock::Reasoning { text, replay, .. } => {
+                    replay.as_ref().is_some_and(|meta| meta.signature.is_some())
+                        || !text.trim().is_empty()
+                }
+            })
+    }
+
+    fn content_role(role: &LlmRole) -> &'static str {
+        match role {
+            LlmRole::Assistant => "model",
+            LlmRole::User | LlmRole::System => "user",
+        }
+    }
+
     /// The `contents` of a request, each attachment a slot where its part
-    /// sits.
-    #[expect(
-        clippy::expect_used,
-        reason = "every content entry here is built by this fn with `parts` as an array; the sort sees the entries it built"
-    )]
+    /// sits, each content written by `units`. Adjacent messages of one role
+    /// merge into one content, so a content is reused whole when its
+    /// messages are the ones lowered before.
     pub(crate) fn build_contents(
         &self,
         req: &LlmRequest,
+        units: &mut UnitWriter<'_>,
     ) -> Result<Vec<TemplateJson>, LlmTransportError> {
         let safe_request = self.reasoning_retention_safe_request(req)?;
         let req = safe_request.as_ref();
-        let mut out: Vec<TemplateJson> = Vec::new();
+        let mut out = Vec::new();
+        let mut members: Vec<usize> = Vec::new();
+        let mut role = None;
+        for index in 0..=req.messages.len() {
+            let next = req
+                .messages
+                .get(index)
+                .filter(|msg| Self::message_writes_part(msg));
+            if index < req.messages.len() && next.is_none() {
+                continue;
+            }
+            let next_role = next.map(|msg| Self::content_role(&msg.role));
+            if !members.is_empty() && next_role != role {
+                out.extend(units.unit(
+                    |key| {
+                        members
+                            .iter()
+                            .fold(key, |key, &member| key.message(&req.messages[member]))
+                    },
+                    || Self::content(req, &members).map(|content| vec![content]),
+                )?);
+                members.clear();
+            }
+            if next.is_some() {
+                members.push(index);
+                role = next_role;
+            }
+        }
+        Ok(out)
+    }
+
+    /// The content of the messages at `members`, all of one role: their
+    /// parts in order, a user content's function responses first, to keep
+    /// parallel responses together before the tagged feedback.
+    fn content(req: &LlmRequest, members: &[usize]) -> Result<TemplateJson, LlmTransportError> {
+        let mut parts = Vec::new();
+        for &member in members {
+            Self::message_parts(req, &req.messages[member], &mut parts);
+        }
+        let role = Self::content_role(&req.messages[members[0]].role);
+        if role == "user" {
+            parts.sort_by_key(|part| !part.has_field("functionResponse"));
+        }
+        Ok(TemplateJson::object([
+            ("role", json!(role).into()),
+            ("parts", parts.into()),
+        ]))
+    }
+
+    /// The parts `msg` writes.
+    fn message_parts(req: &LlmRequest, msg: &LlmMessage, parts: &mut Vec<TemplateJson>) {
         // Gemini 3 accepts media inside a function response; older dialects
         // (and Claude on Vertex) take it only as ordinary user parts.
         let multimodal_function_response = matches!(
@@ -94,14 +165,7 @@ impl GoogleOAuthProvider {
             GoogleDialect::Gemini3 => Some("skip_thought_signature_validator"),
             GoogleDialect::Legacy | GoogleDialect::ClaudeOnVertex => None,
         };
-
-        for msg in &req.messages {
-            let role = match msg.role {
-                LlmRole::Assistant => "model",
-                LlmRole::User | LlmRole::System => "user",
-            };
-
-            let mut parts: Vec<TemplateJson> = Vec::new();
+        {
             if matches!(msg.role, LlmRole::System) {
                 let text = msg
                     .blocks
@@ -246,36 +310,7 @@ impl GoogleOAuthProvider {
                     }
                 }
             }
-
-            if parts.is_empty() {
-                continue;
-            }
-
-            if let Some(prev) = out.last_mut()
-                && prev.str_field("role") == Some(role)
-                && let Some(prev_parts) =
-                    prev.field_mut("parts").and_then(TemplateJson::as_array_mut)
-            {
-                prev_parts.extend(parts);
-            } else {
-                out.push(TemplateJson::object([
-                    ("role", json!(role).into()),
-                    ("parts", parts.into()),
-                ]));
-            }
         }
-        for content in &mut out {
-            if content.str_field("role") == Some("user") {
-                // Keep parallel function responses together before the tagged
-                // feedback in their coalesced user turn.
-                content
-                    .field_mut("parts")
-                    .and_then(TemplateJson::as_array_mut)
-                    .expect("content parts")
-                    .sort_by_key(|part| !part.has_field("functionResponse"));
-            }
-        }
-        Ok(out)
     }
 
     /// Strip the JSON-Schema meta keys the Vertex `parameters` field rejects for

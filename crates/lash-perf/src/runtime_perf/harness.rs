@@ -628,8 +628,13 @@ fn rlm_trajectory_entries(state: &SessionSnapshot) -> Vec<CellRecord> {
             let SessionHistoryRecord::Protocol(event) = event else {
                 return None;
             };
-            match lash_protocol_rlm::decode_rlm_protocol_event(event) {
-                Ok(Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))) => Some(*entry),
+            match lash_protocol_rlm::decode_rlm_protocol_event(event)
+                .as_ref()
+                .map(Option::as_deref)
+            {
+                Ok(Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))) => {
+                    Some(CellRecord::clone(entry))
+                }
                 Ok(Some(
                     RlmProtocolEvent::RlmAssistantContent(_)
                     | RlmProtocolEvent::RlmDiagnostic(_)

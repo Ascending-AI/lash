@@ -8,7 +8,7 @@ use lash_core::facade_support::{
 use lash_core::{MessageRole, PartKind, SessionHistoryRecord, StoredDataCorruption};
 use lash_rlm_types::RlmProtocolEvent;
 
-use super::EventCache;
+use super::EventDecoder;
 
 #[derive(Default)]
 pub(crate) struct HistoryIndex {
@@ -22,7 +22,7 @@ impl HistoryIndex {
     pub(crate) fn from_turn(
         events: &[SessionHistoryRecord],
         messages: &MessageSequence,
-        decoder: &EventCache,
+        decoder: &EventDecoder,
     ) -> Result<Self, StoredDataCorruption> {
         let mut entries = Vec::new();
         visit_turn_view(events, messages, |entry| entries.push(entry));
@@ -31,7 +31,7 @@ impl HistoryIndex {
 
     pub(crate) fn from_context(
         context: &lash_core::RuntimeExecutionContext<'_>,
-        decoder: &EventCache,
+        decoder: &EventDecoder,
     ) -> Result<Self, StoredDataCorruption> {
         let mut entries = Vec::new();
         context.visit_chronological(|entry| entries.push(entry));
@@ -40,14 +40,14 @@ impl HistoryIndex {
 
     pub(crate) fn from_projection(
         projection: &ChronologicalProjection,
-        decoder: &EventCache,
+        decoder: &EventDecoder,
     ) -> Result<Self, StoredDataCorruption> {
         Self::from_owned_entries(projection.entries(), decoder)
     }
 
     pub(crate) fn from_owned_entries(
         source: &[lash_core::facade_support::ChronologicalEntry],
-        decoder: &EventCache,
+        decoder: &EventDecoder,
     ) -> Result<Self, StoredDataCorruption> {
         let entries = source
             .iter()
@@ -74,7 +74,7 @@ impl HistoryIndex {
 
     fn from_entries(
         entries: &[BorrowedChronologicalEntry<'_>],
-        decoder: &EventCache,
+        decoder: &EventDecoder,
     ) -> Result<Self, StoredDataCorruption> {
         let mut index = Self::default();
         let mut prose = Vec::new();

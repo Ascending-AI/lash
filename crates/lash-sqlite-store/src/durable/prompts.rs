@@ -240,7 +240,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
             if !unheld.is_empty() {
                 let bodies: Vec<_> = unheld
                     .iter()
-                    .map(|(hash, text)| (*hash, text.text.as_str()))
+                    .map(|(hash, text)| (*hash, &*text.text))
                     .collect();
                 hash_set(tx, SQLITE_SQL.insert_texts.sql(), [encode(&bodies)?])?;
                 let paths: BTreeSet<_> = unheld
@@ -496,7 +496,7 @@ pub(super) fn texts(tx: &Connection, hashes: &[String]) -> Answer<Vec<PromptText
         if previous != Some(index) {
             texts.push(PromptText {
                 hash,
-                text,
+                text: text.into(),
                 children: Vec::new(),
             });
             previous = Some(index);

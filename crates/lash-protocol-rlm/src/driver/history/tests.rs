@@ -52,18 +52,20 @@ fn assistant_reasoning_event(
 
 fn step_event(code: &str) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: "lash_vm_step_0".to_string(),
-            protocol_iteration: 0,
-            code: code.to_string(),
-            prints: vec!["ok".to_string().into()],
-            images: Vec::new(),
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::Completed,
-        })),
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
+            lash_core::CellRecord {
+                language: "typescript".to_string(),
+                prints_retained: None,
+                id: "lash_vm_step_0".to_string(),
+                protocol_iteration: 0,
+                code: code.to_string(),
+                prints: vec!["ok".to_string().into()],
+                images: Vec::new(),
+                calls: Vec::new(),
+                bindings: Default::default(),
+                result: lash_core::CellOutcome::Completed,
+            },
+        )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -258,41 +260,43 @@ fn ordered_reasoning_replay_precedes_cell_in_folded_history_message() {
 #[test]
 fn failed_observation_lists_executed_calls_and_frames_retry() {
     let event = SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: "lash_vm_step_failed".to_string(),
-            protocol_iteration: 0,
-            code: "first = await module.ok({ secret: 1 })\nsecond = await module.fail({})"
-                .to_string(),
-            prints: Vec::new(),
-            images: Vec::new(),
-            calls: vec![
-                lash_core::ExecutedCall {
-                    result_summary: Some(lash_core::CallResultSummary {
-                        text: "{\"item_id\":\"i-1\"}".to_string(),
-                        truncated: false,
-                    }),
-                    operation: "module.ok".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Ok {},
-                    call_id: Some(lash_core::ToolCallId::fixture("module-ok")),
-                },
-                lash_core::ExecutedCall {
-                    result_summary: None,
-                    operation: "module.fail".to_string(),
-                    outcome: lash_core::ExecutedCallOutcome::Failed {
-                        code: "tool_failed".into(),
-                        message: "failed".into(),
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
+            lash_core::CellRecord {
+                language: "typescript".to_string(),
+                prints_retained: None,
+                id: "lash_vm_step_failed".to_string(),
+                protocol_iteration: 0,
+                code: "first = await module.ok({ secret: 1 })\nsecond = await module.fail({})"
+                    .to_string(),
+                prints: Vec::new(),
+                images: Vec::new(),
+                calls: vec![
+                    lash_core::ExecutedCall {
+                        result_summary: Some(lash_core::CallResultSummary {
+                            text: "{\"item_id\":\"i-1\"}".to_string(),
+                            truncated: false,
+                        }),
+                        operation: "module.ok".to_string(),
+                        outcome: lash_core::ExecutedCallOutcome::Ok {},
+                        call_id: Some(lash_core::ToolCallId::fixture("module-ok")),
                     },
-                    call_id: None,
-                },
-            ],
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Program,
-                "read failed at secret.txt; cache failed at .cache/lash/state",
-            )),
-        })),
+                    lash_core::ExecutedCall {
+                        result_summary: None,
+                        operation: "module.fail".to_string(),
+                        outcome: lash_core::ExecutedCallOutcome::Failed {
+                            code: "tool_failed".into(),
+                            message: "failed".into(),
+                        },
+                        call_id: None,
+                    },
+                ],
+                bindings: Default::default(),
+                result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
+                    lash_core::CellFailureKind::Program,
+                    "read failed at secret.txt; cache failed at .cache/lash/state",
+                )),
+            },
+        )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),
@@ -332,18 +336,20 @@ fn failed_step_event(id: &str, code: &str, error: &str) -> SessionHistoryRecord 
 
 fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
-            language: "typescript".to_string(),
-            prints_retained: None,
-            id: id.to_string(),
-            protocol_iteration: 0,
-            code: code.to_string(),
-            prints: Vec::new(),
-            images: Vec::new(),
-            calls: Vec::new(),
-            bindings: Default::default(),
-            result: lash_core::CellOutcome::Failed(failure),
-        })),
+        lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(
+            lash_core::CellRecord {
+                language: "typescript".to_string(),
+                prints_retained: None,
+                id: id.to_string(),
+                protocol_iteration: 0,
+                code: code.to_string(),
+                prints: Vec::new(),
+                images: Vec::new(),
+                calls: Vec::new(),
+                bindings: Default::default(),
+                result: lash_core::CellOutcome::Failed(failure),
+            },
+        )),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
         )),

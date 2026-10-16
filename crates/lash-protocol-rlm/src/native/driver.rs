@@ -447,7 +447,7 @@ fn conversation_event(message: Message) -> SessionHistoryRecord {
 
 fn trajectory_event(entry: CellRecord, schema_version: u32) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(rlm_protocol_event(
-        RlmProtocolEvent::RlmTrajectoryEntry(Box::new(entry)),
+        RlmProtocolEvent::RlmTrajectoryEntry(std::sync::Arc::new(entry)),
         schema_version,
     ))
 }

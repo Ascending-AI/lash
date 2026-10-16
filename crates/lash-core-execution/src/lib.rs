@@ -791,7 +791,7 @@ pub use session_model::{
     ChargeSafetyPolicy, MaxToolCalls, NoProgressBudget, SessionPolicy, ToolCallLimitExceeded,
     ToolCallLimitScope, TurnBudget,
 };
-pub use session_model::{ProtocolEvent, SessionHistoryRecord};
+pub use session_model::{ProtocolEvent, ProtocolPayload, SessionHistoryRecord};
 pub use store::{
     AdoptedAttachmentCondemnation, AppendRequestIdentity, AttachmentCondemnation,
     AttachmentCondemnationAdoption, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,

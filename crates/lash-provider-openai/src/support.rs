@@ -12,8 +12,8 @@ pub(crate) use lash_core::llm::types::{
     LlmOutputPart, LlmOutputSpec, LlmProviderTraceSender, LlmRequest, LlmResponse, LlmRole,
     LlmStreamEvent, LlmStreamEvidence, LlmTerminalReason, LlmUsage,
     ProviderReasoningRetentionSupport, ProviderReplayMeta, ProviderRouteIdentity,
-    ReasoningRetentionSelection, RecordedRequestTemplate, StreamBlockIdentity, TemplateJson,
-    TransientJson, tool_call_input_replay_string,
+    ReasoningRetentionSelection, RecordedRequestTemplate, SegmentCache, StreamBlockIdentity,
+    TemplateJson, TransientJson, tool_call_input_replay_string,
 };
 pub(crate) use lash_core::{
     facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
@@ -110,7 +110,7 @@ pub(crate) fn reasoning_part_block_texts(
 }
 
 pub(crate) use lash_core::provider::attachment_wire::{
-    check_codec, lower_attachment_json, template_error,
+    UnitWriter, check_codec, lower_attachment_json, segment_context, template_error,
 };
 pub(crate) use lash_sansio::AttachmentRef;
 pub(crate) use lash_sansio::llm::attachment_delivery::{

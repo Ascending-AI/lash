@@ -20,7 +20,7 @@ pub const NOTED_PROTOCOL: &str = "noted_protocol";
 pub fn mid_call_note() -> lash_core::ProtocolEvent {
     lash_core::ProtocolEvent {
         plugin_id: NOTED_PROTOCOL.to_owned(),
-        payload: serde_json::json!({ "note": "appended while the call is unanswered" }),
+        payload: serde_json::json!({ "note": "appended while the call is unanswered" }).into(),
     }
 }
 

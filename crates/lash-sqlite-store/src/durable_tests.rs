@@ -295,7 +295,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
     let run = lash_sansio::TurnId::from("prompt-bytes-turn");
     let text = |name: &str| PromptText {
         hash: format!("hash-{name}"),
-        text: format!("text {name}"),
+        text: format!("text {name}").into(),
         children: Vec::new(),
     };
     let record = |ordinal: u32, snapshot: &[&str], request: &[&str]| {
@@ -850,7 +850,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
     let mut texts: Vec<_> = (0..16)
         .map(|leaf| PromptText {
             hash: format!("leaf-{leaf}"),
-            text: format!("leaf {leaf}"),
+            text: format!("leaf {leaf}").into(),
             children: Vec::new(),
         })
         .collect();
@@ -862,7 +862,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
             let hash = format!("branch-{level}-{index}");
             texts.push(PromptText {
                 hash: hash.clone(),
-                text: format!("branch {level} {index}"),
+                text: format!("branch {level} {index}").into(),
                 children: pair.to_vec(),
             });
             next.push(hash);
@@ -971,13 +971,13 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     let mut texts: Vec<_> = (0..16)
         .map(|index| PromptText {
             hash: format!("text-{index}"),
-            text: format!("text {index}"),
+            text: format!("text {index}").into(),
             children: Vec::new(),
         })
         .collect();
     texts.push(PromptText {
         hash: "branch".to_owned(),
-        text: "branch".to_owned(),
+        text: "branch".to_owned().into(),
         children: vec!["text-0".to_owned(), "text-1".to_owned()],
     });
     let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();

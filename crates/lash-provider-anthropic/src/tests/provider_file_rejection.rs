@@ -3,6 +3,7 @@
 //! and asks for the Files beta exactly when it delivered one.
 use async_trait::async_trait;
 use lash_core::facade_support::LlmTransportError;
+use lash_core::llm::types::SegmentCache;
 use lash_core::llm::types::{
     LiveRequestBody, LlmContentBlock, LlmMessage, LlmRole, ResponseContext,
 };
@@ -65,7 +66,12 @@ async fn refused(status: u16, error: serde_json::Value, file: bool) -> (LlmTrans
             }),
         }],
     )]);
-    let template = Arc::new(provider.lower(&request).await.unwrap());
+    let template = Arc::new(
+        provider
+            .lower(&request, &SegmentCache::disabled())
+            .await
+            .unwrap(),
+    );
     let slot = template.slots().next().expect("one slot");
     let delivery = if file {
         Delivery::ProviderFile {

@@ -120,12 +120,12 @@ fn chunked_response_mode_is_recorded_only_outside_the_body() {
             texts
                 .iter()
                 .find(|(blob, _)| blob == reference)
-                .map(|(_, text)| text.text.as_str())
+                .map(|(_, text)| &*text.text)
         };
         let assembled = decoded.assemble(read).unwrap();
         assert_eq!(assembled, template);
         let live = LiveRequestBody::fill(std::sync::Arc::new(assembled), vec![]).unwrap();
-        assert_eq!(live.wire(), body);
+        assert_eq!(live.to_wire_string(), body);
         assert!(live.stream());
         decoded.transport_stream = if outside.is_none() { Some(false) } else { None };
         assert!(decoded.assemble(read).is_err());
@@ -178,7 +178,7 @@ fn growing_requests_submit_new_fragments_and_logarithmic_index_paths() {
                 texts
                     .iter()
                     .find(|(hash, _)| hash == reference)
-                    .map(|(_, text)| text.text.as_str())
+                    .map(|(_, text)| &*text.text)
             };
             assert_eq!(index.assemble(read).unwrap(), template);
             held.extend(texts.into_iter().map(|(hash, _)| hash));

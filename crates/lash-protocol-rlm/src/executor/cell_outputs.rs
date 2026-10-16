@@ -36,7 +36,7 @@ pub(super) async fn record_cell_outputs(
     ctx: &RuntimeExecutionContext<'_>,
     cell: &cell_run::CellRun,
     code_renderer: &crate::render::CodeRendererSlot,
-    events: &crate::projection::EventCache,
+    events: &crate::projection::EventDecoder,
     values: Vec<lash_kernel_doc::Datum>,
     response: &mut ExecResponse,
 ) {

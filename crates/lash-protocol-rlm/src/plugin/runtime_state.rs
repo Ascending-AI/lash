@@ -101,13 +101,13 @@ impl RlmRuntimeState {
                 && let Some(event) = decode_rlm_protocol_event(event)
                     .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
             {
-                match event {
+                match &*event {
                     RlmProtocolEvent::RlmGlobalsPatch(patch) => {
                         names.extend(patch.set_default.keys().cloned())
                     }
                     RlmProtocolEvent::RlmSeed(seed) => {
                         names.extend(seed.globals.keys().cloned());
-                        names.extend(seed.projected.entries.into_iter().map(|(name, _)| name));
+                        names.extend(seed.projected.entries.iter().map(|(name, _)| name.clone()));
                     }
                     _ => {}
                 }
@@ -235,7 +235,6 @@ impl RlmRuntimeState {
         &self,
         state: lash_core::plugin::ProtocolSessionRestoreView,
     ) -> Result<(), SessionError> {
-        self.dialect.clear_history_cache();
         let mut execution_guard = self.execution.lock().await;
         let execution = &mut *execution_guard;
         let snapshot = state.execution_state.map_err(|error| SessionError::Store {
@@ -257,7 +256,7 @@ impl RlmRuntimeState {
             if let SessionHistoryRecord::Protocol(event) = event
                 && let Some(event) = decode_rlm_protocol_event(event).map_err(history_corruption)?
             {
-                self.apply_seed_or_globals_event(execution, event, &protected_names)
+                self.apply_seed_or_globals_event(execution, &event, &protected_names)
                     .await?;
             }
         }
@@ -276,7 +275,7 @@ impl RlmRuntimeState {
             if let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node
                 && let Some(event) = decode_rlm_protocol_event(event).map_err(history_corruption)?
             {
-                self.apply_seed_or_globals_event(execution, event, &protected_names)
+                self.apply_seed_or_globals_event(execution, &event, &protected_names)
                     .await?;
             }
         }
@@ -317,9 +316,6 @@ impl RlmRuntimeState {
             .await
             .capture_execution_graph(purpose)
             .await?;
-        if purpose == lash_core_store::execution_state::ExecutionGraphPurpose::Final {
-            self.dialect.clear_history_cache();
-        }
         Ok(capture)
     }
 
@@ -386,24 +382,24 @@ impl RlmRuntimeState {
     async fn apply_seed_or_globals_event(
         &self,
         execution: &mut DialectSession,
-        event: RlmProtocolEvent,
+        event: &RlmProtocolEvent,
         protected_names: &BTreeSet<String>,
     ) -> Result<(), SessionError> {
         match event {
             RlmProtocolEvent::RlmGlobalsPatch(patch) => {
-                execution.patch_globals(&patch, protected_names).await?;
+                execution.patch_globals(patch, protected_names).await?;
             }
             RlmProtocolEvent::RlmSeed(seed) => {
                 let mut protected_names = protected_names.clone();
                 if !seed.projected.is_empty() {
-                    self.install_initial_projected_seed(seed.projected)?;
+                    self.install_initial_projected_seed(seed.projected.clone())?;
                     protected_names = self.protected_projected_binding_names().await;
                 }
                 if !seed.globals.is_empty() {
                     execution
                         .patch_globals(
                             &RlmGlobalsPatchPluginBody {
-                                set_default: seed.globals,
+                                set_default: seed.globals.clone(),
                             },
                             &protected_names,
                         )
@@ -503,9 +499,8 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         &self,
         record: &lash_core::ProtocolEvent,
     ) -> Result<Vec<lash_core::AttachmentId>, SessionError> {
-        let Some(RlmProtocolEvent::RlmTrajectoryEntry(cell)) =
-            decode_rlm_protocol_event(record).map_err(history_corruption)?
-        else {
+        let decoded = decode_rlm_protocol_event(record).map_err(history_corruption)?;
+        let Some(RlmProtocolEvent::RlmTrajectoryEntry(cell)) = decoded.as_deref() else {
             return Ok(Vec::new());
         };
         Ok(cell
@@ -600,9 +595,12 @@ fn frame_switch_carries(
         let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node else {
             continue;
         };
-        let values = match decode_rlm_protocol_event(event).map_err(history_corruption)? {
-            Some(RlmProtocolEvent::RlmSeed(seed)) => serde_json::to_value(&seed),
-            Some(RlmProtocolEvent::RlmGlobalsPatch(patch)) => serde_json::to_value(&patch),
+        let values = match decode_rlm_protocol_event(event)
+            .map_err(history_corruption)?
+            .as_deref()
+        {
+            Some(RlmProtocolEvent::RlmSeed(seed)) => serde_json::to_value(seed),
+            Some(RlmProtocolEvent::RlmGlobalsPatch(patch)) => serde_json::to_value(patch),
             _ => continue,
         };
         // Both bodies are JSON maps, so encoding them cannot fail; a body

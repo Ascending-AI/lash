@@ -64,7 +64,7 @@ fn codex_passthrough_refuses_owned_nested_and_suppressed_controls() {
     let provider = provider.with_extra_headers(vec![("SeSsIoN-Id".into(), "other".into())]);
     assert_eq!(
         provider
-            .preflight(&base)
+            .validate_headers()
             .unwrap_err()
             .code
             .as_ref()

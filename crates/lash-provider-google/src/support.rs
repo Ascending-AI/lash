@@ -15,7 +15,7 @@ pub(crate) use lash_core::llm::types::{
     LlmStreamEvidence, LlmTerminalReason, LlmToolChoice, LlmUsage, ProviderReasoningReplay,
     ProviderReasoningRetentionSupport, ProviderReplayMeta, ProviderRouteIdentity,
     ReasoningRetentionValidationError, RecordedRequestTemplate, ResponseContext, ResponseTextMeta,
-    StreamBlockIdentity, TemplateJson, TransientJson, tool_call_input_replay_value,
+    SegmentCache, StreamBlockIdentity, TemplateJson, TransientJson, tool_call_input_replay_value,
 };
 pub(crate) use lash_core::provider::{
     GenerationEmission, GenerationWire, OutputCapWire, Provider, ProviderComponents,
@@ -44,8 +44,8 @@ pub(crate) use crate::config::*;
 pub(crate) use crate::stream::GoogleStreamState;
 
 pub(crate) use lash_core::provider::attachment_wire::{
-    check_codec, lower_attachment_json, message_names_missing_file, reject_missing_provider_files,
-    template_error,
+    UnitWriter, check_codec, lower_attachment_json, message_names_missing_file,
+    reject_missing_provider_files, segment_context, template_error,
 };
 pub(crate) use lash_sansio::AttachmentRef;
 pub(crate) use lash_sansio::llm::attachment_delivery::{

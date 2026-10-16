@@ -240,22 +240,30 @@ use crate::TurnReply;
 use crate::llm::types::LlmToolSpec;
 use crate::plugin::{CheckpointKind, PluginMessage, PluginRuntimeEvent};
 
-/// Durable protocol payload stored in session history.
+mod protocol_payload;
+pub use protocol_payload::ProtocolPayload;
+
+/// Durable protocol payload stored in session history. Its payload is
+/// shared by every clone of the event (see [`ProtocolPayload`]).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolEvent {
     pub plugin_id: String,
-    pub payload: serde_json::Value,
+    pub payload: ProtocolPayload,
 }
 
 impl ProtocolEvent {
+    pub fn new(plugin_id: impl Into<String>, payload: serde_json::Value) -> Self {
+        Self {
+            plugin_id: plugin_id.into(),
+            payload: ProtocolPayload::new(payload),
+        }
+    }
+
     pub fn typed<T>(plugin_id: impl Into<String>, event: T) -> Result<Self, serde_json::Error>
     where
         T: serde::Serialize,
     {
-        Ok(Self {
-            plugin_id: plugin_id.into(),
-            payload: serde_json::to_value(event)?,
-        })
+        Ok(Self::new(plugin_id, serde_json::to_value(event)?))
     }
 
     pub fn decode<T>(&self, expected_plugin_id: &str) -> Result<Option<T>, serde_json::Error>
@@ -265,7 +273,7 @@ impl ProtocolEvent {
         if self.plugin_id != expected_plugin_id {
             return Ok(None);
         }
-        serde_json::from_value(self.payload.clone()).map(Some)
+        T::deserialize(self.payload.value()).map(Some)
     }
 }
 

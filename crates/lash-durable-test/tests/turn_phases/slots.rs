@@ -26,7 +26,7 @@ use lash_sansio::llm::attachment_delivery::{
     AttachmentPosition, Delivery, DeliveryContext, DeliverySecret, ProviderAccepts,
 };
 use lash_sansio::llm::types::{
-    AttachmentSlot, LiveRequestBody, RequestSegment, ResponseContext, SlotCodec,
+    AttachmentSlot, BodyPart, LiveRequestBody, ResponseContext, SlotCodec,
 };
 
 /// The bytes of the image only the slot modes' model calls name.
@@ -136,7 +136,7 @@ pub(super) async fn adapter_template(
             }],
         ));
     let template = adapter(Arc::default())
-        .lower(&request)
+        .lower(&request, &lash_sansio::llm::types::SegmentCache::disabled())
         .await
         .map_err(|error| TurnError::Exec(format!("the adapter lowers the call: {error}")))?;
     if template.slots().count() != 1 {
@@ -320,7 +320,7 @@ impl Provider for WireRecorder {
     ) -> Result<LlmResponse, lash_core::llm::transport::LlmTransportError> {
         self.sent
             .lock_recover()
-            .push((body.wire(), body.template().clone()));
+            .push((body.to_wire_string(), body.template().clone()));
         Ok(LlmResponse::default())
     }
 
@@ -485,18 +485,11 @@ pub(super) fn fill_laws(
     let attempt = call.attempt;
     let mut rest = call.sent.as_str();
     let mut delivered = call.delivered.iter();
-    for segment in stored.segments() {
-        match segment {
-            RequestSegment::Literal { text } => match rest.strip_prefix(&**text) {
-                Some(tail) => rest = tail,
-                None => {
-                    return vec![format!(
-                        "WIRE-SLOTS: attempt {attempt} of call {ordinal} does not send its \
-                         admitted literal {text:?} at {rest:?}"
-                    )];
-                }
-            },
-            RequestSegment::Attachment { slot } => {
+    for part in stored.parts() {
+        let text = match part {
+            BodyPart::Literal(text) => &**text,
+            BodyPart::Separator => ",",
+            BodyPart::Slot(slot) => {
                 let mut values =
                     serde_json::Deserializer::from_str(rest).into_iter::<serde_json::Value>();
                 let value = match values.next() {
@@ -523,6 +516,16 @@ pub(super) fn fill_laws(
                          {value} instead of its own delivery {url}"
                     )];
                 }
+                continue;
+            }
+        };
+        match rest.strip_prefix(text) {
+            Some(tail) => rest = tail,
+            None => {
+                return vec![format!(
+                    "WIRE-SLOTS: attempt {attempt} of call {ordinal} does not send its \
+                     admitted literal {text:?} at {rest:?}"
+                )];
             }
         }
     }

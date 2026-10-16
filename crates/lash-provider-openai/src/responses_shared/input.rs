@@ -1,3 +1,4 @@
+use lash_core::provider::attachment_wire::UnitWriter;
 use lash_sansio::llm::types::TemplateJson;
 use serde_json::{Value, json};
 
@@ -192,11 +193,67 @@ fn function_call_output(content: &[ModelToolReturnPart]) -> TemplateJson {
     )
 }
 
-/// Build ordered Responses input shared by the direct provider and Codex.
-pub fn build_responses_input(req: &LlmRequest) -> Vec<TemplateJson> {
+/// Whether an assistant message writes an input item: a message item for
+/// its text, or a call, an output or a replayed reasoning item.
+fn assistant_writes_item(msg: &LlmMessage) -> bool {
+    matches!(msg.role, LlmRole::Assistant)
+        && msg.blocks.iter().any(|block| match block {
+            LlmContentBlock::Text { text, .. } => !text.is_empty(),
+            LlmContentBlock::ToolCall { .. } | LlmContentBlock::ToolResult { .. } => true,
+            LlmContentBlock::Reasoning { replay, .. } => replay
+                .as_ref()
+                .is_some_and(|meta| meta.encrypted_content.is_some()),
+            LlmContentBlock::Attachment { .. } => false,
+        })
+}
+
+/// Build ordered Responses input shared by the direct provider and Codex,
+/// each group of messages written by `units`.
+///
+/// A group starts at an assistant message that writes an item. Its last
+/// item is the assistant's, so no later user content merges into an
+/// earlier group's item, and it ends the feedback a tool output is placed
+/// before: a group's items are the same alone as within the whole input,
+/// and a group lowered before is reused whole.
+///
+/// # Errors
+///
+/// What pinning an attachment slot refuses with.
+pub fn build_responses_input(
+    req: &LlmRequest,
+    units: &mut UnitWriter<'_>,
+) -> Result<Vec<TemplateJson>, LlmTransportError> {
+    let mut input = Vec::new();
+    let mut start = 0;
+    for end in 1..=req.messages.len() {
+        if end < req.messages.len() && !assistant_writes_item(&req.messages[end]) {
+            continue;
+        }
+        let group = start..end;
+        input.extend(units.unit(
+            |key| {
+                req.messages[group.clone()]
+                    .iter()
+                    .fold(key.u64(group.start as u64), |key, msg| key.message(msg))
+            },
+            || Ok(build_input_group(req, group.clone())),
+        )?);
+        start = end;
+    }
+    Ok(input)
+}
+
+/// The input items of the messages in `group`.
+fn build_input_group(req: &LlmRequest, group: std::ops::Range<usize>) -> Vec<TemplateJson> {
     let mut input: Vec<TemplateJson> = Vec::new();
     let mut feedback_start = None;
-    for (message_index, msg) in req.messages.iter().enumerate() {
+    for (message_index, msg) in req
+        .messages
+        .iter()
+        .enumerate()
+        .skip(group.start)
+        .take(group.len())
+    {
         feedback_boundary(msg, input.len(), &mut feedback_start);
         let fallback = attachment_feedback(msg);
         let msg = fallback.as_ref().unwrap_or(msg);

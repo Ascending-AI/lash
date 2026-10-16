@@ -60,7 +60,7 @@ pub(crate) fn stalled_attempts_in_phase(
         let SessionHistoryRecord::Protocol(event) = record else {
             continue;
         };
-        match crate::projection::decode_rlm_protocol_event(event)? {
+        match crate::projection::decode_rlm_protocol_event(event)?.as_deref() {
             Some(RlmProtocolEvent::RlmDiagnostic(diagnostic))
                 if diagnostic.phase == extraction_phase =>
             {
@@ -104,7 +104,7 @@ fn count_pending_attempts(
             let SessionHistoryRecord::Protocol(event) = record else {
                 continue;
             };
-            match crate::projection::decode_rlm_protocol_event(event)? {
+            match crate::projection::decode_rlm_protocol_event(event)?.as_deref() {
                 Some(RlmProtocolEvent::RlmTrajectoryEntry(entry))
                     if !entry.result.is_failed() && entry.id.starts_with(trajectory_prefix) =>
                 {

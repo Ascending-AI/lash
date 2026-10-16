@@ -619,10 +619,12 @@ impl<Text, Slot> RequestFragment<Text, Slot> {
 }
 
 /// A fresh fragment's encoding and the edges known by its builder.
-/// Admission installs both without decoding the encoding again.
-#[derive(Debug)]
+/// Admission installs both without decoding the encoding again. The text
+/// is shared: an item's fragments are encoded once and every admission that
+/// holds the item hands the same text to the store.
+#[derive(Clone, Debug)]
 pub struct EncodedRequestFragment {
-    pub text: String,
+    pub text: std::sync::Arc<str>,
     pub children: Vec<String>,
 }
 
@@ -661,29 +663,179 @@ fn chunk_text(text: &str, texts: &mut Vec<(BlobRef, String)>) -> Vec<PromptTextR
     chunks
 }
 
+type Leaf = (PromptTextRef, EncodedRequestFragment);
+
 /// Store a fragment by its exact encoding, never by re-rendered JSON.
+fn encode_fragment(
+    fragment: &RequestFragment<&str, &lash_sansio::llm::types::AttachmentSlot>,
+) -> Leaf {
+    let body = serde_json::to_string(fragment).expect("wire fragments encode");
+    let reference = RequestFragment::reference(&body);
+    (
+        reference,
+        EncodedRequestFragment {
+            text: body.into(),
+            children: fragment.children(),
+        },
+    )
+}
+
 fn keep_fragment(
     fragment: &RequestFragment<&str, &lash_sansio::llm::types::AttachmentSlot>,
     texts: &mut Vec<(BlobRef, EncodedRequestFragment)>,
 ) -> PromptTextRef {
-    let body = serde_json::to_string(fragment).expect("wire fragments encode");
-    let reference = RequestFragment::reference(&body);
-    texts.push((
-        reference.blob.clone(),
-        EncodedRequestFragment {
-            text: body,
-            children: fragment.children(),
-        },
-    ));
+    let (reference, encoded) = encode_fragment(fragment);
+    texts.push((reference.blob.clone(), encoded));
     reference
 }
 
-/// Keep one exact literal segment as a leaf, including its JSON structure.
-fn literal_fragment(
-    text: &str,
-    texts: &mut Vec<(BlobRef, EncodedRequestFragment)>,
-) -> PromptTextRef {
-    keep_fragment(&RequestFragment::Literal { text }, texts)
+/// Splits literal text into leaves: at [`PROVIDER_BODY_CHUNK_BYTES`] from a
+/// leaf's start, on UTF-8 boundaries, and after each group of eight escaped
+/// line breaks of a long string. In the envelope it also splits the history
+/// array into groups of eight messages and finds where the history ends.
+struct TextChunker {
+    envelope: bool,
+    depth: usize,
+    history_depth: Option<usize>,
+    history_key: bool,
+    messages: usize,
+    lines: usize,
+    quoted: bool,
+    escaped: bool,
+    /// Leaves before the end of the history array, once it closed.
+    prefix_end: Option<usize>,
+}
+
+impl TextChunker {
+    fn new(envelope: bool) -> Self {
+        Self {
+            envelope,
+            depth: 0,
+            history_depth: None,
+            history_key: false,
+            messages: 0,
+            lines: 0,
+            quoted: false,
+            escaped: false,
+            prefix_end: None,
+        }
+    }
+
+    fn literal(&mut self, text: &str, leaves: &mut Vec<Leaf>) {
+        let leaf = |text: &str, leaves: &mut Vec<Leaf>| {
+            leaves.push(encode_fragment(&RequestFragment::Literal { text }));
+        };
+        let mut start = 0;
+        let mut string_start = 0;
+        for (offset, ch) in text.char_indices() {
+            // Oversize messages split from their own start, on UTF-8
+            // boundaries, without shifting earlier chunks.
+            if offset + ch.len_utf8() - start > PROVIDER_BODY_CHUNK_BYTES {
+                leaf(&text[start..offset], leaves);
+                start = offset;
+            }
+            if self.quoted {
+                if self.escaped {
+                    self.escaped = false;
+                    // A rendered history can occupy one string. Keep short
+                    // message bodies intact; completed line groups in a
+                    // long string stay reusable.
+                    if ch == 'n' {
+                        self.lines += 1;
+                        if self.lines.is_multiple_of(8)
+                            && offset + 1 - string_start >= 4096
+                            && offset + 1 - start >= 4096
+                        {
+                            leaf(&text[start..offset + 1], leaves);
+                            start = offset + 1;
+                        }
+                    }
+                } else if ch == '\\' {
+                    self.escaped = true;
+                } else if ch == '"' {
+                    self.quoted = false;
+                    if self.envelope && self.depth == 1 {
+                        self.history_key = matches!(
+                            &text[string_start..offset + 1],
+                            "\"messages\"" | "\"contents\"" | "\"input\""
+                        );
+                    }
+                }
+            } else if ch == '"' {
+                self.quoted = true;
+                string_start = offset;
+                self.lines = 0;
+            } else {
+                if ch == ']' && self.history_depth == Some(self.depth) {
+                    if start < offset {
+                        leaf(&text[start..offset], leaves);
+                    }
+                    start = offset;
+                    self.prefix_end = Some(leaves.len());
+                    self.history_depth = None;
+                } else if ch == ',' && self.history_depth == Some(self.depth) {
+                    self.messages += 1;
+                    if self.messages.is_multiple_of(8) && offset - start >= 8192 {
+                        if start < offset {
+                            leaf(&text[start..offset], leaves);
+                        }
+                        // The comma belongs to the next group, so appending
+                        // leaves completed groups unchanged.
+                        start = offset;
+                    }
+                }
+                if self.envelope && ch == '[' && self.history_key && self.depth == 1 {
+                    // The opening envelope rides in the first group rather
+                    // than owning another index path.
+                    self.history_depth = Some(self.depth + 1);
+                    self.history_key = false;
+                    self.messages = 0;
+                }
+                match ch {
+                    '{' | '[' => self.depth += 1,
+                    '}' | ']' => self.depth = self.depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+        }
+        if start < text.len() {
+            leaf(&text[start..], leaves);
+        }
+    }
+}
+
+/// An item's leaves, kept with the item: the first of a run, and one after
+/// another item, whose leading separator rides in its first leaf.
+struct ItemLeaves(Vec<Leaf>);
+struct SeparatedItemLeaves(Vec<Leaf>);
+
+fn item_leaves(item: &lash_sansio::llm::types::RequestSegment, separated: bool) -> Vec<Leaf> {
+    use lash_sansio::llm::types::SegmentPart;
+    let mut leaves = Vec::new();
+    let mut separator = separated;
+    for part in item.parts() {
+        // An item's literals each start outside any string: a slot is a
+        // whole value.
+        match part {
+            SegmentPart::Literal(text) => {
+                let mut chunker = TextChunker::new(false);
+                if std::mem::take(&mut separator) {
+                    chunker.literal(&format!(",{text}"), &mut leaves);
+                } else {
+                    chunker.literal(text, &mut leaves);
+                }
+            }
+            SegmentPart::Slot(slot) => {
+                if std::mem::take(&mut separator) {
+                    leaves.push(encode_fragment(&RequestFragment::Literal { text: "," }));
+                }
+                leaves.push(encode_fragment(&RequestFragment::Attachment {
+                    slot: slot.as_ref(),
+                }));
+            }
+        }
+    }
+    leaves
 }
 
 /// A canonical append tree: the left subtree is the largest complete
@@ -703,118 +855,58 @@ fn fragment_tree(
 }
 
 impl ChunkedRequestTemplate {
-    /// Split on groups of eight messages once a fragment reaches 8 KiB,
-    /// keeping completed history stable and bounding the unfinished tail. Long rendered messages also
-    /// split at groups of eight escaped line boundaries. The
-    /// request envelope stays together instead of indexing every JSON field.
+    /// One leaf per history item (with the separator before it), each
+    /// encoded once and kept with its item, so completed history is stable
+    /// and a new call encodes only its new items. Text segments split on
+    /// groups of eight messages once a leaf reaches 8 KiB; long rendered
+    /// strings also split at groups of eight escaped line boundaries. The
+    /// request envelope stays together instead of indexing every JSON
+    /// field. The reusable prefix ends with the last history item.
     pub fn chunk(
         template: &lash_sansio::llm::types::RecordedRequestTemplate,
     ) -> (Self, Vec<(BlobRef, EncodedRequestFragment)>) {
-        use lash_sansio::llm::types::RequestSegment;
-        let mut texts = Vec::new();
-        let mut fragments = Vec::new();
-        let mut depth = 0usize;
-        let mut history_depth = None;
-        let mut history_key = false;
-        let mut messages = 0usize;
-        let mut lines = 0usize;
-        let mut prefix_end = None;
-        let mut quoted = false;
-        let mut escaped = false;
+        let mut leaves: Vec<Leaf> = Vec::new();
+        let mut envelope = TextChunker::new(true);
+        let mut items_end = None;
+        let mut previous_item = false;
         for segment in template.segments() {
-            match segment {
-                RequestSegment::Attachment { slot } => fragments.push(keep_fragment(
-                    &RequestFragment::Attachment {
-                        slot: slot.as_ref(),
-                    },
-                    &mut texts,
-                )),
-                RequestSegment::Literal { text } => {
-                    let mut start = 0;
-                    let mut string_start = 0;
-                    for (offset, ch) in text.char_indices() {
-                        // Oversize messages split from their own start, on
-                        // UTF-8 boundaries, without shifting earlier chunks.
-                        if offset + ch.len_utf8() - start > PROVIDER_BODY_CHUNK_BYTES {
-                            fragments.push(literal_fragment(&text[start..offset], &mut texts));
-                            start = offset;
-                        }
-                        if quoted {
-                            if escaped {
-                                escaped = false;
-                                // A rendered history can occupy one string.
-                                // Keep short message bodies intact; completed
-                                // line groups in a long string stay reusable.
-                                if ch == 'n' {
-                                    lines += 1;
-                                    if lines.is_multiple_of(8)
-                                        && offset + 1 - string_start >= 4096
-                                        && offset + 1 - start >= 4096
-                                    {
-                                        fragments.push(literal_fragment(
-                                            &text[start..offset + 1],
-                                            &mut texts,
-                                        ));
-                                        start = offset + 1;
-                                    }
-                                }
-                            } else if ch == '\\' {
-                                escaped = true;
-                            } else if ch == '"' {
-                                quoted = false;
-                                if depth == 1 {
-                                    history_key = matches!(
-                                        &text[string_start..offset + 1],
-                                        "\"messages\"" | "\"contents\"" | "\"input\""
-                                    );
-                                }
-                            }
-                        } else if ch == '"' {
-                            quoted = true;
-                            string_start = offset;
-                            lines = 0;
-                        } else {
-                            if ch == ']' && history_depth == Some(depth) {
-                                if start < offset {
-                                    fragments
-                                        .push(literal_fragment(&text[start..offset], &mut texts));
-                                }
-                                start = offset;
-                                prefix_end = Some(fragments.len());
-                                history_depth = None;
-                            } else if ch == ',' && history_depth == Some(depth) {
-                                messages += 1;
-                                if messages.is_multiple_of(8) && offset - start >= 8192 {
-                                    if start < offset {
-                                        fragments.push(literal_fragment(
-                                            &text[start..offset],
-                                            &mut texts,
-                                        ));
-                                    }
-                                    // The comma belongs to the next group, so
-                                    // appending leaves completed groups unchanged.
-                                    start = offset;
-                                }
-                            }
-                            if ch == '[' && history_key && depth == 1 {
-                                // The opening envelope rides in the first
-                                // group rather than owning another index path.
-                                history_depth = Some(depth + 1);
-                                history_key = false;
-                                messages = 0;
-                            }
-                            match ch {
-                                '{' | '[' => depth += 1,
-                                '}' | ']' => depth = depth.saturating_sub(1),
-                                _ => {}
-                            }
-                        }
+            if segment.is_item() {
+                let kept = if previous_item {
+                    segment
+                        .derived(|item| SeparatedItemLeaves(item_leaves(item, true)))
+                        .0
+                        .clone()
+                } else {
+                    segment
+                        .derived(|item| ItemLeaves(item_leaves(item, false)))
+                        .0
+                        .clone()
+                };
+                leaves.extend(kept);
+                items_end = Some(leaves.len());
+                previous_item = true;
+                continue;
+            }
+            previous_item = false;
+            for part in segment.parts() {
+                match part {
+                    lash_sansio::llm::types::SegmentPart::Literal(text) => {
+                        envelope.literal(text, &mut leaves);
                     }
-                    if start < text.len() {
-                        fragments.push(literal_fragment(&text[start..], &mut texts));
+                    lash_sansio::llm::types::SegmentPart::Slot(slot) => {
+                        leaves.push(encode_fragment(&RequestFragment::Attachment {
+                            slot: slot.as_ref(),
+                        }));
                     }
                 }
             }
+        }
+        let prefix_end = items_end.or(envelope.prefix_end);
+        let mut fragments = Vec::with_capacity(leaves.len());
+        let mut texts = Vec::with_capacity(leaves.len() * 2);
+        for (reference, encoded) in leaves {
+            texts.push((reference.blob.clone(), encoded));
+            fragments.push(reference);
         }
         let prefix_start = texts.len();
         let prefix = prefix_end
@@ -860,7 +952,7 @@ impl ChunkedRequestTemplate {
                 prefix,
                 inline: inline
                     .into_iter()
-                    .map(|(hash, fragment)| (hash, fragment.text))
+                    .map(|(hash, fragment)| (hash, fragment.text.to_string()))
                     .collect(),
             },
             texts,
@@ -872,9 +964,9 @@ impl ChunkedRequestTemplate {
         &self,
         text: impl Fn(&BlobRef) -> Option<&'a str>,
     ) -> Result<lash_sansio::llm::types::RecordedRequestTemplate, ProviderBodyError> {
-        use lash_sansio::llm::types::RequestSegment;
+        use lash_sansio::llm::types::{RequestSegment, SegmentKind, SegmentPart};
         let mut stack = vec![self.root.clone()];
-        let mut segments = Vec::new();
+        let mut parts = Vec::new();
         let mut literal = String::new();
         while let Some(reference) = stack.pop() {
             let stored = self
@@ -903,19 +995,18 @@ impl ChunkedRequestTemplate {
                 RequestFragment::Literal { text } => literal.push_str(&text),
                 RequestFragment::Attachment { slot } => {
                     if !literal.is_empty() {
-                        segments.push(RequestSegment::Literal {
-                            text: std::mem::take(&mut literal).into(),
-                        });
+                        parts.push(SegmentPart::Literal(std::mem::take(&mut literal).into()));
                     }
-                    segments.push(RequestSegment::Attachment { slot });
+                    parts.push(SegmentPart::Slot(slot));
                 }
             }
         }
         if !literal.is_empty() {
-            segments.push(RequestSegment::Literal {
-                text: literal.into(),
-            });
+            parts.push(SegmentPart::Literal(literal.into()));
         }
+        // A reopened call is sent as admitted, never lowered again: its
+        // body is one text segment.
+        let segments = vec![RequestSegment::from_parts(SegmentKind::Text, parts)?];
         let mut template =
             lash_sansio::llm::types::RecordedRequestTemplate::from_recorded_segments(
                 self.route.clone(),

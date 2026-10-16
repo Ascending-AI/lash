@@ -27,7 +27,7 @@ use crate::config::OpenAiReasoningDialect;
 use crate::driver::CompletionEndpoint;
 use crate::reasoning::{apply_reasoning, reasoning_object};
 use crate::responses_shared as shared;
-use crate::support::TemplateJson;
+use crate::support::{TemplateJson, UnitWriter};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     LlmOutputSpec, LlmRequest, ProviderReasoningRetentionSupport, ReasoningRetentionSelection,
@@ -255,9 +255,8 @@ impl CodexProvider {
         active_thinking_pins_sampling: false,
     };
 
-    /// Refuse, before any credential, WebSocket or HTTP I/O, every host
-    /// setting this request carries that the Codex wire cannot send.
-    pub(crate) fn preflight(&self, req: &LlmRequest) -> Result<(), LlmTransportError> {
+    /// Refuse an extra header this wire sets itself.
+    pub(crate) fn validate_headers(&self) -> Result<(), LlmTransportError> {
         validate_extra_headers(
             &self.extra_headers,
             &[
@@ -272,13 +271,11 @@ impl CodexProvider {
                 "chatgpt-account-id",
             ],
             false,
-        )?;
-        self.build_request(req, req.stream_events.is_some())
-            .map(|_| ())
+        )
     }
 
     /// Run `then` over the retention-safe request with every host setting
-    /// resolved. Pure, so the builder and the preflight agree.
+    /// resolved. Pure, so the builder and the lowering agree.
     fn validated<T>(
         &self,
         req: &LlmRequest,
@@ -322,8 +319,18 @@ impl CodexProvider {
         req: &LlmRequest,
         stream: bool,
     ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
+        self.build_request_with(req, stream, &mut UnitWriter::Plain)
+    }
+
+    /// The request body, each group of history written by `units`.
+    pub(crate) fn build_request_with(
+        &self,
+        req: &LlmRequest,
+        stream: bool,
+        units: &mut UnitWriter<'_>,
+    ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
         self.validated(req, |req, policy, reasoning_body| {
-            self.build_validated(req, stream, policy, reasoning_body)
+            self.build_validated(req, stream, policy, reasoning_body, units)
         })
     }
 
@@ -333,9 +340,10 @@ impl CodexProvider {
         stream: bool,
         policy: ResolvedGenerationPolicy,
         reasoning_body: Value,
+        units: &mut UnitWriter<'_>,
     ) -> Result<BuiltRequest<TemplateJson>, LlmTransportError> {
         let tools = Self::build_tools(req)?;
-        let input = shared::build_responses_input(req);
+        let input = shared::build_responses_input(req, units)?;
         let mut emission = GenerationEmission {
             reasoning: policy.reasoning.is_some(),
             ..GenerationEmission::default()

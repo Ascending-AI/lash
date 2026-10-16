@@ -769,7 +769,7 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
                     .any(|part| part.content().contains(MARKER))
             }
             lash_core::SessionHistoryRecord::Protocol(event) => matches!(
-                lash_protocol_rlm::decode_rlm_protocol_event(event).expect("recorded RLM protocol event decodes"),
+                lash_protocol_rlm::decode_rlm_protocol_event(event).expect("recorded RLM protocol event decodes").as_deref(),
                 Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
                     if content.prose.contains(MARKER)
             ),
@@ -842,7 +842,7 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
                     .iter()
                     .any(|part| part.content().contains(MARKER)),
                 lash_core::SessionHistoryRecord::Protocol(event) => matches!(
-                    lash_protocol_rlm::decode_rlm_protocol_event(event).expect("recorded RLM protocol event decodes"),
+                    lash_protocol_rlm::decode_rlm_protocol_event(event).expect("recorded RLM protocol event decodes").as_deref(),
                     Some(lash_rlm_types::RlmProtocolEvent::RlmAssistantContent(content))
                         if content.prose.contains(MARKER)
                 ),

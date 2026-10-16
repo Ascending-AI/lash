@@ -716,6 +716,8 @@ mod generation_policy_tests;
 mod model_total_tests;
 #[path = "tests/slot_delivery_tests.rs"]
 mod slot_delivery_tests;
+#[path = "tests/wire_bytes_tests.rs"]
+mod wire_bytes_tests;
 
 pub(super) fn empty_request() -> LlmRequest {
     LlmRequest {
@@ -2180,8 +2182,9 @@ impl Provider for AdmissionRecorder {
     async fn lower(
         &mut self,
         request: &LlmRequest,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        self.inner.lower(request).await
+        self.inner.lower(request, cache).await
     }
     fn encode_slot(
         &self,

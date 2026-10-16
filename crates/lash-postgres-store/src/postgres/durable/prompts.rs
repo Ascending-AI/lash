@@ -289,9 +289,7 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
     // The first text under each address stands for it.
     let mut distinct = BTreeMap::new();
     for text in snapshot_texts.iter().chain(request_texts) {
-        distinct
-            .entry(text.hash.as_str())
-            .or_insert(text.text.as_str());
+        distinct.entry(text.hash.as_str()).or_insert(&*text.text);
     }
     if distinct.is_empty() {
         return Some(program);
@@ -416,7 +414,7 @@ pub(super) async fn apply(
             if !unheld.is_empty() {
                 let (hashes, bodies): (Vec<_>, Vec<_>) = unheld
                     .iter()
-                    .map(|(hash, text)| (*hash, text.text.as_str()))
+                    .map(|(hash, text)| (*hash, &*text.text))
                     .unzip();
                 crate::observed_sql::query(POSTGRES_SQL.insert_texts.sql())
                     .bind(&hashes)
@@ -663,7 +661,7 @@ pub(super) async fn texts(
                     .fetch_all(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(sqlx_failure)?,
-                text,
+                text: text.into(),
             });
         }
     }

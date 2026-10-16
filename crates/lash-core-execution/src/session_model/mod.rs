@@ -9,7 +9,7 @@ use crate::{LlmProfileConfig, LlmProfileKey, LlmProfileUnavailable, LlmProfiles}
 pub use lash_sansio::format_tool_output_content;
 pub use lash_sansio::session_model::{
     ConversationRecord, ErrorEnvelope, FailureCode, LlmUsage, MaxToolCalls, Message, MessageRole,
-    Namespace, NoProgressBudget, Part, PartKind, ProtocolEvent, RuntimeOutputCuts,
+    Namespace, NoProgressBudget, Part, PartKind, ProtocolEvent, ProtocolPayload, RuntimeOutputCuts,
     SessionStreamEvent, StreamMessageKind, TokenUsageOverflow, ToolCallLimitExceeded,
     ToolCallLimitScope, TurnBudget, TurnFailureCode, TurnFailureKind, make_error_envelope,
     make_error_event, reassign_part_ids, render_prompt, shared_parts,
@@ -66,7 +66,7 @@ pub fn plugin_runtime_event_from_protocol(
     struct Stamp {
         format: u32,
     }
-    let stamp: Stamp = serde_json::from_value(event.payload.clone())
+    let stamp = <Stamp as serde::Deserialize>::deserialize(event.payload.value())
         .map_err(|error| corrupt(error.to_string()))?;
     if !lash_core_store::store::upcast_chain_covers(
         lash_core_store::surface_format!(PLUGIN_RUNTIME_EVENT_VERSION),
@@ -78,7 +78,7 @@ pub fn plugin_runtime_event_from_protocol(
             stamp.format
         )));
     }
-    serde_json::from_value(event.payload.clone())
+    <PersistedPluginRuntimeEvent as serde::Deserialize>::deserialize(event.payload.value())
         .map(Some)
         .map_err(|error| corrupt(error.to_string()))
 }

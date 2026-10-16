@@ -113,8 +113,9 @@ pub struct TranscriptMessage {
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum TranscriptItem {
     Message(TranscriptMessage),
-    /// One code cell a protocol executed: the record its protocol committed.
-    Cell(Box<CellRecord>),
+    /// One code cell a protocol executed: the record its protocol committed,
+    /// shared with the protocol's decoded event.
+    Cell(Arc<CellRecord>),
     Suppressed(SuppressionReason),
 }
 

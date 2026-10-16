@@ -27,8 +27,7 @@ use lash_sansio::llm::capability::{
     AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
 };
 use lash_sansio::llm::types::{
-    LiveRequestBody, ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment,
-    ResponseContext,
+    LiveRequestBody, ProviderRouteIdentity, RecordedRequestTemplate, ResponseContext, SegmentCache,
 };
 use lash_sansio::sync::MutexExt as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -156,31 +155,25 @@ impl Provider for WireRecorder {
     async fn lower(
         &mut self,
         request: &lash_core::LlmRequest,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, lash_core::llm::transport::LlmTransportError> {
         self.lowered.fetch_add(1, Ordering::SeqCst);
-        let template = RecordedRequestTemplate::of_request(
+        RecordedRequestTemplate::of_request(
             self.route_identity(request.model.wire_model()),
             request,
+            cache,
         )
-        .map_err(lash_core::provider::attachment_wire::template_error)?;
-        let mut segments = template.segments().to_vec();
-        for segment in &mut segments {
-            if let RequestSegment::Attachment { slot } = segment
-                && slot.reference.label.as_deref() == Some("file.png")
-            {
-                slot.accepts = ProviderAccepts {
-                    bytes: false,
-                    url: false,
-                    provider_file: Some(scope()),
-                };
-            }
-        }
-        RecordedRequestTemplate::from_segments(
-            template.route.clone(),
-            template.stream(),
-            template.generation,
-            segments,
-        )
+        .and_then(|template| {
+            template.map_slots(|slot| {
+                if slot.reference.label.as_deref() == Some("file.png") {
+                    slot.accepts = ProviderAccepts {
+                        bytes: false,
+                        url: false,
+                        provider_file: Some(scope()),
+                    };
+                }
+            })
+        })
         .map_err(lash_core::provider::attachment_wire::template_error)
     }
     async fn send(
@@ -190,7 +183,7 @@ impl Provider for WireRecorder {
     ) -> Result<LlmResponse, lash_core::llm::transport::LlmTransportError> {
         let first = {
             let mut wires = self.wires.lock_recover();
-            wires.push((body.wire(), body.template().clone()));
+            wires.push((body.to_wire_string(), body.template().clone()));
             wires.len() == 1
         };
         if self.crash && first {

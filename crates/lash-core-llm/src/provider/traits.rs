@@ -86,13 +86,23 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     }
 
     /// Lower literal JSON and effective attachment acceptance exactly once.
+    ///
+    /// `cache` keeps what this route lowered for earlier calls, by the
+    /// retained identity of what it lowered: a lowering reuses the segments
+    /// of every unchanged message and builds only the new ones, and the
+    /// template it returns is still the whole request. A provider that
+    /// rewrites the body may ignore `cache`; it then rebuilds every call.
+    /// The default lowering is the canonical body
+    /// ([`RecordedRequestTemplate::of_request`]).
     async fn lower(
         &mut self,
         request: &LlmRequest,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         RecordedRequestTemplate::of_request(
             self.route_identity(request.model.wire_model()),
             request,
+            cache,
         )
         .map_err(super::attachment_wire::template_error)
     }
@@ -148,7 +158,9 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
         let timeout = self.options().llm_timeouts().request_timeout;
         let valid_for = timeout.unwrap_or_else(|| horizon.limits.per_request());
         let prepare = async {
-            let template = std::sync::Arc::new(self.lower(&request).await?);
+            // A call outside admission is never lowered again.
+            let template =
+                std::sync::Arc::new(self.lower(&request, &SegmentCache::disabled()).await?);
             let valid_through_ms = horizon
                 .clock
                 .timestamp_ms()

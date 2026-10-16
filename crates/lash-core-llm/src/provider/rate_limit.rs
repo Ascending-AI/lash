@@ -372,6 +372,7 @@ mod admission_tests {
         let template = RecordedRequestTemplate::of_request(
             components.provider.route_identity("model"),
             &super::super::tests::empty_request(),
+            &lash_sansio::llm::types::SegmentCache::disabled(),
         )
         .expect("the request lowers canonically");
         let assert_usage = |request_used, token_used| {

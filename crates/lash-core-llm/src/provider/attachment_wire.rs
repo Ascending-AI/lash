@@ -3,8 +3,9 @@ use crate::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRet
 use lash_sansio::AttachmentRef;
 use lash_sansio::llm::attachment_delivery::{AttachmentPosition, Delivery};
 use lash_sansio::llm::types::{
-    AttachmentSlot, GenerationReceipt, LiveRequestBody, LlmRequest, ProviderRouteIdentity,
-    RecordedRequestTemplate, SlotCodec, TemplateJson, TransientJson,
+    AttachmentSlot, GenerationReceipt, LiveRequestBody, LlmRequest, LoweredItem,
+    ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment, SegmentCache, SegmentContext,
+    SegmentContextKey, SegmentKey, SlotCodec, TemplateJson, TransientJson,
 };
 use serde_json::{Value, json};
 
@@ -63,33 +64,29 @@ pub fn message_names_missing_file(message: &str) -> bool {
         .any(|gone| message.contains(gone))
 }
 
-/// Lower the tree an adapter's builder emitted: its JSON as literals, and
-/// each attachment node as a slot pinned to `codec` and to what the route
-/// accepts there, narrowed by the request's host acceptance. An attachment
-/// nothing accepts refuses the lowering.
-pub fn lower_attachment_json(
+/// The slot an adapter pins for each attachment node it writes: pinned to
+/// `codec` and to what the route `accepts` there, narrowed by the request's
+/// host acceptance. An attachment nothing accepts refuses the lowering.
+pub fn slot_pinner<'a>(
     accepts: impl Fn(
         &lash_sansio::MediaType,
         AttachmentPosition,
-    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts,
-    request: &LlmRequest,
-    route: ProviderRouteIdentity,
-    settings: (bool, Option<GenerationReceipt>),
-    body: &TemplateJson,
-    codec: &str,
-) -> Result<RecordedRequestTemplate, LlmTransportError> {
-    let (stream, generation) = settings;
-    let provider = route.provider.clone();
-    let mut builder = RecordedRequestTemplate::builder(route, stream, generation);
-    builder.json(body, &mut |reference: &AttachmentRef, position| {
+    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts
+    + 'a,
+    request: &'a LlmRequest,
+    provider: &'a str,
+    codec: &'a str,
+) -> impl FnMut(&AttachmentRef, AttachmentPosition) -> Result<AttachmentSlot, LlmTransportError> + 'a
+{
+    move |reference: &AttachmentRef, position| {
         let accepts = accepts(&reference.media_type, position).narrowed(
             request
                 .attachment_acceptance
-                .forms(&provider, &reference.media_type, position),
+                .forms(provider, &reference.media_type, position),
         );
         if accepts.is_empty() {
             return Err(crate::llm::transport::unsupported_attachment_capability(
-                &provider,
+                provider,
                 reference,
                 position,
                 &request
@@ -106,7 +103,139 @@ pub fn lower_attachment_json(
                 revision: 1,
             },
         })
-    })?;
+    }
+}
+
+/// The request-level inputs every lowered unit of `request` on `route`
+/// depends on besides its messages: the lowering's `namespace` (its name
+/// and revision), the route and model, and the host's attachment
+/// acceptance its slots are narrowed by. An adapter adds the dialect flags
+/// its units read, then finishes the context.
+pub fn segment_context(
+    namespace: &str,
+    request: &LlmRequest,
+    route: &ProviderRouteIdentity,
+) -> SegmentContext {
+    SegmentContext::new(namespace)
+        .str(&route.provider)
+        .str(&route.endpoint)
+        .str(&route.model)
+        .str(request.model.wire_model())
+        .json(request.attachment_acceptance.as_ref())
+}
+
+/// `segments`, one unit's lowered items, as tree nodes in its body.
+///
+/// # Errors
+///
+/// [`template_error`] when a segment is not an item.
+pub fn lowered_items(segments: &[RequestSegment]) -> Result<Vec<TemplateJson>, LlmTransportError> {
+    segments
+        .iter()
+        .map(|segment| {
+            LoweredItem::new(segment.clone())
+                .map(TemplateJson::Lowered)
+                .map_err(template_error)
+        })
+        .collect()
+}
+
+/// How an adapter's request builder writes each unit of history it lowers
+/// (a wire message, or a group of wire items): as the JSON it builds, for a
+/// reader of the plain body, or through a [`SegmentCache`], where a unit
+/// whose key was lowered before is the segments it was, and only new units
+/// are built and pinned.
+pub enum UnitWriter<'a> {
+    /// Every unit is built and returned as JSON.
+    Plain,
+    /// Each unit is lowered once per key, its attachments pinned by `pin`.
+    Cached {
+        cache: &'a SegmentCache,
+        context: SegmentContextKey,
+        pin: Box<SlotPin<'a>>,
+    },
+}
+
+/// Pins one attachment a cached unit carries to the slot it is sent through.
+type SlotPin<'a> =
+    dyn FnMut(&AttachmentRef, AttachmentPosition) -> Result<AttachmentSlot, LlmTransportError> + 'a;
+
+impl<'a> UnitWriter<'a> {
+    /// Write units through `cache` under `context`, each slot pinned by
+    /// [`slot_pinner`] for `codec`.
+    pub fn cached(
+        cache: &'a SegmentCache,
+        context: SegmentContextKey,
+        accepts: impl Fn(
+            &lash_sansio::MediaType,
+            AttachmentPosition,
+        ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts
+        + 'a,
+        request: &'a LlmRequest,
+        provider: &'a str,
+        codec: &'a str,
+    ) -> Self {
+        Self::Cached {
+            cache,
+            context,
+            pin: Box::new(slot_pinner(accepts, request, provider, codec)),
+        }
+    }
+
+    /// The tree nodes of one unit: built by `build`, or reused when `key`
+    /// names a unit lowered before. `key` adds to the unit's key what its
+    /// wire form reads besides the context: its source messages, by
+    /// identity, and its modifiers.
+    ///
+    /// # Errors
+    ///
+    /// What `build` or pinning a slot refuses with.
+    pub fn unit<'m>(
+        &mut self,
+        key: impl FnOnce(SegmentKey<'m>) -> SegmentKey<'m>,
+        build: impl FnOnce() -> Result<Vec<TemplateJson>, LlmTransportError>,
+    ) -> Result<Vec<TemplateJson>, LlmTransportError> {
+        match self {
+            Self::Plain => build(),
+            Self::Cached {
+                cache,
+                context,
+                pin,
+            } => {
+                let segments = cache.segments(key(SegmentKey::new(context)), || {
+                    build()?
+                        .iter()
+                        .map(|json| {
+                            RequestSegment::item(json, &mut |reference, position| {
+                                pin(reference, position)
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })?;
+                lowered_items(&segments)
+            }
+        }
+    }
+}
+
+/// Lower the tree an adapter's builder emitted: its JSON as literals, each
+/// lowered item as the segment it is, and each attachment node as a slot
+/// [`slot_pinner`] pins.
+pub fn lower_attachment_json(
+    accepts: impl Fn(
+        &lash_sansio::MediaType,
+        AttachmentPosition,
+    ) -> lash_sansio::llm::attachment_delivery::ProviderAccepts,
+    request: &LlmRequest,
+    route: ProviderRouteIdentity,
+    settings: (bool, Option<GenerationReceipt>),
+    body: &TemplateJson,
+    codec: &str,
+) -> Result<RecordedRequestTemplate, LlmTransportError> {
+    let (stream, generation) = settings;
+    let provider = route.provider.clone();
+    let mut builder = RecordedRequestTemplate::builder(route, stream, generation);
+    builder.json(body, &mut slot_pinner(accepts, request, &provider, codec))?;
     builder.finish().map_err(template_error)
 }
 

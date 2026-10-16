@@ -579,7 +579,7 @@ impl CodexProvider {
 
         let generation_disposition = Some(built.receipt);
         let request_body = Some(admitted.redacted());
-        let body_bytes = admitted.wire().into_bytes();
+        let body_bytes = admitted.to_wire_string().into_bytes();
         emit_provider_request_trace(
             provider_trace.as_ref(),
             super::CODEX_PROVIDER_KIND,
@@ -1200,6 +1200,7 @@ impl Provider for CodexProvider {
     async fn lower(
         &mut self,
         req: &LlmRequest,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         let route = self.route_identity(req.model.wire_model());
         route.validate_endpoint().map_err(|error| {
@@ -1207,11 +1208,31 @@ impl Provider for CodexProvider {
                 .with_kind(ProviderFailureKind::Validation)
                 .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
         })?;
-        self.preflight(req)?;
+        // Building the body is the rest of the preflight.
+        self.validate_headers()?;
         let stream = req.stream_events.is_some();
-        let BuiltRequest { body, receipt } = self.build_request(req, stream)?;
+        let accepts = |mime: &lash_sansio::MediaType, position| {
+            self.attachment_accepts(req.model.wire_model(), mime, position)
+        };
+        // A group of history reads, besides its messages, the route, the
+        // host's acceptance, this provider's file scope and the instruction
+        // role.
+        let context = segment_context("lash.openai.responses-input/1", req, &route)
+            .json(&self.attachment_file_scope())
+            .str(req.model.metadata().capability.instruction_role.as_str())
+            .finish();
+        let mut units = UnitWriter::cached(
+            cache,
+            context,
+            accepts,
+            req,
+            super::CODEX_PROVIDER_KIND,
+            crate::attachment_delivery::RESPONSES_CODEC,
+        );
+        let BuiltRequest { body, receipt } = self.build_request_with(req, stream, &mut units)?;
+        drop(units);
         lower_attachment_json(
-            |mime, position| self.attachment_accepts(req.model.wire_model(), mime, position),
+            accepts,
             req,
             route,
             (stream, Some(receipt)),
@@ -1232,7 +1253,7 @@ impl Provider for CodexProvider {
                 .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
         })?;
         let built = BuiltRequest {
-            body: serde_json::from_str(&body.wire()).map_err(|e| {
+            body: serde_json::from_str(&body.to_wire_string()).map_err(|e| {
                 LlmTransportError::new(format!("The Codex request body does not decode: {e}"))
                     .with_kind(ProviderFailureKind::Validation)
                     .with_lash_code(TurnFailureCode::AdmittedRequestUnavailable)
@@ -1294,5 +1315,6 @@ impl Provider for CodexProvider {
 }
 
 use crate::support::{
-    AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope, lower_attachment_json,
+    AttachmentPosition, Delivery, ProviderAccepts, ProviderFileScope, SegmentCache, UnitWriter,
+    lower_attachment_json, segment_context,
 };

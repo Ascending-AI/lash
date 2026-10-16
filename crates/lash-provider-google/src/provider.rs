@@ -87,7 +87,7 @@ impl GoogleOAuthProvider {
         } else {
             None
         };
-        let request_body_bytes = admitted.wire().into_bytes();
+        let request_body_bytes = admitted.to_wire_string().into_bytes();
         let request_body = Some(admitted.redacted());
         // The model the body names reads the response's parts.
         let origin_model = serde_json::from_str::<Value>(&admitted.redacted())
@@ -476,6 +476,7 @@ impl GoogleOAuthProvider {
         &mut self,
         req: &LlmRequest,
         lease: &TokenLease,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         if self.project_id.is_none() {
             self.project_id = match self.resolved_project_id.get() {
@@ -491,11 +492,30 @@ impl GoogleOAuthProvider {
                 }
             };
         }
-        let contents = self.build_contents(req)?;
+        let accepts = |mime: &lash_sansio::MediaType, position| {
+            self.attachment_accepts(req.model.wire_model(), mime, position)
+        };
+        let route = self.route_identity_for_model(req.model.wire_model());
+        // A content reads, besides its messages, the route, the host's
+        // acceptance, this provider's file scope and the Google dialect.
+        let context = segment_context("lash.google.content/1", req, &route)
+            .json(&self.attachment_file_scope())
+            .json(&req.model.metadata().capability.google_dialect)
+            .finish();
+        let mut units = UnitWriter::cached(
+            cache,
+            context,
+            accepts,
+            req,
+            self.kind(),
+            crate::attachment_delivery::CODEC,
+        );
+        let contents = self.build_contents(req, &mut units)?;
+        drop(units);
         let (request, receipt) =
             Self::build_request_tree(self, req, contents, self.project_id.as_deref())?;
         lower_attachment_json(
-            |mime, position| self.attachment_accepts(req.model.wire_model(), mime, position),
+            accepts,
             req,
             self.route_identity_for_model(req.model.wire_model()),
             (req.stream_events.is_some(), Some(receipt)),
@@ -608,6 +628,7 @@ impl Provider for GoogleOAuthProvider {
     async fn lower(
         &mut self,
         req: &LlmRequest,
+        cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         self.route_identity_for_model(req.model.wire_model())
             .validate_endpoint()
@@ -629,7 +650,7 @@ impl Provider for GoogleOAuthProvider {
         let route = self.route_identity_for_model(req.model.wire_model());
         let tokens = Arc::clone(&self.tokens);
         let mut lease = tokens.current(&route).await?;
-        match self.lower_with_token(&req, &lease).await {
+        match self.lower_with_token(&req, &lease, cache).await {
             Err(error) if rejected_before_output(&error) => {
                 match tokens
                     .replace(&route, &lease, TokenRequestReason::Rejected)
@@ -637,7 +658,7 @@ impl Provider for GoogleOAuthProvider {
                 {
                     Some(fresh) => {
                         lease = fresh;
-                        self.lower_with_token(&req, &lease).await
+                        self.lower_with_token(&req, &lease, cache).await
                     }
                     None => Err(error),
                 }

@@ -212,8 +212,10 @@ pub struct ProviderRouteIdentity {
 }
 
 pub use super::provider_body::{
-    AttachmentSlot, LiveRequestBody, RecordedRequestTemplate, RequestSegment,
-    RequestTemplateBuilder, SlotCodec, TemplateError, TemplateJson, TransientJson,
+    AttachmentSlot, BodyPart, LiveRequestBody, LoweredItem, LoweredUnit, RecordedRequestTemplate,
+    RequestSegment, RequestTemplateBuilder, SEGMENT_CACHE_BUDGET_BYTES, SegmentCache,
+    SegmentCacheStats, SegmentContext, SegmentContextKey, SegmentKey, SegmentKind, SegmentPart,
+    SlotCodec, TemplateError, TemplateJson, TransientJson, WireChunk,
 };
 pub use super::provider_route::ProviderEndpointError;
 pub use super::response_context::{

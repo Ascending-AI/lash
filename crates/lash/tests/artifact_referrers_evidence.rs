@@ -122,13 +122,14 @@ fn last_cell_finish(view: &lash::persistence::SessionReadView) -> Option<serde_j
             lash_core::SessionNodePayload::Event {
                 event: lash_core::SessionHistoryRecord::Protocol(event),
             } => {
+                let decoded = lash_protocol_rlm::decode_rlm_protocol_event(event)
+                    .expect("recorded RLM protocol event decodes");
                 let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(cell)) =
-                    lash_protocol_rlm::decode_rlm_protocol_event(event)
-                        .expect("recorded RLM protocol event decodes")
+                    decoded.as_deref()
                 else {
                     return None;
                 };
-                match cell.result {
+                match &cell.result {
                     lash_core::CellOutcome::Controlled {
                         control: lash_core::CellControl::Finish { value },
                         ..

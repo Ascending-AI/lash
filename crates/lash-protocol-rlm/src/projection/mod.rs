@@ -25,8 +25,8 @@ pub use diagnostics::recorded_extraction_decisions;
 #[cfg(test)]
 pub(crate) use context::EVENT_DECODES;
 
-mod event_cache;
-pub(crate) use event_cache::EventCache;
+mod event_decoder;
+pub(crate) use event_decoder::EventDecoder;
 
 mod history_index;
 pub(crate) use history_index::HistoryIndex;

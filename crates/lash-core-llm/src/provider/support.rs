@@ -13,7 +13,7 @@ pub(super) use crate::llm::types::{
     LlmCallRecord, LlmContentBlock, LlmRequest, LlmRequestScope, LlmResponse, LlmTerminalReason,
     NormalizedError, ProtocolPosition, ProviderReplayOriginConflict, ProviderRouteIdentity,
     RecordedRequestTemplate, ResponseContext, RetryClass, RetryDecision, RetryDeclineCause,
-    RetryWait, TransientJson,
+    RetryWait, SegmentCache, TransientJson,
 };
 pub(super) use lash_sansio::llm::capability::ReasoningIntent;
 pub(super) use lash_sansio::session_model::{FailureCode, Namespace, TurnFailureCode};

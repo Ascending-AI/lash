@@ -126,6 +126,7 @@ impl Provider for Capped {
     async fn lower(
         &mut self,
         request: &LlmRequest,
+        cache: &lash::provider::SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         // What only the request says is refused here, before anything is
         // admitted: a send has the body and no request.
@@ -141,7 +142,7 @@ impl Provider for Capped {
                 "live request exceeds model/output/attachment bounds",
             ));
         }
-        self.inner.lower(request).await
+        self.inner.lower(request, cache).await
     }
     async fn send(
         &mut self,
@@ -150,7 +151,7 @@ impl Provider for Capped {
     ) -> std::result::Result<LlmResponse, LlmTransportError> {
         // The budget is decided from what is sent: the exact body's bytes.
         // Its output is reserved at the cap `lower` holds every request to.
-        let bytes = body.wire().len();
+        let bytes = body.wire_len();
         if context.model().wire_model() != self.budget.model
             || bytes > self.budget.max_input_bytes
             || body.template().slots().next().is_some()

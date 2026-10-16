@@ -88,8 +88,10 @@ impl std::fmt::Display for ModelCallId {
 pub struct PromptText {
     /// The text's content address.
     pub hash: String,
-    /// The exact UTF-8 text.
-    pub text: String,
+    /// The exact UTF-8 text, shared with its writer: a request's history
+    /// fragments are encoded once and handed to every admission that holds
+    /// them without a copy.
+    pub text: std::sync::Arc<str>,
     /// Outgoing index edges; empty for section text and literal leaves.
     pub children: Vec<String>,
 }

@@ -331,7 +331,7 @@ pub(crate) fn cell_response_shape(tags: CellTags) -> String {
 pub(crate) struct SessionDialect {
     dialect: CellDialect,
     services: CodeModeDialectServices,
-    events: Arc<crate::projection::EventCache>,
+    events: Arc<crate::projection::EventDecoder>,
 }
 
 impl SessionDialect {
@@ -463,10 +463,6 @@ impl SessionDialect {
         projection: &lash_core::facade_support::ChronologicalProjection,
     ) -> Result<crate::projection::HistoryIndex, lash_core::StoredDataCorruption> {
         crate::projection::HistoryIndex::from_projection(projection, &self.events)
-    }
-
-    pub(crate) fn clear_history_cache(&self) {
-        self.events.clear();
     }
 
     /// The execution section as one text, prose then declarations.
@@ -757,7 +753,7 @@ pub(crate) struct DialectSession {
     state: CodeModeExecutionState,
     services: CodeModeDialectServices,
     bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
-    events: Arc<crate::projection::EventCache>,
+    events: Arc<crate::projection::EventDecoder>,
 }
 
 impl DialectSession {

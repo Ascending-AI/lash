@@ -121,6 +121,7 @@ fn last_decision(machine: &TurnMachine, native: bool) -> String {
             };
             match crate::projection::decode_rlm_protocol_event(event)
                 .expect("valid history fixture")
+                .as_deref()
             {
                 Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) if diagnostic.phase == phase => {
                     diagnostic.payload["decision"].as_str().map(str::to_string)
@@ -285,8 +286,11 @@ fn discarded_continuations_are_recorded_and_excluded_from_history_in_both_dialec
                         let lash_core::SessionHistoryRecord::Protocol(event) = record else {
                             return None;
                         };
-                        match crate::projection::decode_rlm_protocol_event(event).unwrap() {
-                            Some(RlmProtocolEvent::RlmDiagnostic(d)) => Some(d.payload),
+                        match crate::projection::decode_rlm_protocol_event(event)
+                            .unwrap()
+                            .as_deref()
+                        {
+                            Some(RlmProtocolEvent::RlmDiagnostic(d)) => Some(d.payload.clone()),
                             _ => None,
                         }
                     })
