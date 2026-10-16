@@ -127,6 +127,14 @@ impl Provider for LoggedProvider {
     async fn close(&self) -> Result<(), LlmTransportError> {
         self.inner.close().await
     }
+    async fn attempt_ended(
+        &mut self,
+        attempt: lash::provider::ProviderAttempt,
+        terminal: lash::provider::AttemptTerminal,
+    ) {
+        self.inner.attempt_ended(attempt, terminal).await;
+    }
+
     fn clone_boxed(&self) -> Box<dyn Provider> {
         Box::new(Self {
             inner: self.inner.clone_boxed(),

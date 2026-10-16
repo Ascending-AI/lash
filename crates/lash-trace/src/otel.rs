@@ -843,6 +843,13 @@ impl<'a> Projection<'a> {
 
     fn attributes(&self, record: &TraceRecord, out: &mut Vec<KeyValue>) {
         if let Some(attempt) = self.attempt {
+            if attempt
+                .span
+                .as_ref()
+                .is_some_and(|span| span.terminal_delivery_timed_out)
+            {
+                out.push(A::ProviderTerminalDeliveryTimedOut.value(true));
+            }
             model::attempt_attributes(&attempt.attempt, out);
             return;
         }

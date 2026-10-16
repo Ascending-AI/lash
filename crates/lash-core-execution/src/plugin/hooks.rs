@@ -275,6 +275,7 @@ pub enum PluginLifecycleEvent {
     /// may receive the committed outcome before observers run; observer
     /// failures are reported and cannot change that outcome. Delivery is
     /// not durable: an owner lost after commit may never deliver the event.
+    /// Observation only; hosts bill from provider attempt terminals (ADR 0127).
     TurnFinalized(TurnFinalized),
     SessionRestored(SessionReadView),
     /// A config transaction changed the session's policy. Observers see it

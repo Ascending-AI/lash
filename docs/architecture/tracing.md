@@ -750,8 +750,8 @@ suppressed even at zero (`flight_recorder.minimum_interval_ms`:
 |---|---|
 | `producer` | 20 |
 | `agent` | 25 |
-| `model` | 46 |
-| `model_attempt` | 28 |
+| `model` | 47 |
+| `model_attempt` | 29 |
 | `tool` | 31 |
 | `cell` | 29 |
 | `process` | 26 |

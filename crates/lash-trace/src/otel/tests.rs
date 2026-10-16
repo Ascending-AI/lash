@@ -1915,6 +1915,7 @@ fn default_projection_conforms_to_the_pinned_genai_taxonomy() {
             A::OutputTokens.value(16_i64),
             A::ReasoningTokens.value(8_i64),
             A::RequestStream.value(true),
+            A::ProviderTerminalDeliveryTimedOut.value(true),
             A::ResponseId.value("response-2"),
             A::ReasoningLevel.value("high"),
             A::OutputType.value("json"),
@@ -1935,6 +1936,12 @@ fn default_projection_conforms_to_the_pinned_genai_taxonomy() {
             assert_eq!(attempt.parent_span_id, chat.span_context.span_id());
             assert_eq!(attempt.start_time, epoch_ms(4000 + index as u64 * 1000));
             assert_eq!(attempt.end_time, epoch_ms(4500 + index as u64 * 1000));
+            assert_eq!(
+                attempt
+                    .attributes
+                    .contains(&A::ProviderTerminalDeliveryTimedOut.value(true)),
+                index == 0
+            );
             assert!(
                 attempt
                     .attributes
@@ -2165,6 +2172,7 @@ fn model_fixture(adapter: &OtelTelemetry, provider: &str) -> TraceRecord {
             span: Some(crate::TraceModelAttemptSpan {
                 span_id: adapter.leaf_span_id(),
                 provider: provider.into(),
+                terminal_delivery_timed_out: ordinal == 1,
                 started_at_ms: 3000 + u64::from(ordinal) * 1000,
                 ended_at_ms: 3500 + u64::from(ordinal) * 1000,
             }),

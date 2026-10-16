@@ -66,6 +66,8 @@ pub struct ResponseContext {
     pub contract: Arc<ResponseContract>,
     pub stream_events: Option<LlmEventSender>,
     pub provider_trace: Option<LlmProviderTraceSender>,
+    /// Live cancellation and partial response retention for this attempt.
+    pub attempt_control: super::types::ProviderAttemptControl,
 }
 
 impl ResponseContext {
@@ -76,6 +78,7 @@ impl ResponseContext {
             contract,
             stream_events: None,
             provider_trace: None,
+            attempt_control: Default::default(),
         }
     }
 
@@ -87,6 +90,7 @@ impl ResponseContext {
             contract: Arc::new(ResponseContract::of_request(request)),
             stream_events: request.stream_events.clone(),
             provider_trace: request.provider_trace.clone(),
+            attempt_control: Default::default(),
         }
     }
 

@@ -17,6 +17,7 @@ pub struct ResponseMetadataCapture {
     headers: Vec<String>,
     body_paths: Vec<String>,
     captured: BTreeMap<String, Value>,
+    attempt: Option<lash_core::provider::ProviderAttemptControl>,
 }
 
 impl ResponseMetadataCapture {
@@ -34,9 +35,17 @@ impl ResponseMetadataCapture {
                 .collect(),
             body_paths: defaults.response_metadata_body_paths.clone(),
             captured: BTreeMap::new(),
+            attempt: None,
         };
         capture.capture_headers(response_headers);
         capture
+    }
+
+    /// Keep these same captures available if the attempt is abandoned.
+    pub fn with_attempt(mut self, attempt: lash_core::provider::ProviderAttemptControl) -> Self {
+        attempt.capture_metadata(self.metadata());
+        self.attempt = Some(attempt);
+        self
     }
 
     pub fn is_active(&self) -> bool {
@@ -66,6 +75,9 @@ impl ResponseMetadataCapture {
                 self.captured
                     .insert(format!("body:{pointer}"), value.clone());
             }
+        }
+        if let Some(attempt) = &self.attempt {
+            attempt.capture_metadata(self.metadata());
         }
     }
 
@@ -117,19 +129,28 @@ mod tests {
             response_metadata_body_paths: vec!["/usage/cost".to_string()],
             ..LlmProfileRequestDefaults::new(lash_core::provider::CacheRetention::Short)
         };
+        let attempt = lash_core::provider::ProviderAttemptControl::default();
         let mut capture = ResponseMetadataCapture::from_response(
             &options,
             &[
                 ("x-request-cost".to_string(), "0.01".to_string()),
                 ("set-cookie".to_string(), "secret".to_string()),
             ],
-        );
+        )
+        .with_attempt(attempt.clone());
         capture.capture_body_text(concat!(
             "data: {\"usage\":{\"cost\":1},\"secret\":\"first\"}\n\n",
             "data: {\"usage\":{\"cost\":2},\"secret\":\"last\"}\n\n"
         ));
 
         let metadata = capture.into_metadata();
+        assert_eq!(
+            attempt
+                .partial_response()
+                .expect("live partial")
+                .response_metadata,
+            metadata
+        );
         assert_eq!(metadata["header:x-request-cost"], serde_json::json!("0.01"));
         assert_eq!(metadata["body:/usage/cost"], serde_json::json!(2));
         assert!(!metadata.contains_key("header:set-cookie"));

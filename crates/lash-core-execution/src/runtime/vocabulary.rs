@@ -255,13 +255,10 @@ pub enum TurnEvent {
     },
     /// A sealed per-call attempt ledger, including provider-reported evidence.
     ///
-    /// The settle point for metering (ADR 0127): each model call a turn
-    /// sends reaches its host once as this event, whether it completed,
-    /// failed, or was dropped at its deadline or by an immediate cancel,
-    /// when lash stops polling the provider future and a host decorator
-    /// around it never returns. [`crate::LlmCallRecord::usage`] is the
-    /// call's usage, counted unknown when it never arrived. A call whose
-    /// cell was accepted mid-stream is recorded when its tail drains.
+    /// Observation only. Hosts meter each attempt at the Provider seam:
+    /// its returned Ok or Err, or attempt_ended when no result returned
+    /// (ADR 0127). A call whose cell was accepted mid-stream is recorded
+    /// when its tail drains.
     ModelCallRecorded {
         record: crate::LlmCallRecord,
     },

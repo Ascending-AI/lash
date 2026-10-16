@@ -8,6 +8,8 @@ Openers carry no content: `LlmCallStarted` always carries an omitted request; ho
 
 `ContentLimits::standard()` cuts parts at 16 KiB, which truncates typical agent system prompts. Hosts wanting the full prompt raise `max_part_bytes` (Figments uses 64 KiB parts and 256 KiB attributes).
 
+Provider terminal delivery timeouts set `lash.provider.terminal_delivery_timed_out` on the logical call and attempt spans and increment `lash.provider.terminal_delivery.timeouts`. A bounded invocation does not promise completed host settlement.
+
 Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response` and `reasoning`. Laminar reads `result`/`thinking` and semconv messages only on LLM spans. Hosts map these themselves; for example, map an agent span's `gen_ai.output.messages` into the host agent-output representation and translate nested tool response/reasoning parts for that renderer.
 
 | Span name or prefix | Kind | Ownership | Semconv type |
@@ -65,6 +67,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `gen_ai.usage.cache_write.input_tokens` | Integer | Provenance | model |
 | `gen_ai.usage.reasoning.output_tokens` | Integer | Provenance | model |
 | `lash.model.attempt.ordinal` | Integer | Provenance | model_attempt |
+| `lash.provider.terminal_delivery_timed_out` | Boolean | Provenance | model, model_attempt |
 | `lash.model.attempts` | Integer | Provenance | model |
 | `gen_ai.request.stream` | Boolean | Provenance | model |
 | `gen_ai.request.reasoning.level` | String | Provenance | model |
@@ -128,8 +131,8 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 |---|---|
 | `producer` | 20 |
 | `agent` | 25 |
-| `model` | 46 |
-| `model_attempt` | 28 |
+| `model` | 47 |
+| `model_attempt` | 29 |
 | `tool` | 31 |
 | `cell` | 29 |
 | `process` | 26 |
@@ -156,6 +159,7 @@ Vendor rendering: the pinned semconv 07794021 uses `tool_call_response.response`
 | `gen_ai.execute_tool.duration` | Histogram | `s` | Transition |
 | `gen_ai.invoke_workflow.duration` | Histogram | `s` | Transition |
 | `lash.trace.omissions` | Counter | `` | Live |
+| `lash.provider.terminal_delivery.timeouts` | Counter | `` | Live |
 | `lash.provider.retries` | Counter | `` | Live |
 | `lash.provider.throttle_wait.duration` | Histogram | `ms` | Live |
 | `lash.store.pool.acquire_wait.duration` | Histogram | `ms` | Physical |

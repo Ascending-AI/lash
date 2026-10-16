@@ -2206,6 +2206,14 @@ impl Provider for AdmissionRecorder {
             .push((context.scope.clone(), request));
         self.inner.send(body, context).await
     }
+
+    async fn attempt_ended(
+        &mut self,
+        attempt: crate::provider::ProviderAttempt,
+        terminal: crate::provider::AttemptTerminal,
+    ) {
+        self.inner.attempt_ended(attempt, terminal).await;
+    }
 }
 
 #[tokio::test]
@@ -2273,3 +2281,6 @@ async fn admission_decorator_observes_all_retry_requests_with_session_identity()
         assert_eq!(retry.generation, request.generation);
     }
 }
+
+#[path = "tests/attempt_terminal_tests.rs"]
+mod attempt_terminal_tests;

@@ -538,181 +538,441 @@ pub(super) fn rlm_accepted_cell_without_tail_usage_is_unknown_never_zero() -> Re
     })
 }
 
-/// The `ModelCallRecorded` activities of a turn: the host's settle records.
+/// FIG-6547: a host decorator receives a terminal for every dispatched
+/// attempt, including deadline and cancellation while a cell's tail drains.
 #[cfg(feature = "rlm")]
-fn settle_records(activities: &[TurnActivity]) -> Vec<&lash_core::LlmCallRecord> {
-    activities
-        .iter()
-        .filter_map(|activity| match &activity.event {
-            TurnEvent::ModelCallRecorded { record } => Some(record),
-            _ => None,
-        })
-        .collect()
+#[derive(Debug)]
+struct CountingProvider {
+    inner: Box<dyn lash_core::provider::Provider>,
+    terminals: Arc<
+        StdMutex<
+            Vec<(
+                lash_core::provider::ProviderAttempt,
+                lash_core::provider::AttemptTerminal,
+            )>,
+        >,
+    >,
+    returned: Arc<StdMutex<Vec<(u32, bool, lash_core::llm::types::LlmUsage)>>>,
+    terminal_delivered: Arc<tokio::sync::Notify>,
 }
 
-/// FIG-6446: a call lash drops before its provider future returns, so a
-/// host decorator around it never settles, reaches the host exactly once
-/// as `ModelCallRecorded` with unknown usage: at its deadline while it
-/// streams, at its deadline while its accepted cell's tail drains, and on
-/// the turn's immediate cancel.
+#[cfg(feature = "rlm")]
+#[async_trait]
+impl lash_core::provider::Provider for CountingProvider {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+    fn route_identity(&self, model: &str) -> lash_core::llm::types::ProviderRouteIdentity {
+        self.inner.route_identity(model)
+    }
+    fn options(&self) -> lash_core::provider::ProviderOptions {
+        self.inner.options()
+    }
+    fn set_options(&mut self, options: lash_core::provider::ProviderOptions) {
+        self.inner.set_options(options);
+    }
+    fn serialize_config(&self) -> serde_json::Value {
+        self.inner.serialize_config()
+    }
+    fn requires_streaming(&self) -> bool {
+        self.inner.requires_streaming()
+    }
+    fn generation_retry_guarantee(
+        &self,
+        context: &lash_core::llm::types::ResponseContext,
+        template: &lash_core::llm::types::RecordedRequestTemplate,
+    ) -> lash_core::provider::GenerationRetryGuarantee {
+        self.inner.generation_retry_guarantee(context, template)
+    }
+    async fn send(
+        &mut self,
+        body: &lash_core::llm::types::LiveRequestBody,
+        context: lash_core::llm::types::ResponseContext,
+    ) -> std::result::Result<LlmResponse, LlmTransportError> {
+        let ordinal = context.scope.attempt.expect("Lash assigns the ordinal");
+        let result = self.inner.send(body, context).await;
+        let usage = match &result {
+            Ok(response) => response.usage.clone(),
+            Err(error) => error
+                .partial_response
+                .as_ref()
+                .map(|response| response.usage.clone())
+                .unwrap_or_default(),
+        };
+        self.returned
+            .lock_recover()
+            .push((ordinal, result.is_ok(), usage));
+        result
+    }
+    async fn attempt_ended(
+        &mut self,
+        attempt: lash_core::provider::ProviderAttempt,
+        terminal: lash_core::provider::AttemptTerminal,
+    ) {
+        self.terminals
+            .lock_recover()
+            .push((attempt.clone(), terminal.clone()));
+        self.terminal_delivered.notify_one();
+        self.inner.attempt_ended(attempt, terminal).await;
+    }
+    fn clone_boxed(&self) -> Box<dyn lash_core::provider::Provider> {
+        Box::new(Self {
+            inner: self.inner.clone_boxed(),
+            terminals: self.terminals.clone(),
+            returned: self.returned.clone(),
+            terminal_delivered: self.terminal_delivered.clone(),
+        })
+    }
+}
+
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn a_dropped_call_settles_once_with_unknown_usage() -> Result<()> {
-    run_async_test_on_stack_budget("dropped-call-settles", || async {
-        for case in ["deadline-streaming", "deadline-tail", "cancel-streaming"] {
-            let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let dropped_early = Arc::new(std::sync::atomic::AtomicBool::new(false));
+pub(super) fn every_abandoned_attempt_reaches_the_provider_with_its_partial_receipt() -> Result<()>
+{
+    run_async_test_on_stack_budget("abandoned-provider-attempt", || async {
+        use lash_core::provider::{AttemptEndReason, AttemptTerminal};
+        for case in [
+            "deadline-streaming",
+            "deadline-tail",
+            "cancel-streaming",
+            "cancel-tail",
+            "stream-hook",
+            "provider-panic",
+        ] {
+            let terminals = Arc::new(StdMutex::new(Vec::new()));
+            let returned = Arc::new(StdMutex::new(Vec::new()));
+            let usage = lash_core::llm::types::LlmUsage {
+                input_tokens: 17,
+                output_tokens: 5,
+                cache_read_input_tokens: 13,
+                cache_write_input_tokens: 7,
+                reasoning_output_tokens: 3,
+                ..Default::default()
+            };
             let provider = crate::testing::TestProvider::builder()
-                .kind("dropped-call-settles")
+                .kind("abandoned-provider-attempt")
                 .requires_streaming(true)
-                .complete({
-                    let ended = Arc::clone(&ended);
-                    let dropped_early = Arc::clone(&dropped_early);
-                    move |request| {
-                        let decorated = DecoratedFuture {
-                            ended: Arc::clone(&ended),
-                            dropped_early: Arc::clone(&dropped_early),
-                        };
-                        async move {
-                            let _decorated = decorated;
-                            let stream = request.stream_events.expect("stream events");
-                            if case == "deadline-tail" {
-                                streamed_cell(&stream, "dropped tail");
-                            } else {
-                                stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                                    kind: StreamBlockKind::AssistantText,
-                                    block: lash_core::llm::types::StreamBlockIdentity::new(
-                                        "text:0", 0,
-                                    ),
-                                    text: "Let me think.".to_string(),
-                                }));
-                            }
-                            std::future::pending().await
-                        }
+                .complete({ let usage = usage.clone(); move |request| {
+                    let usage = usage.clone();
+                    async move {
+                        let stream = request.stream_events.expect("stream events");
+                        stream.send(LlmStreamEvent::Evidence(lash_core::llm::types::LlmStreamEvidence {
+                            response_started: true,
+                            provider_usage: Some(serde_json::json!({"input_tokens":17,"output_tokens":5,"cost":0.04})),
+                            response_metadata: [("header:x-opper-cost".into(), serde_json::json!("0.04")), ("body:/usage/cost".into(), serde_json::json!(0.04))].into(),
+                            execution_evidence: Some(lash_core::llm::types::ExecutionEvidence { served_model: Some("served-model".into()), provider_response_id: Some("response-1".into()), ..Default::default() }),
+                            ..Default::default()
+                        }));
+                        stream.send(LlmStreamEvent::Usage(usage));
+                        if case.ends_with("tail") { streamed_cell(&stream, "partial receipt"); }
+                        else { stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText, block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0), text: "Let me think.".into() })); }
+                        if case == "provider-panic" { panic!("provider panicked after receiving usage"); }
+                        std::future::pending().await
                     }
-                })
-                .build()
-                .into_handle();
-            // The cancel case's deadline never reaches the call first.
-            let model_total = if case == "cancel-streaming" { 60 } else { 2 };
-            let core =
-                rlm_abort_drain_core(provider, std::time::Duration::from_secs(model_total)).await?;
+                }})
+                .build();
+            let provider = ProviderHandle::new(lash_core::provider::ProviderComponents::new(
+                Box::new(CountingProvider {
+                    inner: Box::new(provider),
+                    terminals: terminals.clone(),
+                    returned: returned.clone(),
+                    terminal_delivered: Arc::default(),
+                }),
+            ));
+            let total =
+                std::time::Duration::from_secs(if case.starts_with("cancel") { 60 } else { 2 });
+            let mut builder = explicit_ephemeral_facets(rlm_core_builder_over(
+                sqlite_memory_store_backend().await,
+            ))
+            .execution_budgets(tail_budgets(total))
+            .serve_test_llm_profile(provider, mock_llm_profile_spec());
+            if case == "stream-hook" {
+                builder = builder.plugin(Arc::new(StaticPluginFactory::new(
+                    lash_core::plugin::PluginDeclaration::initial("failing-stream-consumer"),
+                    lash_core::facade_support::PluginSpec::new().with_assistant_stream(
+                        lash_core::hook_key!("fail-first-chunk"),
+                        Arc::new(|_| {
+                            Box::pin(async {
+                                Err(lash_core::PluginError::Session("stream hook failed".into()))
+                            })
+                        }),
+                    ),
+                )));
+            }
+            let core = builder.build(crate::testing::runtime_lease_owner())?;
             let session = core
                 .session(
-                    crate::SessionId::parse(format!("dropped-call-settles-{case}"))
-                        .expect("nonblank host identity"),
+                    crate::SessionId::parse(format!("abandoned-provider-{case}"))
+                        .expect("identity"),
                 )
                 .created()
                 .await
                 .open()
                 .await?;
-
             let handle = session.send(TurnInput::text("finish")).await?;
-            if case == "cancel-streaming" {
-                // Cancel once the call's output reached the turn.
+            if case.starts_with("cancel") {
                 let mut events = handle.events();
                 while let Some(activity) = events.next_activity().await {
-                    if matches!(
-                        activity?.event,
-                        TurnEvent::StreamBlock(StreamBlockEvent::Delta {
-                            kind: StreamBlockKind::AssistantText,
-                            ..
-                        })
-                    ) {
+                    let event = activity?.event;
+                    if (case == "cancel-tail"
+                        && matches!(event, TurnEvent::CodeBlockStarted { .. }))
+                        || (case == "cancel-streaming"
+                            && matches!(
+                                event,
+                                TurnEvent::StreamBlock(StreamBlockEvent::Delta { .. })
+                            ))
+                    {
                         break;
                     }
                 }
-                let requested = handle
+                handle
                     .cancel()
                     .mode(crate::TurnCancelMode::Immediate)
                     .await?;
-                assert!(
-                    matches!(requested, crate::CancelReceipt::Cancelled { .. }),
-                    "{requested:?}"
-                );
             }
-            let output = handle.output().await?;
-
+            let output = handle.output().await;
+            if case != "provider-panic" {
+                output?;
+            }
             assert!(
-                dropped_early.load(Ordering::SeqCst),
-                "{case}: lash dropped the provider future"
+                returned.lock_recover().is_empty(),
+                "{case}: the stalled send returned nothing"
             );
-            let [record] = settle_records(&output.activities)[..] else {
-                panic!("{case}: one settle record: {:?}", output.activities);
+            let observed = terminals.lock_recover();
+            assert_eq!(observed.len(), 1, "{case}: one provider terminal");
+            let (
+                attempt,
+                AttemptTerminal::Abandoned {
+                    reason,
+                    drain_timed_out,
+                    partial_response,
+                },
+            ) = &observed[0];
+            assert_eq!(attempt.ordinal, 1);
+            assert_eq!(attempt.scope.attempt, Some(1));
+            assert_eq!(attempt.call_id.0, attempt.scope.request_id);
+            assert!(attempt.scope.llm_call_id.is_some());
+            let expected = match case {
+                "stream-hook" => AttemptEndReason::StreamConsumerFailed,
+                "provider-panic" => AttemptEndReason::ProviderPanicked,
+                _ if case.starts_with("cancel") => AttemptEndReason::ImmediateCancel,
+                _ => AttemptEndReason::ModelDeadline,
             };
-            let unknown = lash_core::llm::types::LlmUsage::unknown_call();
-            assert_eq!(record.usage(), Ok(unknown.clone()), "{case}");
-            assert_eq!(output.result.usage, unknown, "{case}");
+            assert_eq!(*reason, expected, "{case}");
+            assert_eq!(*drain_timed_out, case != "provider-panic", "{case}");
+            let partial = partial_response
+                .as_ref()
+                .expect("the response received before abandonment");
+            assert_eq!(partial.usage, usage, "{case}");
+            assert_eq!(
+                partial.provider_usage,
+                Some(serde_json::json!({"input_tokens":17,"output_tokens":5,"cost":0.04})),
+                "{case}"
+            );
+            assert_eq!(
+                partial.response_metadata["header:x-opper-cost"], "0.04",
+                "{case}"
+            );
+            assert_eq!(
+                partial.response_metadata["body:/usage/cost"], 0.04,
+                "{case}"
+            );
+            let evidence = partial.execution_evidence.as_ref().expect("identity");
+            assert_eq!(evidence.served_model.as_deref(), Some("served-model"));
+            assert_eq!(evidence.provider_response_id.as_deref(), Some("response-1"));
         }
         Ok(())
     })
 }
 
-/// FIG-6446: a call whose provider returns reaches the host exactly once as
-/// `ModelCallRecorded` with the usage it reported, whether its response
-/// completed the call or its cell was accepted mid-stream and its tail
-/// drained.
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn a_completed_call_settles_once_with_known_usage() -> Result<()> {
-    run_async_test_on_stack_budget("completed-call-settles", || async {
-        for case in ["completed", "accepted-mid-stream"] {
-            let provider = crate::testing::TestProvider::builder()
-                .kind("completed-call-settles")
-                .requires_streaming(case == "accepted-mid-stream")
+pub(super) fn returned_provider_attempts_settle_once_without_an_abandoned_terminal() -> Result<()> {
+    run_async_test_on_stack_budget("returned-provider-attempt", || async {
+        for case in ["completed", "accepted-mid-stream", "retry"] {
+            let terminals = Arc::new(StdMutex::new(Vec::new()));
+            let returned = Arc::new(StdMutex::new(Vec::new()));
+            let provider = crate::testing::TestProvider::builder().kind("returned-provider-attempt").requires_streaming(case == "accepted-mid-stream")
+                .options(lash_core::provider::ProviderOptions { reliability: lash_core::provider::ProviderReliability::default().max_attempts(Some(2)).base_delay_ms(0).max_delay_ms(0), ..Default::default() })
+                .generation_retry_guarantee(if case == "retry" { lash_core::provider::GenerationRetryGuarantee::Idempotent } else { lash_core::provider::GenerationRetryGuarantee::None })
                 .complete(move |request| async move {
-                    if case == "accepted-mid-stream" {
-                        let stream = request.stream_events.expect("stream events");
-                        streamed_cell(&stream, "settled");
-                        tokio::time::sleep(TAIL_STOP_GRACE * 3).await;
-                    }
-                    Ok(LlmResponse {
-                        parts: vec![LlmOutputPart::Text {
-                            text:
-                                "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
-                                    .to_string(),
-                            response_meta: None,
-                        }],
-                        usage: lash_core::llm::types::LlmUsage {
-                            input_tokens: 17,
-                            output_tokens: 5,
-                            ..Default::default()
-                        },
-                        terminal_reason: lash_core::LlmTerminalReason::Stop,
-                        ..LlmResponse::default()
-                    })
-                })
-                .build()
-                .into_handle();
-            let core = rlm_abort_drain_core(provider, std::time::Duration::from_secs(60)).await?;
+                if case == "retry" && request.scope.attempt == Some(1) {
+                    return Err(LlmTransportError::new("failed after partial usage")
+                        .with_kind(lash_core::ProviderFailureKind::Stream)
+                        .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::RetryableTransient)
+                        .with_partial_response(LlmResponse { usage: lash_core::llm::types::LlmUsage { input_tokens: 2, output_tokens: 1, ..Default::default() }, provider_usage: Some(serde_json::json!({"input_tokens":2,"output_tokens":1})), ..Default::default() }));
+                }
+                if case == "accepted-mid-stream" { streamed_cell(&request.stream_events.expect("stream events"), "settled"); tokio::time::sleep(TAIL_STOP_GRACE * 3).await; }
+                Ok(LlmResponse { parts: vec![LlmOutputPart::Text { text: "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n".into(), response_meta: None }], usage: lash_core::llm::types::LlmUsage { input_tokens: 17, output_tokens: 5, ..Default::default() }, terminal_reason: lash_core::LlmTerminalReason::Stop, ..Default::default() })
+            }).build();
+            let provider = ProviderHandle::new(lash_core::provider::ProviderComponents::new(
+                Box::new(CountingProvider {
+                    inner: Box::new(provider),
+                    terminals: terminals.clone(),
+                    returned: returned.clone(),
+                    terminal_delivered: Arc::default(),
+                }),
+            ));
+            let total = std::time::Duration::from_secs(60);
+            let budgets = lash_core::ExecutionBudgets::new(lash_core::ExecutionBudgetsConfig {
+                model_total: total,
+                stop_grace: TAIL_STOP_GRACE,
+                provider: lash_core::ProviderAttemptLimits::new(total, total, total, 2)
+                    .expect("provider limits"),
+                ..lash_core::ExecutionBudgetsConfig::recommended()
+            })
+            .expect("budgets");
+            let core = explicit_ephemeral_facets(rlm_core_builder_over(
+                sqlite_memory_store_backend().await,
+            ))
+            .execution_budgets(budgets)
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
+            .build(crate::testing::runtime_lease_owner())?;
             let session = core
                 .session(
-                    crate::SessionId::parse(format!("completed-call-settles-{case}"))
-                        .expect("nonblank host identity"),
+                    crate::SessionId::parse(format!("returned-provider-{case}")).expect("identity"),
                 )
                 .created()
                 .await
                 .open()
                 .await?;
-
             let output = session.send(TurnInput::text("finish")).output().await?;
-
             assert_eq!(
                 output.finished().map(|(_, value)| value),
                 Some(&serde_json::json!("settled")),
                 "{case}"
             );
-            let [record] = settle_records(&output.activities)[..] else {
-                panic!("{case}: one settle record: {:?}", output.activities);
-            };
-            let usage = record.usage().expect("the call's usage");
+            assert!(
+                terminals.lock_recover().is_empty(),
+                "{case}: returned attempts have no callback"
+            );
+            let observed = returned.lock_recover();
+            let outcomes: Vec<_> = observed
+                .iter()
+                .map(|(ordinal, success, usage)| {
+                    (*ordinal, *success, usage.input_tokens, usage.output_tokens)
+                })
+                .collect();
             assert_eq!(
-                (usage.input_tokens, usage.output_tokens, usage.unknown_calls),
-                (17, 5, 0),
+                outcomes,
+                if case == "retry" {
+                    vec![(1, false, 2, 1), (2, true, 17, 5)]
+                } else {
+                    vec![(1, true, 17, 5)]
+                },
                 "{case}"
             );
-            assert_eq!(output.result.usage, usage, "{case}");
         }
+        Ok(())
+    })
+}
+
+/// A tool's cancellation drops its direct-completion awaiter. The owned
+/// provider task must still reach the decorator with the partial usage.
+#[cfg(feature = "rlm")]
+#[test]
+pub(super) fn cancelling_a_tool_settles_its_nested_direct_provider_attempt() -> Result<()> {
+    run_async_test_on_stack_budget("cancel-direct-provider", || async {
+        let terminals = Arc::new(StdMutex::new(Vec::new()));
+        let returned = Arc::new(StdMutex::new(Vec::new()));
+        let terminal_delivered = Arc::new(tokio::sync::Notify::new());
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let provider = crate::testing::TestProvider::builder()
+            .kind("nested-direct-terminal")
+            .complete({
+                let entered = entered.clone();
+                move |request| {
+                    let entered = entered.clone();
+                    async move {
+                        if last_user_text(&request).contains("raw prompt") {
+                            request.stream_events.as_ref().expect("stream events").send(
+                                LlmStreamEvent::Usage(lash_core::llm::types::LlmUsage {
+                                    input_tokens: 2,
+                                    output_tokens: 1,
+                                    ..Default::default()
+                                }),
+                            );
+                            entered.notify_one();
+                            return std::future::pending().await;
+                        }
+                        Ok(LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "direct-probe".into(),
+                                tool_name: "direct_probe".into(),
+                                input_json: "{}".into(),
+                                replay: None,
+                            }],
+                            ..Default::default()
+                        })
+                    }
+                }
+            })
+            .requires_streaming(true)
+            .build();
+        let provider = ProviderHandle::new(lash_core::provider::ProviderComponents::new(Box::new(
+            CountingProvider {
+                inner: Box::new(provider),
+                terminals: terminals.clone(),
+                returned: returned.clone(),
+                terminal_delivered: terminal_delivered.clone(),
+            },
+        )));
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(
+            sqlite_memory_store_backend().await,
+        ))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .tools(
+            crate::tool_provider_key!("direct-probe"),
+            Arc::new(crate::tests::direct_completion::DirectProbe),
+        )
+        .build(crate::testing::runtime_lease_owner())?;
+        let session = core
+            .session(crate::SessionId::parse("cancel-nested-direct").expect("identity"))
+            .created()
+            .await
+            .open()
+            .await?;
+        let handle = session
+            .send(TurnInput::text("ask the model directly"))
+            .await?;
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .expect("the nested provider was entered");
+        handle
+            .cancel()
+            .mode(crate::TurnCancelMode::Immediate)
+            .await?;
+        handle.output().await?;
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            terminal_delivered.notified(),
+        )
+        .await
+        .expect("the dropped direct awaiter still delivers its provider terminal");
+        let observed = terminals.lock_recover();
+        assert_eq!(observed.len(), 1);
+        let (
+            _,
+            lash_core::provider::AttemptTerminal::Abandoned {
+                reason,
+                partial_response,
+                ..
+            },
+        ) = &observed[0];
+        assert_eq!(
+            *reason,
+            lash_core::provider::AttemptEndReason::ImmediateCancel
+        );
+        let partial = partial_response.as_ref().expect("partial usage");
+        assert_eq!(
+            (partial.usage.input_tokens, partial.usage.output_tokens),
+            (2, 1)
+        );
+        assert_eq!(
+            returned.lock_recover().len(),
+            1,
+            "only the outer model call returned"
+        );
         Ok(())
     })
 }

@@ -28,8 +28,8 @@ pub use credential::{
     ProviderToken, TokenError, TokenErrorKind, TokenRequest, TokenRequestReason, TokenSource,
 };
 pub use handle::{
-    ProviderCompletion, ProviderCompletionError, ProviderComponents, ProviderHandle,
-    UnconfiguredProvider,
+    ProviderCancellationGuard, ProviderCompletion, ProviderCompletionError, ProviderComponents,
+    ProviderHandle, UnconfiguredProvider,
 };
 pub use lash_sansio::llm::capability::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,
@@ -56,6 +56,7 @@ pub use slot_delivery::{
     NoSlotDeliveries, SlotDeliveries,
 };
 pub use traits::{
-    DefaultProviderFailureClassifier, GenerationRetryGuarantee, LiveCallHorizon, Provider,
-    ProviderFailureClassifier, canonical_call, canonical_request, is_context_overflow_text,
+    AttemptEndReason, AttemptTerminal, DefaultProviderFailureClassifier, GenerationRetryGuarantee,
+    LiveCallHorizon, Provider, ProviderAttempt, ProviderAttemptControl, ProviderFailureClassifier,
+    ProviderTerminalPolicy, canonical_call, canonical_request, is_context_overflow_text,
 };

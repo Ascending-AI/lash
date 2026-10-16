@@ -3663,13 +3663,18 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "terminal_delivery_timed_out": {
+          "description": "Lash stopped awaiting the host's terminal callback before it returned.",
+          "type": "boolean"
         }
       },
       "required": [
         "span_id",
         "started_at_ms",
         "ended_at_ms",
-        "provider"
+        "provider",
+        "terminal_delivery_timed_out"
       ],
       "type": "object"
     },

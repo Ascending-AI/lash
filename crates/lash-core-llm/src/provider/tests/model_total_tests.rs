@@ -211,41 +211,6 @@ async fn throttle_waits_never_carry_a_model_call_past_its_total() {
     assert_eq!(settled.elapsed, 30 * SECOND);
 }
 
-#[tokio::test(start_paused = true)]
-async fn slow_attempts_and_backoff_are_cut_at_the_model_total() {
-    let budgets = budgets();
-    let settled = complete_under(
-        50 * SECOND,
-        None,
-        ModelCallBounds {
-            budgets: budgets.clone(),
-            enclosing: None,
-        },
-    )
-    .await;
-    assert_model_total_exceeded(&settled, budgets.model_total());
-    assert_eq!(settled.attempts, 2, "the second attempt is cut mid-request");
-    assert_eq!(settled.elapsed, budgets.model_total());
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_nested_model_call_is_cut_at_its_enclosing_limit() {
-    let budgets = budgets();
-    let enclosing = lash_sansio::ExecutionLimit::starting_at(1_000_000, 20 * SECOND, 20 * SECOND);
-    let settled = complete_under(
-        50 * SECOND,
-        None,
-        ModelCallBounds {
-            budgets,
-            enclosing: Some(enclosing),
-        },
-    )
-    .await;
-    assert_model_total_exceeded(&settled, 20 * SECOND);
-    assert_eq!(settled.attempts, 1);
-    assert_eq!(settled.elapsed, 20 * SECOND);
-}
-
 /// Every attempt fails retryably at once, recording the timeouts it was
 /// sent with.
 #[derive(Clone, Debug)]

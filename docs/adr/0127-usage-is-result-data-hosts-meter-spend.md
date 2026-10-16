@@ -60,50 +60,80 @@ Figments installs `CostTrackingProvider` around its resolved provider through
 of that pattern is:
 
 ```text
-complete(request):
-    reservation = spend_gate.reserve(operation_class)
-    attempt = next_ordinal(request.request_id)
-    result = inner.complete(request)
-    receipt = extract_allowlisted_receipt(result)
-    ledger.upsert(request.request_id, attempt, receipt, result.failure)
-    reservation.settle()
+send(body, context):
+    key = (context.scope.request_id, context.scope.attempt)
+    spend_gate.reserve(key, operation_class)
+    result = inner.send(body, context)
+    ledger.upsert(key, extract_allowlisted_receipt(result), result.failure)
+    spend_gate.settle(key)
     return result
+
+attempt_ended(attempt, terminal):
+    key = (attempt.call_id, attempt.ordinal)
+    ledger.upsert(key, extract_allowlisted_receipt(terminal.partial_response), terminal.reason)
+    spend_gate.settle(key)
+    await inner.attempt_ended(attempt, terminal)
 ```
 
-Reservation precedes `complete()`. Settlement runs after every attempt,
-including failure and partial response, before returning its result. The
-host makes settlement idempotent on the deterministic request id and attempt
-ordinal. Provider request/response ids can strengthen its receipt identity.
-The ordinal distinguishes retries of one logical call; repeating delivery of
-one receipt must reuse that attempt's identity.
+Reservation precedes `send()`, is keyed by the attempt, and stays available
+if the send future ends without returning. Settlement runs from either the
+returned result or `attempt_ended`, including failure and partial response.
+The host makes settlement idempotent on the deterministic call id and
+Lash-assigned attempt ordinal. Provider request/response ids can strengthen
+its receipt identity. The ordinal distinguishes retries of one logical call;
+repeating delivery of one receipt must reuse that attempt's identity.
 
 Figments' extractors read OpenRouter `/usage/cost` and Opper `/cost`,
 `/usage/opper/cost/total` and `x-opper-cost`, with declared precedence and
 validated decimal amounts. Missing or malformed receipts remain unpriced,
-never inferred zero. Its provider template clones carry the attempt sequence;
-the template must remain unused so a fresh call starts its own sequence.
+never inferred zero. Lash assigns each send its attempt ordinal; decorators do not count retries.
 Figments ADRs 0048 and 0050 own receipt settlement and operation-class
 in-flight liability. Those policies are examples, not Lash policy.
 
 ### The settle point
 
-A decorator's settlement runs only when its future returns, and Lash may drop
-a turn's call future first: at the call's `model_total` deadline, on the
-turn's immediate cancel, or when the tail of a call whose cell was accepted
-mid-stream (FIG-6433) outlives either. The host then holds a reservation that
-no receipt settles.
+The provider seam is the one settle point for each dispatched attempt:
+`Provider::send` returns `Ok(LlmResponse)` or `Err(LlmTransportError)`, or Lash
+invokes `Provider::attempt_ended` with `AttemptTerminal::Abandoned` after the
+send ended without returning. Returned attempts never receive that callback.
+Decorators forward `attempt_ended` to their inner provider and settle from
+these terminals, including every failed attempt before a retry.
 
-The turn's `TurnEvent::ModelCallRecorded` is the one settle point for every
-model call a turn sends (FIG-6446). Each call reaches the host once as this
-event: completed, failed, or dropped. Its `LlmCallRecord` carries every
-attempt's outcome and reported usage, and `LlmCallRecord::usage()` is the
-call's usage, with `unknown_calls == 1` when the call was cut short after a
-response was observed and its usage never arrived. A host settles a dropped
-call's reservation from that record, pricing it from its own receipts or as
-unpriced, never as zero. A call accepted mid-stream is recorded when its tail
-drains, after its cell started and before the turn commits. A direct
-completion outside a turn returns to the host that awaits it and has no such
-event.
+Lash signals `ResponseContext::attempt_control` at a model deadline,
+immediate cancel, tail-drain drop or superseded retry. A contained provider
+panic delivers Abandoned with ProviderPanicked; a stream consumer or
+assistant-stream hook failure uses StreamConsumerFailed.
+
+Hosts configure `ProviderComponents::with_terminal_policy` with a typed
+`ProviderTerminalPolicy`. Its `drain_timeout` and `delivery_timeout` each
+default to 250 ms. Lash clips each to half the execution budget's stop grace,
+so together they cannot extend that grace. Lash continues polling a cancelled
+send for the drain interval. A cooperative provider can return its partial
+response then. Otherwise Lash drops the send and invokes `attempt_ended` on
+the same provider instance. The terminal carries the call id, Lash-assigned
+ordinal, request scope with the call span, and immutable `drain_timed_out`
+evidence. Its partial response retains allowlisted metadata, served model,
+provider response id and usage received before abandonment. Missing usage
+stays unknown, including when headers arrived without usage.
+
+Lash awaits the callback for the delivery interval, then proceeds even if a
+host ledger write has not completed. A bounded invocation is not a promise
+that the host's settlement completed. Delivery timeout is Lash's observation
+of the callback: the call and attempt spans carry
+`lash.provider.terminal_delivery_timed_out`, and the runtime increments
+`lash.provider.terminal_delivery.timeouts`. It is separate from the immutable
+attempt terminal. These are process-local observations, not durable delivery:
+a process crash delivers nothing and the host reconciles that window from
+its own receipt store. Dropping the turn's owner signals its independently
+owned provider task, which drains and delivers the terminal under these bounds.
+
+Every Lash-driven attempt gets exactly one terminal. A host that itself drives
+and drops a borrowed `ProviderHandle::complete`, `Provider::complete` or
+`Provider::send` future owns that call's cancellation and terminal itself.
+
+`TurnEvent::ModelCallRecorded` and `TurnFinalized` are observation only.
+Neither is a billing delivery channel. Committed turn records remain model
+execution state and usage summaries, without host receipts or settle reads.
 
 ### What Lash provides
 

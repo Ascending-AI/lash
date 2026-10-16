@@ -158,21 +158,50 @@ impl LocalDirectEffectRunner {
         );
         // The provider polls under the call's span (§7.7).
         let ambient = traced.map(|(call, _, _)| call.standing().clone());
-        let completion = lash_core_llm::core_internal::complete_prepared(
-            &mut provider,
-            context,
-            &self.template,
-            self.deliveries.as_ref(),
-            sideband,
-            self.charge_safety.clone(),
-            self.tracing.metrics(),
-            traced.and_then(|(call, _, _)| call.standing().body_permit()),
-            self.bounds.clone(),
-        );
-        let completed = match ambient {
-            Some(ambient) => ambient.ambient(completion).await,
-            None => completion.await,
+        let mut cancellation =
+            sideband.cancel_on_drop(crate::provider::AttemptEndReason::ImmediateCancel);
+        let template = Arc::clone(&self.template);
+        let deliveries = Arc::clone(&self.deliveries);
+        let charge_safety = self.charge_safety.clone();
+        let metrics = self.tracing.metrics().clone();
+        let bounds = self.bounds.clone();
+        // A cancelled cell may drop this await. The task keeps the same
+        // provider alive through cooperative drain and terminal delivery.
+        let task = crate::task::spawn(async move {
+            let completion = lash_core_llm::core_internal::complete_prepared(
+                &mut provider,
+                context,
+                &template,
+                deliveries.as_ref(),
+                sideband,
+                charge_safety,
+                &metrics,
+                ambient.as_ref().and_then(|standing| standing.body_permit()),
+                bounds,
+            );
+            match &ambient {
+                Some(ambient) => ambient.ambient(completion).await,
+                None => completion.await,
+            }
+        });
+        let completed = match task.await {
+            Ok(completed) => completed,
+            Err(error) => {
+                return (
+                    Err(llm_call_error_from_transport(
+                        crate::llm::transport::LlmTransportError::new(format!(
+                            "direct provider task failed: {error}"
+                        ))
+                        .with_lash_code(crate::TurnFailureCode::TaskJoinFailed)
+                        .with_retry_verdict(
+                            crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                        ),
+                    )),
+                    None,
+                );
+            }
         };
+        cancellation.disarm();
         match completed {
             Ok(completion) => (Ok(completion.response), Some(completion.call_record)),
             Err(failure) => (

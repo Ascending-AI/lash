@@ -1,4 +1,5 @@
 use super::support::*;
+use super::traits::{AttemptEndReason, ProviderTerminalPolicy};
 use futures_util::FutureExt as _;
 use lash_sansio::llm::attachment_delivery::Delivery;
 use lash_sansio::{ErrorEnvelope, RetryProgress};
@@ -30,12 +31,14 @@ fn replay_origin_conflict_with_provider_error(
     provider_error
 }
 
+mod attempt;
 mod charge_safety;
+use attempt::{AttemptExecution, AttemptHorizon, dispatch_attempt};
 mod completion;
 pub(super) use charge_safety::RetryGround;
 #[cfg(test)]
 pub(super) use charge_safety::UnguaranteedRetry;
-pub use completion::ProviderCompletionSideband;
+pub use completion::{ProviderCancellationGuard, ProviderCompletionSideband};
 
 /// Component bundle returned by provider factories.
 ///
@@ -56,6 +59,8 @@ pub struct ProviderComponents {
     /// limiter: one session's calls, and a resumed call, reuse each other's
     /// unchanged history.
     pub segment_cache: SegmentCache,
+    /// Live host policy; not part of a recorded provider route or request.
+    pub terminal_policy: ProviderTerminalPolicy,
 }
 
 impl ProviderComponents {
@@ -65,6 +70,7 @@ impl ProviderComponents {
             failure_classifier: Arc::new(DefaultProviderFailureClassifier),
             rate_limiter: Arc::new(ProviderRateLimiter::new()),
             segment_cache: SegmentCache::new(),
+            terminal_policy: ProviderTerminalPolicy::default(),
         }
     }
 
@@ -72,6 +78,12 @@ impl ProviderComponents {
     /// across bundles, or turns it off ([`SegmentCache::disabled`]).
     pub fn with_segment_cache(mut self, cache: SegmentCache) -> Self {
         self.segment_cache = cache;
+        self
+    }
+
+    /// Set the bounds for cooperative drain and terminal delivery.
+    pub fn with_terminal_policy(mut self, policy: ProviderTerminalPolicy) -> Self {
+        self.terminal_policy = policy;
         self
     }
 
@@ -104,6 +116,7 @@ impl Clone for ProviderComponents {
             failure_classifier: Arc::clone(&self.failure_classifier),
             rate_limiter: Arc::clone(&self.rate_limiter),
             segment_cache: self.segment_cache.clone(),
+            terminal_policy: self.terminal_policy,
         }
     }
 }
@@ -213,6 +226,8 @@ impl ProviderHandle {
 
     /// Completes a request under the caller's recorded or configured charge-safety
     /// policy and execution budgets, just as an admitted attempt does.
+    /// A host that drives and drops this borrowed future owns that call's
+    /// cancellation and terminal; Lash-driven calls retain an owned task.
     #[allow(
         clippy::result_large_err,
         reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
@@ -392,8 +407,9 @@ impl ProviderHandle {
             .retry
             .max_attempts
             .unwrap_or_else(|| provider_limits.max_attempts());
-        // The model total is a hard cap over throttle, backoff and every
-        // attempt (spec v3 L-C2). The limit is minted on lash's clock; the
+        // The model total stops throttle, backoff and every attempt;
+        // bounded cancellation cleanup follows it. The limit is minted on
+        // Lash's clock; the
         // granted remainder is then enforced on the monotonic clock.
         let clock = self.components.rate_limiter.clock();
         let limit = bounds
@@ -406,6 +422,11 @@ impl ProviderHandle {
             .expires_at
             .saturating_add(template.fetch_horizon.millis);
         let remaining = |clock: &dyn crate::Clock| deadline.saturating_duration_since(clock.now());
+        let policy = self.components.terminal_policy;
+        let terminal_policy = ProviderTerminalPolicy {
+            drain_timeout: policy.drain_timeout.min(bounds.budgets.stop_grace() / 2),
+            delivery_timeout: policy.delivery_timeout.min(bounds.budgets.stop_grace() / 2),
+        };
         let mut budget = RetryBudget::default();
         loop {
             let attempt_ordinal = sideband.next_attempt_ordinal();
@@ -420,12 +441,24 @@ impl ProviderHandle {
             }
             // A throttle window that would outlast the total settles the
             // call now instead of being waited out.
-            let Some(_permit) = self
-                .components
-                .rate_limiter
-                .admit_within(self.components.provider.as_ref(), template, deadline)
-                .await
-            else {
+            let admission = self.components.rate_limiter.admit_within(
+                self.components.provider.as_ref(),
+                template,
+                deadline,
+            );
+            let admitted = tokio::select! {
+                biased;
+                _ = sideband.cancellation.cancelled() => {
+                    return Err(ProviderCompletionError {
+                        error: LlmTransportError::new("cancelled before provider dispatch")
+                            .with_terminal_reason(LlmTerminalReason::Cancelled)
+                            .with_retry_verdict(TransportRetryVerdict::NotRetryable),
+                        call_record: Box::new(sideband.call_record(call_id)),
+                    });
+                }
+                admitted = admission => admitted,
+            };
+            let Some(_permit) = admitted else {
                 return Err(model_total_exceeded(
                     call_id,
                     &sideband,
@@ -443,47 +476,64 @@ impl ProviderHandle {
             attempt_options.reliability.response_start_timeout = window.response_start_timeout;
             attempt_options.reliability.chunk_timeout = window.chunk_timeout;
             self.components.provider.set_options(attempt_options);
-            let attempt = {
-                // The call is built inside the caught future: a provider
-                // that panics while constructing its future is contained.
-                // Each attempt's context names its ordinal in its scope. Its
-                // slots are delivered and encoded afresh inside the same
-                // envelope, under the call's deadline and cancellation.
-                let attempt = std::panic::AssertUnwindSafe(async {
-                    let mut attempt_context = context.clone();
-                    attempt_context.scope.attempt = Some(attempt_ordinal);
-                    let provider = &mut self.components.provider;
-                    match fill_slots(provider.as_ref(), template, deliveries, valid_through_ms)
-                        .await
-                    {
-                        Ok((live, delivered)) => AttemptSend::Sent {
-                            result: Box::new(provider.send(&live, attempt_context).await),
-                            delivered,
-                        },
-                        Err(error) => AttemptSend::Unsent(error),
-                    }
-                })
-                .catch_unwind();
-                let expiry = clock.sleep_until(deadline);
-                futures_util::pin_mut!(attempt, expiry);
-                match futures_util::future::select(attempt, expiry).await {
-                    futures_util::future::Either::Left((attempt, _)) => Some(attempt),
-                    futures_util::future::Either::Right(((), _)) => None,
-                }
-            };
+            let AttemptExecution {
+                result: attempt,
+                control,
+                delivery_timed_out,
+            } = dispatch_attempt(
+                self.components.provider.as_mut(),
+                context.clone(),
+                attempt_ordinal,
+                template,
+                deliveries,
+                AttemptHorizon {
+                    deadline,
+                    valid_through_ms,
+                    clock: clock.as_ref(),
+                    cancellation: &sideband.cancellation,
+                    terminal_policy,
+                    metrics,
+                },
+            )
+            .await;
+            if delivery_timed_out {
+                sideband.record_terminal_delivery_timeout();
+            }
             let mut restored = self.options();
             restored.reliability.request_timeout = route.request_timeout;
             restored.reliability.response_start_timeout = route.response_start_timeout;
             restored.reliability.chunk_timeout = route.chunk_timeout;
             self.components.provider.set_options(restored);
             let Some(attempt) = attempt else {
-                return Err(model_total_exceeded(
-                    call_id,
-                    &sideband,
-                    attempt_ordinal,
-                    limit,
-                    Some(ProtocolPosition::NoResponse),
-                ));
+                let deadline = control.reason() == Some(AttemptEndReason::ModelDeadline);
+                let mut error = if deadline {
+                    model_total_error(limit, None)
+                } else {
+                    LlmTransportError::new("provider attempt cancelled")
+                        .with_terminal_reason(LlmTerminalReason::Cancelled)
+                        .with_lash_code(TurnFailureCode::Cancelled)
+                        .with_retry_verdict(TransportRetryVerdict::NotRetryable)
+                };
+                error.partial_response = control.partial_response();
+                sideband.seal_attempt(
+                    failure_attempt_record(
+                        attempt_ordinal,
+                        &error,
+                        true,
+                        failure_protocol_position(&error),
+                        deadline.then_some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
+                            limit: lash_sansio::LimitCause::ExecutionTotal,
+                        })),
+                    ),
+                    error
+                        .partial_response
+                        .as_ref()
+                        .map(|partial| &partial.response_metadata),
+                );
+                return Err(ProviderCompletionError {
+                    error,
+                    call_record: Box::new(sideband.call_record(call_id)),
+                });
             };
             let (mut result, delivered, unsent_attempt, panic_payload) = match attempt {
                 Ok(AttemptSend::Sent { result, delivered }) => (*result, delivered, false, None),
@@ -506,8 +556,13 @@ impl ProviderHandle {
             // non-retryable origin-conflict result from the fence below, nor
             // a delivery failure, which is Lash's own and reached no provider.
             if panic_payload.is_none() && !unsent_attempt {
-                result =
-                    result.map_err(|failure| self.components.failure_classifier.classify(failure));
+                result = result.map_err(|failure| {
+                    let mut failure = self.components.failure_classifier.classify(failure);
+                    if control.reason().is_some() {
+                        failure.retry_verdict = TransportRetryVerdict::NotRetryable;
+                    }
+                    failure
+                });
             }
             // A provider that definitely rejected delivered slots (a missing
             // or expired file id) refused before generating: the
@@ -525,7 +580,9 @@ impl ProviderHandle {
                         &delivered,
                         failure.rejected_slots(),
                     );
-                    let expiry = clock.sleep_until(deadline);
+                    let expiry = async {
+                        tokio::select! { _ = clock.sleep_until(deadline) => {}, _ = sideband.cancellation.cancelled() => {} }
+                    };
                     futures_util::pin_mut!(invalidation, expiry);
                     matches!(
                         futures_util::future::select(invalidation, expiry).await,
@@ -757,7 +814,12 @@ impl ProviderHandle {
                                 attempts,
                                 &failure,
                             );
-                            self.components.rate_limiter.clock().sleep(wait).await;
+                            tokio::select! {
+                                _ = clock.sleep(wait) => {},
+                                _ = sideband.cancellation.cancelled() => {
+                                    return Err(ProviderCompletionError { error: failure, call_record: Box::new(sideband.call_record(call_id)) });
+                                }
+                            }
                         }
                         RetryVerdict::Backoff { class } => {
                             let delay = delay.expect("backoff delay was selected before sealing");
@@ -782,7 +844,12 @@ impl ProviderHandle {
                                 attempts,
                                 &failure,
                             );
-                            self.components.rate_limiter.clock().sleep(delay).await;
+                            tokio::select! {
+                                _ = clock.sleep(delay) => {},
+                                _ = sideband.cancellation.cancelled() => {
+                                    return Err(ProviderCompletionError { error: failure, call_record: Box::new(sideband.call_record(call_id)) });
+                                }
+                            }
                             budget.consume(unsafe_retry);
                         }
                     }

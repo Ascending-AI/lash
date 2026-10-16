@@ -2433,3 +2433,6 @@ mod conformance {
         provider_conformance(&CodexRlmHistoryNormalizer);
     }
 }
+
+#[path = "attempt_metadata_tests.rs"]
+mod attempt_metadata_tests;

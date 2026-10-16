@@ -211,6 +211,7 @@ pub struct ProviderRouteIdentity {
     pub model: Box<str>,
 }
 
+pub use super::attempt_control::{AttemptEndReason, ProviderAttemptControl};
 pub use super::provider_body::{
     AttachmentSlot, BodyPart, LiveRequestBody, LoweredItem, LoweredUnit, RecordedRequestTemplate,
     RequestSegment, RequestTemplateBuilder, SEGMENT_CACHE_BUDGET_BYTES, SegmentCache,

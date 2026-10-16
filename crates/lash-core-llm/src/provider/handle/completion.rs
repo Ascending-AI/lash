@@ -11,6 +11,7 @@ struct ProviderCompletionSidebandState {
     /// The dispatched attempt that has not been sealed yet, when an observer
     /// is installed.
     open_attempt: Option<lash_trace::TraceAttemptObservation>,
+    terminal_delivery_timed_out: bool,
 }
 
 type AttemptObserver = Arc<
@@ -28,6 +29,7 @@ type AttemptObserver = Arc<
 #[derive(Clone)]
 pub struct ProviderCompletionSideband {
     state: Arc<Mutex<ProviderCompletionSidebandState>>,
+    pub(super) cancellation: super::super::traits::ProviderAttemptControl,
     attempt_observer: Option<AttemptObserver>,
     attempt_clock: Option<Arc<dyn crate::Clock>>,
     attempt_identity: Option<Arc<dyn lash_trace::TraceIdentity>>,
@@ -42,7 +44,39 @@ impl std::fmt::Debug for ProviderCompletionSideband {
     }
 }
 
+/// Cancellation ownership outside a provider task: dropping an awaiter
+/// signals the task, which remains alive to drain and deliver its terminal.
+pub struct ProviderCancellationGuard {
+    sideband: ProviderCompletionSideband,
+    reason: super::super::traits::AttemptEndReason,
+    armed: bool,
+}
+
+impl ProviderCancellationGuard {
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ProviderCancellationGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.sideband.cancel(self.reason);
+        }
+    }
+}
+
 impl ProviderCompletionSideband {
+    pub fn cancel_on_drop(
+        &self,
+        reason: super::super::traits::AttemptEndReason,
+    ) -> ProviderCancellationGuard {
+        ProviderCancellationGuard {
+            sideband: self.clone(),
+            reason,
+            armed: true,
+        }
+    }
     /// Report each dispatched provider attempt once, when it is sealed: the
     /// observer receives the same [`AttemptRecord`] the call record keeps.
     #[must_use]
@@ -63,6 +97,7 @@ impl ProviderCompletionSideband {
         replay_drops: Vec<crate::ProviderReplayDrop>,
     ) -> Self {
         Self {
+            cancellation: Default::default(),
             attempt_observer: None,
             attempt_clock: None,
             attempt_identity: None,
@@ -72,8 +107,15 @@ impl ProviderCompletionSideband {
                 origin_conflict: None,
                 attempts: Vec::new(),
                 open_attempt: None,
+                terminal_delivery_timed_out: false,
             })),
         }
+    }
+
+    /// Request cooperative cancellation; the provider task owns draining it
+    /// and delivering its terminal before it ends.
+    pub fn cancel(&self, reason: super::super::traits::AttemptEndReason) {
+        self.cancellation.cancel(reason);
     }
 
     fn with_state<R>(&self, f: impl FnOnce(&mut ProviderCompletionSidebandState) -> R) -> R {
@@ -134,7 +176,14 @@ impl ProviderCompletionSideband {
             started_at_ms: Some(clock.timestamp_ms()),
             ended_at_ms: None,
         };
-        self.with_state(|state| state.open_attempt = Some(observation));
+        self.with_state(|state| {
+            state.open_attempt = Some(observation);
+            state.terminal_delivery_timed_out = false;
+        });
+    }
+
+    pub(super) fn record_terminal_delivery_timeout(&self) {
+        self.with_state(|state| state.terminal_delivery_timed_out = true);
     }
 
     /// Seal an attempt into the call record and report it to the observer.
@@ -145,9 +194,9 @@ impl ProviderCompletionSideband {
         attempt: AttemptRecord,
         metadata: Option<&std::collections::BTreeMap<String, serde_json::Value>>,
     ) {
-        let observation = self.with_state(|state| {
+        let (observation, delivery_timed_out) = self.with_state(|state| {
             state.attempts.push(attempt.clone());
-            state.open_attempt.take()
+            (state.open_attempt.take(), state.terminal_delivery_timed_out)
         });
         if let (Some(observer), Some(mut observation)) = (&self.attempt_observer, observation) {
             observation.ended_at_ms = self
@@ -160,6 +209,7 @@ impl ProviderCompletionSideband {
                     started_at_ms: observation.started_at_ms?,
                     ended_at_ms: observation.ended_at_ms?,
                     provider: observation.provider.clone()?,
+                    terminal_delivery_timed_out: delivery_timed_out,
                 })
             });
             observer(

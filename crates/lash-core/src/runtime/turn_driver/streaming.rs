@@ -305,7 +305,8 @@ impl RuntimeTurnDriver<'_> {
             )
             .await
         }));
-        let mut llm_task_abort = AbortOnDrop::new(llm_task.abort_handle());
+        let mut llm_task_cancel =
+            completion_sideband.cancel_on_drop(crate::provider::AttemptEndReason::TailDrainDrop);
 
         let mut text_streamed = false;
         let mut streamed_usage = LlmUsage::default();
@@ -370,14 +371,21 @@ impl RuntimeTurnDriver<'_> {
             match poll_drive_sources(cancel, &mut llm_task, &mut llm_stream_rx, stream_closed).await
             {
                 DrivePollOutcome::Cancelled => {
-                    llm_task.abort();
-                    let terminal = (&mut llm_task).await;
-                    llm_task_abort.disarm();
                     let stop_error = self
                         .model_stop_error
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .clone();
+                    let reason = if stop_error.as_ref().is_some_and(|error| {
+                        error.code == Some(TurnFailureCode::ModelTotalExceeded.into())
+                    }) {
+                        crate::provider::AttemptEndReason::ModelDeadline
+                    } else {
+                        crate::provider::AttemptEndReason::ImmediateCancel
+                    };
+                    completion_sideband.cancel(reason);
+                    let terminal = (&mut llm_task).await;
+                    llm_task_cancel.disarm();
                     let failure = match stop_error {
                         Some(error) => {
                             let mut failure =
@@ -448,7 +456,7 @@ impl RuntimeTurnDriver<'_> {
                         if llm_task.is_finished()
                             && let Ok(provider_result) = (&mut llm_task).await
                         {
-                            llm_task_abort.disarm();
+                            llm_task_cancel.disarm();
                             match provider_result {
                                 Ok(completion) => {
                                     let crate::ProviderCompletion {
@@ -513,7 +521,7 @@ impl RuntimeTurnDriver<'_> {
                 DrivePollOutcome::Joined(join) => {
                     let result = match join {
                         Ok(v) => {
-                            llm_task_abort.disarm();
+                            llm_task_cancel.disarm();
                             v
                         }
                         Err(e) if e.is_panic() => {
@@ -672,9 +680,9 @@ impl RuntimeTurnDriver<'_> {
         if let Err(error) = &result
             && call_record.is_none()
         {
-            llm_task.abort();
+            completion_sideband.cancel(crate::provider::AttemptEndReason::StreamConsumerFailed);
             let terminal = (&mut llm_task).await;
-            llm_task_abort.disarm();
+            llm_task_cancel.disarm();
             call_record = Some(match terminal {
                 Ok(Ok(completion)) => completion.call_record,
                 Ok(Err(failure)) => *failure.call_record,
@@ -747,7 +755,7 @@ impl RuntimeTurnDriver<'_> {
         capsule.finish = assistant_stream_finish_reason(&result, abort_requested);
 
         if handed_off {
-            llm_task_abort.disarm();
+            llm_task_cancel.disarm();
             let clock = Arc::clone(&self.host.core.clock);
             let trace = match (call, &result) {
                 (Some(call), Ok(response)) => Some(drain::TailTrace {

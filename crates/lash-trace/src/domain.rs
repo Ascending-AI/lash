@@ -156,6 +156,8 @@ pub struct TraceModelAttemptSpan {
     pub started_at_ms: u64,
     pub ended_at_ms: u64,
     pub provider: String,
+    /// Lash stopped awaiting the host's terminal callback before it returned.
+    pub terminal_delivery_timed_out: bool,
 }
 
 /// The execution attempt's facts, with trace metadata only for an attempt

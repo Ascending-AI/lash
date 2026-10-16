@@ -286,6 +286,11 @@ impl AnthropicProvider {
             )
             .await?;
 
+        let mut response_metadata = ResponseMetadataCapture::from_response(
+            &context.model().metadata().request_defaults,
+            &resp.headers,
+        )
+        .with_attempt(context.attempt_control.clone());
         let status = resp.status;
         if !resp.is_success() {
             let mut headers = resp.headers;
@@ -320,10 +325,6 @@ impl AnthropicProvider {
         let provider_request_id = first_header_value(&resp.headers, "request-id")
             .or_else(|| first_header_value(&resp.headers, "x-request-id"))
             .map(str::to_string);
-        let mut response_metadata = ResponseMetadataCapture::from_response(
-            &context.model().metadata().request_defaults,
-            &resp.headers,
-        );
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 response_started: true,

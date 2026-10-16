@@ -62,8 +62,15 @@ impl GoogleOAuthProvider {
         )
         .map_err(template_error)?;
         let body = LiveRequestBody::fill(Arc::new(template), Vec::new()).map_err(template_error)?;
-        self.execute_body(access_token, &body, stream_events, provider_trace, reading)
-            .await
+        self.execute_body(
+            access_token,
+            &body,
+            stream_events,
+            provider_trace,
+            reading,
+            Default::default(),
+        )
+        .await
     }
 
     /// Send `admitted`'s bytes as they are, authenticated by `access_token`.
@@ -74,6 +81,7 @@ impl GoogleOAuthProvider {
         stream_events: Option<lash_core::llm::types::LlmEventSender>,
         provider_trace: Option<lash_core::llm::types::LlmProviderTraceSender>,
         reading: ResponseReading,
+        attempt: lash_core::provider::ProviderAttemptControl,
     ) -> Result<LlmResponse, LlmTransportError> {
         let ResponseReading {
             stream_termination,
@@ -131,6 +139,8 @@ impl GoogleOAuthProvider {
             )
             .await?;
 
+        let mut response_metadata =
+            ResponseMetadataCapture::from_response(&defaults, &resp.headers).with_attempt(attempt);
         if !resp.is_success() {
             let status = resp.status;
             let headers = resp.headers;
@@ -158,8 +168,6 @@ impl GoogleOAuthProvider {
         }
         let provider_request_id =
             first_header_value(&resp.headers, "x-request-id").map(str::to_string);
-        let mut response_metadata =
-            ResponseMetadataCapture::from_response(&defaults, &resp.headers);
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 response_started: true,
@@ -550,6 +558,7 @@ impl GoogleOAuthProvider {
             stream_events,
             provider_trace,
             reading,
+            context.attempt_control.clone(),
         )
         .await
         .map_err(|err| reject_missing_provider_files(err, admitted, Self::rejects_file_reference))

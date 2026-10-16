@@ -233,6 +233,8 @@ impl CodexProvider {
             receipt,
         } = built_request;
         let mut attempt = CodexWebsocketAttemptGuard::new(self, lease);
+        let mut response_metadata =
+            ResponseMetadataCapture::from_response(&call.model().metadata().request_defaults, &[]);
         let stream_events = call.stream_events.clone();
         let provider_trace = call.provider_trace.clone();
         let stream_termination = call
@@ -384,6 +386,9 @@ impl CodexProvider {
                 WsMessage::Close(_) => break,
                 WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Frame(_) => continue,
             };
+            response_metadata.capture_body_text(&raw);
+            call.attempt_control
+                .capture_metadata(response_metadata.metadata());
             if !events_seen && let Some(tx) = &stream_events {
                 tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                     response_started: true,
@@ -503,6 +508,7 @@ impl CodexProvider {
         );
         response.http_summary = Some(self.websocket_http_summary(&diagnostics));
         response.generation_disposition = Some(*receipt);
+        response.response_metadata = response_metadata.into_metadata();
         attempt.finish(continuation);
         Ok(response)
     }
@@ -649,6 +655,11 @@ impl CodexProvider {
         let is_sse = header_contains(&resp.headers, "content-type", "text/event-stream");
         let success = resp.is_success();
         let body = resp.body;
+        let mut response_metadata = ResponseMetadataCapture::from_response(
+            &call.model().metadata().request_defaults,
+            &response_headers,
+        )
+        .with_attempt(call.attempt_control.clone());
         if !success {
             let text = read_http_body_text(
                 body,
@@ -678,10 +689,6 @@ impl CodexProvider {
                 request_body.clone(),
             ));
         }
-        let mut response_metadata = ResponseMetadataCapture::from_response(
-            &call.model().metadata().request_defaults,
-            &response_headers,
-        );
         if let Some(tx) = &stream_events {
             tx.send(LlmStreamEvent::Evidence(LlmStreamEvidence {
                 response_started: true,

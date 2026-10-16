@@ -100,6 +100,14 @@ pub(super) fn call_attributes(
         }
     }
     if let Some(attempts) = attempts {
+        if attempts.iter().any(|attempt| {
+            attempt
+                .span
+                .as_ref()
+                .is_some_and(|span| span.terminal_delivery_timed_out)
+        }) {
+            out.push(A::ProviderTerminalDeliveryTimedOut.value(true));
+        }
         out.push(A::ModelAttempts.value(i64::try_from(attempts.len()).unwrap_or(i64::MAX)));
     }
 }

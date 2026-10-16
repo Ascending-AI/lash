@@ -2,8 +2,8 @@
 //! (FIG-6433).
 //!
 //! Accepting a cell does not end the provider's generation: the provider
-//! bills all of it, and a host decorator around the provider settles its
-//! receipt only when its future returns. So the call hands its provider task
+//! bills all of it, and a host decorator settles from its provider terminal.
+//! So the call hands its provider task
 //! here instead of cancelling it, and the turn runs the cell at once. The
 //! tail is read to the provider's terminal event off the turn's path, its
 //! content discarded. The call's record, usage and span settle from what the
@@ -66,6 +66,7 @@ struct CallDrain {
     ordinal: u64,
     call_id: crate::LlmCallId,
     stop: CancellationToken,
+    sideband: crate::facade_support::ProviderCompletionSideband,
     task: crate::task::JoinHandle<DrainedCall>,
 }
 
@@ -73,6 +74,11 @@ impl Drop for CallDrain {
     /// A turn that goes away without settling its drain stops it: the
     /// drain seals the call unknown and closes its span on its own.
     fn drop(&mut self) {
+        self.sideband.cancel(if self.stop.is_cancelled() {
+            crate::provider::AttemptEndReason::ImmediateCancel
+        } else {
+            crate::provider::AttemptEndReason::TailDrainDrop
+        });
         self.stop.cancel();
     }
 }
@@ -87,6 +93,7 @@ impl CallDrains {
     /// Read `tail` to its end off the turn's path, until `stop` fires.
     pub(super) fn start(&self, tail: CallTail, stop: CancellationToken) {
         let call_id = tail.call_id.clone();
+        let sideband = tail.sideband.clone();
         let task = crate::task::spawn(tail.drain(stop.clone()));
         let mut set = self.set();
         set.started = set.started.saturating_add(1);
@@ -95,6 +102,7 @@ impl CallDrains {
             ordinal,
             call_id,
             stop,
+            sideband,
             task,
         });
     }
@@ -168,9 +176,15 @@ impl CallTail {
         let joined = match joined {
             Ok(joined) => joined,
             // The turn stopped the tail, or the call's deadline passed: the
-            // provider task stops, keeping a completion that raced it.
+            // provider task cooperatively stops, delivering its terminal at
+            // the provider seam before returning its call record.
             Err(outcome) => {
-                self.task.abort();
+                self.sideband.cancel(match outcome {
+                    crate::AttemptOutcome::Aborted => {
+                        crate::provider::AttemptEndReason::ImmediateCancel
+                    }
+                    _ => crate::provider::AttemptEndReason::ModelDeadline,
+                });
                 match (&mut self.task).await {
                     Ok(result) => Ok(result),
                     Err(_) => {

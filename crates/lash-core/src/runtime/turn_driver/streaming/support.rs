@@ -97,32 +97,6 @@ pub(super) async fn poll_drive_sources<T>(
     }
 }
 
-pub(super) struct AbortOnDrop {
-    handle: crate::task::AbortHandle,
-    armed: bool,
-}
-
-impl AbortOnDrop {
-    pub(super) fn new(handle: crate::task::AbortHandle) -> Self {
-        Self {
-            handle,
-            armed: true,
-        }
-    }
-
-    pub(super) fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for AbortOnDrop {
-    fn drop(&mut self) {
-        if self.armed {
-            self.handle.abort();
-        }
-    }
-}
-
 pub(super) fn response_usage_is_empty(usage: &LlmUsage) -> bool {
     usage.input_tokens == 0
         && usage.output_tokens == 0

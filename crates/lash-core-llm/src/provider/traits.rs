@@ -1,6 +1,49 @@
 use super::support::*;
 use crate::LlmTerminalReason;
 
+pub use lash_sansio::llm::types::{AttemptEndReason, ProviderAttemptControl};
+
+/// Lash-assigned identity of one dispatched attempt, including its call span.
+#[derive(Clone, Debug)]
+pub struct ProviderAttempt {
+    pub call_id: LlmCallId,
+    pub ordinal: u32,
+    pub scope: LlmRequestScope,
+}
+
+/// A terminal for an attempt whose send future ended without returning.
+#[derive(Clone, Debug)]
+pub enum AttemptTerminal {
+    Abandoned {
+        reason: AttemptEndReason,
+        /// The send did not return within the host's drain timeout.
+        drain_timed_out: bool,
+        partial_response: Option<Box<LlmResponse>>,
+    },
+}
+
+/// Host-selected bounds for stopping a Lash-driven attempt and delivering
+/// its terminal. Each defaults to 250 ms and is clipped to half the
+/// execution budget's stop grace.
+/// A bounded invocation does not promise that the host's settlement completed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProviderTerminalPolicy {
+    /// How long to poll a cancelled send before abandoning it.
+    pub drain_timeout: Duration,
+    /// How long to await the abandoned-terminal callback.
+    pub delivery_timeout: Duration,
+}
+
+impl Default for ProviderTerminalPolicy {
+    /// The default is 250 ms for each interval, before stop-grace clipping.
+    fn default() -> Self {
+        Self {
+            drain_timeout: Duration::from_millis(250),
+            delivery_timeout: Duration::from_millis(250),
+        }
+    }
+}
+
 /// Provider guarantee that repeating a logical generation cannot buy and
 /// replace a second generation after output has already been observed.
 ///
@@ -129,18 +172,34 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     /// [`canonical_request`], or [`canonical_call`] when forwarding its
     /// transient deliveries through another canonical provider.
     ///
-    /// Lash may drop this future before it returns: at the call's deadline,
-    /// on the turn's immediate cancel, or when the tail of a call whose cell
-    /// was accepted mid-stream outlives either. A decorator that meters a
-    /// turn's calls therefore settles each from the turn's
-    /// `TurnEvent::ModelCallRecorded`, which every such call reaches once,
-    /// with `LlmCallRecord::usage` counting it unknown when its usage never
-    /// arrived (ADR 0127).
+    /// A host meters each attempt here: from the returned `Ok` or `Err`,
+    /// or from [`Provider::attempt_ended`] when no result returned. Lash
+    /// signals `context.attempt_control` on cancellation and polls this
+    /// future under [`ProviderTerminalPolicy`] (250 ms by default) before
+    /// abandoning it. Observe stream evidence and declared metadata captures
+    /// as they arrive so abandonment retains
+    /// the usage and receipts already received. Turn events are observation
+    /// only (ADR 0127). Every Lash-driven attempt gets exactly one terminal.
+    /// A host driving and dropping a borrowed [`super::ProviderHandle::complete`],
+    /// [`Provider::complete`] or `send` future owns that call's cancellation
+    /// and terminal itself.
     async fn send(
         &mut self,
         body: &LiveRequestBody,
         context: ResponseContext,
     ) -> Result<LlmResponse, LlmTransportError>;
+
+    /// Exactly one callback after a dispatched send ended without returning.
+    /// It reaches the same provider instance; decorators must forward it to
+    /// their inner provider. A returned Ok or Err never gets this callback.
+    /// Lash awaits delivery under [`ProviderTerminalPolicy`] (250 ms by
+    /// default), then proceeds even if a host ledger write has not finished.
+    /// Bounded invocation is not a promise of completed settlement. The
+    /// terminal reports a drain timeout; a delivery timeout is Lash's trace
+    /// observation and increments its terminal-delivery-timeout counter.
+    /// A process crash delivers nothing; the host owns receipt reconciliation
+    /// for that window.
+    async fn attempt_ended(&mut self, _attempt: ProviderAttempt, _terminal: AttemptTerminal) {}
 
     /// One live call outside admission: lower `request`, fill its slots as
     /// an admitted attempt does, build its response context, send. Lowering

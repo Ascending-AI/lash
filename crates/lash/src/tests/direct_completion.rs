@@ -19,7 +19,7 @@ fn direct_probe_definition() -> lash_core::ToolDefinition {
 }
 
 /// A tool whose call asks the model [`PROMPT`] directly.
-struct DirectProbe;
+pub(super) struct DirectProbe;
 
 #[async_trait]
 impl ToolProvider for DirectProbe {

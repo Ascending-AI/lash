@@ -93,6 +93,14 @@ impl Provider for HostAdmission {
             .expect("fixture keeps admission open");
         self.inner.send(body, context).await
     }
+
+    async fn attempt_ended(
+        &mut self,
+        attempt: lash_core::provider::ProviderAttempt,
+        terminal: lash_core::provider::AttemptTerminal,
+    ) {
+        self.inner.attempt_ended(attempt, terminal).await;
+    }
 }
 
 #[tokio::test]

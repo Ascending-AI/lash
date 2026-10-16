@@ -1483,8 +1483,9 @@ pub mod provider {
     /// Attachment delivery contracts. Their read limits live at
     /// [`crate::persistence::AttachmentReadPolicy`], beside the host's attachment policy.
     pub use lash_core::provider::{
-        AttachmentDeliveryError, CanonicalDeliveries, InlineDeliveries, LiveCallHorizon,
-        NoSlotDeliveries, SlotDeliveries,
+        AttachmentDeliveryError, AttemptEndReason, AttemptTerminal, CanonicalDeliveries,
+        InlineDeliveries, LiveCallHorizon, NoSlotDeliveries, ProviderAttempt,
+        ProviderAttemptControl, ProviderCancellationGuard, ProviderTerminalPolicy, SlotDeliveries,
     };
     /// Read the request a canonical body says, for an in-process model that
     /// decides from what a call asks.

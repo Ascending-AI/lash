@@ -46,6 +46,7 @@ mod enabled {
     #[derive(Clone, Debug)]
     pub struct RuntimeTuningMetrics {
         provider_retries: Counter<u64>,
+        provider_terminal_delivery_timeouts: Counter<u64>,
         trace_omissions: Counter<u64>,
         provider_throttle_wait_duration: Histogram<u64>,
         pool_acquire_wait_duration: Histogram<u64>,
@@ -62,6 +63,10 @@ mod enabled {
         pub fn new(meter: Meter) -> Self {
             Self {
                 provider_retries: counter(&meter, Metric::ProviderRetries),
+                provider_terminal_delivery_timeouts: counter(
+                    &meter,
+                    Metric::ProviderTerminalDeliveryTimeouts,
+                ),
                 trace_omissions: counter(&meter, Metric::TraceOmissions),
                 provider_throttle_wait_duration: histogram(&meter, Metric::ProviderThrottleWait),
                 pool_acquire_wait_duration: histogram(&meter, Metric::PoolAcquireWait),
@@ -81,6 +86,17 @@ mod enabled {
         pub(crate) fn record_trace_omissions(&self, reason: &'static str, count: u32) {
             self.trace_omissions
                 .add(u64::from(count), &[KeyValue::new("reason", reason)]);
+        }
+
+        /// Count one host terminal callback that exceeded its delivery bound.
+        pub fn record_provider_terminal_delivery_timeout(&self, provider: &str) {
+            self.provider_terminal_delivery_timeouts.add(
+                1,
+                &[KeyValue::new(
+                    PROVIDER_ATTRIBUTE,
+                    super::registry::gen_ai_provider_name(provider).to_string(),
+                )],
+            );
         }
 
         pub fn record_provider_retry(&self, provider: &str, kind: &'static str) {
@@ -287,6 +303,9 @@ mod disabled {
     pub struct RuntimeTuningMetrics;
     impl RuntimeTuningMetrics {
         pub(crate) fn record_trace_omissions(&self, _reason: &'static str, _count: u32) {}
+        pub fn record_provider_terminal_delivery_timeout(&self, provider: &str) {
+            let _ = provider;
+        }
         pub fn record_provider_retry(&self, provider: &str, kind: &'static str) {
             let _ = (provider, kind);
         }
@@ -417,6 +436,9 @@ mod tests {
         let wait = std::time::Duration::from_millis(10);
         metrics
             .runtime_tuning
+            .record_provider_terminal_delivery_timeout("test");
+        metrics
+            .runtime_tuning
             .record_provider_retry("test", "backoff");
         metrics
             .runtime_tuning
@@ -485,7 +507,7 @@ mod tests {
             .collect::<Vec<_>>();
         expected.sort_unstable_by_key(|entry| entry.0);
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 18);
+        assert_eq!(actual.len(), 19);
         let isolated = second.get_finished_metrics().expect("second export");
         let names = isolated
             .iter()

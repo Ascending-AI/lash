@@ -558,6 +558,8 @@ async fn send_attempt(
         }
     };
 
+    let mut capture = ResponseMetadataCapture::from_response(&request_defaults, &resp.headers)
+        .with_attempt(context.attempt_control.clone());
     let status = resp.status;
     if !resp.is_success() {
         let headers = resp.headers;
@@ -639,7 +641,6 @@ async fn send_attempt(
     }
 
     let provider_request_id = first_header_value(&resp.headers, "x-request-id").map(str::to_string);
-    let mut capture = ResponseMetadataCapture::from_response(&request_defaults, &resp.headers);
     // Reattachment is another HTTP request for the same logical generation.
     // Its transport request id belongs in the per-attempt record, but sending
     // a second response-start Evidence event would conflict with the live
