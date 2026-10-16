@@ -67,8 +67,9 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
     /// No backend journals effects (ADR 0132): an execution's journal is
     /// settled once the execution ends. Until then its owner may still
     /// publish under it: a turn while its run is the session's unfinished
-    /// one, a process until its record is terminal. A journal key this
-    /// build cannot read names an execution it cannot prove ended.
+    /// one, a session operation while its command is open or its run is
+    /// unfinished, a process until its record is terminal. A journal key
+    /// this build cannot read names an execution it cannot prove ended.
     async fn journal_replay(
         &self,
         journal: &lash_sansio::EffectJournalIdentity,
@@ -87,9 +88,32 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
                 .await
                 .map_err(|error| error.to_string())?
                 .is_some_and(|record| !record.is_terminal()),
+            Some(crate::ExecutionScope::SessionOperation {
+                session_id,
+                operation_id,
+            }) => {
+                let mail = self
+                    .durable
+                    .session_mailbox(&session_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let command_is_open = mail
+                    .batches
+                    .iter()
+                    .any(|batch| batch.batch.as_str() == operation_id.as_str());
+                let run = crate::tool_run::OperationRun {
+                    session_id: session_id.clone(),
+                    operation_id,
+                }
+                .run_id();
+                command_is_open
+                    || lash_durable::DurableReads::turn(self.durable.as_ref(), &session_id)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .is_some_and(|row| row.run == run)
+            }
             Some(
-                crate::ExecutionScope::SessionOperation { .. }
-                | crate::ExecutionScope::SessionDelete { .. }
+                crate::ExecutionScope::SessionDelete { .. }
                 | crate::ExecutionScope::RuntimeOperation { .. },
             ) => false,
             None => true,

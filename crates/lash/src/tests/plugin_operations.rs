@@ -35,6 +35,113 @@ operation!(Command, PluginCommand, "accept.command");
 operation!(Task, PluginTask, "accept.task");
 operation!(Query, PluginQuery, "accept.query");
 
+/// ADR 0113 §2.5: cleanup cannot fence a still-running operation between
+/// two artifact publications; settlement makes that same referrer reclaimable.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_operation_keeps_its_artifact_referrer_live_until_settlement() -> Result<()> {
+    use lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay;
+    use lash_core::runtime::obligations::relay::{
+        DeliveryFailure, ObligationDelivery, ObligationRelay,
+    };
+    use lash_core::store::{ClaimToken, ObligationKey};
+
+    let backend = sqlite_memory_store_backend().await;
+    let task_backend = backend.clone();
+    let (published, mut claims) = tokio::sync::mpsc::unbounded_channel();
+    let spec = lash_core::facade_support::PluginSpec::new().with_plugin_task_typed::<Task, _, _>(
+        move |ctx, args| {
+            let backend = task_backend.clone();
+            let published = published.clone();
+            async move {
+                let journal = ctx
+                    .scoped_effect_controller
+                    .execution_scope()
+                    .journal_identity()
+                    .map_err(|error| error.to_string())?;
+                let claim =
+                    lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::Journal(journal));
+                let modules = backend.module_artifacts();
+                modules
+                    .publish_module_artifact(&claim, "operation-first", b"first")
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let key = ObligationKey::ArtifactCleanup {
+                    referrer: claim.referrer(),
+                };
+                let relay = ArtifactCleanupRelay::over_backend(
+                    &backend,
+                    lash_core::ProcessEngineRegistry::new(),
+                );
+                let cleanup = relay
+                    .deliver(ObligationDelivery {
+                        id: &key.id(),
+                        key: &key,
+                        token: &ClaimToken::new("operation-cleanup"),
+                        attempt: 1,
+                        started_ms: backend.clock().timestamp_ms(),
+                    })
+                    .await;
+                if cleanup != Err(DeliveryFailure::NotYet) {
+                    return Err(format!("cleanup ended a publishing operation: {cleanup:?}"));
+                }
+                modules
+                    .publish_module_artifact(&claim, "operation-second", b"second")
+                    .await
+                    .map_err(|error| error.to_string())?;
+                published.send(claim).map_err(|error| error.to_string())?;
+                Ok(PluginOperationOutcome::new(args))
+            }
+        },
+    );
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .plugin(Arc::new(StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial("accept"),
+            spec,
+        )))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(crate::SessionId::parse("operation-artifact-lifetime").unwrap())
+        .created()
+        .await
+        .open()
+        .await?;
+    let result = session
+        .plugin_operations()
+        .start_task::<Task>("published".into(), "artifact-lifetime")
+        .await?
+        .result()
+        .await?;
+    assert_eq!(result.output, serde_json::json!("published"));
+    let claim = claims.recv().await.expect("the completed task published");
+    let key = ObligationKey::ArtifactCleanup {
+        referrer: claim.referrer(),
+    };
+    let relay =
+        ArtifactCleanupRelay::over_backend(&backend, lash_core::ProcessEngineRegistry::new());
+    assert_eq!(
+        relay
+            .deliver(ObligationDelivery {
+                id: &key.id(),
+                key: &key,
+                token: &ClaimToken::new("settled-operation-cleanup"),
+                attempt: 1,
+                started_ms: backend.clock().timestamp_ms(),
+            })
+            .await,
+        Ok(())
+    );
+    assert!(matches!(
+        backend
+            .module_artifacts()
+            .publish_module_artifact(&claim, "operation-after-settlement", b"ended")
+            .await,
+        Err(lash_core::ArtifactStoreError::ReferrerEnded { .. })
+    ));
+    core.shutdown().await?;
+    Ok(())
+}
+
 /// A handle reopened on a session whose turn the core's node served answers
 /// a plugin query from the plugin view that turn's run published, and the
 /// query appends nothing to the session's history (FIG-5344). A session that
