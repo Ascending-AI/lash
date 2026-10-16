@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use lash_core::{
     ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactStoreError, ArtifactStoreId,
-    DurabilityTier, HostArtifactPin, ModuleArtifactHold, ModuleArtifactStore, ReferrerClaim,
-    ReferrerGuard, ResolvedArtifactCleanup,
+    DurabilityTier, HostArtifactPin, ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
+    ReferrerClaim, ReferrerGuard, ResolvedArtifactCleanup,
 };
 
 /// A writer and a fresh handle over the same durable store.
@@ -241,11 +241,11 @@ pub async fn batch_holds_all_or_nothing(store: Arc<dyn ModuleArtifactStore>) {
             &[
                 ModuleArtifactHold::Acquire {
                     module_ref: &fresh_key,
-                    bytes: &fresh,
+                    body: ModuleArtifactBody::Bytes(&fresh),
                 },
                 ModuleArtifactHold::Publish {
                     module_ref: &stored_key,
-                    bytes: &fresh,
+                    body: ModuleArtifactBody::Bytes(&fresh),
                 },
             ],
         )
@@ -264,15 +264,15 @@ pub async fn batch_holds_all_or_nothing(store: Arc<dyn ModuleArtifactStore>) {
             &[
                 ModuleArtifactHold::Acquire {
                     module_ref: &stored_key,
-                    bytes: &fresh,
+                    body: ModuleArtifactBody::Bytes(&fresh),
                 },
                 ModuleArtifactHold::Acquire {
                     module_ref: &fresh_key,
-                    bytes: &fresh,
+                    body: ModuleArtifactBody::Bytes(&fresh),
                 },
                 ModuleArtifactHold::Publish {
                     module_ref: &document_key,
-                    bytes: &document,
+                    body: ModuleArtifactBody::Bytes(&document),
                 },
             ],
         )
@@ -302,7 +302,7 @@ pub async fn batch_holds_all_or_nothing(store: Arc<dyn ModuleArtifactStore>) {
             &claim,
             &[ModuleArtifactHold::Acquire {
                 module_ref: &fresh_key,
-                bytes: &fresh,
+                body: ModuleArtifactBody::Bytes(&fresh),
             }],
         )
         .await

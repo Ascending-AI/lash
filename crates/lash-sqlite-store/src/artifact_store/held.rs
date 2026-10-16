@@ -5,13 +5,16 @@
 //! execution, whose end releases it (FIG-6481). A hold runs as a handful of
 //! statements over the set: one read of the acquisitions the referrer
 //! already holds, which it skips, one read of the pointers already stored,
-//! bounded multi-row blob inserts, one pointer insert and one edge insert; a
+//! bounded multi-row blob inserts, one install of the graph nodes a
+//! document's or a declaration's pointer roots (FIG-6469), one pointer
+//! insert and one edge insert; a
 //! referrer's end runs one read of the edges still held, one delete of every
 //! pointer no edge holds and one peel of their blobs.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
+use lash_core_execution::store::module_nodes::stage_module_node;
 use lash_core_execution::{ArtifactReferrerKind, ArtifactStoreError, ReferrerClaim};
 
 use super::*;
@@ -101,6 +104,8 @@ fn json_set(values: &impl serde::Serialize) -> rusqlite::Result<String> {
 pub(super) struct HeldArtifact {
     pub(super) artifact_ref: String,
     pub(super) bytes: Vec<u8>,
+    /// The graph node kind the body is stored as; none for bytes.
+    pub(super) node: Option<lash_core_store::checkpoint_graph::NodeKind>,
     pub(super) verified: bool,
 }
 
@@ -176,18 +181,35 @@ impl SqliteStore {
                     .collect::<rusqlite::Result<_>>()?;
                 let mut pointers = Vec::new();
                 let mut blobs = Vec::new();
+                let mut nodes = BTreeMap::new();
                 for artifact in artifacts.iter().copied() {
-                    match stored.get(&artifact.artifact_ref) {
-                        Some(blob_ref) => {
-                            if artifact.verified
-                                && *blob_ref != BlobRef::for_content(&artifact.bytes).as_str()
-                            {
+                    match (stored.get(&artifact.artifact_ref), artifact.node) {
+                        (Some(_), _) if !artifact.verified => {}
+                        (Some(blob_ref), node) => {
+                            let expected = match node {
+                                None => BlobRef::for_content(&artifact.bytes).0,
+                                Some(kind) => stage_module_node(kind, &artifact.bytes)
+                                    .map_err(artifact_failure)?
+                                    .root
+                                    .to_hex(),
+                            };
+                            if *blob_ref != expected {
                                 return Err(artifact_failure(ArtifactStoreError::Immutable {
                                     artifact_ref: artifact.artifact_ref.clone(),
                                 }));
                             }
                         }
-                        None => {
+                        // A node body is stored once, as its graph node,
+                        // which the artifact's pointer roots.
+                        (None, Some(kind)) => {
+                            let staged = stage_module_node(kind, &artifact.bytes)
+                                .map_err(artifact_failure)?;
+                            let root = staged.root.to_hex();
+                            stored.insert(artifact.artifact_ref.clone(), root.clone());
+                            pointers.push((artifact.artifact_ref.as_str(), root));
+                            nodes.extend(staged.nodes);
+                        }
+                        (None, None) => {
                             let content = BlobRef::for_content(&artifact.bytes);
                             let envelope = Self::module_envelope(
                                 &content,
@@ -210,6 +232,16 @@ impl SqliteStore {
                         insert.raw_bind_parameter(index * 2 + 2, &envelope[..])?;
                     }
                     insert.raw_execute()?;
+                }
+                if !nodes.is_empty() {
+                    crate::durable::install_staged(tx, &nodes)?.map_err(|refusal| {
+                        artifact_failure(ArtifactStoreError::StoredDataCorrupt {
+                            source: lash_core_execution::ModuleArtifactCorruption::Storage {
+                                record_kind: "module artifact node".into(),
+                                message: refusal.to_string(),
+                            },
+                        })
+                    })?;
                 }
                 if !pointers.is_empty() {
                     crate::conn::cached_execute(

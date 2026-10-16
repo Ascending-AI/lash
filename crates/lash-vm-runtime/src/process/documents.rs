@@ -1,12 +1,13 @@
 //! The admitted documents processes run, in the store set's module port.
 //!
-//! A document is stored once, as its canonical token body, under its
-//! identity: the digest of that body, kernel version and manifest included
-//! (`K-DOC-003`), the same bytes and key its checkpoint graph node (kind 10)
-//! is encoded from. [`KernelDocuments::publish`] is the one writer: beside
-//! the document it holds the definition of every library function the
-//! document lists, each as its token body (a helper-definition node's)
-//! under its own identity, so a reader draws the
+//! A document is stored once, as its checkpoint graph node (kind 10), under
+//! its identity: the digest of its canonical token body, kernel version and
+//! manifest included (`K-DOC-003`). The artifact's row roots that node, so
+//! a cell checkpoint naming the same document shares the one copy
+//! (FIG-6469). [`KernelDocuments::publish`] is the one writer: beside the
+//! document it holds the definition of every library function the document
+//! lists, each as its HelperDefinition node (kind 14) under its own
+//! identity, so a reader draws the
 //! document from what it retains and never from its own build's registry
 //! (FIG-6379). Equal helper sets are stored once, whichever documents list
 //! them.
@@ -22,7 +23,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use lash_core::{
-    ArtifactName, ArtifactStoreError, ModuleArtifactHold, ModuleArtifactStore, ReferrerClaim,
+    ArtifactName, ArtifactStoreError, ModuleArtifactBody, ModuleArtifactHold, ModuleArtifactStore,
+    ReferrerClaim,
 };
 use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
 use lash_kernel_doc::graph_tokens::decode_body;
@@ -349,12 +351,12 @@ impl KernelDocuments {
             .iter()
             .map(|(name, image)| ModuleArtifactHold::Acquire {
                 module_ref: &name.artifact_ref,
-                bytes: image,
+                body: ModuleArtifactBody::HelperDefinition(image),
             })
             .collect();
         let document_hold = ModuleArtifactHold::Publish {
             module_ref: &document_ref,
-            bytes: document.body(),
+            body: ModuleArtifactBody::Document(document.body()),
         };
         match retainer {
             None => {
@@ -387,7 +389,7 @@ impl KernelDocuments {
                 claim,
                 &[ModuleArtifactHold::Acquire {
                     module_ref: &name.artifact_ref,
-                    bytes,
+                    body: ModuleArtifactBody::Bytes(bytes),
                 }],
             )
             .await?)
@@ -553,11 +555,11 @@ impl KernelDocuments {
                 &[
                     ModuleArtifactHold::Acquire {
                         module_ref: &source_artifact(&map.source).artifact_ref,
-                        bytes: source.as_bytes(),
+                        body: ModuleArtifactBody::Bytes(source.as_bytes()),
                     },
                     ModuleArtifactHold::Acquire {
                         module_ref: &source_map_artifact(&identity).artifact_ref,
-                        bytes: &map_bytes,
+                        body: ModuleArtifactBody::Bytes(&map_bytes),
                     },
                 ],
             )
@@ -739,7 +741,7 @@ mod tests {
             artifacts: &[ModuleArtifactHold<'_>],
         ) -> Result<(), ArtifactStoreError> {
             if let Some(last) = artifacts.last() {
-                *self.0.lock().expect("store") = Some(last.bytes().to_vec());
+                *self.0.lock().expect("store") = Some(last.body().bytes().to_vec());
             }
             Ok(())
         }
@@ -766,6 +768,8 @@ mod tests {
     #[derive(Default)]
     struct Counted {
         stored: Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
+        /// Each artifact held as a graph node's body, and the node's kind.
+        nodes: Mutex<std::collections::BTreeMap<String, u32>>,
         writes: Mutex<Vec<Write>>,
     }
 
@@ -777,8 +781,14 @@ mod tests {
             module_ref: &str,
             bytes: &[u8],
         ) -> Result<(), ArtifactStoreError> {
-            self.hold_module_artifacts(claim, &[ModuleArtifactHold::Publish { module_ref, bytes }])
-                .await
+            self.hold_module_artifacts(
+                claim,
+                &[ModuleArtifactHold::Publish {
+                    module_ref,
+                    body: ModuleArtifactBody::Bytes(bytes),
+                }],
+            )
+            .await
         }
         async fn acquire_module_artifact(
             &self,
@@ -801,13 +811,17 @@ mod tests {
             let mut stored = self.stored.lock().expect("store");
             let mut write = Write::new();
             for artifact in artifacts {
+                let bytes = artifact.body().bytes();
                 stored
                     .entry(artifact.module_ref().to_owned())
-                    .or_insert_with(|| artifact.bytes().to_vec());
-                write.push((
-                    artifact.module_ref().to_owned(),
-                    artifact.bytes().as_ptr() as usize,
-                ));
+                    .or_insert_with(|| bytes.to_vec());
+                if let Some(kind) = artifact.body().node_kind() {
+                    self.nodes
+                        .lock()
+                        .expect("nodes")
+                        .insert(artifact.module_ref().to_owned(), kind.0);
+                }
+                write.push((artifact.module_ref().to_owned(), bytes.as_ptr() as usize));
             }
             self.writes.lock().expect("writes").push(write);
             Ok(())
@@ -899,11 +913,11 @@ mod tests {
         );
     }
 
-    /// FIG-6257: however many process definitions publish a document, the
-    /// store holds it once, as the token body its checkpoint graph node
-    /// (kind 10) is encoded from, under the digest that keys that node; each
-    /// helper it lists is held as its own token body. A read decodes that
-    /// body once, and nothing is JSON.
+    /// FIG-6257, FIG-6469: however many process definitions publish a
+    /// document, the store holds it once, as its checkpoint graph node (kind
+    /// 10) encoded from its token body, under the digest that keys that
+    /// node; each helper it lists is held as its own HelperDefinition node
+    /// (kind 14). A read decodes that body once, and nothing is JSON.
     #[tokio::test]
     async fn a_document_is_stored_once_as_its_graph_node_body() {
         let mut registry = lash_kernel_doc::FunctionRegistry::new();
@@ -957,6 +971,14 @@ mod tests {
             decode_body::<FunctionDefinition>(&held[&function_artifact(&helper).artifact_ref])
                 .expect("the helper is stored as its token body");
         assert_eq!(definition.identity(), helper);
+        assert_eq!(
+            *store.nodes.lock().expect("nodes"),
+            std::collections::BTreeMap::from([
+                (document.id().to_string(), 10),
+                (function_artifact(&helper).artifact_ref, 14),
+            ]),
+            "the document and its helper are held as graph nodes, not as copies of their bodies"
+        );
         assert!(
             held.values()
                 .all(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).is_err()),

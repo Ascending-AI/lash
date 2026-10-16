@@ -27,10 +27,14 @@ use lash_core::runtime::artifact_cleanup::{
 use lash_core::runtime::obligations::relay::{RelayPolicy, relay_due};
 use lash_core::testing::TestClock;
 
+#[path = "definition_graph.rs"]
+mod graph;
+pub use graph::*;
+
 const DEFINITION_ENGINE: &str = "definition-law";
 
-/// An engine whose definition value names one module, which is every
-/// artifact a start of it reads.
+/// An engine whose definition value names one module and, optionally, the
+/// `functions` it lists, which are every artifact a start of it reads.
 struct ModuleDefinitionEngine;
 
 fn module_of(payload: &serde_json::Value) -> Result<String, crate::PluginError> {
@@ -81,10 +85,20 @@ impl crate::ProcessEngine for ModuleDefinitionEngine {
         &self,
         payload: &serde_json::Value,
     ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
-        Ok(vec![crate::ArtifactName {
-            store: crate::ArtifactStoreId::KernelDocument,
-            artifact_ref: module_of(payload)?,
-        }])
+        let functions = payload
+            .get("functions")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_owned);
+        Ok(std::iter::once(module_of(payload)?)
+            .chain(functions)
+            .map(|artifact_ref| crate::ArtifactName {
+                store: crate::ArtifactStoreId::KernelDocument,
+                artifact_ref,
+            })
+            .collect())
     }
 
     async fn end_artifact_referrer(

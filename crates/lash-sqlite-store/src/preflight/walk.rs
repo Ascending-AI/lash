@@ -151,7 +151,7 @@ fn read_page(
     }
 }
 
-/// One persisted JSON module artifact per module reference.
+/// One persisted module artifact per module reference.
 ///
 /// The pointer row is left-joined to its content-addressed blob so a dangling
 /// artifact reference remains visible as a named item. The blob envelope is
@@ -178,7 +178,11 @@ fn read_module_artifacts(
             let artifact_ref: String = row.get(0)?;
             let blob_ref: String = row.get(1)?;
             let stored: Option<Vec<u8>> = row.get(2)?;
+            let encoding: Option<i64> = row.get(3)?;
             let payload = match stored {
+                // A document or a declaration is its graph node, stored as
+                // its encoded bytes with no blob envelope to unwrap.
+                Some(stored) if encoding == Some(1) => DurablePayload::GraphNode(stored),
                 Some(stored) => logical_json_payload(stored),
                 None => DurablePayload::Missing {
                     reason: format!(

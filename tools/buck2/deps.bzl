@@ -274,6 +274,7 @@ PACKAGE_DEPS = {
             "futures_util": "//third-party/rust:p0127",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_worker": "//crates/lash-core-worker:lash-core-worker",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "pretty_assertions": "//third-party/rust:p0246",
             "proptest": "//third-party/rust:p0250",

@@ -111,7 +111,9 @@ pub enum RootOwner {
     /// `session_meta.admission_base_checkpoint_ref`.
     SessionAdmissionBase { session: SessionId },
     /// SQLite `artifact_refs`; PostgreSQL `lash_lash_vm_artifacts` with
-    /// `storage_kind = 1`.
+    /// `storage_kind = 1`: a kernel document's or a helper declaration's
+    /// row, which roots its node for the referrers whose edges hold the row
+    /// (FIG-6469).
     ArtifactBridge { namespace: String, artifact: String },
     /// `graph_release_pins`, keyed by the release's dialect line and name
     /// (`typescript/1.0`).

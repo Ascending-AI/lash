@@ -16,6 +16,8 @@ use crate::support::database_url;
 
 #[path = "blob_probe.rs"]
 mod blob_probe;
+#[path = "definition_graph_probe.rs"]
+mod definition_graph_probe;
 
 async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
     let url = database_url()?;
@@ -96,6 +98,27 @@ lash_conformance::process_definition_tests!({
         Arc::new(lash_core_execution::facade_support::SystemClock),
     );
     (database, registry, ports)
+});
+
+lash_conformance::process_definition_graph_tests!({
+    let Some((database, storage)) = storage().await else {
+        eprintln!("skipping Postgres definition graph laws: database URL is not set");
+        return;
+    };
+    let storage = Arc::new(storage);
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
+        Arc::new(storage.lash_vm_artifact_store()),
+        Arc::new(storage.process_env_store()),
+        Arc::new(storage.lash_vm_artifact_store()),
+        Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
+        storage.artifact_cleanup(),
+        Arc::new(lash_core_execution::facade_support::SystemClock),
+    );
+    let probe = Arc::new(definition_graph_probe::PostgresDefinitionGraphProbe::new(
+        storage,
+    )) as Arc<dyn lash_conformance::DefinitionGraphProbe>;
+    (database, registry, ports, probe)
 });
 
 lash_conformance::process_prune_start_staging_tests!({

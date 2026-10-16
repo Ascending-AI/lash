@@ -31,6 +31,12 @@
 //! manifest: the manifest is in the id's preimage, and siblings name each
 //! other.
 //!
+//! A manifest's kernel document and helper declarations are checkpoint
+//! graph nodes (FIG-6469): each artifact's row roots its Document or
+//! HelperDefinition node, so the referrer's edge to the row retains the
+//! node directly. The node is stored once, shared with every definition and
+//! checkpoint that names it, and goes with its last root.
+//!
 //! An id alone holds nothing. [`ArtifactReferrerPorts::read_definition`] is a
 //! snapshot and promises nothing about retention.
 

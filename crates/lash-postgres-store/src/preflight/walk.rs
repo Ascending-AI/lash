@@ -76,12 +76,13 @@ pub(crate) async fn scan_durable(
     }
 }
 
-/// One persisted JSON module artifact per module reference.
+/// One persisted module artifact per module reference: its bytes, or the
+/// graph node a document's or a declaration's row roots.
 async fn scan_module_artifacts(
     pool: &PgPool,
     scan: &DurableScan,
 ) -> Result<DurableScanPage, StoreError> {
-    let rows = crate::observed_sql::query_as::<_, (String, Vec<u8>)>(
+    let rows = crate::observed_sql::query_as::<_, (String, Option<Vec<u8>>, Option<Vec<u8>>)>(
         crate::artifact_store::artifact_sql()
             .lash_vm_artifacts
             .list_namespace_page
@@ -99,19 +100,28 @@ async fn scan_module_artifacts(
     let returned = rows.len();
     let items: Vec<DurableItem> = rows
         .into_iter()
-        .map(|(artifact_ref, bytes)| DurableItem {
+        .map(|(artifact_ref, bytes, node)| DurableItem {
             surface: DurableSurface::ModuleArtifact,
+            payload: match (bytes, node) {
+                (Some(bytes), _) => match String::from_utf8(bytes) {
+                    Ok(text) => DurablePayload::Json(text),
+                    Err(error) => DurablePayload::Missing {
+                        reason: format!("module artifact blob is not UTF-8 JSON: {error}"),
+                    },
+                },
+                (None, Some(node)) => DurablePayload::GraphNode(node),
+                (None, None) => DurablePayload::Missing {
+                    reason: format!(
+                        "module artifact `{artifact_ref}` roots a graph node \
+                         which has no row in the blobs table"
+                    ),
+                },
+            },
             cursor: artifact_ref,
             process_id: None,
             session_id: None,
             status: None,
             owner_record: None,
-            payload: match String::from_utf8(bytes) {
-                Ok(text) => DurablePayload::Json(text),
-                Err(error) => DurablePayload::Missing {
-                    reason: format!("module artifact blob is not UTF-8 JSON: {error}"),
-                },
-            },
         })
         .collect();
     let next = page_cursor(scan, items.last().map(|item| item.cursor.clone()), returned);

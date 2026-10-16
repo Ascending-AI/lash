@@ -84,3 +84,78 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
         )
     }
 }
+
+/// The definition graph laws' rows and cuts (FIG-6469), over the catalog a
+/// raw SQLite connection opens.
+pub(crate) struct SqliteDefinitionGraphProbe {
+    catalog: String,
+}
+
+impl SqliteDefinitionGraphProbe {
+    pub(crate) fn new(catalog: String) -> Self {
+        Self { catalog }
+    }
+
+    fn open(&self) -> rusqlite::Connection {
+        rusqlite::Connection::open(&self.catalog).expect("open the SQLite definition graph probe")
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_conformance::DefinitionGraphProbe for SqliteDefinitionGraphProbe {
+    async fn module_row(&self, artifact_ref: &str) -> lash_conformance::ModuleRow {
+        use rusqlite::OptionalExtension as _;
+        let row: Option<(String, Option<i64>)> = self
+            .open()
+            .query_row(
+                "SELECT refs.blob_ref, blobs.encoding FROM artifact_refs AS refs
+                 LEFT JOIN blobs ON blobs.hash = refs.blob_ref
+                 WHERE refs.namespace = 'kernel_document' AND refs.artifact_ref = ?1",
+                rusqlite::params![artifact_ref],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .expect("read the SQLite module row");
+        match row {
+            None => lash_conformance::ModuleRow::Absent,
+            Some((hash, Some(1))) => lash_conformance::ModuleRow::Node(hash),
+            Some(_) => lash_conformance::ModuleRow::Bytes,
+        }
+    }
+
+    async fn graph_nodes(&self) -> std::collections::BTreeSet<String> {
+        self.open()
+            .prepare("SELECT hash FROM blobs WHERE encoding = 1")
+            .expect("prepare the SQLite graph node read")
+            .query_map([], |row| row.get(0))
+            .expect("read the SQLite graph nodes")
+            .collect::<Result<_, _>>()
+            .expect("collect the SQLite graph nodes")
+    }
+
+    async fn cut(&self, cut: lash_conformance::DefinitionGraphCut) {
+        let trigger = match cut {
+            lash_conformance::DefinitionGraphCut::Publication => {
+                "BEFORE INSERT ON artifact_referrer_edges WHEN NEW.namespace = 'kernel_document'"
+            }
+            lash_conformance::DefinitionGraphCut::Severance => {
+                "BEFORE DELETE ON artifact_referrer_edges WHEN OLD.namespace = 'kernel_document'"
+            }
+            lash_conformance::DefinitionGraphCut::Retirement => {
+                "BEFORE DELETE ON blobs WHEN OLD.encoding = 1"
+            }
+        };
+        self.open()
+            .execute_batch(&format!(
+                "CREATE TRIGGER definition_graph_cut {trigger} BEGIN \
+                 SELECT RAISE(ABORT, 'injected definition graph cut'); END;"
+            ))
+            .expect("install the SQLite definition graph cut");
+    }
+
+    async fn clear_cut(&self) {
+        self.open()
+            .execute_batch("DROP TRIGGER definition_graph_cut")
+            .expect("remove the SQLite definition graph cut");
+    }
+}

@@ -824,6 +824,32 @@ macro_rules! process_definition_tests {
     };
 }
 
+/// Register the laws of a definition's document and declarations as
+/// checkpoint graph nodes (FIG-6469): one body each under a direct edge,
+/// reclamation with the last owner, and no loss or leak at a crash cut. The
+/// fixture yields `(guard, process registry, artifact referrer ports,
+/// definition graph probe)`.
+#[macro_export]
+macro_rules! process_definition_graph_tests {
+    ($fixture:block) => {
+        $crate::process_definition_graph_tests!(@catalogue $fixture; [
+            (a_definition_and_its_declarations_store_one_graph_body_under_a_direct_edge, "definition-graph-one-body"),
+            (a_definitions_graph_nodes_are_reclaimed_with_their_last_owner, "definition-graph-last-owner"),
+            (a_crash_at_definition_publication_severance_or_retirement_neither_loses_nor_leaks_a_node, "definition-graph-crash-cuts"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, registry, ports, probe) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(registry, ports, probe).await;
+            }
+        )*
+    };
+}
+
 #[macro_export]
 macro_rules! attachment_store_tests {
     ($fixture:block) => {

@@ -2235,6 +2235,7 @@ dependencies = [
  "lash-internal-core-worker",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-kernel-doc",
  "pretty_assertions",
  "proptest",
  "rmp-serde",

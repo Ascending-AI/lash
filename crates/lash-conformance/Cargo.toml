@@ -27,6 +27,7 @@ lash-vm = []
 lash-core = { workspace = true, features = ["testing"] }
 # Enable the worker testing surface in the workspace feature graph.
 lash-core-worker = { workspace = true, features = ["testing"] }
+lash-kernel-doc = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 async-trait.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

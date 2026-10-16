@@ -1,8 +1,9 @@
 //! The module-artifact port a store set supplies (ADR 0113): the store of
 //! admitted kernel documents.
 //!
-//! The port stores a document's canonical bytes under its identity, kept
-//! alive by referrer edges, and never decodes them: the kernel process engine
+//! The port stores a document's canonical token body under its identity,
+//! kept alive by referrer edges, as the checkpoint graph node it encodes
+//! ([`ModuleArtifactBody`]), and never decodes it: the kernel process engine
 //! owns the encoding and wraps this port in its typed `KernelDocuments`. The
 //! port sits here, below the engine, so [`StoreSet`](crate::StoreSet) can
 //! supply it like every other persistence port, and the documents a code mode
@@ -188,21 +189,62 @@ fn module_artifact_refused(refusal: ModuleArtifactRefusal) -> crate::PluginError
     )
 }
 
+/// What one held module artifact is stored as.
+///
+/// A kernel document and a library function's definition are checkpoint
+/// graph nodes: a durable store keeps each once, as its node, which the
+/// artifact's row roots (the graph's artifact bridge, FIG-6469), so a
+/// checkpoint graph that names the same node shares that one copy. A read
+/// of the artifact answers the node's logical body. Anything else is bytes
+/// the module namespace's codec owns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModuleArtifactBody<'a> {
+    /// Opaque bytes, stored as they are.
+    Bytes(&'a [u8]),
+    /// A kernel document's canonical token body: its Document node (kind
+    /// 10).
+    Document(&'a [u8]),
+    /// A library function's definition as its token body: its
+    /// HelperDefinition node (kind 14).
+    HelperDefinition(&'a [u8]),
+}
+
+impl<'a> ModuleArtifactBody<'a> {
+    /// What a read of the artifact answers: the bytes, or the node's
+    /// logical body.
+    pub fn bytes(&self) -> &'a [u8] {
+        match self {
+            Self::Bytes(bytes) | Self::Document(bytes) | Self::HelperDefinition(bytes) => bytes,
+        }
+    }
+
+    /// The graph node kind the body is stored as, if it is a node.
+    #[must_use]
+    pub fn node_kind(&self) -> Option<lash_core_store::checkpoint_graph::NodeKind> {
+        use lash_core_store::checkpoint_graph::NodeKind;
+        match self {
+            Self::Bytes(_) => None,
+            Self::Document(_) => Some(NodeKind::DOCUMENT),
+            Self::HelperDefinition(_) => Some(NodeKind::HELPER_DEFINITION),
+        }
+    }
+}
+
 /// One artifact a [`ModuleArtifactStore::hold_module_artifacts`] batch holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModuleArtifactHold<'a> {
-    /// Stored when absent and verified against stored bytes, as
+    /// Stored when absent and verified against what is stored, as
     /// [`ModuleArtifactStore::publish_module_artifact`] holds it.
     Publish {
         module_ref: &'a str,
-        bytes: &'a [u8],
+        body: ModuleArtifactBody<'a>,
     },
-    /// Acquired whatever bytes are stored, as
+    /// Acquired whatever is stored, as
     /// [`ModuleArtifactStore::acquire_module_artifact`] holds it, and stored
-    /// as `bytes` when nothing is.
+    /// as `body` when nothing is.
     Acquire {
         module_ref: &'a str,
-        bytes: &'a [u8],
+        body: ModuleArtifactBody<'a>,
     },
 }
 
@@ -213,9 +255,9 @@ impl<'a> ModuleArtifactHold<'a> {
         }
     }
 
-    pub fn bytes(&self) -> &'a [u8] {
+    pub fn body(&self) -> ModuleArtifactBody<'a> {
         match self {
-            Self::Publish { bytes, .. } | Self::Acquire { bytes, .. } => bytes,
+            Self::Publish { body, .. } | Self::Acquire { body, .. } => *body,
         }
     }
 }
@@ -223,7 +265,9 @@ impl<'a> ModuleArtifactHold<'a> {
 /// The module-artifact store of one store set: the admitted kernel documents.
 ///
 /// A module is published once under its module reference (an opaque key) as
-/// its verified store bytes, and kept alive by referrer edges. Only the
+/// its verified [`ModuleArtifactBody`], and kept alive by referrer edges. A
+/// node body's row roots its graph node, so the node lives while an edge
+/// holds the row or another root reaches it. Only the
 /// cleanup executor severs edges, through [`Self::end_module_referrer`]; an
 /// artifact with no edge left is reclaimed there, and an ended referrer is
 /// fenced against every later write. The bytes are immutable: publishing
@@ -273,8 +317,8 @@ pub trait ModuleArtifactStore: Send + Sync {
         cleanup: &ResolvedArtifactCleanup,
     ) -> Result<(), ArtifactStoreError>;
 
-    /// The store bytes published under `module_ref`, if any referrer holds
-    /// them.
+    /// The bytes published under `module_ref`, or the logical body of the
+    /// node it roots, if any referrer holds it.
     async fn get_module_artifact(
         &self,
         module_ref: &str,

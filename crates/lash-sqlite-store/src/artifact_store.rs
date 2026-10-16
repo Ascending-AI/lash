@@ -41,13 +41,20 @@ lash_store_sql::statements! {
         select_blob_ref = "SELECT blob_ref FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref = ?2";
 
+        /// The blob `?1`/`?2` points at and its encoding: a graph node is a
+        /// node-bodied artifact's root (FIG-6469). A dangling pointer has
+        /// none.
+        select_body_ref = "SELECT refs.blob_ref, blobs.encoding FROM artifact_refs AS refs
+             LEFT JOIN blobs ON blobs.hash = refs.blob_ref
+             WHERE refs.namespace = ?1 AND refs.artifact_ref = ?2";
+
         /// Every pointer row, as the collector's root set.
         select_gc_roots = "SELECT namespace, blob_ref FROM artifact_refs
              ORDER BY namespace, artifact_ref";
 
         /// One preflight page of published artifacts in namespace `?1`, after
         /// reference `?2`, at most `?3` rows.
-        select_preflight_page = "SELECT refs.artifact_ref, refs.blob_ref, blobs.content
+        select_preflight_page = "SELECT refs.artifact_ref, refs.blob_ref, blobs.content, blobs.encoding
              FROM artifact_refs AS refs
              LEFT JOIN blobs ON blobs.hash = refs.blob_ref
              WHERE refs.namespace = ?1
@@ -560,14 +567,14 @@ impl SqliteStore {
         let resolved = self
             .conn
             .call(move |conn| {
-                let blob_ref: Option<String> = conn
+                let stored: Option<(String, Option<i64>)> = conn
                     .query_row(
-                        artifact_sql().refs.select_blob_ref.sql(),
+                        artifact_sql().refs.select_body_ref.sql(),
                         params![namespace, artifact_ref],
-                        |row| row.get::<_, String>(0),
+                        |row| Ok((row.get(0)?, row.get(1)?)),
                     )
                     .optional()?;
-                let Some(blob_ref) = blob_ref else {
+                let Some((blob_ref, encoding)) = stored else {
                     return Ok(None);
                 };
                 let mut edges =
@@ -577,6 +584,11 @@ impl SqliteStore {
                     let kind: String = row.get(0)?;
                     let id: String = row.get(1)?;
                     decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
+                }
+                if encoding == Some(1) {
+                    return Self::module_node_conn(conn, &blob_ref)
+                        .map(|body| Some(Some(body)))
+                        .map_err(sqlite_conversion_error);
                 }
                 Ok(Some(
                     Self::get_blob_conn(conn, &BlobRef(blob_ref))
@@ -595,6 +607,26 @@ impl SqliteStore {
             )
         })
         .map(Some)
+    }
+}
+
+impl SqliteStore {
+    /// The logical body of the node-bodied artifact whose row roots
+    /// `root`: its closure read in the caller's transaction, every node
+    /// checked.
+    fn module_node_conn(conn: &rusqlite::Connection, root: &str) -> Result<Vec<u8>, StoreError> {
+        let corrupt = |message: String| stored_data_corrupt("module artifact node", message);
+        let node = lash_core_store::checkpoint_graph::NodeId::from_hex(root)
+            .ok_or_else(|| corrupt(format!("`{root}` is not a node reference")))?;
+        let closure = crate::durable::graph_closure(
+            conn,
+            node,
+            &lash_durable::domain::graph::OWNER_READ_LIMITS,
+        )
+        .map_err(sqlite_error)?
+        .map_err(|refusal| corrupt(refusal.to_string()))?;
+        lash_core_execution::store::module_nodes::module_node_body(node, &closure)
+            .map_err(|error| corrupt(error.to_string()))
     }
 }
 
@@ -662,7 +694,8 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
                 }
                 Ok(held::HeldArtifact {
                     artifact_ref: artifact.module_ref().to_owned(),
-                    bytes: artifact.bytes().to_vec(),
+                    bytes: artifact.body().bytes().to_vec(),
+                    node: artifact.body().node_kind(),
                     verified: matches!(
                         artifact,
                         lash_core_execution::ModuleArtifactHold::Publish { .. }

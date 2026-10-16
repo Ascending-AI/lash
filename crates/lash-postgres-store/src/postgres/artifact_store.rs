@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
+use lash_core_execution::store::module_nodes::stage_module_node;
 use lash_core_execution::{
     ArtifactReferrer, ArtifactStoreError, ReferrerClaim, ResolvedArtifactCleanup, StoreError,
 };
@@ -31,6 +32,14 @@ lash_store_sql::statements! {
              VALUES (?1, ?2, 0, ?3) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
         select_bytes = "SELECT artifact_bytes FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2";
+        /// A node-bodied artifact's row: its graph node, which the row roots
+        /// through the bridge (FIG-6469).
+        insert_node = "INSERT INTO lash_vm_artifacts (namespace, artifact_ref, storage_kind, graph_ref)
+             VALUES (?1, ?2, 1, ?3) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
+        /// What artifact `?2` of namespace `?1` stores: its bytes, or the
+        /// graph node its row roots.
+        select_stored = "SELECT artifact_bytes, graph_ref FROM lash_vm_artifacts
+             WHERE namespace = ?1 AND artifact_ref = ?2";
         /// Each reference of `?2` in namespace `?1` that referrer `?3`/`?4`
         /// holds no edge to.
         select_unheld = "SELECT wanted.artifact_ref FROM unnest(?2::TEXT[]) AS wanted(artifact_ref)
@@ -39,9 +48,13 @@ lash_store_sql::statements! {
                    AND edge.referrer_kind = ?3 AND edge.referrer_id = ?4)";
         exists = "SELECT EXISTS (SELECT 1 FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2)";
-        list_namespace_page = "SELECT artifact_ref, artifact_bytes FROM lash_vm_artifacts
-             WHERE namespace = ?1 AND (?2::text IS NULL OR artifact_ref > ?2::text)
-             ORDER BY artifact_ref LIMIT ?3";
+        /// One page of namespace `?1` after `?2`: each artifact's bytes, or
+        /// the encoded graph node its row roots.
+        list_namespace_page = "SELECT artifact.artifact_ref, artifact.artifact_bytes, node.content
+             FROM lash_vm_artifacts AS artifact
+             LEFT JOIN blobs AS node ON node.hash = artifact.graph_ref
+             WHERE artifact.namespace = ?1 AND (?2::text IS NULL OR artifact.artifact_ref > ?2::text)
+             ORDER BY artifact.artifact_ref LIMIT ?3";
     }
 }
 
@@ -411,27 +424,30 @@ impl PostgresLashVmArtifactStore {
                 .map_err(ArtifactStoreError::from)?;
         }
         for artifact in artifacts {
-            let (artifact_ref, bytes) = (artifact.module_ref(), artifact.bytes());
-            crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
-                .bind(MODULE_ARTIFACT_NAMESPACE)
-                .bind(artifact_ref)
-                .bind(bytes)
-                .execute(crate::observed_sql::executor(&mut **tx))
-                .await
-                .map_err(backend)?;
-            if let lash_core_execution::ModuleArtifactHold::Publish { .. } = artifact {
-                let stored: Vec<u8> = crate::observed_sql::query_scalar(
-                    artifact_sql().lash_vm_artifacts.select_bytes.sql(),
-                )
-                .bind(MODULE_ARTIFACT_NAMESPACE)
-                .bind(artifact_ref)
-                .fetch_one(crate::observed_sql::executor(&mut **tx))
-                .await
-                .map_err(backend)?;
-                if stored != bytes {
-                    return Err(ArtifactStoreError::Immutable {
-                        artifact_ref: artifact_ref.to_owned(),
-                    });
+            let artifact_ref = artifact.module_ref();
+            let verified = matches!(
+                artifact,
+                lash_core_execution::ModuleArtifactHold::Publish { .. }
+            );
+            match artifact.body().node_kind() {
+                None => {
+                    Self::hold_module_bytes_tx(
+                        &mut tx,
+                        artifact_ref,
+                        artifact.body().bytes(),
+                        verified,
+                    )
+                    .await?;
+                }
+                Some(kind) => {
+                    Self::hold_module_node_tx(
+                        &mut tx,
+                        artifact_ref,
+                        kind,
+                        artifact.body().bytes(),
+                        verified,
+                    )
+                    .await?;
                 }
             }
             crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
@@ -444,6 +460,85 @@ impl PostgresLashVmArtifactStore {
                 .map_err(backend)?;
         }
         tx.commit().await.map_err(backend)
+    }
+
+    /// Store module bytes under `artifact_ref` if absent, and verify they
+    /// equal the stored bytes when `verified`.
+    async fn hold_module_bytes_tx(
+        tx: &mut sqlx::PgConnection,
+        artifact_ref: &str,
+        bytes: &[u8],
+        verified: bool,
+    ) -> Result<(), ArtifactStoreError> {
+        crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
+            .bind(MODULE_ARTIFACT_NAMESPACE)
+            .bind(artifact_ref)
+            .bind(bytes)
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?;
+        if verified {
+            let stored: Option<Vec<u8>> = crate::observed_sql::query_scalar(
+                artifact_sql().lash_vm_artifacts.select_bytes.sql(),
+            )
+            .bind(MODULE_ARTIFACT_NAMESPACE)
+            .bind(artifact_ref)
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?;
+            if stored.as_deref() != Some(bytes) {
+                return Err(ArtifactStoreError::Immutable {
+                    artifact_ref: artifact_ref.to_owned(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Store a node body under `artifact_ref` if absent, once, as its graph
+    /// node, which the row roots; verify a stored row roots that node when
+    /// `verified`. The caller holds the artifact's lock.
+    async fn hold_module_node_tx(
+        tx: &mut sqlx::PgConnection,
+        artifact_ref: &str,
+        kind: lash_core_store::checkpoint_graph::NodeKind,
+        logical: &[u8],
+        verified: bool,
+    ) -> Result<(), ArtifactStoreError> {
+        let stored: Option<(Option<Vec<u8>>, Option<String>)> =
+            crate::observed_sql::query_as(artifact_sql().lash_vm_artifacts.select_stored.sql())
+                .bind(MODULE_ARTIFACT_NAMESPACE)
+                .bind(artifact_ref)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(backend)?;
+        match stored {
+            Some(_) if !verified => Ok(()),
+            Some((_, root)) => {
+                let staged = stage_module_node(kind, logical)?;
+                if root.as_deref() == Some(staged.root.to_hex().as_str()) {
+                    Ok(())
+                } else {
+                    Err(ArtifactStoreError::Immutable {
+                        artifact_ref: artifact_ref.to_owned(),
+                    })
+                }
+            }
+            None => {
+                let staged = stage_module_node(kind, logical)?;
+                crate::durable::install_staged(&mut *tx, &staged.nodes)
+                    .await
+                    .map_err(module_node_refused)?;
+                crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_node.sql())
+                    .bind(MODULE_ARTIFACT_NAMESPACE)
+                    .bind(artifact_ref)
+                    .bind(staged.root.to_hex())
+                    .execute(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(backend)?;
+                Ok(())
+            }
+        }
     }
 
     /// Hold one definition closure under the claim in one transaction: the
@@ -789,12 +884,63 @@ impl PostgresLashVmArtifactStore {
         for row in &edges {
             decode_edge_referrer(row)?;
         }
-        crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .fetch_optional(crate::observed_sql::executor(&self.pool))
-            .await
-            .map_err(backend)
+        let stored: Option<(Option<Vec<u8>>, Option<String>)> =
+            crate::observed_sql::query_as(artifact_sql().lash_vm_artifacts.select_stored.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .fetch_optional(crate::observed_sql::executor(&self.pool))
+                .await
+                .map_err(backend)?;
+        match stored {
+            None => Ok(None),
+            Some((Some(bytes), _)) => Ok(Some(bytes)),
+            Some((None, root)) => self.module_node_body(root.as_deref()).await,
+        }
+    }
+
+    /// The logical body of the node a bridged artifact's row roots, its
+    /// closure read in one statement: none when a reclaim took the row's
+    /// node after the row was read.
+    async fn module_node_body(
+        &self,
+        root: Option<&str>,
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
+        use lash_core_store::checkpoint_graph::{GraphRefusal, NodeId};
+        let corrupt = |message: String| ArtifactStoreError::StoredDataCorrupt {
+            source: lash_core_execution::ModuleArtifactCorruption::Storage {
+                record_kind: "module artifact node".into(),
+                message,
+            },
+        };
+        let root = root
+            .and_then(NodeId::from_hex)
+            .ok_or_else(|| corrupt("a bridged row names no node".into()))?;
+        let mut connection = self.pool.acquire().await.map_err(backend)?;
+        let closure = match crate::durable::graph_closure(
+            &mut connection,
+            root,
+            &lash_durable::domain::graph::OWNER_READ_LIMITS,
+        )
+        .await
+        {
+            Ok(closure) => closure,
+            Err(GraphRefusal::MissingNode(missing)) if missing == root => return Ok(None),
+            Err(refusal) => return Err(corrupt(refusal.to_string())),
+        };
+        lash_core_execution::store::module_nodes::module_node_body(root, &closure).map(Some)
+    }
+}
+
+/// A graph refusal of a module node's install: what the store holds under
+/// the node's digest is not that node.
+fn module_node_refused(
+    refusal: lash_core_store::checkpoint_graph::GraphRefusal,
+) -> ArtifactStoreError {
+    ArtifactStoreError::StoredDataCorrupt {
+        source: lash_core_execution::ModuleArtifactCorruption::Storage {
+            record_kind: "module artifact node".into(),
+            message: refusal.to_string(),
+        },
     }
 }
 
