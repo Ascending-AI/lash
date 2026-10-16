@@ -870,9 +870,13 @@ impl Port {
     }
 
     /// `batch` as it crosses: its pages, and the capability of each child
-    /// that is neither sealed in it nor a host node the heap holds no grant
-    /// for (a checkpoint root's release and owner binding, or a page an
-    /// earlier batch carried that is staged): the parent decides those.
+    /// the heap holds under a grant. A child it holds under none is a page
+    /// sealed earlier in the batch or carried by an earlier one, or a host
+    /// node (a checkpoint root's release and owner binding): the parent
+    /// decides those. A child the batch seals too still crosses with its
+    /// grant: the parent stages the batch in seal order, and a committed
+    /// page the heap read under a grant and seals again lands after the
+    /// pages that already named it (FIG-6466).
     fn request(&self, batch: &Pending) -> CarriedSeal {
         // Counted as they cross, not when granted: a park's batch is
         // granted with the run's next slice, which a released worker
@@ -882,7 +886,7 @@ impl Port {
         for (_, own) in &batch.pages {
             for child in &own.children {
                 let child = self.resolved(*child);
-                if child.grant != PageGrant::NONE && !batch.index.contains_key(&child.id) {
+                if child.grant != PageGrant::NONE {
                     children.insert(child.id, capability_of(&child));
                 }
             }

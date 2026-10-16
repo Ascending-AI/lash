@@ -16,6 +16,9 @@
 //! after its block ends and after a restart, a process handle,
 //! a projected host binding, a deferred tool binding's result, and a
 //! loop-carried global.
+//!
+//! FIG-6466: a session's later turns read every page its earlier turns
+//! committed, on the same worker every turn and on a fresh worker each.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -28,6 +31,8 @@ mod web_fetch;
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+
+use lash_core::ToolDefinitionBindingExt as _;
 
 use served::{Tier, World};
 use web_fetch::Fetch;
@@ -389,7 +394,180 @@ async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
     world.shutdown().await;
 }
 
+/// The session the page laws run in.
+const PAGES_SESSION: &str = "fig6466-pages";
+/// The host tool whose nested result each turn binds.
+const RECORDS: &str = "records";
+/// How many turns the page laws run.
+const PAGE_TURNS: usize = 3;
+
+/// `records`' body: twenty nested records of the turn its arguments name,
+/// enough to span many heap pages.
+struct Records;
+
+#[async_trait::async_trait]
+impl lash::tools::StaticToolExecute for Records {
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let turn = call.args.get("turn").and_then(serde_json::Value::as_u64);
+        lash_core::ToolOutcome::ok(records(turn.unwrap_or_default())).into()
+    }
+}
+
+fn records(turn: u64) -> serde_json::Value {
+    (0..20_u64)
+        .map(|i| {
+            serde_json::json!({
+                "id": i,
+                "name": format!("record-{turn}-{i}"),
+                "title": "A nested host tool result with ordinary fields",
+                "description": "The value arrives from a native tool and is printed by the cell",
+                "score": i * 13 + turn,
+                "ratio": 1.25,
+                "state": "ready",
+                "tags": ["sqlite", "typescript", "nested"],
+                "details": { "owner": "benchmark", "values": [i, i + 1, i + turn] },
+            })
+        })
+        .collect()
+}
+
+/// The page laws' core over `workers`: RLM turns and the `records` tool.
+fn page_builder(
+    backend: &lash::Backend,
+    workers: lash::vm::WorkerService,
+) -> lash::LashCoreBuilder {
+    let definition = lash_core::ToolDefinition::raw(
+        RECORDS,
+        RECORDS,
+        "Answers the nested records of a turn.",
+        serde_json::json!({ "type": "object", "properties": { "turn": { "type": "integer" } } }),
+        serde_json::json!({ "type": "array" }),
+    )
+    .expect("records' schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], RECORDS));
+    lash::LashCore::rlm_builder(backend.clone(), served::rlm(backend, workers)).tools(
+        lash::tool_provider_key!("tools"),
+        Arc::new(lash::tools::StaticToolProvider::new(
+            vec![definition],
+            Records,
+        )),
+    )
+}
+
+/// One worker serves the whole pool: every turn's cell runs on it.
+fn one_worker() -> lash::vm::WorkerService {
+    let mut config = sim::untimed_workers().config().clone();
+    config.max_workers = 1;
+    lash::vm::WorkerService::new(config).with_worker_receipts()
+}
+
+/// Turn `turn`'s cell: it rebinds `result` to the turn's records, keeps
+/// them as `turn_<turn>`, prints them, and finishes with every turn's
+/// records so far, which reads each page an earlier turn committed.
+fn page_cell(turn: usize) -> String {
+    let kept: Vec<String> = (1..=turn).map(|turn| format!("turn_{turn}")).collect();
+    format!(
+        "const result = await tools.records({{ turn: {turn} }});\n\
+         const turn_{turn} = result;\n\
+         console.log(JSON.stringify(result));\n\
+         await control.finish(JSON.stringify([{}]));",
+        kept.join(", ")
+    )
+}
+
+/// Runs turn `turn` of the page laws' session and checks it reached every
+/// page: its answer is every turn's records, read back whole.
+async fn page_turn(world: &World, turn: usize) {
+    let name = format!("fig6466-turn-{turn}");
+    world.script(&name, vec![served::cell(&page_cell(turn))]);
+    let session = world
+        .core
+        .session(lash::SessionId::try_from(PAGES_SESSION.to_owned()).expect("a session id"))
+        .durable()
+        .await
+        .expect("the session is open on the serving node");
+    let output = world.send(&session, &name).await;
+    served::assert_answered(&format!("turn {turn}"), &output);
+    let expected: Vec<serde_json::Value> = (1..=turn as u64).map(records).collect();
+    let answered = output
+        .finished()
+        .and_then(|(_, value)| value.as_str())
+        .map(|text| serde_json::from_str::<serde_json::Value>(text).expect("the cell's JSON"));
+    assert_eq!(
+        answered,
+        Some(serde_json::Value::Array(expected)),
+        "turn {turn} reads every page its session committed"
+    );
+}
+
+/// FIG-6466: a session's later turns read the pages its earlier turns
+/// committed and seal pages that name them, on the same worker every turn.
+/// Turn two was refused `PageRefused Unauthorized` at every pass: its heap
+/// sealed again a committed page it held under a grant, after a page that
+/// named it, and that page crossed without the grant.
+async fn later_turns_read_their_pages_on_the_same_worker(tier: Tier) {
+    let workers = one_worker();
+    let Some(world) = World::new(tier, |backend| page_builder(backend, workers.clone())).await
+    else {
+        return;
+    };
+    world.session(PAGES_SESSION, served::spec(8)).await;
+    for turn in 1..=PAGE_TURNS {
+        page_turn(&world, turn).await;
+    }
+    let pids: BTreeSet<u32> = workers
+        .worker_receipts()
+        .iter()
+        .map(|receipt| receipt.pid)
+        .collect();
+    assert_eq!(pids.len(), 1, "one worker serves every turn: {pids:?}");
+    world.shutdown().await;
+}
+
+/// FIG-6466: the same session, each turn on a fresh worker of a node that
+/// boots for it and reads the session back from the store.
+async fn later_turns_read_their_pages_on_a_fresh_worker_each(tier: Tier) {
+    let mut workers = one_worker();
+    let first = workers.clone();
+    let Some(mut world) = World::new(tier, |backend| page_builder(backend, first)).await else {
+        return;
+    };
+    world.session(PAGES_SESSION, served::spec(8)).await;
+    let mut pids = BTreeSet::new();
+    for turn in 1..=PAGE_TURNS {
+        if turn > 1 {
+            workers = one_worker();
+            let fresh = workers.clone();
+            world
+                .restart(&format!("fig6466-boot-{turn}"), |backend| {
+                    page_builder(backend, fresh)
+                })
+                .await;
+        }
+        page_turn(&world, turn).await;
+        let ran_on: BTreeSet<u32> = workers
+            .worker_receipts()
+            .iter()
+            .map(|receipt| receipt.pid)
+            .collect();
+        assert_eq!(
+            ran_on.len(),
+            1,
+            "turn {turn} runs on one worker: {ran_on:?}"
+        );
+        assert!(
+            pids.is_disjoint(&ran_on),
+            "turn {turn} runs on a fresh worker: {ran_on:?} after {pids:?}"
+        );
+        pids.extend(ran_on);
+    }
+    world.shutdown().await;
+}
+
 tiered_laws!(
     session_globals_survive_cells_and_reload_and_private_slots_never_do,
     rlm_message_append_keeps_the_committed_execution,
+    later_turns_read_their_pages_on_the_same_worker,
+    later_turns_read_their_pages_on_a_fresh_worker_each,
 );
