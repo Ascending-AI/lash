@@ -149,6 +149,21 @@ impl Provider for WireRecorder {
     fn serialize_config(&self) -> serde_json::Value {
         serde_json::json!({})
     }
+    fn attachment_accepts(
+        &self,
+        _model: &str,
+        media_type: &lash_core::MediaType,
+        position: AttachmentPosition,
+    ) -> ProviderAccepts {
+        if media_type.as_str() != "image/png" || position != AttachmentPosition::Message {
+            return ProviderAccepts::NONE;
+        }
+        ProviderAccepts {
+            bytes: false,
+            url: true,
+            provider_file: Some(scope()),
+        }
+    }
     fn attachment_file_scope(&self) -> Option<ProviderFileScope> {
         Some(scope())
     }

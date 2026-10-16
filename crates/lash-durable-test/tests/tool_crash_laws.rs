@@ -205,7 +205,11 @@ impl Turn {
     /// effect's keep their own `round.outcome`.
     fn outcome_label(self) -> CommitLabel {
         match self {
-            Self::LimitStep => CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
+            // Puts already belong to the execution before the tool answers;
+            // they stage no store-local effect. FIG-6521 omits the attachment
+            // this provider's catalogue rejects, so the next call now lowers
+            // successfully and commits the plain outcome with its admission.
+            Self::LimitStep | Self::Put => CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             _ => CommitLabel::ROUND_OUTCOME,
         }
     }

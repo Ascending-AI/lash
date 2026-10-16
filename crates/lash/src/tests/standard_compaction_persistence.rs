@@ -706,6 +706,12 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
 
 #[tokio::test]
 async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
+    use lash_core::llm::types::LlmMessage;
+    use lash_core::provider::{
+        AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+    };
+    use lash_sansio::llm::attachment_delivery::{AttachmentPosition, DeliveryForms};
+
     let session_id = "standard-compaction-attachment-prune";
     let trace = Arc::new(crate::testing::RecordingTraceSink::new());
     let store_factory = sqlite_memory_store_set().await;
@@ -724,13 +730,28 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         ))
         .trace_sink(trace.clone())
         .build(crate::testing::runtime_lease_owner())?;
+    let acceptance = Arc::new(AttachmentCapabilitySnapshot {
+        revision: "standard-compaction-attachment-prune".into(),
+        acceptors: vec![AttachmentAcceptor {
+            provider: "standard-compaction-frame-test".into(),
+            rules: vec![AttachmentAcceptanceRule {
+                positions: vec![AttachmentPosition::Message],
+                media_types: vec!["image/png".into()],
+                media_families: Vec::new(),
+                forms: DeliveryForms {
+                    bytes: true,
+                    url: false,
+                    provider_file: false,
+                },
+            }],
+        }],
+    });
     let session = core
         .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
-        .created_with(session_spec_for(&llm_profile_spec(
-            "attachment-prune-model",
-            None,
-            100_000,
-        )))
+        .created_with(
+            session_spec_for(&llm_profile_spec("attachment-prune-model", None, 100_000))
+                .attachment_acceptance(acceptance),
+        )
         .await
         .open()
         .await?;
@@ -793,14 +814,24 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
         "attachment pruning must not rewrite the durable message"
     );
 
-    let requests = requests.lock_recover().clone();
+    let requests = requests
+        .lock_recover()
+        .iter()
+        .map(|request| serde_json::from_str::<Vec<LlmMessage>>(request))
+        .collect::<serde_json::Result<Vec<_>>>()?;
     assert_eq!(requests.len(), 2);
+    let has_attachment = |messages: &[LlmMessage]| {
+        messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .any(|block| matches!(block, LlmContentBlock::Attachment { .. }))
+    };
     assert!(
-        requests[0].contains("attachment"),
+        has_attachment(&requests[0]),
         "the first model request sees the attachment"
     );
     assert!(
-        !requests[1].contains("attachment_ref"),
+        !has_attachment(&requests[1]),
         "the next Prompt View prunes the old attachment"
     );
     let api_message = session
