@@ -57,6 +57,13 @@ Sampling requires host perf permissions and belongs on a quiet host. Building
 and running a symbolized executable is functional proof; no CPU optimization
 claim follows from a smoke receipt.
 
+## Persistent-heap sites
+
+`scripts/profile_paged_heap.py` profiles the heap-scaling harness's park and
+resume, its released workers included, and attributes CPU to page faults,
+sealing, spool I/O, publication SQL and retirement. The command is in the
+[durable substrate README](../../../crates/lash-perf/src/bin/durable_substrate/README.md#attributing-a-park-and-resume-at-large-h).
+
 ## Off-CPU capture
 
 ```sh

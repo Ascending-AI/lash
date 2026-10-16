@@ -125,7 +125,7 @@ impl Deployment {
         }
     }
 
-    async fn stores(&self) -> Result<(Arc<dyn StoreSet>, Option<PostgresStorage>)> {
+    pub(crate) async fn stores(&self) -> Result<(Arc<dyn StoreSet>, Option<PostgresStorage>)> {
         Ok(match &self.database {
             Database::Sqlite(path) => (
                 Arc::new(

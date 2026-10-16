@@ -76,8 +76,13 @@ def blocked_stacks(text: str) -> tuple[Counter, int]:
 
 
 def run_profiled(cmd: list[str], *, receipt: Path, cpu: bool = False,
-                 off_cpu: bool = False, population: str | None = None, **kwargs) -> subprocess.CompletedProcess:
-    """Run once; capture both populations in the same perf.data when requested."""
+                 off_cpu: bool = False, population: str | None = None, kernel: bool = False,
+                 **kwargs) -> subprocess.CompletedProcess:
+    """Run once; capture both populations in the same perf.data when requested.
+
+    `kernel` also samples the workload's kernel cycles (its syscalls and
+    faults), which `perf_event_paranoid` <= 1 permits for its own processes.
+    """
     if not cpu and not off_cpu:
         return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
     profile_path = receipt.with_suffix(".profiles")
@@ -86,7 +91,7 @@ def run_profiled(cmd: list[str], *, receipt: Path, cpu: bool = False,
     directory = profile_path.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     status_path = directory / "capture.json"
-    status = {"status": "failed", "cpu": cpu, "off_cpu": off_cpu, "workload": cmd,
+    status = {"status": "failed", "cpu": cpu, "off_cpu": off_cpu, "kernel": kernel, "workload": cmd,
               "workload_receipt": str(receipt.resolve())}
     # Never reuse old successful artifacts after a failed capture.
     for name in ("perf.data", "perf.script", "cpu.folded", "cpu.top.txt",
@@ -101,7 +106,7 @@ def run_profiled(cmd: list[str], *, receipt: Path, cpu: bool = False,
         record = [perf, "record", "-g", "--call-graph", "fp", "--no-buildid-cache", "-c", "1",
                   "-o", str(directory / "perf.data")]
         if cpu:
-            record += ["-e", "cycles/name=cycles,freq=999/u"]
+            record += ["-e", "cycles/name=cycles,freq=999/" + ("" if kernel else "u")]
         if off_cpu:
             record += ["-e", "sched:sched_switch", "--switch-events"]
         proc = subprocess.run([*record, "--", *cmd], capture_output=True, text=True, **kwargs)

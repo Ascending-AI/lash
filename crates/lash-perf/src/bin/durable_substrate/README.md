@@ -227,9 +227,8 @@ H (the growth exponent). JSONL retains every park interval, including all three
 reset intervals. The committed [before table](../../../fixtures/heap-baseline.txt)
 names the main SHA measured with the whole-state runtime; the
 [paged table](../../../fixtures/heap-baseline-paged.txt) is the persistent
-heap's (FIG-6193), measured with `kiln run --config=optimized` at H = 100,
-1000 and 5000. At H = 10,000 the objects-update sample does not finish within
-the sample limit (FIG-6198 owns that). These are counts;
+heap's, re-measured for FIG-6198 with an optimized build at H = 100, 1000,
+5000 and 10,000. These are counts;
 wall time is diagnostic, with no threshold. The fixture is historical evidence,
 not a golden count oracle, and does not replace `kernel-baseline.json` or the
 advisory `duration-trend-history.jsonl`.
@@ -278,23 +277,82 @@ that traversal is bounded.
 
 Page counters: `pages_loaded` counts pages the released worker's page port
 read from its parent, `pages_sealed` the pages it sealed into the parent's
-staging, `spool_bytes` the bytes the parent wrote to its activations' spools,
-and `retirement_batches` the store's bounded retirement steps (the node's
-retirement task runs them in the background, so they land in whichever
-interval they run in).
+staging (counted as they cross to the parent, so a released worker's last
+batch counts too), `spool_bytes` the bytes the parent wrote to its
+activations' spools, and `retirement_batches` the store's bounded retirement
+steps. A sample's background sweep waits an hour; each mark drains
+retirement first, so an interval counts the steps its own park left.
+
+Publication counters come from the recorder's SQL receipt of the interval's
+one accepted owner park, so background work and the observer's reads are
+excluded: `publish_statements`, `publish_rows_read` and, on SQLite,
+`publish_vm_steps` (the engine's virtual-machine steps). After the last
+gate each sample also reports a tail on the last interval's row:
+`tail_host_checks`, the pages the host verified while the cell ended, the
+machine carried and the next prompt read the cell's bindings, and
+`tail_ms`. `seed_ms`, `wall_ms` and `tail_ms` are diagnostic wall time,
+never gated. `--heap-scenarios a,b` runs only the named scenarios.
 
 The counted laws assert, over each scenario's measured interval at two or more
 H, that a count's growth exponent stays at most 0.25: a park's sealed pages and
 spooled bytes at a fixed change (list, objects, drop, resets), the pages a
 cold resume loads at a fixed working set (list, objects, resets), the pages a
-string length read loads, and the pages a no-op next cell loads and seals.
-Counts only, never wall time. Every interval still requires worker
-release/reset and exactly one owner park; the command-line run asserts the
-laws over its populations, and the harness law runs all six scenarios at
-H = 100 and 2,000 on fresh SQLite memory stores:
+string length read loads, the pages a no-op next cell loads and seals, the
+retirement steps a park leaves (list, objects, resets), and, on SQLite,
+every scenario's publication SQL steps. A park's publication also
+stays within 16,384 SQL steps at every H (about twice the most measured): a
+walk of the committed closure costs a fixed release graph at these H, which
+an exponent dilutes. The host's page checks after the last gate grow at most
+linearly (exponent 1.25): a host read that restarts at every missing page
+grows with their square, which stalled objects-update at H = 10,000
+(FIG-6198; FIG-6419 removed the restart). Counts only, never wall time. A count that is
+zero at any H has no exponent and fails its law. Every broken law is named
+in one failure. Every interval still requires worker release/reset and
+exactly one owner park; the command-line run asserts the laws over its
+populations, and the harness law runs all six scenarios on fresh SQLite
+memory stores, objects-update at H = 1,000 and 10,000 and the others at
+H = 100 and 2,000:
 
 ```sh
 kiln test //crates/lash-perf:durable-substrate__bin__unit_test \
   --test_arg=heap::tests::six_scenarios_obey_the_paged_heaps_counted_laws \
   --test_arg=--exact
 ```
+
+Same binary, two runs: the page, spool, retirement, publication, tail, VM,
+encode and decode counts are identical. Interval-wide SQL and IPC include
+the runner's background work and the observer's polling, and vary.
+
+PostgreSQL runs the same scenarios through `bench.py` under `kiln gate`, on
+a private server (the publication-steps laws are SQLite's only):
+
+```sh
+kiln gate lash <fork> -- python3 crates/lash-perf/src/bin/durable_substrate/bench.py \
+  --binary "$B" --evidence-dir .kiln/<ticket>/pg --case heap-scaling -- \
+  --vm-worker "$W" --heap-sizes 100,1000,10000
+```
+
+### Attributing a park and resume at large H
+
+One command profiles the harness (the parent and every released worker it
+spawns) and attributes CPU to the persistent heap's sites: page faults,
+sealing, spool I/O, publication SQL and retirement. The meter's own SQL
+trace is a bucket of its own. Build both binaries with frame pointers (see
+[CPU profiles](../../../../../docs/perf/instruments/cpu-profiles.md)):
+
+```sh
+. ./env.sh
+kiln build //crates/lash-perf:durable-substrate__bin //crates/lash-vm-worker:lash-vm-worker__bin \
+  --target-platforms //tools/buck2:profiling -c kiln.rust_profile=optimized \
+  --materializations final --build-report "$PWD/.kiln/<ticket>/build.json"
+B=$(python3 tools/buck2/outputs.py --report .kiln/<ticket>/build.json --label //crates/lash-perf:durable-substrate__bin --single)
+W=$(python3 tools/buck2/outputs.py --report .kiln/<ticket>/build.json --label //crates/lash-vm-worker:lash-vm-worker__bin --single)
+(ulimit -v 8388608; /usr/bin/time -v python3 scripts/profile_paged_heap.py \
+  --binary "$B" --worker "$W" --scenario objects-update --heap-sizes 1000,10000 \
+  --out .kiln/<ticket>/attribution)
+```
+
+It writes `attribution.txt` (samples and share per site, each site's top
+stacks, and the counted table with wall time beside it), perf's text
+top-N `cpu.top.txt` and folded stacks `cpu.folded`. A stack counts for the
+innermost frame that names a site.
