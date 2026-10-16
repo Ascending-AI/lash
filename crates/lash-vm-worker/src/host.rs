@@ -871,6 +871,10 @@ impl Port {
     /// for (a checkpoint root's release and owner binding, or a page an
     /// earlier batch carried that is staged): the parent decides those.
     fn request(&self, batch: &Pending) -> CarriedSeal {
+        // Counted as they cross, not when granted: a park's batch is
+        // granted with the run's next slice, which a released worker
+        // never receives.
+        crate::perf_witness::pages_sealed(batch.pages.len() as u64);
         let mut children = BTreeMap::new();
         for (_, own) in &batch.pages {
             for child in &own.children {
@@ -924,7 +928,6 @@ impl Port {
     fn admitted(&mut self, sealed: &[PageCapability], pages: Vec<(PageEnvelope, PageAnswer)>) {
         let count = sealed.len() as u64;
         self.traffic.pages_sealed += count;
-        crate::perf_witness::pages_sealed(count);
         for (capability, (page, own)) in sealed.iter().zip(pages) {
             let grant = grant_of(capability);
             self.granted.insert(own.page.id, grant);
