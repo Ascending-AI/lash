@@ -105,7 +105,11 @@ pub(super) const NODE_WAKE_ROLLBACK_MAIL: &str =
 pub(crate) use graph::TABLES as GRAPH_TABLES;
 pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
+    retire_roots,
 };
+#[cfg(feature = "testing")]
+pub(crate) use pages::cut_retirement_holds;
+pub(crate) use pages::retire_step_in as retire_step;
 pub(crate) use prompts::TABLES as PROMPT_SNAPSHOTS_TABLES;
 pub(crate) use prompts::release as release_prompt_snapshots;
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
@@ -119,7 +123,7 @@ pub(crate) use waits::TABLES as WAITS_TABLES;
 /// turns' run facts (their tool-call ledgers), its cells' roots, admissions
 /// and facts, the waits its actor owns and its turns' wait tombstones. The
 /// session's actor row stays, its terminal fence. Answers every graph root
-/// those rows held: the delete's to peel.
+/// those rows held: the delete's to retire.
 pub(crate) fn retire_session_rows(
     tx: &Connection,
     session: &lash_sansio::SessionId,

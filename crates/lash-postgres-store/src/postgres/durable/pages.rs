@@ -196,18 +196,51 @@ const FRONTIER_CAP: usize = 4096;
 #[cfg(any(test, feature = "testing"))]
 static CANDIDATE_PEAK_BUFFERED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Arm or disarm a named fault at the hold boundary for conformance laws.
+#[cfg(feature = "testing")]
+pub(crate) async fn cut_retirement_holds(
+    pool: &sqlx::PgPool,
+    trigger: &str,
+    armed: bool,
+) -> sqlx::Result<()> {
+    let function = format!("lash_{trigger}").replace('"', "\"\"");
+    let trigger = trigger.replace('"', "\"\"");
+    if armed {
+        sqlx::query(&format!(
+            "CREATE OR REPLACE FUNCTION \"{function}\"() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN RAISE EXCEPTION 'injected retirement hold failure'; END $$"
+        ))
+        .execute(pool)
+        .await?;
+        sqlx::query(&format!(
+            "CREATE TRIGGER \"{trigger}\" BEFORE INSERT ON lash_retirement_holds \
+             FOR EACH ROW EXECUTE FUNCTION \"{function}\"()"
+        ))
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query(&format!(
+            "DROP TRIGGER IF EXISTS \"{trigger}\" ON lash_retirement_holds"
+        ))
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}
+
 /// Holds every stored node of `closures`, the closure under each, and of
 /// `alone`, each node alone, queued at `now`: the publication's half of
 /// D-RET, and where a lease release leaves its root. Every node is
-/// key-share locked before any hold row is written (lock order 4).
+/// key-share locked before any hold row is written (lock order 4). Answers
+/// how many stored nodes it held.
 async fn hold(
     tx: &mut PgConnection,
     closures: &BTreeSet<String>,
     alone: &BTreeSet<String>,
     now: DurableInstant,
-) -> Result<(), sqlx::Error> {
+) -> Result<usize, sqlx::Error> {
     if closures.is_empty() && alone.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     let closures: Vec<&str> = closures.iter().map(String::as_str).collect();
     let alone: Vec<&str> = alone.iter().map(String::as_str).collect();
@@ -217,7 +250,7 @@ async fn hold(
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await?;
     if locked.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
     crate::observed_sql::query(SQL.postgres.hold.sql())
         .bind(&closures)
@@ -226,7 +259,7 @@ async fn hold(
         .bind(&locked)
         .execute(crate::observed_sql::executor(tx))
         .await?;
-    Ok(())
+    Ok(locked.len())
 }
 
 /// Holds what `retired` recorded, in its committing transaction: each
@@ -237,7 +270,24 @@ pub(crate) async fn hold_retired(
     now: DurableInstant,
 ) -> Result<(), sqlx::Error> {
     let (closures, phase_ends) = retired.into_parts();
-    hold(tx, &closures, &phase_ends, now).await
+    hold(tx, &closures, &phase_ends, now).await.map(drop)
+}
+
+/// Holds the closure of each stored root of `roots`, the roots the
+/// caller's transaction retired outside an owner commit (a session's
+/// delete, a released revision), queued at `now`. Nothing is peeled here:
+/// however large the closures, the transaction writes one hold row per
+/// root and never meets a node another transaction peel-locked, so nothing
+/// is skipped and left to the orphan audit; retirement steps delete what
+/// nothing else reaches later, in bounded transactions. The caller holds
+/// once, after every other lock it takes (lock order 4). Answers how many
+/// stored roots it held.
+pub(crate) async fn retire_roots(
+    tx: &mut PgConnection,
+    roots: &BTreeSet<String>,
+    now: DurableInstant,
+) -> Result<usize, sqlx::Error> {
+    hold(tx, roots, &BTreeSet::new(), now).await
 }
 
 /// Puts `nodes` on the step's frontier, the closure under each when

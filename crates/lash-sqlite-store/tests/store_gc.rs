@@ -268,6 +268,8 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .delete_session(&SessionId::from("delete/me"))
         .await
         .expect("delete session again");
+    // The delete held its roots; the collection retires what they reach.
+    factory.gc_unreachable().await.expect("collect");
 
     assert!(catalog_uri(&root).exists());
     assert!(

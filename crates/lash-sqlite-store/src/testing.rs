@@ -19,6 +19,16 @@ pub fn cut_session_wakes(conn: &rusqlite::Connection, armed: bool) -> rusqlite::
     crate::durable::cut_session_wakes(conn, armed)
 }
 
+/// Fail transactions that insert a retirement hold until the named trigger
+/// is dropped. External conformance laws use this to prove delete rollback.
+///
+/// # Errors
+///
+/// The trigger's DDL failed.
+pub fn cut_retirement_holds(conn: &rusqlite::Connection, trigger: &str) -> rusqlite::Result<()> {
+    crate::durable::cut_retirement_holds(conn, trigger)
+}
+
 /// The shared-fragment DDL statements provisioning applies to the database.
 /// Fixtures that shadow a schema table with their own declaration apply these
 /// to complete the fragment-carried catalog without duplicating DDL text.

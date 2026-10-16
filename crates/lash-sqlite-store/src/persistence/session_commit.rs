@@ -690,7 +690,12 @@ pub(crate) fn apply_runtime_commit_conn(
     // of their window, once the run's terminal names it. A session with
     // no metadata row recorded no policy and releases nothing either.
     if retention.is_some_and(lash_core_execution::Retention::releases_at_commit) {
-        crate::revisions::release_unretained_conn(tx, false, Some(&commit.session_id))?;
+        crate::revisions::release_unretained_conn(
+            tx,
+            false,
+            Some(&commit.session_id),
+            lash_durable::DurableInstant(crate::clamp_epoch_ms(now)),
+        )?;
     }
     let mut result = plan.result(
         stored_checkpoint.checkpoint_ref,

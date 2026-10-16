@@ -25,7 +25,7 @@ pub async fn process_prune_preserves_independent_session_checkpoint_roots(
     assert!(probe.blob_exists(&roots.dependent_root).await);
     probe.fail_next_blob_delete().await;
     prune_completed_process(registry.as_ref(), &process_id).await;
-    probe.clear_blob_delete_failure().await;
+    probe.clear_injected_failure().await;
     for id in [&dependent, &aliased] {
         assert!(
             factory

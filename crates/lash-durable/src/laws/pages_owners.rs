@@ -1,6 +1,7 @@
 //! The page laws of a candidate's owner write and of host reads over heap
 //! pages (FIG-6193): a step outcome owns its candidate as an execution root
-//! does, and a host graph read never descends into a heap page.
+//! does, a deleted session's heap retires in bounded steps, and a host
+//! graph read never descends into a heap page.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -9,7 +10,8 @@ use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, GraphRefusal, Nod
 
 use super::super::{LABEL, LawBroken, LawOutcome, ensure};
 use super::{
-    Candidate, PageTier, drain, encoded, exec_root, owned, page, publish, refusal, simple,
+    Candidate, GeneratedManifest, PageTier, drain, encoded, exec_root, owned, page, publish,
+    refusal, simple,
 };
 use crate::DomainWrite;
 use crate::domain::graph::{ExecRootWrite, RootOwner, RunFactKind, RunFactWrite};
@@ -211,6 +213,73 @@ pub async fn a_pruned_step_outcome_frees_exactly_its_unshared_pages(
     ensure!(
         deleted == 3,
         "reclaiming the record, its root and its one unshared page deleted {deleted} nodes"
+    );
+    Ok(())
+}
+
+/// Deleting a session retires its heap in bounded steps (FIG-6423): the
+/// delete's transaction deletes no page and holds only the roots the
+/// session's rows held, as many for a heap of `pages` pages as for one of
+/// eight, and the retirement steps, each within its budget, then remove
+/// every page the heap added, so nothing is left for the orphan audit.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn deleting_a_session_retires_its_heap_in_bounded_steps(
+    tier: &dyn PageTier,
+    pages: u32,
+) -> LawOutcome {
+    // The standard node's step: what its retirement driver deletes per
+    // transaction.
+    let budget = crate::RetirementSettings::standard().batch_nodes;
+    let store = tier.pages();
+    let mut held = Vec::new();
+    let mut delete_rows = Vec::new();
+    for (session, leaves) in [("pages-delete-small", 8), ("pages-delete-large", pages)] {
+        let owner = owned(tier, session).await?;
+        let exec = owner.exec("heap");
+        let before = tier.stored().await;
+        let heap = GeneratedManifest::new(session, leaves, 1_000, CommitId::mint());
+        // The heap's pages and the execution root over them.
+        let added = heap.nodes().len() + 1;
+        publish(tier, &owner, &simple(&exec, None), Box::new(heap)).await?;
+        drain(store, budget).await?;
+        let published = tier.stored().await;
+        ensure!(
+            published.len() == before.len() + added,
+            "{session}'s heap stored {} nodes, not {added}",
+            published.len() - before.len()
+        );
+        delete_rows.push(tier.delete_session(session).await);
+        let after = tier.stored().await;
+        ensure!(
+            after == published,
+            "deleting {session} deleted {} of its {added} heap nodes in its own transaction",
+            published.len() - after.len()
+        );
+        held.push(store.retirement_backlog().await?.holds);
+        let (_, deleted) = drain(store, budget).await?;
+        let left = tier.stored().await;
+        ensure!(
+            left == before,
+            "retiring {session}'s heap left {} nodes and took {} it did not add",
+            left.difference(&before).count(),
+            before.difference(&left).count()
+        );
+        ensure!(
+            deleted == added as u64,
+            "retiring {session}'s heap of {added} nodes deleted {deleted}"
+        );
+    }
+    ensure!(
+        held.first() == held.last() && held.first().is_some_and(|held| *held > 0),
+        "the deletes held {held:?} roots for heaps of 8 and {pages} pages"
+    );
+    ensure!(
+        delete_rows.first() == delete_rows.last()
+            && delete_rows.first().is_some_and(|rows| *rows > 0),
+        "the deletes affected {delete_rows:?} SQL rows for heaps of 8 and {pages} pages"
     );
     Ok(())
 }

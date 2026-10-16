@@ -812,41 +812,20 @@ pub(super) fn hydrate_in(
     Ok(walk(tx, root, limits)?.map(|nodes| HydratedGraph { owner, root, nodes }))
 }
 
-/// What a peel did: the candidates it examined (the retired roots and each
-/// child of a node it deleted), how many it deleted, and how many something
-/// still names.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Peeled {
-    pub(crate) examined: usize,
-    pub(crate) deleted: usize,
-}
-
-impl Peeled {
-    /// The candidates something still names.
-    pub(crate) fn retained(self) -> usize {
-        self.examined - self.deleted
-    }
-}
-
 /// Peels `frontier`, the roots the caller's transaction retired: deletes
 /// each one nothing names or reaches any more, then each child the deleted
 /// nodes' edges reached, level by level, stopping wherever something still
 /// names a node. Its work is the newly unreachable nodes and their edges,
-/// never a closure something still roots.
-pub(crate) fn peel(tx: &Connection, frontier: BTreeSet<String>) -> rusqlite::Result<Peeled> {
-    let mut examined = frontier.clone();
+/// never a closure something still roots. Answers how many it deleted.
+pub(crate) fn peel(tx: &Connection, frontier: BTreeSet<String>) -> rusqlite::Result<usize> {
     let mut frontier = frontier;
     let mut deleted = 0;
     while !frontier.is_empty() {
         let (gone, children) = peel_level(tx, &frontier)?;
         deleted += gone;
-        examined.extend(children.iter().cloned());
         frontier = children;
     }
-    Ok(Peeled {
-        examined: examined.len(),
-        deleted,
-    })
+    Ok(deleted)
 }
 
 /// `values` as one JSON array, the binding a `json_each` statement reads.
@@ -903,7 +882,21 @@ pub(super) fn hold_retired(
 ) -> rusqlite::Result<()> {
     let (closures, phase_ends) = retired.into_parts();
     super::pages::hold(tx, &closures, true, now)?;
-    super::pages::hold(tx, &phase_ends, false, now)
+    super::pages::hold(tx, &phase_ends, false, now).map(drop)
+}
+
+/// Holds the closure of each stored root of `roots`, the roots the
+/// caller's transaction retired outside an owner commit (a session's
+/// delete, a released revision), queued at `now`. Nothing is peeled here:
+/// however large the closures, the transaction writes one hold row per
+/// root, and retirement steps delete what nothing else reaches later, in
+/// bounded transactions. Answers how many stored roots it held.
+pub(crate) fn retire_roots(
+    tx: &Connection,
+    roots: &BTreeSet<String>,
+    now: DurableInstant,
+) -> rusqlite::Result<usize> {
+    super::pages::hold(tx, roots, true, now)
 }
 
 /// How many roots the catalog names and how many blobs are stored.
@@ -935,7 +928,7 @@ pub(crate) fn audit_page(
         )?
         .collect::<rusqlite::Result<BTreeSet<_>>>()?;
     let last = orphans.last().cloned();
-    Ok((last, peel(tx, orphans)?.deleted))
+    Ok((last, peel(tx, orphans)?))
 }
 
 fn graph_refused<T>(refusal: GraphRefusal) -> Answer<T> {

@@ -192,14 +192,14 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         match deleted {
             Ok(()) => {}
             Err(error) => {
-                report.deleted_blob_count = 0;
+                report.held_root_count = 0;
                 return Err(lash_core_execution::MaintenanceFailure::failed(
                     error, report,
                 ));
             }
         }
         if let Err(error) = tx.commit().await {
-            report.deleted_blob_count = 0;
+            report.held_root_count = 0;
             return Err(lash_core_execution::MaintenanceFailure::failed(
                 store_sqlx_error(error),
                 report,
@@ -977,7 +977,7 @@ pub(crate) async fn delete_session_tx(
     // What the session roots: its head, every revision it still retains,
     // every window its terminals name and its admission base. Its pins,
     // revisions, runs and metadata go with it, so each root they held is
-    // retired here and peeled below.
+    // retired here and held below.
     let runs = &crate::session_runs::session_runs_sql().runs;
     let mut checkpoint_refs: std::collections::BTreeSet<String> = session_texts(
         tx,
@@ -1088,15 +1088,6 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
-    // The session's roots are retired: peel them. A node another root
-    // still names or reaches is retained, and the peel stops there; its work
-    // is the session's exclusive closure.
-    let peeled = crate::durable::peel(tx, checkpoint_refs)
-        .await
-        .map_err(crate::support::graph_store_error)?;
-    report.enumerated_blob_count = peeled.examined;
-    report.deleted_blob_count += peeled.deleted;
-    report.retained_blob_count += peeled.retained();
     // Deleting the session is the explicit retention its prompt snapshots
     // wait for: its roots go, and every text no other root shares. Last
     // among the resource locks, so the shared texts' locks are held for the
@@ -1104,6 +1095,18 @@ pub(crate) async fn delete_session_tx(
     crate::durable::release_prompt_snapshots(tx, session_id, None)
         .await
         .map_err(store_sqlx_error)?;
+    // The session's roots are retired: hold them, closures and all, for the
+    // retirement steps, which delete what no other root names or reaches in
+    // bounded transactions of their own. The session's exclusive heap is
+    // never peeled here. The hold comes after every other lock this delete
+    // takes (lock order 4 in `durable/pages.rs`).
+    report.held_root_count = crate::durable::retire_roots(
+        tx,
+        &checkpoint_refs,
+        lash_durable::DurableInstant(crate::support::clamp_epoch_ms(now)),
+    )
+    .await
+    .map_err(store_sqlx_error)?;
     if !materialized {
         return Ok(None);
     }

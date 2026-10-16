@@ -19,14 +19,19 @@ pub trait SessionDeleteBlobProbe: Send + Sync {
     async fn blob_exists(&self, blob_ref: &crate::BlobRef) -> bool;
 
     /// Integrator class (ADR 0051): **conformance-suite embedders** implement
-    /// this fault injection at their backend's delete boundary.
+    /// this fault injection at their backend's blob delete boundary.
     async fn fail_next_blob_delete(&self);
+
+    /// Integrator class (ADR 0051): **conformance-suite embedders** implement
+    /// this fault injection at their backend's retirement-hold boundary: the
+    /// next transaction that holds a graph root for page retirement fails.
+    async fn fail_next_retirement_hold(&self);
 
     /// Remove any backend fault object that outlives the failed transaction.
     ///
     /// Integrator class (ADR 0051): **conformance-suite embedders** implement
     /// this when their injected fault persists beyond one transaction.
-    async fn clear_blob_delete_failure(&self) {}
+    async fn clear_injected_failure(&self) {}
 
     /// Observe one exact checkpoint-root projection edge when the backend
     /// materializes that projection. Backends without a projection table
@@ -255,6 +260,16 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
     }
 }
 
+/// A host collection: the page retirement of everything a delete held,
+/// then the orphan audit.
+async fn collect(backend: &str, handles: &SessionDeleteBlobHandles) {
+    handles
+        .factory
+        .gc_unreachable()
+        .await
+        .unwrap_or_else(|failure| panic!("{backend}: the collection completes: {failure}"));
+}
+
 async fn assert_components_exist(
     backend: &str,
     probe: &dyn SessionDeleteBlobProbe,
@@ -343,7 +358,10 @@ where
         .delete_session(&first.request.session_id)
         .await
         .expect("delete a session whose head advanced twice");
-    assert!(report.deleted_blob_count > 0);
+    assert!(
+        report.held_root_count > 0,
+        "{backend}: the delete holds the roots its rows held"
+    );
     assert!(
         handles
             .factory
@@ -352,6 +370,7 @@ where
             .expect("read deletion"),
         "{backend}: deletion must reach Deleted"
     );
+    collect(backend, &handles).await;
     assert_components_exist(
         backend,
         handles.probe.as_ref(),
@@ -367,7 +386,7 @@ where
         {
             assert!(
                 !exists,
-                "{backend}: reclaim must sever the dead-root edge in its transaction"
+                "{backend}: retirement must sever the dead-root edge"
             );
         }
     }
@@ -444,6 +463,7 @@ where
             .delete_session(&source.request.session_id)
             .await
             .expect("delete the source while the fork retains an admission base");
+        collect(backend, &handles).await;
         assert!(
             handles.probe.blob_exists(&source.checkpoint_ref).await,
             "{backend}: an admission base is a root even without a head or anchor"
@@ -495,7 +515,8 @@ where
     }
 }
 
-/// Prove session deletion reclaims only blobs whose final exact edge it severs.
+/// Prove session deletion holds its roots and that their retirement reclaims
+/// only blobs whose final exact edge it severs.
 ///
 /// Integrator class (ADR 0051): **conformance-suite embedders** run this against
 /// each custom session-store backend.
@@ -507,7 +528,7 @@ where
     session_delete_reclaims_exclusive_checkpoint_blobs(backend, make()).await;
     session_delete_keeps_fork_shared_checkpoint_blobs(backend, make()).await;
     session_delete_reclaims_content_aliased_checkpoint_roots(backend, make()).await;
-    session_delete_blob_failure_rolls_back_with_partial_report(backend, make()).await;
+    session_delete_hold_failure_rolls_back_with_partial_report(backend, make()).await;
 }
 
 #[expect(
@@ -536,6 +557,7 @@ async fn session_delete_reclaims_content_aliased_checkpoint_roots(
         .delete_session(&SessionId::from(ALIASED_SESSION_ID))
         .await
         .expect("delete root B's session while root A still aliases it");
+    collect(backend, &handles).await;
     assert!(
         handles.probe.blob_exists(&roots.aliased_root).await,
         "{backend}: deleting B's head must retain B while live root A aliases its bytes"
@@ -565,6 +587,7 @@ async fn session_delete_reclaims_content_aliased_checkpoint_roots(
         .delete_session(&SessionId::from(DEPENDENT_SESSION_ID))
         .await
         .expect("delete root A's session and its content-aliased component");
+    collect(backend, &handles).await;
     assert!(
         !handles.probe.blob_exists(&roots.aliased_root).await,
         "{backend}: deleting root A must reclaim the now-unowned aliased root B"
@@ -598,13 +621,20 @@ async fn session_delete_reclaims_exclusive_checkpoint_blobs(
         .delete_session(&committed.request.session_id)
         .await
         .expect("delete exclusively rooted checkpoint");
-    assert_eq!(
-        crate::MaintenanceReport::sweep(&report),
-        crate::MaintenanceSweep::Swept,
-        "{backend}: exclusive checkpoint delete must reclaim blobs"
+    assert!(
+        report.held_root_count > 0,
+        "{backend}: an exclusive checkpoint delete holds its roots"
     );
-    assert!(report.enumerated_blob_count >= committed.component_refs.len());
-    assert_eq!(report.retained_blob_count, 0);
+    // The delete's own transaction deletes nothing: its roots' closures
+    // wait for retirement.
+    assert_components_exist(
+        backend,
+        handles.probe.as_ref(),
+        &committed.component_refs,
+        true,
+    )
+    .await;
+    collect(backend, &handles).await;
     assert_components_exist(
         backend,
         handles.probe.as_ref(),
@@ -672,11 +702,12 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
     assert!(handles.probe.blob_exists(&source_config).await);
     assert!(handles.probe.blob_exists(&fork_config).await);
 
-    let source_report = handles
+    handles
         .factory
         .delete_session(&committed.request.session_id)
         .await
         .expect("delete source with surviving fork");
+    collect(backend, &handles).await;
     assert!(
         !handles.probe.blob_exists(&source_config).await,
         "{backend}: the deleted session releases its config"
@@ -684,11 +715,6 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
     assert!(
         handles.probe.blob_exists(&fork_config).await,
         "{backend}: the fork owns its config"
-    );
-    assert_eq!(
-        source_report.retained_blob_count + source_report.deleted_blob_count,
-        source_report.enumerated_blob_count,
-        "{backend}: every candidate has a reclaim decision"
     );
     assert_components_exist(
         backend,
@@ -703,7 +729,8 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
         .delete_session(&fork_request.session_id)
         .await
         .expect("delete final checkpoint referrer");
-    assert!(fork_report.deleted_blob_count > 0);
+    assert!(fork_report.held_root_count > 0);
+    collect(backend, &handles).await;
     assert!(
         !handles.probe.blob_exists(&fork_config).await,
         "{backend}: the final owner releases its config"
@@ -721,23 +748,23 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_delete_blob_failure_rolls_back_with_partial_report(
+async fn session_delete_hold_failure_rolls_back_with_partial_report(
     backend: &str,
     handles: SessionDeleteBlobHandles,
 ) {
     let committed =
-        committed_checkpoint(&handles.factory, &SessionId::from("delete-blob-failure")).await;
-    handles.probe.fail_next_blob_delete().await;
+        committed_checkpoint(&handles.factory, &SessionId::from("delete-hold-failure")).await;
+    handles.probe.fail_next_retirement_hold().await;
     let failure = handles
         .factory
         .delete_session(&committed.request.session_id)
         .await
-        .expect_err("injected blob failure must fail session delete");
-    handles.probe.clear_blob_delete_failure().await;
+        .expect_err("injected hold failure must fail session delete");
+    handles.probe.clear_injected_failure().await;
     assert!(matches!(failure.stop, crate::MaintenanceStop::Failed(_)));
     assert_eq!(
-        failure.partial.deleted_blob_count, 0,
-        "{backend}: rolled-back deletes must not be reported as durable work"
+        failure.partial.held_root_count, 0,
+        "{backend}: rolled-back holds must not be reported as durable work"
     );
     assert!(
         handles
@@ -746,8 +773,9 @@ async fn session_delete_blob_failure_rolls_back_with_partial_report(
             .await
             .expect("open after failed delete")
             .is_some(),
-        "{backend}: blob failure must roll the owning delete back"
+        "{backend}: hold failure must roll the owning delete back"
     );
+    collect(backend, &handles).await;
     assert_components_exist(
         backend,
         handles.probe.as_ref(),

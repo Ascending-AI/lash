@@ -221,7 +221,12 @@ pub(crate) fn write_run_terminal_conn(
         )));
     }
     if let Some(revision) = terminal.head_revision {
-        crate::revisions::record_terminal_conn(tx, &terminal.session_id, revision)?;
+        crate::revisions::record_terminal_conn(
+            tx,
+            &terminal.session_id,
+            revision,
+            lash_durable::DurableInstant(crate::clamp_epoch_ms(terminal.at_ms)),
+        )?;
     }
     release_run_rows_conn(tx, &terminal.session_id, &terminal.run, terminal.at_ms)
 }

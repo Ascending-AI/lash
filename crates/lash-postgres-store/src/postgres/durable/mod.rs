@@ -72,6 +72,9 @@ pub(crate) use graph::{
 };
 pub(crate) use head_commit::{SessionHints, apply_store_commit};
 mod pages;
+#[cfg(feature = "testing")]
+pub(crate) use pages::cut_retirement_holds;
+pub(crate) use pages::retire_roots;
 mod park;
 pub(crate) mod processes;
 mod prompts;

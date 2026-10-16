@@ -109,11 +109,19 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
             .collect::<Result<Vec<_>, _>>()
             .expect("revision rows")
     };
-    assert_eq!(
-        crate::revisions::release_unretained_conn(&connection, true, Some(&session))
-            .expect("collect"),
-        0
-    );
+    // A host collection: the release, then the retirement of what it held.
+    let collect = || {
+        let now = lash_durable::DurableInstant(0);
+        crate::revisions::release_unretained_conn(&connection, true, Some(&session), now)
+            .expect("collect");
+        let budget = lash_durable::domain::pages::RetirementBudget { nodes: 64 };
+        while crate::durable::retire_step(&connection, budget, now)
+            .expect("a retirement step")
+            .holds_advanced
+            > 0
+        {}
+    };
+    collect();
     assert_eq!(
         retained_revisions(),
         vec![1, 2],
@@ -125,13 +133,9 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
         vec![1, 2],
         "unpin alone does not release a revision"
     );
-    // FIG-5949 counts peeled blobs, not released revisions. Revision 1 is
-    // released here, but its config body is still rooted by head revision 2.
-    assert_eq!(
-        crate::revisions::release_unretained_conn(&connection, true, Some(&session))
-            .expect("collect unpinned"),
-        0
-    );
+    // Revision 1 is released here, but its config body is still rooted by
+    // head revision 2.
+    collect();
     assert_eq!(
         retained_revisions(),
         vec![2],
@@ -149,11 +153,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
             .expect("the head retains the shared config"),
         b"{}"
     );
-    assert_eq!(
-        crate::revisions::release_unretained_conn(&connection, true, Some(&session))
-            .expect("collect again"),
-        0
-    );
+    collect();
     assert_eq!(
         connection
             .query_row(
@@ -1700,10 +1700,11 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
         .expect("failure page");
     assert_eq!(turns_before.turns.len(), 1);
     assert_eq!(failures_before.settlements.len(), 1);
+    let now = store.retirement_instant();
     store
         .conn
-        .write(|tx| {
-            crate::revisions::release_unretained_conn(tx, true, None)
+        .write(move |tx| {
+            crate::revisions::release_unretained_conn(tx, true, None, now)
                 .map_err(crate::sqlite_conversion_error)?;
             Ok(())
         })

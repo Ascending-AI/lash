@@ -48,6 +48,7 @@ use generated::Recipe;
 pub use owners::{
     a_host_read_never_descends_into_a_heap_page,
     a_pruned_step_outcome_frees_exactly_its_unshared_pages, a_step_outcome_owns_its_candidate,
+    deleting_a_session_retires_its_heap_in_bounded_steps,
 };
 pub use races::{PageLockProbe, publications_and_retirement_on_two_nodes_never_deadlock};
 
@@ -77,6 +78,9 @@ pub trait PageTier: Send + Sync {
     /// The process's resident high-water mark in KiB, where the platform
     /// reports one.
     fn resident_high_water(&self) -> Option<u64>;
+    /// Deletes session `session` through the deployment's session catalog,
+    /// as a host's delete does, returning its observed SQL row count.
+    async fn delete_session(&self, session: &str) -> u64;
 }
 
 fn staging() -> GraphStaging {

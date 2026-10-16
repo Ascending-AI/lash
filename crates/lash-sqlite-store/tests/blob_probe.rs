@@ -50,11 +50,18 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
             .expect("install SQLite blob-delete fault");
     }
 
-    async fn clear_blob_delete_failure(&self) {
+    async fn fail_next_retirement_hold(&self) {
+        let conn =
+            rusqlite::Connection::open(&self.catalog).expect("open SQLite retirement-hold fault");
+        lash_sqlite_store::testing::cut_retirement_holds(&conn, self.fault_name)
+            .expect("install SQLite retirement-hold fault");
+    }
+
+    async fn clear_injected_failure(&self) {
         rusqlite::Connection::open(&self.catalog)
-            .expect("open SQLite blob-delete fault cleanup")
+            .expect("open SQLite fault cleanup")
             .execute_batch(&format!("DROP TRIGGER {}", self.fault_name))
-            .expect("remove SQLite blob-delete fault");
+            .expect("remove SQLite fault");
     }
 
     async fn checkpoint_component_edge_exists(

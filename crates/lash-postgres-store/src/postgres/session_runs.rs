@@ -208,7 +208,13 @@ pub(crate) async fn write_run_terminal_conn(
         )));
     }
     if let Some(revision) = terminal.head_revision {
-        crate::revisions::record_terminal_conn(conn, &terminal.session_id, revision).await?;
+        crate::revisions::record_terminal_conn(
+            conn,
+            &terminal.session_id,
+            revision,
+            lash_durable::DurableInstant(crate::support::clamp_epoch_ms(terminal.at_ms)),
+        )
+        .await?;
     }
     release_run_rows_conn(conn, &terminal.session_id, &terminal.run, terminal.at_ms).await
 }

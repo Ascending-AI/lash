@@ -56,12 +56,16 @@ pub struct VacuumReport {
     pub removed_queued_work_tombstone_count: usize,
 }
 
-/// Blob outcomes from one session-owner delete cascade.
+/// What one session-owner delete cascade handed to page retirement.
 ///
-/// `enumerated_blob_count` counts the nodes the delete's peel examined: the
-/// roots the session's rows held, then each child of a node it deleted.
-/// `retained_blob_count` counts those a surviving root names or a surviving
-/// node's edge reaches. The remainder was deleted in the owning transaction.
+/// `held_root_count` counts the stored graph roots the session's rows held
+/// (its head, every revision and window it retained, its admission base and
+/// its engine rows' roots) that the owning transaction held for retirement,
+/// each with its closure. The delete deletes no blob itself, so its
+/// transaction stays as small for a session with a large heap as for an
+/// empty one: the node's bounded retirement steps, or a host collection
+/// ([`StoreMaintenance::gc_unreachable`](crate::store::StoreMaintenance::gc_unreachable)),
+/// later delete every node of those closures nothing else names or reaches.
 ///
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**
 /// produce this report from [`SessionCatalogStore::delete_session`](crate::store::SessionCatalogStore::delete_session),
@@ -69,9 +73,7 @@ pub struct VacuumReport {
 /// facade.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionBlobReclaimReport {
-    pub enumerated_blob_count: usize,
-    pub retained_blob_count: usize,
-    pub deleted_blob_count: usize,
+    pub held_root_count: usize,
 }
 
 /// Which arm of the success side a completed maintenance pass landed on.
@@ -136,12 +138,6 @@ impl MaintenanceReport for VacuumReport {
         self.removed_node_count
             + self.removed_pending_turn_input_tombstone_count
             + self.removed_queued_work_tombstone_count
-    }
-}
-
-impl MaintenanceReport for SessionBlobReclaimReport {
-    fn reclaimed_count(&self) -> usize {
-        self.deleted_blob_count
     }
 }
 

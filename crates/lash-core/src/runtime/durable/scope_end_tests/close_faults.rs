@@ -21,11 +21,7 @@ fn injected(step: SessionCloseStep) -> crate::PluginError {
 
 /// The partial report the injected storage failure witnessed.
 fn partial() -> SessionBlobReclaimReport {
-    SessionBlobReclaimReport {
-        enumerated_blob_count: 4,
-        retained_blob_count: 1,
-        deleted_blob_count: 2,
-    }
+    SessionBlobReclaimReport { held_root_count: 2 }
 }
 
 /// A close step that calls out of the durable store and meets a failure

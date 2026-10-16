@@ -114,12 +114,14 @@ pub trait SessionCatalogStore: Send + Sync {
         retention: Retention,
     ) -> Result<(), StoreError>;
 
-    /// Delete `session_id` and reclaim blobs whose final exact reference edge
-    /// that transaction severs.
+    /// Delete `session_id` and hold every graph root its rows held for page
+    /// retirement, in one transaction whose size does not grow with the
+    /// session's heap. The blobs only those roots reach are deleted later,
+    /// in bounded steps (see [`SessionBlobReclaimReport`]).
     ///
     /// Failure carries the partial report accumulated before the transaction
     /// rolled back, so a zero success report means witnessed emptiness,
-    /// never an unreported reclaim failure.
+    /// never an unreported failure.
     async fn delete_session(
         &self,
         session_id: &SessionId,

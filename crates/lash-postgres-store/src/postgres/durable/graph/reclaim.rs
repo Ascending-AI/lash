@@ -10,41 +10,20 @@ use sqlx::PgConnection;
 
 use super::{Answer, SQL, db};
 
-/// What a peel did: the candidates it examined (the retired roots and each
-/// child of a node it deleted), how many it deleted, and how many something
-/// still names.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Peeled {
-    pub(crate) examined: usize,
-    pub(crate) deleted: usize,
-}
-
-impl Peeled {
-    /// The candidates something still names.
-    pub(crate) fn retained(self) -> usize {
-        self.examined - self.deleted
-    }
-}
-
 /// Peels `frontier`, the roots the caller's transaction retired: deletes
 /// each one nothing names or reaches any more, then each child the deleted
 /// nodes' edges reached, level by level, stopping wherever something still
 /// names a node. Its work is the newly unreachable nodes and their edges,
-/// never a closure something still roots.
-pub(crate) async fn peel(tx: &mut PgConnection, frontier: BTreeSet<String>) -> Answer<Peeled> {
-    let mut examined = frontier.clone();
+/// never a closure something still roots. Answers how many it deleted.
+pub(crate) async fn peel(tx: &mut PgConnection, frontier: BTreeSet<String>) -> Answer<usize> {
     let mut frontier = frontier;
     let mut deleted = 0;
     while !frontier.is_empty() {
         let (gone, children) = peel_level(tx, &frontier).await?;
         deleted += gone;
-        examined.extend(children.iter().cloned());
         frontier = children;
     }
-    Ok(Peeled {
-        examined: examined.len(),
-        deleted,
-    })
+    Ok(deleted)
 }
 
 /// One level of [`peel`]: locks what of `frontier` no other transaction
@@ -111,5 +90,5 @@ pub(crate) async fn audit_page(
             .into_iter()
             .collect();
     let last = orphans.last().cloned();
-    Ok((last, peel(tx, orphans).await?.deleted))
+    Ok((last, peel(tx, orphans).await?))
 }

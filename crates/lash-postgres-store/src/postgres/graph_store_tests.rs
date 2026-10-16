@@ -467,6 +467,20 @@ impl PageTier for Tier {
             .find_map(|line| line.strip_prefix("VmHWM:"))
             .and_then(|value| value.trim().trim_end_matches("kB").trim().parse().ok())
     }
+
+    async fn delete_session(&self, session: &str) -> u64 {
+        let factory = self._storage.session_store_factory();
+        let session =
+            lash_core_execution::SessionId::try_from(session.to_owned()).expect("a law session id");
+        let (answer, receipt) = sql::collect(
+            "pages.session-delete",
+            "postgres",
+            lash_core_execution::SessionCatalogStore::delete_session(&factory, &session),
+        )
+        .await;
+        answer.expect("the session delete commits");
+        receipt.rows_affected
+    }
 }
 
 macro_rules! page_law {
@@ -536,6 +550,22 @@ async fn retirement_advances_in_bounded_steps_and_reclaims_everything_unowned() 
         return;
     };
     pages::retirement_advances_in_bounded_steps_and_reclaims_everything_unowned(&mut tier, 5_000)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}
+
+/// D-RET (FIG-6423): a deleted session's heap retires in
+/// bounded steps, not in the delete's transaction, and no node a peel
+/// skipped is left to the orphan audit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deleting_a_session_retires_its_heap_in_bounded_steps() {
+    // Compare 8 and 2,000 pages within the standard operation deadline;
+    // SQLite's mounts exercise the same law at 50,000 pages.
+    let Some(tier) = tier().await else {
+        eprintln!("skipping the session heap retirement: database URL is not set");
+        return;
+    };
+    pages::deleting_a_session_retires_its_heap_in_bounded_steps(&tier, 2_000)
         .await
         .unwrap_or_else(|broken| panic!("{broken}"));
 }

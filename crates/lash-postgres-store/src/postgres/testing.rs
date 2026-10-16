@@ -191,6 +191,20 @@ pub async fn cut_session_wakes(pool: &sqlx::PgPool, armed: bool) -> sqlx::Result
     crate::durable::cut_session_wakes(pool, armed).await
 }
 
+/// Arm or disarm a named retirement-hold fault for external conformance laws.
+/// Disarming removes the trigger; the caller drops its fault function.
+///
+/// # Errors
+///
+/// The fault function or trigger DDL failed.
+pub async fn cut_retirement_holds(
+    pool: &sqlx::PgPool,
+    trigger: &str,
+    armed: bool,
+) -> sqlx::Result<()> {
+    crate::durable::cut_retirement_holds(pool, trigger, armed).await
+}
+
 /// Install statement triggers delaying node registration and claim by
 /// `delay`, including claims that find no actors. Use on an isolated fixture
 /// database to model shared-service latency in the crash matrix's guard law.

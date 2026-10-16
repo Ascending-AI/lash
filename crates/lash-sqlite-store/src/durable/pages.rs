@@ -131,23 +131,35 @@ pub(crate) const FRONTIER_CAP: usize = 4096;
 pub(crate) static CANDIDATE_PEAK_BUFFERED: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+/// Install a named fault at the hold boundary for external conformance laws.
+#[cfg(feature = "testing")]
+pub(crate) fn cut_retirement_holds(tx: &Connection, trigger: &str) -> rusqlite::Result<()> {
+    tx.execute_batch(&format!(
+        "CREATE TRIGGER \"{}\" BEFORE INSERT ON retirement_holds BEGIN \
+         SELECT RAISE(ABORT, 'injected retirement hold failure'); END;",
+        trigger.replace('"', "\"\"")
+    ))
+}
+
 /// Holds every stored node of `roots`, the closure under each when
-/// `closure`, queued at `now`: the publication's half of D-RET.
+/// `closure`, queued at `now`: the publication's half of D-RET. Answers
+/// how many stored nodes it held.
 pub(super) fn hold(
     tx: &Connection,
     roots: &BTreeSet<String>,
     closure: bool,
     now: DurableInstant,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<usize> {
     let roots: Vec<&String> = roots.iter().collect();
+    let mut held = 0;
     for chunk in roots.chunks(HOLD_BATCH) {
-        cached_execute(
+        held += cached_execute(
             tx,
             SQL.sqlite.hold.sql(),
             rusqlite::params![graph::json_array(&chunk), i64::from(closure), now.0],
         )?;
     }
-    Ok(())
+    Ok(held)
 }
 
 /// Records `admission` with its root, in the publishing transaction.
@@ -399,7 +411,7 @@ fn owner_bytes(owner: &RootOwner) -> Vec<u8> {
 }
 
 /// One retirement step in the caller's transaction (see the module docs).
-fn retire_step_in(
+pub(crate) fn retire_step_in(
     tx: &Connection,
     budget: RetirementBudget,
     now: DurableInstant,

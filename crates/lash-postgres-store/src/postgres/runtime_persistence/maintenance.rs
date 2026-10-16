@@ -12,12 +12,13 @@ impl StoreMaintenance for PostgresStore {
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)
     }
 
-    /// Release what the host's collection ends, then audit for orphans,
-    /// mirroring the SQLite store's ([`GcReport`] fields match). Every
-    /// transaction that retires a root peels it, so no mark and sweep runs
-    /// and no lock orders this pass against writers or readers. Lash VM
-    /// artifact rows (`lash_lash_vm_artifacts`) are not blobs: only a bridged
-    /// artifact's graph node is a root.
+    /// Release what the host's collection ends, retire what is held, then
+    /// audit for orphans, mirroring the SQLite store's ([`GcReport`] fields
+    /// match). Every transaction that retires a root holds it for the
+    /// retirement steps, so no mark and sweep runs and no lock orders this
+    /// pass against writers or readers. Lash VM artifact rows
+    /// (`lash_lash_vm_artifacts`) are not blobs: only a bridged artifact's
+    /// graph node is a root.
     async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
         let mut report = GcReport::default();
         let outcome = self.gc_unreachable_blobs(&mut report).await;
@@ -104,14 +105,36 @@ impl PostgresStore {
     async fn gc_unreachable_blobs(&self, report: &mut GcReport) -> Result<(), StoreError> {
         let graph_error = |refusal| StoreError::Backend(format!("{refusal}"));
         // A host collection is what ends `until_gc`'s hold: release every
-        // revision no head, pin or retention window keeps, peeling what
+        // revision no head, pin or retention window keeps, holding what
         // they held, in an ordinary guarded transaction of its own.
         {
             let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
             let mut tx = begin_guarded(connection, &self.fence).await?;
-            let released = crate::revisions::release_unretained_tx(&mut tx, true, None).await?;
+            crate::revisions::release_unretained_tx(&mut tx, true, None, self.retirement_instant())
+                .await?;
             tx.commit().await.map_err(store_sqlx_error)?;
-            report.deleted_blob_count += released;
+        }
+        // Then what that release and every earlier delete, prune and commit
+        // held, through the node's own bounded retirement steps.
+        let pages = crate::PostgresDurableStore::new(
+            Arc::clone(&self.pools),
+            self.fence.clone(),
+            self.observer.clone(),
+        );
+        loop {
+            let progress = lash_durable::domain::pages::PageStore::retire_step(
+                &pages,
+                lash_durable::domain::pages::RetirementBudget {
+                    nodes: lash_durable::RetirementSettings::standard().batch_nodes,
+                },
+            )
+            .await
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+            report.deleted_blob_count +=
+                usize::try_from(progress.nodes_deleted).unwrap_or(usize::MAX);
+            if progress.holds_advanced == 0 && progress.leases_reaped == 0 {
+                break;
+            }
         }
         // The orphan audit: a page per guarded transaction, each locking
         // only the rows it deletes, so commits beside it progress.

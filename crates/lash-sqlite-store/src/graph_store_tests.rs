@@ -367,6 +367,20 @@ impl PageTier for Tier {
             .find_map(|line| line.strip_prefix("VmHWM:"))
             .and_then(|value| value.trim().trim_end_matches("kB").trim().parse().ok())
     }
+
+    async fn delete_session(&self, session: &str) -> u64 {
+        let store = self._set.open_store().await.expect("the session store");
+        let session =
+            lash_core_execution::SessionId::try_from(session.to_owned()).expect("a law session id");
+        let (answer, receipt) = lash_core_execution::facade_support::sql::collect(
+            "pages.session-delete",
+            "sqlite",
+            lash_core_execution::SessionCatalogStore::delete_session(store.as_ref(), &session),
+        )
+        .await;
+        answer.expect("the session delete commits");
+        receipt.rows_affected
+    }
 }
 
 macro_rules! page_law {
@@ -482,6 +496,28 @@ mod retirement_advances_in_bounded_steps_and_reclaims_everything_unowned {
         )
         .await
         .unwrap_or_else(|broken| panic!("{broken}"));
+    }
+}
+
+/// D-RET (FIG-6423): a deleted session's 50,000-page heap retires in
+/// bounded steps, not in the delete's transaction.
+mod deleting_a_session_retires_its_heap_in_bounded_steps {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn memory() {
+        let tier = tier(false).await;
+        pages::deleting_a_session_retires_its_heap_in_bounded_steps(&tier, 50_000)
+            .await
+            .unwrap_or_else(|broken| panic!("{broken}"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn file() {
+        let tier = tier(true).await;
+        pages::deleting_a_session_retires_its_heap_in_bounded_steps(&tier, 50_000)
+            .await
+            .unwrap_or_else(|broken| panic!("{broken}"));
     }
 }
 

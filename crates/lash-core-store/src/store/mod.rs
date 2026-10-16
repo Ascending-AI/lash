@@ -1181,6 +1181,8 @@ pub trait StoreMaintenance: Send + Sync {
     async fn vacuum(&self, session_id: &SessionId) -> MaintenanceResult<VacuumReport>;
 
     /// Catalog-wide by definition: delete blobs no retained root reaches.
+    /// What deletes, pruning and earlier commits held for page retirement is
+    /// retired here too, in bounded steps of their own.
     ///
     /// A read-only-tier auditor with a destructive repair arm (ADR 0067 §1):
     /// correctness never depends on it running. Same outcome contract as

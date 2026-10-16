@@ -22,6 +22,26 @@ impl PostgresBlobProbe {
     fn fault_function(&self) -> String {
         format!("lash_{}", self.fault_name)
     }
+
+    /// Fails blob deletes until cleared.
+    async fn fail_blob_deletes(&self) {
+        let function = self.fault_function();
+        sqlx::query(&format!(
+            "CREATE OR REPLACE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN RAISE EXCEPTION 'injected blob delete failure'; END $$"
+        ))
+        .execute(self.storage.pool())
+        .await
+        .expect("create Postgres fault function");
+        sqlx::query(&format!(
+            "CREATE TRIGGER {} BEFORE DELETE ON lash_blobs \
+             FOR EACH ROW EXECUTE FUNCTION {function}()",
+            self.fault_name
+        ))
+        .execute(self.storage.pool())
+        .await
+        .expect("install Postgres fault");
+    }
 }
 
 #[async_trait::async_trait]
@@ -35,33 +55,38 @@ impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
     }
 
     async fn fail_next_blob_delete(&self) {
-        let function = self.fault_function();
-        sqlx::query(&format!(
-            "CREATE OR REPLACE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$ \
-             BEGIN RAISE EXCEPTION 'injected blob delete failure'; END $$"
-        ))
-        .execute(self.storage.pool())
+        self.fail_blob_deletes().await;
+    }
+
+    async fn fail_next_retirement_hold(&self) {
+        lash_postgres_store::testing::cut_retirement_holds(
+            self.storage.pool(),
+            self.fault_name,
+            true,
+        )
         .await
-        .expect("create Postgres blob-delete fault function");
+        .expect("install Postgres retirement-hold fault");
+    }
+
+    async fn clear_injected_failure(&self) {
         sqlx::query(&format!(
-            "CREATE TRIGGER {} BEFORE DELETE ON lash_blobs \
-             FOR EACH ROW EXECUTE FUNCTION {function}()",
+            "DROP TRIGGER IF EXISTS {} ON lash_blobs",
             self.fault_name
         ))
         .execute(self.storage.pool())
         .await
-        .expect("install Postgres blob-delete fault");
-    }
-
-    async fn clear_blob_delete_failure(&self) {
-        sqlx::query(&format!("DROP TRIGGER {} ON lash_blobs", self.fault_name))
-            .execute(self.storage.pool())
-            .await
-            .expect("remove Postgres blob-delete trigger");
+        .expect("remove Postgres blob-delete fault trigger");
+        lash_postgres_store::testing::cut_retirement_holds(
+            self.storage.pool(),
+            self.fault_name,
+            false,
+        )
+        .await
+        .expect("remove Postgres retirement-hold fault trigger");
         sqlx::query(&format!("DROP FUNCTION {}()", self.fault_function()))
             .execute(self.storage.pool())
             .await
-            .expect("remove Postgres blob-delete function");
+            .expect("remove Postgres fault function");
     }
 
     async fn checkpoint_component_edge_exists(

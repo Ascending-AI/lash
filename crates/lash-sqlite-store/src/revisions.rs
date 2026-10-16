@@ -45,13 +45,14 @@ pub(crate) fn record_revision_conn(
     Ok(())
 }
 
-/// Number a newly committed terminal once, then release revisions outside its window.
-/// A staged revision becomes terminal in the same publishing transaction; a replay
-/// cannot advance the ordinal again.
+/// Number a newly committed terminal once, then release revisions outside its window,
+/// at `now`. A staged revision becomes terminal in the same publishing transaction; a
+/// replay cannot advance the ordinal again.
 pub(crate) fn record_terminal_conn(
     tx: &Connection,
     session: &SessionId,
     revision: u64,
+    now: lash_durable::DurableInstant,
 ) -> Result<(), StoreError> {
     let ordinal: Option<i64> = tx
         .query_row(
@@ -73,21 +74,23 @@ pub(crate) fn record_terminal_conn(
         .map_err(sqlite_error)?;
     }
     if retention_conn(tx, session)?.is_some_and(Retention::releases_at_commit) {
-        release_unretained_conn(tx, false, Some(session))?;
+        release_unretained_conn(tx, false, Some(session), now)?;
     }
     Ok(())
 }
 
 /// Release every revision nothing retains, of `session_id` or of every
 /// session, retire the ancestry only a released revision kept alive, and
-/// peel the checkpoint and config roots they published (FIG-5949). `collecting` is a
-/// host collection, which ends `until_gc`'s hold. Answers how many blobs
-/// the peel deleted.
+/// hold the checkpoint and config roots they published for retirement at
+/// `now` (FIG-5949, FIG-6423): a checkpoint root reaches its session's
+/// heap, which retirement steps delete in bounded transactions, never this
+/// one. `collecting` is a host collection, which ends `until_gc`'s hold.
 pub(crate) fn release_unretained_conn(
     tx: &Connection,
     collecting: bool,
     session_id: Option<&SessionId>,
-) -> Result<usize, StoreError> {
+    now: lash_durable::DurableInstant,
+) -> Result<(), StoreError> {
     let released = {
         let mut stmt = tx
             .prepare_cached(session_sql().revisions.prune_unretained.sql())
@@ -114,8 +117,8 @@ pub(crate) fn release_unretained_conn(
         roots.extend(checkpoint_ref);
         roots.extend(config_ref);
     }
-    crate::durable::peel(tx, roots)
-        .map(|peeled| peeled.deleted)
+    crate::durable::retire_roots(tx, &roots, now)
+        .map(drop)
         .map_err(sqlite_error)
 }
 
@@ -394,6 +397,12 @@ pub(crate) fn pin_conn(
 }
 
 impl SqliteStore {
+    /// The instant a hold this store's catalog writes is queued at: the
+    /// clock the store set's durable core reads.
+    pub(crate) fn retirement_instant(&self) -> lash_durable::DurableInstant {
+        lash_durable::DurableInstant(crate::clamp_epoch_ms(self.clock.timestamp_ms()))
+    }
+
     /// Run `f` in one write transaction, rolling back on a store refusal.
     async fn revision_write<T, F>(&self, f: F) -> Result<T, StoreError>
     where
@@ -469,6 +478,7 @@ impl SqliteStore {
         target: &Target,
     ) -> Result<(), StoreError> {
         let (session_id, target) = (session_id.clone(), target.clone());
+        let now = self.retirement_instant();
         self.revision_write(move |tx| {
             crate::conn::cached_execute(
                 tx,
@@ -480,7 +490,7 @@ impl SqliteStore {
             // this pin alone held now; `until_gc` leaves it to the host's
             // collection, and so does a session that recorded no policy.
             if retention_conn(tx, &session_id)?.is_some_and(Retention::releases_at_commit) {
-                release_unretained_conn(tx, false, Some(&session_id))?;
+                release_unretained_conn(tx, false, Some(&session_id), now)?;
             }
             Ok(())
         })

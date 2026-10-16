@@ -90,7 +90,7 @@ pub(super) async fn delete_session_from_catalog(
             // What the session roots: its head, every revision it still
             // retains, every window its terminals name and its admission
             // base. Its pins, revisions, runs and metadata go with it, so
-            // each root they held is retired here and peeled below.
+            // each root they held is retired here and held below.
             let text_column = |sql: &str| -> Result<Vec<String>, lash_core_execution::StoreError> {
                 let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
                 let rows = stmt
@@ -211,27 +211,27 @@ pub(super) async fn delete_session_from_catalog(
             // root shares.
             crate::durable::release_prompt_snapshots(tx, &session_id, None)
                 .map_err(sqlite_error)?;
-            // The session's roots are retired: peel them. A node another
-            // root still names or reaches is retained, and the peel stops
-            // there; its work is the session's exclusive closure.
-            let peeled = crate::durable::peel(tx, roots).map_err(sqlite_error)?;
-            report.enumerated_blob_count = peeled.examined;
-            report.deleted_blob_count += peeled.deleted;
-            report.retained_blob_count += peeled.retained();
+            // The session's roots are retired: hold them, closures and all,
+            // for the retirement steps, which delete what no other root
+            // names or reaches in bounded transactions of their own. The
+            // session's exclusive heap is never peeled here.
+            report.held_root_count = crate::durable::retire_roots(
+                tx,
+                &roots,
+                lash_durable::DurableInstant(crate::clamp_epoch_ms(now_ms)),
+            )
+            .map_err(sqlite_error)?;
             tracing::debug!(
                 session_id = session_id.as_str(),
-                enumerated_blob_count = report.enumerated_blob_count,
-                retained_blob_count = report.retained_blob_count,
-                deleted_blob_count = report.deleted_blob_count,
-                sweep = ?lash_core_execution::MaintenanceReport::sweep(&report),
-                "session delete reclaimed owner-scoped blobs"
+                held_root_count = report.held_root_count,
+                "session delete held its roots for retirement"
             );
             Ok(report.clone())
         })();
         Ok(match outcome {
             Ok(value) => TxOutcome::Commit(Ok(value)),
             Err(err) => {
-                report.deleted_blob_count = 0;
+                report.held_root_count = 0;
                 TxOutcome::Rollback(Err(lash_core_execution::MaintenanceFailure::failed(
                     err, report,
                 )))

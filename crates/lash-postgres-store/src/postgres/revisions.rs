@@ -44,11 +44,13 @@ pub(crate) async fn record_revision_tx(
     Ok(())
 }
 
-/// Number a terminal once within its publishing transaction, then apply retention.
+/// Number a terminal once within its publishing transaction, then apply retention
+/// at `now`.
 pub(crate) async fn record_terminal_conn(
     conn: &mut PgConnection,
     session: &SessionId,
     revision: u64,
+    now: lash_durable::DurableInstant,
 ) -> Result<(), StoreError> {
     let ordinal: Option<i64> =
         crate::observed_sql::query_scalar(session_sql().revisions.mark_terminal.sql())
@@ -75,16 +77,17 @@ pub(crate) async fn record_terminal_conn(
     .map(|(kind, turns)| Retention::from_stored(&kind, turns))
     .transpose()?;
     if retention.is_some_and(Retention::releases_at_commit) {
-        release_unretained_tx(conn, false, Some(session)).await?;
+        release_unretained_tx(conn, false, Some(session), now).await?;
     }
     Ok(())
 }
 
 /// Release every revision nothing retains, of `session_id` or of every
 /// session, retire the ancestry only a released revision kept alive, and
-/// peel the checkpoint and config roots they published (FIG-5949). `collecting` is a
-/// host collection, which ends `until_gc`'s hold. Answers how many blobs the
-/// peel deleted.
+/// hold the checkpoint and config roots they published for retirement at
+/// `now` (FIG-5949, FIG-6423): a checkpoint root reaches its session's
+/// heap, which retirement steps delete in bounded transactions, never this
+/// one. `collecting` is a host collection, which ends `until_gc`'s hold.
 ///
 /// A fork holds its source revision's row share-locked until its own head
 /// commits, so a release that raced one waits and then retires nothing the
@@ -93,7 +96,8 @@ pub(crate) async fn release_unretained_tx(
     tx: &mut PgConnection,
     collecting: bool,
     session_id: Option<&SessionId>,
-) -> Result<usize, StoreError> {
+    now: lash_durable::DurableInstant,
+) -> Result<(), StoreError> {
     let released = crate::observed_sql::query(session_sql().revisions.prune_unretained.sql())
         .bind(i64::from(collecting))
         .bind(session_id.map(SessionId::as_str))
@@ -111,15 +115,15 @@ pub(crate) async fn release_unretained_tx(
     for leaf_node_id in &leaves {
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, leaf_node_id).await?;
     }
-    let roots = released
+    let roots: std::collections::BTreeSet<String> = released
         .iter()
         .flat_map(|row| [row.get::<Option<String>, _>(2), row.get(3)])
         .flatten()
         .collect();
-    crate::durable::peel(tx, roots)
+    crate::durable::retire_roots(tx, &roots, now)
         .await
-        .map(|peeled| peeled.deleted)
-        .map_err(crate::support::graph_store_error)
+        .map(drop)
+        .map_err(store_sqlx_error)
 }
 
 /// The retention policy recorded for `session_id`, or `None` for a session
@@ -316,6 +320,11 @@ async fn begin_snapshot(pool: &PgPool) -> Result<Tx<'_>, StoreError> {
 }
 
 impl PostgresStore {
+    /// The instant a hold this store's catalog writes is queued at.
+    pub(crate) fn retirement_instant(&self) -> lash_durable::DurableInstant {
+        lash_durable::DurableInstant(crate::support::clamp_epoch_ms(self.clock.timestamp_ms()))
+    }
+
     pub(crate) async fn resolve_target_in_catalog(
         &self,
         session_id: &SessionId,
@@ -441,7 +450,8 @@ impl PostgresStore {
             .await?
             .is_some_and(Retention::releases_at_commit)
         {
-            release_unretained_tx(&mut tx, false, Some(session_id)).await?;
+            release_unretained_tx(&mut tx, false, Some(session_id), self.retirement_instant())
+                .await?;
         }
         tx.commit().await.map_err(store_sqlx_error)
     }

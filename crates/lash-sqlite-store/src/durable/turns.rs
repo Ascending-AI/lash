@@ -390,7 +390,7 @@ pub(super) fn apply(
                 });
             }
             if let Some(revision) = head_revision {
-                crate::revisions::record_terminal_conn(tx, session, *revision)
+                crate::revisions::record_terminal_conn(tx, session, *revision, commit.now)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
             }
             // The turn's phase row and namespaces go with it, and their
