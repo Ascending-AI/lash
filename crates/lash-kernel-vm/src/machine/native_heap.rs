@@ -16,7 +16,7 @@ use std::sync::Arc;
 pub(super) struct Roots<'a> {
     pub(super) tasks: &'a mut Tasks,
     pub(super) joins: &'a Tree<ListJoinRecord>,
-    pub(super) registers: &'a [Value],
+    pub(super) registers: &'a super::registers::Registers,
     pub(super) pinned: &'a [Value],
     pub(super) pinned_bytes: u64,
     pub(super) fresh: &'a [EntityId],
@@ -49,7 +49,7 @@ impl Roots<'_> {
         heap.set_execution_roots(
             tasks,
             self.joins.clone(),
-            self.registers,
+            &self.registers.projection(),
             self.pinned,
             self.pinned_bytes,
             self.fresh,
@@ -168,6 +168,139 @@ mod laws {
     use super::*;
     use crate::Bounds;
     use crate::laws::embedder::{Embedder, Setup};
+
+    /// FIG-6614: scalar statements reuse initialized storage; publication
+    /// still prices the complete logical window, including taken Nulls.
+    #[test]
+    fn register_reuse_preserves_pressure_projection() {
+        use crate::Machine;
+        use crate::machine::{Boundary, KernelMachine};
+        use lash_kernel_state::paged::directory::value_cost;
+
+        fn assert_projection(machine: &mut KernelMachine, expected: &[Value]) {
+            let actual = machine.regs.projection();
+            assert_eq!(actual.len(), expected.len());
+            for (actual, expected) in actual.iter().zip(expected) {
+                assert!(machine.heap.equal(actual, expected).unwrap());
+                assert_eq!(value_cost(actual), value_cost(expected));
+            }
+            machine.publish_holdings().unwrap();
+            machine.heap.collect().unwrap();
+            let reused = machine.heap.certificate();
+            let tasks = machine.tasks.holdings().unwrap();
+            machine
+                .heap
+                .set_execution_roots(
+                    tasks,
+                    machine.joins.clone(),
+                    expected,
+                    &machine.pins.values,
+                    machine.pins.bytes,
+                    &machine.fresh,
+                )
+                .unwrap();
+            machine.heap.collect().unwrap();
+            let fresh = machine.heap.certificate();
+            assert_eq!(
+                reused.upper, fresh.upper,
+                "publication changed logical memory"
+            );
+            assert_eq!(
+                reused.entities, fresh.entities,
+                "publication changed reachable roots"
+            );
+        }
+
+        let run = |n, collect| {
+            let mut embedder = Embedder::new(&format!(
+                "main {{ let i = 0 while num.lt(i, {n}) {{ set i = num.add(i, 1) }} return i }}"
+            ));
+            if collect {
+                embedder.machine.boundary = Some(Box::new(|_| Boundary::Collect));
+            }
+            assert_eq!(
+                crate::laws::embedder::result(embedder.run_to_end(&[])),
+                crate::laws::embedder::int(n)
+            );
+            (
+                embedder.machine.regs.initializations,
+                embedder.machine.meters().charged,
+            )
+        };
+        let warm = run(3, false).0;
+        let repeated = run(100, false);
+        assert!(warm > 0, "the witness must initialize a real window");
+        assert_eq!(
+            repeated.0, warm,
+            "warm statements refilled the physical window"
+        );
+        assert_eq!(
+            run(100, true),
+            repeated,
+            "collection changed charge or initialization"
+        );
+
+        let mut embedder = Embedder::new("main { return null }");
+        let machine = &mut embedder.machine;
+        machine.regs.window(130);
+        for at in 0..130 {
+            machine.put(at, Value::Int((at as u64).into()));
+        }
+        machine.regs.clear();
+        machine.regs.window(70);
+        let mut expected = vec![Value::Null; 70];
+        assert_projection(machine, &expected);
+
+        let list = Value::List(
+            machine
+                .heap
+                .allocate(Object::List(vec![Value::Null; 7]))
+                .unwrap(),
+        );
+        machine.put(65, list.clone());
+        expected[65] = list;
+        assert_projection(machine, &expected);
+        let taken = machine.take(65);
+        machine.pin_value(&taken).unwrap();
+        expected[65] = Value::Null;
+        assert_projection(machine, &expected);
+
+        let owned = Value::text("released at the statement boundary");
+        let Value::Text(text) = &owned else {
+            unreachable!()
+        };
+        let lash_kernel_doc::heap::Payload::Resident(text) = &text.body else {
+            unreachable!()
+        };
+        let weak = Arc::downgrade(text);
+        machine.put(67, owned.clone());
+        expected[67] = owned;
+        assert_projection(machine, &expected);
+
+        // Native arguments must remain contiguous, including taken Nulls
+        // and missing parameters filled with Absent. A writer beyond the
+        // declared window grows its logical extent just as the old Vec did.
+        for at in [64, 66] {
+            machine.put(at, Value::Absent);
+            expected[at] = Value::Absent;
+        }
+        for (actual, expected) in machine.regs[64..68].iter().zip(&expected[64..68]) {
+            assert!(machine.heap.equal(actual, expected).unwrap());
+        }
+        machine.put(131, Value::Bool(true));
+        expected.resize(132, Value::Null);
+        expected[131] = Value::Bool(true);
+        assert_projection(machine, &expected);
+        machine.regs.clear();
+        machine.pins.clear();
+        machine.heap.release_statement_roots().unwrap();
+        drop(expected);
+        assert!(
+            weak.upgrade().is_none(),
+            "scratch retained an owned value past its boundary"
+        );
+        assert_projection(machine, &[]);
+    }
 
     /// K-BND-003: the operation which requested precision must bring its
     /// proposed edges to the trace. A child held only by a native's local

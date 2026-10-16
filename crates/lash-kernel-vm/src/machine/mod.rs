@@ -19,6 +19,7 @@ mod native_heap;
 mod observing;
 mod ops;
 mod queue;
+mod registers;
 mod session;
 mod steps;
 mod stream;
@@ -343,8 +344,9 @@ pub struct KernelMachine {
     census_refinements: u64,
     /// The registers: the values of the expressions of the statement being
     /// run and the arguments of the calls and actions it makes. No step
-    /// reads one an earlier step wrote, and each step's end clears them.
-    regs: Vec<Value>,
+    /// reads one an earlier step wrote. Initialized storage is reused,
+    /// while each step's end releases its logical values.
+    regs: registers::Registers,
     storage: Storage,
     steps: steps::StepCheck,
     end: Option<End>,

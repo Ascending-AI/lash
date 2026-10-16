@@ -436,7 +436,7 @@ impl KernelMachine {
             charged: root.meters.charged,
             live_tasks: root.meters.live_tasks,
             census_refinements,
-            regs: Vec::new(),
+            regs: registers::Registers::default(),
             storage: Storage::default(),
             steps: Default::default(),
             end: None,

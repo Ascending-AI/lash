@@ -617,7 +617,7 @@ impl KernelMachine {
                 self.storage.value_moves += usize::from(index < given);
             }
             let value = match index < given {
-                true => std::mem::replace(&mut self.regs[base + index], Value::Absent),
+                true => self.regs.take(base + index, Value::Absent),
                 false => Value::Absent,
             };
             self.bind(task, param.at, param.shared, value)?;

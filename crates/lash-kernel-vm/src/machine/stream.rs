@@ -93,9 +93,7 @@ impl KernelMachine {
         mut pc: usize,
     ) -> Eval<Ran> {
         let window = running.stmt.regs as usize;
-        if self.regs.len() < window {
-            self.regs.resize(window, Value::Null);
-        }
+        self.regs.window(window);
         let ops = running.stream.ops.as_slice();
         let task = running.task;
         loop {

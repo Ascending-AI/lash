@@ -54,18 +54,6 @@ pub(super) enum Flow {
 /// How an operation ends (see the module documentation).
 pub(super) type Status = Result<Flow, Interrupt>;
 
-/// Drops a register's old value, which is mostly one that owns nothing:
-/// that one needs no drop.
-#[inline(always)]
-fn release(value: Value) {
-    if matches!(
-        value,
-        Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
-    ) {
-        std::mem::forget(value);
-    }
-}
-
 /// The list position a value is: a number with an integral value that is
 /// not negative (`K-FORM-006`). `None` is a number that is no position.
 fn position(index: &Value) -> Eval<Option<usize>> {
@@ -91,16 +79,7 @@ impl KernelMachine {
         {
             self.storage.value_moves += 1;
         }
-        match self.regs.get_mut(out) {
-            Some(held) => release(std::mem::replace(held, value)),
-            None => self.grow(out, value),
-        }
-    }
-
-    #[inline(never)]
-    fn grow(&mut self, out: Reg, value: Value) {
-        self.regs.resize(out, Value::Null);
-        self.regs.push(value);
+        self.regs.put(out, value);
     }
 
     /// Takes the value out of register `r`, which is left null.
@@ -110,7 +89,7 @@ impl KernelMachine {
         {
             self.storage.value_moves += 1;
         }
-        std::mem::replace(&mut self.regs[r], Value::Null)
+        self.regs.take(r, Value::Null)
     }
 
     /// The charge anchor (`K-CHG-002`): `units` more, unless the running

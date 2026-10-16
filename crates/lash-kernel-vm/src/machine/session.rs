@@ -74,7 +74,7 @@ pub(super) fn start(
         charging: true,
         charged: 0,
         live_tasks: 1,
-        regs: Vec::new(),
+        regs: registers::Registers::default(),
         storage: Storage::default(),
         steps: Default::default(),
         end: None,
@@ -149,7 +149,7 @@ pub(super) fn start(
         }
     };
     let count = args.len();
-    machine.regs = args;
+    machine.regs = args.into();
     machine
         .push_frame(TaskId::MAIN, &exe, exec::Call::new(code, 0, count))
         .map_err(|error| start_interrupt("the start", error))?;
