@@ -149,6 +149,11 @@ pub enum OpenError {
 pub enum SealError {
     #[error("the run has ended; there is nothing to park")]
     Ended,
+    /// A task stands in a call made inside an expression, which no record
+    /// holds: the run is not at a safe point (`K-MACH-007`). Running on
+    /// reaches one when the call returns or the task parks.
+    #[error("a task stands in a call made inside an expression; run on to the next safe point")]
+    NotSafePoint,
     #[error("the machine is in a state it cannot write: {problem}")]
     Fault { problem: String },
     #[error(transparent)]

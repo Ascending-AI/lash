@@ -72,9 +72,6 @@ impl DurableReads for SqliteDurableStore {
                 .min(configured.state_json_depth()),
             requested.value_depth().min(configured.value_depth()),
         )
-        .and_then(|limits| {
-            limits.with_inline_depth(requested.inline_depth().min(configured.inline_depth()))
-        })
         .ok_or_else(|| super::corrupt("diagnostic read limits", "invalid kernel bounds"))?;
         let limits = DecodeLimits {
             kernel_data,

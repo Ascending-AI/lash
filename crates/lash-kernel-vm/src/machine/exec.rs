@@ -8,8 +8,8 @@ use lash_kernel_exec::LocalRef;
 use super::ops::Reg;
 use super::stream::{Ran, Running, unbound};
 use super::{
-    Completion, Control, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt, KernelMachine,
-    LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
+    Calling, Completion, Control, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt,
+    KernelMachine, LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Plan, Source, StmtId, Var};
 use crate::data::{copy_out, deep_size, magnitude, nested_size, size};
@@ -31,8 +31,6 @@ pub(super) struct Call<'a> {
     pub(super) captures: &'a [EntityId],
     /// The library function the code is the body of.
     pub(super) library: Option<LibId>,
-    /// The call sits inside an expression and runs to its end there.
-    pub(super) inline: bool,
     /// The statement of the caller's frame that waits in the call.
     pub(super) awaited_by: Option<StmtId>,
 }
@@ -45,7 +43,6 @@ impl<'a> Call<'a> {
             count,
             captures: &[],
             library: None,
-            inline: false,
             awaited_by: None,
         }
     }
@@ -57,11 +54,6 @@ impl<'a> Call<'a> {
 
     pub(super) fn of_library(mut self, library: LibId) -> Self {
         self.library = Some(library);
-        self
-    }
-
-    pub(super) fn inline(mut self) -> Self {
-        self.inline = true;
         self
     }
 
@@ -348,15 +340,29 @@ impl KernelMachine {
             self.charge_call(exe, call.lib, units)?;
         }
         self.observe(Event::Pop { task });
-        let inline = frame.inline;
+        let lib = frame.library.as_ref().map(|call| call.lib);
         self.recycle(frame);
-        if inline {
-            self.inline_result = Some(result);
-            return Ok(None);
-        }
         if self.task(task)?.frames.is_empty() {
             self.end_task(task, result)?;
             return Ok(None);
+        }
+        if let Some(calling) = self.frame(task)?.calling.take() {
+            self.task(task)?.called -= 1;
+            self.called -= 1;
+            self.top = calling.base;
+            return match result {
+                Ok(value) => {
+                    // The value is in no variable until the statement binds
+                    // it.
+                    self.put(calling.dst, value);
+                    self.pin(calling.dst).map_err(|halt| match lib {
+                        Some(lib) => halt.in_function(&exe.lib(lib).definition.name),
+                        None => halt,
+                    })?;
+                    self.continue_statement(task, host, exe, calling)
+                }
+                Err(value) => Ok(Some(Completion::Throw(value))),
+            };
         }
         Ok(match result {
             Ok(value) => {
@@ -507,7 +513,6 @@ impl KernelMachine {
             args: base,
             count: given,
             captures,
-            inline,
             awaited_by,
         } = call;
         let code = exe.code(code_id);
@@ -544,7 +549,7 @@ impl KernelMachine {
             control,
             awaiting: None,
             library: None,
-            inline,
+            calling: None,
             published: None,
         };
         if let Some(lib) = library {
@@ -786,6 +791,38 @@ impl KernelMachine {
         let value = self.heap_write(|heap| heap.instantiate(&frozen).map_err(Interrupt::from))?;
         self.charge(charge)?;
         Ok(value)
+    }
+
+    /// Runs on the statement that stood in a call made inside one of its
+    /// expressions, the call's value in its result register, from the op
+    /// after the call. Gives the departure the frame is left with.
+    fn continue_statement(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        calling: Calling,
+    ) -> Result<Option<Completion>, Halt> {
+        let running = Running::new(task, exe, calling.stmt);
+        let ran = match self.run(host, &running, calling.pc, calling.base) {
+            Ok(ran) => ran,
+            Err(Interrupt::Raise(value)) => return Ok(Some(Completion::Throw(*value))),
+            Err(Interrupt::Halt(halt)) => return Err(halt),
+        };
+        match ran {
+            Ran::Done => {
+                self.take_edge(task, exe, running.edge)?;
+                Ok(None)
+            }
+            Ran::Step => Ok(None),
+            Ran::Depart(completion) => Ok(Some(completion)),
+            // A `while` condition: the loop goes on as its test says.
+            Ran::Tested(value) => match self.tested(task, value) {
+                Ok(_) => Ok(None),
+                Err(Interrupt::Raise(value)) => Ok(Some(Completion::Throw(*value))),
+                Err(Interrupt::Halt(halt)) => Err(halt),
+            },
+        }
     }
 
     /// Completes the statement the top frame waits in with the value its

@@ -75,7 +75,7 @@ impl Frame {
 
     fn sync_to(&mut self, coordinates: bool) -> Result<(), HeapFault> {
         if coordinates && let Some(Control::Block { block, next }) = self.control.last() {
-            let index = if self.awaiting.is_some() {
+            let index = if self.awaiting.is_some() || self.calling.is_some() {
                 next.checked_sub(1)
                     .ok_or_else(|| malformed("a frame awaits a statement it has not issued"))?
             } else {
@@ -288,10 +288,10 @@ impl Frames {
     }
     pub(super) fn push(&mut self, mut frame: Frame) -> Result<(), HeapFault> {
         self.flush()?;
-        // Inline calls run inside their caller's expression. Its live
-        // cursor cannot be restored from a statement boundary until that
-        // expression completes, so retain its derived frame while pinned.
-        if !frame.inline && !self.cache.values().any(|frame| frame.inline) {
+        // A frame standing in a call made inside an expression cannot be
+        // restored from its record until the callee returns, so it stays
+        // derived while pinned.
+        if !self.pinned() {
             self.cache.clear();
         }
         frame.sync()?;
@@ -354,7 +354,7 @@ impl Frames {
         Ok(())
     }
     pub(super) fn pinned(&self) -> bool {
-        self.cache.values().any(|frame| frame.inline)
+        self.cache.values().any(|frame| frame.calling.is_some())
     }
     /// The frames the cache holds, by their index in the stack.
     pub(super) fn cached(&self) -> Vec<(usize, &Frame)> {
@@ -553,6 +553,6 @@ fn restore(
         control,
         awaiting,
         library,
-        inline: false,
+        calling: None,
     })
 }

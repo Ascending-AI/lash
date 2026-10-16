@@ -182,6 +182,19 @@ pub(crate) struct Library {
 /// a kernel body; `native_twice` says whether the native one is registered.
 /// Its formula reads its argument: 7 for a one-word integer.
 pub(crate) fn library(native_twice: bool) -> Library {
+    library_with(native_twice, None)
+}
+
+/// Library functions a law adds to the laws' library, each with the name
+/// the header gives it: registered after the library's own, which they
+/// may use.
+pub(crate) type Probes = fn(
+    &mut FunctionRegistry,
+    &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)>;
+
+/// [`library`] with the functions `probes` adds.
+pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Library {
     let mut registry = FunctionRegistry::new();
     let mut ids = BTreeMap::new();
     let machine = register_machine_functions(&mut registry).unwrap();
@@ -262,6 +275,11 @@ pub(crate) fn library(native_twice: bool) -> Library {
     ))
     .unwrap();
     ids.insert("each.map", registry.register(map, None).unwrap());
+    if let Some(probes) = probes {
+        for (name, id) in probes(&mut registry, &ids) {
+            ids.insert(name, id);
+        }
+    }
     let mut header = String::from(
         "kernel 1\neffect echo(x?: Any) -> Any\neffect boom(x?: Any) -> Any\n\
          effect num(x: Text) -> Any\n",
@@ -330,6 +348,7 @@ pub(crate) struct Setup {
     pub(crate) native_twice: bool,
     pub(crate) start: CellStart,
     pub(crate) slice: u64,
+    pub(crate) probes: Option<Probes>,
 }
 
 impl Default for Setup {
@@ -348,6 +367,7 @@ impl Default for Setup {
                 host: Vec::new(),
             },
             slice: u64::MAX,
+            probes: None,
         }
     }
 }
@@ -364,6 +384,7 @@ pub(crate) struct Embedder {
     pub(crate) withdrawn: Vec<WaitId>,
     slice: u64,
     bounds: Bounds,
+    probes: Option<Probes>,
     pub(crate) source: Source,
 }
 
@@ -413,7 +434,7 @@ impl Embedder {
     }
 
     pub(crate) fn with(text: &str, setup: Setup) -> Self {
-        let library = library(setup.native_twice);
+        let library = library_with(setup.native_twice, setup.probes);
         let text = format!("numbers {}\n{}{text}", setup.numbers, library.header);
         let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
         let document = Arc::new(document);
@@ -442,6 +463,7 @@ impl Embedder {
             withdrawn: Vec::new(),
             slice: setup.slice,
             bounds: setup.bounds,
+            probes: setup.probes,
             source,
         }
     }
@@ -449,7 +471,7 @@ impl Embedder {
     /// The run's document with a registry built afresh, in which
     /// `pair.twice` runs natively or not.
     pub(crate) fn program(&self, native_twice: bool) -> (Program, Library) {
-        let library = library(native_twice);
+        let library = library_with(native_twice, self.probes);
         let program = Program {
             release: PageId([8; 32]),
             document: Arc::clone(&self.document),
@@ -497,23 +519,43 @@ impl Embedder {
         root
     }
 
+    /// [`Self::reopen`] where the run is at a safe point; `false`, with
+    /// nothing changed, where a task stands in a call made inside an
+    /// expression (`K-MACH-007`).
+    pub(crate) fn reopen_if_safe(&mut self, layout: Layout, native_twice: bool) -> bool {
+        match self.try_checkpoint() {
+            Ok((root, certificate)) => {
+                self.open_at(&root, certificate, layout, native_twice);
+                true
+            }
+            Err(crate::SealError::NotSafePoint) => false,
+            Err(other) => panic!("the seal failed: {other}"),
+        }
+    }
+
     /// Seals the run whole, as a node commits it, leaving it running: the
     /// root and the accounting another node opens it with.
     pub(crate) fn checkpoint(&mut self) -> (CheckpointRoot, AccountingCertificate) {
+        self.try_checkpoint().unwrap()
+    }
+
+    /// [`Self::checkpoint`], or why the machine refused to seal.
+    pub(crate) fn try_checkpoint(
+        &mut self,
+    ) -> Result<(CheckpointRoot, AccountingCertificate), crate::SealError> {
         let sealed = self
             .machine
             .seal(SealBudget {
                 pages: u64::MAX,
                 bytes: u64::MAX,
-            })
-            .unwrap()
+            })?
             .unwrap();
         let certificate = self.machine.accounting();
         let root: CheckpointRoot = lash_kernel_doc::graph_tokens::decode_body(
             &lash_kernel_doc::graph_tokens::encode_body(&sealed.root),
         )
         .unwrap();
-        (root, certificate)
+        Ok((root, certificate))
     }
 
     /// Opens `root`, a checkpoint of this run, cold in another machine.

@@ -221,7 +221,7 @@ Rules whose cases need a running machine are pinned by the conformance corpus (`
 ## Bounds (`K-BND`)
 
 - **K-BND-001.** The embedder states the run's bounds: total charge; memory; the depth of any task's active calls; the number of tasks that have not ended; the number of effects and sleeps requested at one park; the number of members of one list `join`. A native function's guard (`K-LIB-008`) is a bound too. Passing a bound ends the run with a typed bound error naming it. It is not a raise: no guest code runs afterwards.
-- **K-BND-002.** Call depth is counted per task, one per active call of a declared function, a closure or a library body. `main`'s own body is not a call; an entry's and a spawned task's function is. Library bodies run inside expressions (`K-STMT-002`) nest at most 64 deep, whatever the bound.
+- **K-BND-002.** Call depth is counted per task, one per active call of a declared function, a closure or a library body. `main`'s own body is not a call; an entry's and a spawned task's function is.
 - **K-BND-003.** How memory is counted belongs to the machine, not to the kernel version. A machine counts it deterministically: whether an allocation passes the bound depends on what the run can still reach and on nothing else, not on when the machine last freed what it cannot, nor on what it holds resident. A machine may decide on an upper bound of what the run holds while that bound fits; an allocation it would pass is decided on the exact reachable amount. The memory a machine reports between such decisions is that upper bound, not live bytes. The result of an ended task counts for as long as its handle can be reached.
 
 ## Library functions (`K-LIB`)
@@ -310,12 +310,12 @@ whole-document kernel-text example that compiles and runs.
 ## The machine (`K-MACH`)
 
 - **K-MACH-001.** The machine is a library. It does no I/O, starts no thread and keeps no global state; everything guest-derived lives in the instance the embedder owns. Its heap's pages are read and sealed only through a page source the embedder hands it, and a call to that source may block while the statement and any native call under way wait intact. A page the source cannot supply, or supplies corrupt, is the embedder's failure: never a value, a raise or a bound the guest sees, and the run continues from its last committed state.
-- **K-MACH-002.** `run` executes ready tasks until no task is ready, the run ends, or the charge spent in this call reaches the slice, tested between statements. It returns which.
+- **K-MACH-002.** `run` executes ready tasks until no task is ready, the run ends, or the charge spent in this call reaches the slice, tested after each statement of any frame, a frame called from inside an expression included. It returns which. A slice may therefore return while a task stands in a call made inside an expression.
 - **K-MACH-003.** A park returns the effects and sleeps requested since the last park and the waits withdrawn since then.
 - **K-MACH-004.** `deliver` takes one outcome for one wait and makes its task ready (`K-TASK-005`). An outcome for a withdrawn wait is dropped. An outcome for a wait never handed out, or delivered twice, is an error to the embedder and changes nothing.
 - **K-MACH-005.** A slice return leaves tasks ready. Running again continues as if there had been no return: slices change no value, no order and no charge.
 - **K-MACH-006.** The machine asks the host whether the run is cancelled at each slice boundary and at each park. A cancelled run ends there; no cleanup block runs.
-- **K-MACH-007.** Between two calls the run is at a safe point: every task is between statements. A checkpoint of its state may be sealed then, and only then. Pages the machine seals mid-slice to bound its residency are named by no checkpoint until the next safe point.
+- **K-MACH-007.** Between two calls the run is at a safe point when every task is between statements, which a park always is. A slice return while a task stands in a call made inside an expression is not one: a seal there is refused as no safe point and changes nothing, and running on reaches one when the call returns. A checkpoint of the run's state may be sealed at a safe point, and only there. Pages the machine seals mid-slice to bound its residency are named by no checkpoint until the next safe point.
 - **K-MACH-008.** Opening a sealed checkpoint in a machine built from the same document and the same function identities continues the computation exactly: the same values, errors, effect identities and charges as if it had never been sealed, whatever the engine's internal layout, whichever pages it holds resident and whichever of a function's implementations it runs.
 
 ## Dialect printing (`K-DIALECT`)

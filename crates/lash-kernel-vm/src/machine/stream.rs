@@ -6,7 +6,9 @@
 //! and every operation is strict (`K-EVAL-001`, `K-EVAL-006`). A range ends
 //! at its last op, which completes the statement, ends its step where it
 //! left the task, departs, or, for a `while` condition, gives the test's
-//! value.
+//! value. A call inside an expression whose function runs its body ends
+//! the step too: the statement stands in the call, its window kept, and
+//! runs on from the op after it when the callee returns.
 
 use std::sync::Arc;
 
@@ -15,8 +17,8 @@ use lash_kernel_exec::{LocalRef, Op, Reg, RegRange, StepEdge};
 
 use super::ops::{Entry, Flow};
 use super::{
-    Completion, Control, Eval, Halt, Interrupt, KernelMachine, SlotState, TryPhase, bound, fault,
-    raise,
+    Calling, Completion, Control, Eval, Halt, Interrupt, KernelMachine, SlotState, TryPhase, bound,
+    fault, raise,
 };
 use crate::compile::{BlockId, CodeId, Executable, Form, LibId, Stmt, StmtId, Stream};
 use crate::heap::{value_bytes, within_depth};
@@ -122,12 +124,14 @@ impl KernelMachine {
                     self.put(at(base, dst), value);
                 }
                 Op::Call { lib, args } => {
-                    let lib = LibId(lib.0);
-                    self.call_expr(host, running, lib, at(base, args.start), args.len)?;
-                    // An inline body's statements ran above the call's
-                    // value: the window is whole again for the ops after it.
-                    if self.regs.len() < window {
-                        self.regs.resize(window, Value::Null);
+                    let calling = Calling {
+                        stmt: running.id,
+                        pc,
+                        base,
+                        dst: at(base, args.start),
+                    };
+                    if self.call_expr(running, LibId(lib.0), calling, args.len)? == Flow::Step {
+                        return Ok(Ran::Step);
                     }
                 }
                 Op::Session { dst, name } => {
@@ -468,21 +472,20 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// Calls `lib` with the `count` arguments from `args`, its value in
-    /// `args`.
+    /// Calls `lib` inside an expression with the `count` arguments from
+    /// the call's result register: `Done`, its value there, or `Step`, the
+    /// statement standing in the call as `calling` says while its body's
+    /// frame runs.
     fn call_expr(
         &mut self,
-        host: &mut dyn Host,
         running: &Running<'_>,
         lib: LibId,
-        args: usize,
+        calling: Calling,
         count: u32,
-    ) -> Eval<()> {
-        let (task, exe) = (running.task, running.exe);
-        if self.call_lib(task, exe, lib, args, count as usize, args, Entry::Inline)? == Flow::Step {
-            self.run_inline(task, host, exe, lib, args)?;
-        }
-        Ok(())
+    ) -> Eval<Flow> {
+        let (task, exe, args) = (running.task, running.exe, calling.dst);
+        let entry = Entry::Expression(calling);
+        self.call_lib(task, exe, lib, args, count as usize, args, entry)
     }
 
     /// A closure of `code` over the cells of the variables it shares.

@@ -15,8 +15,9 @@
 //! An operation that cannot step returns [`Eval`] instead. The registers
 //! are the machine's register stack: a statement's ops name the registers
 //! of its window, where each expression's value goes and each operation
-//! reads its operands. Nothing outside a step holds a register, so a parked
-//! run never holds one (`K-STMT-004`).
+//! reads its operands. Past its step only a statement standing in a call
+//! made inside an expression keeps its window, below the callee's; such a
+//! task cannot wait, so a parked run holds no register (`K-STMT-004`).
 //!
 //! The operations are the member reads and writes, the charge, memory
 //! reservation and pin anchors, the library call with its charge (the one
@@ -29,7 +30,7 @@ use num_traits::ToPrimitive;
 
 use super::exec::Call;
 use super::stream::{Ran, Running};
-use super::{Control, Cursor, Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
+use super::{Calling, Control, Cursor, Eval, Halt, Interrupt, KernelMachine, bound, fault, raise};
 use crate::compile::{Charge, Executable, Form, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::heap::within_depth;
@@ -60,8 +61,9 @@ pub(super) enum Entry {
     /// In a frame of its own, as an action's call or a task's start; the
     /// statement of the caller's frame that waits in the call, if any.
     Frame(Option<StmtId>),
-    /// Inside an expression, to its end there (`K-STMT-002`).
-    Inline,
+    /// Inside an expression (`K-STMT-002`): in a frame of its own too, the
+    /// caller's statement standing in the call where it says.
+    Expression(Calling),
 }
 
 /// Drops a register's old value, which is mostly one that owns nothing:
@@ -418,14 +420,17 @@ impl KernelMachine {
         let call = Call::new(*code, args, function.arity).of_library(lib);
         match entry {
             Entry::Frame(awaiting) => self.push_frame(task, exe, call.awaited_by(awaiting))?,
-            Entry::Inline => {
-                if self.inline_depth >= self.limits.inline_depth() {
-                    return Err(
-                        bound(Bound::CallDepth, u64::from(self.limits.inline_depth())).into(),
-                    );
+            Entry::Expression(calling) => {
+                // The caller stands in the call before the callee's frame
+                // is pushed, so that its derived frame stays.
+                self.frame(task)?.calling = Some(calling);
+                if let Err(interrupt) = self.push_frame(task, exe, call) {
+                    self.frame(task)?.calling = None;
+                    return Err(interrupt.in_function(&function.definition.name));
                 }
-                self.push_frame(task, exe, call.inline())
-                    .map_err(|halt| halt.in_function(&function.definition.name))?;
+                self.task(task)?.called += 1;
+                self.called += 1;
+                self.top = calling.dst;
             }
         }
         Ok(Flow::Step)
@@ -578,52 +583,6 @@ impl KernelMachine {
         }
     }
 
-    /// Runs the kernel body [`Self::call_lib`] entered inside an expression
-    /// to its end, its value in `out`. Such a body stands beside a native
-    /// implementation and cannot wait (`K-LIB-004`).
-    pub(super) fn run_inline(
-        &mut self,
-        task: TaskId,
-        host: &mut dyn Host,
-        exe: &Executable,
-        lib: LibId,
-        out: Reg,
-    ) -> Eval<()> {
-        let name = &exe.lib(lib).definition.name;
-        self.inline_depth += 1;
-        // The body's statements run their windows from the call's value on,
-        // above every register the caller's statement still holds.
-        let top = std::mem::replace(&mut self.top, out);
-        let result = loop {
-            if let Some(result) = self.inline_result.take() {
-                break result;
-            }
-            let outcome = self.advance(task, host, exe);
-            let settled = self.settle(task, host, exe, outcome);
-            if let Err(halt) = settled {
-                self.inline_depth -= 1;
-                self.top = top;
-                return Err(halt.in_function(name).into());
-            }
-            if self.current != Some(task) {
-                self.inline_depth -= 1;
-                self.top = top;
-                return Err(fault("a library body waited inside an expression").into());
-            }
-        };
-        self.inline_depth -= 1;
-        self.top = top;
-        self.refresh_charging(task, exe)?;
-        match result {
-            Ok(value) => {
-                self.put(out, value);
-                self.pin(out).map_err(|halt| halt.in_function(name))?;
-                Ok(())
-            }
-            Err(value) => Err(Interrupt::raised(value)),
-        }
-    }
-
     /// Starts a `for` over the value in `iterable` (`K-ITER-002`): raises
     /// `type_error` unless it is a list, a tuple, a map or a set, then takes
     /// the first iteration step.
@@ -725,31 +684,42 @@ impl KernelMachine {
             }
             Some(Control::While { stmt, .. }) => {
                 let running = Running::new(task, exe, *stmt);
-                let Form::While { test, body, .. } = &running.stmt.form else {
+                let Form::While { test, .. } = &running.stmt.form else {
                     return Err(fault("a `while` loop is not at a `while`").into());
                 };
-                let tested = self.run(host, &running, test.start as usize, self.top)?;
-                let Ran::Tested(value) = tested else {
-                    return Err(fault("a `while` condition gave no value").into());
-                };
-                match value {
-                    Value::Bool(true) => {
-                        if let Some(Control::While { started, .. }) =
-                            self.frame(task)?.control.last_mut()
-                        {
-                            *started += 1;
-                        }
-                        self.push_block(task, *body)?;
-                        Ok(Flow::Step)
-                    }
-                    Value::Bool(false) => {
-                        self.frame(task)?.control.pop();
-                        Ok(Flow::Done)
-                    }
-                    _ => raise("type_error", "a `while` condition must be a bool"),
+                match self.run(host, &running, test.start as usize, self.top)? {
+                    Ran::Tested(value) => self.tested(task, value),
+                    // The condition stands in a call made inside it.
+                    Ran::Step => Ok(Flow::Step),
+                    _ => Err(fault("a `while` condition gave no value").into()),
                 }
             }
             _ => Err(fault("no loop is innermost").into()),
+        }
+    }
+
+    /// The innermost `while` loop's condition gave `value`: its next
+    /// iteration starts, `Step`, or it ends, `Done` (`K-FORM-013`).
+    pub(super) fn tested(&mut self, task: TaskId, value: Value) -> Status {
+        let frame = self.frame(task)?;
+        let Some(Control::While { stmt, started }) = frame.control.last_mut() else {
+            return Err(fault("a `while` condition stands in no `while` loop").into());
+        };
+        let Form::While { body, .. } = &frame.exe.stmt(*stmt).form else {
+            return Err(fault("a `while` loop is not at a `while`").into());
+        };
+        let body = *body;
+        match value {
+            Value::Bool(true) => {
+                *started += 1;
+                self.push_block(task, body)?;
+                Ok(Flow::Step)
+            }
+            Value::Bool(false) => {
+                frame.control.pop();
+                Ok(Flow::Done)
+            }
+            _ => raise("type_error", "a `while` condition must be a bool"),
         }
     }
 }

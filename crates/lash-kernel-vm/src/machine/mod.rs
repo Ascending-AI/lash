@@ -1,7 +1,9 @@
 //! The kernel machine: one run of one document as a set of tasks.
 //!
 //! Each task is a stack of frames, and each frame a stack of the blocks,
-//! loops and `try` statements it is inside. A task pauses only at an
+//! loops and `try` statements it is inside. A call inside an expression is
+//! a frame too: the caller's statement stands in it, its registers kept
+//! below the callee's, until the callee returns. A task pauses only at an
 //! action, between statements (`K-STMT-004`), so its whole state is that
 //! stack and the variables: no value lives anywhere else while it waits.
 
@@ -229,6 +231,17 @@ struct LibraryCall {
     args: Tree<Value>,
 }
 
+/// A statement standing in a call made inside one of its expressions: its
+/// op after the call, its register window, and the register the call's
+/// value goes to, where the callee's windows start.
+#[derive(Clone, Copy, Debug)]
+struct Calling {
+    stmt: StmtId,
+    pc: usize,
+    base: usize,
+    dst: usize,
+}
+
 /// The vectors of a frame that has ended, kept for the next frame.
 #[derive(Debug, Default)]
 struct FrameStorage {
@@ -252,9 +265,10 @@ struct Frame {
     awaiting: Option<StmtId>,
     /// The library call this frame is the body of, charged when it ends.
     library: Option<LibraryCall>,
-    /// The frame was called from inside an expression and runs to its end
-    /// there.
-    inline: bool,
+    /// Where this frame's statement stands while the call it made inside
+    /// an expression runs in the frame above. The record cannot hold it,
+    /// so such a frame stays derived until the callee returns.
+    calling: Option<Calling>,
     /// The record as last written to its row: what a flush compares to
     /// instead of reading the row back (FIG-6318).
     published: Option<FrameRecord>,
@@ -318,6 +332,8 @@ enum Wait {
 struct Task {
     record: lash_kernel_state::paged::TaskRecord,
     frames: frames::Frames,
+    /// How many of its frames stand in a call made inside an expression.
+    called: u32,
     /// The record as last written to its row (FIG-6318).
     published: Option<lash_kernel_state::paged::TaskRecord>,
 }
@@ -372,15 +388,18 @@ pub struct KernelMachine {
     costs: crate::costs::Costs,
     live_tasks: u32,
     census_refinements: u64,
-    inline_depth: u32,
-    inline_result: Option<Result<Value, Value>>,
+    /// How many frames of all tasks stand in a call made inside an
+    /// expression. The run is at a safe point only when none does
+    /// (`K-MACH-007`).
+    called: u32,
     /// The registers: the values of the expressions being evaluated and
     /// the arguments of the calls being made, in the windows of the
-    /// statements running, innermost last. No step reads one an earlier
-    /// step wrote, and a slice's end clears them.
+    /// statements running, innermost last. Only a statement standing in a
+    /// call made inside an expression keeps its window past its step, and
+    /// each step's end truncates the registers to those windows.
     regs: Vec<Value>,
-    /// Where the window of the next statement to run starts: 0, or above
-    /// the registers of the expression an inline body runs inside.
+    /// Where the window of the next statement to run starts: 0, or the
+    /// result register of the call the innermost such statement stands in.
     top: usize,
     storage: Storage,
     steps: steps::StepCheck,
@@ -686,17 +705,21 @@ impl KernelMachine {
         if self.observer.is_some() {
             self.observe_step(task, exe);
         }
-        self.pins.clear();
-        self.fresh.clear();
+        // A statement standing in a call keeps what it holds until it ends.
+        if self.called == 0 {
+            self.pins.clear();
+            self.fresh.clear();
+        }
         let outcome = match self.task(task)?.take_incoming() {
             Some(incoming) => {
                 self.refresh_charging(task, exe)?;
                 self.resume(task, exe, incoming).and_then(|value| {
                     // The value is in no variable until the statement binds
                     // it.
-                    self.put(0, value);
-                    self.pin(0)?;
-                    let stmt = self.finish_action(task, host, exe, 0)?;
+                    let base = self.top;
+                    self.put(base, value);
+                    self.pin(base)?;
+                    let stmt = self.finish_action(task, host, exe, base)?;
                     self.take_edge_of(task, exe, stmt)?;
                     Ok(Completion::Normal)
                 })
@@ -988,12 +1011,16 @@ impl KernelMachine {
                     };
                 }
             }
-            self.regs.clear();
-            self.pins.clear();
-            self.fresh.clear();
-            self.heap
-                .release_statement_roots()
-                .map_err(MachineError::Heap)?;
+            // The windows of statements standing in calls made inside
+            // expressions stay, with what those statements hold.
+            self.regs.truncate(self.top);
+            if self.called == 0 {
+                self.pins.clear();
+                self.fresh.clear();
+                self.heap
+                    .release_statement_roots()
+                    .map_err(MachineError::Heap)?;
+            }
             #[cfg(test)]
             self.at_boundary()?;
             if let Some(end) = self.end.take() {

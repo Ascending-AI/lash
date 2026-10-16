@@ -29,6 +29,7 @@ impl Task {
                 frames: Tree::new(true),
             },
             frames: Frames::new(access, exe),
+            called: 0,
             published: None,
         }
     }
@@ -126,6 +127,7 @@ impl Tasks {
                     published: Some(record.clone()),
                     record,
                     frames,
+                    called: 0,
                 },
             );
         }
@@ -207,7 +209,7 @@ impl Tasks {
         malformed.map_or(Ok(()), Err)
     }
     /// How many frames `id` has and those the cache holds, by index: the
-    /// top one, and those an inline call pins. `None` when the task is not
+    /// top one, and those standing in a call made inside an expression. `None` when the task is not
     /// cached.
     pub(super) fn cached_frames(&self, id: TaskId) -> Option<(usize, Vec<(usize, &super::Frame)>)> {
         self.cache

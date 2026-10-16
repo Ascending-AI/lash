@@ -232,6 +232,7 @@ impl KernelMachine {
                 }
             }
             ActionKind::Yield => {
+                self.leaves_no_call(task)?;
                 let yielding = self.task(task)?;
                 yielding.wake(Incoming::Value(Value::Null));
                 self.frame(task)?.awaiting = Some(stmt);
@@ -389,9 +390,21 @@ impl KernelMachine {
 
     /// Parks the running task in a wait.
     fn suspend(&mut self, task: TaskId, stmt: StmtId, wait: Wait) -> Result<(), Halt> {
+        self.leaves_no_call(task)?;
         self.frame(task)?.awaiting = Some(stmt);
         self.task(task)?.suspend(wait);
         self.current = None;
+        Ok(())
+    }
+
+    /// A task may give up its turn while a frame of it stands in a call
+    /// made inside an expression only by a `spawn`, which runs the child at
+    /// once and the spawner next. Every body such a call runs stands beside
+    /// a native implementation, so it cannot wait (`K-LIB-004`).
+    fn leaves_no_call(&mut self, task: TaskId) -> Result<(), Halt> {
+        if self.task(task)?.called > 0 {
+            return Err(fault("a library body waited inside an expression"));
+        }
         Ok(())
     }
 

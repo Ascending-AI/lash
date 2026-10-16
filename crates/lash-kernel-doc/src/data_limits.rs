@@ -9,7 +9,6 @@ pub struct KernelDataLimits {
     decode_depth: u64,
     state_json_depth: usize,
     value_depth: usize,
-    inline_depth: u32,
 }
 impl KernelDataLimits {
     /// Existing maxima: document 64, document JSON 352, binary value decode
@@ -22,7 +21,6 @@ impl KernelDataLimits {
             decode_depth: 512,
             state_json_depth: 512,
             value_depth: 128,
-            inline_depth: 64,
         }
     }
     pub fn new(
@@ -44,18 +42,7 @@ impl KernelDataLimits {
                 decode_depth,
                 state_json_depth,
                 value_depth,
-                inline_depth: 64,
             })
-    }
-    pub fn with_inline_depth(mut self, depth: u32) -> Option<Self> {
-        if depth > 64 {
-            return None;
-        }
-        self.inline_depth = depth;
-        Some(self)
-    }
-    pub const fn inline_depth(self) -> u32 {
-        self.inline_depth
     }
     pub const fn document_depth(self) -> usize {
         self.document_depth
@@ -86,13 +73,11 @@ struct LimitsWire {
     decode_depth: u64,
     state_json_depth: usize,
     value_depth: usize,
-    inline_depth: u32,
 }
 impl TryFrom<LimitsWire> for KernelDataLimits {
     type Error = &'static str;
     fn try_from(w: LimitsWire) -> Result<Self, Self::Error> {
         Self::new(w.document_depth, w.document_json_depth, w.decode_depth, w.state_json_depth, w.value_depth)
-            .and_then(|limits| limits.with_inline_depth(w.inline_depth))
             .ok_or("kernel data limits exceed native safety ceilings (64/352/512/512/128), or value depth is zero")
     }
 }
