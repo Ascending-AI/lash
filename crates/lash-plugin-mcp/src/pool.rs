@@ -659,7 +659,11 @@ impl McpConnectionPool {
     pub(crate) fn events_connection(
         &self,
         server_name: &str,
-    ) -> Option<(crate::events::McpServerEvents, Option<EventsPeer>)> {
+    ) -> Option<(
+        crate::events::McpServerEvents,
+        crate::config::McpDataLimits,
+        Option<EventsPeer>,
+    )> {
         if self.shut_down.load(Ordering::SeqCst) {
             return None;
         }
@@ -667,22 +671,11 @@ impl McpConnectionPool {
         let service = entry
             .service_snapshot()
             .map(|service| (service.peer.clone(), service.handler.clone()));
-        Some((entry.config.events.clone(), service))
-    }
-
-    /// The servers whose events are enabled, with their policy.
-    pub(crate) fn events_servers(&self) -> Vec<(String, crate::events::McpEventsConfig)> {
-        self.entries
-            .read_recover()
-            .iter()
-            .filter_map(|(name, entry)| {
-                entry
-                    .config
-                    .events
-                    .enabled()
-                    .map(|config| (name.clone(), config.clone()))
-            })
-            .collect()
+        Some((
+            entry.config.events.clone(),
+            entry.config.data_limits,
+            service,
+        ))
     }
 
     /// Tear down all connections in parallel. Call this before dropping the

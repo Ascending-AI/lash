@@ -1,34 +1,43 @@
-# MCP events
+# MCP events as host code
 
-MCP servers can publish events ([SEP-3415](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/3415)):
-a ticket was created, a build failed, an email arrived. The MCP plugin turns
-each event into durable lash work, and it is off unless the host turns it on,
-one server at a time.
+This reference host uses only the `lash` facade for MCP transport and keyed
+turn admission. Its own SQLite database holds subscription registrations,
+opaque cursors, retention-gap evidence, immutable mapped inputs and delivery
+receipts. Lash owns admitted turn execution and recovery.
 
-`ticket_events()` is the host's policy for one server: deliver by push or
-poll, and let a model react in its own session. `watch_tickets` subscribes a
-session as the host:
+Create the plugin with each server enabled by
+`McpServerConfig::with_events(McpEventTransportPolicy::default())`, and obtain
+`plugin.events()`. The handle provides typed `list`, `poll` and `open`.
+A push request offers `read_window` and explicit `close`; hosts choose the
+window duration, item threshold and per-server reorder-settle interval.
+Listings share `McpDataLimits.catalog_pages`, `catalog_items`, `catalog_bytes`
+(defaults: 64 pages, 4,096 items, 8 MiB). The default notification capacity is
+1,024 and reorder settle is 50 ms. Overflow returns typed continuity loss:
+reconnect and reconcile from committed progress. The settle interval accounts
+for rmcp's independently dispatched notification handlers; it cannot prove
+that an arbitrary late notification was received.
 
-```rust,ignore
-let plugin = Arc::new(lash::mcp::McpPluginFactory::new(servers).await?);
-let core = lash::LashCore::standard_builder(backend).plugin(plugin.clone()) /* … */ .build(owner)?;
-core.bind_mcp_events(&plugin.events());
-let subscription = mcp_events::watch_tickets(&plugin.events(), "tickets", &session).await?;
-```
+`HostStore::register` records this host's explicit destination and arguments
+under an id and generation. Change those by registering a new generation and
+disabling the old one. `run_polling` implements the host's poll/dispatch loop
+with an explicit `PollPolicy` and shutdown future; it returns on faults or gaps
+for host reconciliation. `poll_once` is also available for a different host
+scheduler. Neither enables model-facing tools nor registers a Lash engine.
 
-The subscription is a durable process of the plugin's engine. It polls (or
-holds a stream), saves the server's cursor in the same commit that admits the
-event's delivery, and delivers each event as one keyed turn of the session.
-A crash anywhere, a node handover or the server delivering an event twice
-starts no second turn. A model can subscribe too, through `subscribe_event`,
-within what the host's reaction profile allows.
+`HostStore::accept` commits the whole occurrence batch and its cursor in one
+transaction. The host maps each ticket to an existing session and immutable
+input, excluding transport cursors. A delivery key hashes the server, event
+type, subscription id, generation and occurrence id; its stable `TurnId`
+keys `durable.send(input).id(turn)`. `dispatch_pending` submits each committed
+input, then acknowledges it in a separate host transaction. A crash between
+those writes leaves a pending row and retries the same input with the same key.
+The SQLite law loses that acknowledgment, reopens the host database, retries
+and observes exactly one turn.
 
-`status` reads what a host needs to know without running anything: events
-delivered, gaps where the server resumed past its retention, failed
-deliveries, and why a subscription is parked. `resume` un-parks one;
-`unsubscribe` ends one, after which no event reacts.
-
-The test in `src/tests.rs` runs the whole path against the plugin's SEP-3415
-fixture server over SQLite. The laws live in
-`crates/lash-durable-test/tests/mcp_events_laws.rs` and
-`crates/lash-durable-test/tests/mcp_events_crash_proof.rs`.
+This is a single-dispatcher reference. A distributed host adds its own lease
+and fencing, authorization, retry/backoff, gap recovery and retention policy.
+A disabled subscription stops polling; already accepted inbox deliveries remain
+owed. Keep host dedup evidence for as long as the source can redeliver. A host
+using keyed process starts must record the returned binding before pruning can
+remove Lash's start-key evidence. Hosts can use their own `ProcessEngine`
+through the generic seam when their dispatcher needs durable process steps.

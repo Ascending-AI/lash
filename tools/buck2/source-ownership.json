@@ -104,7 +104,6 @@
       "src/language_observation/tests.rs",
       "src/language_observation/worker.rs",
       "src/lib.rs",
-      "src/mcp_events.rs",
       "src/observation_feed.rs",
       "src/pacing.rs",
       "src/parked_work.rs",
@@ -633,15 +632,6 @@
         "tests/support/dialect.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"
-      ],
-      "mcp_events_crash_proof": [
-        "tests/mcp_events_crash_proof.rs",
-        "tests/support/matrix.rs",
-        "tests/support/sim.rs"
-      ],
-      "mcp_events_laws": [
-        "tests/mcp_events_laws.rs",
-        "tests/support/served.rs"
       ],
       "model_answer_receipt_laws": [
         "tests/model_answer_receipt_laws.rs",

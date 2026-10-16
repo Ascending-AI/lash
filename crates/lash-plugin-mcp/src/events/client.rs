@@ -1,41 +1,30 @@
-//! The `events/*` requests on a pooled connection, and the routing of
-//! `notifications/events/*` to the stream that asked for them.
-//!
-//! rmcp hands every notification to the client handler on a task of its own,
-//! so two notifications of one stream can reach it in either order. A push
-//! window therefore closes on a heartbeat, keeps reading for a short settle
-//! after it, and persists the heartbeat's cursor (the position the server
-//! checked up to). An event that arrives later than the settle is not lost:
-//! the next window reopens at that cursor, and if the event lies past it the
-//! server delivers it again, where its derived key de-duplicates it.
-
-use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
+//! Typed requests and bounded push windows. rmcp dispatches notifications
+//! independently; the host selects a settle interval and owns cursor commits.
+use super::wire::{
+    self, EVENTS_EXTENSION, ListPage, McpEventContinuityLoss, McpEventDescriptor,
+    McpEventOccurrence, McpEventPoll, McpEventRequest, McpEventsRefusal, McpEventsWireError,
+    StreamPosition,
+};
+use super::{McpEventTransportPolicy, McpServerEvents};
+use crate::pool::McpConnectionPool;
 use lash_sansio::sync::MutexExt as _;
 use rmcp::ServiceError;
 use rmcp::model::{ClientRequest, CustomRequest, ServerResult};
-use rmcp::service::{Peer, PeerRequestOptions, RoleClient};
+use rmcp::service::{Peer, PeerRequestOptions, RequestHandle, RoleClient};
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
-use super::config::McpServerEvents;
-use super::wire::{
-    self, EVENTS_EXTENSION, ListPage, McpEventDescriptor, McpEventOccurrence, McpEventsRefusal,
-    McpEventsWireError, PollResult, StreamPosition,
-};
-use crate::pool::McpConnectionPool;
-
-/// The most `events/list` pages one listing reads.
-const MAX_LIST_PAGES: usize = 64;
-/// How long a push window keeps reading after the notification that closed
-/// it, for notifications rmcp dispatched before it and delivered after.
-const PUSH_SETTLE: Duration = Duration::from_millis(50);
-/// The most stream notifications held for a subscription id that has no
-/// route yet: those that beat the stream's own registration.
-const MAX_ORPHANS: usize = 1024;
-
+/// Which shared catalog budget refused an event listing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpEventListingLimit {
+    Pages,
+    Items,
+    Bytes,
+}
 /// Why an events request did not answer.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -74,6 +63,19 @@ pub enum McpEventsCallError {
         method: String,
         message: String,
     },
+    /// Host admission refused a listing before accepting a partial catalog.
+    #[error("MCP server `{server}` event listing exceeded {limit:?} ({bound})")]
+    ListingLimit {
+        server: String,
+        limit: McpEventListingLimit,
+        bound: usize,
+    },
+    /// The connection lost notifications; no window from it is complete.
+    #[error("MCP server `{server}` event continuity was lost: {loss:?}")]
+    ContinuityLost {
+        server: String,
+        loss: McpEventContinuityLoss,
+    },
     /// The answer does not decode as the extension defines it.
     #[error("MCP server `{server}` answered `{method}` with an undecodable result: {message}")]
     Decode {
@@ -93,64 +95,95 @@ impl McpEventsCallError {
     }
 }
 
-/// What one push window read.
+/// What one push window read. A host commits its events before its cursor.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct StreamWindow {
-    pub(crate) events: Vec<McpEventOccurrence>,
-    /// The position to reopen at: the closing heartbeat's, else the last
-    /// position the stream named.
-    pub(crate) cursor: Option<String>,
-    /// Whether the stream reported a gap (`active` with `truncated`).
-    pub(crate) truncated: bool,
-    /// The server ended the subscription (`terminated`).
-    pub(crate) terminated: Option<McpEventsWireError>,
-    /// Transient per-occurrence errors the server reported.
-    pub(crate) errors: Vec<McpEventsWireError>,
+pub struct McpEventWindow {
+    pub events: Vec<McpEventOccurrence>,
+    pub cursor: Option<String>,
+    pub truncated: bool,
+    pub terminated: Option<McpEventsWireError>,
+    pub errors: Vec<McpEventsWireError>,
+}
+impl McpEventWindow {
+    pub fn continuity_loss(&self) -> Option<McpEventContinuityLoss> {
+        self.truncated.then_some(McpEventContinuityLoss::Retention)
+    }
 }
 
-/// The routes of one connection's open streams, by their request id.
-#[derive(Default)]
 pub(crate) struct EventStreams {
+    capacity: usize,
     inner: Mutex<StreamRoutes>,
 }
-
+impl Default for EventStreams {
+    fn default() -> Self {
+        Self::new(McpEventTransportPolicy::default().orphan_notifications)
+    }
+}
 #[derive(Default)]
 struct StreamRoutes {
-    routes: BTreeMap<String, mpsc::UnboundedSender<(String, Value)>>,
+    routes: BTreeMap<String, mpsc::Sender<(String, Value)>>,
     orphans: VecDeque<(String, String, Value)>,
+    loss: Option<McpEventContinuityLoss>,
 }
-
 impl EventStreams {
-    /// Route a `notifications/events/*` notification of `subscription`.
+    pub(crate) fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            inner: Mutex::default(),
+        }
+    }
     pub(crate) fn deliver(&self, subscription: &Value, method: String, params: Value) {
         let key = subscription.to_string();
         let mut inner = self.inner.lock_recover();
-        if let Some(route) = inner.routes.get(&key) {
-            let _ = route.send((method, params));
+        if inner.loss.is_some() {
             return;
         }
-        if inner.orphans.len() == MAX_ORPHANS {
-            inner.orphans.pop_front();
-        }
-        inner.orphans.push_back((key, method, params));
+        let loss = if let Some(route) = inner.routes.get(&key) {
+            if route.try_send((method, params)).is_ok() {
+                return;
+            }
+            McpEventContinuityLoss::NotificationOverflow {
+                capacity: self.capacity,
+            }
+        } else if inner.orphans.len() < self.capacity {
+            inner.orphans.push_back((key, method, params));
+            return;
+        } else {
+            McpEventContinuityLoss::NotificationOverflow {
+                capacity: self.capacity,
+            }
+        };
+        // Loss is connection-wide: without retaining unbounded lost request
+        // identities we cannot prove which future route is complete. Closing
+        // senders wakes readers; reconnect constructs fresh routing state.
+        inner.loss = Some(loss);
+        inner.routes.clear();
+        inner.orphans.clear();
     }
-
-    fn open(&self, subscription: &Value) -> mpsc::UnboundedReceiver<(String, Value)> {
+    fn loss(&self) -> Option<McpEventContinuityLoss> {
+        self.inner.lock_recover().loss.clone()
+    }
+    fn open(
+        &self,
+        subscription: &Value,
+    ) -> Result<mpsc::Receiver<(String, Value)>, McpEventContinuityLoss> {
         let key = subscription.to_string();
-        let (sender, receiver) = mpsc::unbounded_channel();
         let mut inner = self.inner.lock_recover();
+        if let Some(loss) = &inner.loss {
+            return Err(loss.clone());
+        }
+        let (sender, receiver) = mpsc::channel(self.capacity.max(1));
         let orphans = std::mem::take(&mut inner.orphans);
         for (orphan, method, params) in orphans {
             if orphan == key {
-                let _ = sender.send((method, params));
+                let _ = sender.try_send((method, params));
             } else {
                 inner.orphans.push_back((orphan, method, params));
             }
         }
         inner.routes.insert(key, sender);
-        receiver
+        Ok(receiver)
     }
-
     fn close(&self, subscription: &Value) {
         let key = subscription.to_string();
         let mut inner = self.inner.lock_recover();
@@ -158,13 +191,11 @@ impl EventStreams {
         inner.orphans.retain(|(orphan, _, _)| *orphan != key);
     }
 }
-
-/// A connected peer for `server`'s events.
 fn events_peer(
     pool: &McpConnectionPool,
     server: &str,
 ) -> Result<(Peer<RoleClient>, crate::host::LashMcpClientHandler), McpEventsCallError> {
-    let (events, service) =
+    let (events, _, service) =
         pool.events_connection(server)
             .ok_or_else(|| McpEventsCallError::UnknownServer {
                 server: server.to_owned(),
@@ -177,13 +208,12 @@ fn events_peer(
     let (peer, handler) = service.ok_or_else(|| McpEventsCallError::Disconnected {
         server: server.to_owned(),
     })?;
-    let advertised = peer.peer_info().is_some_and(|info| {
+    if !peer.peer_info().is_some_and(|info| {
         info.capabilities
             .extensions
             .as_ref()
             .is_some_and(|extensions| extensions.contains_key(EVENTS_EXTENSION))
-    });
-    if !advertised {
+    }) {
         return Err(McpEventsCallError::NotAdvertised {
             server: server.to_owned(),
         });
@@ -191,6 +221,229 @@ fn events_peer(
     Ok((peer, handler))
 }
 
+/// Host-callable event transport over the plugin's shared connections.
+#[derive(Clone)]
+pub struct McpEventClient {
+    pool: Arc<McpConnectionPool>,
+}
+impl McpEventClient {
+    pub fn new(pool: Arc<McpConnectionPool>) -> Self {
+        Self { pool }
+    }
+    /// Discover all event descriptors within this server's shared catalog limits.
+    pub async fn list(
+        &self,
+        server: &str,
+        timeout: Duration,
+    ) -> Result<Vec<McpEventDescriptor>, McpEventsCallError> {
+        events_peer(&self.pool, server)?;
+        let (_, limits, _) = self.pool.events_connection(server).ok_or_else(|| {
+            McpEventsCallError::UnknownServer {
+                server: server.to_owned(),
+            }
+        })?;
+        let refuse = |limit, bound| McpEventsCallError::ListingLimit {
+            server: server.to_owned(),
+            limit,
+            bound,
+        };
+        let mut events = Vec::new();
+        let mut cursor: Option<String> = None;
+        let mut seen = BTreeSet::new();
+        let mut bytes = 0usize;
+        for _ in 0..limits.catalog_pages {
+            let params = cursor.as_ref().map_or_else(
+                || serde_json::json!({}),
+                |c| serde_json::json!({"cursor":c}),
+            );
+            let value = call(&self.pool, server, wire::LIST_METHOD, params, timeout).await?;
+            bytes = bytes.saturating_add(value.to_string().len());
+            if bytes > limits.catalog_bytes {
+                return Err(refuse(McpEventListingLimit::Bytes, limits.catalog_bytes));
+            }
+            let page: ListPage = decode(server, wire::LIST_METHOD, value)?;
+            if events.len().saturating_add(page.events.len()) > limits.catalog_items {
+                return Err(refuse(McpEventListingLimit::Items, limits.catalog_items));
+            }
+            events.extend(page.events);
+            match page.next_cursor {
+                None => return Ok(events),
+                Some(next) if seen.insert(next.clone()) => cursor = Some(next),
+                Some(_) => {
+                    return Err(McpEventsCallError::Decode {
+                        server: server.to_owned(),
+                        method: wire::LIST_METHOD.to_owned(),
+                        message: "event listing cursor cycle".to_owned(),
+                    });
+                }
+            }
+        }
+        Err(refuse(McpEventListingLimit::Pages, limits.catalog_pages))
+    }
+    /// One poll. The host owns scheduling, persistence and retention-gap handling.
+    pub async fn poll(
+        &self,
+        server: &str,
+        input: &McpEventRequest,
+        timeout: Duration,
+    ) -> Result<McpEventPoll, McpEventsCallError> {
+        decode(
+            server,
+            wire::POLL_METHOD,
+            call(
+                &self.pool,
+                server,
+                wire::POLL_METHOD,
+                input.params(),
+                timeout,
+            )
+            .await?,
+        )
+    }
+    /// Open one push request. Read its window and explicitly close it before
+    /// committing progress. Dropping it also attempts remote cancellation.
+    pub async fn open(
+        &self,
+        server: &str,
+        input: &McpEventRequest,
+    ) -> Result<McpEventStream, McpEventsCallError> {
+        let (peer, handler) = events_peer(&self.pool, server)?;
+        let (config, _, _) = self.pool.events_connection(server).ok_or_else(|| {
+            McpEventsCallError::UnknownServer {
+                server: server.to_owned(),
+            }
+        })?;
+        let settle = config
+            .enabled()
+            .map_or(0, |policy| policy.reorder_settle_ms);
+        let handle = peer
+            .send_request_with_option(
+                request(wire::STREAM_METHOD, input.params()),
+                PeerRequestOptions::no_options(),
+            )
+            .await
+            .map_err(|error| service_error(server, wire::STREAM_METHOD, Duration::ZERO, error))?;
+        let streams = handler.event_streams();
+        let subscription = handle.id.clone().into_json_value();
+        let notifications = match streams.open(&subscription) {
+            Ok(receiver) => receiver,
+            Err(loss) => {
+                let _ = peer.send_notification(cancel_notification(handle.id)).await;
+                return Err(McpEventsCallError::ContinuityLost {
+                    server: server.to_owned(),
+                    loss,
+                });
+            }
+        };
+        Ok(McpEventStream {
+            server: server.to_owned(),
+            peer,
+            streams,
+            handle: Some(handle),
+            notifications,
+            settle: Duration::from_millis(settle),
+            answered: false,
+        })
+    }
+}
+
+/// One open request; its routing and cancellation stay in the transport.
+/// Read one window, then close. A partial window with a transport/decode fault
+/// is an error and must never advance a host cursor.
+pub struct McpEventStream {
+    server: String,
+    peer: Peer<RoleClient>,
+    streams: Arc<EventStreams>,
+    handle: Option<RequestHandle<RoleClient>>,
+    notifications: mpsc::Receiver<(String, Value)>,
+    settle: Duration,
+    answered: bool,
+}
+impl McpEventStream {
+    pub async fn read_window(
+        &mut self,
+        window: Duration,
+        max_events: usize,
+    ) -> Result<McpEventWindow, McpEventsCallError> {
+        let deadline = tokio::time::Instant::now() + window;
+        let mut closing = None;
+        let mut out = McpEventWindow::default();
+        let handle = self
+            .handle
+            .as_mut()
+            .ok_or_else(|| McpEventsCallError::Disconnected {
+                server: self.server.clone(),
+            })?;
+        loop {
+            if let Some(loss) = self.streams.loss() {
+                return Err(McpEventsCallError::ContinuityLost {
+                    server: self.server.clone(),
+                    loss,
+                });
+            }
+            tokio::select! {
+                biased;
+                () = tokio::time::sleep_until(closing.unwrap_or(deadline)) => {
+                    if closing.is_some() { break; }
+                    closing = Some(tokio::time::Instant::now() + self.settle);
+                }
+                item = self.notifications.recv() => {
+                    let Some((method, params)) = item else {
+                        if let Some(loss) = self.streams.loss() { return Err(McpEventsCallError::ContinuityLost { server: self.server.clone(), loss }); }
+                        break;
+                    };
+                    let close = apply(&mut out, &method, params).map_err(|message| McpEventsCallError::Decode { server: self.server.clone(), method, message })?;
+                    if close || out.events.len() >= max_events {
+                        closing.get_or_insert_with(|| tokio::time::Instant::now() + self.settle);
+                    }
+                }
+                result = &mut handle.rx, if !self.answered => {
+                    self.answered = true;
+                    match result {
+                        Ok(Ok(_)) => { closing.get_or_insert_with(|| tokio::time::Instant::now() + self.settle); }
+                        Ok(Err(error)) => return Err(service_error(&self.server, wire::STREAM_METHOD, window, error)),
+                        Err(_) => return Err(McpEventsCallError::Transport { server: self.server.clone(), method: wire::STREAM_METHOD.to_owned(), message: "the stream closed".to_owned() }),
+                    }
+                }
+            }
+        }
+        // An overflow racing the closing timer cannot publish a complete window.
+        if let Some(loss) = self.streams.loss() {
+            return Err(McpEventsCallError::ContinuityLost {
+                server: self.server.clone(),
+                loss,
+            });
+        }
+        Ok(out)
+    }
+    /// Remove the route and cancel the remote request. Cancellation failures
+    /// retain their typed protocol/transport cause.
+    pub async fn close(mut self) -> Result<(), McpEventsCallError> {
+        if let Some(handle) = self.handle.take() {
+            self.streams.close(&handle.id.clone().into_json_value());
+            self.peer
+                .send_notification(cancel_notification(handle.id))
+                .await
+                .map_err(|error| {
+                    service_error(&self.server, wire::STREAM_METHOD, Duration::ZERO, error)
+                })?;
+        }
+        Ok(())
+    }
+}
+impl Drop for McpEventStream {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            self.streams.close(&handle.id.clone().into_json_value());
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                let peer = self.peer.clone();
+                runtime.spawn(async move {
+                    let _ = peer.send_notification(cancel_notification(handle.id)).await;
+                });
+            }
+        }
+    }
+}
 fn request(method: &str, params: Value) -> ClientRequest {
     ClientRequest::CustomRequest(CustomRequest::new(method, Some(params)))
 }
@@ -269,145 +522,6 @@ fn decode<T: serde::de::DeserializeOwned>(
     })
 }
 
-impl McpConnectionPool {
-    /// The event types `server` lists, every page, bounded.
-    pub async fn list_events(
-        &self,
-        server: &str,
-        timeout: Duration,
-    ) -> Result<Vec<McpEventDescriptor>, McpEventsCallError> {
-        let mut events = Vec::new();
-        let mut cursor: Option<String> = None;
-        for _ in 0..MAX_LIST_PAGES {
-            let params = match &cursor {
-                Some(cursor) => serde_json::json!({ "cursor": cursor }),
-                None => serde_json::json!({}),
-            };
-            let page: ListPage = decode(
-                server,
-                wire::LIST_METHOD,
-                call(self, server, wire::LIST_METHOD, params, timeout).await?,
-            )?;
-            events.extend(page.events);
-            match page.next_cursor {
-                Some(next) if Some(&next) != cursor.as_ref() => cursor = Some(next),
-                _ => return Ok(events),
-            }
-        }
-        Err(McpEventsCallError::Decode {
-            server: server.to_owned(),
-            method: wire::LIST_METHOD.to_owned(),
-            message: format!("the listing ran past {MAX_LIST_PAGES} pages"),
-        })
-    }
-
-    /// One `events/poll`.
-    pub(crate) async fn poll_events(
-        &self,
-        server: &str,
-        params: Value,
-        timeout: Duration,
-    ) -> Result<PollResult, McpEventsCallError> {
-        decode(
-            server,
-            wire::POLL_METHOD,
-            call(self, server, wire::POLL_METHOD, params, timeout).await?,
-        )
-    }
-
-    /// One push window: open `events/stream`, read until a heartbeat closes
-    /// the window or `window` passes, settle, then cancel the stream (the
-    /// subscription's remote cancel).
-    pub(crate) async fn stream_events(
-        &self,
-        server: &str,
-        params: Value,
-        window: Duration,
-        max_events: usize,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> Result<StreamWindow, McpEventsCallError> {
-        let method = wire::STREAM_METHOD;
-        let (peer, handler) = events_peer(self, server)?;
-        let handle = peer
-            .send_request_with_option(request(method, params), PeerRequestOptions::no_options())
-            .await
-            .map_err(|error| service_error(server, method, window, error))?;
-        let subscription = handle.id.clone().into_json_value();
-        let streams = handler.event_streams();
-        let mut notifications = streams.open(&subscription);
-        let mut response = handle.rx;
-        let mut out = StreamWindow::default();
-        let deadline = tokio::time::Instant::now() + window;
-        let mut closing: Option<tokio::time::Instant> = None;
-        let mut answered = false;
-        let mut failure = None;
-        loop {
-            let until = closing.unwrap_or(deadline);
-            tokio::select! {
-                biased;
-                () = cancel.cancelled() => break,
-                () = tokio::time::sleep_until(until) => {
-                    if closing.is_some() {
-                        break;
-                    }
-                    closing = Some(tokio::time::Instant::now() + PUSH_SETTLE);
-                }
-                notification = notifications.recv() => {
-                    let Some((method, params)) = notification else { break };
-                    let close = apply(&mut out, &method, params).map_err(|message| {
-                        McpEventsCallError::Decode {
-                            server: server.to_owned(),
-                            method: method.clone(),
-                            message,
-                        }
-                    });
-                    match close {
-                        Err(error) => {
-                            failure = Some(error);
-                            break;
-                        }
-                        Ok(close) if close || out.events.len() >= max_events => {
-                            closing.get_or_insert_with(|| tokio::time::Instant::now() + PUSH_SETTLE);
-                        }
-                        Ok(_) => {}
-                    }
-                }
-                result = &mut response, if !answered => {
-                    answered = true;
-                    match result {
-                        // The server closed the stream: what it sent is the window.
-                        Ok(Ok(_)) => {
-                            closing.get_or_insert_with(|| tokio::time::Instant::now() + PUSH_SETTLE);
-                        }
-                        Ok(Err(error)) => {
-                            failure = Some(service_error(server, method, window, error));
-                            break;
-                        }
-                        Err(_) => {
-                            failure = Some(McpEventsCallError::Transport {
-                                server: server.to_owned(),
-                                method: method.to_owned(),
-                                message: "the stream closed".to_owned(),
-                            });
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        streams.close(&subscription);
-        if !answered {
-            // The remote cancel: stdio's `notifications/cancelled`, and the
-            // request stream's end over HTTP.
-            let _ = peer.send_notification(cancel_notification(handle.id)).await;
-        }
-        match failure {
-            Some(error) if out.events.is_empty() => Err(error),
-            _ => Ok(out),
-        }
-    }
-}
-
 fn cancel_notification(id: rmcp::model::RequestId) -> rmcp::model::ClientNotification {
     rmcp::model::CancelledNotification::new(rmcp::model::CancelledNotificationParam::new(
         Some(id),
@@ -417,7 +531,7 @@ fn cancel_notification(id: rmcp::model::RequestId) -> rmcp::model::ClientNotific
 }
 
 /// Fold one stream notification into `out`; whether it closes the window.
-fn apply(out: &mut StreamWindow, method: &str, params: Value) -> Result<bool, String> {
+fn apply(out: &mut McpEventWindow, method: &str, params: Value) -> Result<bool, String> {
     match method {
         wire::EVENT_NOTIFICATION => {
             let event: McpEventOccurrence =
@@ -480,4 +594,88 @@ pub(crate) fn route_notification(
     };
     streams.deliver(&subscription, notification.method.clone(), params);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::{McpEventTransportPolicy, testing::McpEventsFixture};
+
+    /// H6: a finite listing inside the host's declared page budget is accepted.
+    #[tokio::test]
+    async fn a_host_selected_65_page_budget_accepts_65_pages() {
+        let world = tempfile::tempdir().unwrap();
+        let fixture = McpEventsFixture::new(world.path());
+        fixture.control(serde_json::json!({"list_pages": 65}));
+        let mut config = fixture.server(McpEventTransportPolicy::default());
+        config.data_limits.catalog_pages = 65;
+        let pool = McpConnectionPool::connect(BTreeMap::from([("tickets".to_owned(), config)]))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                match McpEventClient::new(Arc::clone(&pool))
+                    .list("tickets", Duration::from_secs(5))
+                    .await
+                {
+                    Err(McpEventsCallError::Disconnected { .. }) => tokio::task::yield_now().await,
+                    result => break result.unwrap(),
+                }
+            }
+        })
+        .await
+        .unwrap();
+        pool.shutdown_all().await;
+    }
+
+    /// H6: routing must never silently present an overflowed window as complete.
+    #[tokio::test]
+    async fn orphan_overflow_is_reported_before_a_window_is_complete() {
+        let world = tempfile::tempdir().unwrap();
+        let fixture = McpEventsFixture::new(world.path());
+        fixture.control(serde_json::json!({"orphan_notifications": 3}));
+        let pool = McpConnectionPool::connect(BTreeMap::from([(
+            "tickets".to_owned(),
+            fixture.server(McpEventTransportPolicy {
+                orphan_notifications: 2,
+                reorder_settle_ms: 0,
+            }),
+        )]))
+        .await
+        .unwrap();
+        let client = McpEventClient::new(Arc::clone(&pool));
+        client
+            .list("tickets", Duration::from_secs(5))
+            .await
+            .unwrap();
+        let (_, _, service) = pool.events_connection("tickets").unwrap();
+        let streams = service.unwrap().1.event_streams();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while streams.loss().is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let result = client
+            .open(
+                "tickets",
+                &McpEventRequest {
+                    name: "ticket.created".to_owned(),
+                    arguments: serde_json::Map::new(),
+                    cursor: None,
+                    max_events: 5,
+                    max_age_ms: None,
+                },
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(McpEventsCallError::ContinuityLost {
+                loss: McpEventContinuityLoss::NotificationOverflow { capacity: 2 },
+                ..
+            })
+        ));
+        pool.shutdown_all().await;
+    }
 }

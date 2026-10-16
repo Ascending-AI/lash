@@ -20,7 +20,6 @@ use crate::pool::McpConnectionPool;
 /// Plugin factory for MCP.
 pub struct McpPluginFactory {
     pool: Arc<McpConnectionPool>,
-    events: crate::events::McpEvents,
 }
 
 /// Builder for an MCP plugin factory and its host-owned client handlers.
@@ -92,17 +91,12 @@ impl McpPluginFactory {
     }
 
     fn over(pool: Arc<McpConnectionPool>) -> Self {
-        Self {
-            events: crate::events::McpEvents::new(Arc::clone(&pool)),
-            pool,
-        }
+        Self { pool }
     }
 
-    /// The host's handle on MCP event subscriptions. A host binds it to its
-    /// core once the core is built; servers whose events are disabled offer
-    /// none.
-    pub fn events(&self) -> crate::events::McpEvents {
-        self.events.clone()
+    /// Host-callable event transport. No engine or tools are registered.
+    pub fn events(&self) -> crate::events::McpEventClient {
+        crate::events::McpEventClient::new(Arc::clone(&self.pool))
     }
 
     /// Direct access to the underlying pool, in case the embedder wants to
@@ -149,7 +143,6 @@ impl PluginFactory for McpPluginFactory {
     }
 
     async fn shutdown(&self) -> Result<(), PluginError> {
-        self.events.unbind();
         self.pool.shutdown_all().await;
         Ok(())
     }
@@ -161,10 +154,6 @@ impl PluginFactory for McpPluginFactory {
         self: Arc<Self>,
     ) -> std::result::Result<lash_core::plugin::PluginRecipe, lash_core::plugin::PluginError> {
         let recipe_factory = Arc::clone(&self);
-        // Events add an engine and tools only when a server enables them:
-        // otherwise the plugin registers exactly what it did without them.
-        let events = (!self.pool.events_servers().is_empty()).then(|| self.events.clone());
-        let session_events = events.clone();
         let recipe: std::result::Result<
             lash_core::plugin::PluginRecipe,
             lash_core::plugin::PluginError,
@@ -172,7 +161,7 @@ impl PluginFactory for McpPluginFactory {
             let mut reg = lash_core::plugin::PluginRegistrar::<McpSessionPlugin>::new(
                 lash_core::plugin::PluginFactory::id(self.as_ref()),
             );
-            McpSessionPlugin::declare(&mut reg, session_events.is_some())?;
+            McpSessionPlugin::declare(&mut reg)?;
             let id = lash_core::plugin::PluginFactory::id(self.as_ref());
             Ok(lash_core::plugin::PluginRecipe::bound(
                 id,
@@ -180,7 +169,6 @@ impl PluginFactory for McpPluginFactory {
                 move |_ctx, _state| {
                     Ok(Arc::new(McpSessionPlugin {
                         pool: Arc::clone(&self.pool),
-                        events: session_events.clone(),
                     }))
                 },
             ))
@@ -191,11 +179,6 @@ impl PluginFactory for McpPluginFactory {
         );
         recipe_factory.declare_configuration(&mut configuration)?;
         recipe = recipe.with_configuration(configuration);
-        if let Some(events) = events {
-            recipe = recipe.with_process_engine(crate::events::MCP_EVENTS_ENGINE, move |_ctx| {
-                Ok(crate::events::registration(&events))
-            });
-        }
         Ok(recipe)
     }
 }
@@ -229,29 +212,12 @@ impl lash_core::plugin::PluginMetadata for McpPluginFactory {
 
 struct McpSessionPlugin {
     pool: Arc<McpConnectionPool>,
-    events: Option<crate::events::McpEvents>,
 }
 
 impl McpSessionPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
-        events: bool,
     ) -> std::result::Result<(), lash_core::plugin::PluginError> {
-        if events {
-            reg.tools().provider(
-                lash_core::tool_provider_key!("events"),
-                move |this, _state| {
-                    this.events
-                        .as_ref()
-                        .map(crate::events::tool_provider)
-                        .ok_or_else(|| {
-                            lash_core::plugin::PluginError::Registration(
-                                "the MCP events tools were declared without events".to_owned(),
-                            )
-                        })
-                },
-            )?;
-        }
         reg.tools().provider(
             lash_core::tool_provider_key!("servers"),
             move |this, _state| {

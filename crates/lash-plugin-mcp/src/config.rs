@@ -631,15 +631,12 @@ impl McpServerConfig {
 
     /// Offer this server's events under `events`.
     #[must_use]
-    pub fn with_events(mut self, events: crate::events::McpEventsConfig) -> Self {
+    pub fn with_events(mut self, events: crate::events::McpEventTransportPolicy) -> Self {
         self.events = crate::events::McpServerEvents::Enabled(events);
         self
     }
 
     pub(crate) fn validate(&self, server_name: &str) -> Result<(), McpError> {
-        if let Some(events) = self.events.enabled() {
-            events.validate(server_name)?;
-        }
         if server_name.trim().is_empty() {
             return Err(McpError::Config(
                 "MCP server name cannot be empty".to_string(),

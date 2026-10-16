@@ -58,19 +58,6 @@ pub struct McpEventOccurrence {
     pub cursor: Option<String>,
 }
 
-impl McpEventOccurrence {
-    /// The occurrence as a reaction reads it: everything but its cursor,
-    /// which is delivery bookkeeping and never part of what it delivers.
-    pub(crate) fn delivered(&self) -> Value {
-        serde_json::json!({
-            "eventId": self.event_id,
-            "name": self.name,
-            "timestamp": self.timestamp,
-            "data": self.data,
-        })
-    }
-}
-
 /// An `events/list` page.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,17 +71,17 @@ pub(crate) struct ListPage {
 /// An `events/poll` result.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct PollResult {
+pub struct McpEventPoll {
     #[serde(default)]
-    pub(crate) events: Vec<McpEventOccurrence>,
+    pub events: Vec<McpEventOccurrence>,
     #[serde(default)]
-    pub(crate) cursor: Option<String>,
+    pub cursor: Option<String>,
     #[serde(default)]
-    pub(crate) truncated: bool,
+    pub truncated: bool,
     #[serde(default)]
-    pub(crate) has_more: bool,
+    pub has_more: bool,
     #[serde(default)]
-    pub(crate) next_poll_ms: Option<u64>,
+    pub next_poll_ms: Option<u64>,
 }
 
 /// The `active` and `heartbeat` notifications' cursor and gap.
@@ -155,4 +142,39 @@ impl McpEventsRefusal {
 /// The `_meta` subscription id of a stream notification.
 pub(crate) fn subscription_id(params: &Value) -> Option<&Value> {
     params.get("_meta")?.get(SUBSCRIPTION_ID_META)
+}
+
+/// Typed loss of continuity; the host must reconcile authoritative source
+/// state rather than treating the accepted window as a complete history.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum McpEventContinuityLoss {
+    /// The server no longer retains all history after the requested cursor.
+    Retention,
+    /// Local notification storage overflowed. Reconnect before reopening.
+    NotificationOverflow { capacity: usize },
+}
+impl McpEventPoll {
+    pub fn continuity_loss(&self) -> Option<McpEventContinuityLoss> {
+        self.truncated.then_some(McpEventContinuityLoss::Retention)
+    }
+}
+
+/// Typed poll/stream parameters. Cursors are opaque server values; `None`
+/// requests from now. Hosts choose their own fetch/replay bounds.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpEventRequest {
+    pub name: String,
+    pub arguments: Map<String, Value>,
+    pub cursor: Option<String>,
+    pub max_events: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_age_ms: Option<u64>,
+}
+impl McpEventRequest {
+    pub(crate) fn params(&self) -> Value {
+        serde_json::json!({ "name": self.name, "arguments": self.arguments,
+            "cursor": self.cursor, "maxEvents": self.max_events, "maxAgeMs": self.max_age_ms })
+    }
 }

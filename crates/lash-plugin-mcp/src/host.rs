@@ -357,6 +357,16 @@ impl LashMcpClientHandler {
         self
     }
 
+    pub(crate) fn with_event_policy(
+        mut self,
+        policy: crate::events::McpEventTransportPolicy,
+    ) -> Self {
+        self.event_streams = Arc::new(crate::events::client::EventStreams::new(
+            policy.orphan_notifications,
+        ));
+        self
+    }
+
     pub(crate) fn event_streams(&self) -> Arc<crate::events::client::EventStreams> {
         Arc::clone(&self.event_streams)
     }

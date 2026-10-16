@@ -1599,8 +1599,13 @@ PACKAGE_DEPS = {
             "tokio": "//third-party/rust:p0381"
         },
         "normal": {
+            "blake3": "//third-party/rust:p0032",
             "lash": "//crates/lash:lash",
-            "serde_json": "//third-party/rust:p0322"
+            "rusqlite": "//third-party/rust:p0293",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322",
+            "thiserror": "//third-party/rust:p0375",
+            "tokio": "//third-party/rust:p0381"
         }
     },
     "provider-signatures": {

@@ -3547,9 +3547,13 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 name = "mcp-events"
 version = "0.0.0-dev"
 dependencies = [
+ "blake3",
  "lash-runtime",
+ "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
 ]
 

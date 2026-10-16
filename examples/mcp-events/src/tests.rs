@@ -1,12 +1,9 @@
-//! The example end to end: a SQLite-backed core with the MCP plugin over
-//! the plugin's SEP-3415 fixture server; each published ticket becomes one
-//! turn of the watching session, and the report shows both.
+//! ADR 0137: a host inbox survives lost admission acknowledgements and
+//! reconciles through keyed sends, once, on SQLite.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash::mcp::events::testing::McpEventsFixture;
 use serde_json::json;
 
 use super::*;
@@ -32,18 +29,7 @@ fn model() -> lash::provider::ProviderHandle {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn each_published_ticket_becomes_one_turn() {
-    let world = tempfile::tempdir().expect("the fixture's world");
-    let fixture = McpEventsFixture::new(world.path());
-    fixture.control(json!({ "heartbeat_ms": 100 }));
-    let plugin = Arc::new(
-        lash::mcp::McpPluginFactory::new(BTreeMap::from([(
-            SERVER.to_owned(),
-            fixture.server(ticket_events()),
-        )]))
-        .await
-        .expect("the MCP plugin builds"),
-    );
+async fn a_lost_admission_ack_retries_one_committed_occurrence_as_one_turn() {
     let stores = lash::sqlite::SqliteStoreSet::memory()
         .await
         .expect("the store set opens");
@@ -56,7 +42,6 @@ async fn each_published_ticket_becomes_one_turn() {
         .build()
         .expect("the model's metadata");
     let core = lash::LashCore::standard_builder(backend)
-        .plugin(Arc::clone(&plugin) as Arc<dyn lash::plugins::PluginFactory>)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -68,7 +53,6 @@ async fn each_published_ticket_becomes_one_turn() {
             lash::persistence::LeaseIncarnationId::new("boot"),
         ))
         .expect("the core builds");
-    core.bind_mcp_events(&plugin.events());
 
     let session = SessionId::try_from("triage".to_owned()).expect("a session id");
     core.session(session.clone())
@@ -82,68 +66,74 @@ async fn each_published_ticket_becomes_one_turn() {
         ))
         .await
         .expect("the session is created");
-    let subscription = watch_tickets(&plugin.events(), SERVER, &session)
-        .await
-        .expect("the subscription starts");
-    assert_eq!(
-        watch_tickets(&plugin.events(), SERVER, &session).await.ok(),
-        Some(subscription.clone()),
-        "asking again answers the same subscription"
-    );
-    // Push starts from now: the stream is open before the tickets arrive.
-    while fixture.requests_of("events/stream").is_empty() {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    fixture.emit("t-1", json!({ "title": "printer on fire" }));
-    fixture.emit("t-2", json!({ "title": "coffee machine empty" }));
 
-    let durable = core
-        .session(session.clone())
-        .durable()
-        .await
-        .expect("the durable session");
+    let world = tempfile::tempdir().unwrap();
+    let path = world.path().join("host.sqlite");
+    let mut host = HostStore::open(&path).unwrap();
+    let subscription = Subscription {
+        id: "watch-tickets".to_owned(),
+        generation: 1,
+        server: SERVER.to_owned(),
+        event: TICKET_CREATED.to_owned(),
+        session: session.clone(),
+        arguments: Map::new(),
+    };
+    host.register(&subscription).unwrap();
+    let occurrence = McpEventOccurrence {
+        event_id: "t-1".to_owned(),
+        name: TICKET_CREATED.to_owned(),
+        timestamp: "2026-10-17T00:00:00Z".to_owned(),
+        data: json!({"title":"printer on fire"}),
+        cursor: None,
+    };
+    let batch = McpEventPoll {
+        events: vec![occurrence],
+        cursor: Some("after-1".to_owned()),
+        truncated: false,
+        has_more: false,
+        next_poll_ms: None,
+    };
+    host.accept(&subscription.id, 1, &batch).unwrap();
+    let delivery = host.pending(10).unwrap().pop().unwrap();
+    admit(&core, &delivery).await.unwrap();
+    // Admission committed, but its acknowledgement never reaches the host
+    // inbox. Reopening recovers both the occurrence and its stable key.
+    drop(host);
+    let mut host = HostStore::open(&path).unwrap();
+    assert_eq!(
+        host.read(&subscription.id, 1).unwrap().1.as_deref(),
+        Some("after-1")
+    );
+    assert_eq!(host.pending(10).unwrap()[0].turn, delivery.turn);
+    host.dispatch_pending(&core, 10).await.unwrap();
+    host.accept(&subscription.id, 1, &batch).unwrap(); // source redelivery
+    assert!(host.pending(10).unwrap().is_empty());
+    let durable = core.session(session).durable().await.unwrap();
     tokio::time::timeout(Duration::from_secs(120), async {
         loop {
-            let transcript = match durable.read().await.expect("the committed read") {
-                Some(view) => view
+            if let Some(view) = durable.read().await.unwrap() {
+                let transcript = view
                     .messages()
                     .iter()
                     .flat_map(|message| message.parts.iter())
                     .map(|part| part.content().into_owned())
                     .collect::<Vec<_>>()
-                    .join("\n"),
-                None => String::new(),
-            };
-            let turns = ["t-1", "t-2"].map(|id| {
-                transcript
-                    .matches(&format!("\"eventId\": \"{id}\""))
-                    .count()
-            });
-            if turns == [1, 1] {
-                break;
+                    .join("\n");
+                let occurrences = transcript.matches("printer on fire").count();
+                assert!(occurrences <= 1, "a retry admitted a second turn");
+                if occurrences == 1 && transcript.contains("triaged") {
+                    break;
+                }
             }
-            assert!(
-                turns.iter().all(|count| *count <= 1),
-                "a ticket reacted twice"
-            );
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     })
     .await
-    .expect("both tickets become turns");
-
-    let lines = report(&plugin.events(), &session)
+    .expect("the admitted turn finishes");
+    let turns = durable
+        .committed_turns(None, std::num::NonZeroU32::new(10).unwrap())
         .await
-        .expect("the report");
-    // A push window may hand an event over twice; its key absorbs the
-    // second, which the status counts as delivered.
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert!(lines[0].contains("by Push"), "{lines:?}");
-    assert!(!lines[0].contains("degraded"), "{lines:?}");
-    plugin
-        .events()
-        .unsubscribe(&subscription)
-        .await
-        .expect("the unsubscribe");
-    core.shutdown().await.expect("the core shuts down");
+        .unwrap();
+    assert_eq!(turns.turns.len(), 1, "exactly one turn was recorded");
+    core.shutdown().await.unwrap();
 }

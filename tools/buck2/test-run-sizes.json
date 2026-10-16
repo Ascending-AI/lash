@@ -455,22 +455,6 @@
     "peak_bytes": 123248640,
     "samples": 289
   },
-  "//crates/lash-durable-test:mcp_events_crash_proof__test": {
-    "cpu_count": 4,
-    "memory_kb": 1572864,
-    "p95_cores": 3.78,
-    "p99_peak_bytes": 1178808320,
-    "peak_bytes": 1178808320,
-    "samples": 77
-  },
-  "//crates/lash-durable-test:mcp_events_laws__test": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 1.12,
-    "p99_peak_bytes": 119885824,
-    "peak_bytes": 119885824,
-    "samples": 63
-  },
   "//crates/lash-durable-test:model_answer_receipt_laws__test": {
     "cpu_count": 2,
     "memory_kb": 262144,

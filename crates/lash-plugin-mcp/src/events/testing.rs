@@ -15,7 +15,10 @@
 //! - `refuse`: `{code, message}` every events request answers;
 //! - `terminate`: `{code, message}` an open stream ends with;
 //! - `next_poll_ms` and `heartbeat_ms`: the server's pacing;
-//! - `poll_delay_ms`: the wall time the server takes to answer each poll.
+//! - `poll_delay_ms`: the wall time the server takes to answer each poll;
+//! - `list_pages`: return this many finite catalog pages;
+//! - `orphan_notifications`: send this many unregistered push notifications
+//!   on each listing, to exercise host-selected routing admission.
 //!
 //! `requests.jsonl` logs every request and notification the server read,
 //! once it is handled: a logged poll or stream has fixed where it starts.
@@ -30,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use super::config::McpEventsConfig;
+use super::config::McpEventTransportPolicy;
 use crate::config::{McpServerConfig, McpStdioTransport};
 
 /// The one event type the fixture offers.
@@ -137,6 +140,17 @@ for line in sys.stdin:
     elif method == 'tools/list':
         send({'jsonrpc': '2.0', 'id': request_id, 'result': {'tools': []}})
     elif method == 'events/list':
+        for n in range(control().get('orphan_notifications', 0)):
+            send({'jsonrpc': '2.0', 'method': 'notifications/events/heartbeat', 'params': {
+                'cursor': str(n), '_meta': {'io.modelcontextprotocol/subscriptionId': 'pre-route'}}})
+        page = int(params.get('cursor') or 0)
+        pages = control().get('list_pages', 1)
+        result = {'events': []}
+        if page + 1 < pages:
+            result['nextCursor'] = str(page + 1)
+        if pages > 1:
+            send({'jsonrpc': '2.0', 'id': request_id, 'result': result})
+            continue
         send({'jsonrpc': '2.0', 'id': request_id, 'result': {'events': [{
             'name': 'ticket.created', 'description': 'A ticket was created.',
             'delivery': control().get('delivery', ['poll', 'push']),
@@ -190,7 +204,7 @@ impl McpEventsFixture {
     }
 
     /// A stdio server over this world, its events offered under `events`.
-    pub fn server(&self, events: McpEventsConfig) -> McpServerConfig {
+    pub fn server(&self, events: McpEventTransportPolicy) -> McpServerConfig {
         let mut transport = McpStdioTransport::new(
             "python3",
             vec!["-u".to_owned(), "-c".to_owned(), SERVER.to_owned()],

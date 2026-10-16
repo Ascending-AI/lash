@@ -110,8 +110,6 @@ mod durable_session;
 mod error;
 pub mod formats;
 mod language_observation;
-#[cfg(feature = "mcp")]
-mod mcp_events;
 mod observation_feed;
 mod parked_work;
 #[cfg(feature = "postgres")]

@@ -48,8 +48,9 @@ pub(crate) fn connect_service(
     active_pid: Arc<AtomicU32>,
     shutdown_requested: Arc<RwLock<McpServerHealth>>,
 ) -> Result<ConnectingService, McpError> {
-    let client_handler =
-        LashMcpClientHandler::new(server_name, host_services).with_tool_changes(tool_changes);
+    let client_handler = LashMcpClientHandler::new(server_name, host_services)
+        .with_tool_changes(tool_changes)
+        .with_event_policy(config.events.enabled().cloned().unwrap_or_default());
 
     match &config.transport {
         McpTransport::Stdio(transport) => {

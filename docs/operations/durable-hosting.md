@@ -1531,7 +1531,7 @@ cap; the workbench's upload preset is 1 MiB.
 | H | MCP inbound stdio message | 8 MiB | `McpServerConfig.data_limits.stdio_message_bytes` | Addressable bytes |
 | H | MCP calls / startup / liveness / reconnect / shutdown | Startup 10 s; call 60 s idle / 600 s total; probe 5 s, disconnect after 3 timeouts, keepalive off; reconnect 500 ms–30 s, unlimited attempts; close 3 s, forced stages 1 s each, scheduling 1 s, child poll 10 ms | `McpServerConfig.{startup_timeout_ms,call_max_total_timeout_ms,call_policy,shutdown_policy}` | Representable milliseconds and validated reconnect/cleanup ordering |
 | H | MCP trace propagation | W3C: each `tools/call` sends its `execute_tool` span's `traceparent` and `tracestate` in `params._meta` | `McpServerConfig.trace_propagation: McpTracePropagation` (`w3c`, `off`; `off` sends only the `lash.dev/*` keys and still exports the span) | Two values; no header, allowlist or backend choice |
-| H | MCP event subscriptions (SEP-3415) | Off per server; when enabled: poll floor 1 s, 50 events a fetch, push window 25 s, fetch 30 s, delivery 10 s, retry 1–60 s, park after 5 failed fetches | `McpServerConfig.events: McpServerEvents` (`McpEventsConfig.bounds: McpEventBounds`) | Validated: a fetch below its 300 s step bound, `max_events + 1` deliveries within the 600 s dispatch step |
+| H | MCP event transport (SEP-3415) | Off per server; 1,024 buffered notifications, 50 ms reorder settle | `McpServerConfig.events: McpServerEvents::Enabled(McpEventTransportPolicy)`; event listing shares `McpDataLimits.catalog_pages/items/bytes` | Notification overflow returns typed continuity loss; hosts reconnect and reconcile |
 | H | Tool body, park, requests, execution allowance | Explicit, no inferred tool default | `ToolDraft` / admitted tool execution and park bounds | Typed bounds; provider/native capabilities still checked |
 | H/S | Execution and provider attempts | Recommended model 10 min, control 60 s, stop 2 s; attempts host-declared | `LashCoreBuilder::execution_budgets`, `ProviderAttemptLimits`, tool/model contracts | 30 days / 16 attempts; finite recorded deadline and retry arithmetic |
 | H | Turn / no-progress budgets | Required explicit finite or unbounded choice | `SessionSpec` / `TurnBudget` / `NoProgressBudget` | Nonzero addressable count or explicit unbounded |
@@ -1589,3 +1589,26 @@ cap; the workbench's upload preset is 1 MiB.
 | I | Read/cache buffers, reservation steps, batching and cooperative slices | Various | Existing cache/working configs where useful | Evict/reload, paginate or yield; data remains recoverable |
 | I | Numeric/time domains, varint width, Unicode, schema/format version | ECMAScript TimeClip 8.64e15 ms; exact f64 integers 2^53; u64 varint 10 bytes | Semantic/representation contracts | Changing these changes the language or stored representation, not an operational budget |
 | I | Test generators, conformance/performance witnesses, diagnostic sampling counters | Harness-specific | Harness arguments / explicit measurement selection | No production host/user payload admission |
+
+## MCP event transport and host delivery
+
+With the `mcp` feature, `McpPluginFactory::events()` returns a
+`lash::mcp::events::McpEventClient`. Enable each server with
+`McpServerConfig::with_events(McpEventTransportPolicy::default())`.
+The client provides `list`, `poll` and `open`; an open `McpEventStream`
+provides `read_window` and `close`. Requests, occurrences, opaque cursors,
+refusals and continuity loss are typed facade data. A retention gap is
+available through `continuity_loss()`; notification overflow returns
+`McpEventsCallError::ContinuityLost` and poisons that connection's windows
+until reconnection. Do not commit progress from a failed window.
+
+Lash registers no event subscription engine or model subscription tools.
+Hosts own durable subscription registries, enabled state, authorization,
+poll/stream loops, scheduling, mapping, routing, gap reconciliation and
+retention. Commit occurrences and their cursor in host storage before
+acknowledging progress. Retry delivery through `send().id(TurnId)` or keyed
+process start with unchanged content and a key derived from the source,
+subscription generation and occurrence identity. Retain delivery evidence
+for the source's redelivery horizon and coordinate it with Lash pruning.
+See [the reference host](../../examples/mcp-events/README.md) and
+[ADR 0137](../adr/0137-the-host-owns-events-routing-and-scheduling.md).

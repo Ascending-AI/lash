@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "MCP event subscriptions on the lash facade alone: a host enables one server's events, subscribes a session, and every new event durably starts one turn."
+description = "Host-owned MCP event registry, inbox and keyed delivery on the Lash facade."
 
 [lib]
 doctest = false
@@ -15,6 +15,12 @@ workspace = true
 [dependencies]
 lash = { workspace = true, features = ["mcp"] }
 serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+blake3 = { workspace = true }
+thiserror = { workspace = true }
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+tokio = { workspace = true, features = ["macros", "time"] }
 
 [dev-dependencies]
 lash = { workspace = true, features = ["mcp", "sqlite", "testing"] }

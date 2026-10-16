@@ -149,6 +149,18 @@ is possible, and sends any session notification under a stable `TurnId`.
 Redelivery consults that record. The host explicitly supplies the started
 process's tools and keeps its definition pinned while the registration needs it.
 
+**MCP events.** The MCP plugin ships only typed SEP-3415 transport:
+`McpEventClient::{list, poll, open}` and `McpEventStream::{read_window, close}`.
+Enabling a server's transport registers no engine or model subscription tools.
+Hosts select `McpEventTransportPolicy` notification and reorder-settle bounds;
+event listings use the existing `McpDataLimits` page/item/byte budgets.
+Overflow is typed continuity loss, never an apparently complete window.
+The host owns registrations, schedules, subscription cursors, input mapping,
+destinations and reaction delivery. The reference host in `examples/mcp-events`
+commits a batch and cursor to its own SQLite inbox, then reconciles keyed
+sends. Losing the admission acknowledgment retries the same key and content.
+This replaces the plugin subscription engine and its parked state (FIG-6604).
+
 **Process-end notices.** The host consumes committed process lifecycle facts,
 records the destination and notice identity, then calls `send().id` on the
 selected session. Re-reading a cursor repeats the same send. It advances its
