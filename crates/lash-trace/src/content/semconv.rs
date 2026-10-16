@@ -63,8 +63,13 @@ pub(crate) fn attributes(event: &TraceEvent) -> Vec<(&'static str, Value)> {
         out.push(("gen_ai.tool.call.arguments", json!({"code":code})));
     }
     match event {
-        TraceEvent::TurnCompleted { input, .. } if !input.is_empty() => {
-            out.push(("gen_ai.input.messages", semconv_input(input)));
+        TraceEvent::TurnCompleted { input, output, .. } => {
+            if !input.is_empty() {
+                out.push(("gen_ai.input.messages", semconv_input(input)));
+            }
+            if !output.is_empty() {
+                out.push(("gen_ai.output.messages", semconv_input(output)));
+            }
         }
         TraceEvent::LlmCallCompleted { response, .. } => {
             let parts: Vec<_> = response

@@ -64,7 +64,12 @@ impl ToolProvider for DirectAsk {
 
 /// What the decorator saw of one attempt: whether it was the tool body's
 /// direct call, its scope's `request_id` and its `llm_call_id`.
-type Seen = (bool, String, Option<String>);
+type Seen = (
+    bool,
+    String,
+    Option<String>,
+    Option<crate::tracing::TraceCarrier>,
+);
 
 /// The decorator: a provider that records every attempt's scope. The
 /// turn's first call fails its first attempt retryably and then asks for
@@ -88,6 +93,7 @@ fn decorated(seen: &Arc<StdMutex<Vec<Seen>>>) -> ProviderHandle {
                 direct,
                 request.scope.request_id.clone(),
                 request.scope.llm_call_id.clone(),
+                request.scope.trace_carrier.as_deref().cloned(),
             ));
             let attempt = (!direct).then(|| turn_attempts.fetch_add(1, Ordering::SeqCst));
             async move {
@@ -159,7 +165,7 @@ async fn every_attempt_names_the_exported_chat_span_of_its_call() -> Result<()> 
     );
     let ids: Vec<String> = seen
         .iter()
-        .map(|(_, _, id)| id.clone().expect("every attempt names its call"))
+        .map(|(_, _, id, _)| id.clone().expect("every attempt names its call"))
         .collect();
     assert_eq!(ids[0], ids[1], "a retried call's attempts carry one id");
     let called: std::collections::BTreeSet<_> = ids.iter().cloned().collect();
@@ -185,21 +191,42 @@ async fn every_attempt_names_the_exported_chat_span_of_its_call() -> Result<()> 
         .collect();
     assert_eq!(closed, called, "each call's closing record names it");
 
+    // FIG-6431: the decorator gets the actual logical chat span on every
+    // attempt, including a direct model call made from a tool body.
+    let started = observed.records(&core, "llm_call_started");
+    for (_, _, id, carrier) in &seen {
+        let opener = started
+            .iter()
+            .find(|record| &record.context.llm_call_id == id)
+            .expect("each decorated call has an opener");
+        assert_eq!(
+            carrier.as_ref(),
+            opener.position.as_ref().map(|position| &position.span)
+        );
+        assert!(carrier.is_some(), "an observed call has its own chat span");
+    }
+
     // Unobserved, the decorator still sees the turn's calls named, by the
     // same ids, and the requests are unchanged.
     let (unobserved, _) = run(false).await?;
     let turn = |seen: &[Seen]| -> Vec<(String, Option<String>)> {
         seen.iter()
-            .filter(|(direct, _, _)| !direct)
-            .map(|(_, request, id)| (request.clone(), id.clone()))
+            .filter(|(direct, _, _, _)| !direct)
+            .map(|(_, request, id, _)| (request.clone(), id.clone()))
             .collect()
     };
     assert_eq!(turn(&unobserved), turn(&seen));
     assert!(
         unobserved
             .iter()
-            .all(|(direct, _, id)| !direct || id.is_some()),
+            .all(|(direct, _, id, _)| !direct || id.is_some()),
         "an unobserved direct call is named too: {unobserved:#?}"
+    );
+    assert!(
+        unobserved
+            .iter()
+            .all(|(_, _, _, carrier)| carrier.is_none()),
+        "export off leaves the scope carrier explicitly absent"
     );
     core.shutdown().await?;
     Ok(())

@@ -457,6 +457,13 @@ fn event_samples() -> Vec<TraceEvent> {
             },
         },
         TraceEvent::TurnCompleted {
+            output: vec![lash_trace::TraceLlmMessage {
+                role: "assistant".into(),
+                blocks: vec![lash_trace::TraceContentBlock::Text {
+                    text: "turn answer".into(),
+                    cache_breakpoint: false,
+                }],
+            }],
             input: Vec::new(),
             inference_calls: Some(2),
             tool_calls: Some(1),
@@ -895,6 +902,13 @@ fn content_bearing_events() -> Vec<TraceEvent> {
     };
     vec![
         TraceEvent::TurnCompleted {
+            output: vec![lash_trace::TraceLlmMessage {
+                role: "assistant".into(),
+                blocks: vec![lash_trace::TraceContentBlock::Text {
+                    text: CONTENT.into(),
+                    cache_breakpoint: false,
+                }],
+            }],
             inference_calls: None,
             tool_calls: None,
             input: vec![lash_trace::TraceLlmMessage {

@@ -27,6 +27,16 @@ impl OpenSpan {
             .map_or(TraceSpanKind::Model, |leaf| leaf.kind);
         self.standing = self.standing.selected(kind, ids);
     }
+    /// The model call's own span; absent when its detail is disabled or no
+    /// observed container exists. Never substitutes the enclosing span.
+    pub fn carrier(&self) -> Option<&TraceCarrier> {
+        self.standing
+            .leaf
+            .as_ref()
+            .filter(|leaf| leaf.kind == TraceSpanKind::Model && self.standing.is_observed())
+            .map(|leaf| &leaf.span)
+    }
+
     pub fn standing(&self) -> &TraceStanding {
         &self.standing
     }

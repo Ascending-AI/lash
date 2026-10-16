@@ -656,7 +656,7 @@ impl Processes {
                     "the kernel engine returned no settings".to_owned(),
                 ))
             })?;
-        serde_json::from_value(settings.into_value()).map_err(|error| {
+        crate::process::KernelRecordedSettings::from_engine_settings(&settings).map_err(|error| {
             lash_core::PluginError::Registration(format!(
                 "the kernel settings do not decode: {error}"
             ))

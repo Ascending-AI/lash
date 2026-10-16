@@ -33,9 +33,9 @@ pub use lash_trace::{
     TraceDomainCompletion, TraceDomainStatus, TraceDomainSubject, TraceEventKind, TraceIdentity,
     TraceIds, TraceLinkMode, TraceLinks, TraceModelAttempt, TraceModelAttemptSpan, TraceModelCall,
     TraceParent, TracePosition, TraceRecordIdentity, TraceScopeAdmission, TraceScopeId,
-    TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceSpanKind, TraceStateLimits,
-    TraceTimestamp, TraceToolOwner, TraceTransitionKind, W3cSpanId, W3cTraceFlags, W3cTraceId,
-    W3cTraceState, derive_span,
+    TraceScopeKind, TraceScopeOffer, TraceScopeOwner, TraceSpanKind, TraceStateBudget,
+    TraceStateLimits, TraceTimestamp, TraceToolOwner, TraceTransitionKind, W3cSpanId,
+    W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
 };
 pub use lash_trace::{TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
 

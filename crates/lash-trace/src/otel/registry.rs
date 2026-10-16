@@ -181,7 +181,7 @@ attributes! {
         CancelOrigin => ("lash.cancel.origin", String, TraceSpanKindSet::of(&[K::Agent])),
         SystemInstructions => ("gen_ai.system_instructions", String, TraceSpanKindSet::of(&[K::Model])),
         InputMessages => ("gen_ai.input.messages", String, TraceSpanKindSet::of(&[K::Model, K::Agent])),
-        OutputMessages => ("gen_ai.output.messages", String, TraceSpanKindSet::of(&[K::Model])),
+        OutputMessages => ("gen_ai.output.messages", String, TraceSpanKindSet::of(&[K::Model, K::Agent])),
         ToolDefinitions => ("gen_ai.tool.definitions", String, TraceSpanKindSet::of(&[K::Model])),
         ToolArguments => ("gen_ai.tool.call.arguments", String, TraceSpanKindSet::of(&[K::Tool,K::Cell])),
         ToolResult => ("gen_ai.tool.call.result", String, TraceSpanKindSet::of(&[K::Tool,K::Cell])),
@@ -336,7 +336,7 @@ metrics! {
 pub fn contract_markdown() -> String {
     use std::fmt::Write;
     let mut out = format!(
-        "# Lash instrumentation contract\n\nScope `{LASH_INSTRUMENTATION_NAME}`, version `{LASH_INSTRUMENTATION_CONTRACT}`. GenAI snapshot `{GEN_AI_SEMCONV_SNAPSHOT}`. Exported changes require a release note. No schema URL is claimed.\n\n| Span name or prefix | Kind | Ownership | Semconv type |\n|---|---|---|---|\n"
+        "# Lash instrumentation contract\n\nScope `{LASH_INSTRUMENTATION_NAME}`, version `{LASH_INSTRUMENTATION_CONTRACT}`. GenAI snapshot `{GEN_AI_SEMCONV_SNAPSHOT}`. Exported changes require a release note. No schema URL is claimed.\n\n`TurnCompleted.output` carries the settled assistant answer under `OutputMessages` consent; its closer alone supplies `gen_ai.output.messages` on `invoke_agent`. Content is omitted by default and passes through the content hook and bounds. Model decorators read the logical chat span from `LlmRequestScope.trace_carrier` (absent when no model span is built). Content hooks identify tool records through `ContentView.tool_name`.\n\n| Span name or prefix | Kind | Ownership | Semconv type |\n|---|---|---|---|\n"
     );
     for span in SPANS {
         let _ = writeln!(

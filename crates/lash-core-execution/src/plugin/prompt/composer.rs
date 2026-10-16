@@ -235,6 +235,7 @@ pub fn admission_record(
             // own.
             attempt: None,
             llm_call_id: None,
+            trace_carrier: None,
             ..response.scope.clone()
         },
         &serde_json::to_string(response.contract.as_ref())?,

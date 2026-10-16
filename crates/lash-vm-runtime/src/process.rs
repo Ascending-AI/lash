@@ -156,6 +156,14 @@ pub struct KernelRecordedSettings {
     pub observe: lash_kernel_vm::Observe,
 }
 
+/// Engine settings that cannot decode as kernel recorded settings.
+#[derive(Debug, thiserror::Error)]
+#[error("{source}")]
+pub struct KernelSettingsError {
+    #[source]
+    source: serde_json::Error,
+}
+
 impl KernelRecordedSettings {
     /// The settings of a process written in `dialect` and held to `bounds`,
     /// observed `off`.
@@ -178,6 +186,18 @@ impl KernelRecordedSettings {
     pub fn observing(mut self, observe: lash_kernel_vm::Observe) -> Self {
         self.observe = observe;
         self
+    }
+
+    /// Decode settings received from a host transport into their typed form.
+    ///
+    /// # Errors
+    /// Unknown fields, missing fields and invalid values return the typed
+    /// JSON decoding error; no default settings replace a refused value.
+    pub fn from_engine_settings(
+        settings: &lash_core::EngineSettings,
+    ) -> Result<Self, KernelSettingsError> {
+        serde_json::from_value(settings.value().clone())
+            .map_err(|source| KernelSettingsError { source })
     }
 
     /// The engine settings a start records, including its typed observation choice.
@@ -543,12 +563,11 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
                 "a kernel process start states its settings".to_owned(),
             ));
         };
-        let settings: KernelRecordedSettings = serde_json::from_value(settings.value().clone())
-            .map_err(|error| {
-                lash_core::PluginError::Registration(format!(
-                    "the kernel settings do not decode: {error}"
-                ))
-            })?;
+        let settings = KernelRecordedSettings::from_engine_settings(settings).map_err(|error| {
+            lash_core::PluginError::Registration(format!(
+                "the kernel settings do not decode: {error}"
+            ))
+        })?;
         if settings.dialect != self.dialect {
             return Err(lash_core::PluginError::Registration(format!(
                 "the kernel settings name dialect `{}`, and this engine's workers serve `{}`",

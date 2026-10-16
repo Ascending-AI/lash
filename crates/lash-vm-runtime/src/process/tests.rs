@@ -909,3 +909,44 @@ main { let got = perform a.run(null) as Any finish got }
     )
     .expect("only worker's performed effect must be offered");
 }
+
+/// FIG-6431 / S1: HTTP engine settings round-trip strictly to the recorded
+/// settings; an unknown key or invalid typed value is never ignored.
+#[test]
+fn engine_settings_decode_strictly_to_recorded_settings() {
+    use super::KernelRecordedSettings;
+    let recorded = KernelRecordedSettings::new(
+        "typescript",
+        lash_kernel_vm::Bounds {
+            charge: 10_000,
+            memory: 1024 * 1024,
+            call_depth: 32,
+            live_tasks: 16,
+            requests_per_park: 16,
+            join_members: 16,
+        },
+    )
+    .observing(lash_kernel_vm::Observe::Counts);
+    let engine = recorded.clone().into_engine_settings();
+    assert_eq!(
+        KernelRecordedSettings::from_engine_settings(&engine).unwrap(),
+        recorded
+    );
+    let mut unknown = engine.value().clone();
+    unknown["unknown"] = serde_json::json!(true);
+    assert!(
+        KernelRecordedSettings::from_engine_settings(&lash_core::EngineSettings::new(unknown))
+            .is_err()
+    );
+    for (key, value) in [
+        ("charge", serde_json::json!(-1)),
+        ("observe", serde_json::json!("invalid")),
+    ] {
+        let mut invalid = engine.value().clone();
+        invalid[key] = value;
+        assert!(
+            KernelRecordedSettings::from_engine_settings(&lash_core::EngineSettings::new(invalid))
+                .is_err()
+        );
+    }
+}

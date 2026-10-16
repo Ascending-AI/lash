@@ -280,7 +280,7 @@ pub async fn run_session_close(
                         turn,
                         traced,
                         &[],
-                        input,
+                        (input, Vec::new()),
                         (turn.model_calls, Some(turn.tool_calls)),
                     );
                 }

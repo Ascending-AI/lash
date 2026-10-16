@@ -605,6 +605,10 @@ pub struct LlmRequestScope {
     /// configuration: no request digest covers it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm_call_id: Option<String>,
+    /// The logical call's `chat` span, identical to its opening trace record.
+    /// Absent when no span is built. Live telemetry, never stored or digested.
+    #[serde(skip)]
+    pub trace_carrier: Option<Arc<crate::trace_carrier::TraceCarrier>>,
 }
 
 /// The turn a model call serves, typed so a host attributes the call's cost
@@ -646,6 +650,7 @@ impl LlmRequestScope {
             turn: None,
             attempt: None,
             llm_call_id: None,
+            trace_carrier: None,
         }
     }
 

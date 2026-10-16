@@ -305,6 +305,9 @@ impl DirectLlmClient {
             );
             (call, id)
         });
+        llm_request.scope.trace_carrier = traced
+            .as_ref()
+            .and_then(|(call, _)| call.carrier().cloned().map(Arc::new));
         // No lash execution owns this call: the host that made it owns its
         // billing, and lash keeps no ledger row for it (ADR 0127).
         let sideband =

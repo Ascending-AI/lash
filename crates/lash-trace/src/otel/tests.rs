@@ -141,6 +141,7 @@ fn closing(
 fn completed_under(parent: &TraceCarrier, scope: &TraceScopeId) -> TraceRecord {
     record(
         TraceEvent::TurnCompleted {
+            output: Vec::new(),
             input: Vec::new(),
             inference_calls: None,
             tool_calls: None,
@@ -1283,6 +1284,7 @@ fn failure_attributes_preserve_typed_classes() {
         (
             TraceSpanKind::Agent,
             TraceEvent::TurnCompleted {
+                output: Vec::new(),
                 input: Vec::new(),
                 inference_calls: None,
                 tool_calls: None,

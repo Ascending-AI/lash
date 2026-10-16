@@ -1050,7 +1050,7 @@ pub mod process {
     pub use lash_vm_runtime::Observe;
     /// Typed settings for a kernel-engine start.
     #[cfg(feature = "codemode")]
-    pub use lash_vm_runtime::{KernelBounds, KernelRecordedSettings};
+    pub use lash_vm_runtime::{KernelBounds, KernelRecordedSettings, KernelSettingsError};
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{
         ConsumerHold, FitPolicy, ProcessDefinitionStoredError, ProcessStartDeclaration,

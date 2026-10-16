@@ -195,6 +195,8 @@ pub struct ContentView<'a> {
     pub position: Option<&'a TracePosition>,
     pub ids: &'a TraceIds,
     pub event_kind: TraceEventKind,
+    /// The called tool on tool opener/closer records; absent for other kinds.
+    pub tool_name: Option<&'a str>,
     pub policy: &'a TracePolicySnapshot,
 }
 /// A transaction over a record's captured fields and bounded references.
@@ -303,7 +305,13 @@ impl crate::TraceRecord {
             && let Some(hook) = hook
         {
             let ids = self.context.ids();
+            let tool_name = match &self.event {
+                TraceEvent::ToolCallStarted { name, .. }
+                | TraceEvent::ToolCallCompleted { name, .. } => Some(name.clone()),
+                _ => None,
+            };
             let view = ContentView {
+                tool_name: tool_name.as_deref(),
                 kind: self
                     .position
                     .as_ref()

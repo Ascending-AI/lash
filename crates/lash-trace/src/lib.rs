@@ -99,8 +99,8 @@ pub use telemetry::{
     TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT, TraceAttemptId, TraceAttemptLink, TraceCall,
     TraceCaller, TraceCarrier, TraceCause, TraceIdentity, TraceLinkMode, TraceLinks, TraceParent,
     TraceRecordIdentity, TraceScopeAdmission, TraceScopeId, TraceScopeKind, TraceScopeOffer,
-    TraceScopeOwner, TraceStateLimits, TraceToolOwner, TraceTransitionKind, W3cSpanId,
-    W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
+    TraceScopeOwner, TraceStateBudget, TraceStateLimits, TraceToolOwner, TraceTransitionKind,
+    W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState, derive_span,
 };
 pub use time::TraceTimestamp;
 pub use workflow_overlay::{

@@ -37,6 +37,9 @@ impl LocalDirectEffectRunner {
                 );
                 (call, context, request.model.wire_model().to_string())
             });
+        request.scope.trace_carrier = traced
+            .as_ref()
+            .and_then(|(call, _, _)| call.carrier().cloned().map(Arc::new));
         let (result, call_record) = self
             .run_direct_llm_request(provider, request, traced.as_ref())
             .await;
@@ -142,6 +145,7 @@ impl LocalDirectEffectRunner {
             .clone()
             .with_senders(request.stream_events.take(), request.provider_trace.take());
         context.scope.llm_call_id = request.scope.llm_call_id.clone();
+        context.scope.trace_carrier = request.scope.trace_carrier.clone();
         let sideband = traced.map_or_else(
             || sideband.clone(),
             |(call, context, _)| call.provider_attempts(sideband.clone(), context.clone()),

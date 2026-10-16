@@ -462,6 +462,15 @@ mod tests {
     /// its recorded effect instead of diverging from it.
     #[test]
     fn trace_provenance_is_no_part_of_an_envelopes_identity() {
+        let mut call = llm_call(transcript("same request"));
+        let unobserved = call.canonical_form().expect("journaled request");
+        if let RuntimeEffectCommand::LlmCall { request } = &mut call.command {
+            request.scope.trace_carrier = Some(Arc::new(producer(1)));
+        }
+        let observed = call.canonical_form().expect("journaled observed request");
+        assert_eq!(observed.json(), unobserved.json());
+        assert_eq!(observed.hash(), unobserved.hash());
+
         let parent = |id| lash_trace::TraceCause::Parent(producer(id)).as_parent();
         let offer = |id| {
             lash_trace::TraceScopeOffer::new(

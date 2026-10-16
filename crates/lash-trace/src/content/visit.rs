@@ -67,7 +67,7 @@ fn request(req: &mut TraceLlmRequest, f: &mut dyn FnMut(&mut ContentField<'_>)) 
             f,
         );
     }
-    input_messages(&mut req.messages, f);
+    messages(&mut req.messages, C::InputMessages, "input_messages", f);
     tools(&mut req.tools, f);
     if let Some(spec) = &mut req.output_spec
         && spec.get("type").and_then(Value::as_str) == Some("json_schema")
@@ -83,32 +83,30 @@ fn request(req: &mut TraceLlmRequest, f: &mut dyn FnMut(&mut ContentField<'_>)) 
         json(C::OutputSchema, "output_schema", &mut req.output_spec, f);
     }
 }
-fn input_messages(messages: &mut [TraceLlmMessage], f: &mut dyn FnMut(&mut ContentField<'_>)) {
+fn messages(
+    messages: &mut [TraceLlmMessage],
+    category: C,
+    prefix: &str,
+    f: &mut dyn FnMut(&mut ContentField<'_>),
+) {
     for (i, message) in messages.iter_mut().enumerate() {
         for (j, block) in message.blocks.iter_mut().enumerate() {
-            let path = format!("input_messages[{i}].parts[{j}]");
+            let path = format!("{prefix}[{i}].parts[{j}]");
             match block {
-                TraceContentBlock::Text { text: value, .. } => {
-                    text(C::InputMessages, path, value, f)
-                }
-                TraceContentBlock::Attachment { reference } => {
-                    json(C::InputMessages, path, reference, f)
-                }
+                TraceContentBlock::Text { text: value, .. } => text(category, path, value, f),
+                TraceContentBlock::Attachment { reference } => json(category, path, reference, f),
                 TraceContentBlock::ToolCall { input_json, .. } => {
-                    json(C::InputMessages, path, input_json, f)
+                    json(category, path, input_json, f)
                 }
                 TraceContentBlock::ToolResult { content, .. } => {
                     for (k, part) in content.iter_mut().enumerate() {
                         match part {
                             TraceToolResultBlock::Text { text: value } => {
-                                text(C::InputMessages, format!("{path}.content[{k}]"), value, f)
+                                text(category, format!("{path}.content[{k}]"), value, f)
                             }
-                            TraceToolResultBlock::Attachment { reference } => json(
-                                C::InputMessages,
-                                format!("{path}.content[{k}]"),
-                                reference,
-                                f,
-                            ),
+                            TraceToolResultBlock::Attachment { reference } => {
+                                json(category, format!("{path}.content[{k}]"), reference, f)
+                            }
                         }
                     }
                 }
@@ -506,9 +504,13 @@ impl TraceEvent {
                 inference_calls: _,
                 tool_calls: _,
                 input,
+                output,
                 inputs: _,
                 outcome: _,
-            } => input_messages(input, f),
+            } => {
+                messages(input, C::InputMessages, "input_messages", f);
+                messages(output, C::OutputMessages, "output_messages", f);
+            }
             Self::Custom { payload, name: _ } => json(C::Extension, "extension", payload, f),
             Self::TurnStarted { metadata: _ }
             | Self::PromptBuilt {
@@ -562,10 +564,13 @@ impl TraceEvent {
                 tool.output_schema = Value::Null;
             }
         }
-        if let Self::TurnCompleted { input, .. } = self
-            && !policy.captures(C::InputMessages)
-        {
-            input.clear();
+        if let Self::TurnCompleted { input, output, .. } = self {
+            if !policy.captures(C::InputMessages) {
+                input.clear();
+            }
+            if !policy.captures(C::OutputMessages) {
+                output.clear();
+            }
         }
         // Remove reasoning parts, rather than leave empty reasoning in a message.
         if let Some(req) = self.request_mut() {

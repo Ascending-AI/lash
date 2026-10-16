@@ -826,6 +826,7 @@ pub async fn run_phases(
                 let cause = done.run_terminal_cause(&run)?;
                 let kind = cause.kind();
                 let traced = turn_trace::outcome(services.tracing(), &cause);
+                let output = turn_trace::output(services.tracing(), &row, &cause);
                 // A frame switch mails its follow-on with its commit.
                 let follow_on = match &done.outcome {
                     Some(outcome) => follow_on_mail(
@@ -933,7 +934,7 @@ pub async fn run_phases(
                     &row,
                     traced,
                     &drive.delivered_inputs(),
-                    input,
+                    (input, output),
                     (
                         calls,
                         Some(
@@ -1089,7 +1090,7 @@ pub(super) async fn refuse(
         row,
         traced,
         &[],
-        input,
+        (input, Vec::new()),
         (row.model_calls, Some(row.tool_calls)),
     );
     Ok(())

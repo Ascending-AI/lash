@@ -623,7 +623,7 @@ async fn end(
         row,
         traced,
         &delivered,
-        input,
+        (input, Vec::new()),
         (
             current.unwrap_or(row).model_calls,
             Some(current.unwrap_or(row).tool_calls),

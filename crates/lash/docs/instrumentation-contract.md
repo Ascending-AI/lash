@@ -2,6 +2,8 @@
 
 Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions-genai@07794021bfe46e1c241408b6f55cb4354bd28318`. Exported changes require a release note. No schema URL is claimed.
 
+`TurnCompleted.output` carries the settled assistant answer under `OutputMessages` consent; its closer alone supplies `gen_ai.output.messages` on `invoke_agent`. Content is omitted by default and passes through the content hook and bounds. Model decorators read the logical chat span from `LlmRequestScope.trace_carrier` (absent when no model span is built). Content hooks identify tool records through `ContentView.tool_name`.
+
 | Span name or prefix | Kind | Ownership | Semconv type |
 |---|---|---|---|
 | `lash.send` | Producer | Live | — |
@@ -78,7 +80,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `lash.cancel.origin` | String | Provenance | agent |
 | `gen_ai.system_instructions` | String | Provenance | model |
 | `gen_ai.input.messages` | String | Provenance | agent, model |
-| `gen_ai.output.messages` | String | Provenance | model |
+| `gen_ai.output.messages` | String | Provenance | agent, model |
 | `gen_ai.tool.definitions` | String | Provenance | model |
 | `gen_ai.tool.call.arguments` | String | Provenance | tool, cell |
 | `gen_ai.tool.call.result` | String | Provenance | tool, cell |
@@ -108,7 +110,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | Span kind | Attribute reserve |
 |---|---|
 | `producer` | 20 |
-| `agent` | 24 |
+| `agent` | 25 |
 | `model` | 45 |
 | `model_attempt` | 28 |
 | `tool` | 31 |

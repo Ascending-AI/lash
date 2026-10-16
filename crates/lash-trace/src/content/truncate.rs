@@ -163,6 +163,9 @@ impl TraceEvent {
                         response.text.clear();
                         response.parts = None;
                     }
+                    if let Self::TurnCompleted { output, .. } = self {
+                        output.clear();
+                    }
                 }
                 "gen_ai.tool.call.arguments" => match self {
                     Self::ToolCallCompleted { args, .. } | Self::ToolCallStarted { args, .. } => {

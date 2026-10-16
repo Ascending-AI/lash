@@ -19,6 +19,8 @@ use lash_kernel_doc::{Datum, KernelDataLimits, NumberToken};
 pub enum NotJson {
     #[error("JSON has no spelling for a non-finite float")]
     NonFiniteFloat,
+    #[error("`{path}` is absent (undefined); JSON has no spelling for absent")]
+    Absent { path: String },
     #[error("JSON has no spelling for {kind}")]
     Kind { kind: JsonlessKind },
     #[error("a JSON object's keys are texts, and this map has a key of another kind")]
@@ -30,7 +32,6 @@ pub enum NotJson {
 /// The kinds of datum JSON has no spelling for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JsonlessKind {
-    Absent,
     Bytes,
     Timestamp,
     Set,
@@ -42,7 +43,6 @@ pub enum JsonlessKind {
 impl std::fmt::Display for JsonlessKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Absent => "absent",
             Self::Bytes => "bytes",
             Self::Timestamp => "a timestamp",
             Self::Set => "a set",
@@ -67,11 +67,17 @@ pub fn datum_to_json_with_limits(
     limits: KernelDataLimits,
 ) -> Result<String, NotJson> {
     let mut text = String::new();
-    write(value, 0, &mut text, limits.document_depth())?;
+    write(value, 0, &mut text, limits.document_depth(), "$")?;
     Ok(text)
 }
 
-fn write(value: &Datum, depth: usize, out: &mut String, limit: usize) -> Result<(), NotJson> {
+fn write(
+    value: &Datum,
+    depth: usize,
+    out: &mut String,
+    limit: usize,
+    path: &str,
+) -> Result<(), NotJson> {
     if depth > limit {
         return Err(NotJson::TooDeep { limit });
     }
@@ -92,7 +98,7 @@ fn write(value: &Datum, depth: usize, out: &mut String, limit: usize) -> Result<
                 if index > 0 {
                     out.push(',');
                 }
-                write(item, depth + 1, out, limit)?;
+                write(item, depth + 1, out, limit, &format!("{path}[{index}]"))?;
             }
             out.push(']');
         }
@@ -102,6 +108,7 @@ fn write(value: &Datum, depth: usize, out: &mut String, limit: usize) -> Result<
                 depth,
                 out,
                 limit,
+                path,
             )?;
         }
         Datum::Map(entries) => {
@@ -112,9 +119,13 @@ fn write(value: &Datum, depth: usize, out: &mut String, limit: usize) -> Result<
                 };
                 fields.push((key.as_str(), value));
             }
-            write_object(fields.into_iter(), depth, out, limit)?;
+            write_object(fields.into_iter(), depth, out, limit, path)?;
         }
-        Datum::Absent => return kind(JsonlessKind::Absent),
+        Datum::Absent => {
+            return Err(NotJson::Absent {
+                path: path.to_owned(),
+            });
+        }
         Datum::Bytes(_) => return kind(JsonlessKind::Bytes),
         Datum::Timestamp(_) => return kind(JsonlessKind::Timestamp),
         Datum::Set(_) => return kind(JsonlessKind::Set),
@@ -130,6 +141,7 @@ fn write_object<'a>(
     depth: usize,
     out: &mut String,
     limit: usize,
+    path: &str,
 ) -> Result<(), NotJson> {
     out.push('{');
     for (index, (key, value)) in fields.enumerate() {
@@ -138,7 +150,21 @@ fn write_object<'a>(
         }
         write_text(key, out);
         out.push(':');
-        write(value, depth + 1, out, limit)?;
+        let child = if key.chars().enumerate().all(|(i, c)| {
+            c == '_' || c == '$' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit())
+        }) && !key.is_empty()
+        {
+            if path == "$" {
+                key.to_owned()
+            } else {
+                format!("{path}.{key}")
+            }
+        } else {
+            let mut quoted = String::new();
+            write_text(key, &mut quoted);
+            format!("{path}[{quoted}]")
+        };
+        write(value, depth + 1, out, limit, &child)?;
     }
     out.push('}');
     Ok(())
@@ -436,14 +462,44 @@ mod tests {
         );
         assert_eq!(
             datum_to_json(&Datum::List(vec![Datum::Absent])),
-            Err(NotJson::Kind {
-                kind: JsonlessKind::Absent
+            Err(NotJson::Absent {
+                path: "$[0]".into()
             })
         );
         assert_eq!(
             datum_to_json(&Datum::Map(vec![(Datum::Bool(true), Datum::Null)])),
             Err(NotJson::MapKey)
         );
+    }
+
+    /// FIG-6431: both cell dialects use this JSON boundary, and an absent
+    /// tool argument must name the field the author can correct.
+    #[test]
+    fn absent_tool_arguments_name_their_path() {
+        for (value, path) in [
+            (
+                Datum::Record(vec![("workflow_id".into(), Datum::Absent)]),
+                "workflow_id",
+            ),
+            (
+                Datum::Record(vec![(
+                    "a".into(),
+                    Datum::Record(vec![(
+                        "b".into(),
+                        Datum::List(vec![Datum::Null, Datum::Null, Datum::Absent]),
+                    )]),
+                )]),
+                "a.b[2]",
+            ),
+        ] {
+            let refusal = datum_to_json(&value).expect_err("absent is not JSON");
+            assert!(
+                refusal
+                    .to_string()
+                    .contains(&format!("`{path}` is absent (undefined)")),
+                "{refusal}"
+            );
+        }
     }
 
     /// Text that is not exactly one JSON value is refused, never repaired.

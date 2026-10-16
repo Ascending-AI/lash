@@ -210,6 +210,60 @@ async fn served_turn() -> Result<(Observed, LashCore)> {
     Ok((observed, core))
 }
 
+/// FIG-6431: the committed assistant answer reaches the closer and the
+/// invoke_agent span only with OutputMessages consent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_turn_closer_exports_its_answer_only_with_output_consent() -> Result<()> {
+    for capture in [lash_trace::Capture::Omitted, lash_trace::Capture::Captured] {
+        let builder = explicit_ephemeral_facets(LashCore::standard_builder(
+            sqlite_memory_store_backend().await,
+        ))
+        .serve_test_llm_profile(
+            mock_provider(vec![text_call("settled answer")]).into_handle(),
+            mock_llm_profile_spec(),
+        )
+        .content_policy(
+            lash_trace::ContentPolicy::omitted()
+                .with(lash_trace::ContentCategory::OutputMessages, capture),
+        );
+        let (observed, builder) = Observed::install(builder);
+        let core = builder.build(crate::testing::runtime_lease_owner())?;
+        let session = core
+            .session(crate::SessionId::parse("turn-answer-consent").unwrap())
+            .create(crate::SessionCreation::root(mock_session_spec()))
+            .await?;
+        let output = session.send(TurnInput::text("answer")).output().await?;
+        assert!(output.is_success());
+        let records = observed.records(&core, "turn_completed");
+        assert_eq!(records.len(), 1);
+        let lash_trace::TraceEvent::TurnCompleted { output, .. } = &records[0].event else {
+            unreachable!()
+        };
+        let captured = capture == lash_trace::Capture::Captured;
+        assert_eq!(!output.is_empty(), captured);
+        let spans = observed.spans("invoke_agent");
+        assert_eq!(spans.len(), 1);
+        let exported = attribute(&spans[0], "gen_ai.output.messages");
+        if captured {
+            let answer = serde_json::json!([{"role":"assistant","parts":[{"type":"text","content":"settled answer"}]}]);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&exported.expect("captured output"))
+                    .unwrap(),
+                answer
+            );
+            assert_eq!(output[0].role, "assistant");
+            assert_eq!(
+                serde_json::to_value(output).unwrap()[0]["blocks"][0]["text"],
+                "settled answer"
+            );
+        } else {
+            assert!(exported.is_none());
+        }
+        core.shutdown().await?;
+    }
+    Ok(())
+}
+
 /// `turn_started`: the turn's admission, once, opening the turn's span at
 /// its scope's retained start, where the exported `invoke_agent` starts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -273,6 +327,7 @@ async fn a_served_turn_exports_one_invoke_agent_for_its_committed_terminal() -> 
     assert_eq!(
         completed[0].event,
         lash_trace::TraceEvent::TurnCompleted {
+            output: Vec::new(),
             input: Vec::new(),
             inference_calls: Some(2),
             tool_calls: Some(1),

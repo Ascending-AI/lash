@@ -445,6 +445,7 @@ fn content_shapes_validate_against_the_pinned_semconv_schemas() {
 #[test]
 fn turn_closer_input_obeys_capture_redaction_and_bounds() {
     let event = || TraceEvent::TurnCompleted {
+        output: Vec::new(),
         inference_calls: None,
         tool_calls: None,
         input: vec![TraceLlmMessage {
@@ -471,6 +472,86 @@ fn turn_closer_input_obeys_capture_redaction_and_bounds() {
     assert!(!serde_json::to_string(&captured).unwrap().contains("secret"));
     assert!(!captured.content.truncated.is_empty() || !captured.content.oversize.is_empty());
     for (_, value) in attributes(&captured.event) {
+        assert!(
+            serde_json::to_vec(&value).unwrap().len() as u64
+                <= policy.content_limits.max_attribute_bytes()
+        );
+    }
+}
+
+/// FIG-6431: a hook can redact a completed tool's result by tool name.
+#[test]
+fn a_content_hook_selects_a_completed_tools_result_by_name() {
+    struct PerTool;
+    impl ContentHook for PerTool {
+        fn on_content(&self, view: &ContentView<'_>, content: &mut RecordContent<'_>) {
+            if view.tool_name == Some("tool") {
+                content.for_each(|field| {
+                    if field.category() == ContentCategory::ToolResults {
+                        field.omit();
+                    }
+                });
+            }
+        }
+    }
+    let policy = TracePolicySnapshot {
+        content: ContentPolicy::captured(),
+        ..Default::default()
+    };
+    for (name, kept) in [("tool", false), ("other", true)] {
+        let mut event = tool(json!({"secret": "tool-specific secret"}));
+        if let TraceEvent::ToolCallCompleted { name: target, .. } = &mut event {
+            *target = name.into();
+        }
+        let mut record = record(event);
+        record.apply_content(&policy, Some(&PerTool));
+        assert_eq!(
+            serde_json::to_string(&record)
+                .unwrap()
+                .contains("tool-specific secret"),
+            kept
+        );
+    }
+}
+
+/// FIG-6431: an answer uses OutputMessages consent, the exhaustive host
+/// hook and the same part/attribute bounds as model output.
+#[test]
+fn turn_closer_output_obeys_capture_redaction_and_bounds() {
+    let event = || TraceEvent::TurnCompleted {
+        input: Vec::new(),
+        output: vec![TraceLlmMessage {
+            role: "assistant".into(),
+            blocks: vec![TraceContentBlock::Text {
+                text: "secret ".repeat(100_000),
+                cache_breakpoint: false,
+            }],
+        }],
+        inference_calls: None,
+        tool_calls: None,
+        inputs: 1,
+        outcome: TraceTurnOutcome::Completed {
+            done_reason: TraceTurnCompletionReason::AssistantMessage,
+        },
+    };
+    let omitted = record(event()).governed(ContentPolicy::omitted());
+    assert!(!serde_json::to_string(&omitted).unwrap().contains("secret"));
+    assert!(attributes(&omitted.event).is_empty());
+    let policy = TracePolicySnapshot {
+        content: ContentPolicy::omitted().with(ContentCategory::OutputMessages, Capture::Captured),
+        ..Default::default()
+    };
+    let mut captured = record(event());
+    captured.apply_content(&policy, Some(&Rewrite));
+    assert!(!serde_json::to_string(&captured).unwrap().contains("secret"));
+    assert!(!captured.content.truncated.is_empty() || !captured.content.oversize.is_empty());
+    let attrs = attributes(&captured.event);
+    assert!(
+        attrs
+            .iter()
+            .any(|(key, _)| *key == "gen_ai.output.messages")
+    );
+    for (_, value) in attrs {
         assert!(
             serde_json::to_vec(&value).unwrap().len() as u64
                 <= policy.content_limits.max_attribute_bytes()

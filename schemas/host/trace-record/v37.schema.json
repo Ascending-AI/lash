@@ -6192,6 +6192,13 @@
         "outcome": {
           "$ref": "#/$defs/TraceTurnOutcome"
         },
+        "output": {
+          "description": "The assistant answer this turn settled with, governed as OutputMessages.",
+          "items": {
+            "$ref": "#/$defs/TraceLlmMessage"
+          },
+          "type": "array"
+        },
         "tool_calls": {
           "description": "Tool calls admitted by the turn and its cells, including failures.\nThe terminal owner reads the stored count plus acknowledged appends;\nabsent only for a record with no known execution counts.",
           "format": "uint64",

@@ -209,6 +209,46 @@ pub(super) async fn input(
         .collect()
 }
 
+/// The answer comes from the terminal being committed, never from the last
+/// model call (which may have ended in a tool call or a failure).
+pub(super) fn output(
+    tracing: Option<&TraceRuntime>,
+    row: &TurnRow,
+    cause: &RunTerminalCause,
+) -> Vec<lash_trace::TraceLlmMessage> {
+    let Some(tracing) = tracing.filter(|tracing| tracing.is_observed()) else {
+        return Vec::new();
+    };
+    let standing = tracing.unreplayed(row.admission.trace().cloned()).selected(
+        lash_trace::TraceSpanKind::Agent,
+        &context(&row.session, &row.run, row.admission.input_ids().first()).ids(),
+    );
+    if !standing
+        .content()
+        .captures(lash_trace::ContentCategory::OutputMessages)
+    {
+        return Vec::new();
+    }
+    let RunTerminalCause::Committed {
+        outcome:
+            RunCommittedOutcome::Finished {
+                finish: TurnFinish::AssistantMessage { text },
+                ..
+            },
+        ..
+    } = cause
+    else {
+        return Vec::new();
+    };
+    vec![lash_trace::TraceLlmMessage {
+        role: "assistant".into(),
+        blocks: vec![lash_trace::TraceContentBlock::Text {
+            text: text.clone(),
+            cache_breakpoint: false,
+        }],
+    }]
+}
+
 /// Emit `turn_completed` with `outcome` for `row`'s turn, whose terminal
 /// commit was just acknowledged, under the trace scope its admission
 /// retained, linking what it consumed: the producers of `delivered`, the
@@ -220,7 +260,10 @@ pub(super) fn ended(
     row: &TurnRow,
     outcome: Option<TraceTurnOutcome>,
     delivered: &[crate::AdmittedTurnInputs],
-    input: Vec<lash_trace::TraceLlmMessage>,
+    content: (
+        Vec<lash_trace::TraceLlmMessage>,
+        Vec<lash_trace::TraceLlmMessage>,
+    ),
     counts: (u32, Option<u64>),
 ) {
     let (Some(tracing), Some(scope), Some(outcome)) = (tracing, row.admission.trace(), outcome)
@@ -238,7 +281,8 @@ pub(super) fn ended(
                 (
                     context(&row.session, &row.run, row.admission.input_ids().first()),
                     TraceEvent::TurnCompleted {
-                        input,
+                        input: content.0,
+                        output: content.1,
                         inference_calls: Some(counts.0),
                         tool_calls: counts.1,
                         outcome,

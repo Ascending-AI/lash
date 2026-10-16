@@ -279,6 +279,9 @@ impl RuntimeTurnDriver<'_> {
             llm_request.provider_trace.take(),
         );
         context.scope.llm_call_id = Some(llm_call_id.clone());
+        context.scope.trace_carrier = call
+            .as_ref()
+            .and_then(|call| call.carrier().cloned().map(Arc::new));
         let deliveries: Arc<dyn crate::provider::SlotDeliveries> =
             self.host.core.durability.attachment_store.clone();
         let mut llm_task = crate::task::spawn(async move {

@@ -262,6 +262,9 @@ pub enum TraceEvent {
     TurnCompleted {
         /// Admitted input messages, captured by the terminal owner from durable input.
         input: Vec<crate::TraceLlmMessage>,
+        /// The assistant answer this turn settled with, governed as OutputMessages.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        output: Vec<crate::TraceLlmMessage>,
         /// Model calls admitted by this turn, including failed calls; absent
         /// when the terminal owner cannot recover that fact.
         #[serde(default, skip_serializing_if = "Option::is_none")]
