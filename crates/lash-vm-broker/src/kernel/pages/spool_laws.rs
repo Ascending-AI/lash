@@ -263,6 +263,81 @@ fn a_manifest_is_the_reachable_staged_dag_in_digest_order() {
     assert_eq!(spool.usage().pages, 1);
 }
 
+/// SMALL-MANIFEST-BOUNDED: a small candidate reserves one sort record per
+/// reachable fresh or external page, plus the two fixed streaming buffers.
+/// Ordering, child authority and settlement still apply at every size.
+#[test]
+fn small_manifest_bounded() {
+    const RECORD_BYTES: u64 = 33;
+    const STREAM_BUFFERS: u64 = 2 * (8 << 10);
+    const LARGE_RUN_BYTES: u64 = 4096 * RECORD_BYTES;
+    for leaves in [0, 6, 62] {
+        let dir = tempfile::tempdir().expect("dir");
+        let root = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("root");
+        let mut spool = root.spool(StageLeaseId(1)).expect("spool");
+        let committed = page("committed", &[]);
+        let mut nodes: Vec<_> = (0..leaves)
+            .map(|at| page(&format!("leaf {at}"), &[]))
+            .collect();
+        for node in &nodes {
+            spool.seal(node.clone(), &|_| false).expect("staged");
+        }
+        let mut children: Vec<_> = nodes.iter().map(|node| node.id).collect();
+        children.push(committed.id);
+        let top = page("top", &children);
+        assert_eq!(
+            spool.seal(top.clone(), &|_| false),
+            Err(StageFault::Unauthorized {
+                page: top.id,
+                child: committed.id,
+            })
+        );
+        spool
+            .seal(top.clone(), &|id| *id == committed.id)
+            .expect("authorized child");
+        nodes.push(top.clone());
+        let meter = spool.meter();
+        let commit = CommitId([8; 32]);
+        let mut manifest = spool
+            .candidate(top.id, Some(committed.id), commit)
+            .expect("candidate");
+        let summary = manifest.summary();
+        assert_eq!((summary.fresh_nodes, summary.external), (leaves + 1, 1));
+        let records = summary.fresh_nodes + summary.external;
+        let sort_bytes = records * RECORD_BYTES;
+        assert!(sort_bytes < LARGE_RUN_BYTES);
+        assert_eq!(
+            meter.peak(),
+            STREAM_BUFFERS + sort_bytes,
+            "SMALL-MANIFEST-BOUNDED: {records} records reserve their actual bytes"
+        );
+        let entries = drain(manifest.as_mut(), None, 3);
+        let ids: Vec<_> = entries.iter().map(id_of).collect();
+        let mut expected: Vec<_> = nodes.iter().map(|node| node.id).collect();
+        expected.push(committed.id);
+        expected.sort_unstable();
+        assert_eq!(ids, expected);
+        for entry in entries {
+            match entry {
+                ManifestEntry::Fresh(node) => assert_eq!(
+                    node,
+                    *nodes
+                        .iter()
+                        .find(|known| known.id == node.id)
+                        .expect("fresh page")
+                ),
+                ManifestEntry::External(id) => assert_eq!(id, committed.id),
+            }
+        }
+        let beside = page("beside", &[]);
+        spool.seal(beside.clone(), &|_| false).expect("beside");
+        spool.settle(commit).expect("settled");
+        assert!(nodes.iter().all(|node| !spool.contains(&node.id)));
+        assert!(spool.contains(&beside.id));
+        assert_eq!(spool.usage().pages, 1);
+    }
+}
+
 /// The most digest-record bytes a spool holds in memory at once while it
 /// builds, streams and settles a candidate, whatever the candidate's size.
 const METADATA_BOUND: u64 = 1 << 20;

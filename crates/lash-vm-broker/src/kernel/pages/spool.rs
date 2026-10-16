@@ -127,15 +127,18 @@ fn writer(path: &Path) -> Result<BufWriter<File>, StageFault> {
 /// Sorts the records of `unsorted` into `sorted` (FIG-6421): runs of at
 /// most [`RUN_RECORDS`], each sorted in memory, then merge passes of at
 /// most [`MERGE_FANIN`] runs each, every run streamed through one buffer.
+/// The walk already counted the records, so a small input reserves only
+/// its actual run rather than the large-manifest bound (FIG-6458).
 fn sort_records(
     dir: &Path,
     unsorted: &Path,
     sorted: &Path,
+    records: u64,
     meter: &SpoolMeter,
 ) -> Result<(), StageFault> {
     let run = |pass: usize, at: usize| dir.join(format!("run-{pass}-{at}"));
     let mut input = reader(unsorted)?;
-    let mut buffer: Vec<Record> = Vec::with_capacity(RUN_RECORDS);
+    let mut buffer: Vec<Record> = Vec::with_capacity(records.min(RUN_RECORDS as u64) as usize);
     let mut runs = 0;
     loop {
         while buffer.len() < RUN_RECORDS
@@ -649,7 +652,7 @@ impl StageSpool for DiskSpool {
         }
         queue.flush().map_err(|error| io(&error))?;
         drop((queue, walk));
-        sort_records(&dir, &records, &dir.join("manifest"), &self.meter)?;
+        sort_records(&dir, &records, &dir.join("manifest"), written, &self.meter)?;
         fs::remove_file(&records).map_err(|error| io(&error))?;
         fs::remove_dir_all(&marks).map_err(|error| io(&error))?;
         self.candidate = Some(Candidate { summary });
