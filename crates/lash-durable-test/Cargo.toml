@@ -27,6 +27,7 @@ lash-core-store = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]
+lash-transport-failure = { workspace = true }
 base64 = { workspace = true }
 flate2 = "1"
 delegation = { workspace = true }

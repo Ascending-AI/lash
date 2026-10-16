@@ -22,13 +22,12 @@ async fn google_completion_epilogue_conformance() {
 // a 401 still replaces credentials once before surfacing the second refusal.
 #[tokio::test]
 async fn refused_http_body_retains_evidence_and_auth_replacement() {
-    use lash_core::facade_support::LlmTransportError;
     use lash_core::provider::{
         ProviderOptions, ProviderToken, TokenError, TokenRequest, TokenRequestReason, TokenSource,
     };
-    use lash_llm_transport::{
-        HttpFailureContext, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport,
-    };
+    use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
+    use lash_transport_failure::HttpFailureContext;
+    use lash_transport_failure::LlmTransportError;
     use std::sync::atomic::{AtomicUsize, Ordering};
     #[derive(Debug, Default)]
     struct Source {

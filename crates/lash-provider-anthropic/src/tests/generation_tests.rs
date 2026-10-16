@@ -116,10 +116,10 @@ async fn refused_settings_never_reach_the_transport() {
             &self,
             _request: lash_llm_transport::LlmHttpRequest,
             _timeout: Option<std::time::Duration>,
-        ) -> Result<lash_llm_transport::LlmHttpResponse, lash_core::llm::transport::LlmTransportError>
+        ) -> Result<lash_llm_transport::LlmHttpResponse, lash_transport_failure::LlmTransportError>
         {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err(lash_core::llm::transport::LlmTransportError::new(
+            Err(lash_transport_failure::LlmTransportError::new(
                 "a refused call reached the transport",
             ))
         }

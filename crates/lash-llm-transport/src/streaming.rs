@@ -24,12 +24,11 @@
 //! intentionally leaves the sequence local to each adapter: protocol-specific
 //! terminal predicates and emission rules are not hooks on a shared sequence.
 
+use lash_core::ProviderFailureKind;
 use lash_core::provider::ProviderOptions;
-use lash_core::{
-    ProviderFailureKind, facade_support::LlmTransportError, llm::transport::TransportRetryVerdict,
-};
 use lash_sansio::llm::types::{LlmEventSender, LlmStreamEvent, LlmUsage};
 use lash_sansio::session_model::TurnFailureCode;
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 use std::time::Duration;
 use tokio::time::Instant;
@@ -281,7 +280,7 @@ where
                 // propagating, so a final event delivered without a trailing
                 // blank line still reaches the caller.
                 let _ = buffer.finish(&mut capture_then_emit);
-                if let lash_http_transport::HttpFailureContext::ResponseRead { detail } =
+                if let lash_transport_failure::HttpFailureContext::ResponseRead { detail } =
                     error.context.as_ref()
                 {
                     error.message = format!("Stream read failed: {detail}");

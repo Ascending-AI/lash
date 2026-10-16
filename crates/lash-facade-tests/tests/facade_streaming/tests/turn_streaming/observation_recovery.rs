@@ -309,7 +309,7 @@ fn quota_refused_provider() -> ProviderHandle {
             Err(LlmTransportError::new("You exceeded your current quota.")
                 .with_kind(lash_core::ProviderFailureKind::Quota)
                 .with_code(lash_core::FailureCode::provider(QUOTA_CODE))
-                .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::NotRetryable))
+                .with_retry_verdict(lash::provider::TransportRetryVerdict::NotRetryable))
         })
         .build()
         .into_handle()

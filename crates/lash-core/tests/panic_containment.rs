@@ -6,10 +6,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lash_core::facade_support::{
-    LlmTransportError, Provider, ProviderComponents, ProviderHandle, ProviderOptions,
-};
+use lash_core::facade_support::{Provider, ProviderComponents, ProviderHandle, ProviderOptions};
 use lash_core::{GenerationOptions, LlmRequest, LlmRequestScope, LlmResponse};
+use lash_transport_failure::LlmTransportError;
 
 static PANIC_MODE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 

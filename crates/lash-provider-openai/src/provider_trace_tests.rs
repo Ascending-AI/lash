@@ -4,13 +4,13 @@ use std::sync::{Arc, Mutex};
 use crate::codex::ws_testing::{ScriptedWsAction, spawn_scripted_websocket};
 use crate::{CodexProvider, OpenAiCompatibleProvider};
 use async_trait::async_trait;
-use lash_core::facade_support::LlmTransportError;
 use lash_core::llm::types::{
     LlmMessage, LlmProviderTraceEvent, LlmProviderTraceSender, LlmRequest, LlmRequestScope,
     LlmRole, LlmToolChoice,
 };
 use lash_core::provider::Provider;
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
+use lash_transport_failure::LlmTransportError;
 
 const SECRET_SENTINEL: &str = "sk-super-secret-do-not-log";
 

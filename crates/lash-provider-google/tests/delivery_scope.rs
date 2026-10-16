@@ -4,7 +4,6 @@
 )]
 
 use async_trait::async_trait;
-use lash_core::facade_support::LlmTransportError;
 use lash_core::provider::{Provider, ProviderToken};
 use lash_core_store::attachments::AttachmentStore;
 use lash_core_store::attachments::provider_files::{
@@ -14,6 +13,7 @@ use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTr
 use lash_provider_google::GoogleOAuthProvider;
 use lash_sansio::llm::attachment_delivery::{Delivery, DeliveryLimits, ProviderAccepts};
 use lash_sansio::{AttachmentCreateMeta, AttachmentRef, MediaType};
+use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 

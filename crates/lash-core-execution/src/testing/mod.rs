@@ -252,7 +252,6 @@ pub use process_fixtures::{
     tool_component, tool_plugin,
 };
 
-use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{LlmRequest, LlmResponse};
 use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSnapshot};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
@@ -261,6 +260,7 @@ use crate::{
     AssembledTurn, LlmUsage, ProviderOptions, RuntimeSessionState, SessionPolicy,
     TurnExecutionMetrics, TurnFinish, TurnOutcome, TurnStop,
 };
+use lash_transport_failure::LlmTransportError;
 
 /// Generous claim bounds for store/runtime conformance tests whose subject is
 /// not batching policy. Batching-specific tests construct exact policies.

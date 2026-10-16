@@ -28,6 +28,7 @@ proptest-support = ["dep:proptest"]
 workspace = true
 
 [dependencies]
+lash-transport-failure = { workspace = true }
 lash-render = { workspace = true }
 lash-core = { workspace = true }
 lash-http-transport = { workspace = true }

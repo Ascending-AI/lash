@@ -202,9 +202,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
                         }
                     })
                     .ok_or_else(|| {
-                        lash_core::llm::transport::LlmTransportError::new(
-                            "seeded operation missing",
-                        )
+                        lash_transport_failure::LlmTransportError::new("seeded operation missing")
                     })?;
                 let generator = Generator::new(&source, "boundary-seeded").map_err(transport)?;
                 let response = generator
@@ -224,7 +222,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
                     return Err(transport("seeded first-attempt retry before response")
                         .with_kind(lash_core::llm::transport::ProviderFailureKind::Transport)
                         .with_retry_verdict(
-                            lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                            lash_transport_failure::TransportRetryVerdict::RetryableTransient,
                         ));
                 }
                 let mut elapsed = 0;
@@ -298,8 +296,8 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         evidence,
     ))
 }
-fn transport(error: impl std::fmt::Display) -> lash_core::llm::transport::LlmTransportError {
-    lash_core::llm::transport::LlmTransportError::new(error.to_string())
+fn transport(error: impl std::fmt::Display) -> lash_transport_failure::LlmTransportError {
+    lash_transport_failure::LlmTransportError::new(error.to_string())
 }
 async fn execute(
     args: &Args,

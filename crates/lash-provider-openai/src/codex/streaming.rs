@@ -16,9 +16,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::protocol::Message as WsMessage;
 
-use lash_core::llm::transport::{
-    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
-};
+use lash_core::llm::transport::{ProviderFailureKind, TurnFailureCode};
 use lash_core::llm::types::{
     AttachmentSlot, ExecutionEvidence, LiveRequestBody, LlmRequest, LlmResponse, LlmStreamEvent,
     LlmStreamEvidence, LlmTerminalReason, LlmUsage, ProviderRouteIdentity, RecordedRequestTemplate,
@@ -35,6 +33,7 @@ use lash_llm_transport::{
 };
 use lash_llm_transport::{TokenLease, merge_extra_headers, rejected_before_output};
 use lash_sansio::FailureCode;
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 use crate::common::BuiltRequest;
 use crate::responses_shared as shared;

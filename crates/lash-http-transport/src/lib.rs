@@ -2,12 +2,8 @@
 
 #[cfg(test)]
 mod allocation_counter;
-mod error;
 mod http;
 
-pub use error::{
-    HttpFailureContext, LlmTransportError, TransportRetryVerdict, retry_after_from_headers,
-};
 pub use http::{
     ByteStream, HttpHeaderValue, HttpMethod, HttpRequest, HttpResponse, HttpResponseBody,
     HttpTransport, HttpTransportPolicy, ReqwestByteStream, ReqwestHttpTransport, build_http_client,

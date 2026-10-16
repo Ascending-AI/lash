@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lash::scenario_contracts::AGENT_SCENARIO_CONTRACTS;
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
+use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{
     LlmEventSender, LlmMessage, LlmOutputPart, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
     LlmTerminalReason, LlmToolChoice, LlmToolSpec,
@@ -21,6 +21,7 @@ use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::{CodexProvider, OpenAiCompatibleProvider, OpenAiProvider};
 use lash_rlm_types::RlmProtocolEvent;
+use lash_transport_failure::LlmTransportError;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

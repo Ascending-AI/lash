@@ -1,11 +1,10 @@
 use serde_json::{Value, json};
 use std::sync::{Arc, LazyLock};
 
-use lash_core::llm::transport::{
-    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
-};
+use lash_core::llm::transport::{ProviderFailureKind, TurnFailureCode};
 use lash_core::llm::types::ReasoningRetentionValidationError;
 use lash_llm_transport::{LlmHttpTransport, ReqwestLlmHttpTransport};
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 pub(crate) use lash_llm_transport::{
     merge_usage,
@@ -88,15 +87,13 @@ pub(crate) fn invalid_empty_response(
 pub(crate) fn empty_response_error(
     raw: String,
     limits: crate::RequestDiagnosticLimits,
-) -> lash_core::llm::transport::LlmTransportError {
+) -> lash_transport_failure::LlmTransportError {
     empty_response_diagnostic(limits.body_excerpt(&raw))
 }
 
-pub(crate) fn empty_response_diagnostic(
-    raw: String,
-) -> lash_core::llm::transport::LlmTransportError {
-    lash_core::llm::transport::LlmTransportError::new("OpenAI-compatible empty_response")
-        .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::NotRetryable)
+pub(crate) fn empty_response_diagnostic(raw: String) -> lash_transport_failure::LlmTransportError {
+    lash_transport_failure::LlmTransportError::new("OpenAI-compatible empty_response")
+        .with_retry_verdict(lash_transport_failure::TransportRetryVerdict::NotRetryable)
         .with_lash_code(TurnFailureCode::EmptyResponse)
         .with_raw(raw)
 }

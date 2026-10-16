@@ -7,8 +7,8 @@
 
 use serde_json::Value;
 
-use lash_core::llm::transport::LlmTransportError;
 use lash_core::provider::{DefaultProviderFailureClassifier, ProviderFailureClassifier};
+use lash_transport_failure::LlmTransportError;
 
 use super::CodexProvider;
 

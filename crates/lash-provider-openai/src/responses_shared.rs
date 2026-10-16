@@ -28,7 +28,7 @@ use std::collections::HashMap;
 
 use crate::schema::{classify_openai_error, sse_error_event_retry_verdict};
 use lash_core::facade_support::ModelToolReturnPart;
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{
     ExecutionEvidence, LlmContentBlock, LlmMessage, LlmOutputPart, LlmRequest, LlmResponse,
     LlmRole, LlmStreamEvent, LlmToolChoice, LlmUsage, ProviderReasoningReplay, ProviderReplayMeta,
@@ -45,6 +45,7 @@ use lash_llm_transport::{
     openai_terminal_reason_from_response_value as terminal_reason_from_response_value,
     openai_usage_from_response_value as usage_from_response_value, terminal_reason_from_parts,
 };
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 mod input;
 pub use input::build_responses_input;

@@ -9,7 +9,7 @@ use super::*;
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 
 use lash::TurnInput;
-use lash_core::llm::transport::LlmTransportError;
+use lash::provider::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmProviderTraceEvent, LlmUsage, StreamBlockIdentity};
 use lash_core::testing::runtime_helpers::{EchoTool, MockCall, mock_provider};
 use tracing_subscriber::layer::{Context, SubscriberExt};

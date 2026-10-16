@@ -163,10 +163,10 @@ async fn deep_turn_session(
         .before_next_completion(Box::new(move || {
             Box::pin(async move {
                 let run = durable.unfinished_run().await.map_err(|error| {
-                    lash_core::llm::transport::LlmTransportError::new(error.to_string())
+                    lash_transport_failure::LlmTransportError::new(error.to_string())
                 })?;
                 if !run.is_some_and(|run| run.run == turn_id) {
-                    return Err(lash_core::llm::transport::LlmTransportError::new(
+                    return Err(lash_transport_failure::LlmTransportError::new(
                         "deep composition ingress requires its durably running turn",
                     ));
                 }
@@ -179,7 +179,7 @@ async fn deep_turn_session(
                     ))
                     .await
                     .map_err(|error| {
-                        lash_core::llm::transport::LlmTransportError::new(error.to_string())
+                        lash_transport_failure::LlmTransportError::new(error.to_string())
                     })?;
                 Ok(())
             })

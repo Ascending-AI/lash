@@ -3,7 +3,7 @@
 //! call ledger, its activity and what it committed.
 
 use super::*;
-use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict};
+use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash_core::llm::types::{LlmUsage, StreamBlockIdentity};
 use lash_core::{MessageRole, TurnEvent};
 use lash_sansio::ReportedFailure;

@@ -3,7 +3,7 @@ use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash::TurnActivity;
-use lash_core::llm::transport::LlmTransportError;
+use lash::provider::LlmTransportError;
 use lash_core::llm::types::ResponseTextMeta;
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
@@ -256,7 +256,7 @@ pub fn retry_once_provider() -> ProviderHandle {
                         .with_code(lash_core::FailureCode::provider("server_overloaded"))
                         .with_raw("provider overload detail")
                         .with_retry_verdict(
-                            lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                            lash::provider::TransportRetryVerdict::RetryableTransient,
                         ));
                 }
                 Ok(LlmResponse {

@@ -1,9 +1,8 @@
 //! Transport-level failure types and attachment capability diagnostics shared
 //! by provider adapters.
 
-pub use lash_http_transport::{
-    HttpFailureContext, LlmTransportError, TransportRetryVerdict, retry_after_from_headers,
-};
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
+
 pub use lash_sansio::llm::types::ProviderFailureKind;
 pub use lash_sansio::session_model::TurnFailureCode;
 

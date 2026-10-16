@@ -1,5 +1,6 @@
 use super::*;
-use lash_llm_transport::{HttpFailureContext, LlmByteStream, LlmHttpResponse};
+use lash_llm_transport::{LlmByteStream, LlmHttpResponse};
+use lash_transport_failure::HttpFailureContext;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug)]

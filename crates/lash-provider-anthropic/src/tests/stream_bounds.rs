@@ -1,6 +1,6 @@
 use super::*;
 use lash_core::ProviderFailureKind;
-use lash_core::llm::transport::TransportRetryVerdict;
+use lash_transport_failure::TransportRetryVerdict;
 
 const BLOCK_LIMIT: usize = 1024;
 

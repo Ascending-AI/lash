@@ -16,7 +16,7 @@ impl ResponsesStreamParser {
         &mut self,
         provider: &str,
         payload: &str,
-    ) -> Result<(), lash_core::facade_support::LlmTransportError> {
+    ) -> Result<(), lash_transport_failure::LlmTransportError> {
         crate::responses_shared::parse_sse_payload(provider, payload, &mut self.state)
     }
 
@@ -43,7 +43,7 @@ pub struct CacheBreakpointReport {
 pub fn serialize_chat_request(
     request: &LlmRequest,
     retention: CacheRetention,
-) -> Result<(Value, CacheBreakpointReport), lash_core::facade_support::LlmTransportError> {
+) -> Result<(Value, CacheBreakpointReport), lash_transport_failure::LlmTransportError> {
     let provider = OpenAiCompatibleProvider::new("test", "https://provider.test");
     let request = with_retention(request, retention);
     let (built, diagnostics) =
@@ -61,7 +61,7 @@ pub fn serialize_chat_request(
 pub fn serialize_responses_request(
     request: &LlmRequest,
     retention: CacheRetention,
-) -> Result<Value, lash_core::facade_support::LlmTransportError> {
+) -> Result<Value, lash_transport_failure::LlmTransportError> {
     OpenAiCompatibleProvider::new("test", OPENAI_BASE_URL)
         .with_compat(crate::OpenAiCompat {
             prompt_cache_key: Some(true),
@@ -74,7 +74,7 @@ pub fn serialize_responses_request(
 pub fn serialize_codex_request(
     request: &LlmRequest,
     retention: CacheRetention,
-) -> Result<Value, lash_core::facade_support::LlmTransportError> {
+) -> Result<Value, lash_transport_failure::LlmTransportError> {
     CodexProvider::new(std::sync::Arc::new(
         lash_core::provider::ProviderToken::new("access"),
     ))

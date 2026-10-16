@@ -25,6 +25,7 @@ members = [
     "crates/lash-conformance",
     "crates/lash-vm-runtime",
     "crates/lash-http-transport",
+    "crates/lash-transport-failure",
     "crates/lash-llm-transport",
     "crates/lash-sqlite-store",
     "crates/lash-postgres-store",
@@ -113,6 +114,7 @@ default-members = [
     "crates/lash-tool-presenter-python",
     "crates/lash-tool-presenter-standard",
     "crates/lash-http-transport",
+    "crates/lash-transport-failure",
     "crates/lash-llm-transport",
     "crates/lash-llm-tools",
     "crates/lash-protocol-standard",
@@ -326,6 +328,7 @@ lash-core-effect = { package = "lash-internal-core-effect", path = "crates/lash-
 lash-core-execution = { package = "lash-internal-core-execution", path = "crates/lash-core-execution", version = "=0.0.0-dev" }
 lash-core-worker = { package = "lash-internal-core-worker", path = "crates/lash-core-worker", version = "=0.0.0-dev" }
 lash-http-transport = { package = "lash-internal-http-transport", path = "crates/lash-http-transport", version = "=0.0.0-dev" }
+lash-transport-failure = { package = "lash-internal-transport-failure", path = "crates/lash-transport-failure", version = "=0.0.0-dev" }
 lash-llm-tools = { package = "lash-internal-llm-tools", path = "crates/lash-llm-tools", version = "=0.0.0-dev" }
 lash-llm-transport = { package = "lash-internal-llm-transport", path = "crates/lash-llm-transport", version = "=0.0.0-dev" }
 lash-vm-runtime = { package = "lash-internal-vm-runtime", path = "crates/lash-vm-runtime", version = "=0.0.0-dev" }

@@ -8,9 +8,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use lash_core::ProviderFailureKind;
-use lash_core::facade_support::LlmTransportError;
 use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_sansio::sync::MutexExt;
+use lash_transport_failure::LlmTransportError;
 use serde_json::Value;
 
 use lash_provider_fixtures::provider::{ProviderWireScript, ScriptedLlmHttpTransport};

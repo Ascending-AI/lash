@@ -1,6 +1,5 @@
 use crate::AttachmentRef;
 use crate::SchemaContract;
-use crate::llm::transport::LlmTransportError;
 use crate::llm::types::{
     LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRequest,
     LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
@@ -13,6 +12,7 @@ use crate::provider::{
     LlmProfileEffortValidationCategory, NoSlotDeliveries, ProviderHandle, SlotDeliveries,
 };
 use lash_trace::{TraceContext, TraceSink};
+use lash_transport_failure::LlmTransportError;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

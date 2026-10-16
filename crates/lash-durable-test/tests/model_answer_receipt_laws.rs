@@ -65,6 +65,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
@@ -249,10 +250,8 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                 if answered {
                     if matches!(answer, Answer::RetryTool) && send_index == 1 {
                         stream(&request, &["retrying"]);
-                        return Err(lash_core::llm::transport::LlmTransportError::new("retry")
-                            .with_retry_verdict(
-                            lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
-                        ));
+                        return Err(LlmTransportError::new("retry")
+                            .with_retry_verdict(TransportRetryVerdict::RetryableTransient));
                     }
                     return Ok(streamed(&request, &["do", "ne"]));
                 }
@@ -261,12 +260,10 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                 let mut response = match answer {
                     Answer::Failed => {
                         stream(&request, &["the ", "paid a"]);
-                        return Err(lash_core::llm::transport::LlmTransportError::new(
-                            "the provider failed after streaming",
-                        )
-                        .with_retry_verdict(
-                            lash_core::llm::transport::TransportRetryVerdict::NotRetryable,
-                        ));
+                        return Err(
+                            LlmTransportError::new("the provider failed after streaming")
+                                .with_retry_verdict(TransportRetryVerdict::NotRetryable),
+                        );
                     }
                     Answer::Unstreamed => LlmResponse {
                         parts: vec![LlmOutputPart::Text {

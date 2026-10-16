@@ -8,12 +8,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use lash_core::facade_support::LlmTransportError;
 use lash_core::provider::{ProviderHandle, ProviderOptions};
 use lash_llm_transport::{
     LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport,
 };
 use lash_provider_openai::OpenAiCompatibleProvider;
+use lash_transport_failure::LlmTransportError;
 
 #[derive(Debug)]
 struct ResponseTransport {

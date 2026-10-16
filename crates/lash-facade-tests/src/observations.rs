@@ -1,7 +1,7 @@
 use super::*;
 use lash::TurnEvent;
 #[cfg(feature = "rlm")]
-use lash_core::llm::transport::LlmTransportError;
+use lash::provider::LlmTransportError;
 use std::sync::Mutex as StdMutex;
 #[cfg(feature = "rlm")]
 use std::sync::atomic::{AtomicUsize, Ordering};

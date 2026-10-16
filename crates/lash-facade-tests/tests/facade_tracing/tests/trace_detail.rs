@@ -11,11 +11,11 @@ use super::trace_enrichment::exporting;
 use super::*;
 
 use lash::TurnInput;
+use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash::tracing::{
     Capture, ContentCategory, ContentPolicy, TraceDetail, TraceDetailPolicy, TraceExportPolicy,
     TraceRecord, TraceSpanKind as K,
 };
-use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict};
 use lash_core::llm::types::{LlmOutputPart, LlmProviderTraceEvent, StreamBlockIdentity};
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use lash_trace::otel::OtelOptions;

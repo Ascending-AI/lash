@@ -3,11 +3,10 @@
 //! Give each logical provider call its own ledger, then join the 1-based HTTP
 //! ordinal to that call's sealed attempt records. This seam sees built requests,
 //! headers and body delivery, not DNS/TLS internals or visible model tokens.
-use crate::{
-    ByteStream, HttpRequest, HttpResponse, HttpResponseBody, HttpTransport, LlmTransportError,
-};
+use crate::{ByteStream, HttpRequest, HttpResponse, HttpResponseBody, HttpTransport};
 use async_trait::async_trait;
 use bytes::Bytes;
+use lash_transport_failure::LlmTransportError;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

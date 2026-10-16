@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use lash_core::attachments::{
     ProviderFileCacheLimits, ProviderFileDelivery, ProviderFileUploader, UploadedProviderFile,
 };
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{
     LiveRequestBody, LlmRequest, LlmResponse, RecordedRequestTemplate, ResponseContext,
     SegmentCache,
@@ -22,6 +22,7 @@ use lash_sansio::llm::capability::{
     AttachmentAcceptanceRule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
 };
 use lash_sansio::sync::MutexExt;
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 

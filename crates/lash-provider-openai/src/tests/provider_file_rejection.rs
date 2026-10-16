@@ -7,13 +7,13 @@ use lash_core::attachments::{
     AttachmentStore, AttachmentStoreError, ProviderFileCacheLimits, ProviderFileDelivery,
     ProviderFileUploader, RuntimeAttachmentStore, UploadedProviderFile,
 };
-use lash_core::facade_support::LlmTransportError;
 use lash_core::llm::types::SegmentCache;
 use lash_core::llm::types::{AdmittedSend, LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::provider::{Provider, ProviderHandle, ProviderOptions, ProviderReliability};
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_sansio::llm::attachment_delivery::{DeliverySecret, ProviderFileScope};
 use lash_sansio::{AttachmentCreateMeta, AttachmentRef, MediaType};
+use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 

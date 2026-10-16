@@ -2,7 +2,6 @@
 //! missing-file refusal against the slots it delivered as provider files,
 //! and asks for the Files beta exactly when it delivered one.
 use async_trait::async_trait;
-use lash_core::facade_support::LlmTransportError;
 use lash_core::llm::types::SegmentCache;
 use lash_core::llm::types::{
     LiveRequestBody, LlmContentBlock, LlmMessage, LlmRole, ResponseContext,
@@ -11,6 +10,7 @@ use lash_core::provider::Provider;
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_sansio::llm::attachment_delivery::{Delivery, DeliverySecret};
 use lash_sansio::{AttachmentId, AttachmentRef, MediaType};
+use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 

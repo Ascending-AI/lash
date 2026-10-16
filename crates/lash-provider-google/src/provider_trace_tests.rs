@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::GoogleOAuthProvider;
 use async_trait::async_trait;
-use lash_core::facade_support::LlmTransportError;
 use lash_core::llm::types::{LlmProviderTraceEvent, LlmProviderTraceSender};
 use lash_core::provider::StreamTermination;
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
+use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 
 const SECRET_SENTINEL: &str = "sk-super-secret-do-not-log";

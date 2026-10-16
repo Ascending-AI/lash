@@ -128,12 +128,14 @@ impl CallDrains {
             let drained = match (&mut drain.task).await {
                 Ok(drained) => drained,
                 Err(error) => {
-                    let failure = crate::llm::transport::LlmTransportError::new(format!(
+                    let failure = lash_transport_failure::LlmTransportError::new(format!(
                         "the model call's tail drain failed: {error}"
                     ))
                     .with_kind(crate::ProviderFailureKind::Unknown)
                     .with_lash_code(TurnFailureCode::TaskJoinFailed)
-                    .with_retry_verdict(crate::llm::transport::TransportRetryVerdict::NotRetryable);
+                    .with_retry_verdict(
+                        lash_transport_failure::TransportRetryVerdict::NotRetryable,
+                    );
                     DrainedCall {
                         record: crate::provider::synthetic_terminal_call_record(
                             drain.call_id.clone(),
@@ -228,12 +230,12 @@ impl CallTail {
             }
             Ok(Err(failure)) => (*failure.call_record, None, None),
             Err(error) => {
-                let failure = crate::llm::transport::LlmTransportError::new(format!(
+                let failure = lash_transport_failure::LlmTransportError::new(format!(
                     "internal task failed: {error}"
                 ))
                 .with_kind(crate::ProviderFailureKind::Unknown)
                 .with_lash_code(TurnFailureCode::TaskJoinFailed)
-                .with_retry_verdict(crate::llm::transport::TransportRetryVerdict::NotRetryable);
+                .with_retry_verdict(lash_transport_failure::TransportRetryVerdict::NotRetryable);
                 let record = self.sideband.terminal_call_record(
                     self.call_id.clone(),
                     crate::AttemptOutcome::Interrupted,
@@ -286,19 +288,19 @@ impl CallTail {
 
 /// Why a tail stopped before its provider returned: the turn's immediate
 /// cancel (`Aborted`), or the call's deadline (`Interrupted`).
-fn tail_stop_failure(outcome: crate::AttemptOutcome) -> crate::llm::transport::LlmTransportError {
+fn tail_stop_failure(outcome: crate::AttemptOutcome) -> lash_transport_failure::LlmTransportError {
     let failure = match outcome {
         crate::AttemptOutcome::Aborted => {
-            crate::llm::transport::LlmTransportError::new("cancelled")
+            lash_transport_failure::LlmTransportError::new("cancelled")
                 .with_kind(crate::ProviderFailureKind::Unknown)
                 .with_lash_code(TurnFailureCode::Cancelled)
                 .with_terminal_reason(crate::LlmTerminalReason::Cancelled)
         }
-        _ => crate::llm::transport::LlmTransportError::new(
+        _ => lash_transport_failure::LlmTransportError::new(
             "the model call reached its deadline before its provider returned",
         )
         .with_kind(crate::ProviderFailureKind::Timeout)
         .with_lash_code(TurnFailureCode::ModelTotalExceeded),
     };
-    failure.with_retry_verdict(crate::llm::transport::TransportRetryVerdict::NotRetryable)
+    failure.with_retry_verdict(lash_transport_failure::TransportRetryVerdict::NotRetryable)
 }

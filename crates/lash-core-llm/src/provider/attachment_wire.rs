@@ -1,5 +1,5 @@
 //! Adapter helpers for lowering a built request tree and encoding its slots.
-use crate::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use crate::llm::transport::ProviderFailureKind;
 use lash_sansio::AttachmentRef;
 use lash_sansio::llm::attachment_delivery::{AttachmentPosition, Delivery};
 use lash_sansio::llm::types::{
@@ -7,6 +7,7 @@ use lash_sansio::llm::types::{
     ProviderRouteIdentity, RecordedRequestTemplate, RequestSegment, SegmentCache, SegmentContext,
     SegmentContextKey, SegmentKey, SlotCodec, TemplateJson, TransientJson,
 };
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use serde_json::{Value, json};
 
 pub fn template_error(error: impl std::fmt::Display) -> LlmTransportError {

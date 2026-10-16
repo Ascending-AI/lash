@@ -166,7 +166,7 @@ impl lash_llm_transport::LlmHttpTransport for WireTransport {
         &self,
         request: lash_llm_transport::LlmHttpRequest,
         _response_start_timeout: Option<Duration>,
-    ) -> Result<lash_llm_transport::LlmHttpResponse, lash_core::llm::transport::LlmTransportError>
+    ) -> Result<lash_llm_transport::LlmHttpResponse, lash_transport_failure::LlmTransportError>
     {
         self.sent
             .lock_recover()
@@ -317,7 +317,7 @@ impl Provider for WireRecorder {
         &mut self,
         body: &LiveRequestBody,
         _context: ResponseContext,
-    ) -> Result<LlmResponse, lash_core::llm::transport::LlmTransportError> {
+    ) -> Result<LlmResponse, lash_transport_failure::LlmTransportError> {
         self.sent
             .lock_recover()
             .push((body.to_wire_string(), body.template().clone()));

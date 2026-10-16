@@ -45,13 +45,13 @@ mod runtime {
             sqlite_memory_store_set, sqlite_recording_backend, sqlite_recording_backend_with_clock,
             unbound_recording_store, unbound_recording_store_with_clock, unbound_store,
         };
-        pub(crate) use lash_core::llm::transport::LlmTransportError;
         pub(crate) use lash_core::llm::types::LlmProviderTraceEvent;
         pub(crate) use lash_core::plugin::StaticPluginFactory;
         pub(crate) use lash_core::testing::TestProvider;
         pub(crate) use lash_core::testing::runtime_helpers as helpers;
         pub(crate) use lash_core::testing::runtime_helpers::*;
         pub(crate) use lash_core::testing::trace_capture;
+        pub(crate) use lash_transport_failure::LlmTransportError;
         pub(crate) use serde_json::json;
         pub(crate) use std::path::PathBuf;
         pub(crate) use std::sync::atomic::{AtomicBool, Ordering};

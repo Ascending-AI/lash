@@ -19,7 +19,7 @@ impl lash_llm_transport::LlmHttpTransport for StaticSseTransport {
         &self,
         _request: lash_llm_transport::LlmHttpRequest,
         _timeout: Option<std::time::Duration>,
-    ) -> Result<lash_llm_transport::LlmHttpResponse, lash_core::facade_support::LlmTransportError>
+    ) -> Result<lash_llm_transport::LlmHttpResponse, lash_transport_failure::LlmTransportError>
     {
         Ok(lash_llm_transport::LlmHttpResponse {
             status: 200,

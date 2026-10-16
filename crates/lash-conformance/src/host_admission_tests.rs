@@ -1,6 +1,6 @@
-use lash_core::facade_support::LlmTransportError;
 use lash_core::provider::{Provider, ProviderComponents, ProviderHandle, ProviderOptions};
 use lash_core::{LlmRequest, LlmResponse, ProviderRouteIdentity, RecordedRequestTemplate};
+use lash_transport_failure::LlmTransportError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

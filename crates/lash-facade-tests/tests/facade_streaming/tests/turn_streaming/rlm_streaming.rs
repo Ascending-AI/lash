@@ -4,9 +4,9 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use lash_core::TurnEvent;
 #[cfg(feature = "rlm")]
-use lash_core::facade_support::LlmTransportError;
+use lash::provider::LlmTransportError;
+use lash_core::TurnEvent;
 use lash_core::facade_support::TurnOutcome;
 #[cfg(feature = "rlm")]
 use lash_core::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
@@ -501,9 +501,7 @@ pub(super) fn rlm_accepted_cell_without_tail_usage_is_unknown_never_zero() -> Re
                     tokio::time::sleep(TAIL_STOP_GRACE * 3).await;
                     Err(LlmTransportError::new("the stream broke after the cell")
                         .with_kind(lash_core::ProviderFailureKind::Stream)
-                        .with_retry_verdict(
-                            lash_core::llm::transport::TransportRetryVerdict::NotRetryable,
-                        ))
+                        .with_retry_verdict(lash::provider::TransportRetryVerdict::NotRetryable))
                 })
                 .build()
                 .into_handle();
@@ -788,19 +786,61 @@ pub(super) fn returned_provider_attempts_settle_once_without_an_abandoned_termin
         for case in ["completed", "accepted-mid-stream", "retry"] {
             let terminals = Arc::new(StdMutex::new(Vec::new()));
             let returned = Arc::new(StdMutex::new(Vec::new()));
-            let provider = lash::testing::TestProvider::builder().kind("returned-provider-attempt").requires_streaming(case == "accepted-mid-stream")
-                .options(lash_core::provider::ProviderOptions { reliability: lash_core::provider::ProviderReliability::default().max_attempts(Some(2)).base_delay_ms(0).max_delay_ms(0), ..Default::default() })
-                .generation_retry_guarantee(if case == "retry" { lash_core::provider::GenerationRetryGuarantee::Idempotent } else { lash_core::provider::GenerationRetryGuarantee::None })
+            let provider = lash::testing::TestProvider::builder()
+                .kind("returned-provider-attempt")
+                .requires_streaming(case == "accepted-mid-stream")
+                .options(lash_core::provider::ProviderOptions {
+                    reliability: lash_core::provider::ProviderReliability::default()
+                        .max_attempts(Some(2))
+                        .base_delay_ms(0)
+                        .max_delay_ms(0),
+                    ..Default::default()
+                })
+                .generation_retry_guarantee(if case == "retry" {
+                    lash_core::provider::GenerationRetryGuarantee::Idempotent
+                } else {
+                    lash_core::provider::GenerationRetryGuarantee::None
+                })
                 .complete(move |request| async move {
-                if case == "retry" && request.scope.attempt == Some(1) {
-                    return Err(LlmTransportError::new("failed after partial usage")
-                        .with_kind(lash_core::ProviderFailureKind::Stream)
-                        .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::RetryableTransient)
-                        .with_partial_response(LlmResponse { usage: lash_core::llm::types::LlmUsage { input_tokens: 2, output_tokens: 1, ..Default::default() }, provider_usage: Some(serde_json::json!({"input_tokens":2,"output_tokens":1})), ..Default::default() }));
-                }
-                if case == "accepted-mid-stream" { streamed_cell(&request.stream_events.expect("stream events"), "settled"); tokio::time::sleep(TAIL_STOP_GRACE * 3).await; }
-                Ok(LlmResponse { parts: vec![LlmOutputPart::Text { text: "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n".into(), response_meta: None }], usage: lash_core::llm::types::LlmUsage { input_tokens: 17, output_tokens: 5, ..Default::default() }, terminal_reason: lash_core::LlmTerminalReason::Stop, ..Default::default() })
-            }).build();
+                    if case == "retry" && request.scope.attempt == Some(1) {
+                        return Err(LlmTransportError::new("failed after partial usage")
+                            .with_kind(lash_core::ProviderFailureKind::Stream)
+                            .with_retry_verdict(
+                                lash::provider::TransportRetryVerdict::RetryableTransient,
+                            )
+                            .with_partial_response(LlmResponse {
+                                usage: lash_core::llm::types::LlmUsage {
+                                    input_tokens: 2,
+                                    output_tokens: 1,
+                                    ..Default::default()
+                                },
+                                provider_usage: Some(
+                                    serde_json::json!({"input_tokens":2,"output_tokens":1}),
+                                ),
+                                ..Default::default()
+                            }));
+                    }
+                    if case == "accepted-mid-stream" {
+                        streamed_cell(&request.stream_events.expect("stream events"), "settled");
+                        tokio::time::sleep(TAIL_STOP_GRACE * 3).await;
+                    }
+                    Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::Text {
+                            text:
+                                "<typescript>\nawait control.finish(\"settled\");\n</typescript>\n"
+                                    .into(),
+                            response_meta: None,
+                        }],
+                        usage: lash_core::llm::types::LlmUsage {
+                            input_tokens: 17,
+                            output_tokens: 5,
+                            ..Default::default()
+                        },
+                        terminal_reason: lash_core::LlmTerminalReason::Stop,
+                        ..Default::default()
+                    })
+                })
+                .build();
             let provider = ProviderHandle::new(lash_core::provider::ProviderComponents::new(
                 Box::new(CountingProvider {
                     inner: Box::new(provider),

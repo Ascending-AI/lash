@@ -57,6 +57,7 @@ required-features = ["default"]
 workspace = true
 
 [dependencies]
+lash-transport-failure = { workspace = true }
 lash-kernel-doc.workspace = true
 lash-kernel-check.workspace = true
 lash-kernel-dialect.workspace = true

@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use lash_core::attachments::{
     AttachmentStore, ProviderFileCacheLimits, ProviderFileDelivery, RuntimeAttachmentStore,
 };
-use lash_core::facade_support::LlmTransportError;
 use lash_core::llm::types::SegmentCache;
 use lash_core::llm::types::{AdmittedSend, LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::provider::{
@@ -14,6 +13,7 @@ use lash_core::provider::{
 };
 use lash_llm_transport::{LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_sansio::{AttachmentCreateMeta, MediaType};
+use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 

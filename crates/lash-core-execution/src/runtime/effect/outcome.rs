@@ -1,7 +1,7 @@
 use crate::LlmRequest as CoreLlmRequest;
 use crate::LlmResponse;
-use crate::llm::transport::LlmTransportError;
 use crate::sansio::LlmCallError;
+use lash_transport_failure::LlmTransportError;
 
 use super::CausalRef;
 

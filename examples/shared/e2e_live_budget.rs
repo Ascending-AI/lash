@@ -7,10 +7,10 @@ use anyhow::{Context as _, Result, ensure};
 use async_trait::async_trait;
 use lash::direct::ProviderRouteIdentity;
 use lash::provider::{
-    GenerationRetryGuarantee, LlmRequest, LlmResponse, LlmTransportError, Provider,
-    ProviderComponents, ProviderFailureKind, ProviderOptions, RecordedRequestTemplate,
-    TransportRetryVerdict,
+    GenerationRetryGuarantee, LlmRequest, LlmResponse, Provider, ProviderComponents,
+    ProviderFailureKind, ProviderOptions, RecordedRequestTemplate,
 };
+use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use serde::Deserialize;
 use serde_json::{Value, json};
 

@@ -6,9 +6,7 @@ pub(crate) use async_trait::async_trait;
 pub(crate) use base64::Engine;
 pub(crate) use serde_json::{Value, json};
 
-pub(crate) use lash_core::llm::transport::{
-    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
-};
+pub(crate) use lash_core::llm::transport::{ProviderFailureKind, TurnFailureCode};
 pub(crate) use lash_core::llm::types::{
     AttachmentSlot, ExecutionEvidence, GenerationReceipt, LiveRequestBody, LlmContentBlock,
     LlmOutputPart, LlmOutputSpec, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent,
@@ -38,6 +36,7 @@ pub(crate) use lash_llm_transport::{
 };
 pub(crate) use lash_llm_transport::{TokenGate, TokenLease, rejected_before_output};
 pub(crate) use lash_sansio::ModelToolReturnPart;
+pub(crate) use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 pub(crate) use crate::config::*;
 

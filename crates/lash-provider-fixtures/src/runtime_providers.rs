@@ -52,8 +52,8 @@ impl From<serde_json::Error> for RuntimeProviderError {
     }
 }
 
-impl From<lash_core::facade_support::LlmTransportError> for RuntimeProviderError {
-    fn from(value: lash_core::facade_support::LlmTransportError) -> Self {
+impl From<lash_transport_failure::LlmTransportError> for RuntimeProviderError {
+    fn from(value: lash_transport_failure::LlmTransportError) -> Self {
         Self::new(value.to_string())
     }
 }

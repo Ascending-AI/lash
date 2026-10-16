@@ -1,7 +1,8 @@
 use serde_json::Value;
 
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::LlmTerminalReason;
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 fn error_object(value: &Value) -> Option<&Value> {
     value

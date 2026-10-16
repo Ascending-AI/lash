@@ -3,8 +3,9 @@
 
 use crate::config::OpenAiReasoningDialect;
 use crate::driver::CompletionEndpoint;
-use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict, TurnFailureCode};
+use lash_core::llm::transport::TurnFailureCode;
 use lash_core::provider::ReasoningIntent;
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use serde_json::{Value, json};
 
 /// Write `intent` onto `body` in the route's dialect, or refuse it.

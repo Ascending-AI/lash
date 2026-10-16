@@ -4,7 +4,6 @@
 
 use super::*;
 use async_trait::async_trait;
-use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict};
 use lash_core::provider::ProviderToken;
 use lash_core::provider::{
     TokenError, TokenErrorKind, TokenRequest, TokenRequestReason, TokenSource,
@@ -12,6 +11,7 @@ use lash_core::provider::{
 use lash_llm_transport::{
     LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport,
 };
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use ws_testing::spawn_scripted_websocket_rejecting_token;
 
 /// A host source that rotates `token-N` to `token-N+1` when lash rejects the

@@ -3,7 +3,7 @@
 //! its committed state and what its model was asked.
 
 use super::*;
-use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict};
+use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash_core::{FailureCode, MessageRole};
 
 /// One scripted model answer: a response or a transport failure.

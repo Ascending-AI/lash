@@ -746,11 +746,13 @@ async fn immediate_stop_after_a_checkpoint(id: &str) -> Result<ImmediateTail> {
                 requests.lock_recover().push(request.messages.clone());
                 let call = calls.fetch_add(1, Ordering::SeqCst);
                 async move {
-                    let delta = |block: &str, text: &str| LlmStreamEvent::Block(StreamBlockEvent::Delta {
-                        kind: StreamBlockKind::AssistantText,
-                        block: lash_core::llm::types::StreamBlockIdentity::new(block, 0),
-                        text: text.to_string(),
-                    });
+                    let delta = |block: &str, text: &str| {
+                        LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                            kind: StreamBlockKind::AssistantText,
+                            block: lash_core::llm::types::StreamBlockIdentity::new(block, 0),
+                            text: text.to_string(),
+                        })
+                    };
                     match call {
                         0 => Ok(LlmResponse {
                             parts: vec![
@@ -772,11 +774,13 @@ async fn immediate_stop_after_a_checkpoint(id: &str) -> Result<ImmediateTail> {
                                 .stream_events
                                 .expect("stream sender")
                                 .send(delta("failed-block", RETRACTED));
-                            Err(lash::provider::LlmTransportError::new("transient provider failure")
-                                .with_kind(lash_core::ProviderFailureKind::Stream)
-                                .with_retry_verdict(
-                                    lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
-                                ))
+                            Err(lash::provider::LlmTransportError::new(
+                                "transient provider failure",
+                            )
+                            .with_kind(lash_core::ProviderFailureKind::Stream)
+                            .with_retry_verdict(
+                                lash::provider::TransportRetryVerdict::RetryableTransient,
+                            ))
                         }
                         2 => {
                             request

@@ -9,10 +9,11 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use chrono::{SecondsFormat, Utc};
-use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
+use lash_core::ProviderFailureKind;
 use lash_llm_transport::{
     LlmByteStream, LlmHttpBody, LlmHttpRequest, LlmHttpResponse, LlmHttpTransport,
 };
+use lash_transport_failure::LlmTransportError;
 use serde_json::Value;
 
 use lash_provider_fixtures::provider::{
@@ -753,7 +754,7 @@ fn elapsed_millis(duration: Duration) -> u64 {
 fn recording_error(message: impl Into<String>) -> LlmTransportError {
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Transport)
-        .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::NotRetryable)
+        .with_retry_verdict(lash_transport_failure::TransportRetryVerdict::NotRetryable)
 }
 
 #[cfg(test)]

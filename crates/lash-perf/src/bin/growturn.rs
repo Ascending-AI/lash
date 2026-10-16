@@ -109,16 +109,16 @@ fn provider(args: &Args, meter: Arc<measure::Meter>) -> lash_core::provider::Pro
                     }).max().unwrap_or(0);
                 if done > 0 && !request.messages.iter().filter(|m| m.role != LlmRole::Assistant)
                     .flat_map(|m| m.blocks.iter()).any(|b| matches!(b, LlmContentBlock::Text { text, .. } if text.contains(&format!("grow-done:{done}:")))) {
-                    return Err(lash::provider::LlmTransportError::new("cell did not emit its successful payload receipt"));
+                    return Err(lash_transport_failure::LlmTransportError::new("cell did not emit its successful payload receipt"));
                 }
                 meter.model_request(&request);
-                meter.start_profile(done).map_err(|e| lash::provider::LlmTransportError::new(e.to_string()))?;
+                meter.start_profile(done).map_err(|e| lash_transport_failure::LlmTransportError::new(e.to_string()))?;
                 if done.is_multiple_of(every) || done == rounds || done == rounds / 2
                     || done == rounds * 3 / 4 || done == meter.profile_from_round {
                     let phase = if handoffs && done == rounds / 2 { "resumed-in-process" }
                         else if handoffs && done == rounds * 3 / 4 { "resumed-process-restart" }
                         else { "round" };
-                    meter.sample(phase, done).map_err(|e| lash::provider::LlmTransportError::new(e.to_string()))?;
+                    meter.sample(phase, done).map_err(|e| lash_transport_failure::LlmTransportError::new(e.to_string()))?;
                 }
                 let text = if done == rounds { "growing turn complete".to_owned() } else {
                     let next = done + 1;

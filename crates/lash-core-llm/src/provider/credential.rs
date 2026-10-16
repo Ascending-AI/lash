@@ -10,10 +10,10 @@
 use std::fmt;
 use std::time::{Duration, SystemTime};
 
-use lash_http_transport::{LlmTransportError, TransportRetryVerdict};
 use lash_sansio::Redacted;
 use lash_sansio::llm::types::{ProviderFailureKind, ProviderRouteIdentity};
 use lash_sansio::session_model::TurnFailureCode;
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 /// A credential the host minted for one provider route. Lash holds it only for
 /// one model-call attempt and never records it: it has no `Serialize`, and its

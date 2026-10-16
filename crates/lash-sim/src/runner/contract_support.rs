@@ -365,7 +365,7 @@ pub(super) fn fixed_texts_provider(
                         "{kind} provider exhausted its fixed response"
                     ))
                     .with_retry_verdict(
-                        lash::provider::TransportRetryVerdict::NotRetryable,
+                        lash_transport_failure::TransportRetryVerdict::NotRetryable,
                     ));
                 };
                 let expected_text = text.clone();

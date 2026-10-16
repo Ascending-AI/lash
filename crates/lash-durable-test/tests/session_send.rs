@@ -721,13 +721,17 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
             move |_request| {
                 calls.fetch_add(1, Ordering::SeqCst);
                 async {
-                    Err(lash_core::llm::transport::LlmTransportError::new("retry me")
+                    Err(lash_transport_failure::LlmTransportError::new("retry me")
                         .with_kind(lash_core::ProviderFailureKind::Transport)
                         .with_headers([("x-request-id", "failed-attempt")])
-                        .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::RetryableTransient))
+                        .with_retry_verdict(
+                            lash_transport_failure::TransportRetryVerdict::RetryableTransient,
+                        ))
                 }
             }
-        }).build().into_handle();
+        })
+        .build()
+        .into_handle();
     let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
         .await
         .expect("memory stores");

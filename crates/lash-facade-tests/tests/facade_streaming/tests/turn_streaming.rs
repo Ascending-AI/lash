@@ -2,9 +2,9 @@ use super::*;
 
 use lash::TurnEvent;
 
+use lash::provider::LlmTransportError;
 use lash::{TurnActivity, TurnInput};
 use lash_core::facade_support::{SessionObservationSubscription, SessionResume, TurnOutcome};
-use lash_core::llm::transport::LlmTransportError;
 
 use lash_core::{SessionId, TurnId};
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};

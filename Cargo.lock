@@ -2236,6 +2236,7 @@ dependencies = [
  "lash-internal-core-worker",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-transport-failure",
  "lash-kernel-doc",
  "pretty_assertions",
  "proptest",
@@ -2266,6 +2267,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
+ "lash-internal-transport-failure",
  "lash-kernel-doc",
  "lash-kernel-migrate",
  "libc",
@@ -2309,6 +2311,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-trace",
+ "lash-internal-transport-failure",
  "lash-kernel-check",
  "lash-kernel-doc",
  "lash-kernel-migrate",
@@ -2355,9 +2358,9 @@ dependencies = [
  "chrono",
  "futures-util",
  "lash-internal-core-ids",
- "lash-internal-http-transport",
  "lash-internal-sansio",
  "lash-internal-trace",
+ "lash-internal-transport-failure",
  "schemars",
  "serde",
  "serde_json",
@@ -2444,6 +2447,7 @@ dependencies = [
  "lash-internal-provider-anthropic",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-transport-failure",
  "lash-internal-vm-client",
  "lash-internal-vm-runtime",
  "lash-kernel-doc",
@@ -2505,10 +2509,9 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "bytes",
- "httpdate",
  "lash-internal-sansio",
+ "lash-internal-transport-failure",
  "reqwest",
- "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -2535,6 +2538,7 @@ dependencies = [
  "lash-internal-llm-transport",
  "lash-internal-render",
  "lash-internal-sansio",
+ "lash-internal-transport-failure",
  "proptest",
  "serde",
  "serde_json",
@@ -2720,6 +2724,7 @@ dependencies = [
  "lash-internal-llm-transport",
  "lash-internal-provider-anthropic",
  "lash-internal-sansio",
+ "lash-internal-transport-failure",
  "reqwest",
  "serde_json",
  "tokio",
@@ -2737,6 +2742,7 @@ dependencies = [
  "lash-internal-provider-google",
  "lash-internal-provider-openai",
  "lash-internal-sansio",
+ "lash-internal-transport-failure",
  "serde",
  "serde_json",
  "tokio",
@@ -2754,6 +2760,7 @@ dependencies = [
  "lash-internal-llm-transport",
  "lash-internal-provider-google",
  "lash-internal-sansio",
+ "lash-internal-transport-failure",
  "lash-runtime",
  "reqwest",
  "serde_json",
@@ -2775,6 +2782,7 @@ dependencies = [
  "lash-internal-provider-openai",
  "lash-internal-sansio",
  "lash-internal-tool-support",
+ "lash-internal-transport-failure",
  "lash-runtime",
  "reqwest",
  "serde",
@@ -2950,6 +2958,15 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "lash-internal-transport-failure"
+version = "0.0.0-dev"
+dependencies = [
+ "httpdate",
+ "lash-internal-sansio",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3297,6 +3314,7 @@ dependencies = [
  "lash-internal-rlm-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-transport-failure",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
  "lash-internal-vm-library",
@@ -3411,6 +3429,7 @@ dependencies = [
  "lash-internal-tool-shape",
  "lash-internal-tool-support",
  "lash-internal-trace",
+ "lash-internal-transport-failure",
  "lash-internal-vm-client",
  "lash-internal-vm-runtime",
  "lash-internal-vm-worker",
@@ -3463,6 +3482,7 @@ dependencies = [
  "lash-internal-s3-store",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-transport-failure",
  "lash-internal-vm-client",
  "lash-internal-vm-runtime",
  "lash-runtime",

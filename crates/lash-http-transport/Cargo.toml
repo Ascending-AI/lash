@@ -20,12 +20,11 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-transport-failure = { workspace = true }
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
-httpdate = { workspace = true }
 reqwest = { workspace = true, features = ["json", "query", "stream", "rustls", "http2"] }
-thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
 
 [dev-dependencies]

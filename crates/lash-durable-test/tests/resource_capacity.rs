@@ -47,7 +47,7 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
     let provider = lash_core::testing::TestProvider::builder()
         .kind("resource-capacity")
         .complete(|_request| async move {
-            Ok::<_, lash_core::llm::transport::LlmTransportError>(lash_core::LlmResponse {
+            Ok::<_, lash_transport_failure::LlmTransportError>(lash_core::LlmResponse {
                 parts: vec![lash_core::LlmOutputPart::Text {
                     text: "done".to_owned(),
                     response_meta: None,

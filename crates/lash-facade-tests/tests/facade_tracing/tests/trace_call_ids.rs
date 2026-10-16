@@ -6,7 +6,7 @@
 use super::trace_emission::{Observed, attribute};
 use super::*;
 
-use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict};
+use lash::provider::{LlmTransportError, TransportRetryVerdict};
 
 const SESSION: &str = "l26-call-ids";
 const PROMPT: &str = "direct prompt";

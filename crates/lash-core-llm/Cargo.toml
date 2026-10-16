@@ -29,8 +29,8 @@ testing = ["lash-core-ids/testing", "lash-sansio/testing"]
 workspace = true
 
 [dependencies]
+lash-transport-failure = { workspace = true }
 lash-core-ids = { workspace = true }
-lash-http-transport = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }
 async-trait = { workspace = true }

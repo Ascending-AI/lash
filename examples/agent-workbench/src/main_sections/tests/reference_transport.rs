@@ -41,9 +41,9 @@ use lash::SessionId;
 use lash::TurnId;
 use lash::direct::{LlmStreamEvent, StreamBlockIdentity};
 use lash::provider::{
-    GenerationRetryGuarantee, LlmRequest, LlmTransportError, ProviderFailureKind, ProviderOptions,
-    ProviderReliability, TransportRetryVerdict,
+    GenerationRetryGuarantee, LlmRequest, ProviderFailureKind, ProviderOptions, ProviderReliability,
 };
+use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash::{StreamBlockEvent, StreamBlockKind};
 
 use lash::TurnEvent;

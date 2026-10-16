@@ -4,8 +4,8 @@
 //! is cancelled. On facade turns the session actor runs.
 
 use super::*;
+use lash::provider::LlmTransportError;
 use lash_core::FailureCode;
-use lash_core::facade_support::LlmTransportError;
 use lash_core::facade_support::TurnOutcome;
 use lash_core::plugin::AssistantStreamTransform;
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};

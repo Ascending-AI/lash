@@ -4,9 +4,7 @@ pub(crate) use serde::Deserialize;
 pub(crate) use serde_json::{Value, json};
 pub(crate) use std::collections::HashMap;
 
-pub(crate) use lash_core::llm::transport::{
-    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
-};
+pub(crate) use lash_core::llm::transport::{ProviderFailureKind, TurnFailureCode};
 pub(crate) use lash_core::llm::types::{
     AttachmentSlot, ExecutionEvidence, LiveRequestBody, LlmContentBlock, LlmEventSender,
     LlmOutputPart, LlmOutputSpec, LlmProviderTraceSender, LlmRequest, LlmResponse, LlmRole,
@@ -18,6 +16,7 @@ pub(crate) use lash_core::llm::types::{
 pub(crate) use lash_core::{
     facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose,
 };
+pub(crate) use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 // `ResponseTextMeta` is only referenced by the crate's `#[cfg(test)]`
 // assertions (the request/response shapes that exercise the shared Responses
 // input builder), so gate the re-export to test builds to keep the non-test

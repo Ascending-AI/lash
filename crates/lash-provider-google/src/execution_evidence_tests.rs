@@ -16,7 +16,7 @@ impl LlmHttpTransport for StaticResponseTransport {
         &self,
         _request: LlmHttpRequest,
         _timeout: Option<std::time::Duration>,
-    ) -> Result<LlmHttpResponse, lash_core::facade_support::LlmTransportError> {
+    ) -> Result<LlmHttpResponse, lash_transport_failure::LlmTransportError> {
         Ok(LlmHttpResponse {
             status: 200,
             headers: vec![("content-type".to_string(), "application/json".to_string())],
@@ -34,7 +34,7 @@ impl LlmHttpTransport for StaticSseTransport {
         &self,
         _request: LlmHttpRequest,
         _timeout: Option<std::time::Duration>,
-    ) -> Result<LlmHttpResponse, lash_core::facade_support::LlmTransportError> {
+    ) -> Result<LlmHttpResponse, lash_transport_failure::LlmTransportError> {
         Ok(LlmHttpResponse {
             status: 200,
             headers: vec![("content-type".to_string(), "text/event-stream".to_string())],

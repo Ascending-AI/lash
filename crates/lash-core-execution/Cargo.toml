@@ -31,6 +31,7 @@ testing = ["lash-durable/testing", "dep:tracing-subscriber", "lash-core-ids/test
 workspace = true
 
 [dependencies]
+lash-transport-failure = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }
 lash-core-store = { workspace = true }

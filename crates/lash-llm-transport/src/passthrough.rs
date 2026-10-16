@@ -1,7 +1,7 @@
 //! Merge host-owned wire fields after the adapter has written its request.
 
-use lash_core::llm::transport::{LlmTransportError, TransportRetryVerdict};
 use lash_core::{GenerationOptionOutcome, ProviderFailureKind, TurnFailureCode};
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use serde_json::{Map, Value};
 
 /// Host-supplied route headers. Debug output never exposes names or values.

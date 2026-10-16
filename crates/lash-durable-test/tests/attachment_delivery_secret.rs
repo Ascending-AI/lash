@@ -171,7 +171,7 @@ impl Provider for WireRecorder {
         &mut self,
         request: &lash_core::LlmRequest,
         cache: &SegmentCache,
-    ) -> Result<RecordedRequestTemplate, lash_core::llm::transport::LlmTransportError> {
+    ) -> Result<RecordedRequestTemplate, lash_transport_failure::LlmTransportError> {
         self.lowered.fetch_add(1, Ordering::SeqCst);
         RecordedRequestTemplate::of_request(
             self.route_identity(request.model.wire_model()),
@@ -195,7 +195,7 @@ impl Provider for WireRecorder {
         &mut self,
         body: &LiveRequestBody,
         _context: ResponseContext,
-    ) -> Result<LlmResponse, lash_core::llm::transport::LlmTransportError> {
+    ) -> Result<LlmResponse, lash_transport_failure::LlmTransportError> {
         let first = {
             let mut wires = self.wires.lock_recover();
             wires.push((body.to_wire_string(), body.template().clone()));

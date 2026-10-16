@@ -201,7 +201,7 @@ pub mod facade_support {
     pub use crate::direct::DirectPart;
     pub use crate::direct::DirectRequest;
     pub use crate::direct::DirectRole;
-    pub use crate::llm::transport::LlmTransportError;
+
     pub use crate::plugin::AfterTurnContributions;
     pub use crate::plugin::AssistantResponseTransform;
     pub use crate::plugin::CheckpointHookContext;

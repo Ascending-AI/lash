@@ -1,6 +1,7 @@
-use lash_core::llm::transport::{LlmTransportError, ProviderFailureKind};
+use lash_core::llm::transport::ProviderFailureKind;
 use lash_core::llm::types::{LlmOutputPart, LlmStreamEvent, LlmUsage};
 use lash_sansio::llm::types::StreamBlockEvent;
+use lash_transport_failure::LlmTransportError;
 use serde_json::Value;
 
 use crate::responses_shared::ResponsesStreamState;

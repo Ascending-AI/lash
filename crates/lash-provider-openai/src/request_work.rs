@@ -106,10 +106,12 @@ pub(crate) fn needs_blocking(
 pub(crate) async fn run<T: Send + 'static>(
     blocking: bool,
     work: impl FnOnce() -> T + Send + 'static,
-) -> Result<T, crate::support::LlmTransportError> {
+) -> Result<T, lash_transport_failure::LlmTransportError> {
     if blocking {
         tokio::task::spawn_blocking(work).await.map_err(|error| {
-            crate::support::LlmTransportError::new(format!("OpenAI request work failed: {error}"))
+            lash_transport_failure::LlmTransportError::new(format!(
+                "OpenAI request work failed: {error}"
+            ))
         })
     } else {
         Ok(work())
@@ -260,7 +262,7 @@ mod tests {
             "x".repeat(EXCERPT_BYTES)
         );
         let body = "€".repeat(EXCERPT_BYTES);
-        let error = crate::support::LlmTransportError::new("invalid response")
+        let error = lash_transport_failure::LlmTransportError::new("invalid response")
             .with_raw(RequestDiagnosticLimits::standard().body_excerpt(&body));
         let raw = error.raw.as_deref().unwrap();
         assert!(raw.len() <= EXCERPT_BYTES + 40);

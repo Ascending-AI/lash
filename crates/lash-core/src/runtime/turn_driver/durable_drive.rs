@@ -653,10 +653,10 @@ impl TurnDrive for RuntimeDrive {
     }
 
     fn model_unsent(&mut self, id: crate::EffectId, error: crate::LlmCallError) {
-        let mut failure = crate::llm::transport::LlmTransportError::new(error.message.clone())
+        let mut failure = lash_transport_failure::LlmTransportError::new(error.message.clone())
             .with_kind(error.kind)
             .with_terminal_reason(error.terminal_reason)
-            .with_retry_verdict(crate::llm::transport::TransportRetryVerdict::NotRetryable);
+            .with_retry_verdict(lash_transport_failure::TransportRetryVerdict::NotRetryable);
         failure.code = error.code.clone();
         failure.partial_response = error.partial_response.clone();
         let call_id = crate::LlmCallId(format!(

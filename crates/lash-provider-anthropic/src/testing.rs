@@ -9,7 +9,7 @@ use crate::AnthropicProvider;
 pub fn serialize_request(
     request: &LlmRequest,
     retention: CacheRetention,
-) -> Result<Value, lash_core::facade_support::LlmTransportError> {
+) -> Result<Value, lash_transport_failure::LlmTransportError> {
     let mut request = request.clone();
     request
         .model

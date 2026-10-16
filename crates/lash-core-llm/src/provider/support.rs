@@ -4,9 +4,7 @@ pub(super) use std::time::Duration;
 pub(super) use async_trait::async_trait;
 pub(super) use serde::{Deserialize, Serialize};
 
-pub(super) use crate::llm::transport::{
-    LlmTransportError, ProviderFailureKind, TransportRetryVerdict,
-};
+pub(super) use crate::llm::transport::ProviderFailureKind;
 pub(super) use crate::llm::types::{
     AttachmentSlot, AttemptOutcome, AttemptRecord, ChargeSafetyDecision, ChargeSafetyDenialReason,
     ExecutionEvidence, GenerationOptionOutcome, GenerationReceipt, LiveRequestBody, LlmCallId,
@@ -17,6 +15,7 @@ pub(super) use crate::llm::types::{
 };
 pub(super) use lash_sansio::llm::capability::ReasoningIntent;
 pub(super) use lash_sansio::session_model::{FailureCode, Namespace, TurnFailureCode};
+pub(super) use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 #[cfg(test)]
 pub(super) use super::handle::*;

@@ -48,8 +48,8 @@ impl From<serde_json::Error> for ProviderMutationExecutionError {
     }
 }
 
-impl From<lash_core::facade_support::LlmTransportError> for ProviderMutationExecutionError {
-    fn from(value: lash_core::facade_support::LlmTransportError) -> Self {
+impl From<lash_transport_failure::LlmTransportError> for ProviderMutationExecutionError {
+    fn from(value: lash_transport_failure::LlmTransportError) -> Self {
         Self::new(value.to_string())
     }
 }

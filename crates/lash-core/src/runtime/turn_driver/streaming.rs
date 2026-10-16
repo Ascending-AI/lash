@@ -424,21 +424,21 @@ impl RuntimeTurnDriver<'_> {
                     let failure = match stop_error {
                         Some(error) => {
                             let mut failure =
-                                crate::llm::transport::LlmTransportError::new(error.message)
+                                lash_transport_failure::LlmTransportError::new(error.message)
                                     .with_kind(error.kind)
                                     .with_terminal_reason(error.terminal_reason)
                                     .with_retry_verdict(
-                                        crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                                        lash_transport_failure::TransportRetryVerdict::NotRetryable,
                                     );
                             failure.code = error.code;
                             failure
                         }
-                        None => crate::llm::transport::LlmTransportError::new("cancelled")
+                        None => lash_transport_failure::LlmTransportError::new("cancelled")
                             .with_kind(crate::ProviderFailureKind::Unknown)
                             .with_lash_code(TurnFailureCode::Cancelled)
                             .with_terminal_reason(crate::LlmTerminalReason::Cancelled)
                             .with_retry_verdict(
-                                crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                                lash_transport_failure::TransportRetryVerdict::NotRetryable,
                             ),
                     };
                     let outcome = if failure.terminal_reason == crate::LlmTerminalReason::Cancelled
@@ -604,13 +604,13 @@ impl RuntimeTurnDriver<'_> {
                             break Err(failure);
                         }
                         Err(e) => {
-                            let failure = crate::llm::transport::LlmTransportError::new(format!(
+                            let failure = lash_transport_failure::LlmTransportError::new(format!(
                                 "internal task failed: {e}"
                             ))
                             .with_kind(crate::ProviderFailureKind::Unknown)
                             .with_lash_code(TurnFailureCode::TaskJoinFailed)
                             .with_retry_verdict(
-                                crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                                lash_transport_failure::TransportRetryVerdict::NotRetryable,
                             );
                             call_record = Some(crate::provider::synthetic_terminal_call_record(
                                 call_id.clone(),
@@ -725,11 +725,11 @@ impl RuntimeTurnDriver<'_> {
                 Ok(Err(failure)) => *failure.call_record,
                 Err(_) => {
                     let mut failure =
-                        crate::llm::transport::LlmTransportError::new(error.message.clone())
+                        lash_transport_failure::LlmTransportError::new(error.message.clone())
                             .with_kind(error.kind)
                             .with_terminal_reason(error.terminal_reason)
                             .with_retry_verdict(
-                                crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                                lash_transport_failure::TransportRetryVerdict::NotRetryable,
                             );
                     failure.code = error.code.clone();
                     failure.partial_response = error.partial_response.clone();

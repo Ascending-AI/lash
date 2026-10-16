@@ -16,8 +16,9 @@ use lash_sansio::llm::types::{AttachmentSlot, LiveRequestBody, RecordedRequestTe
 use lash_sansio::{AttachmentId, AttachmentRef};
 
 use super::Provider;
-use crate::llm::transport::{LlmTransportError, ProviderFailureKind, TransportRetryVerdict};
+use crate::llm::transport::ProviderFailureKind;
 use lash_sansio::session_model::TurnFailureCode;
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 /// What fills the attachment slots of one attempt.
 #[async_trait::async_trait]

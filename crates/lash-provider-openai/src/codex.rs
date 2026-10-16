@@ -28,7 +28,6 @@ use crate::driver::CompletionEndpoint;
 use crate::reasoning::{apply_reasoning, reasoning_object};
 use crate::responses_shared as shared;
 use crate::support::{TemplateJson, UnitWriter};
-use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     LlmOutputSpec, LlmRequest, ProviderReasoningRetentionSupport, ReasoningRetentionSelection,
 };
@@ -42,6 +41,7 @@ use lash_llm_transport::{
     LlmHttpTransport, TokenGate, merge_extra_body, reserved_generation_paths,
     validate_extra_headers,
 };
+use lash_transport_failure::LlmTransportError;
 
 use failure::CodexFailureClassifier;
 use session::CodexWebsocketSessionCache;

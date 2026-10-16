@@ -14,11 +14,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core::llm::transport::{
-    LlmTransportError, ProviderFailureKind, TransportRetryVerdict, TurnFailureCode,
-};
+use lash_core::llm::transport::{ProviderFailureKind, TurnFailureCode};
 use lash_core::llm::types::ResponseContext;
 use lash_llm_transport::TokenLease;
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};

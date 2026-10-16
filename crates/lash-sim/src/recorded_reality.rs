@@ -1,15 +1,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use lash_core::ProviderFailureKind;
 use lash_core::llm::types::{
     LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRequest, LlmRole,
     LlmTerminalReason, LlmToolChoice,
 };
 use lash_core::provider::{DefaultProviderFailureClassifier, Provider, ProviderFailureClassifier};
-use lash_core::{ProviderFailureKind, facade_support::LlmTransportError};
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::{OpenAiCompatibleProvider, OpenAiProvider};
+use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 
 use lash_provider_fixtures::provider::{

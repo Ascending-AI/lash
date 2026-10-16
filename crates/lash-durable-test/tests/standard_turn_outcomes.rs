@@ -1285,10 +1285,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
                             Some(tx) => {
                                 let _ = tx.send(());
                                 std::future::pending::<
-                                    Result<
-                                        LlmResponse,
-                                        lash_core::llm::transport::LlmTransportError,
-                                    >,
+                                    Result<LlmResponse, lash_transport_failure::LlmTransportError>,
                                 >()
                                 .await
                             }

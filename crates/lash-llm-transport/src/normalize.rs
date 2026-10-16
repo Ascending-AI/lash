@@ -8,11 +8,10 @@
 //! contract, so there is no normalizer trait here — providers wire their own
 //! wire-format parsing to these primitives directly.
 
+use lash_core::ProviderFailureKind;
 use lash_core::provider::ProviderOptions;
-use lash_core::{
-    ProviderFailureKind, facade_support::LlmTransportError, llm::transport::TransportRetryVerdict,
-};
 use lash_sansio::llm::types::{LlmOutputPart, LlmTerminalReason, LlmUsage};
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 use serde_json::Value;
 
 use crate::util::{extract_error_detail, parse_i64};

@@ -189,12 +189,12 @@ impl LocalDirectEffectRunner {
             Err(error) => {
                 return (
                     Err(llm_call_error_from_transport(
-                        crate::llm::transport::LlmTransportError::new(format!(
+                        lash_transport_failure::LlmTransportError::new(format!(
                             "direct provider task failed: {error}"
                         ))
                         .with_lash_code(crate::TurnFailureCode::TaskJoinFailed)
                         .with_retry_verdict(
-                            crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                            lash_transport_failure::TransportRetryVerdict::NotRetryable,
                         ),
                     )),
                     None,

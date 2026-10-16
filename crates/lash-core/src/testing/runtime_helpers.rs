@@ -5,7 +5,6 @@
 //! promoted out of the library's unit-test target; they live behind the
 //! `testing` feature, the crate's existing seam for test-only surface.
 
-use crate::llm::transport::LlmTransportError;
 use crate::llm::types::LlmStreamEvent;
 use crate::plugin::PluginSessionRequest;
 use crate::plugin::StaticPluginFactory;
@@ -13,6 +12,7 @@ use crate::runtime::*;
 use crate::testing::TestProvider;
 use crate::*;
 use lash_sansio::sync::MutexExt;
+use lash_transport_failure::LlmTransportError;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

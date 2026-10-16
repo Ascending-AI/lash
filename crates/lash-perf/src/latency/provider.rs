@@ -18,7 +18,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use lash_core::LlmTerminalReason;
-use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{
     LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage,
 };
@@ -26,6 +25,7 @@ use lash_core::provider::ProviderOptions;
 use lash_core::testing::TestProvider;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
+use lash_transport_failure::LlmTransportError;
 
 /// The provider fixtures the latency cases select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]

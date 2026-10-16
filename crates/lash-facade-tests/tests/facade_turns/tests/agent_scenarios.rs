@@ -19,7 +19,7 @@ fn scripted(responses: Vec<String>, requests: Arc<StdMutex<Vec<LlmRequest>>>) ->
             async move {
                 requests.lock_recover().push(request.clone());
                 let text = responses.lock().await.pop_front().ok_or_else(|| {
-                    lash_core::llm::transport::LlmTransportError::new(
+                    lash::provider::LlmTransportError::new(
                         "scripted agent scenario provider exhausted its expected responses",
                     )
                 })?;
@@ -348,7 +348,7 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
                                 assert_eq!(tool_calls.load(Ordering::SeqCst), 1);
                                 assert!(request_text(&request).contains("262144"));
                                 if classified {
-                                    Err(lash_core::llm::transport::LlmTransportError::new(
+                                    Err(lash::provider::LlmTransportError::new(
                                         "This model's maximum context length is 128000 tokens",
                                     )
                                     .with_http_status(400))

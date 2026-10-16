@@ -26,6 +26,7 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-core-worker": "lash-internal-core-worker",
     "lash-durable": "lash-internal-durable",
     "lash-http-transport": "lash-internal-http-transport",
+    "lash-transport-failure": "lash-internal-transport-failure",
     "lash-vm-runtime": "lash-internal-vm-runtime",
     "lash-llm-tools": "lash-internal-llm-tools",
     "lash-llm-transport": "lash-internal-llm-transport",

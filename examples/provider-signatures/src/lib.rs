@@ -6,7 +6,8 @@ mod transport {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use lash::http_transport::{HttpRequest, HttpResponse, HttpTransport, LlmTransportError};
+    use lash::http_transport::{HttpRequest, HttpResponse, HttpTransport};
+    use lash::provider::LlmTransportError;
 
     #[derive(Debug)]
     struct HostTransport;

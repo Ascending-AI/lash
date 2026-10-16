@@ -1478,7 +1478,6 @@ pub mod provider {
     #[cfg(any(feature = "anthropic", feature = "google", feature = "openai"))]
     pub use lash_llm_transport::{ExtraHeaders, TokenPolicy};
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::llm::transport::HttpFailureContext;
     /// Attachment delivery contracts. Their read limits live at
     /// [`crate::persistence::AttachmentReadPolicy`], beside the host's attachment policy.
     pub use lash_core::provider::{
@@ -1509,6 +1508,9 @@ pub mod provider {
     /// What a provider's `send` reads its response under, beside the body:
     /// the call's scope, its recorded contract and the send's live senders.
     pub use lash_sansio::llm::types::{ResponseContext, ResponseContract, ToolCallContract};
+    pub use lash_transport_failure::{
+        HttpFailureContext, LlmTransportError, TransportRetryVerdict, retry_after_from_headers,
+    };
 
     /// Typed provider-failure classification surfaced on
     /// [`TurnIssue`](crate::turn::TurnIssue) and session error envelopes.
@@ -1517,7 +1519,6 @@ pub mod provider {
     /// selection. The snake_case [`LlmProfileEffortValidationCategory`] codes are a
     /// stable contract a capability catalog can branch on.
     pub use lash_core::facade_support::LlmProfileEffortValidationCategory;
-    pub use lash_core::llm::transport::TransportRetryVerdict;
     pub use lash_core::llm::types::{
         LlmContentBlock, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRole, LlmToolChoice,
     };
@@ -1549,10 +1550,10 @@ pub mod provider {
         DiscardedAfterCell, ExecutionEvidence, ExecutionEvidenceCollectionInterruption,
         ExecutionEvidenceMergeError, LlmRequest, LlmRequestOwner, LlmRequestScope, LlmResponse,
         LlmStreamEvidence, LlmTurnScope, NormalizedError, ProtocolPosition, ProviderEndpointError,
-        RetryClass, RetryDecision, RetryDeclineCause, RetryWait, facade_support::LlmTransportError,
+        RetryClass, RetryDecision, RetryDeclineCause, RetryWait,
     };
     /// The namespaced failure code carried on
-    /// [`LlmTransportError`](facade_support::LlmTransportError) and attempt
+    /// [`LlmTransportError`] and attempt
     /// journals: `lash:` codes are workspace-authored, `provider:` codes came
     /// off the provider wire, and a host names its own vocabulary through
     /// [`HostNamespace`] plus [`FailureCode::host`] — a host namespace is

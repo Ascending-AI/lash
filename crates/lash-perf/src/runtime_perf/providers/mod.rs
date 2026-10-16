@@ -39,7 +39,7 @@ pub(crate) type BeforeCompletion = Box<
     dyn FnOnce() -> std::pin::Pin<
             Box<
                 dyn std::future::Future<
-                        Output = Result<(), lash_core::llm::transport::LlmTransportError>,
+                        Output = Result<(), lash_transport_failure::LlmTransportError>,
                     > + Send,
             >,
         > + Send,

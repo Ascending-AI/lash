@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use lash_core::facade_support::{
     ProviderSchemaCapabilities, SchemaPurpose, SchemaResolutionRequest, resolve_schema,
 };
-use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::ResponseContract;
 use lash_sansio::{OmissionNullPath, OmissionNullPathSegment};
+use lash_transport_failure::LlmTransportError;
 use serde_json::Value;
 
 use super::projection_error;

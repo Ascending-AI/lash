@@ -7,7 +7,8 @@ use super::{
 use crate::runtime_perf::openai_compat::OpenAiCompatBenchServer;
 use anyhow::{Context, Result, ensure};
 use lash_core::perf_witness::startup::{self, Marker, Phase, Recorder};
-use lash_http_transport::{HttpRequest, HttpResponse, HttpTransport, LlmTransportError};
+use lash_http_transport::{HttpRequest, HttpResponse, HttpTransport};
+use lash_transport_failure::LlmTransportError;
 use serde::{Deserialize, Serialize};
 use std::{
     path::Path,

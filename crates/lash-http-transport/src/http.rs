@@ -7,9 +7,9 @@ use bytes::Bytes;
 use lash_sansio::llm::types::ProviderFailureKind;
 use lash_sansio::session_model::TurnFailureCode;
 
-use crate::{LlmTransportError, TransportRetryVerdict};
 #[cfg(test)]
 use lash_sansio::session_model::FailureCode;
+use lash_transport_failure::{LlmTransportError, TransportRetryVerdict};
 
 #[async_trait]
 pub trait HttpTransport: Send + Sync + fmt::Debug {
@@ -687,7 +687,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             error.context.as_ref(),
-            crate::HttpFailureContext::ResponseBodyTooLarge {
+            lash_transport_failure::HttpFailureContext::ResponseBodyTooLarge {
                 limit: 0,
                 received_at_least: 1
             }
@@ -759,7 +759,10 @@ mod tests {
             let counts = measurement.finish();
             assert!(matches!(
                 error.context.as_ref(),
-                crate::HttpFailureContext::ResponseBodyTooLarge { limit: LIMIT, .. }
+                lash_transport_failure::HttpFailureContext::ResponseBodyTooLarge {
+                    limit: LIMIT,
+                    ..
+                }
             ));
             assert!(
                 counts.allocated <= 2048,
@@ -785,7 +788,7 @@ mod tests {
         let counts = measurement.finish();
         assert!(matches!(
             error.context.as_ref(),
-            crate::HttpFailureContext::ResponseBodyTooLarge { limit: LIMIT, .. }
+            lash_transport_failure::HttpFailureContext::ResponseBodyTooLarge { limit: LIMIT, .. }
         ));
         assert!(
             counts.allocated <= LIMIT + 2048,
@@ -826,7 +829,10 @@ mod tests {
                 } else {
                     assert!(matches!(
                         result.unwrap_err().context.as_ref(),
-                        crate::HttpFailureContext::ResponseBodyTooLarge { limit: 8, .. }
+                        lash_transport_failure::HttpFailureContext::ResponseBodyTooLarge {
+                            limit: 8,
+                            ..
+                        }
                     ));
                 }
             }

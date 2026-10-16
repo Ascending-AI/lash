@@ -1,0 +1,28 @@
+[package]
+name = "lash-internal-transport-failure"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Transport failure evidence and retry verdicts for Lash integrations."
+keywords = ["lash", "transport", "http"]
+categories = ["asynchronous", "network-programming"]
+
+[lib]
+name = "lash_transport_failure"
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+[dependencies]
+lash-sansio = { workspace = true }
+thiserror = { workspace = true }
+httpdate = { workspace = true }

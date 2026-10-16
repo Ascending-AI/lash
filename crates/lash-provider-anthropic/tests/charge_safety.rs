@@ -32,7 +32,7 @@ impl lash_llm_transport::LlmHttpTransport for CountingSseTransport {
         &self,
         _request: lash_llm_transport::LlmHttpRequest,
         _timeout: Option<std::time::Duration>,
-    ) -> Result<lash_llm_transport::LlmHttpResponse, lash_core::facade_support::LlmTransportError>
+    ) -> Result<lash_llm_transport::LlmHttpResponse, lash_transport_failure::LlmTransportError>
     {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(lash_llm_transport::LlmHttpResponse {
