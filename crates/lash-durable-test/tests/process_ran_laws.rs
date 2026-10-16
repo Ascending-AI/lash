@@ -12,15 +12,17 @@
 //!   and commit-then-abort and recovers on the other node. A segment a kill
 //!   recomputes draws other bits and may take the other branch; only the
 //!   accepted attempt's counts and tape commit. In every cell the
-//!   `process.ran` records sum to exactly the statements on the committed
-//!   path, one record per segment: a recomputed pass appends nothing.
+//!   `process.ran` statement/block counts sum to exactly the committed
+//!   path, and each sleep action issues once, with one record per segment:
+//!   a recomputed pass appends nothing.
 //! - **Replay:** every committed segment replays from what the journal
 //!   retains to `Verified` with its path, and the paths' histogram is the
-//!   `process.ran` sum. A tape that does not answer the segment's reads
-//!   diverges; a record the segment's start refers to that is no longer
-//!   retained, a segment that recorded no tape, and a pruned process are
-//!   `Unreplayable`. A process carried onto a successor pair replays each
-//!   segment on either side of the carry. An unobserved process replays
+//!   statement/block projection of the `process.ran` sum. A tape that does
+//!   not answer the segment's reads diverges; a record the segment's start
+//!   refers to that is no longer retained, a segment that recorded no tape,
+//!   and a pruned process are `Unreplayable`. A process carried onto a
+//!   successor pair replays each segment on either side of the carry.
+//!   An unobserved process replays
 //!   nothing and its overlay says it is unobserved, never zero.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
@@ -356,6 +358,40 @@ impl Counted {
         let mut violations = Vec::new();
         let records = self.ran_records(process).await;
         let committed = histogram(records.iter().flatten().copied());
+        let document =
+            lash::workflow::document::parse_document(&source()).expect("the document parses");
+        // Replay paths contain statement starts and empty-block entries.
+        // Action issues and while-condition tests share Ran's channel but
+        // have separate ordinal domains, so they do not belong in this sum.
+        let statement_ordinals: BTreeSet<_> = document.site_ordinals().into_values().collect();
+        let committed_statements: BTreeMap<_, _> = committed
+            .iter()
+            .filter_map(|(&ordinal, &count)| {
+                statement_ordinals
+                    .contains(&ordinal)
+                    .then_some((ordinal, count))
+            })
+            .collect();
+        // Both sleeps issue once even across cuts and carries. Check their
+        // counts independently rather than discarding the non-statement bins.
+        let expected_actions: BTreeMap<_, _> = document
+            .action_ordinals()
+            .into_values()
+            .map(|ordinal| (ordinal, 1))
+            .collect();
+        let committed_actions: BTreeMap<_, _> = committed
+            .iter()
+            .filter_map(|(&ordinal, &count)| {
+                expected_actions
+                    .contains_key(&ordinal)
+                    .then_some((ordinal, count))
+            })
+            .collect();
+        if committed_actions != expected_actions {
+            violations.push(format!(
+                "the sleep actions committed {committed_actions:?}, not {expected_actions:?}"
+            ));
+        }
         let replayed = self.replay(process, ReplaySegments::All).await;
         if replayed.len() != 3 {
             violations.push(format!(
@@ -388,9 +424,9 @@ impl Counted {
             }
         }
         let path = histogram(path);
-        if path != committed {
+        if path != committed_statements {
             violations.push(format!(
-                "the committed path counts {path:?}, but `process.ran` sums to {committed:?}"
+                "the committed path counts {path:?}, but `process.ran` statement/block counts sum to {committed_statements:?}"
             ));
         }
         let carries = self
