@@ -119,6 +119,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Correctness checks queue above optional cache warming (priority 0).
+  KILN_RE_PRIORITY: "10"
   LASH_CI_FEATURES: ""
   # The linker is a property of the caches this workflow shares, not of any
   # one job's step list. RUSTFLAGS is part of cargo's per-unit fingerprint, so

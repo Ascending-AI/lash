@@ -383,22 +383,50 @@ class WorkflowTests(unittest.TestCase):
         inventory = json.loads(
             (ROOT / "tools/buck2/target-inventory.json").read_text()
         )
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "scripts").mkdir()
-            driver = root / "scripts/hermetic-build.sh"
-            driver.write_text("#!/bin/bash\nprintf '%s\\n' \"$@\" > argv\n")
-            driver.chmod(0o755)
-            result = subprocess.run(["bash", "-c", run], cwd=root, capture_output=True, text=True)
-            self.assertEqual(0, result.returncode, result.stderr)
-            argv = (root / "argv").read_text().splitlines()
-        self.assertEqual("check", argv[0])
-        labels = {arg for arg in argv if arg.startswith("//")}
-        # The two generated aggregates expand to the `[check]` graph: the
-        # workspace's default resolution plus every `__fv_` lane variant.
-        self.assertEqual({"//:workspace_check", "//:feature_lane_compile"}, labels)
+        for event in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=event), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "scripts").mkdir()
+                driver = root / "scripts/hermetic-build.sh"
+                driver.write_text("#!/bin/bash\nprintf '%s\\n' \"$@\" > argv\n")
+                driver.chmod(0o755)
+                result = subprocess.run(
+                    ["bash", "-c", run], cwd=root, capture_output=True, text=True,
+                    env=os.environ | {"GITHUB_EVENT_NAME": event},
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+                argv = (root / "argv").read_text().splitlines()
+                self.assertEqual("check", argv[0])
+                labels = {arg for arg in argv if arg.startswith("//")}
+                expected = {"//:workspace_check"}
+                if event != "push":
+                    expected.add("//:feature_lane_compile")
+                self.assertEqual(expected, labels)
+                static = workflow("cache-warm.yml")["jobs"]["static-checks"]
+                self.assertEqual("github.event_name == 'push'", static["if"])
+                static_labels = step(static, "Check the feature-lane graph")["run"]
+                owners = int("//:feature_lane_compile" in labels) + int(
+                    event == "push" and "//:feature_lane_compile" in static_labels
+                )
+                self.assertEqual(1, owners)
         self.assertTrue(inventory["workspace_check_targets"])
         self.assertTrue(inventory["feature_lane_check_targets"])
+
+    def test_required_checks_outrank_optional_cache_warming(self) -> None:
+        parsed = workflow("cache-warm.yml")
+        for name in ("warm-buck2", "warm-workspace-tests"):
+            warm = parsed["jobs"][name]
+            self.assertEqual("0", warm.get("env", {}).get("KILN_RE_PRIORITY"))
+            for item in warm["steps"]:
+                for jobs in re.findall(r"--jobs (\d+)", item.get("run", "")):
+                    self.assertGreaterEqual(int(jobs), 8)
+                    self.assertLessEqual(int(jobs), 16)
+        static = parsed["jobs"]["static-checks"]
+        static_env = parsed.get("env", {}) | static.get("env", {})
+        self.assertGreater(int(static_env.get("KILN_RE_PRIORITY", "0")), 0)
+        self.assertGreater(
+            int(workflow("ci.yml")["env"].get("KILN_RE_PRIORITY", "0")), 0
+        )
 
     def test_push_static_checks_are_a_separate_visible_job(self) -> None:
         parsed = workflow("cache-warm.yml")

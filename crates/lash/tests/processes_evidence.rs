@@ -1610,6 +1610,7 @@ mod named_component_laws {
     }
 }
 
+#[cfg(feature = "codemode")]
 #[path = "processes_evidence/link_laws.rs"]
 #[allow(
     clippy::expect_used,

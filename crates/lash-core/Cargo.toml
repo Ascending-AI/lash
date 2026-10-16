@@ -70,7 +70,7 @@ chrono = { workspace = true }
 lash-core = { package = "lash-internal-core", path = ".", features = ["testing"] }
 # FIG-3580: fixtures layer over a SQLite memory backend's effect host; the
 # store depends on lash-core-execution, not on this crate (ADR 0102).
-lash-sqlite-store = { workspace = true }
+lash-sqlite-store = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }

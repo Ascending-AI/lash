@@ -45,6 +45,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Required checks queue above optional prewarm; interactive Kiln stays at 100.
+  KILN_RE_PRIORITY: "10"
   # Mirror ci.yml's workflow-level env: RUSTFLAGS and LASH_CI_FEATURES are part
   # of the workspace-tests cache's settings digest, so they must resolve to the
   # same values here or the saved key differs from the one the partition
@@ -60,6 +62,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: build-cache
+    env:
+      KILN_RE_PRIORITY: "0"
     steps:
       - &checkout
         name: Check out repository
@@ -102,21 +106,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/hermetic-build.sh clippy --jobs 32 --materializations none \
+          scripts/hermetic-build.sh clippy --jobs 16 --materializations none \
             //:workspace_clippy
 
       # `kiln check` resolves the metadata-only `[check]` graph, which neither
       # the clippy actions nor the test-binary builds share: `//:workspace_check`
-      # is the default resolution an agent's first check requests, and
-      # `//:feature_lane_compile` is the `__fv_` lane-variant set the
-      # `feature-lanes` CI job shards across four runners. The two aggregates
-      # expand to the generated workspace/feature-lane check target lists.
+      # is the default resolution an agent's first check requests.
+      # static-checks owns the feature-lane graph on push; schedule and
+      # dispatch still warm its `__fv_` lane variants here.
       - name: Warm check actions
         shell: bash
         run: |
           set -euo pipefail
-          scripts/hermetic-build.sh check --jobs 32 --materializations none \
-            //:workspace_check //:feature_lane_compile
+          targets=(//:workspace_check)
+          if [ "${GITHUB_EVENT_NAME}" != push ]; then
+            targets+=(//:feature_lane_compile)
+          fi
+          scripts/hermetic-build.sh check --jobs 16 --materializations none \
+            "${targets[@]}"
 
       # Build the same binaries as the core and tail partition, plus the
       # VM worker, without executing tests.
@@ -124,7 +131,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/hermetic-build.sh build --jobs 32 --materializations none \
+          scripts/hermetic-build.sh build --jobs 16 --materializations none \
             //:workspace_tests //crates/lash:ui_fixtures //crates/lash:facade_completeness \
             //crates/lash-vm-worker:lash-vm-worker__bin
 
@@ -249,9 +256,8 @@ jobs:
             //:schema_checks
           scripts/ci/buck2-test.sh static-checks //crates/lash:facade_completeness
 
-      # The same `__fv_` `[check]` aggregate ci.yml's feature-lanes job shards;
-      # one invocation suffices here because the warm above already holds the
-      # lane graph's cache entries.
+      # The same `__fv_` `[check]` aggregate ci.yml's feature-lanes job shards.
+      # This job is its only owner on push.
       - name: Check the feature-lane graph
         shell: bash
         run: |
@@ -277,6 +283,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     if: github.event_name != 'push'
+    env:
+      KILN_RE_PRIORITY: "0"
     steps:
       - *checkout
 

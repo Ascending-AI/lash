@@ -627,9 +627,11 @@ The driver sends `KILN_RE_PRIORITY` as the priority of every Execute request,
 as `-c kiln.re_priority=<n>`: `0` when the variable is unset, and an error
 before Buck2 starts when it is not an integer from -1000 to 1000. Kiln exports
 `100` for `kiln build|check|test|clippy|doc|run` and `0` for `kiln gate` and
-the commands a gate's script runs; CI and direct `scripts/hermetic-build.sh`
-calls leave it unset. The pool queue serves the higher priority first, then
-the older request, so `kiln` commands outrank gates and CI.
+the commands a gate's script runs. Required CI in `ci.yml` and the push
+static checks set `10`; optional cache warming sets `0` and its Buck2
+commands use 16 jobs. Direct `scripts/hermetic-build.sh` calls default to `0`.
+The pool queue serves the higher priority first, then the older request,
+so interactive Kiln commands outrank required CI, which outranks prewarm.
 
 - **No preemption.** Priority orders queued actions only. A running action is
   never interrupted, and a request for an action already queued keeps that
@@ -900,12 +902,12 @@ Fork/Dependabot events receive no credentials and retain Cargo lint, workspace
 tests, feature checks and service branches. Always clean the job's private
 certificate directory. Pool cache warming keeps one trusted main writer; cold
 caches affect timing rather than correctness. The push warm covers the clippy,
-`[check]` (workspace and `__fv_` lane-variant) and test-binary graphs, so an
-agent's first `kiln check` or `kiln test` after a push reads the action cache
-rather than re-executing. A separate `static-checks` job in the same workflow
-runs the schema checks, `facade_completeness`, the repository-gate contracts
-and a feature-lane `[check]` on every push and fails the run visibly; it does
-not gate the warm.
+workspace `[check]` and test-binary graphs. A separate `static-checks` job in
+the same workflow owns the `__fv_` feature-lane `[check]` on every push,
+alongside schema checks, `facade_completeness` and repository-gate contracts,
+and fails the run visibly. It does not gate the warm. Schedule and dispatch
+also warm the feature-lane graph; all these successful checks populate the
+action cache agents read on their next `kiln check` or `kiln test`.
 
 | Fact | Local owner | CI owner |
 | --- | --- | --- |

@@ -49,7 +49,7 @@ uuid = { workspace = true, features = ["v4"] }
 lash-durable-test = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-durable = { workspace = true, features = ["testing"] }
-lash = { workspace = true, features = ["postgres", "mcp"] }
+lash = { workspace = true, features = ["postgres", "mcp", "testing"] }
 lash-conformance = { workspace = true, features = ["lash-vm"] }
 lash-core = { workspace = true, features = ["testing"] }
 # Integration tests need this crate's own `testing` seams (the conformance

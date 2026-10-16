@@ -1707,6 +1707,7 @@ async fn typescript_import_reports_missing_tools_as_admission_refusals() {
 #[path = "workflow_laws/generated_source.rs"]
 mod generated_source;
 #[path = "workflow_laws/node_spans.rs"]
+#[cfg(all(feature = "testing", feature = "otel-trace"))]
 mod node_spans;
 
 #[path = "workflow_laws/documents.rs"]

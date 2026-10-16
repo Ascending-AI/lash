@@ -197,6 +197,16 @@ trybuild = "1"
 tracing-subscriber = { workspace = true }
 opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 
+[[test]]
+name = "plugin_certification"
+path = "tests/plugin_certification.rs"
+required-features = ["testing"]
+
+[[test]]
+name = "workflow_laws"
+path = "tests/workflow_laws.rs"
+required-features = ["codemode", "workflow-authoring"]
+
 [[example]]
 name = "worker_host"
 path = "examples/worker_host.rs"

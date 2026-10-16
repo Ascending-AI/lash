@@ -20,6 +20,7 @@ dhat-heap = []
 synthetic-next = [
     "lash-vm-protocol/synthetic-next",
     "lash-vm-broker/synthetic-next",
+    "lash-core-execution/synthetic-next",
     "lash-kernel-doc/synthetic-next",
     "lash-kernel-vm/synthetic-next",
 ]

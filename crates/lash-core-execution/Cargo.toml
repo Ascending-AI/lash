@@ -68,7 +68,7 @@ insta = "1"
 # crate, so only an integration test (one copy of the kernel) may use it; an
 # in-crate `cfg(test)` module would see a second copy with distinct traits.
 # Version-less so packaging strips the cyclic dev-dependency.
-lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store" }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "../lash-sqlite-store", features = ["testing"] }
 syn = { version = "2", features = ["full"] }
 tokio = { workspace = true, features = ["test-util"] }
 
