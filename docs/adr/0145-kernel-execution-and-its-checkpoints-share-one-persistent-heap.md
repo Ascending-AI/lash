@@ -224,16 +224,15 @@ So whether an allocation passes depends on what the run can reach, not on
 residency, eviction or when the census last refined (`K-BND-003`).
 
 One collection runs outside pressure, and it is bounded by a constant: a
-cell's carry refines once when what the session reached when the heap
-opened can have shrunk (an entity that existed then dropped a value naming
-anything, or a binding change dropped a value naming such an entity) and U
-is at most 128 KiB
-(`CARRY_COLLECTION_BYTES`), so a session sheds what its cell cut loose
-before its pages are sealed. A no-op cell, or one that only adds bindings or
-projects the host's, traces nothing; what only a cell's own values reached
-(its allocations, and what its frames held across a park) and a larger
-session are left to pressure. A park still never collects
-(FIG-6321). The bound is on U, not on the entity count: every entity,
+cell's carry refines once when the census still counts a closure entity
+or a task edge, which no carried binding reaches, and U is at most 128 KiB
+(`CARRY_COLLECTION_BYTES`), so a session sheds the functions and tasks its
+cell left dead before its pages are sealed, and a later carry's
+classification reads nothing. Both facts are the heap header's, so the
+decision is the same however often the cell's heap reopened (FIG-6453). A
+no-op cell, or one that made no function or task, traces nothing; its data
+garbage and a larger session are left to pressure. A park still never
+collects (FIG-6321). The bound is on U, not on the entity count: every entity,
 element, entry and capture a trace walks costs at least 8 bytes, so U
 bounds the trace's work, while one list of scalars is one entity however
 long it is (FIG-6425).

@@ -4,7 +4,7 @@
 //! root tree the census reads is installed here, and no other module
 //! changes what the machine holds.
 use super::directory::execution::TaskRecord;
-use super::directory::{value_cost, value_has_edges};
+use super::directory::value_cost;
 use super::heap_impl::{PagedHeap, census_fault};
 use super::tree::{Cell, SealWork, Tree, checked_sum};
 use super::*;
@@ -41,23 +41,11 @@ pub(super) struct Holdings {
     /// The bytes the last write refused for (FIG-6318): the refusal also
     /// crosses the native face, whose errors cannot name it.
     refused: Option<u64>,
-    /// The primary ordinal and the family the heap would allocate next
-    /// when it opened: every entity below them existed then.
-    opened: (u64, u64),
-    /// Whether what the session's bindings reached when the heap opened
-    /// can have shrunk: an entity that existed then dropped a value that
-    /// names anything, or a binding change dropped a value naming such an
-    /// entity. What only the cell's own values ever reached, its
-    /// allocations and what its frames held across a park, was never in
-    /// that set: it waits for pressure, and until one of these a carry's
-    /// collection runs for nothing (FIG-6425).
-    freeable: bool,
 }
 
-impl Holdings {
-    /// What a heap holds when it opens with `next_ordinal` and
-    /// `next_family` still to allocate.
-    pub(super) fn opened(next_ordinal: u64, next_family: u64) -> Self {
+impl Default for Holdings {
+    /// What a heap holds when it opens: nothing, over current roots.
+    fn default() -> Self {
         Self {
             temporary: Vec::new(),
             fresh: Vec::new(),
@@ -65,10 +53,11 @@ impl Holdings {
             held: 0,
             roots_current: true,
             refused: None,
-            opened: (next_ordinal, next_family),
-            freeable: false,
         }
     }
+}
+
+impl Holdings {
     /// The credit what the running statement holds gives a write that
     /// grows by `growth`.
     pub(super) fn credit(&self, growth: u64) -> u64 {
@@ -89,35 +78,6 @@ impl Holdings {
 }
 
 impl PagedHeap {
-    /// Whether `entity` was in the heap when it opened, where its roots
-    /// could reach it.
-    fn existed_at_open(&self, entity: EntityId) -> bool {
-        let (ordinal, family) = self.holdings.opened;
-        if entity.family == FamilyId::PRIMARY {
-            entity.ordinal < ordinal
-        } else {
-            entity.family.0 < family
-        }
-    }
-    /// Whether `value` names an entity that was in the heap when it opened.
-    fn names_existing(&self, value: &Value) -> Result<bool, HeapFault> {
-        let mut names = false;
-        self.stream_edges(value, &mut |identity| {
-            if let Identity::Object(entity) = identity {
-                names |= self.existed_at_open(entity);
-            }
-            Ok(())
-        })?;
-        Ok(names)
-    }
-    /// `entity` dropped `value`, overwritten or removed: what the opened
-    /// roots reached can have shrunk when an entity that existed then lost
-    /// a value naming anything.
-    pub(super) fn dropped(&mut self, entity: EntityId, value: &Value) {
-        if value_has_edges(value) && self.existed_at_open(entity) {
-            self.holdings.freeable = true;
-        }
-    }
     /// Opens the execution roots `root` names over the heap whose header it
     /// names: that header's accounting already prices them, so nothing is
     /// charged.
@@ -346,17 +306,21 @@ impl PagedHeap {
             Err(error) => Err(census_fault(error).into()),
         }
     }
-    /// Whether a carry collects: when what the session's bindings reached
-    /// when the heap opened can have shrunk, so a no-op cell, or one that
-    /// only adds or projects bindings, traces nothing, and U is at most
-    /// [`CARRY_COLLECTION_BYTES`], so the trace is bounded by a constant
-    /// and a carry stays O(1) however much the session holds.
+    /// Whether a carry collects: when the census still counts a closure
+    /// entity or a task edge, which the carried bindings never reach (a
+    /// binding that reaches one is not carried), and U is at most
+    /// [`CARRY_COLLECTION_BYTES`], so the trace is bounded by a constant.
+    /// Both facts are the heap header's, so a cell's carry decides the same
+    /// however often its heap reopened mid-cell; a cell that made no
+    /// function or task, a no-op one included, traces nothing, and its
+    /// data garbage waits for pressure. Left in place, a dead closure would
+    /// make every later carry's classification read every binding.
     pub(super) fn collects_at_carry(&self) -> bool {
-        self.holdings.freeable
-            && self.census.as_ref().is_some_and(|census| {
-                let certificate = census.certificate();
-                certificate.entities > 0 && certificate.upper.0 <= CARRY_COLLECTION_BYTES
-            })
+        (self.population.closure_entities > 0 || self.population.task_edges > 0)
+            && self
+                .census
+                .as_ref()
+                .is_some_and(|census| census.certificate().upper.0 <= CARRY_COLLECTION_BYTES)
     }
     /// One exact refinement outside pressure: traces from the persistent
     /// roots and the installed statement roots, sweeps what it did not
@@ -418,22 +382,6 @@ impl PagedHeap {
         &mut self,
         bindings: Tree<BindingRecord>,
     ) -> Result<(), HeapWriteError> {
-        if !self.holdings.freeable {
-            let mut dropped = Vec::new();
-            self.session
-                .diff(&bindings, &self.access, &mut |(_, old, _)| {
-                    if let Some(old) = old {
-                        dropped.push(old.value.clone());
-                    }
-                })?;
-            for value in dropped {
-                let names = match value {
-                    BoundRecord::Value(value) => self.names_existing(&value)?,
-                    BoundRecord::Shared(id) => self.existed_at_open(id),
-                };
-                self.holdings.freeable |= names;
-            }
-        }
         let before = self.session.cost();
         let old_tasks = self.session.read_task_edges(&self.access)?;
         self.replace_execution_root(before, old_tasks, bindings, |heap, root| {

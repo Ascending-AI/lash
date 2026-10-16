@@ -145,9 +145,8 @@ fn a_noop_cold_carry_of_a_growing_scalar_list_traces_rows_independent_of_its_len
 }
 /// FIG-6425: a cell that projects the same host bindings over a growing
 /// list, a text and a freshly decoded list as the machine's start writes
-/// them and its end removes them, traces no body row at its carry: what
-/// the opened session reached cannot shrink, and the projection's copies
-/// were never reachable from it.
+/// them and its end removes them, traces no body row at its carry: the
+/// cell made no function or task, so its carry has nothing to shed.
 #[test]
 fn a_cell_projecting_unchanged_host_bindings_over_a_growing_list_traces_no_rows() {
     let traced = [100, 5_000, 80_000].map(|length| {

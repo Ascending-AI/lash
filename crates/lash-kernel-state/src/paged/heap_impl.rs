@@ -113,7 +113,7 @@ impl PagedHeap {
             session: Tree::new(false),
             tasks: Tree::new(false),
             joins: Tree::new(false),
-            holdings: super::publication::Holdings::opened(root.next_ordinal, root.next_family),
+            holdings: super::publication::Holdings::default(),
         })
     }
     pub fn set_data_limits(&mut self, limits: lash_kernel_doc::KernelDataLimits) {
@@ -562,7 +562,7 @@ impl SemanticHeap for PagedHeap {
             session: Tree::new(false),
             tasks: Tree::new(false),
             joins: Tree::new(false),
-            holdings: super::publication::Holdings::opened(0, 1),
+            holdings: super::publication::Holdings::default(),
         }
     }
     fn open(
@@ -587,7 +587,7 @@ impl SemanticHeap for PagedHeap {
             session: Tree::new(false),
             tasks: Tree::new(false),
             joins: Tree::new(false),
-            holdings: super::publication::Holdings::opened(root.next_ordinal, root.next_family),
+            holdings: super::publication::Holdings::default(),
         })
     }
     fn canonical_value(&mut self, value: Value) -> Result<Value, HeapWriteError> {
@@ -708,7 +708,7 @@ impl SemanticHeap for PagedHeap {
             ));
         }
         let value = self.canonical(value)?;
-        let (old, cost, tasks) = match &head.body {
+        let (cost, tasks) = match &head.body {
             Body::List { rows, next } => {
                 let old = if index == rows.len() {
                     next.checked_add(1)
@@ -733,15 +733,12 @@ impl SemanticHeap for PagedHeap {
                     .checked_sub(old.as_ref().map_or(0, Cell::task_edges))
                     .and_then(|tasks| tasks.checked_add(value.task_edges()))
                     .ok_or_else(|| HeapFault::Malformed("logical aggregate overflow".into()))?;
-                (old, cost, tasks)
+                (cost, tasks)
             }
             _ => unreachable!("required list"),
         };
         let after = census::MIN_ENTITY_COST.0.saturating_add(cost);
         drop(head);
-        if let Some(old) = &old {
-            self.dropped(list, old);
-        }
         self.change_head(list, after, false, tasks, |heap| {
             let mut value = Some(value);
             let mut update = |head: &mut ObjectHead| {
@@ -798,7 +795,6 @@ impl SemanticHeap for PagedHeap {
             }
             _ => return Err(HeapFault::Malformed("list descriptor kind mismatch".into()).into()),
         };
-        self.dropped(list, &value);
         self.publish(list, head)?;
         Ok(value)
     }
@@ -827,10 +823,7 @@ impl SemanticHeap for PagedHeap {
             return Err(raised("type_error", "expected a table"));
         };
         if let Some(Ordinal(ordinal)) = lookup.remove(&normal, &self.access)? {
-            if let Some(entry) = rows.remove(&ordinal.to_be_bytes(), &self.access)? {
-                self.dropped(table, &entry.key);
-                self.dropped(table, &entry.value);
-            }
+            rows.remove(&ordinal.to_be_bytes(), &self.access)?;
             self.publish(table, head)?;
         }
         Ok(())
@@ -860,9 +853,7 @@ impl SemanticHeap for PagedHeap {
         self.table_remove(record, &key)
     }
     fn variable_write(&mut self, variable: EntityId, value: Value) -> Result<(), HeapWriteError> {
-        if let Body::Variable(old) = self.required(variable, ObjectKind::Variable)?.body {
-            self.dropped(variable, &old);
-        }
+        self.required(variable, ObjectKind::Variable)?;
         let value = self.canonical(value)?;
         self.publish(
             variable,
@@ -996,7 +987,6 @@ impl PagedHeap {
         let mut head = self.required(table, kind)?;
         let key = self.canonical(key)?;
         let value = self.canonical(value)?;
-        let mut dropped = None;
         if let Body::Table {
             lookup, rows, next, ..
         } = &mut head.body
@@ -1005,7 +995,7 @@ impl PagedHeap {
                 let mut e = rows
                     .get(&ordinal.to_be_bytes(), &self.access)?
                     .ok_or_else(|| HeapFault::Malformed("lookup points at no entry".into()))?;
-                dropped = Some(std::mem::replace(&mut e.value, value));
+                e.value = value;
                 rows.write(ordinal_key(ordinal), e, &self.access)?;
             } else {
                 let following = next
@@ -1015,9 +1005,6 @@ impl PagedHeap {
                 lookup.write(normal, Ordinal(*next), &self.access)?;
                 *next = following;
             }
-        }
-        if let Some(old) = dropped {
-            self.dropped(table, &old);
         }
         self.publish(table, head)
     }

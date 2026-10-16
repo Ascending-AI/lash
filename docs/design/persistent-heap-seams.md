@@ -1212,17 +1212,15 @@ copy keeps its residency weight; a self-contained site reference is
 memoized per heap. The census sees the same root cost at every reservation
 as before, because a frame's cost counts holdings only (FIG-6318).
 
-S7, collection: a cell's carry refines once when what the session's
-bindings reached when the heap opened can have shrunk, the census holds some entity, and U
-is at most 128 KiB (`CARRY_COLLECTION_BYTES`, 4096 entities at their minimum
-cost); a park never collects. The roots' reach can shrink only when an
-entity that existed at the open drops a value naming anything (a list
-element or table entry overwritten or removed, a variable rewritten), a
-session-binding change drops a value naming such an entity (found by
-diffing the old and new binding tables). A no-op cell, or one that only
-adds bindings or projects the host's and removes them again, traces
-nothing; what only the cell's own values reached (its allocations, and
-what its frames held across a park) waits for pressure. U bounds
+S7, collection: a cell's carry refines once when the census's population
+certificate still counts a closure entity or a task edge, which no carried
+binding reaches, and U is at most 128 KiB (`CARRY_COLLECTION_BYTES`, 4096
+entities at their minimum cost); a park never collects. Both facts are the
+heap header's, so a carry decides the same whether or not its cell's heap
+reopened mid-cell from a checkpoint (FIG-6453): a mark kept only in the
+open heap would make the carried root depend on where the run was cut. A
+no-op cell, or one that made no function or task, traces nothing; its data
+garbage waits for pressure. U bounds
 the trace's work where an entity count does not: every entity, element,
 entry and capture it walks costs at least 8 bytes, while one list of
 scalars is one entity however long it is (FIG-6425).

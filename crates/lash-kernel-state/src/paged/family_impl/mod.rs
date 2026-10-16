@@ -629,9 +629,9 @@ impl HeapLifecycle for PagedHeap {
                     other => invalid(format!("session root transfer failed: {other}")),
                 })?;
         }
-        // A small carried session holds what it reaches: the cell's garbage
-        // is swept here, once per cell, so no dead entity, family or task
-        // row rides into every later cell's pages. The trace is bounded.
+        // A small carried session sheds the functions and tasks its cell
+        // left dead here, once per cell, so no later carry's classification
+        // walks its bindings for them. The trace is bounded.
         if self.collects_at_carry() {
             self.collect()?;
         }
