@@ -916,11 +916,8 @@ fn attachment_spec() -> lash::SessionSpec {
     }))
 }
 
-/// A committed tool attachment no provider accepts degrades instead of
-/// failing the session: the tool's result records a typed
-/// `attachment_unavailable` notice naming it when the result is admitted,
-/// every later request omits its bytes and carries that notice, and the
-/// turn after it still answers.
+/// An attachment the target cannot read is omitted per request; its tool succeeds
+/// and later turns remain continuable.
 async fn unsupported_committed_tool_attachment_degrades_and_session_remains_continuable(
     tier: Tier,
 ) {
@@ -969,20 +966,169 @@ async fn unsupported_committed_tool_attachment_degrades_and_session_remains_cont
             request.attachments().next().is_none(),
             "an unmaterializable attachment is omitted from provider requests"
         );
-        let notice = request_text(request)
-            .split("<attachment_unavailable>")
-            .nth(1)
-            .and_then(|tail| tail.split("</attachment_unavailable>").next())
-            .map(|payload| {
-                serde_json::from_str::<serde_json::Value>(payload).expect("a typed notice")
-            })
-            .unwrap_or_else(|| panic!("a typed notice in {}", request_text(request)));
-        assert_eq!(notice["label"], "workspace_badge.bin");
-        assert_eq!(notice["media_type"], "application/octet-stream");
-        assert_eq!(notice["position"], "tool_result");
-        assert_eq!(notice["reason"], "no_provider_accepts_mime_and_position");
+        assert!(request_text(request).contains("(workspace_badge.bin omitted: this model can't read application/octet-stream in a tool result)"));
     }
     world.shutdown().await;
+}
+
+/// FIG-6521 A/B: omission belongs to the target request, never its history.
+async fn pdf_session_after_model_switch(check_first: bool, omission: Option<&'static str>) {
+    const PDF_MODEL: &str = "pdf-model";
+    let asked = Arc::new(Asked::default());
+    let (stores, _keep) = served::stores(Tier::SqliteMemory).await.unwrap();
+    let backend = served::backend(stores);
+    let provider = attachment_model(Arc::clone(&asked));
+    let models = [served::MODEL, PDF_MODEL].into_iter().fold(
+        lash::LlmProfileRegistry::new(),
+        |registry, name| {
+            registry
+                .register(
+                    name,
+                    lash::RegisteredLlmProfile::new(
+                        lash_core::testing::test_llm_profile_metadata(name),
+                        provider.clone(),
+                    ),
+                )
+                .unwrap()
+        },
+    );
+    let mut mode = lash::plugins::StandardProtocolConfig::standard();
+    if let Some(line) = omission {
+        mode.tool_presenter = lash::tools::ToolPresenterSlot::new(
+            lash::tools::WrappedToolPresenter::new(
+                "host-omission",
+                lash::standard::StandardToolPresenter,
+            )
+            .with_attachment_omission_renderer(move |_| line.to_owned()),
+        );
+    }
+    let core = lash::LashCore::builder(backend)
+        .protocol_plugin(Arc::new(
+            lash::plugins::StandardProtocolPluginFactory::with_config(mode),
+        ))
+        .tools(
+            lash::tool_provider_key!("tools"),
+            Arc::new(AttachmentResultTool {
+                media_type: "application/pdf",
+                bytes: b"%PDF-report",
+                label: "report.pdf",
+            }),
+        )
+        .llm_profiles(Arc::new(models))
+        .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .data_retention(lash::DataRetention::standard())
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new("pdf-omission"),
+            lash::persistence::LeaseIncarnationId::new("pdf-omission-boot"),
+        ))
+        .unwrap();
+    let session = core
+        .session(lash::SessionId::try_from("pdf-session".to_owned()).unwrap())
+        .create(lash::SessionCreation::root(attachment_spec()))
+        .await
+        .unwrap();
+    let first = session
+        .send(lash::TurnInput::text("fetch report"))
+        .output()
+        .await
+        .unwrap();
+    served::assert_answered("PDF result", &first);
+    let stored = session.read().await.unwrap().unwrap();
+    let stored_parts = stored
+        .messages()
+        .iter()
+        .flat_map(|m| m.parts.iter())
+        .filter_map(|part| part.tool_result_content())
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
+    let live = core
+        .session(session.session_id().clone())
+        .open()
+        .await
+        .unwrap();
+    let config = live.admin().config();
+    let revision = config.revision().await.unwrap();
+    let mut acceptance = attachment_spec()
+        .attachment_acceptance
+        .unwrap()
+        .as_ref()
+        .clone();
+    acceptance.acceptors[0].rules[0]
+        .media_types
+        .push("application/pdf".into());
+    let change = config
+        .apply(
+            lash::config::ConfigWrite::new("pdf-model-switch", revision),
+            lash::config::ConfigTransaction::of(lash::config::SetLlmProfile {
+                model: lash::LlmProfileKey::new(PDF_MODEL),
+            })
+            .then(lash::config::SetAttachmentAcceptance { acceptance }),
+        )
+        .await
+        .unwrap()
+        .await_outcome(&config)
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            change,
+            lash::config::ConfigTransactionOutcome::Applied { .. }
+        ),
+        "{change:?}"
+    );
+    let follow = session
+        .send(lash::TurnInput::text("read report now"))
+        .output()
+        .await
+        .unwrap();
+    served::assert_answered("PDF model switch", &follow);
+    let requests = asked.requests();
+    core.shutdown().await.unwrap();
+    if check_first {
+        assert!(
+            request_text(&requests[1]).contains(omission.unwrap_or(
+                "(report.pdf omitted: this model can't read application/pdf in a tool result)"
+            )),
+            "{}",
+            request_text(&requests[1])
+        );
+        assert_eq!(
+            stored_parts.iter().filter_map(|p| p.attachment()).count(),
+            1
+        );
+        assert!(
+            stored_parts
+                .iter()
+                .filter_map(|p| p.visible_text())
+                .all(|text| !text.contains("omitted") && !text.contains("attachment_unavailable")),
+            "history keeps no omission text: {stored_parts:?}"
+        );
+    } else {
+        assert_eq!(requests[2].model.wire_model(), PDF_MODEL);
+        assert_eq!(requests[2].attachments().count(), 1);
+        assert!(!request_text(&requests[2]).contains("omitted"));
+        assert!(!request_text(&requests[2]).contains("attachment_unavailable"));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pdf_omission_is_request_text_and_never_stored() {
+    pdf_session_after_model_switch(true, None).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn switching_to_a_pdf_model_sends_the_original_attachment_without_a_notice() {
+    pdf_session_after_model_switch(false, None).await;
+}
+
+/// FIG-6521 C: the host's mode presenter controls request omission wording.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_host_presenter_controls_the_attachment_omission_line() {
+    pdf_session_after_model_switch(true, Some("Host notice: PDF unavailable here.")).await;
 }
 
 /// A tool attachment the provider accepts reaches the next request as a

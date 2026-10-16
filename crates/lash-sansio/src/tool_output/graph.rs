@@ -27,9 +27,9 @@ use serde::de::DeserializeOwned;
 use serde_json::{Number, Value};
 
 use super::{
-    AttachmentMaterializationNotice, AttachmentMaterializationReason, CancelOrigin,
-    ModelToolReturn, ModelToolReturnPart, ToolCallOutcome, ToolCallOutput, ToolCancellation,
-    ToolControl, ToolFailure, ToolFailureClass, ToolFailureSource, ToolValue, TurnControl,
+    CancelOrigin, ModelToolReturn, ModelToolReturnPart, ToolCallOutcome, ToolCallOutput,
+    ToolCancellation, ToolControl, ToolFailure, ToolFailureClass, ToolFailureSource, ToolValue,
+    TurnControl,
 };
 use crate::llm::attachment_delivery::AttachmentPosition;
 use crate::{AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType, RetainedOutput};
@@ -103,10 +103,6 @@ numbered!(CancelOrigin {
 numbered!(AttachmentPosition {
     Message = 0,
     ToolResult = 1,
-});
-
-numbered!(AttachmentMaterializationReason {
-    NoProviderAcceptsMimeAndPosition = 0,
 });
 
 // --- JSON value trees ----------------------------------------------------
@@ -255,28 +251,6 @@ impl TokenCodec for AttachmentRef {
             byte_len,
             type_metadata,
             label: Option::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for AttachmentMaterializationNotice {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(5);
-        out.text(self.attachment_id.as_str());
-        self.label.encode(out);
-        out.text(self.media_type.as_str());
-        self.position.encode(out);
-        self.reason.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(5)?;
-        Ok(Self {
-            attachment_id: decode_attachment_id(input)?,
-            label: Option::decode(input)?,
-            media_type: decode_media_type(input)?,
-            position: AttachmentPosition::decode(input)?,
-            reason: AttachmentMaterializationReason::decode(input)?,
         })
     }
 }
@@ -713,18 +687,16 @@ impl TokenCodec for ModelToolReturnPart {
 
 impl TokenCodec for ModelToolReturn {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
+        out.seq(2);
         out.text(&self.tool_name);
         self.parts.encode(out);
-        self.attachment_notices.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
+        input.expect_struct(2)?;
         Ok(Self {
             tool_name: input.text()?.to_owned(),
             parts: Vec::decode(input)?,
-            attachment_notices: Vec::decode(input)?,
         })
     }
 }
@@ -862,7 +834,7 @@ impl TokenCodec for RecipePart {
 }
 
 /// How a call's model presentation is rebuilt from its typed outcome: the
-/// renderer, the parts, the attachment notices, and the exact digest and
+/// renderer, the parts, and the exact digest and
 /// length of the canonical encoding of the [`ModelToolReturn`] it stands
 /// for (FIG-5887 §4).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -870,29 +842,26 @@ pub struct PresentationRecipe {
     pub renderer: RendererId,
     pub tool_name: String,
     pub parts: Vec<RecipePart>,
-    pub notices: Vec<AttachmentMaterializationNotice>,
     pub digest: [u8; 32],
     pub bytes: u64,
 }
 
 impl TokenCodec for PresentationRecipe {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(6);
+        out.seq(5);
         encode_digest(&self.renderer.0, out);
         out.text(&self.tool_name);
         self.parts.encode(out);
-        self.notices.encode(out);
         encode_digest(&self.digest, out);
         out.unsigned(self.bytes);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(6)?;
+        input.expect_struct(5)?;
         Ok(Self {
             renderer: RendererId(decode_digest(input)?),
             tool_name: input.text()?.to_owned(),
             parts: Vec::decode(input)?,
-            notices: Vec::decode(input)?,
             digest: decode_digest(input)?,
             bytes: input.unsigned()?,
         })
@@ -1016,7 +985,6 @@ impl PresentationRecipe {
             renderer: RendererId::model_return(),
             tool_name: presentation.tool_name.clone(),
             parts,
-            notices: presentation.attachment_notices.clone(),
             digest,
             bytes,
         }
@@ -1056,7 +1024,6 @@ impl PresentationRecipe {
         let presentation = ModelToolReturn {
             tool_name: self.tool_name.clone(),
             parts,
-            attachment_notices: self.notices.clone(),
         };
         if presentation_digest(&presentation) != (self.digest, self.bytes) {
             return Err(PresentationRefusal::Mismatch);

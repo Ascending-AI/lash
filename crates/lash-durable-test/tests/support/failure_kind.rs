@@ -65,6 +65,13 @@ impl ProtocolSessionPlugin for RefusingProtocol {
 struct ModelDriver;
 
 impl ProtocolDriverPlugin for ModelDriver {
+    fn attachment_omission_text(
+        &self,
+        notice: &lash_sansio::AttachmentMaterializationNotice,
+    ) -> String {
+        format!("({} omitted)", notice.media_type)
+    }
+
     fn build_preamble(
         &self,
         input: lash_core::ProtocolBuildInput,

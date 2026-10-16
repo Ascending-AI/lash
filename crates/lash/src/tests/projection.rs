@@ -60,7 +60,6 @@ async fn presentation_step_only_changes_model_observation() -> Result<()> {
                 let projected = lash_sansio::ModelToolReturn {
                     tool_name: input.context.tool_name.clone(),
                     parts: vec![lash_sansio::ModelToolReturnPart::text("model projection")],
-                    attachment_notices: Vec::new(),
                 };
                 Box::pin(async move { Ok(projected) })
             }),

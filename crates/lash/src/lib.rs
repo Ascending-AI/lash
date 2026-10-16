@@ -472,8 +472,8 @@ pub mod tools {
     pub use lash_tool_presenter_api::{
         PresentationRefusal, PresentedToolSection, RecordedToolPresenter, ToolDisclosure,
         ToolPresentationEntry, ToolPresentationRequest, ToolPresenter, ToolPresenterSlot,
-        WrappedToolPresenter, admit_over_standard, inline_schema, inline_shape,
-        listing as presenter_listing, read_config,
+        WrappedToolPresenter, admit_over_standard, default_attachment_omission_text, inline_schema,
+        inline_shape, listing as presenter_listing, read_config,
     };
     /// The shape a presenter reads a tool's JSON Schemas as.
     pub use lash_tool_shape::{

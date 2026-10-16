@@ -156,7 +156,6 @@ fn completed_call(
             parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                 "result",
             )],
-            attachment_notices: Vec::new(),
         },
         intent_outcomes: Vec::new(),
         replay: None,

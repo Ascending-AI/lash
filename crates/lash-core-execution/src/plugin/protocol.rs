@@ -551,6 +551,10 @@ pub trait AssistantProseProjectorPlugin: Send + Sync {
 /// crates own the concrete prompt policy and output parser. Plugin stack
 /// construction must install exactly one implementation.
 pub trait ProtocolDriverPlugin: Send + Sync {
+    /// The mode's replacement for one attachment the target request cannot accept.
+    /// This is request presentation only; the original ref stays in history.
+    fn attachment_omission_text(&self, notice: &crate::AttachmentMaterializationNotice) -> String;
+
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble;
 
     /// The call's offered tools over its pinned catalog, using this protocol's

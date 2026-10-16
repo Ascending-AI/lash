@@ -185,7 +185,6 @@ fn fold_wrapper(
     let mut rows = Vec::with_capacity(wrapper.rows.len());
     let mut model_rows = Vec::with_capacity(wrapper.rows.len());
     let mut attachments = Vec::new();
-    let mut attachment_notices = Vec::new();
     let mut intent_outcomes = Vec::new();
     // A member's settled control is the step's: the wrapper carries it, and
     // [`control_member`] names the member it came from.
@@ -223,7 +222,6 @@ fn fold_wrapper(
                 let value = member.output.value_for_projection();
                 let (presented, member_attachments) = presented_member(member.model_return.parts);
                 attachments.extend(member_attachments);
-                attachment_notices.extend(member.model_return.attachment_notices);
                 intent_outcomes.extend(member.intent_outcomes);
                 if success {
                     rows.push(BatchResultRow::success(index, tool, value));
@@ -250,7 +248,6 @@ fn fold_wrapper(
         model_return: ModelToolReturn {
             tool_name: wrapper.tool_name.clone(),
             parts,
-            attachment_notices,
         },
         intent_outcomes,
         replay: wrapper.replay.clone(),

@@ -848,9 +848,7 @@ pub use provider_files::{
 };
 
 mod degradation;
-pub use degradation::{
-    attachment_materialization_notice, degrade_unmaterializable_request_attachments,
-};
+pub use degradation::degrade_unmaterializable_request_attachments;
 
 #[cfg(test)]
 #[path = "attachments/referrer_failure_tests.rs"]

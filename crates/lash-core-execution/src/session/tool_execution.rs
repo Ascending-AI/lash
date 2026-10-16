@@ -3,8 +3,8 @@ use crate::tool_dispatch::{
     ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome, prepare_tool_call_with_context,
 };
 use crate::{
-    ModelToolReturn, SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation,
-    ToolFailure, ToolFailureClass, TurnActivityId, TurnEvent,
+    SessionStreamEvent, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolFailure,
+    ToolFailureClass, TurnActivityId, TurnEvent,
 };
 
 #[derive(Clone)]
@@ -338,7 +338,6 @@ impl RuntimeExecutionContext<'_> {
                             std::sync::Arc::clone(&self.dispatch.state),
                             std::sync::Arc::new(facts),
                             std::sync::Arc::clone(&self.dispatch.attachment_store),
-                            self.attachment_acceptance().clone(),
                             duration_ms,
                             &plan,
                         ),
@@ -556,68 +555,5 @@ impl RuntimeExecutionContext<'_> {
         handle: serde_json::Value,
     ) -> ToolInvocationReply {
         self.await_process_handle(call_id, handle).await
-    }
-}
-
-pub(crate) fn surface_attachment_materialization_notices(
-    snapshot: &crate::provider::AttachmentCapabilitySnapshot,
-    output: &ToolCallOutput,
-    model_return: &mut ModelToolReturn,
-) {
-    for notice in output.attachments().iter().filter_map(|source| {
-        crate::attachments::attachment_materialization_notice(
-            snapshot,
-            source,
-            lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult,
-        )
-    }) {
-        model_return
-            .parts
-            .push(crate::ModelToolReturnPart::text(notice.model_placeholder()));
-        model_return.attachment_notices.push(notice);
-    }
-}
-
-#[cfg(test)]
-mod attachment_materialization_tests {
-    use super::*;
-
-    #[test]
-    fn successful_unsupported_attachment_surfaces_typed_admission_notice() {
-        let attachment_ref = crate::AttachmentRef {
-            id: crate::AttachmentId::parse(
-                "a38e99b7e70bfb9f89b444caa68b43916cac061841fb555c4ac276776dc551a6",
-            )
-            .expect("attachment id"),
-            media_type: crate::MediaType::parse("application/octet-stream").expect("binary MIME"),
-            byte_len: 34,
-            type_metadata: None,
-            label: Some("workspace_badge.bin".to_string()),
-        };
-        let output =
-            crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(attachment_ref));
-        let mut model_return =
-            crate::ModelToolReturn::from_output("workspace_badge".to_string(), &output);
-
-        surface_attachment_materialization_notices(
-            &crate::attachments::attachment_test_acceptance(),
-            &output,
-            &mut model_return,
-        );
-
-        assert!(output.is_success(), "admission must not fail the tool");
-        assert_eq!(model_return.attachment_notices.len(), 1);
-        assert_eq!(
-            model_return.attachment_notices[0].reason,
-            crate::AttachmentMaterializationReason::NoProviderAcceptsMimeAndPosition
-        );
-        assert!(model_return.parts.iter().any(|part| {
-            matches!(
-                part,
-                crate::ModelToolReturnPart::Text { text }
-                    if text.contains("attachment_unavailable")
-                        && text.contains("workspace_badge.bin")
-            )
-        }));
     }
 }

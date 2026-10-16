@@ -478,9 +478,7 @@ impl ExecutionComposition {
     /// step errors continue the fold from the
     /// recorded fallback text return (`ModelToolReturn::text(call_id, tool,
     /// err)`), so one broken step settles a refusal the model can read instead
-    /// of losing the whole presentation. Attachment-materialization notices
-    /// are then computed under `attachment_acceptance`, the caller's recorded
-    /// environment. Last, the folded return is measured against the
+    /// of losing the whole presentation. The folded return is measured against the
     /// retention policy and its text retained if it is too long for history
     /// (FIG-1643). The refs retained through `ctx.artifacts` and the policy
     /// ride the returned [`crate::runtime::effect::ToolPresentation`] into
@@ -495,7 +493,6 @@ impl ExecutionComposition {
         ctx: ToolResultProjectionContext,
         facts: Arc<crate::plugin::ToolPresentationFacts>,
         plan: &crate::runtime::PresentationBinding,
-        attachment_acceptance: &crate::provider::AttachmentCapabilitySnapshot,
     ) -> Result<
         crate::runtime::effect::ToolPresentation,
         crate::runtime::effect::RuntimeEffectControllerError,
@@ -532,11 +529,6 @@ impl ExecutionComposition {
                 Err(err) => crate::ModelToolReturn::text(ctx.tool_name.clone(), err.to_string()),
             };
         }
-        crate::session::tool_execution::surface_attachment_materialization_notices(
-            attachment_acceptance,
-            &ctx.output,
-            &mut model_return,
-        );
         let retention = ctx.artifacts.retention_policy();
         crate::runtime::effect::retain_oversized_return(
             &mut model_return,

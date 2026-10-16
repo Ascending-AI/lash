@@ -1045,12 +1045,12 @@ pub enum ToolControl {
     },
 }
 
-/// Why Lash replaced an attachment with a model-visible placeholder.
+/// Why a request omitted an attachment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentMaterializationReason {
-    /// No provider in the shared adapter capability registry accepts this MIME/position pair.
-    NoProviderAcceptsMimeAndPosition,
+    /// The target model and its route cannot accept this MIME/position pair.
+    TargetModelDoesNotAcceptMimeAndPosition,
 }
 
 /// Typed information explaining why an attachment is absent from model input.
@@ -1066,8 +1066,8 @@ pub struct AttachmentMaterializationNotice {
 }
 
 impl AttachmentMaterializationNotice {
-    /// Build the deterministic notice for a MIME and position no provider accepts.
-    pub fn no_provider_accepts(
+    /// Build the notice for a target model that cannot accept this attachment.
+    pub fn target_model_does_not_accept(
         reference: &AttachmentRef,
         position: crate::llm::attachment_delivery::AttachmentPosition,
     ) -> Self {
@@ -1076,16 +1076,8 @@ impl AttachmentMaterializationNotice {
             label: reference.label.clone(),
             media_type: reference.media_type.clone(),
             position,
-            reason: AttachmentMaterializationReason::NoProviderAcceptsMimeAndPosition,
+            reason: AttachmentMaterializationReason::TargetModelDoesNotAcceptMimeAndPosition,
         }
-    }
-
-    /// Render the typed notice as a deterministic model-facing placeholder.
-    pub fn model_placeholder(&self) -> String {
-        let payload = serde_json::to_string(self).unwrap_or_else(|_| {
-            "{\"reason\":\"no_provider_accepts_mime_and_position\"}".to_string()
-        });
-        format!("<attachment_unavailable>{payload}</attachment_unavailable>")
     }
 }
 
@@ -1093,9 +1085,6 @@ impl AttachmentMaterializationNotice {
 pub struct ModelToolReturn {
     pub tool_name: String,
     pub parts: Vec<ModelToolReturnPart>,
-    /// Admission-time warnings attached without changing the tool's success outcome.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachment_notices: Vec<AttachmentMaterializationNotice>,
 }
 
 impl ModelToolReturn {
@@ -1130,11 +1119,7 @@ impl ModelToolReturn {
                 parts
             }
         };
-        Self {
-            tool_name,
-            parts,
-            attachment_notices: Vec::new(),
-        }
+        Self { tool_name, parts }
     }
 
     fn parts_from_value(value: &ToolValue) -> Vec<ModelToolReturnPart> {
@@ -1197,7 +1182,6 @@ impl ModelToolReturn {
         Self {
             tool_name,
             parts: vec![ModelToolReturnPart::text(content)],
-            attachment_notices: Vec::new(),
         }
     }
 }

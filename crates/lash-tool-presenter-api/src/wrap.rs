@@ -10,6 +10,9 @@ use crate::{
     ToolPresenter,
 };
 
+type OmissionRenderer =
+    dyn Fn(&lash_sansio::AttachmentMaterializationNotice) -> String + Send + Sync;
+
 type ToolFilter = dyn Fn(&ToolPresentationEntry<'_>) -> bool + Send + Sync;
 
 /// A presenter that presents through `inner` and decorates its section: a
@@ -39,6 +42,7 @@ pub struct WrappedToolPresenter {
     heading: Option<String>,
     appended: Option<String>,
     filter: Option<Arc<ToolFilter>>,
+    omission_renderer: Option<Arc<OmissionRenderer>>,
 }
 
 impl WrappedToolPresenter {
@@ -55,7 +59,18 @@ impl WrappedToolPresenter {
             heading: None,
             appended: None,
             filter: None,
+            omission_renderer: None,
         }
+    }
+
+    /// Replace the wrapped presenter's request-only attachment omission line.
+    #[must_use]
+    pub fn with_attachment_omission_renderer(
+        mut self,
+        render: impl Fn(&lash_sansio::AttachmentMaterializationNotice) -> String + Send + Sync + 'static,
+    ) -> Self {
+        self.omission_renderer = Some(Arc::new(render));
+        self
     }
 
     /// Text before the section, separated from it by a blank line.
@@ -84,6 +99,16 @@ impl WrappedToolPresenter {
 }
 
 impl ToolPresenter for WrappedToolPresenter {
+    fn attachment_omission_text(
+        &self,
+        notice: &lash_sansio::AttachmentMaterializationNotice,
+    ) -> String {
+        match &self.omission_renderer {
+            Some(render) => render(notice),
+            None => self.inner.attachment_omission_text(notice),
+        }
+    }
+
     fn id(&self) -> &str {
         &self.id
     }

@@ -1717,7 +1717,16 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
         serde_json::from_slice(&serde_json::to_vec(&policy).unwrap()).unwrap();
     let mut historical = attachment_request(vec![source.clone()]);
     Arc::make_mut(&mut historical).attachment_acceptance = restored.attachment_acceptance;
-    let notices = degrade_unmaterializable_request_attachments(&mut historical);
+    let accepted = Arc::clone(&historical.attachment_acceptance);
+    let notices = degrade_unmaterializable_request_attachments(
+        &mut historical,
+        |reference, position| {
+            !accepted
+                .acceptors(&reference.media_type, position)
+                .is_empty()
+        },
+        |_| "omitted".to_owned(),
+    );
     assert!(
         notices.is_empty(),
         "the opening revision must preserve historical rendering"
@@ -1730,7 +1739,12 @@ fn pinned_session_attachment_acceptance_survives_model_catalogue_change() {
     let mut unpinned = attachment_request(vec![source]);
     Arc::make_mut(&mut unpinned).attachment_acceptance = changed_host;
     assert_eq!(
-        degrade_unmaterializable_request_attachments(&mut unpinned).len(),
+        degrade_unmaterializable_request_attachments(
+            &mut unpinned,
+            |_, _| false,
+            |_| "omitted".to_owned()
+        )
+        .len(),
         1
     );
     assert!(

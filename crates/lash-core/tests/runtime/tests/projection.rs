@@ -137,6 +137,13 @@ impl lash_core::plugin::ProtocolSessionPlugin for AppendRollbackProtocolSession 
 struct UnusedAppendRollbackProtocolDriver;
 
 impl lash_core::plugin::ProtocolDriverPlugin for UnusedAppendRollbackProtocolDriver {
+    fn attachment_omission_text(
+        &self,
+        notice: &lash_sansio::AttachmentMaterializationNotice,
+    ) -> String {
+        format!("({} omitted)", notice.media_type)
+    }
+
     fn build_preamble(
         &self,
         _input: lash_core::ProtocolBuildInput,

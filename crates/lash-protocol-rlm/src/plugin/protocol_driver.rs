@@ -12,6 +12,16 @@ pub(super) struct RlmProtocolDriver {
 }
 
 impl ProtocolDriverPlugin for RlmProtocolDriver {
+    fn attachment_omission_text(
+        &self,
+        notice: &lash_sansio::AttachmentMaterializationNotice,
+    ) -> String {
+        self.dialect
+            .tool_presenter()
+            .presenter()
+            .attachment_omission_text(notice)
+    }
+
     fn resolve_render(
         &self,
         namespace: &lash_core::ProtocolTurnOptions,

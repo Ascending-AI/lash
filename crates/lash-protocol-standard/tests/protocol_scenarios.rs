@@ -334,7 +334,6 @@ impl StandardToolResult {
                 parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                     self.model_return_text,
                 )],
-                attachment_notices: Vec::new(),
             },
             intent_outcomes: self.intent_outcomes.clone(),
             replay: None,

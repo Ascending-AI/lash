@@ -496,13 +496,7 @@ async fn render_present(
             }
         })?;
     let params = resolved.for_tool(&ctx.tool_id);
-    let mut rendered = renderer.0.tool_output(&ctx.output, &ctx.tool_id, params);
-    rendered.body.extend(
-        result
-            .attachment_notices
-            .iter()
-            .map(|notice| ModelToolReturnPart::text(notice.model_placeholder())),
-    );
+    let rendered = renderer.0.tool_output(&ctx.output, &ctx.tool_id, params);
     let mut cuts = rendered.cuts;
     let (chars, lines) = text_stats(&rendered.body);
     cuts.original_chars = cuts.original_chars.max(chars);

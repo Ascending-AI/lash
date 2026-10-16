@@ -606,7 +606,6 @@ pub(super) async fn present_resolved(
             &binding
                 .map(|binding| binding.presentation.clone())
                 .unwrap_or_default(),
-            &dispatch.facts.attachment_acceptance,
         )
         .await
     {

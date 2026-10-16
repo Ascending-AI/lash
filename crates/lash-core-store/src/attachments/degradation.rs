@@ -1,44 +1,64 @@
-//! Catalogue refusal preserves accepted refs and attachment occurrence order.
-use lash_sansio::AttachmentRef;
+//! Request-local omission preserves history and attachment occurrence order.
 use lash_sansio::llm::attachment_delivery::AttachmentPosition;
-use std::collections::HashSet;
+use lash_sansio::{AttachmentMaterializationNotice, AttachmentRef};
 use std::sync::Arc;
 
-pub fn attachment_materialization_notice(
-    snapshot: &crate::provider::AttachmentCapabilitySnapshot,
-    reference: &AttachmentRef,
-    position: AttachmentPosition,
-) -> Option<crate::AttachmentMaterializationNotice> {
-    snapshot
-        .acceptors(&reference.media_type, position)
-        .is_empty()
-        .then(|| crate::AttachmentMaterializationNotice::no_provider_accepts(reference, position))
-}
-
+/// Replace each attachment the target cannot accept with the mode's text.
+/// The request is copied on write; the history it was projected from stays intact.
 pub fn degrade_unmaterializable_request_attachments(
     request: &mut Arc<crate::llm::types::LlmRequest>,
-) -> Vec<crate::AttachmentMaterializationNotice> {
+    accepts: impl Fn(&AttachmentRef, AttachmentPosition) -> bool,
+    omission_text: impl Fn(&AttachmentMaterializationNotice) -> String,
+) -> Vec<AttachmentMaterializationNotice> {
     use crate::llm::types::LlmContentBlock;
     let mut notices = Vec::new();
-    for message in &request.messages {
-        for block in message.blocks.iter() {
+    let omitted = |reference: &AttachmentRef, position| !accepts(reference, position);
+    if !request
+        .messages
+        .iter()
+        .flat_map(|m| m.blocks.iter())
+        .any(|block| match block {
+            LlmContentBlock::Attachment { reference } => {
+                omitted(reference, AttachmentPosition::Message)
+            }
+            LlmContentBlock::ToolResult { content, .. } => content
+                .iter()
+                .filter_map(|p| p.attachment())
+                .any(|r| omitted(r, AttachmentPosition::ToolResult)),
+            _ => false,
+        })
+    {
+        return notices;
+    }
+    for message in &mut Arc::make_mut(request).messages {
+        for block in Arc::make_mut(&mut message.blocks) {
             match block {
-                LlmContentBlock::Attachment { reference } => {
-                    if let Some(notice) = attachment_materialization_notice(
-                        &request.attachment_acceptance,
+                LlmContentBlock::Attachment { reference }
+                    if omitted(reference, AttachmentPosition::Message) =>
+                {
+                    let notice = AttachmentMaterializationNotice::target_model_does_not_accept(
                         reference,
                         AttachmentPosition::Message,
-                    ) {
-                        notices.push(notice);
-                    }
+                    );
+                    *block = LlmContentBlock::Text {
+                        text: omission_text(&notice).into(),
+                        response_meta: None,
+                        cache_breakpoint: false,
+                    };
+                    notices.push(notice);
                 }
                 LlmContentBlock::ToolResult { content, .. } => {
-                    for reference in content.iter().filter_map(|part| part.attachment()) {
-                        if let Some(notice) = attachment_materialization_notice(
-                            &request.attachment_acceptance,
-                            reference,
-                            AttachmentPosition::ToolResult,
-                        ) {
+                    for part in content {
+                        if let Some(reference) = part
+                            .attachment()
+                            .filter(|r| omitted(r, AttachmentPosition::ToolResult))
+                        {
+                            let notice =
+                                AttachmentMaterializationNotice::target_model_does_not_accept(
+                                    reference,
+                                    AttachmentPosition::ToolResult,
+                                );
+                            *part = lash_sansio::ModelToolReturnPart::text(omission_text(&notice));
                             notices.push(notice);
                         }
                     }
@@ -46,67 +66,6 @@ pub fn degrade_unmaterializable_request_attachments(
                 _ => {}
             }
         }
-    }
-    if notices.is_empty() {
-        return notices;
-    }
-    let request = Arc::make_mut(request);
-    let snapshot = &request.attachment_acceptance;
-    for message in &mut request.messages {
-        let existing = message
-            .blocks
-            .iter()
-            .flat_map(|block| match block {
-                LlmContentBlock::Text { text, .. } => vec![text.to_string()],
-                LlmContentBlock::ToolResult { content, .. } => content
-                    .iter()
-                    .filter_map(|part| part.visible_text().map(str::to_string))
-                    .collect(),
-                _ => Vec::new(),
-            })
-            .collect::<HashSet<_>>();
-        Arc::make_mut(&mut message.blocks).retain_mut(|block| match block {
-            LlmContentBlock::Attachment { reference } => {
-                let Some(notice) = attachment_materialization_notice(
-                    snapshot,
-                    reference,
-                    AttachmentPosition::Message,
-                ) else {
-                    return true;
-                };
-                let placeholder = notice.model_placeholder();
-                if existing.contains(&placeholder) {
-                    return false;
-                }
-                *block = LlmContentBlock::Text {
-                    text: placeholder.into(),
-                    response_meta: None,
-                    cache_breakpoint: false,
-                };
-                true
-            }
-            LlmContentBlock::ToolResult { content, .. } => {
-                content.retain_mut(|part| {
-                    let Some(notice) = part.attachment().and_then(|reference| {
-                        attachment_materialization_notice(
-                            snapshot,
-                            reference,
-                            AttachmentPosition::ToolResult,
-                        )
-                    }) else {
-                        return true;
-                    };
-                    let placeholder = notice.model_placeholder();
-                    if existing.contains(&placeholder) {
-                        return false;
-                    }
-                    *part = lash_sansio::ModelToolReturnPart::text(placeholder);
-                    true
-                });
-                true
-            }
-            _ => true,
-        });
     }
     notices
 }

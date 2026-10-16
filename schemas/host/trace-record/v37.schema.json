@@ -1,11 +1,11 @@
 {
   "$defs": {
     "AttachmentMaterializationReason": {
-      "description": "Why Lash replaced an attachment with a model-visible placeholder.",
+      "description": "Why a request omitted an attachment.",
       "oneOf": [
         {
-          "const": "no_provider_accepts_mime_and_position",
-          "description": "No provider in the shared adapter capability registry accepts this MIME/position pair.",
+          "const": "target_model_does_not_accept_mime_and_position",
+          "description": "The target model and its route cannot accept this MIME/position pair.",
           "type": "string"
         }
       ]

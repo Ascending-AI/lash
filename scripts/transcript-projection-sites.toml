@@ -241,3 +241,5 @@ roles = ["Assistant", "Event", "Tool", "User"]
 
 "crates/lash/src/tests/core_session_builder/typed_errors.rs#a_retried_admin_mutation_with_the_same_host_key_applies_once" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "The keyed append law separately verifies exactly one durable append before checking settlement publishes it to resident state (FIG-6032)." }
 "examples/agent-workbench/src/eval/host.rs#worker" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "The FIG-763 operator evaluator exports persisted messages as evidence and checks typed reply markers; it does not choose a UI reply or reclassify the transcript." }
+
+"crates/lash-durable-test/tests/standard_turn_outcomes.rs#pdf_session_after_model_switch" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "FIG-6521 reads the committed tool parts to prove request omission never writes notice text into history." }

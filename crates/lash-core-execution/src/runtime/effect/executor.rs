@@ -296,16 +296,14 @@ pub(crate) fn unresolved_execution_env(
 
 /// Everything the presentation boundary needs that is not on the journaled
 /// command: the session's plugin chain, the facts a step may read, the
-/// store retained artifacts are `put` into, the recorded
-/// attachment-acceptance environment the materialization notices compute
-/// under, and how long the settled call took — an observation the steps may
+/// store retained artifacts are `put` into, and
+/// how long the settled call took — an observation the steps may
 /// read, never part of the command's recorded identity.
 pub struct PresentationLocalExecution {
     pub composition: Arc<crate::plugin::ExecutionComposition>,
     pub state: Arc<dyn crate::plugin::ExecutionState>,
     pub facts: Arc<crate::plugin::ToolPresentationFacts>,
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
-    pub attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
     pub duration_ms: u64,
 }
 
@@ -346,12 +344,10 @@ impl PresentationLocalExecution {
             duration_ms: self.duration_ms,
             artifacts,
         };
-        let presentation = Box::pin(self.composition.present_tool_result(
-            context,
-            self.facts,
-            &plan,
-            &self.attachment_acceptance,
-        ))
+        let presentation = Box::pin(
+            self.composition
+                .present_tool_result(context, self.facts, &plan),
+        )
         .await?;
         Ok(RuntimeEffectOutcome::PresentToolResult {
             presentation: Box::new(presentation),
@@ -614,7 +610,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         state: Arc<dyn crate::plugin::ExecutionState>,
         facts: Arc<crate::plugin::ToolPresentationFacts>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
-        attachment_acceptance: crate::provider::AttachmentCapabilitySnapshot,
         duration_ms: u64,
         plan: &super::PresentationBinding,
     ) -> Self {
@@ -626,7 +621,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     state,
                     facts,
                     attachment_store,
-                    attachment_acceptance,
                     duration_ms,
                 },
             )),

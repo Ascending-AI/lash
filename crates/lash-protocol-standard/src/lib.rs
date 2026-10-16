@@ -794,6 +794,16 @@ struct StandardProtocolDriver {
 }
 
 impl ProtocolDriverPlugin for StandardProtocolDriver {
+    fn attachment_omission_text(
+        &self,
+        notice: &lash_sansio::AttachmentMaterializationNotice,
+    ) -> String {
+        self.config
+            .tool_presenter
+            .presenter()
+            .attachment_omission_text(notice)
+    }
+
     fn resolve_render(
         &self,
         namespace: &lash_core::ProtocolTurnOptions,
@@ -1054,7 +1064,6 @@ fn refused_tool_call_completion(
     replay: Option<ProviderReplayMeta>,
 ) -> CompletedToolCall {
     let model_return = lash_core::facade_support::ModelToolReturn {
-        attachment_notices: Vec::new(),
         tool_name: tool_name.clone(),
         parts: vec![lash_core::facade_support::ModelToolReturnPart::Text {
             text: output.value_for_projection().to_string(),

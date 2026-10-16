@@ -2,6 +2,8 @@
 
 ## Interaction Glossary
 
+- **Attachment Omission**: When the target model of a request cannot accept an attachment in its position, that request carries the mode's short notice in its place. The decision is made per request; history keeps the attachment. _Avoid_: placeholder in stored history, attachment_unavailable blob.
+
 - **Host Application**: Deployable product that selects Lash runtime crates, providers, plugins, Execution Modes, persistence, configuration, and presentation. A Host Application owns those composition choices and releases independently from Lash. _Avoid_: reference host (when repository or release ownership matters), Lash frontend.
 
 - **Session Binding**: Immutable facade-owned pairing created at session open between one exact session id, its admitted store handle, and the lifecycle services that own its controls, attachments, process environment and work ports. Park and resume preserve it; receiving-core provider, plugin, prompt, tracing, and policy configuration remain live. _Avoid_: backend label.

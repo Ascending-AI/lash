@@ -233,6 +233,13 @@ impl CodeExecutorPlugin for Integrator {
 
 #[lash::async_trait]
 impl ProtocolDriverPlugin for Integrator {
+    fn attachment_omission_text(
+        &self,
+        _notice: &lash::plugins::AttachmentMaterializationNotice,
+    ) -> String {
+        unreachable!("external signature witness")
+    }
+
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         unreachable!("external signature witness")
     }

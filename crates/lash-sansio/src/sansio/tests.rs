@@ -280,7 +280,6 @@ fn completed_tool(
         model_return: ModelToolReturn {
             tool_name: tool_name.to_string(),
             parts: vec![ModelToolReturnPart::text(format!("{tool_name} result"))],
-            attachment_notices: Vec::new(),
         },
         intent_outcomes: Vec::new(),
         replay: None,

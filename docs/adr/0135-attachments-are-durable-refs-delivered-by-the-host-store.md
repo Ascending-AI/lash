@@ -61,11 +61,16 @@ credential). The effective acceptance of one attachment is the
 intersection: a `ProviderAccepts { bytes, url, provider_file }` for that
 MIME at that position.
 
-An attachment no provider in the catalogue accepts is replaced by its
-deterministic notice before dispatch. One the catalogue accepts but the
-serving route cannot encode is refused at lowering as
-`unsupported_attachment_capability`. Scopes compare exactly; a provider file
-id is never used outside the scope it was created in.
+Request preparation decides acceptance against the target model and serving
+route, narrowed by the recorded host catalogue. Each attachment that target
+cannot accept in its position is replaced in that request by the execution
+mode's short omission line (FIG-6521); history keeps the real reference, and
+traces keep the typed attachment id, MIME, position and reason. Tool execution
+makes no acceptance judgement and stores no omission text. The mode's presenter
+owns the line through `ProtocolDriverPlugin::attachment_omission_text`; shipped
+modes delegate to their replaceable `ToolPresenter`. FIG-6496 owns the broader
+history-presentation policy seam. Scopes compare exactly; a provider file id is
+never used outside the scope it was created in.
 
 ### 3. The host store delivers
 

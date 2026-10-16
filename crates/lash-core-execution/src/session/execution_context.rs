@@ -621,10 +621,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    pub(crate) fn attachment_acceptance(&self) -> &crate::provider::AttachmentCapabilitySnapshot {
-        &self.facts.attachment_acceptance
-    }
-
     /// The session's recorded tool-call limit, as this execution runs under
     /// it: a run's snapshot for a turn, the recorded environment for a
     /// process.

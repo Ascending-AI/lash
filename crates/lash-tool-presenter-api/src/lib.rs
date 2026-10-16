@@ -33,8 +33,39 @@ pub use projection::{inline_schema, inline_shape};
 
 pub use wrap::WrappedToolPresenter;
 
+/// The default one-line request notice for an attachment a model cannot read.
+/// Hosts may reuse this in their mode presenter, or supply their own wording.
+/// The label (or MIME when unlabelled) is flattened to keep the notice one line.
+pub fn default_attachment_omission_text(
+    notice: &lash_sansio::AttachmentMaterializationNotice,
+) -> String {
+    let label = notice
+        .label
+        .as_deref()
+        .unwrap_or(notice.media_type.as_str())
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let position = match notice.position {
+        lash_sansio::llm::attachment_delivery::AttachmentPosition::Message => "a message",
+        lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult => "a tool result",
+    };
+    format!(
+        "({label} omitted: this model can't read {} in {position})",
+        notice.media_type
+    )
+}
+
 /// How a mode's tools read to a model.
 pub trait ToolPresenter: Send + Sync {
+    /// Request-only wording for an attachment the target model cannot accept.
+    fn attachment_omission_text(
+        &self,
+        notice: &lash_sansio::AttachmentMaterializationNotice,
+    ) -> String {
+        default_attachment_omission_text(notice)
+    }
+
     /// The presenter's identity: what a session records, and what a session
     /// reopened under another presenter is refused for.
     fn id(&self) -> &str;

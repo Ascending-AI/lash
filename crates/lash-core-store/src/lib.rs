@@ -106,10 +106,10 @@ pub(crate) use lash_sansio::session_model::{
 };
 pub(crate) use lash_sansio::tool_contract::{ToolDefinition, ToolId, ToolManifest};
 pub(crate) use lash_sansio::{
-    AttachmentId, AttachmentMaterializationNotice, AttachmentRef, AttachmentTypeMetadata, BatchId,
-    BlankIdentity, CausalRef, CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId,
-    LlmUsage, Message, MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage,
-    ProcessId, SessionAppendNode, SessionId, TurnId, TurnOutputSource, TurnReply, shared_parts,
+    AttachmentId, AttachmentRef, AttachmentTypeMetadata, BatchId, BlankIdentity, CausalRef,
+    CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId, LlmUsage, Message,
+    MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId,
+    SessionAppendNode, SessionId, TurnId, TurnOutputSource, TurnReply, shared_parts,
 };
 
 pub(crate) type SessionHistoryRecord =

@@ -196,6 +196,13 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
 struct EffectControllerTestProtocolDriver;
 
 impl ProtocolDriverPlugin for EffectControllerTestProtocolDriver {
+    fn attachment_omission_text(
+        &self,
+        notice: &lash_sansio::AttachmentMaterializationNotice,
+    ) -> String {
+        format!("({} omitted)", notice.media_type)
+    }
+
     fn build_preamble(
         &self,
         input: lash_core::ProtocolBuildInput,

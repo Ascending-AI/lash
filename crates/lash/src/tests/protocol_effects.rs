@@ -79,6 +79,13 @@ impl ProtocolSessionPlugin for TestProtocolSession {}
 struct TestProtocolDriver(Received);
 
 impl ProtocolDriverPlugin for TestProtocolDriver {
+    fn attachment_omission_text(
+        &self,
+        notice: &lash_sansio::AttachmentMaterializationNotice,
+    ) -> String {
+        format!("({} omitted)", notice.media_type)
+    }
+
     fn build_preamble(
         &self,
         input: lash_core::ProtocolBuildInput,

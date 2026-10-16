@@ -1,6 +1,6 @@
 //! A turn's new model call is prepared for its admission (ADR 0133 §6,
 //! FIG-5259): its prompt composed into its request, the protocol's
-//! before-call decision taken, attachments no provider accepts degraded to
+//! before-call decision taken, attachments the target model cannot accept replaced with
 //! their notices, its correlation scope set, and the request lowered by the
 //! provider of its route to the request template every attempt and resend
 //! fills and sends (ADR 0135 §6). Nothing is delivered here: an attachment
@@ -53,8 +53,22 @@ impl RuntimeTurnDriver<'static> {
             return Ok(PreparedCall::Ended);
         }
         let mut request = request;
-        let degraded =
-            crate::attachments::degrade_unmaterializable_request_attachments(&mut request);
+        let provider = self
+            .policy
+            .binding()
+            .bind_for_unjournaled_call()
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        let target = Arc::clone(&request);
+        let degraded = crate::attachments::degrade_unmaterializable_request_attachments(
+            &mut request,
+            |reference, position| provider.accepts_attachment(&target, reference, position),
+            |notice| {
+                self.session
+                    .plugins()
+                    .protocol_driver()
+                    .attachment_omission_text(notice)
+            },
+        );
         let mut request = LlmRequest::clone(&request);
         for notice in degraded {
             self.emit_trace(iteration, || lash_trace::TraceEvent::AttachmentDegraded {

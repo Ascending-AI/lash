@@ -31,20 +31,6 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         "image".to_string(),
         ToolValue::Attachment(attachment.clone()),
     );
-    let notice = lash_sansio::AttachmentMaterializationNotice::no_provider_accepts(
-        &attachment,
-        lash_sansio::llm::attachment_delivery::AttachmentPosition::ToolResult,
-    );
-    let notice_placeholder = notice.model_placeholder();
-    let mut noticed = ModelToolReturn::from_output(
-        "shot".to_string(),
-        &ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone())),
-    );
-    noticed
-        .parts
-        .push(ModelToolReturnPart::text(notice_placeholder.clone()));
-    noticed.attachment_notices.push(notice);
-
     let returns = [
         ModelToolReturn::from_output(
             "shot".to_string(),
@@ -63,16 +49,9 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
             &ToolCallOutput::success_tool_value(ToolValue::String(String::new())),
         ),
         ModelToolReturn::from_output("shot".to_string(), &ToolCallOutput::success("ok")),
-        noticed,
     ];
 
-    let labels = [
-        "call-array",
-        "call-object",
-        "call-empty",
-        "call-text",
-        "call-notice",
-    ];
+    let labels = ["call-array", "call-object", "call-empty", "call-text"];
     let calls = returns
         .iter()
         .zip(labels)
@@ -144,13 +123,6 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         ),
         ("call-empty", vec![]),
         ("call-text", vec![ModelToolReturnPart::text("\"ok\"")]),
-        (
-            "call-notice",
-            vec![
-                ModelToolReturnPart::Attachment(attachment.clone()),
-                ModelToolReturnPart::text(notice_placeholder),
-            ],
-        ),
     ];
     for ((call_id, content), (expected_call_id, expected_content)) in
         result_blocks.iter().zip(&expected_blocks)

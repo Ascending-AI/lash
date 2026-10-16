@@ -186,7 +186,7 @@ fn event_samples() -> Vec<TraceEvent> {
             label: Some("artifact.bin".to_string()),
             media_type: Some("application/octet-stream".to_string()),
             position: lash_sansio::llm::attachment_delivery::AttachmentPosition::Message,
-            reason: lash_sansio::AttachmentMaterializationReason::NoProviderAcceptsMimeAndPosition,
+            reason: lash_sansio::AttachmentMaterializationReason::TargetModelDoesNotAcceptMimeAndPosition,
         },
         TraceEvent::CompositionChanged {
             fingerprint: "composition-sha".to_string(),
@@ -980,7 +980,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             label: Some(CONTENT.to_string()),
             media_type: Some("application/octet-stream".to_string()),
             position: lash_sansio::llm::attachment_delivery::AttachmentPosition::Message,
-            reason: lash_sansio::AttachmentMaterializationReason::NoProviderAcceptsMimeAndPosition,
+            reason: lash_sansio::AttachmentMaterializationReason::TargetModelDoesNotAcceptMimeAndPosition,
         },
         TraceEvent::CompositionChanged {
             fingerprint: "composition-sha".to_string(),

@@ -292,7 +292,6 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
             let mut model_return = ModelToolReturn {
                 tool_name: "oversized".to_string(),
                 parts: vec![ModelToolReturnPart::text(text)],
-                attachment_notices: Vec::new(),
             };
             lash_core::runtime::effect::retain_oversized_return(
                 &mut model_return,

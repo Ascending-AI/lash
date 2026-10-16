@@ -324,12 +324,7 @@ impl ProductionToolHandlers<'_> {
         };
         let presentation = dispatch
             .composition
-            .present_tool_result(
-                projection,
-                facts,
-                &prepared.input.binding.presentation,
-                &dispatch.facts.attachment_acceptance,
-            )
+            .present_tool_result(projection, facts, &prepared.input.binding.presentation)
             .await
             .map_err(|error| {
                 self.context.record_nested_effect_error(error.clone());

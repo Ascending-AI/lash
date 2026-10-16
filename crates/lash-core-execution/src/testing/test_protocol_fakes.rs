@@ -286,6 +286,13 @@ struct TestProtocolDriver {
 }
 
 impl ProtocolDriverPlugin for TestProtocolDriver {
+    fn attachment_omission_text(
+        &self,
+        notice: &lash_sansio::AttachmentMaterializationNotice,
+    ) -> String {
+        format!("({} omitted)", notice.media_type)
+    }
+
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let tool_names = input.tool_catalog.tool_names();
         let driver: Arc<dyn ProtocolDriverHandle<crate::HostTurnProtocol>> = match self.driver {

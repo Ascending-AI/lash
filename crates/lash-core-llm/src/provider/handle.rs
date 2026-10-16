@@ -179,6 +179,26 @@ impl ProviderHandle {
         self.components.provider.route_identity(model)
     }
 
+    /// Whether this target route can encode the attachment under the host catalogue.
+    pub fn accepts_attachment(
+        &self,
+        request: &LlmRequest,
+        reference: &lash_sansio::AttachmentRef,
+        position: lash_sansio::llm::attachment_delivery::AttachmentPosition,
+    ) -> bool {
+        !self
+            .components
+            .provider
+            .attachment_accepts(request.model.wire_model(), &reference.media_type, position)
+            .narrowed(request.attachment_acceptance.forms(
+                self.kind(),
+                &reference.media_type,
+                position,
+            ))
+            .narrowed_to_live_scope(self.components.provider.attachment_file_scope().as_ref())
+            .is_empty()
+    }
+
     pub fn options(&self) -> ProviderOptions {
         self.components.provider.options()
     }
