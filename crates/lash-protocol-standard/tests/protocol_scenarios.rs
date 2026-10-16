@@ -331,13 +331,9 @@ impl StandardToolResult {
             output: self.output.clone(),
             model_return: lash_core::facade_support::ModelToolReturn {
                 tool_name: self.tool_name.to_string(),
-                parts: std::iter::once(lash_core::facade_support::ModelToolReturnPart::text(
+                parts: vec![lash_core::facade_support::ModelToolReturnPart::text(
                     self.model_return_text,
-                ))
-                .chain(self.intent_outcomes.iter().map(|outcome| {
-                    lash_core::facade_support::ModelToolReturnPart::text(outcome.model_addendum())
-                }))
-                .collect(),
+                )],
                 attachment_notices: Vec::new(),
             },
             intent_outcomes: self.intent_outcomes.clone(),

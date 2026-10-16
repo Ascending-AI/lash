@@ -183,7 +183,14 @@ impl lash_core::ToolProvider for ActivityTools {
             return lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::new());
         }
         self.gate.passed().await;
-        let answer = lash_core::ToolOutcomeDone::ok(serde_json::json!({ "answered": label }));
+        // A call asked for its `slot` answers its start's result slot, as
+        // `processes.start` does: the realized start's handle replaces it.
+        let answer =
+            lash_core::ToolOutcomeDone::ok(if call.args["slot"].as_bool().unwrap_or_default() {
+                lash_sansio::handle::process_start_slot_json(0)
+            } else {
+                serde_json::json!({ "answered": label })
+            });
         if !call.args["start"].as_bool().unwrap_or_default() {
             return lash_core::ToolAttemptOutcome::done(answer, lash_core::ToolIntents::default());
         }
@@ -1053,10 +1060,119 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
     world.shutdown().await;
 }
 
+/// A tool intent is runtime work, never model content (FIG-6522): a call
+/// that answers an output and declares a start shows the model exactly what
+/// the same call answering without the start shows it, and its recorded
+/// return holds no intent text. The start's executed outcome reaches the
+/// host typed, as the call's `ToolIntentOutcome`. A call that needs the
+/// model to know its child answers the start's slot, and its own result
+/// names the process the start registered.
+async fn a_tool_s_intent_outcome_never_reaches_the_model(tier: Tier) {
+    const NAME: &str = "activity law: answer with and without a start";
+    let gate = Gate::new(true);
+    let Some(world) = world(tier, &gate, false).await else {
+        return;
+    };
+    world.script(
+        NAME,
+        vec![served::response(vec![
+            served::call(
+                "answered-with-start",
+                GATED,
+                serde_json::json!({ "label": "same", "start": true }),
+            ),
+            served::call(
+                "answered-alone",
+                GATED,
+                serde_json::json!({ "label": "same" }),
+            ),
+            served::call(
+                "answered-with-slot",
+                GATED,
+                serde_json::json!({ "label": "slot", "start": true, "slot": true }),
+            ),
+        ])],
+    );
+    let session = world
+        .session("activity-intent-quiet", served::spec(8))
+        .await;
+    let sink = Recorded::default();
+    let outcome = tokio::time::timeout(
+        WATCHDOG,
+        session
+            .send(lash::TurnInput::text(NAME))
+            .await
+            .expect("the input is accepted")
+            .outcome_into(&sink),
+    )
+    .await
+    .expect("deadlock watchdog: the turn never settled")
+    .expect("the turn answers");
+    let lash::SendOutcome::Settled { output, .. } = outcome else {
+        panic!("the turn settles: {outcome:?}");
+    };
+    served::assert_answered("the intent turn", &output);
+    let results = served::results(&world.read("activity-intent-quiet").await);
+    let content = |provider_call_id: &str| {
+        results
+            .iter()
+            .find(|result| result.provider_call_id == provider_call_id)
+            .unwrap_or_else(|| panic!("the turn recorded {provider_call_id}: {results:#?}"))
+            .content
+            .clone()
+    };
+    let with_start = content("answered-with-start");
+    assert_eq!(
+        with_start,
+        content("answered-alone"),
+        "the recorded return is the tool's output alone"
+    );
+    let asked = world.requests(NAME);
+    let shown = asked.get(1).expect("the model was asked after the calls");
+    assert!(
+        !shown.contains("tool intent") && !with_start.contains("tool intent"),
+        "no intent outcome reaches the model: {shown}"
+    );
+    let activities = sink.activities();
+    let started_child = |provider_call_id: &str| {
+        let ids = started(&activities, provider_call_id);
+        assert_eq!(ids.len(), 1, "one start: {activities:#?}");
+        let children = activities
+            .iter()
+            .filter_map(|activity| match &activity.event {
+                TurnEvent::ToolIntentOutcome {
+                    call_id,
+                    outcome:
+                        lash_core::ToolIntentExecutionOutcome::Executed {
+                            realized: lash_core::ToolIntentRealized::StartProcess(handle),
+                            ..
+                        },
+                } if *call_id == ids[0] => Some(handle.process_id.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            children.len(),
+            1,
+            "the host is handed the start's typed executed outcome: {activities:#?}"
+        );
+        children[0].clone()
+    };
+    started_child("answered-with-start");
+    let child = started_child("answered-with-slot");
+    let with_slot = content("answered-with-slot");
+    assert!(
+        with_slot.contains(&child.to_string()) && !with_slot.contains("tool intent"),
+        "the slot's own result names the started process: {with_slot}"
+    );
+    world.shutdown().await;
+}
+
 tiered_laws!(
     a_durable_turn_streams_provider_deltas_before_its_committed_rows,
     a_durable_turn_streams_a_native_call_s_activity_to_its_sink,
     a_presentation_step_presents_every_native_round_call,
     a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows,
     a_commit_on_one_node_reaches_a_subscriber_attached_through_another,
+    a_tool_s_intent_outcome_never_reaches_the_model,
 );

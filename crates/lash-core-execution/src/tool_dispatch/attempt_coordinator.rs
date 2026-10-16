@@ -509,7 +509,10 @@ pub(super) fn project_recorded_intent_outcomes(
                 *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
                     crate::ToolFailureClass::Unavailable,
                     refusal.code(),
-                    format!("{refusal:?}"),
+                    format!(
+                        "the definition was not resolved: it was refused with {}",
+                        refusal.describe()
+                    ),
                 ));
             }
             _ => {}
@@ -803,5 +806,51 @@ mod projection_tests {
         );
 
         assert_eq!(output.value_for_projection(), realized_handle("p-first"));
+    }
+
+    /// A get's own result is the definition it resolved: the realized read
+    /// replaces the slot its attempt answered, and a refused read is the
+    /// call's failure in plain words. No intent receipt carries either to
+    /// the model (FIG-6522).
+    #[test]
+    fn a_definition_slot_answers_the_resolved_definition_or_the_refusal() {
+        let definition = crate::ProcessDefinition::new(
+            crate::ProcessDefinitionId::from_sha256_digest([7; 32]),
+            crate::ProcessSignature::Unknown,
+        );
+        let get = |realized| {
+            executed_at(
+                crate::ToolIntentRealized::GetDefinition(Box::new(realized)),
+                0,
+            )
+        };
+        let mut output =
+            crate::ToolCallOutput::success(lash_sansio::handle::definition_slot_json(0));
+        project_recorded_intent_outcomes(&mut output, &[get(definition.clone())]);
+        assert_eq!(
+            output.value_for_projection(),
+            serde_json::to_value(&definition).expect("definition")
+        );
+
+        let mut refused =
+            crate::ToolCallOutput::success(lash_sansio::handle::definition_slot_json(0));
+        project_recorded_intent_outcomes(
+            &mut refused,
+            &[crate::ToolIntentExecutionOutcome::Refused {
+                identity: None,
+                intent_index: 0,
+                kind: crate::ToolIntentKind::GetDefinition,
+                refusal: crate::ToolIntentRefusalReason::MintingRunCancelled,
+            }],
+        );
+        let crate::ToolCallOutcome::Failure(failure) = refused.outcome else {
+            panic!("a refused read must not answer its slot");
+        };
+        assert_eq!(failure.code, "minting_run_cancelled");
+        assert_eq!(
+            failure.message,
+            "the definition was not resolved: it was refused with minting_run_cancelled: \
+             the logical Run whose emission minted the intent was cancelled"
+        );
     }
 }

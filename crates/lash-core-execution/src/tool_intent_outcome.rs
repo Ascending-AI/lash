@@ -18,7 +18,8 @@ macro_rules! define_realized {
             pub fn kind(&self) -> ToolIntentKind {
                 match self { $(Self::$variant(_) => ToolIntentKind::$variant,)* }
             }
-            /// Serialize only at the model presentation boundary.
+            /// Serialize only where a tool's own output takes the realized
+            /// value: the slot its attempt answered (ADR 0107).
             pub fn model_value(&self) -> Result<serde_json::Value, serde_json::Error> {
                 match self {
                     $(Self::$variant(result) => serde_json::to_value(result),)*
@@ -153,36 +154,6 @@ impl ToolIntentExecutionOutcome {
             Self::Executed { realized, .. } => Some(realized.kind()),
             Self::Refused { kind, .. } => Some(*kind),
             Self::ProtocolRefused { .. } => None,
-        }
-    }
-
-    pub fn model_addendum(&self) -> String {
-        match self {
-            Self::Executed {
-                identity, realized, ..
-            } => format!(
-                "[tool intent {} #{} executed: {}]",
-                realized.kind().as_str(),
-                identity.intent_index,
-                match realized.model_value() {
-                    Ok(value) => value.to_string(),
-                    Err(error) => format!("presentation failed: {error}"),
-                }
-            ),
-            Self::Refused {
-                intent_index,
-                kind,
-                refusal,
-                ..
-            } => format!(
-                "[tool intent {} #{} refused: {}]",
-                kind.as_str(),
-                intent_index,
-                refusal.code()
-            ),
-            Self::ProtocolRefused { refusal } => {
-                format!("[tool intent batch refused: {}]", refusal.code())
-            }
         }
     }
 }

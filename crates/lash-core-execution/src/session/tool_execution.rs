@@ -347,7 +347,7 @@ impl RuntimeExecutionContext<'_> {
                     .and_then(crate::RuntimeEffectOutcome::into_tool_presentation),
                 Err(error) => Err(error.into()),
             }?;
-            let mut model_return = presentation.model_return;
+            let model_return = presentation.model_return;
             let possession = outcome
                 .intent_outcomes
                 .iter()
@@ -365,11 +365,6 @@ impl RuntimeExecutionContext<'_> {
                 },
                 &possession,
             )?;
-            for intent_outcome in crate::tool_dispatch::model_visible_intent_outcomes(&outcome) {
-                model_return.parts.push(crate::ModelToolReturnPart::text(
-                    intent_outcome.model_addendum(),
-                ));
-            }
             self.emit_tool_intent_outcome_activities(call_key, call_id, &outcome.intent_outcomes);
 
             let record = ToolCallRecord {

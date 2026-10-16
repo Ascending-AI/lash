@@ -141,54 +141,23 @@ pub(super) fn launch_refusal(outcome: &crate::ToolIntentExecutionOutcome) -> cra
         crate::ToolIntentExecutionOutcome::Refused { refusal, .. } => (
             crate::ToolFailureClass::Internal,
             refusal.code().to_string(),
-            format!(
-                "the declared start did not launch: {}",
-                outcome.model_addendum()
-            ),
+            format!("the declared start did not launch: {}", refusal.describe()),
         ),
-        other => (
+        crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => (
+            crate::ToolFailureClass::Unavailable,
+            "declared_start_refused".to_string(),
+            format!("the declared start did not launch: {}", refusal.describe()),
+        ),
+        crate::ToolIntentExecutionOutcome::Executed { realized, .. } => (
             crate::ToolFailureClass::Unavailable,
             "declared_start_refused".to_string(),
             format!(
-                "the declared start did not launch: {}",
-                other.model_addendum()
+                "the declared start did not launch: it realized {} instead",
+                realized.kind().as_str()
             ),
         ),
     };
     crate::ToolFailure::runtime(class, code, message)
-}
-
-/// The intent outcomes a call's model-facing return reports.
-///
-/// A parked call declares no intents, so the one outcome it can carry is its
-/// declared start's launch receipt: host-facing metadata that names the child
-/// (ADR 0116 §3.8). The model sees the child's value only, so the receipt is
-/// left out of the return's addenda.
-pub fn model_visible_intent_outcomes(
-    outcome: &super::ToolDispatchOutcome,
-) -> &[crate::ToolIntentExecutionOutcome] {
-    model_visible_outcomes(&outcome.intents, &outcome.intent_outcomes)
-}
-
-/// The outcomes of `outcomes` a model-facing return reports, for a call that
-/// declared `intents`: a parked call's lone launch receipt is left out (see
-/// [`model_visible_intent_outcomes`]).
-pub(crate) fn model_visible_outcomes<'a>(
-    intents: &crate::ToolIntents,
-    outcomes: &'a [crate::ToolIntentExecutionOutcome],
-) -> &'a [crate::ToolIntentExecutionOutcome] {
-    let launch_receipt = intents.intents.is_empty()
-        && matches!(
-            outcomes,
-            [crate::ToolIntentExecutionOutcome::Executed {
-                realized: crate::ToolIntentRealized::StartProcess(_),
-                ..
-            } | crate::ToolIntentExecutionOutcome::Refused {
-                kind: crate::ToolIntentKind::StartProcess,
-                ..
-            }]
-        );
-    if launch_receipt { &[] } else { outcomes }
 }
 
 #[cfg(test)]

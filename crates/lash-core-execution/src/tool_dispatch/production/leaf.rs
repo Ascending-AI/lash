@@ -133,18 +133,13 @@ impl ProductionToolHandlers<'_> {
                     &mut output,
                     &presented.intent_outcomes,
                 );
-                // The realized declarations are reported after the presented
-                // value; a declared start's launch receipt is host-facing only.
-                let mut model_return = presented.presentation.model_return;
-                model_return.parts.extend(
-                    super::super::pending_resolver::model_visible_outcomes(
-                        &captured.intents,
-                        &presented.intent_outcomes,
-                    )
-                    .iter()
-                    .map(|outcome| crate::ModelToolReturnPart::text(outcome.model_addendum())),
-                );
-                (output, model_return, presented.intent_outcomes)
+                // Intent outcomes are host-facing facts: the model is shown
+                // the presented value alone (FIG-6522).
+                (
+                    output,
+                    presented.presentation.model_return,
+                    presented.intent_outcomes,
+                )
             }
             CallEnd::Withheld { decision, cause } => {
                 let output = super::observations::terminal_output(decision, cause.as_ref(), None)

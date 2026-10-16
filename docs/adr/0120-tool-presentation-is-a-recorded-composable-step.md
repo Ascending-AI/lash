@@ -55,7 +55,9 @@ The presentation commits as its own phase of the Run
 ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §5). The
 presentation reader validates its stored format. Resume loads the recorded
 model return without resolving callbacks or running presenters and steps.
-Realized intent outcomes supply the model addenda. Duration is an observation,
+Realized intent outcomes are host-facing facts and never reach the model
+return (FIG-6522); a tool that needs the model to know one answers it in its
+own result. Duration is an observation,
 not identity. An unavailable callback needed for an owed presentation refuses
 typed; a completed presentation does not consult the live registry.
 

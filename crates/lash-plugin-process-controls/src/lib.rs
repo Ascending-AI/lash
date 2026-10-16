@@ -424,7 +424,7 @@ fn process_cancel_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:cancel_process",
         "cancel_process",
-        "Request cancellation for a durable process, including a running host-launched process. Pass the handle a process start or `processes.list(...)` returned, or the bare `process_id`.",
+        "Request cancellation for a durable process, including a running host-launched process. Pass the handle a process start or `processes.list(...)` returned, or the bare `process_id`. The result names the process and the cancellation this call requested; await the handle for the process's terminal.",
         serde_json::json!({
             "type": "object",
             "properties": {

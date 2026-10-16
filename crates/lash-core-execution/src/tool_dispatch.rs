@@ -22,7 +22,7 @@ pub use crate::runtime::process::{
 pub use crate::tool_run::RunCutRefusal;
 pub use call_run::{AdmittedToolCall, AttemptEnd, CallEnd};
 pub use context::ToolDispatchContext;
-pub use pending_resolver::{LaunchReceipt, model_visible_intent_outcomes};
+pub use pending_resolver::LaunchReceipt;
 pub use realization::{Realization, RealizationReceipt};
 pub use singleton_run::{
     BeforeCheckReply, IsolatedBinding, IsolatedProcessDescriptor, SingletonAttempt,
