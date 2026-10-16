@@ -22,6 +22,7 @@
 //! registration; and the adoption of what was staged once the row committed
 //! ([`StartStaging::adopt`]).
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
@@ -786,7 +787,14 @@ async fn stage<'a>(
                 .collect()
         })
         .unwrap_or_default();
-    let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
+    let engine = stage_engine(
+        stores,
+        &claim,
+        &registration,
+        env.as_ref(),
+        definition.as_ref(),
+    )
+    .await?;
     // The engine's artifacts are held: its effects are read from them.
     link_start(stores, loaded.as_ref(), &registration).await?;
     Box::pin(stage_input(stores, start_key, registration.input.as_ref())).await?;
@@ -1191,12 +1199,25 @@ async fn stage_engine<'a>(
     claim: &ReferrerClaim,
     registration: &ProcessRegistration,
     env: Option<&StagedEnv>,
+    definition: Option<&StagedDefinition<'_>>,
 ) -> Result<Option<StagedEngine<'a>>, RuntimeEffectControllerError> {
     let ProcessInput::Engine { kind, payload, .. } = registration.input.as_ref() else {
         return Ok(None);
     };
     let engines = stores.engines;
-    let names = engines.require(kind)?.start_artifacts(payload)?;
+    // A checked definition's manifest already holds these names under this
+    // same claim. Keep only artifacts the actual start payload adds (for
+    // example through its arguments); adoption carries the definition's
+    // complete closure independently of this remainder.
+    let names: Vec<_> = engines
+        .require(kind)?
+        .start_artifacts(payload)?
+        .into_iter()
+        .filter(|name| {
+            !definition
+                .is_some_and(|definition| definition.staged && definition.artifacts.contains(name))
+        })
+        .collect();
     if names.is_empty() {
         return Ok(None);
     }
@@ -1288,6 +1309,7 @@ async fn resolve_start_target<'a>(
                     engines: stores.engines,
                     ports: definition_ports(stores, resolved.id())?,
                     id: resolved.id().clone(),
+                    artifacts: resolved.draft.artifacts().iter().cloned().collect(),
                     staged,
                 }),
                 registration,
@@ -1451,6 +1473,7 @@ async fn stage_definition<'a>(
             engines,
             ports,
             id: resolved.id().clone(),
+            artifacts: resolved.draft.artifacts().iter().cloned().collect(),
             staged,
         },
         registration,
@@ -1487,6 +1510,8 @@ struct StagedDefinition<'a> {
     engines: &'a ProcessEngineRegistry,
     ports: &'a ArtifactReferrerPorts,
     id: super::ProcessDefinitionId,
+    /// The checked manifest acquired under this start's claim.
+    artifacts: BTreeSet<ArtifactName>,
     /// Whether `Start(key)` holds the closure: `false` when it was already
     /// fenced.
     staged: bool,

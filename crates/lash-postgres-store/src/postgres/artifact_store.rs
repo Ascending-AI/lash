@@ -28,6 +28,18 @@ lash_store_sql::statements! {
 
 lash_store_sql::statements! {
     pub(crate) struct LashVmArtifactStatements @ "lash_vm_artifact" {
+        /// First absent member, preserving the manifest's refusal order.
+        select_missing_manifest = "SELECT wanted.artifact_ref
+             FROM unnest(?1::TEXT[], ?2::TEXT[]) WITH ORDINALITY AS wanted(namespace, artifact_ref, ordinal)
+             WHERE NOT EXISTS (SELECT 1 FROM lash_vm_artifacts AS stored
+                 WHERE stored.namespace = wanted.namespace AND stored.artifact_ref = wanted.artifact_ref)
+             ORDER BY wanted.ordinal LIMIT 1";
+        /// The whole closure's exact retention edges, in one statement.
+        insert_manifest_edges = "INSERT INTO artifact_referrer_edges
+             (namespace, artifact_ref, referrer_kind, referrer_id)
+             SELECT namespace, artifact_ref, ?3, ?4
+             FROM unnest(?1::TEXT[], ?2::TEXT[]) AS wanted(namespace, artifact_ref)
+             ON CONFLICT DO NOTHING";
         insert_bytes = "INSERT INTO lash_vm_artifacts (namespace, artifact_ref, storage_kind, artifact_bytes)
              VALUES (?1, ?2, 0, ?3) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
         select_bytes = "SELECT artifact_bytes FROM lash_vm_artifacts
@@ -578,22 +590,36 @@ impl PostgresLashVmArtifactStore {
             format!("lash-artifact:{namespace}:{artifact_ref}")
         });
         locked.dedup();
-        for (namespace, artifact_ref) in &locked {
-            lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
-        }
-        for (namespace, artifact_ref) in manifest {
-            let exists: bool =
-                crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
-                    .bind(*namespace)
-                    .bind(artifact_ref)
-                    .fetch_one(crate::observed_sql::executor(&mut **tx))
-                    .await
-                    .map_err(backend)?;
-            if !exists {
-                return Err(ArtifactStoreError::ArtifactMissing {
-                    artifact_ref: artifact_ref.clone(),
-                });
-            }
+        let lock_keys: Vec<_> = locked
+            .iter()
+            .map(|(namespace, artifact_ref)| format!("lash-artifact:{namespace}:{artifact_ref}"))
+            .collect();
+        crate::observed_sql::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_ordered_texts
+                .sql(),
+        )
+        .bind(&lock_keys)
+        .execute(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(backend)?;
+        let (namespaces, references): (Vec<_>, Vec<_>) = manifest
+            .iter()
+            .map(|(namespace, reference)| (*namespace, reference.as_str()))
+            .unzip();
+        let missing: Option<String> = crate::observed_sql::query_scalar(
+            artifact_sql()
+                .lash_vm_artifacts
+                .select_missing_manifest
+                .sql(),
+        )
+        .bind(&namespaces)
+        .bind(&references)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(backend)?;
+        if let Some(artifact_ref) = missing {
+            return Err(ArtifactStoreError::ArtifactMissing { artifact_ref });
         }
         match descriptor {
             Some(bytes) => {
@@ -639,16 +665,15 @@ impl PostgresLashVmArtifactStore {
                 .await
                 .map_err(ArtifactStoreError::from)?;
         }
-        for (namespace, artifact_ref) in &locked {
-            crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
-                .bind(*namespace)
-                .bind(*artifact_ref)
-                .bind(claim.referrer().kind().as_str())
-                .bind(claim.referrer().canonical_id())
-                .execute(crate::observed_sql::executor(&mut **tx))
-                .await
-                .map_err(backend)?;
-        }
+        let (namespaces, references): (Vec<_>, Vec<_>) = locked.into_iter().unzip();
+        crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_manifest_edges.sql())
+            .bind(&namespaces)
+            .bind(&references)
+            .bind(claim.referrer().kind().as_str())
+            .bind(claim.referrer().canonical_id())
+            .execute(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(backend)?;
         tx.commit().await.map_err(backend)
     }
 

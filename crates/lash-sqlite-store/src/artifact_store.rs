@@ -30,6 +30,19 @@ lash_store_sql::statements! {
     /// `lash_lash_vm_artifacts` and has no pointer table, so this whole set
     /// exists on one backend only.
     pub(crate) struct RefSqliteStatements @ "artifact_ref" {
+        /// First missing manifest member, in the caller's refusal order.
+        select_missing_manifest = "SELECT wanted.value ->> 1 FROM json_each(?1) AS wanted
+             WHERE NOT EXISTS (SELECT 1 FROM artifact_refs AS stored
+                 WHERE stored.namespace = wanted.value ->> 0
+                   AND stored.artifact_ref = wanted.value ->> 1)
+             ORDER BY CAST(wanted.key AS INTEGER) LIMIT 1";
+
+        /// Acquire a complete checked closure without per-artifact statements.
+        insert_manifest_edges = "INSERT INTO artifact_referrer_edges
+             (namespace, artifact_ref, referrer_kind, referrer_id)
+             SELECT value ->> 0, value ->> 1, ?2, ?3 FROM json_each(?1) WHERE true
+             ON CONFLICT DO NOTHING";
+
         /// Point `?1`/`?2` at blob `?3`. An artifact is immutable, so a
         /// second publication of the same reference keeps the first pointer
         /// and the caller compares what it reads back.
@@ -492,12 +505,16 @@ impl SqliteStore {
                         |row| row.get(0),
                     )
                 };
-                for (namespace, artifact_ref) in &manifest {
-                    if !stored(namespace, artifact_ref)? {
-                        return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
-                            artifact_ref: artifact_ref.clone(),
-                        }));
-                    }
+                let manifest_json = serde_json::to_string(&manifest)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                let missing: Option<String> = tx.query_row(
+                    artifact_sql().refs.select_missing_manifest.sql(),
+                    params![manifest_json], |row| row.get(0),
+                ).optional()?;
+                if let Some(artifact_ref) = missing {
+                    return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
+                        artifact_ref,
+                    }));
                 }
                 match &descriptor {
                     Some(bytes) => {
@@ -536,22 +553,17 @@ impl SqliteStore {
                     crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms)
                         .map_err(sqlite_conversion_error)?;
                 }
-                for (namespace, artifact_ref) in manifest
+                let closure: Vec<_> = manifest
                     .iter()
                     .map(|(namespace, artifact_ref)| (*namespace, artifact_ref.as_str()))
                     .chain(std::iter::once((PROCESS_DEFINITION_NAMESPACE, id.as_str())))
-                {
-                    crate::conn::cached_execute(
-                        tx,
-                        artifact_sql().edges.insert_edge.sql(),
-                        params![
-                            namespace,
-                            artifact_ref,
-                            referrer.kind().as_str(),
-                            referrer.canonical_id()
-                        ],
-                    )?;
-                }
+                    .collect();
+                crate::conn::cached_execute(
+                    tx,
+                    artifact_sql().refs.insert_manifest_edges.sql(),
+                    params![serde_json::to_string(&closure).map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+                        referrer.kind().as_str(), referrer.canonical_id()],
+                )?;
                 Ok(())
             })
             .await

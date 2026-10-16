@@ -37,6 +37,15 @@ lash_store_sql::statements! {
         /// binds, not by six copies of the text.
         lock_xact_by_text = "SELECT pg_advisory_xact_lock(hashtextextended(?1, 0))";
 
+        /// Acquire the caller's sorted text keys in exactly that order,
+        /// independent of the database's text collation.
+        lock_xact_by_ordered_texts =
+            "SELECT pg_advisory_xact_lock(hashtextextended(ordered.text_key, 0))
+             FROM (
+                 SELECT text_key FROM unnest(?1::TEXT[]) WITH ORDINALITY AS keys(text_key, ordinal)
+                 ORDER BY ordinal
+             ) AS ordered";
+
         /// The same lock with the caller choosing the seed, which is how the
         /// await-event waiters partition their key space per wait kind
         /// without hashing the kind into the key string.
