@@ -929,13 +929,22 @@ impl Checkout {
         {
             return Err(PoolError::QueueFull { bytes: bytes.len() });
         }
-        self.send_encoded(&bytes, timeout)
+        self.send_encoded(
+            &bytes,
+            crate::measurements::IpcTraffic::parent_kind(&frame.message),
+            timeout,
+        )
     }
     /// Sends a frame encoded under the next outgoing header.
-    fn send_encoded(&mut self, bytes: &[u8], timeout: Duration) -> Result<(), PoolError> {
+    fn send_encoded(
+        &mut self,
+        bytes: &[u8],
+        kind: usize,
+        timeout: Duration,
+    ) -> Result<(), PoolError> {
         let worker = self.worker.as_mut().ok_or_else(PoolError::eof)?;
         self.outgoing.next_header();
-        worker.send_encoded(bytes, timeout)
+        worker.send_encoded(bytes, kind, timeout)
     }
     fn receive_control(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
         let frame = self
@@ -970,7 +979,7 @@ impl Checkout {
         self.resettable = false;
         self.printed_bytes = 0;
         let result = self
-            .send_encoded(bytes, timeout)
+            .send_encoded(bytes, crate::measurements::IpcTraffic::RUN_KIND, timeout)
             .and_then(|()| self.answer(timeout));
         self.settle(result)
     }

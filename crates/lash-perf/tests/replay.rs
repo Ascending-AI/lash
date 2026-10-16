@@ -34,3 +34,58 @@ fn the_replay_corpus_subset_stays_within_its_counted_budgets() {
     );
     assert!(receipt.exists());
 }
+
+/// TRAFFIC-CONSERVATION: replay exports complete per-kind transport and
+/// physical SQLite attribution from the same cuts as its existing totals.
+#[test]
+fn traffic_conservation_replay_exports_only_complete_attribution() {
+    let dir = tempfile::tempdir().unwrap();
+    let receipt = dir.path().join("receipt.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .args(["replay", "ts-codemode", "--turns", "1", "--traffic"])
+        .arg("--store-dir")
+        .arg(dir.path().join("stores"))
+        .arg("--out")
+        .arg(&receipt)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(receipt).unwrap()).unwrap();
+    let round = &value["workloads"][0]["rounds"][0];
+    assert_eq!(round["traffic"]["sqlite"]["complete"], true);
+    let body: u64 = round["traffic"]["sqlite"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["kind"] == "wal_body")
+        .map(|row| row["bytes"].as_u64().unwrap())
+        .sum();
+    let ipc = &round["traffic"]["ipc"];
+    let bins: Vec<_> = ipc["sent"]
+        .as_object()
+        .unwrap()
+        .values()
+        .chain(ipc["received"].as_object().unwrap().values())
+        .collect();
+    let frames: u64 = bins.iter().map(|r| r["frames"].as_u64().unwrap()).sum();
+    let bytes: u64 = bins.iter().map(|r| r["bytes"].as_u64().unwrap()).sum();
+    assert!(frames > 0);
+    assert_eq!(
+        frames as f64,
+        round["metrics"]["ipc_frames"].as_f64().unwrap()
+    );
+    assert_eq!(
+        bytes as f64,
+        round["metrics"]["ipc_bytes"].as_f64().unwrap()
+    );
+    assert!(body > 0);
+    assert_eq!(
+        body as f64,
+        round["metrics"]["store_bytes_written"].as_f64().unwrap()
+    );
+}

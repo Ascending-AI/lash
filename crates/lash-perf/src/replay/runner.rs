@@ -33,6 +33,7 @@ pub struct RunOptions {
     /// Separate Python-worker heap profiles beside the replay receipt.
     pub worker_profile_dir: std::path::PathBuf,
     pub sql_shapes: Option<std::path::PathBuf>,
+    pub traffic: bool,
     pub heap: super::ReplayHeapArgs,
 }
 
@@ -189,6 +190,11 @@ async fn retire(pages: Option<&dyn lash_durable::domain::pages::PageStore>) -> R
 
 /// Run `workload` once and return its receipt.
 pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadReceipt> {
+    let traffic = options
+        .traffic
+        .then(lash_sqlite_store::write_observer::Collector::install)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!(e))?;
     let (stores, probe, keep) = open_stores(&options.store, &workload.name).await?;
     let pages = stores.durable_store().pages();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
@@ -257,7 +263,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         });
     }
     let turns = lanes.first().map_or(0, |lane| lane.inputs.len());
-    let meter = Meter::install(probe, pool, options.sql_shapes.is_some())?;
+    let meter = Meter::install(probe, pool, options.sql_shapes.is_some(), traffic)?;
     let backend_name = meter.backend().to_owned();
     let mut rounds = Vec::with_capacity(turns);
     let mut compactions = Vec::new();
@@ -289,7 +295,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 },
             )?);
         }
-        let (before, shapes_before) = meter.read_with_shapes(model_calls).await;
+        let (before, shapes_before, traffic_before) = meter.read_with_shapes(model_calls).await;
         let started = Instant::now();
         let outcomes = tokio::time::timeout(
             ROUND_WATCHDOG,
@@ -319,7 +325,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             );
             model_calls += calls.scripted as u64;
         }
-        let (after, shapes_after) = meter.read_with_shapes(model_calls).await;
+        let (after, shapes_after, traffic_after) = meter.read_with_shapes(model_calls).await;
         if profile_end == Some(turn + 1)
             && let Some(window) = heap_window.take()
         {
@@ -350,6 +356,10 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             frame_depth,
             sessions: lanes.len(),
             setup: lanes[0].inputs[turn].0.setup,
+            traffic: traffic_after
+                .zip(traffic_before)
+                .map(|(after, before)| after.difference(&before, &metrics))
+                .transpose()?,
             metrics,
         });
         frame_depth += 1;
@@ -357,12 +367,13 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
             .compact_every
             .is_some_and(|every| (turn + 1) % every == 0 && turn + 1 < turns)
         {
-            let before = meter.read(model_calls).await;
+            let (before, _, traffic_before) = meter.read_with_shapes(model_calls).await;
             let started = Instant::now();
             for lane in &lanes {
                 compact(lane, turn + 1).await?;
             }
-            let mut metrics = difference(&before, &meter.read(model_calls).await);
+            let (after, _, traffic_after) = meter.read_with_shapes(model_calls).await;
+            let mut metrics = difference(&before, &after);
             metrics.insert(
                 "wall_ms".to_owned(),
                 started.elapsed().as_secs_f64() * 1_000.0,
@@ -373,6 +384,10 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
                 frame_depth,
                 sessions: lanes.len(),
                 setup: false,
+                traffic: traffic_after
+                    .zip(traffic_before)
+                    .map(|(after, before)| after.difference(&before, &metrics))
+                    .transpose()?,
                 metrics,
             });
             frame_depth = 0;

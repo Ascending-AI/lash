@@ -63,6 +63,8 @@ use worker::Connection as AsyncConnection;
 
 use crate::location::DatabaseTarget;
 
+use crate::observed_sql::open_connection;
+
 /// Outcome a write flow returns to decide commit vs rollback while still
 /// handing a value back to the caller. Used for paths that compute a result
 /// *and* may discover mid-transaction that the work must not be persisted
@@ -185,6 +187,12 @@ fn checkpoint_loop(state: Weak<CheckpointState>) {
 /// Return whether a blocked checkpoint should be retried even without a new
 /// commit. TRUNCATE is attempted only while the in-process write gate is idle.
 fn checkpoint_if_needed(state: &CheckpointState) -> rusqlite::Result<bool> {
+    crate::observed_sql::physical_scope("sqlite.background_checkpoint", || {
+        checkpoint_observed(state)
+    })
+}
+
+fn checkpoint_observed(state: &CheckpointState) -> rusqlite::Result<bool> {
     // Stop new in-process readers and let their current statements finish.
     // Writers also take this shared lock before the existing write gate, so
     // obtaining it exclusively makes the write gate idle without a lock cycle.
@@ -195,7 +203,7 @@ fn checkpoint_if_needed(state: &CheckpointState) -> rusqlite::Result<bool> {
     let Ok(_write_gate) = state.write_gate.try_lock() else {
         return Ok(true);
     };
-    let connection = Connection::open_with_flags(
+    let connection = open_connection(
         &state.path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
@@ -628,7 +636,9 @@ impl SqliteConnection {
         lash_core_execution::perf_witness::startup::record(
             lash_core_execution::perf_witness::startup::Phase::StoreOpenStarted,
         );
-        let inner = AsyncConnection::start(move || Connection::open(path)).await?;
+        let inner =
+            AsyncConnection::start(move || open_connection(path, rusqlite::OpenFlags::default()))
+                .await?;
         #[cfg(feature = "perf-witness")]
         lash_core_execution::perf_witness::startup::record(
             lash_core_execution::perf_witness::startup::Phase::StoreOpened,
@@ -718,7 +728,7 @@ impl SqliteConnection {
         let setup_gate = Arc::clone(&gate);
         let uri = target.read_only_uri();
         let inner = AsyncConnection::start(move || {
-            Connection::open_with_flags(
+            open_connection(
                 uri,
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
                     | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
@@ -853,7 +863,7 @@ impl SqliteConnection {
     ) -> rusqlite::Result<()> {
         let uri = target.uri();
         let connection = AsyncConnection::start(move || {
-            Connection::open_with_flags(
+            open_connection(
                 uri,
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
                     | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
@@ -895,22 +905,24 @@ impl SqliteConnection {
         #[cfg(feature = "perf-witness")]
         let reader = self.reader;
         let f = move |c: &mut Connection| {
-            #[cfg(feature = "perf-witness")]
-            let _busy = lash_core_execution::perf_witness::latency::Busy::enter(reader);
-            let observed = window.is_some() && !cfg!(feature = "perf-witness");
-            if observed {
-                crate::observed_sql::enable(c);
-            }
-            #[cfg(feature = "perf-witness")]
-            let writes = crate::observed_sql::WriteWitness::start(c);
-            let result =
-                lash_core_execution::facade_support::sql::Window::on_worker(window, || f(c));
-            #[cfg(feature = "perf-witness")]
-            writes.finish(c);
-            if observed {
-                c.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
-            }
-            result
+            crate::observed_sql::physical_scope(std::any::type_name::<F>(), || {
+                #[cfg(feature = "perf-witness")]
+                let _busy = lash_core_execution::perf_witness::latency::Busy::enter(reader);
+                let observed = window.is_some() && !cfg!(feature = "perf-witness");
+                if observed {
+                    crate::observed_sql::enable(c);
+                }
+                #[cfg(feature = "perf-witness")]
+                let writes = crate::observed_sql::WriteWitness::start(c);
+                let result =
+                    lash_core_execution::facade_support::sql::Window::on_worker(window, || f(c));
+                #[cfg(feature = "perf-witness")]
+                writes.finish(c);
+                if observed {
+                    c.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
+                }
+                result
+            })
         };
         #[cfg(feature = "testing")]
         if self.inline_calls {

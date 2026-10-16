@@ -30,7 +30,9 @@ pub use lash_vm_protocol::{
     page::{HeapFault, HostResource, PageRefusal},
 };
 pub use machine::{RemoteMachine, RemoteMachines, RunHost, RunStart, kernel_reads};
-pub use measurements::{ExecutionClass, ExecutionReceipt, PoolCounters, PoolMeasurements};
+pub use measurements::{
+    ExecutionClass, ExecutionReceipt, FrameTraffic, IpcTraffic, PoolCounters, PoolMeasurements,
+};
 /// Runtime-only checkout on [`WorkerPool`]; the lash facade does not export it.
 pub use pool::runtime_ops::WorkerPoolRuntimeOps;
 pub use pool::{Checkout, ExecutionBudget, PoolStats, RunStep, WorkerPool};

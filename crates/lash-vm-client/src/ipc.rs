@@ -106,13 +106,18 @@ impl Worker {
 
     pub fn send(&mut self, frame: &ParentFrame, timeout: Duration) -> Result<(), PoolError> {
         let bytes = self.codec.encode_parent(frame).map_err(PoolError::from)?;
-        self.send_encoded(&bytes, timeout)
+        self.send_encoded(
+            &bytes,
+            crate::measurements::IpcTraffic::parent_kind(&frame.message),
+            timeout,
+        )
     }
 
     /// Sends a frame this worker's codec has already encoded.
     pub(crate) fn send_encoded(
         &mut self,
         bytes: &[u8],
+        kind: usize,
         timeout: Duration,
     ) -> Result<(), PoolError> {
         let started = Instant::now();
@@ -128,6 +133,7 @@ impl Worker {
                 .max((bytes.len() + self.inbound.buffer_capacity()) as u64);
             measurements.counters.ipc_sent_messages += 1;
             measurements.counters.ipc_sent_bytes += bytes.len() as u64;
+            measurements.counters.ipc.sent(kind, bytes.len());
         }
         Ok(())
     }
@@ -153,28 +159,12 @@ impl Worker {
             }
             result => result.map_err(|error| error.with_silence(started.elapsed()))?,
         };
-        if let Some(measurements) = &self.measurements {
-            let mut measurements = measurements
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            measurements.counters.peak_buffer_bytes = measurements
-                .counters
-                .peak_buffer_bytes
-                .max((bytes.capacity() + self.inbound.buffer_capacity()) as u64);
-            measurements.counters.ipc_received_messages += 1;
-            measurements.counters.ipc_received_bytes += bytes.len() as u64;
-        }
-        let frame = self.codec.decode_worker(&bytes).map_err(PoolError::from)?;
-        if let Some(measurements) = &self.measurements {
-            let mut measurements = measurements
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            measurements.counters.peak_buffer_bytes = measurements
-                .counters
-                .peak_buffer_bytes
-                .max((bytes.capacity() + self.inbound.buffer_capacity()) as u64);
-        }
-        Ok(frame)
+        decode_measured(
+            &self.codec,
+            &bytes,
+            bytes.capacity() + self.inbound.buffer_capacity(),
+            self.measurements.as_ref(),
+        )
     }
 
     fn exit_evidence(&self) -> lash_vm_protocol::SupervisorEvidence {
@@ -546,4 +536,182 @@ pub fn write_frames(
     }
     first.extend_from_slice(second);
     write_frame(pipe, &first, Instant::now() + timeout)
+}
+
+// The existing decoder is also the receive counter producer. A refused frame
+// still belongs to the aggregate and to the explicit undecodable bin.
+fn decode_measured(
+    codec: &FrameCodec,
+    bytes: &[u8],
+    peak_buffers: usize,
+    measurements: Option<&crate::measurements::SharedMeasurements>,
+) -> Result<WorkerFrame, PoolError> {
+    let frame = codec.decode_worker(bytes).map_err(PoolError::from);
+    if let Some(measurements) = measurements {
+        let mut measurements = measurements
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        measurements
+            .counters
+            .ipc
+            .received(frame.as_ref().ok().map(|f| &f.message), bytes.len());
+        measurements.counters.peak_buffer_bytes = measurements
+            .counters
+            .peak_buffer_bytes
+            .max(peak_buffers as u64);
+        measurements.counters.ipc_received_messages += 1;
+        measurements.counters.ipc_received_bytes += bytes.len() as u64;
+    }
+    frame
+}
+
+#[cfg(test)]
+mod traffic_tests {
+    use super::*;
+    use crate::measurements::{IpcTraffic, Measurements};
+    use lash_vm_protocol::{
+        DecodeLimits, EncodedPayload, ExecutionLease, FrameEpoch, MessageFence, OwnerEpoch,
+        ParentMessage, WorkerMessage,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// TRAFFIC-CONSERVATION: socket bundling and frame splitting cannot change
+    /// per-kind bytes or frame counts; malformed whole frames remain explicit.
+    #[test]
+    fn traffic_conservation_bundled_and_split_frames() {
+        let codec = FrameCodec::new(DecodeLimits::standard());
+        let mut fence = MessageFence::new(ExecutionLease(1), OwnerEpoch(1), FrameEpoch(1));
+        let measurements = Arc::new(Mutex::new(Measurements::default()));
+        for capacity in [16 * 1024, FRAME_HEADER_BYTES] {
+            let (mut tx, mut rx) = UnixStream::pair().unwrap();
+            let messages = [
+                WorkerMessage::Started,
+                WorkerMessage::Delivered,
+                WorkerMessage::Printed {
+                    payload: EncodedPayload(vec![0; 32 * 1024]),
+                },
+            ];
+            let frames: Vec<_> = messages
+                .iter()
+                .map(|message| {
+                    codec
+                        .encode_worker(&WorkerFrame {
+                            header: fence.next_header(),
+                            message: message.clone(),
+                        })
+                        .unwrap()
+                })
+                .collect();
+            let bytes: Vec<_> = frames.iter().flatten().copied().collect();
+            let writer = std::thread::spawn(move || tx.write_all(&bytes).unwrap());
+            let mut source =
+                FrameSource::with_capacity(std::num::NonZeroUsize::new(capacity).unwrap());
+            let before = measurements.lock().unwrap().counters;
+            for expected in &messages {
+                let bytes = source
+                    .read_frame(&mut rx, &codec, Instant::now() + Duration::from_secs(10))
+                    .unwrap();
+                let frame = decode_measured(
+                    &codec,
+                    &bytes,
+                    bytes.capacity() + source.buffer_capacity(),
+                    Some(&measurements),
+                )
+                .unwrap();
+                assert_eq!(&frame.message, expected);
+            }
+            writer.join().unwrap();
+            let after = measurements.lock().unwrap().counters;
+            let traffic = after.ipc.difference(&before.ipc).unwrap();
+            assert_eq!(
+                traffic.totals().frames,
+                after.ipc_received_messages - before.ipc_received_messages
+            );
+            assert_eq!(
+                traffic.totals().bytes,
+                after.ipc_received_bytes - before.ipc_received_bytes
+            );
+            assert_eq!(traffic.received[4].frames, 1);
+            assert_eq!(traffic.received[11].frames, 1);
+            assert_eq!(traffic.received[7].bytes, frames[2].len() as u64);
+        }
+        let mut traffic = IpcTraffic::default();
+        for message in [ParentMessage::Cancel, ParentMessage::Reset] {
+            let bytes = codec
+                .encode_parent(&ParentFrame {
+                    header: fence.next_header(),
+                    message: message.clone(),
+                })
+                .unwrap();
+            traffic.sent(IpcTraffic::parent_kind(&message), bytes.len());
+        }
+        assert_eq!(traffic.totals().frames, 2);
+        assert_eq!(traffic.sent[7].frames, 1);
+        assert_eq!(traffic.sent[8].frames, 1);
+        // The borrowed Run producer bundles a delivery; the split producer
+        // sends Deliver and Run separately. Count the actual wire envelopes.
+        use lash_vm_protocol::{BorrowedParentFrame, BorrowedParentMessage, Delivery};
+        let deliveries = [Delivery {
+            wait: 1,
+            outcome: EncodedPayload(vec![7; 8]),
+        }];
+        let bundled = codec
+            .encode_borrowed(&BorrowedParentFrame {
+                header: fence.next_header(),
+                message: BorrowedParentMessage::Run {
+                    start: None,
+                    deliveries: &deliveries,
+                    slice: 10,
+                    cancel: false,
+                    sealed: &[],
+                },
+            })
+            .unwrap();
+        let mut bundled_traffic = IpcTraffic::default();
+        bundled_traffic.sent(IpcTraffic::RUN_KIND, bundled.len());
+        assert_eq!(bundled_traffic.totals().frames, 1);
+        assert_eq!(bundled_traffic.totals().bytes, bundled.len() as u64);
+        let mut split_traffic = IpcTraffic::default();
+        let mut split_bytes = 0;
+        for message in [
+            ParentMessage::Deliver {
+                wait: 1,
+                outcome: deliveries[0].outcome.clone(),
+            },
+            ParentMessage::Run {
+                start: None,
+                deliveries: vec![],
+                slice: 10,
+                cancel: false,
+                sealed: vec![],
+            },
+        ] {
+            let bytes = codec
+                .encode_parent(&ParentFrame {
+                    header: fence.next_header(),
+                    message: message.clone(),
+                })
+                .unwrap();
+            split_bytes += bytes.len() as u64;
+            split_traffic.sent(IpcTraffic::parent_kind(&message), bytes.len());
+        }
+        assert_eq!(split_traffic.totals().frames, 2);
+        assert_eq!(split_traffic.totals().bytes, split_bytes);
+        assert_eq!(split_traffic.sent[3].frames, 1);
+        assert_eq!(split_traffic.sent[IpcTraffic::RUN_KIND].frames, 1);
+        let before = measurements.lock().unwrap().counters;
+        let invalid = vec![0; FRAME_HEADER_BYTES];
+        assert!(decode_measured(&codec, &invalid, 0, Some(&measurements)).is_err());
+        let after = measurements.lock().unwrap().counters;
+        assert_eq!(
+            after.ipc_received_messages,
+            before.ipc_received_messages + 1
+        );
+        assert_eq!(
+            after.ipc_received_bytes,
+            before.ipc_received_bytes + invalid.len() as u64
+        );
+        assert!(after.ipc.difference(&before.ipc).is_none());
+        assert_eq!(after.ipc.totals().bytes, after.ipc_received_bytes);
+    }
 }

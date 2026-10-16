@@ -13,6 +13,7 @@ pub mod receipt;
 pub mod recorder;
 pub mod runner;
 pub mod script;
+pub mod traffic;
 mod workers;
 
 pub use workers::python_worker_entry;
@@ -60,6 +61,9 @@ pub struct ReplayArgs {
     /// SQLite shape × store-origin sidecar (one selected workload).
     #[arg(long)]
     pub sql_shapes: Option<PathBuf>,
+    /// Attribute physical SQLite writes and VM transport kinds in the receipt.
+    #[arg(long)]
+    pub traffic: bool,
     #[command(flatten)]
     pub heap: ReplayHeapArgs,
 }
@@ -102,6 +106,7 @@ async fn run_workloads(
     out: &std::path::Path,
     sql_shapes: Option<&std::path::Path>,
     heap: &ReplayHeapArgs,
+    traffic: bool,
 ) -> Result<ReplayReceipt> {
     let mut receipt = ReplayReceipt {
         format: RECEIPT_FORMAT.to_owned(),
@@ -115,6 +120,7 @@ async fn run_workloads(
             worker_profile_dir: out.with_extension("worker-heaps").join(&workload.name),
             sql_shapes: sql_shapes.map(std::path::Path::to_path_buf),
             heap: heap.clone(),
+            traffic,
         };
         eprintln!(
             "replay: {} ({} turns x {} session(s))",
@@ -161,8 +167,8 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         );
     }
     anyhow::ensure!(
-        args.sql_shapes.is_none() || args.store == StoreKind::Sqlite,
-        "--sql-shapes is SQLite only"
+        (args.sql_shapes.is_none() && !args.traffic) || args.store == StoreKind::Sqlite,
+        "--sql-shapes and --traffic are SQLite only"
     );
     if let Some(first) = args.heap.profile_turn {
         let end = args.heap.profile_through_turn.unwrap_or(first);
@@ -199,6 +205,7 @@ pub async fn run(args: &ReplayArgs) -> Result<()> {
         &args.out,
         args.sql_shapes.as_deref(),
         &args.heap,
+        args.traffic,
     )
     .await?;
     print!("{}", receipt::table(&receipt));
@@ -230,6 +237,7 @@ pub async fn run_gate(args: &GateArgs) -> Result<i32> {
         &args.out,
         None,
         &ReplayHeapArgs::default(),
+        false,
     )
     .await?;
     print!("{}", receipt::table(&receipt));

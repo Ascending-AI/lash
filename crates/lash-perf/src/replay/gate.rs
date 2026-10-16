@@ -516,6 +516,7 @@ mod tests {
                 frame_depth: depth,
                 sessions: 1,
                 setup: false,
+                traffic: None,
                 metrics: BTreeMap::from([(
                     "sql_bytes_written".to_owned(),
                     40_000.0 + bytes_per_prior_turn * depth as f64,

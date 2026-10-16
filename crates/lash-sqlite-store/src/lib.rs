@@ -52,6 +52,9 @@ use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 mod namespace;
 mod observed_sql;
+/// Opt-in physical-write attribution for performance replay.
+#[cfg(feature = "perf-witness")]
+pub mod write_observer;
 
 #[cfg(test)]
 mod rendered_statement_sets_tests;

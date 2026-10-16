@@ -1,5 +1,5 @@
 //! Host-owned pool measurements. Execution receipts are opt-in and bounded.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +15,8 @@ pub struct PoolCounters {
     pub ipc_sent_bytes: u64,
     pub ipc_received_messages: u64,
     pub ipc_received_bytes: u64,
+    /// Fixed message-kind bins; includes an explicit undecodable receive bin.
+    pub ipc: IpcTraffic,
     pub resets: u64,
     pub reuses: u64,
     /// Supervisor-observed EOF/exit, distinct from a guest error or limit.
@@ -98,6 +100,7 @@ pub(crate) fn units() -> BTreeMap<&'static str, &'static str> {
         ("ipc_sent_bytes", "bytes"),
         ("ipc_received_messages", "count"),
         ("ipc_received_bytes", "bytes"),
+        ("ipc", "encoded frames and bytes by message kind"),
         ("resets", "count"),
         ("reuses", "count"),
         ("crashes", "count"),
@@ -108,4 +111,129 @@ pub(crate) fn units() -> BTreeMap<&'static str, &'static str> {
         ("receipts_dropped", "count"),
     ]
     .into()
+}
+
+/// Exact encoded frame traffic, including the transport header.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrameTraffic {
+    pub frames: u64,
+    pub bytes: u64,
+}
+impl FrameTraffic {
+    fn record(&mut self, bytes: usize) {
+        self.frames += 1;
+        self.bytes += bytes as u64;
+    }
+}
+
+/// Bounded histograms in declaration order, independent of socket read/write
+/// boundaries. No decoding, strings or per-frame allocation for classification.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcTraffic {
+    pub sent: [FrameTraffic; 10],
+    pub received: [FrameTraffic; 17],
+}
+impl IpcTraffic {
+    pub(crate) const RUN_KIND: usize = 2;
+    pub const SENT_KINDS: [&'static str; 10] = [
+        "start",
+        "prepare",
+        "run",
+        "deliver",
+        "host_answer",
+        "pages",
+        "seal",
+        "cancel",
+        "reset",
+        "shutdown",
+    ];
+    pub const RECEIVED_KINDS: [&'static str; 17] = [
+        "refused",
+        "progress",
+        "limit_exceeded",
+        "ready",
+        "started",
+        "host_read",
+        "pages",
+        "printed",
+        "parked",
+        "slice",
+        "ended",
+        "delivered",
+        "sealed",
+        "cancelled",
+        "reset_done",
+        "prepared",
+        "undecodable",
+    ];
+    pub(crate) fn parent_kind(message: &lash_vm_protocol::ParentMessage) -> usize {
+        use lash_vm_protocol::ParentMessage as M;
+        match message {
+            M::Start(_) => 0,
+            M::Prepare { .. } => 1,
+            M::Run { .. } => Self::RUN_KIND,
+            M::Deliver { .. } => 3,
+            M::HostAnswer { .. } => 4,
+            M::Pages { .. } => 5,
+            M::Seal => 6,
+            M::Cancel => 7,
+            M::Reset => 8,
+            M::Shutdown => 9,
+        }
+    }
+    pub(crate) fn sent(&mut self, kind: usize, bytes: usize) {
+        self.sent[kind].record(bytes);
+    }
+    pub(crate) fn received(
+        &mut self,
+        message: Option<&lash_vm_protocol::WorkerMessage>,
+        bytes: usize,
+    ) {
+        use lash_vm_protocol::WorkerMessage as M;
+        let kind = match message {
+            Some(M::Refused { .. }) => 0,
+            Some(M::Progress { .. }) => 1,
+            Some(M::LimitExceeded { .. }) => 2,
+            Some(M::Ready { .. }) => 3,
+            Some(M::Started) => 4,
+            Some(M::HostRead { .. }) => 5,
+            Some(M::Pages { .. }) => 6,
+            Some(M::Printed { .. }) => 7,
+            Some(M::Parked { .. }) => 8,
+            Some(M::Slice { .. }) => 9,
+            Some(M::Ended { .. }) => 10,
+            Some(M::Delivered) => 11,
+            Some(M::Sealed { .. }) => 12,
+            Some(M::Cancelled) => 13,
+            Some(M::ResetDone { .. }) => 14,
+            Some(M::Prepared { .. }) => 15,
+            None => 16,
+        };
+        self.received[kind].record(bytes);
+    }
+    /// Refuse counter resets, missing frames, or a decode failure.
+    pub fn difference(&self, before: &Self) -> Option<Self> {
+        let mut result = Self::default();
+        for ((out, after), before) in result
+            .sent
+            .iter_mut()
+            .chain(&mut result.received)
+            .zip(self.sent.iter().chain(&self.received))
+            .zip(before.sent.iter().chain(&before.received))
+        {
+            out.frames = after.frames.checked_sub(before.frames)?;
+            out.bytes = after.bytes.checked_sub(before.bytes)?;
+        }
+        (result.received[16] == FrameTraffic::default()).then_some(result)
+    }
+    pub fn totals(&self) -> FrameTraffic {
+        self.sent
+            .iter()
+            .chain(&self.received)
+            .fold(FrameTraffic::default(), |mut sum, row| {
+                sum.frames += row.frames;
+                sum.bytes += row.bytes;
+                sum
+            })
+    }
 }

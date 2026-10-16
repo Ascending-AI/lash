@@ -97,6 +97,8 @@ pub struct RoundRecord {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub setup: bool,
     pub metrics: BTreeMap<String, f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traffic: Option<super::traffic::Report>,
 }
 
 /// One metric over a workload's rounds, per session turn.
@@ -286,6 +288,7 @@ mod tests {
                 frame_depth: depth % 50,
                 sessions: 2,
                 setup: depth == 0,
+                traffic: None,
                 metrics: BTreeMap::from([("store_bytes_written".to_owned(), 2.0 * value(depth))]),
             })
             .collect()

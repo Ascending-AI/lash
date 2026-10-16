@@ -89,6 +89,8 @@ pub(crate) struct Member {
     window: Option<Window>,
     body: Box<dyn Body>,
     #[cfg(feature = "perf-witness")]
+    origin: &'static str,
+    #[cfg(feature = "perf-witness")]
     timing: Option<lash_core_execution::perf_witness::queues::Timer>,
 }
 
@@ -102,6 +104,8 @@ impl Member {
     {
         Self {
             writer: Arc::clone(writer),
+            #[cfg(feature = "perf-witness")]
+            origin: std::any::type_name::<F>(),
             window: Window::current(),
             body: Box::new(Typed {
                 body: Some(f),
@@ -279,6 +283,14 @@ impl Settled {
 /// answer each member it settled. Returns, in order, the members it did not
 /// run, which lead the next batch.
 pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
+    #[cfg(feature = "perf-witness")]
+    let origin = if members.len() == 1 {
+        members[0].origin
+    } else {
+        "sqlite.shared_batch_commit"
+    };
+    #[cfg(not(feature = "perf-witness"))]
+    let origin = "";
     let writer = Arc::clone(&members[0].writer);
     #[cfg(feature = "perf-witness")]
     let busy = lash_core_execution::perf_witness::latency::Busy::enter(false);
@@ -297,21 +309,23 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
         crate::observed_sql::enable(c);
     }
     let settled = Window::on_worker(window, || {
-        let _read_gate = gate(&writer.read_gate, "sqlite.read_gate", |gate| {
-            gate.read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-        });
-        let _write_gate = gate(&writer.write_gate, "sqlite.write_gate", |gate| {
-            gate.lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-        });
-        // The witness counts each member's rows as it runs and the pages
-        // the batch wrote, so a batch counts what its members' plain
-        // transactions did (FIG-5968).
-        let mut writes = Writes::start(c);
-        let settled = transact(c, &writer, std::mem::take(&mut members), &mut writes);
-        writes.finish(c);
-        settled
+        crate::observed_sql::physical_scope(origin, || {
+            let _read_gate = gate(&writer.read_gate, "sqlite.read_gate", |gate| {
+                gate.read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            });
+            let _write_gate = gate(&writer.write_gate, "sqlite.write_gate", |gate| {
+                gate.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            });
+            // The witness counts each member's rows as it runs and the pages
+            // the batch wrote, so a batch counts what its members' plain
+            // transactions did (FIG-5968).
+            let mut writes = Writes::start(c);
+            let settled = transact(c, &writer, std::mem::take(&mut members), &mut writes);
+            writes.finish(c);
+            settled
+        })
     });
     if observed {
         c.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);

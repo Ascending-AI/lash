@@ -358,12 +358,42 @@ fn placeholders(sql: &str) -> impl Iterator<Item = std::ops::Range<usize>> + '_ 
 pub(crate) fn with_origin<T>(origin: &'static str, work: impl FnOnce() -> T) -> T {
     #[cfg(feature = "perf-witness")]
     {
-        lash_core_execution::perf_witness::sql_shapes::with_origin(origin, work)
+        lash_core_execution::perf_witness::sql_shapes::with_origin(origin, || {
+            crate::write_observer::scope(origin, work)
+        })
     }
     #[cfg(not(feature = "perf-witness"))]
     {
         let _ = origin;
         work()
+    }
+}
+
+/// The physical observer's boundary encloses COMMIT and aggregate accounting.
+#[inline]
+pub(crate) fn physical_scope<T>(origin: &'static str, work: impl FnOnce() -> T) -> T {
+    #[cfg(feature = "perf-witness")]
+    {
+        crate::write_observer::scope(origin, work)
+    }
+    #[cfg(not(feature = "perf-witness"))]
+    {
+        let _ = origin;
+        work()
+    }
+}
+
+pub(crate) fn open_connection(
+    path: impl AsRef<std::path::Path>,
+    flags: rusqlite::OpenFlags,
+) -> rusqlite::Result<rusqlite::Connection> {
+    #[cfg(feature = "perf-witness")]
+    {
+        crate::write_observer::open(path, flags)
+    }
+    #[cfg(not(feature = "perf-witness"))]
+    {
+        rusqlite::Connection::open_with_flags(path, flags)
     }
 }
 

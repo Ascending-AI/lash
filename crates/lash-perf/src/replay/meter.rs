@@ -219,6 +219,7 @@ pub struct Meter {
     witness: lash_core::perf_witness::Collector,
     probe: StoreProbe,
     workers: Option<lash::vm::WorkerPool>,
+    traffic: Option<lash_sqlite_store::write_observer::Collector>,
 }
 
 impl Meter {
@@ -227,6 +228,7 @@ impl Meter {
         probe: StoreProbe,
         workers: Option<lash::vm::WorkerPool>,
         sql_shapes: bool,
+        traffic: Option<lash_sqlite_store::write_observer::Collector>,
     ) -> Result<Self> {
         Ok(Self {
             witness: (if sql_shapes {
@@ -237,6 +239,7 @@ impl Meter {
             .map_err(|error| anyhow::anyhow!("{error}"))?,
             probe,
             workers,
+            traffic,
         })
     }
 
@@ -256,8 +259,13 @@ impl Meter {
     ) -> (
         Reading,
         Option<lash_core::perf_witness::sql_shapes::Receipt>,
+        Option<super::traffic::Reading>,
     ) {
         let mut shapes = None;
+        let mut traffic = self
+            .traffic
+            .as_ref()
+            .map(|_| super::traffic::Reading::default());
         let mut reading = Reading::new();
         let alloc = crate::GLOBAL_ALLOCATOR.stats();
         reading.insert(
@@ -276,7 +284,15 @@ impl Meter {
             page_size, store, ..
         } = &self.probe
         {
-            let work = self.witness.snapshot();
+            let work = if let Some(observer) = &self.traffic {
+                let (work, physical) = observer.cut(|| self.witness.snapshot());
+                if let Some(traffic) = &mut traffic {
+                    traffic.sqlite = Some(physical);
+                }
+                work
+            } else {
+                self.witness.snapshot()
+            };
             shapes = work.sql_shapes.clone();
             let verb = |name: &str| {
                 work.sql_statements_by_verb
@@ -305,6 +321,9 @@ impl Meter {
         }
         if let Some(pool) = &self.workers {
             let counters = pool.measurements().counters;
+            if let Some(traffic) = &mut traffic {
+                traffic.ipc = Some(counters.ipc);
+            }
             reading.insert(
                 "ipc_frames",
                 (counters.ipc_sent_messages + counters.ipc_received_messages) as f64,
@@ -320,6 +339,6 @@ impl Meter {
             reading.insert("workers_killed", super::workers::killed() as f64);
             reading.insert("worker_cpu_ms", pool.measured_cpu().as_secs_f64() * 1_000.0);
         }
-        (reading, shapes)
+        (reading, shapes, traffic)
     }
 }
