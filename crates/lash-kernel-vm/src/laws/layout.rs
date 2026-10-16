@@ -135,6 +135,9 @@ fn a_compiled_formula_charges_what_the_formula_states() {
     let near = u64::MAX - 1;
     let formulas = [
         Formula::Constant(7),
+        Formula::CeilLog2(Box::new(Formula::Sum(vec![input.clone(), result.clone()]))),
+        Formula::Product(vec![size("a"), Formula::CeilLog2(Box::new(deep("a")))]),
+        Formula::CeilLog2(Box::new(Formula::CeilLog2(Box::new(deep("a"))))),
         Formula::Sum(vec![]),
         Formula::Product(vec![]),
         Formula::Max(vec![]),

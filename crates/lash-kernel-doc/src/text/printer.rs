@@ -715,7 +715,8 @@ impl<'a> Printer<'a> {
     }
 
     fn formula(&mut self, formula: &Formula) {
-        let (name, terms) = match formula {
+        let (name, terms): (&str, &[Formula]) = match formula {
+            Formula::CeilLog2(term) => ("ceil_log2", std::slice::from_ref(term.as_ref())),
             Formula::Constant(amount) => {
                 self.out.push_str(&amount.to_string());
                 return;

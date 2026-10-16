@@ -693,3 +693,43 @@ fn map_admission_preserves_exact_charge_across_slices_and_argument_parks() {
         assert!(restored.2 >= 2, "both effect parks were imported");
     }
 }
+
+/// FIG-6528: Array.sort reaches the stable logarithmic kernel sort on a
+/// 1,000-record page, including ties and a seeded adversarial ordering.
+#[test]
+fn sort_comparisons_are_bounded_by_n_log_n() {
+    for rank in [
+        "1000 - i",
+        "(seed = (seed * 1664525 + 1013904223) % 4294967296) % 31",
+        "i",
+        "0",
+    ] {
+        let source = format!(
+            r#"
+            const xs = []; let seed = 6528;
+            for (let i = 0; i < 1000; i++) {{ xs.push({{key: {rank}, pos: i}}); }}
+            let calls = 0;
+            xs.sort((a, b) => {{ calls++; return a.key - b.key; }});
+            let valid = true;
+            for (let i = 1; i < 1000; i++) {{
+                if (xs[i-1].key > xs[i].key ||
+                    (xs[i-1].key === xs[i].key && xs[i-1].pos > xs[i].pos)) {{ valid = false; }}
+            }}
+            console.log(valid && xs.length === 1000 && calls <= 9966);
+            console.log(calls);
+        "#
+        );
+        let (mut machine, _) = start(&source);
+        let mut console = Console::default();
+        assert!(matches!(
+            machine.run(&mut console, u64::MAX).unwrap(),
+            Step::Ended(End::Finished(_))
+        ));
+        eprintln!(
+            "typescript rank={rank} n=1000 comparisons={} charge={}",
+            console.lines[1],
+            machine.meters().charged
+        );
+        assert_eq!(console.lines[0], "true");
+    }
+}

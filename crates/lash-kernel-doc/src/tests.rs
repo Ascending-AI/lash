@@ -837,3 +837,48 @@ fn registered_declarations_check_without_identifying_again() {
         assert_eq!(&**image, crate::graph_tokens::encode_body(&**definition));
     }
 }
+
+/// K-CHG-003, FIG-6528: integer ceil_log2 is exact at every power of two,
+/// including the unsigned limit, and survives text, JSON and graph encoding.
+#[test]
+fn logarithmic_charge_rounds_up_and_round_trips() {
+    let mut cases: Vec<(u64, u32)> = vec![(0, 0), (1, 0), (u64::MAX, 64)];
+    for bit in 1..64 {
+        let power = 1u64 << bit;
+        cases.extend([
+            (power - 1, if bit == 1 { 0 } else { bit }),
+            (power, bit),
+            (power + 1, bit + 1),
+        ]);
+    }
+    for (amount, expected) in cases {
+        let formula = Formula::CeilLog2(Box::new(Formula::Constant(amount)));
+        assert_eq!(
+            formula.evaluate(&mut |_, _| unreachable!()),
+            u64::from(expected),
+            "{amount}"
+        );
+        let mut function = definition("bounded", false);
+        function.charge = formula;
+        crate::validate_definition(&function, &BTreeMap::new()).unwrap();
+        assert_eq!(
+            parse_definition(&print_definition(&function)).unwrap(),
+            function
+        );
+        assert_eq!(
+            FunctionDefinition::from_json(&function.to_json().unwrap()).unwrap(),
+            function
+        );
+        let mut registry = FunctionRegistry::new();
+        let encoded = registry
+            .validate_functions(vec![function])
+            .unwrap()
+            .to_tokens();
+        assert_eq!(
+            ValidatedFunctions::from_tokens(&encoded)
+                .unwrap()
+                .to_tokens(),
+            encoded
+        );
+    }
+}

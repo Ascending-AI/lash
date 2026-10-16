@@ -1018,6 +1018,7 @@ impl TokenCodec for Formula {
         out.sum(self.codec_variant(), 1);
         match self {
             Self::Constant(amount) => out.unsigned(*amount),
+            Self::CeilLog2(term) => term.encode(out),
             Self::Size(operand)
             | Self::DeepSize(operand)
             | Self::NestedSize(operand)
@@ -1031,7 +1032,7 @@ impl TokenCodec for Formula {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.nested(|input| {
             Ok(
-                match variant(input, |variant| (variant <= 8).then_some(1))? {
+                match variant(input, |variant| (variant <= 9).then_some(1))? {
                     0 => Self::Constant(input.unsigned()?),
                     1 => Self::Size(Operand::decode(input)?),
                     2 => Self::DeepSize(Operand::decode(input)?),
@@ -1040,7 +1041,8 @@ impl TokenCodec for Formula {
                     5 => Self::Sum(Vec::decode(input)?),
                     6 => Self::Product(Vec::decode(input)?),
                     7 => Self::Max(Vec::decode(input)?),
-                    _ => Self::Min(Vec::decode(input)?),
+                    8 => Self::Min(Vec::decode(input)?),
+                    _ => Self::CeilLog2(Box::new(Self::decode(input)?)),
                 },
             )
         })

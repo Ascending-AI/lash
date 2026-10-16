@@ -1094,6 +1094,7 @@ fn mentions_function(ty: &Type) -> bool {
 fn check_formula(formula: &Formula, signature: &Signature, result: bool) -> Result<(), Invalid> {
     match formula {
         Formula::Constant(_) => Ok(()),
+        Formula::CeilLog2(term) => check_formula(term, signature, result),
         Formula::Size(operand)
         | Formula::DeepSize(operand)
         | Formula::NestedSize(operand)

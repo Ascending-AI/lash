@@ -122,6 +122,8 @@ pub enum Formula {
     Max(Vec<Formula>),
     /// The smallest of one or more amounts.
     Min(Vec<Formula>),
+    /// Ceiling of log2 of an amount; 0 for amounts 0 and 1.
+    CeilLog2(Box<Formula>),
 }
 
 /// What a [`Formula`] measures.
@@ -157,6 +159,7 @@ impl Formula {
             Self::Product(terms) => Self::Product(all(terms)),
             Self::Max(terms) => Self::Max(all(terms)),
             Self::Min(terms) => Self::Min(all(terms)),
+            Self::CeilLog2(term) => Self::CeilLog2(Box::new(term.shallow())),
             Self::Constant(_) | Self::Size(_) | Self::Magnitude(_) => self.clone(),
         }
     }
@@ -165,6 +168,9 @@ impl Formula {
     pub fn evaluate(&self, measure: &mut dyn FnMut(&Operand, Measure) -> u64) -> u64 {
         match self {
             Self::Constant(amount) => *amount,
+            Self::CeilLog2(term) => {
+                u64::from(u64::BITS - term.evaluate(measure).saturating_sub(1).leading_zeros())
+            }
             Self::Size(operand) => measure(operand, Measure::Size),
             Self::DeepSize(operand) => measure(operand, Measure::DeepSize),
             Self::NestedSize(operand) => measure(operand, Measure::NestedSize),

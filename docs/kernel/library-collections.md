@@ -61,6 +61,8 @@ the catalog exposes every body. The bodies are written in kernel text.
   the list's contents. A throwing comparator leaves the list untouched by sort;
   any mutations the callback itself made remain. A comparator that waits is
   an ordinary activation, retaining its operands and partially sorted snapshot.
+  Bottom-up merging compares an earlier run on the left with a later run on
+  the right, takes left on ties, and uses at most ceil(n log2 n) comparisons.
 - **K-COL-012.** Sum folds numeric addition from integer zero. Zip takes two
   lists and stops at the shorter length. Enumerate pairs each visited element
   with its zero-based integer position. Range takes integer start/end and an
@@ -75,10 +77,11 @@ the catalog exposes every body. The bodies are written in kernel text.
 - **K-COL-014.** Every definition carries its charge formula in its identity.
   Reads charge the index/key and lookup sizes; copies and traversal charge
   argument/result sizes; equality scans charge deep contents and each candidate
-  comparison; sort charges quadratic list size. Callback work and ordinary
+  comparison; sort declares `1 + 256 * size(xs) * (1 + ceil_log2(size(xs)))`,
+  bounding copying, merging and publication. Callback work and ordinary
   body forms are charged by the VM as well. Charges do not depend on caches.
 
-This completes the 1.0 baseline; it adds no saved or wire shape. Native functions
+This completes the collection definitions of the 1.0 baseline. Native functions
 read and allocate only. A callback-taking definition never has a native path.
 
 Two small strict utilities complete the building blocks used by these bodies

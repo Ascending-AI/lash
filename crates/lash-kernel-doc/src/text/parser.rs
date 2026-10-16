@@ -1234,6 +1234,7 @@ impl Parser {
                 "deep" => Formula::DeepSize(parser.operand()?),
                 "nested" => Formula::NestedSize(parser.operand()?),
                 "magnitude" => Formula::Magnitude(parser.operand()?),
+                "ceil_log2" => Formula::CeilLog2(Box::new(parser.formula()?)),
                 "sum" | "product" | "max" | "min" => {
                     let mut terms = Vec::new();
                     while parser.peek() != &Token::RParen {

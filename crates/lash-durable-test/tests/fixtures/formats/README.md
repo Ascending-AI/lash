@@ -292,3 +292,13 @@ fresh image bytes replaced the set's before the temporary set was dropped.
 Each fresh image recorded exactly the result the set names. The set keeps its
 id, programs, helper catalogue, version constants and every oracle member.
 Both pre-heap refusal witnesses keep their bytes.
+
+FIG-6528 replaces the shared kernel list.sort insertion sort with stable
+bottom-up merging and logarithmic charge declarations. The unsealed kernel
+and both dialect releases therefore have new manifests. On the tree rebased
+onto origin/main (`00806d3656`), the existing baseline recorders refreshed
+`lashvm` and `session`, and the corpus recorder refreshed all six images of
+set `4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1`, one selected image per
+invocation. Each fresh corpus image resumed to exactly its old recorded
+result before replacement. Programs, expected results, set metadata and
+versions are unchanged; both pre-heap refusal witnesses retain their bytes.

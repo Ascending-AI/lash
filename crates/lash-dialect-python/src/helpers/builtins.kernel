@@ -338,7 +338,7 @@ body {
 # `sorted(values, key=key, reverse=reverse)`: stable, by `<`.
 function py.sorted(values: Any, key?: Any, reverse?: Any) -> List(Any)
 kernel 1
-charge sum(8, product(size(values), size(values)))
+charge sum(8, product(256, size(values), sum(1, ceil_log2(size(values)))))
 body {
   let items = invoke py.to_list(values)
   let pairs = []

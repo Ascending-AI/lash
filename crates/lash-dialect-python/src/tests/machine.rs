@@ -1438,3 +1438,59 @@ fn python_awaits_add_no_turn() {
         assert_eq!(recorded.end, "ok");
     }
 }
+
+/// FIG-6528: sorted(key=...) uses at most ceil(n log2 n) comparisons;
+/// key evaluation is once per record, and reverse preserves equal-key order.
+#[test]
+fn sort_comparisons_are_bounded_by_n_log_n() {
+    for rank in ["1000 - i", "seed % 31", "i", "0"] {
+        for reverse in [false, true] {
+            let source = format!(
+                r#"
+xs = []
+seed = 6528
+for i in range(1000):
+    seed = (seed * 1664525 + 1013904223) % 4294967296
+    xs.append(({rank}, i))
+seen = []
+def key(item):
+    seen.append(1)
+    return item[0]
+out = sorted(xs, key=key, reverse={reverse})
+valid = len(out) == 1000 and len(seen) == 1000
+for i in range(1, 1000):
+    if out[i-1][0] == out[i][0]:
+        if out[i-1][1] > out[i][1]:
+            valid = False
+    elif {reverse}:
+        if out[i-1][0] < out[i][0]:
+            valid = False
+    elif out[i-1][0] > out[i][0]:
+        valid = False
+print(valid)
+"#,
+                reverse = if reverse { "True" } else { "False" }
+            );
+            let (mut machine, _) = start(&source, effects(), Session::default());
+            machine.count_work();
+            let mut console = Console::default();
+            assert!(matches!(
+                machine.run(&mut console, u64::MAX).unwrap(),
+                Step::Ended(End::Finished(_))
+            ));
+            let work = machine.work().unwrap();
+            let comparisons: u64 = work
+                .codes
+                .iter()
+                .filter(|code| code.symbol.name.starts_with("py.sorted/closure@"))
+                .map(|code| code.counts.calls)
+                .sum();
+            eprintln!(
+                "python rank={rank} reverse={reverse} n=1000 comparisons={comparisons} charge={}",
+                machine.meters().charged
+            );
+            assert!(comparisons > 0 && comparisons <= 9966);
+            assert_eq!(console.lines, ["True"]);
+        }
+    }
+}

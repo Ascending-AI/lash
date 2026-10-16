@@ -865,6 +865,19 @@
             "min"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Ceiling of log2 of an amount; 0 for amounts 0 and 1.",
+          "properties": {
+            "ceil_log2": {
+              "$ref": "#/$defs/Formula"
+            }
+          },
+          "required": [
+            "ceil_log2"
+          ],
+          "type": "object"
         }
       ]
     },

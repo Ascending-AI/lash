@@ -141,15 +141,30 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
         ),
         (
             "list.sort(xs: List(Any), compare: Fn(a: Any, b: Any) -> Number) -> List(Any)",
-            "do invoke collection.function_check(compare) let sorted = list.copy(xs) let n = list.len(sorted) let i = 1 \
-             while num.lt(i, n) { let value = sorted[i] let j = i \
-             while num.lt(0, j) { let k = num.sub(j, 1) let before = sorted[k] \
-             let order = apply compare(before, value) \
+            // Each pass merges adjacent runs into the other private buffer.
+            // The left run contains earlier input positions: ties take left,
+            // and callbacks always receive (left, right), even after a wait.
+            "do invoke collection.function_check(compare) let sorted = list.copy(xs) let out = [] \
+             let n = list.len(sorted) let width = 1 \
+             while num.lt(width, n) { let start = 0 \
+             while num.lt(start, n) { let mid = num.add(start, width) \
+             if num.lt(n, mid) { set mid = n } let end = num.add(mid, width) \
+             if num.lt(n, end) { set end = n } let left = start let right = mid let dest = start \
+             while num.lt(left, mid) { if num.lt(right, end) { } else { break } \
+             let before = sorted[left] let after = sorted[right] let order = apply compare(before, after) \
              if eq(order, order) { } else { do invoke collection.unordered(order) } \
-             if num.lt(0, order) { set sorted[j] = before set j = k } else { break } } \
-             set sorted[j] = value set i = num.add(i, 1) } \
+             if num.lt(0, order) { set out[dest] = after set right = num.add(right, 1) } \
+             else { set out[dest] = before set left = num.add(left, 1) } set dest = num.add(dest, 1) } \
+             while num.lt(left, mid) { set out[dest] = sorted[left] \
+             set left = num.add(left, 1) set dest = num.add(dest, 1) } \
+             while num.lt(right, end) { set out[dest] = sorted[right] \
+             set right = num.add(right, 1) set dest = num.add(dest, 1) } set start = end } \
+             let previous = sorted set sorted = out set out = previous set width = num.add(width, width) } \
              do invoke list.clear(xs) for value in sorted { set xs[list.len(xs)] = value } return xs",
-            "sum(1, product(size(xs), size(xs)))",
+            // size(xs) = n + 1. At most ceil(log2 n) merge passes, with
+            // fewer than 256 units of body work per element per pass; the
+            // extra pass covers copying, validation and final publication.
+            "sum(1, product(256, size(xs), sum(1, ceil_log2(size(xs)))))",
             "errors \"unordered\"",
         ),
         (

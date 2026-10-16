@@ -511,6 +511,100 @@ fn k_col_011_sort_is_stable_and_failure_never_publishes_partial_sort() {
         "type_error"
     );
 }
+/// FIG-6528: stable sorting must use at most ceil(n log2 n) callbacks,
+/// including adversarial orderings and ties. Counts and total VM charge are
+/// printed at the trace's page sizes so the complexity claim is measurable.
+#[test]
+fn sort_comparisons_are_bounded_by_n_log_n() {
+    let mut violations = Vec::new();
+    for n in [30usize, 150, 750, 1000] {
+        for shape in ["reversed", "seeded", "sorted", "equal"] {
+            let mut seed = 6528u32;
+            let ranks: Vec<usize> = (0..n)
+                .map(|i| match shape {
+                    "reversed" => n - i,
+                    "seeded" => {
+                        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                        seed as usize % 31
+                    }
+                    "sorted" => i,
+                    _ => 0,
+                })
+                .collect();
+            let input = ranks
+                .iter()
+                .enumerate()
+                .map(|(i, rank)| format!("({rank}, {i})"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let source = format!(
+                "main {{ let xs = [{input}] let calls = 0 \
+                 let compare = fn(a, b) {{ set calls = num.add(calls, 1) return num.sub(a[0], b[0]) }} \
+                 do invoke list.sort(xs, compare) return (xs, calls) }}"
+            );
+            let mut machine = crate::testsupport::start(
+                program(&source),
+                Bounds {
+                    charge: 1_000_000_000,
+                    ..BOUNDS
+                },
+                lash_kernel_vm::Layout::default(),
+            )
+            .unwrap();
+            let Step::Ended(End::Finished(done)) =
+                machine.run(&mut World::default(), u64::MAX).unwrap()
+            else {
+                panic!("sort did not finish: {shape} n={n}")
+            };
+            let Datum::Tuple(parts) = done.result else {
+                panic!("sort result")
+            };
+            let mut expected: Vec<_> = ranks.iter().copied().enumerate().collect();
+            expected.sort_by_key(|(_, rank)| *rank);
+            assert_eq!(
+                parts[0],
+                Datum::List(
+                    expected
+                        .into_iter()
+                        .map(|(i, rank)| tuple(vec![int(rank as i64), int(i as i64)]))
+                        .collect()
+                )
+            );
+            let Datum::Int(calls) = &parts[1] else {
+                panic!("callback count")
+            };
+            let calls: usize = calls.to_string().parse().unwrap();
+            let bound = (n as f64 * (n as f64).log2()).ceil() as usize;
+            eprintln!(
+                "sort shape={shape} n={n} comparisons={calls} bound={bound} charge={}",
+                machine.meters().charged
+            );
+            if calls > bound {
+                violations.push((shape, n, calls, bound));
+            }
+            // K-COL-014: the logarithmic declaration bounds this complete
+            // counted workload, including its constant-work comparator.
+            let registry = registry();
+            let (_, sort) = registry
+                .iter()
+                .find(|(_, f)| f.definition().name.as_str() == "list.sort")
+                .unwrap();
+            let declared = sort
+                .definition()
+                .charge
+                .evaluate(&mut |_, _| (n + 1) as u64);
+            assert!(
+                machine.meters().charged <= declared,
+                "charge exceeds declaration at n={n}"
+            );
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "quadratic comparisons: {violations:?}"
+    );
+}
+
 #[test]
 fn k_col_012_sum_zip_enumerate_and_range_have_kernel_bodies() {
     assert_eq!(
@@ -658,7 +752,7 @@ fn reduce_callback_wait_resumes_the_accumulator() {
 #[test]
 fn sort_callback_wait_resumes_the_snapshot_and_comparator_operands() {
     callback_law(
-        "fn f(a, b) { let x = num.sub(a, b) let y = perform echo(x) as Any return y } main { let xs = [3, 2, 1] do invoke list.sort(xs, &f) return xs }",
+        "fn f(a, b) { let x = num.sub(a, b) let y = perform echo(x) as Any return y } main { let xs = [3, 1, 2] do invoke list.sort(xs, &f) return xs }",
         list(&[1, 2, 3]),
         3,
     );

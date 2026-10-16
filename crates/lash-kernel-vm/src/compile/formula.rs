@@ -60,6 +60,7 @@ enum Op {
     Multiply,
     Max,
     Min,
+    CeilLog2,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -86,6 +87,7 @@ impl Plan {
         for op in &plan.ops {
             depth = match op {
                 Op::Constant(_) | Op::Measure(_) => depth + 1,
+                Op::CeilLog2 => depth,
                 Op::Add | Op::Multiply | Op::Max | Op::Min => depth - 1,
             };
             plan.depth = plan.depth.max(depth);
@@ -143,6 +145,10 @@ impl Plan {
     fn term(&mut self, formula: &doc::Formula, params: &[doc::Param], shallow: bool) {
         match formula {
             doc::Formula::Constant(amount) => self.ops.push(Op::Constant(*amount)),
+            doc::Formula::CeilLog2(term) => {
+                self.term(term, params, shallow);
+                self.ops.push(Op::CeilLog2);
+            }
             doc::Formula::Size(operand) => self.measure(operand, doc::Measure::Size, params),
             doc::Formula::DeepSize(operand) => self.measure(
                 operand,
@@ -298,6 +304,10 @@ impl Plan {
             let amount = match *op {
                 Op::Constant(amount) => amount,
                 Op::Measure(index) => measured[index],
+                Op::CeilLog2 => {
+                    top -= 1;
+                    u64::from(u64::BITS - stack[top].saturating_sub(1).leading_zeros())
+                }
                 Op::Add | Op::Multiply | Op::Max | Op::Min => {
                     top -= 1;
                     let (left, right) = (stack[top - 1], stack[top]);

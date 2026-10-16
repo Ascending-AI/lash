@@ -315,6 +315,7 @@ impl CodecVariant for Formula {
             Self::Product(..) => 6,
             Self::Max(..) => 7,
             Self::Min(..) => 8,
+            Self::CeilLog2(..) => 9,
         }
     }
 }
