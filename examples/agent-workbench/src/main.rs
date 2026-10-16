@@ -27,6 +27,7 @@ mod cron;
 mod deferred_tools;
 #[path = "../../shared/e2e_live_budget.rs"]
 mod e2e_live_budget;
+mod eval;
 mod execution_feeds;
 mod execution_graphs;
 mod execution_view;
@@ -200,6 +201,12 @@ fn main() -> AnyhowResult<()> {
             let command = args.next();
             if command.as_deref() == Some("mcp-fixture") {
                 return mcp_fixture::serve().await;
+            }
+            if command.as_deref() == Some("eval") {
+                return eval::cli(args.collect()).await;
+            }
+            if command.as_deref() == Some("eval-worker") {
+                return eval::worker_cli(args.collect()).await;
             }
             async_main().await
         })

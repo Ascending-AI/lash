@@ -637,3 +637,49 @@ session-scoped `ManageTools` policy. The sample allows all operators;
 deployments supply their own authorizer.
 
 The browser referee is [workbench-tool-membership](../../runbooks/workbench-tool-membership/runbook.md).
+
+## Operator rubric evals
+
+The unpublished evaluator runs a TOML dataset above the deterministic runtime
+checks. It is never a CI or merge gate. Edit `evals/recovery.toml` to declare
+exact driver and judge model identities, their tiers, the arm execution order,
+repeats, inputs, expectations and weighted 0–4 criteria. Skill drivers and the
+judge require a frontier floor; model tier declarations are operator attestations.
+The runner refuses invalid manifests before starting any workers. Python 3.11+
+provides TOML parsing; no additional Python packages are needed.
+
+After sourcing `env.sh`, run one bounded operator invocation with
+`OPENROUTER_API_KEY` set (and optionally `AGENT_WORKBENCH_PROVIDER_URL`):
+
+```sh
+(ulimit -v 8388608; /usr/bin/time -v kiln run //examples/agent-workbench:agent-workbench -- eval run examples/agent-workbench/evals/recovery.toml .kiln/rubric-run)
+```
+
+The output directory must be new. Every model × case × repeat gets an isolated
+SQLite store, frozen inputs, a transcript, typed trace slice, settled snapshot,
+hard-gate results, rubric scores and rationales, raw judge output and failures.
+`report.html` opens locally; `matrix.json` carries the complete machine-readable
+matrix and paired comparisons. Each case/repeat block executes arms in the
+declared order. No host-affecting tools or external workspace are available.
+The `kill_restart` case preserves a prior exchange, kills and reaps its worker
+at the final input's model-call opener, then reattaches that accepted input in a
+new process over the same store. The engine resumes it; the host sends no
+replacement turn.
+
+Persisted input/reply identities, settled turn count, trace coverage, absence of
+host tools, and an observed kill/restart are hard gates. Any failed gate or
+harness/judge failure wins over the weighted score. All planned matrix cells
+remain visible, including failures and incomplete coverage. Paired differences
+use only pairs with complete evidence and passing hard gates; reports give raw
+differences, eligible/planned counts and a conservative 95% bounded-score
+interval, conditional on independent repeats. Fixed-order and judge bias remain
+explicit uncertainty; small runs do not establish a ranking.
+
+To evaluate captured evidence again, use
+`eval judge MANIFEST.toml CASE_ID BUNDLE_DIR`. It consumes the same
+`evidence.json` (Lash messages, snapshot and typed records) and `recovery.json`
+(observed kill/reap) and writes `reevaluation.json`. It neither runs an agent
+nor modifies captured inputs. Missing evidence is a failed gate or an
+observability finding, never a reason to invent another runtime event stream.
+The scripted law proves assembly and recovery only; actual model quality is
+operator evidence.

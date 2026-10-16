@@ -1,0 +1,45 @@
+name = "continuation after host loss"
+repeats = 2
+timeout_seconds = 120
+score_min = 0
+score_max = 4
+# Order is execution order within each case/repeat block. Edit both arms and
+# the judge to the exact provider model identities you intend to compare.
+arm_order = ["baseline", "candidate"]
+
+[judge]
+id = "judge"
+model = "anthropic/claude-opus-4.6"
+floor = "frontier"
+
+[[models]]
+id = "baseline"
+model = "anthropic/claude-opus-4.6"
+floor = "frontier"
+
+[[models]]
+id = "candidate"
+model = "openai/gpt-5.4"
+floor = "frontier"
+
+[[cases]]
+id = "recover-plan"
+tier = "skill"
+driver_floor = "frontier"
+scenario = "kill_restart"
+inputs = [
+  "Plan a three-step archival workflow for an imaginary library. The accession code is ORCHID-731. Reply with a short plan and retain that code for our next exchange. Do not call tools.",
+  "Continue that plan as a short handover to the next librarian, including the accession code and the three steps. Do not call tools."
+]
+expectations = "The continuation preserves ORCHID-731, the original plan's three steps and their order. It reads as a coherent handover, without inventing completed actions or claiming knowledge of a host crash."
+pass_score = 3.0
+
+[[cases.rubric]]
+id = "continuity"
+weight = 3
+criterion = "0: loses prior context; 1: vague reference; 2: partial plan; 3: code and all three steps retained; 4: precise, natural continuation with no invented actions."
+
+[[cases.rubric]]
+id = "handover"
+weight = 1
+criterion = "0: unusable; 1: confusing; 2: usable with edits; 3: clear and concise; 4: immediately useful handover with accurate action status."
