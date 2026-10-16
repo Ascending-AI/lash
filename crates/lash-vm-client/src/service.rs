@@ -141,9 +141,9 @@ pub enum Response {
         /// The document's JSON encoding.
         #[serde(with = "serde_bytes")]
         document: Vec<u8>,
-        /// Its annotations' JSON encoding.
-        #[serde(with = "serde_bytes")]
-        annotations: Vec<u8>,
+        /// Where each statement of the document came from in the source,
+        /// checked against both by the dialect that lowered it.
+        source_map: Option<lash_kernel_doc::SourceMap>,
         /// What the source wrote of each function the document makes, by
         /// the site of its closure ([`lash_kernel_dialect::Lowered::written`]).
         #[serde(with = "lash_kernel_dialect::written_table")]

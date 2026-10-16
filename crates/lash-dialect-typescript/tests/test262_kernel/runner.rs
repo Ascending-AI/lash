@@ -1012,7 +1012,7 @@ fn async_tests_are_judged_by_done_completion() {
     ] {
         let document = lash_kernel_doc::parse_document(&format!("kernel 1\nnumbers by_spelling\nmain {{ {prints} let __test262Completed = true return null }}")).unwrap();
         let lowered = Lowered {
-            annotations: lash_kernel_doc::Annotations::new(document.identity().unwrap()),
+            source_map: None,
             written: Default::default(),
             document,
         };

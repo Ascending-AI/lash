@@ -522,8 +522,9 @@ fn envelope_refusals() -> Vec<(&'static str, EncodedNode, GraphRefusal)> {
         overlong.clone(),
         with_node(&overlong, CanonicalFault::NonMinimalVarint),
     ));
-    // A pre-heap image's whole-state roots are refused by kind, naming
-    // their format, before any body is read (FIG-6193).
+    // A retired kind is refused by kind, naming its format, before any
+    // body is read: the annotation layer (FIG-6376) and a pre-heap image's
+    // whole-state roots (FIG-6193).
     for &(kind, format) in NodeKind::RETIRED {
         let retired = raw(kind.0, &[], &[0x00]);
         cases.push((

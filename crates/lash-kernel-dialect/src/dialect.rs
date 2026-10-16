@@ -2,9 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    Annotations, Document, EffectName, FunctionDefinition, Name, Signature, Site,
-};
+use lash_kernel_doc::{Document, EffectName, FunctionDefinition, Name, Signature, Site, SourceMap};
 
 use crate::diagnostic::Diagnostic;
 use crate::library::Library;
@@ -78,9 +76,11 @@ pub enum EffectControl {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Lowered {
     pub document: Document,
-    /// Where each statement came from in the source. It never changes
-    /// behaviour or the document's identity (`K-ID-001`).
-    pub annotations: Annotations,
+    /// Where each statement and action of the document's own code came from
+    /// in the source, checked against both. It never changes behaviour or
+    /// the document's identity (`K-ID-001`), and nothing a run or a save
+    /// needs is in it.
+    pub source_map: Option<SourceMap>,
     /// What the source wrote of each function the cell's code makes, by
     /// the site of its closure.
     pub written: BTreeMap<Site, crate::Written>,
@@ -112,7 +112,7 @@ pub trait Printer {
 
 /// A dialect, as an embedder installs it.
 pub struct Package {
-    /// The name annotations record a document's dialect under.
+    /// The dialect's name, as a session and a cell envelope record it.
     pub dialect: String,
     pub front_end: Box<dyn FrontEnd>,
     /// Read exported source back against `base`, the document it was printed

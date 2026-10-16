@@ -426,14 +426,14 @@ async fn link_cell(
             reads: candidates.keys().cloned().collect(),
         })
         .await;
-    let (document, annotations, written, function_values, reached) = match lowered {
+    let (document, source_map, written, function_values, reached) = match lowered {
         Ok(Response::Lowered {
             document,
-            annotations,
+            source_map,
             written,
             function_values,
             reads,
-        }) => (document, annotations, written, function_values, reads),
+        }) => (document, source_map, written, function_values, reads),
         Ok(Response::DialectRefused(mut refusal)) => {
             let feedback =
                 crate::feedback::contribute_repairs(&mut refusal, code, &grant_calls, ctx);
@@ -476,7 +476,7 @@ async fn link_cell(
         code: CellEnvelope::code_digest(code),
         dialect: state.dialect().to_owned(),
         document: text(document, "document")?,
-        annotations: text(annotations, "annotations")?,
+        source_map,
         written,
         function_values,
         effects: CellEnvelope::record_effects(&boundary),
@@ -491,6 +491,13 @@ async fn link_cell(
     let document = envelope
         .document()
         .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
+    if let Some(map) = &envelope.source_map {
+        map.validate(&document, code).map_err(|error| {
+            host_failure(format!(
+                "the worker's source map is not the cell's: {error}"
+            ))
+        })?;
+    }
 
     // `main` starts with the session's bindings and, over them, the host's
     // read-only ones.
@@ -735,8 +742,9 @@ async fn run_linked_cell(
     // The run names the dialect its cell's envelope recorded: a worker
     // whose embedding lacks it refuses the cell (FIG-5990).
     let dialect = envelope.dialect.clone();
-    let annotations =
-        serde_json::from_str::<lash_kernel_doc::Annotations>(&envelope.annotations).ok();
+    // The map the cell was lowered with, stored in its envelope: a resumed
+    // cell's failure locates its tasks by it, never by lowering again.
+    let source_map = envelope.source_map.clone();
     let document_identity = document.identity();
     let segment = match snapshots.root().await {
         Ok(root) => root.map_or_else(|| "start".to_owned(), |root| root.root.to_string()),
@@ -1099,12 +1107,16 @@ async fn run_linked_cell(
             ),
             End::Error(error) => {
                 let observation = CellObservation::of_run_error(error, &state.not_carried());
-                respond(lash_core::CellOutcome::Failed(observation.failure(
-                    code,
-                    annotations.as_ref(),
-                    services.channel,
-                    services.prompts.as_ref(),
-                )))
+                respond(lash_core::CellOutcome::Failed(
+                    observation.failure(
+                        code,
+                        source_map
+                            .as_ref()
+                            .filter(|map| map.validate(&host.entries.document, code).is_ok()),
+                        services.channel,
+                        services.prompts.as_ref(),
+                    ),
+                ))
             }
             End::Cancelled => failed(
                 lash_core::CellFailureKind::Host,

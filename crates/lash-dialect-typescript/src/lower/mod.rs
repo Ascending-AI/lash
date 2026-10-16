@@ -24,7 +24,6 @@ use crate::builtins::{self, Table};
 use crate::types::{Facts, PlainRecord, Ty};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
-mod annotate;
 mod async_fn;
 mod calls;
 mod expressions;
@@ -210,19 +209,7 @@ struct Positional {
     arity: usize,
 }
 
-/// Where a statement came from, kept beside the statement until the
-/// document is whole and its sites can be counted.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Note {
-    pub(crate) span: Option<SourceSpan>,
-    /// What the function the statement binds is, as its source wrote it.
-    pub(crate) written: Option<lash_kernel_dialect::Written>,
-    /// Calling conventions of closures folded below this statement.
-    nested_written: Vec<(Vec<u32>, lash_kernel_dialect::Written)>,
-    /// The notes of the statement's blocks, in the order a walk of its
-    /// children meets them.
-    pub(crate) blocks: Vec<Vec<Note>>,
-}
+pub(crate) use lash_kernel_dialect::Note;
 
 /// A kernel block under construction.
 #[derive(Debug, Default)]
@@ -262,7 +249,8 @@ struct Scope {
     /// Where in its buffer the scope began: predeclarations go there.
     start: usize,
     kernel_depth: usize,
-    predeclare: Vec<(Name, Expr)>,
+    /// Each predeclaration, with the span of the reference that needed it.
+    predeclare: Vec<(Name, Expr, Option<SourceSpan>)>,
 }
 
 /// What `break` and `continue` leave.
@@ -322,6 +310,7 @@ pub(crate) struct Lowerer<'a> {
     paths: Vec<expressions::LoopPaths>,
     /// The functions the document declares: its processes.
     declared: BTreeMap<Name, lash_kernel_doc::Function>,
+    /// The notes of each declared function's body.
     declared_notes: BTreeMap<Name, Vec<Note>>,
     /// The declared functions a host may start, with their signatures.
     entries: BTreeMap<Name, Signature>,
@@ -500,11 +489,17 @@ fn lower_program(
             environment.library,
         );
     }
-    let (annotations, written) =
-        annotate::annotations(&document, &main.notes, &lowerer.declared_notes, source)?;
+    let (source_map, written) = lash_kernel_dialect::site_layers(
+        &document,
+        source,
+        lash_kernel_doc::SourceLanguage::TypeScript,
+        &main.notes,
+        &lowerer.declared_notes,
+    )
+    .map_err(|refused| Diagnostic::new(DiagnosticCode::InvalidAst, refused.to_string(), None))?;
     Ok(Lowered {
         document,
-        annotations,
+        source_map: Some(source_map),
         written,
     })
 }
@@ -578,7 +573,7 @@ impl Lowerer<'_> {
             unreachable!("a scope is open");
         };
         debug_assert_eq!(scope.kernel_depth, self.kernel_depth);
-        for (offset, (name, value)) in scope.predeclare.into_iter().enumerate() {
+        for (offset, (name, value, span)) in scope.predeclare.into_iter().enumerate() {
             if !session_scope {
                 self.note_private(&name);
             }
@@ -589,7 +584,13 @@ impl Lowerer<'_> {
                     value: Rhs::Expr(value),
                 },
             );
-            self.buf.notes.insert(scope.start + offset, Note::default());
+            self.buf.notes.insert(
+                scope.start + offset,
+                Note {
+                    span,
+                    ..Note::default()
+                },
+            );
         }
     }
 
@@ -699,7 +700,9 @@ impl Lowerer<'_> {
             // An earlier cell declared it; this cell assigns it.
             return;
         }
-        self.scopes[scope].predeclare.push((kernel, value));
+        self.scopes[scope]
+            .predeclare
+            .push((kernel, value, self.span));
     }
 
     /// The variable a source name reads, checked for use before its

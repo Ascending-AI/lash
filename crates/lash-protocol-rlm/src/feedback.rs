@@ -23,7 +23,7 @@
 use std::collections::BTreeMap;
 
 use lash_core::{CellDefect, CellFailure, CellFailureKind};
-use lash_kernel_doc::{Annotations, Datum, Name, Site, TaskIdentity};
+use lash_kernel_doc::{Datum, Name, Site, SourceMap, TaskIdentity};
 use lash_kernel_vm::{Bound, BoundExceeded, RunError};
 use lash_vm_client::service::DialectRefusal;
 
@@ -167,12 +167,12 @@ impl CellObservation {
 
     /// The cell's failure: its kind, its typed defect where a rule of the
     /// session's cells names one, and the message a model repairs from.
-    /// `annotations` are the document's, which place a task's spawn in the
-    /// source.
+    /// `map` is the document's source map, checked against `source`, which
+    /// places a task's spawn there.
     pub(crate) fn failure(
         &self,
         source: &str,
-        annotations: Option<&Annotations>,
+        map: Option<&SourceMap>,
         channel: crate::plugin::RlmChannel,
         prompts: &dyn DialectPrompts,
     ) -> CellFailure {
@@ -180,7 +180,7 @@ impl CellObservation {
         let place = |tasks: &[TaskIdentity]| -> String {
             tasks
                 .iter()
-                .map(|task| task_place(task, source, annotations))
+                .map(|task| task_place(task, source, map))
                 .collect::<Vec<_>>()
                 .join("; ")
         };
@@ -343,13 +343,13 @@ pub(crate) fn task_label(task: &TaskIdentity) -> String {
 }
 
 /// Which task, for the model: the source line of the async code it runs
-/// when the document's annotations place its spawn, else its typed label.
-fn task_place(task: &TaskIdentity, source: &str, annotations: Option<&Annotations>) -> String {
+/// when the document's source map places its spawn, else its typed label.
+fn task_place(task: &TaskIdentity, source: &str, map: Option<&SourceMap>) -> String {
     let TaskIdentity::Spawned(spawn) = task else {
         return "the program itself".to_owned();
     };
-    match annotations.and_then(|annotations| site_span(annotations, &spawn.site)) {
-        Some((start, _)) => {
+    match map.and_then(|map| site_start(map, &spawn.site)) {
+        Some(start) => {
             let (line, _) = line_column(source, start);
             let text = source.lines().nth(line - 1).unwrap_or_default().trim();
             format!("the async code at line {line} (`{text}`)")
@@ -358,20 +358,24 @@ fn task_place(task: &TaskIdentity, source: &str, annotations: Option<&Annotation
     }
 }
 
-/// The source span a front end recorded for the statement at `site`, or
-/// for the nearest statement that encloses it.
-fn site_span(annotations: &Annotations, site: &Site) -> Option<(usize, usize)> {
-    annotations
-        .nodes
+/// Where the source the map locates at `site`, or at the nearest located
+/// node that encloses it, starts.
+fn site_start(map: &SourceMap, site: &Site) -> Option<usize> {
+    map.sites
         .iter()
-        .filter(|node| node.site.unit == site.unit && site.path.starts_with(&node.site.path))
-        .max_by_key(|node| node.site.path.len())
-        .and_then(|node| node.data.get("span"))
-        .and_then(|span| {
-            let start = usize::try_from(span.get(0)?.as_u64()?).ok()?;
-            let end = usize::try_from(span.get(1)?.as_u64()?).ok()?;
-            Some((start, end))
+        .filter(|located| {
+            located.site.unit == site.unit && site.path.starts_with(&located.site.path)
         })
+        .filter_map(|located| {
+            let start = located
+                .ranges
+                .first()
+                .map(|range| range.start)
+                .or(located.implicit)?;
+            Some((located.site.path.len(), start))
+        })
+        .max_by_key(|(depth, _)| *depth)
+        .map(|(_, start)| start)
 }
 
 /// A value copied out of a run, as the text a failure message carries: an

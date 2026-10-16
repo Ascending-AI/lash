@@ -277,10 +277,12 @@ fn start(
     let names = session.names();
     let lowered = lower_with(source, &effects, &names).unwrap_or_else(|error| panic!("{error}"));
     let text = lash_kernel_doc::print_document(&lowered.document);
-    if let Err(invalid) =
-        lash_kernel_doc::validate_annotations(&lowered.annotations, &lowered.document)
-    {
-        panic!("{invalid}\n{text}");
+    let map = lowered
+        .source_map
+        .as_ref()
+        .expect("a lowered cell has its source map");
+    if let Err(refused) = map.validate(&lowered.document, source) {
+        panic!("{refused}\n{text}");
     }
     let mut environment = lash_kernel_check::Environment::new(library());
     environment.effects = effects;

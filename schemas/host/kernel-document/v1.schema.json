@@ -1541,7 +1541,7 @@
   "$id": "https://lash.dev/schemas/kernel-document/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "A workflow document: `main`, the declared functions, the entries a host\nmay start, the private bindings and the requirements manifest.\n\nA document holds behaviour only. Labels, layout, the dialect it was\nwritten in and its authored source are [`Annotations`], stored apart and\nkeyed to the document's [`DocumentId`].",
+  "description": "A workflow document: `main`, the declared functions, the entries a host\nmay start, the private bindings and the requirements manifest.\n\nA document holds behaviour only. Where its nodes came from in authored\nsource is an optional [`crate::SourceMap`], stored apart and keyed to the\ndocument's [`DocumentId`].",
   "properties": {
     "entries": {
       "additionalProperties": {

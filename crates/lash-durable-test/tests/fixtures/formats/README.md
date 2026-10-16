@@ -238,3 +238,14 @@ on a tree rebased onto `fc61ecc700cbb32b1eddc3f8e7b4425091cc178a`, plus this
 change. Their programs, every expected result, set metadata, helper catalogue
 and versions are unchanged. Both baseline images already have the column
 and retain their bytes. No runtime compatibility path or migration was added.
+
+FIG-6376 changed the cell envelope (kind 15) in place: its child for the open
+annotation layer (kind 11, now retired: a node of it is refused with
+`GraphRefusal::RetiredFormat` naming `Annotations`) became an optional checked
+source map (kind 42, `SourceMap`). Every image holding a kind-15 envelope
+(`session` and set `4b1b3a0d684e448108de3ac8f13d0a153ffe0ef1`'s
+`pending-tool-typescript`, `pending-tool-python` and `saved-declared-read`) is
+re-recorded in place with its recorder on a build rebased onto `origin/main`,
+keeping every oracle, set id, program, helper catalogue and version. The three
+kernel images, `lashvm` and the pre-heap refusal witnesses hold no envelope
+and keep their bytes.

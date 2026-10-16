@@ -18,6 +18,7 @@ use crate::testing::{DurableHost, cell_context, cell_services, python_workers, r
 
 mod repeat;
 mod saved_functions;
+mod source_map;
 mod tool_args;
 mod written;
 

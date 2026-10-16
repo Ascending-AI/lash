@@ -9,6 +9,7 @@ mod pages;
 mod refusals;
 mod replies;
 mod session;
+mod source_map;
 mod witness;
 
 mod generated_source;

@@ -69,6 +69,12 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "refusal": "NonCanonical { node: Some(NodeId(70020a5ce01495e071d67fbfbffe5746bd32792d66bb1cc68c0bb6b92327fa73)), reason: NonMinimalVarint }"
     },
     {
+      "envelope": "4c4153480b000100",
+      "expected": "b75d344a157cf5423b8f4d65740963ef976d355066ff51a02d3635dbd3fcf584",
+      "name": "Annotations",
+      "refusal": "RetiredFormat { node: Some(NodeId(b75d344a157cf5423b8f4d65740963ef976d355066ff51a02d3635dbd3fcf584)), kind: 11, format: \"Annotations\" }"
+    },
+    {
       "envelope": "4c41534810000100",
       "expected": "6a957eeee0673de568e3e8553d285f935afa0c659b5daa597259422f08a65ebb",
       "name": "KernelWhole",
@@ -318,13 +324,6 @@ pub const GRAMMAR_VECTORS: &str = r##"{
     },
     {
       "bound": 65536,
-      "kind": 11,
-      "name": "Annotations",
-      "owner": "Kernel",
-      "shape": "Enveloped"
-    },
-    {
-      "bound": 65536,
       "kind": 12,
       "name": "EffectTable",
       "owner": "Host",
@@ -509,6 +508,13 @@ pub const GRAMMAR_VECTORS: &str = r##"{
       "bound": 65536,
       "kind": 41,
       "name": "WrittenTable",
+      "owner": "Kernel",
+      "shape": "Enveloped"
+    },
+    {
+      "bound": 65536,
+      "kind": 42,
+      "name": "SourceMap",
       "owner": "Kernel",
       "shape": "Enveloped"
     },

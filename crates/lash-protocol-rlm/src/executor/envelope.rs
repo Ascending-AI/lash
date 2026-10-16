@@ -48,9 +48,11 @@ pub struct CellEnvelope {
     pub dialect: String,
     /// The kernel document the cell runs, as JSON.
     pub document: String,
-    /// The document's annotations, as JSON: where each statement came from
-    /// in the source.
-    pub annotations: String,
+    /// Where each statement of the document came from in the source, when
+    /// the dialect gave a map: what a failure locates its tasks by, at
+    /// whichever activation the cell ends. Nothing a run or a save needs is
+    /// in it.
+    pub source_map: Option<lash_kernel_doc::SourceMap>,
     /// What the source wrote of each function the document makes, by the
     /// site of its closure: what the cell saves a function it leaves with
     /// ([`lash_kernel_dialect::Lowered::written`]).
@@ -593,7 +595,7 @@ struct EnvelopeBody {
     dialect: String,
     document_id: lash_kernel_doc::DocumentId,
     document: NodeId,
-    annotations: NodeId,
+    source_map: Option<NodeId>,
     written: NodeId,
     function_values: Option<lash_kernel_dialect::FunctionValues>,
     effects: NodeId,
@@ -607,7 +609,7 @@ impl TokenCodec for EnvelopeBody {
         out.text(&self.dialect);
         self.document_id.encode(out);
         self.document.encode(out);
-        self.annotations.encode(out);
+        self.source_map.encode(out);
         self.written.encode(out);
         encode_opt_tree(self.function_values.as_ref(), out);
         self.effects.encode(out);
@@ -621,7 +623,7 @@ impl TokenCodec for EnvelopeBody {
             dialect: input.text()?.to_owned(),
             document_id: lash_kernel_doc::DocumentId::decode(input)?,
             document: NodeId::decode(input)?,
-            annotations: NodeId::decode(input)?,
+            source_map: Option::decode(input)?,
             written: NodeId::decode(input)?,
             function_values: decode_opt_tree(input)?,
             effects: NodeId::decode(input)?,
@@ -632,13 +634,13 @@ impl TokenCodec for EnvelopeBody {
 
 impl CellEnvelope {
     /// Stages the cell's envelope under the exact helper release `release`
-    /// (a ReleaseManifest), its document, annotations and written table as
+    /// (a ReleaseManifest), its document, source map and written table as
     /// typed nodes, and returns the envelope's node.
     ///
     /// # Errors
     ///
-    /// [`GraphRefusal::InvalidBody`] for a document or annotations that do
-    /// not decode, or any refusal of the staging area.
+    /// [`GraphRefusal::InvalidBody`] for a document that does not decode or
+    /// a map of another document, or any refusal of the staging area.
     pub fn stage(
         &self,
         staging: &mut GraphStaging,
@@ -647,17 +649,29 @@ impl CellEnvelope {
         let document = self
             .document()
             .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?;
-        let annotations = lash_kernel_doc::Annotations::from_json(&self.annotations)
-            .map_err(|error| graph_invalid(NodeKind::ANNOTATIONS, error))?;
         let document_id = document
             .identity()
             .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?;
+        if self
+            .source_map
+            .as_ref()
+            .is_some_and(|map| map.document != document_id)
+        {
+            return Err(graph_invalid(
+                NodeKind::SOURCE_MAP,
+                "the source map names another document",
+            ));
+        }
         let body = EnvelopeBody {
             code: self.code.clone(),
             dialect: self.dialect.clone(),
             document_id,
             document: staging.encode_value(NodeKind::DOCUMENT, &document)?,
-            annotations: staging.encode_value(NodeKind::ANNOTATIONS, &annotations)?,
+            source_map: self
+                .source_map
+                .as_ref()
+                .map(|map| staging.encode_value(NodeKind::SOURCE_MAP, map))
+                .transpose()?,
             written: staging.encode_value(NodeKind::WRITTEN_TABLE, &self.written)?,
             function_values: self.function_values.clone(),
             effects: staging.encode_value(
@@ -696,8 +710,19 @@ impl CellEnvelope {
                 "the document is not the one its identity names",
             ));
         }
-        let annotations: lash_kernel_doc::Annotations =
-            decoder.decode(body.annotations, NodeKind::ANNOTATIONS)?;
+        let source_map: Option<lash_kernel_doc::SourceMap> = body
+            .source_map
+            .map(|map| decoder.decode(map, NodeKind::SOURCE_MAP))
+            .transpose()?;
+        if source_map
+            .as_ref()
+            .is_some_and(|map| map.document != body.document_id)
+        {
+            return Err(graph_invalid(
+                NodeKind::SOURCE_MAP,
+                "the source map names another document",
+            ));
+        }
         let written: BTreeMap<Site, Written> =
             decoder.decode(body.written, NodeKind::WRITTEN_TABLE)?;
         let table: EffectTable = decoder.decode(body.effects, NodeKind::EFFECT_TABLE)?;
@@ -707,9 +732,7 @@ impl CellEnvelope {
             document: document
                 .to_json()
                 .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?,
-            annotations: annotations
-                .to_json()
-                .map_err(|error| graph_invalid(NodeKind::ANNOTATIONS, error))?,
+            source_map,
             written,
             function_values: body.function_values,
             effects: table.effects,

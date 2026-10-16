@@ -249,6 +249,6 @@ identity!(
 );
 identity!(
     /// A document's behavioural identity: the SHA-256 of its canonical form,
-    /// which holds no annotation (`K-ID-001`).
+    /// which holds no source map (`K-ID-001`).
     DocumentId
 );

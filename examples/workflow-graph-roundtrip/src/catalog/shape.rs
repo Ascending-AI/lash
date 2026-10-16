@@ -1,7 +1,7 @@
 //! SHAPE: measure the real workflow importer, without changing lowering.
 //! All document-owned units count, including entry adapters and closures;
 //! library helper bodies do not. Source ownership is exclusive: the smallest
-//! parser statement containing a lowering annotation owns that kernel statement.
+//! parser statement containing a statement's source-map range owns that kernel statement.
 //! Unspelled adapters remain visible in `overhead`, never silently discarded.
 mod source;
 
@@ -33,19 +33,16 @@ fn corpus(root: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn measure(path: String, text: String, lowered: Lowered, authors: Vec<Span>) -> Measurement {
-    lash_kernel_doc::validate_annotations(&lowered.annotations, &lowered.document)
-        .expect("importer notes name real document nodes");
-    let notes: BTreeMap<_, _> = lowered
-        .annotations
-        .nodes
+    let map = lowered
+        .source_map
+        .as_ref()
+        .expect("the importer maps its document's source");
+    map.validate(&lowered.document, &text)
+        .expect("the importer's map names real document nodes");
+    let notes: BTreeMap<_, _> = map
+        .sites
         .iter()
-        .map(|note| {
-            let span = note.data.get("span").map(|span| Span {
-                start: span[0].as_u64().expect("span start") as usize,
-                end: span[1].as_u64().expect("span end") as usize,
-            });
-            (note.site.clone(), span)
-        })
+        .map(|located| (located.site.clone(), located.ranges.first().copied()))
         .collect();
     let mut owned = vec![0; authors.len()];
     let mut counts = [0; 6];

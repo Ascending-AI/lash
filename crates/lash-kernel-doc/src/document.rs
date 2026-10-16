@@ -27,9 +27,9 @@ pub const MAX_NESTING_DEPTH: usize = 64;
 /// A workflow document: `main`, the declared functions, the entries a host
 /// may start, the private bindings and the requirements manifest.
 ///
-/// A document holds behaviour only. Labels, layout, the dialect it was
-/// written in and its authored source are [`Annotations`], stored apart and
-/// keyed to the document's [`DocumentId`].
+/// A document holds behaviour only. Where its nodes came from in authored
+/// source is an optional [`crate::SourceMap`], stored apart and keyed to the
+/// document's [`DocumentId`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
@@ -246,69 +246,10 @@ pub(crate) fn from_versioned_json_with_limits<T: DeserializeOwned>(
     from_json_with_limits(text, limits)
 }
 
-/// The annotation layer of one document: everything about it that is not
-/// behaviour.
-///
-/// Annotations are keyed to the document's identity and attached to nodes.
-/// They never change what runs, and dropping them loses nothing a run needs.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Annotations {
-    /// The document these annotate.
-    pub document: DocumentId,
-    /// The dialect the document was written in.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dialect: Option<String>,
-    /// The source text the document was lowered from.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    /// Per-node annotations, ordered by site, at most one per site.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub nodes: Vec<NodeAnnotation>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct NodeAnnotation {
-    pub site: Site,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<Label>,
-    /// Anything else a host or a dialect keeps on the node (layout, a source
-    /// span), under a key of its own choosing. The kernel reads none of it.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub data: BTreeMap<String, serde_json::Value>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Label {
     pub title: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-}
-
-impl Annotations {
-    /// An empty annotation layer for `document`.
-    pub fn new(document: DocumentId) -> Self {
-        Self {
-            document,
-            dialect: None,
-            source: None,
-            nodes: Vec::new(),
-        }
-    }
-
-    pub fn to_json(&self) -> Result<String, EncodeError> {
-        to_json(self)
-    }
-
-    pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        Self::from_json_with_limits(text, crate::KernelDataLimits::standard())
-    }
-    pub fn from_json_with_limits(
-        text: &str,
-        limits: crate::KernelDataLimits,
-    ) -> Result<Self, DecodeError> {
-        from_json_with_limits(text, limits)
-    }
 }

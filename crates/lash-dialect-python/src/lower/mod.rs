@@ -12,7 +12,6 @@
 //! Python scopes a name to the whole function and a closure may name it
 //! before its assignment runs.
 
-mod annotate;
 mod calls;
 mod expressions;
 mod format;
@@ -40,16 +39,7 @@ use crate::scope::{self, Bindings, Ty};
 
 pub(crate) type Lowering<T> = Result<T, Diagnostic>;
 
-/// Where a kernel statement came from, and the notes of the blocks under
-/// it in the order a walk of the statement meets them.
-#[derive(Clone, Debug)]
-pub(crate) struct Note {
-    span: Option<Span>,
-    blocks: Vec<Vec<Note>>,
-    written: Option<lash_kernel_dialect::Written>,
-    /// Calling conventions of closures folded below this statement.
-    nested_written: Vec<(Vec<u32>, lash_kernel_dialect::Written)>,
-}
+pub(crate) use lash_kernel_dialect::Note;
 
 /// Kernel statements with their notes.
 #[derive(Debug, Default)]
@@ -186,6 +176,8 @@ pub(crate) struct Lowerer<'a> {
     saved_used: BTreeSet<Name>,
     saved_startable: BTreeSet<Name>,
     declared: BTreeMap<Name, lash_kernel_doc::Function>,
+    /// The notes of each declared function's body.
+    declared_notes: BTreeMap<Name, Vec<Note>>,
     entries: BTreeMap<Name, Signature>,
 }
 
@@ -320,6 +312,7 @@ pub(crate) fn lower(
         saved_used: BTreeSet::new(),
         saved_startable,
         declared: BTreeMap::new(),
+        declared_notes: BTreeMap::new(),
         entries: BTreeMap::new(),
     };
     lowerer.declare_classes(&module.body)?;
@@ -386,10 +379,17 @@ pub(crate) fn lower(
             format!("the program lowers to a document the kernel refuses: {invalid}"),
         )
     })?;
-    let (annotations, written) = annotate::annotations(&document, &main.notes, source)?;
+    let (source_map, written) = lash_kernel_dialect::site_layers(
+        &document,
+        source,
+        lash_kernel_doc::SourceLanguage::Python,
+        &main.notes,
+        &lowerer.declared_notes,
+    )
+    .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
     Ok(Lowered {
         document,
-        annotations,
+        source_map: Some(source_map),
         written,
     })
 }

@@ -14,7 +14,7 @@ A supported, structurally valid Document prints, and reading the printed
 source against that Document gives identical `Document::canonical_bytes()` and
 the same `DocumentId`: entries, private names, every declaration (including
 unused ones) and main. There is no alpha-equivalence or normalization.
-Annotations and maps are outside the Document. Source is a generated language
+Source maps are outside the Document. Source is a generated language
 subset with kernel semantics; a stock language runtime is not promised to run it.
 
 ## Independent operations

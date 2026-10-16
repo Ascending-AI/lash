@@ -18,6 +18,7 @@ mod imperative;
 mod library;
 mod metadata;
 mod name_plan;
+mod notes;
 pub mod readability;
 mod saved;
 mod source;
@@ -35,6 +36,7 @@ pub use lash_kernel_state::{WaitId, paged};
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use metadata::{check_metadata_uniqueness, metadata_json};
 pub use name_plan::NamePlan;
+pub use notes::{Note, site_layers};
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
     FUNCTION_BUNDLE_NODE_KIND, InstalledFunction, Kept, Left, MemberBody, NotSaved, SavedFunction,

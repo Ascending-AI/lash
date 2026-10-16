@@ -179,6 +179,7 @@ impl Lowerer<'_> {
             None => {
                 let value = self.temp();
                 let ready = self.temp();
+                let span = self.span;
                 let paths = &mut self.paths[index];
                 for (name, literal) in [
                     (value.clone(), Literal::Absent),
@@ -188,7 +189,10 @@ impl Lowerer<'_> {
                         name,
                         value: Rhs::Expr(Expr::Literal(literal)),
                     });
-                    paths.declarations.notes.push(super::Note::default());
+                    paths.declarations.notes.push(super::Note {
+                        span,
+                        ..super::Note::default()
+                    });
                 }
                 (value, ready, Ty::Unknown)
             }

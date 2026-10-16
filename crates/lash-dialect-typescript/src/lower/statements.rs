@@ -28,14 +28,19 @@ fn truth() -> Expr {
     Expr::Literal(Literal::Bool(true))
 }
 
-fn one(stmt: Stmt) -> Buf {
-    Buf {
-        stmts: vec![stmt],
-        notes: vec![Note::default()],
-    }
-}
-
 impl Lowerer<'_> {
+    /// A block of the one statement `stmt`, scaffolding of the statement
+    /// being lowered: it is located there.
+    fn one(&self, stmt: Stmt) -> Buf {
+        Buf {
+            stmts: vec![stmt],
+            notes: vec![Note {
+                span: self.span,
+                ..Note::default()
+            }],
+        }
+    }
+
     /// Declares what a block's own statements declare lexically: `let`,
     /// `const`, functions and enums. The bindings exist for the whole
     /// block and are not live until their declarations run.
@@ -145,7 +150,7 @@ impl Lowerer<'_> {
         if condition == truth() {
             return;
         }
-        self.emit_if(condition, Buf::default(), one(Stmt::Break));
+        self.emit_if(condition, Buf::default(), self.one(Stmt::Break));
     }
 
     pub(super) fn lower_statement(&mut self, statement: &ast::Stmt) -> Lowering<()> {
@@ -411,7 +416,7 @@ impl Lowerer<'_> {
         first: &Operand,
         lower: impl FnOnce(&mut Self) -> Lowering<()>,
     ) -> Lowering<()> {
-        let lower_flag = one(Stmt::Assign {
+        let lower_flag = self.one(Stmt::Assign {
             place: Place::Variable(variable_of(first)),
             value: lash_kernel_doc::Rhs::Expr(Expr::Literal(Literal::Bool(false))),
         });
@@ -521,7 +526,7 @@ impl Lowerer<'_> {
     /// hole, which no JavaScript value is.
     pub(super) fn absent_if_hole(&mut self, element: &Name, raw: &Operand) -> Lowering<()> {
         let hole = self.same(raw.expr(), Expr::Tuple(Vec::new()))?;
-        let absent = one(Stmt::Assign {
+        let absent = self.one(Stmt::Assign {
             place: Place::Variable(element.clone()),
             value: lash_kernel_doc::Rhs::Expr(Expr::Literal(Literal::Absent)),
         });
@@ -730,14 +735,14 @@ impl Lowerer<'_> {
                 let test = this.lower_expr(test)?;
                 let equal =
                     this.invoke("ts.strict_equals", &[discriminant.clone(), test], Ty::Bool)?;
-                this.emit_if(equal.expr(), one(choose(index)), Buf::default());
+                this.emit_if(equal.expr(), this.one(choose(index)), Buf::default());
                 Ok(())
             })?;
             self.emit_if(undecided, attempt, Buf::default());
         }
         if let Some(default) = cases.iter().position(|case| case.test.is_none()) {
             let undecided = self.same(chosen.expr(), unchosen.expr())?;
-            self.emit_if(undecided, one(choose(default)), Buf::default());
+            self.emit_if(undecided, self.one(choose(default)), Buf::default());
         }
         let running = self.let_expr(Expr::Literal(Literal::Bool(false)), Ty::Bool);
         let running_name = variable_of(&running);
@@ -752,7 +757,7 @@ impl Lowerer<'_> {
                 let here = this.same(chosen.expr(), position(index))?;
                 this.emit_if(
                     here,
-                    one(Stmt::Assign {
+                    this.one(Stmt::Assign {
                         place: Place::Variable(running_name.clone()),
                         value: lash_kernel_doc::Rhs::Expr(truth()),
                     }),

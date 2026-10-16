@@ -99,22 +99,30 @@ fn the_manifest_lists_functions_reached_through_helpers() {
     }
 }
 
-/// A statement's source span is an annotation on the site of the statement
-/// that does the work. A former `@label` doc comment is ordinary trivia: it
-/// names nothing and is no node's label.
+/// A statement's source span is mapped at the site of the statement that
+/// does the work. A former `@label` doc comment is ordinary trivia: it
+/// locates nothing.
 #[test]
-fn spans_annotate_sites_and_label_comments_are_trivia() {
+fn spans_map_sites_and_label_comments_are_trivia() {
     let source = "/** @label Greet — say hello */\nconsole.log('hi');\nlet z = 1;";
     let lowered = lower(source).unwrap();
-    assert_eq!(lowered.annotations.dialect.as_deref(), Some("typescript"));
-    let nodes = &lowered.annotations.nodes;
-    assert!(nodes.iter().all(|node| node.label.is_none()));
-    let call = source.find("console").unwrap();
-    let logged = nodes.iter().find(|node| node.site.path == [1]).unwrap();
-    assert_eq!(logged.data["span"][0], call);
-    let last = nodes.last().unwrap();
+    let map = lowered.source_map.unwrap();
+    assert_eq!(map.language, lash_kernel_doc::SourceLanguage::TypeScript);
+    let start = |path: &[u32]| {
+        map.sites
+            .iter()
+            .find(|located| located.site.path == path)
+            .map(|located| located.ranges[0].start)
+    };
+    assert_eq!(start(&[1]), source.find("console"));
+    let last = map.sites.last().unwrap();
     assert_eq!(last.site.path, [2]);
-    assert_eq!(last.data["span"][0], source.find("let z").unwrap());
+    assert_eq!(start(&[2]), source.find("let z"));
+    assert!(
+        map.sites
+            .iter()
+            .all(|located| located.ranges[0].start >= source.find('\n').unwrap())
+    );
 }
 
 /// A member reference is read before its argument expressions run.

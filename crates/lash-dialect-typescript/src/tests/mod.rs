@@ -2,9 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
-use lash_kernel_doc::{
-    EffectName, Signature, parse_document, print_document, validate_annotations, validate_document,
-};
+use lash_kernel_doc::{EffectName, Signature, parse_document, print_document, validate_document};
 
 use crate::Diagnostic;
 
@@ -31,6 +29,7 @@ mod printer_corpus;
 mod process;
 mod readable_source;
 mod remaining_builtins;
+mod source_map;
 mod step_structure;
 mod trim;
 mod typed;
@@ -111,8 +110,12 @@ fn lower_against(
     if let Err(invalid) = validate_document(&lowered.document, library()) {
         panic!("{invalid}\n{}", print_document(&lowered.document));
     }
-    if let Err(invalid) = validate_annotations(&lowered.annotations, &lowered.document) {
-        panic!("{invalid}");
+    let map = lowered
+        .source_map
+        .as_ref()
+        .expect("a lowered cell has its source map");
+    if let Err(refused) = map.validate(&lowered.document, source) {
+        panic!("{refused}");
     }
     let text = print_document(&lowered.document);
     assert_eq!(

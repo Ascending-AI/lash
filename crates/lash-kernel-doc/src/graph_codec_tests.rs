@@ -5,8 +5,8 @@ use num_bigint::BigInt;
 
 use super::*;
 use crate::graph_tokens::{CanonicalFault, DecodeDimension, decode_body, encode_body};
+use crate::parse_document;
 use crate::tests::{catalog, every_form_corpus};
-use crate::{Annotations, Label, NodeAnnotation, parse_document};
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -137,25 +137,7 @@ fn documents_and_definitions_read_back_exactly() {
     for definition in catalog().0.values() {
         round_trip(definition);
     }
-    let mut data = std::collections::BTreeMap::new();
-    data.insert(
-        "span".to_owned(),
-        serde_json::json!({"z": [1, -2, 2.5, null, true, "s"], "a": {}}),
-    );
-    let annotations = Annotations {
-        document: DocumentId::from_bytes([7; 32]),
-        dialect: Some("typescript".into()),
-        source: Some("let x = 1".into()),
-        nodes: vec![NodeAnnotation {
-            site: Site::new(Unit::Main, vec![0, 1]),
-            label: Some(Label {
-                title: "t".into(),
-                description: None,
-            }),
-            data,
-        }],
-    };
-    round_trip(&annotations);
+    round_trip(&serde_json::json!({"z": [1, -2, 2.5, null, true, "s"], "a": {}}));
 }
 
 /// A sorted map or set read in another order, or with a repeated key, is

@@ -228,7 +228,7 @@ The kernel is a set of small crates that depend on nothing else in lash, so the 
 
 | Crate | Owns | Used by |
 | --- | --- | --- |
-| `lash-kernel-doc` | Values, types, forms, the document, function definitions and the native-function interface, the manifest, annotations, serialisation, structural validation, the kernel text notation | Everything; a host that only reads documents needs nothing else |
+| `lash-kernel-doc` | Values, types, forms, the document, function definitions and the native-function interface, the manifest, source maps and correspondences, serialisation, structural validation, the kernel text notation | Everything; a host that only reads documents needs nothing else |
 | `lash-kernel-check` | Linking, the statement rule, derived facts, admission against an environment's effect and function signatures | Editors, the engine |
 | `lash-kernel-edit` | Drafts, typed edit transactions, correspondence | Editors |
 | `lash-kernel-lib` | The kernel library: bodies and native implementations | The machine, any second reader |

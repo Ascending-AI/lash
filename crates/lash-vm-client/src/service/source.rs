@@ -70,19 +70,21 @@ impl Service {
         match response {
             Response::Lowered {
                 document,
-                annotations,
+                source_map,
                 written,
                 ..
             } => {
                 let document = std::str::from_utf8(&document)
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
-                let annotations = std::str::from_utf8(&annotations)
+                let document = Document::from_json(document)
                     .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                if let Some(map) = &source_map {
+                    map.validate(&document, source)
+                        .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?;
+                }
                 Ok(lash_kernel_dialect::Lowered {
-                    document: Document::from_json(document)
-                        .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?,
-                    annotations: lash_kernel_doc::Annotations::from_json(annotations)
-                        .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))?,
+                    document,
+                    source_map,
                     written,
                 })
             }

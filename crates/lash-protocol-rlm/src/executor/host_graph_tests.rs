@@ -236,7 +236,7 @@ fn a_hosts_control_cancel_and_limit_facts_survive_collection() {
     ));
 }
 
-/// A cell's envelope is staged once, as typed document, annotations and
+/// A cell's envelope is staged once, as typed document, source map and
 /// effect-table nodes under its exact release manifest: staging it again
 /// at a later park makes the same node, so no park copies it. A cell's end
 /// names its terminal, its adopted session state, its host root and its
@@ -248,17 +248,22 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
 
     let document =
         lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { return 1 }").unwrap();
-    let annotations = lash_kernel_doc::Annotations {
-        document: document.identity().unwrap(),
-        dialect: Some("typescript".into()),
-        source: Some("1".into()),
-        nodes: Vec::new(),
-    };
+    let source_map = lash_kernel_doc::SourceMap::new(
+        &document,
+        "1",
+        lash_kernel_doc::SourceLanguage::TypeScript,
+        vec![lash_kernel_doc::SourceSite {
+            site: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![0]),
+            ranges: vec![lash_kernel_doc::Span::new(0, 1).unwrap()],
+            implicit: None,
+        }],
+    )
+    .unwrap();
     let envelope = CellEnvelope {
         code: CellEnvelope::code_digest("1"),
         dialect: "typescript".to_owned(),
         document: document.to_json().unwrap(),
-        annotations: annotations.to_json().unwrap(),
+        source_map: Some(source_map),
         written: std::collections::BTreeMap::new(),
         function_values: None,
         effects: [(
@@ -319,7 +324,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     let (loaded, pinned) = CellEnvelope::load(&mut decoder, end.envelope).unwrap();
     assert_eq!(pinned, release);
     assert_eq!(loaded.document, envelope.document);
-    assert_eq!(loaded.annotations, envelope.annotations);
+    assert_eq!(loaded.source_map, envelope.source_map);
     assert_eq!(loaded.effects, envelope.effects);
     assert_eq!(loaded.unavailable_notes, envelope.unavailable_notes);
     assert_eq!(loaded.projected, envelope.projected);

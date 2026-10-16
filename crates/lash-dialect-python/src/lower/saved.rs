@@ -8,7 +8,7 @@ use lash_kernel_doc::{
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::Ranged;
 
-use super::{Lowerer, Lowering, Operand};
+use super::{Lowerer, Lowering, Note, Operand};
 use crate::scope::Ty;
 
 /// A later call needs the parameter names, default slots and coroutine
@@ -125,6 +125,25 @@ impl Lowerer<'_> {
         let entry = self.fresh(&format!("{name}_process"));
         let returned = self.temp();
         self.saved_used.insert(name.clone());
+        let body = vec![
+            Stmt::Let {
+                name: returned.clone(),
+                value: Rhs::Action(Action::Call {
+                    callee: Callee::Declared(declared),
+                    args: signature
+                        .params
+                        .iter()
+                        .map(|param| Atom::Variable(param.name.clone()))
+                        .collect(),
+                }),
+            },
+            Stmt::Return {
+                value: Expr::Variable(returned),
+            },
+        ];
+        // The entry is the reference's scaffolding: it is located there.
+        self.declared_notes
+            .insert(entry.clone(), Note::covering(&body, self.span));
         self.declared.insert(
             entry.clone(),
             Function {
@@ -133,22 +152,7 @@ impl Lowerer<'_> {
                     .iter()
                     .map(|param| param.name.clone())
                     .collect(),
-                body: vec![
-                    Stmt::Let {
-                        name: returned.clone(),
-                        value: Rhs::Action(Action::Call {
-                            callee: Callee::Declared(declared),
-                            args: signature
-                                .params
-                                .iter()
-                                .map(|param| Atom::Variable(param.name.clone()))
-                                .collect(),
-                        }),
-                    },
-                    Stmt::Return {
-                        value: Expr::Variable(returned),
-                    },
-                ],
+                body,
             },
         );
         self.entries.insert(entry.clone(), signature);

@@ -322,8 +322,8 @@ pub(crate) fn python_workers() -> lash_vm_client::service::Service {
 }
 
 /// A front end that lowers as the one it wraps does and keeps no map of
-/// where the statements came from: what it lowers has an empty annotation
-/// layer. Nothing a run or a save needs may be missing from such a cell.
+/// where the statements came from. Nothing a run or a save needs may be
+/// missing from such a cell.
 struct Unmapped(Box<dyn lash_kernel_dialect::FrontEnd>);
 
 impl lash_kernel_dialect::FrontEnd for Unmapped {
@@ -333,7 +333,7 @@ impl lash_kernel_dialect::FrontEnd for Unmapped {
         environment: &lash_kernel_dialect::Environment<'_>,
     ) -> Result<lash_kernel_dialect::Lowered, lash_kernel_dialect::Diagnostic> {
         let mut lowered = self.0.lower(source, environment)?;
-        lowered.annotations = lash_kernel_doc::Annotations::new(lowered.annotations.document);
+        lowered.source_map = None;
         Ok(lowered)
     }
 }

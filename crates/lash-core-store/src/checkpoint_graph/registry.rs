@@ -114,7 +114,6 @@ registry! {
     FROZEN_VALUE = 8, "FrozenValue", Enveloped, Node, Kernel;
     OPAQUE_LEAF = 9, "OpaqueLeaf", Enveloped, Node, Seams;
     DOCUMENT = 10, "Document", Enveloped, Node, Kernel;
-    ANNOTATIONS = 11, "Annotations", Enveloped, Node, Kernel;
     EFFECT_TABLE = 12, "EffectTable", Enveloped, Node, Host;
     RELEASE_MANIFEST = 13, "ReleaseManifest", Enveloped, Node, Kernel;
     HELPER_DEFINITION = 14, "HelperDefinition", Enveloped, Node, Kernel;
@@ -142,6 +141,7 @@ registry! {
     TURN_CONTENT = 39, "TurnContent", Enveloped, Node, Integrator;
     CALL_BODY = 40, "CallBody", Enveloped, Node, Host;
     WRITTEN_TABLE = 41, "WrittenTable", Enveloped, Node, Kernel;
+    SOURCE_MAP = 42, "SourceMap", Enveloped, Node, Kernel;
 }
 
 registry! {
@@ -162,11 +162,13 @@ impl NodeKind {
     /// A number in it past [`SEMANTIC_REGISTRY`] is a later format's.
     pub const SEMANTIC: RangeInclusive<u32> = 1000..=1999;
 
-    /// The whole-image kinds the persistent heap replaced (FIG-6193), with
-    /// the format each held. Their numbers are never reused, and a node of
-    /// one is refused, naming its format, before anything reads its body:
-    /// this build has no reader for a pre-heap image.
+    /// Retired kinds, with the format each held: the open annotation layer
+    /// the checked source map replaced (FIG-6376), and the whole-image kinds
+    /// the persistent heap replaced (FIG-6193). Their numbers are never
+    /// reused, and a node of one is refused, naming its format, before
+    /// anything reads its body: this build has no reader for either.
     pub const RETIRED: &[(Self, &str)] = &[
+        (Self(11), "Annotations"),
         (Self(16), "KernelWhole"),
         (Self(27), "TerminalWhole"),
         (Self(29), "SessionExecution"),

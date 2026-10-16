@@ -196,6 +196,9 @@ impl Lowerer<'_> {
             },
         ];
         self.saved_used.insert(name.clone());
+        // The entry is the reference's scaffolding: it is located there.
+        self.declared_notes
+            .insert(entry.clone(), super::Note::covering(&body, self.span));
         self.declared.insert(
             entry.clone(),
             lash_kernel_doc::Function {

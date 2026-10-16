@@ -2,8 +2,8 @@
 //!
 //! A document is stored once, as its canonical JSON, under its identity:
 //! the hash of its content, kernel version and manifest included
-//! (`K-DOC-003`). Annotations are not stored with it: they never change
-//! behaviour and are keyed to the identity by whoever keeps them.
+//! (`K-DOC-003`). A source map is not stored with it: it never changes
+//! behaviour and is keyed to the identity by whoever keeps it.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};

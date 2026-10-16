@@ -47,7 +47,7 @@ pub(crate) fn perform(
                 Some(Ok(lowered)) => Response::Lowered {
                     reads: reached(&lowered.document, library, reads),
                     document: encoded(lowered.document.to_json())?,
-                    annotations: encoded(lowered.annotations.to_json())?,
+                    source_map: lowered.source_map,
                     written: lowered.written,
                     function_values: embedding
                         .dialects
@@ -91,7 +91,7 @@ pub(crate) fn perform(
                     match lowered {
                         Ok(lowered) => Response::Lowered {
                             document: encoded(lowered.document.to_json())?,
-                            annotations: encoded(lowered.annotations.to_json())?,
+                            source_map: lowered.source_map,
                             written: lowered.written,
                             function_values: None,
                             reads: Default::default(),

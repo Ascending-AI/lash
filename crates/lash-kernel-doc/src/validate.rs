@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use crate::ast::{
     Action, Atom, Block, Callee, Closure, Expr, Literal, Member, Node, Place, Rhs, Site, Stmt, Unit,
 };
-use crate::document::{Annotations, Document};
+use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
 use crate::name::{EffectName, FunctionId, FunctionName, Name};
 use crate::native::FunctionCatalog;
@@ -158,15 +158,6 @@ pub enum InvalidReason {
     /// cannot wait.
     #[error("the body stands beside a native implementation, so it cannot `{}`", .form.keyword())]
     NativeBodyMayWait { form: StatementForm },
-    #[error("these annotate document {annotated}, not {document}")]
-    AnnotationsOfAnotherDocument {
-        annotated: crate::name::DocumentId,
-        document: crate::name::DocumentId,
-    },
-    #[error("an annotation is attached to no node")]
-    AnnotationOfNoNode,
-    #[error("annotations are not in site order, or two share a site")]
-    AnnotationsOutOfOrder,
     #[error("cannot take the document's identity: {message}")]
     Identity { message: String },
 }
@@ -362,42 +353,6 @@ pub(crate) fn validate_identified_definition(
     };
     scope.check_unit(&body.block, Site::new(Unit::Library(function), []))?;
     Ok(Some(function))
-}
-
-/// Validates an annotation layer against the document it claims to
-/// annotate.
-pub fn validate_annotations(annotations: &Annotations, document: &Document) -> Result<(), Invalid> {
-    let identity = document.identity().map_err(|error| {
-        invalid(
-            None,
-            InvalidReason::Identity {
-                message: error.message,
-            },
-        )
-    })?;
-    if annotations.document != identity {
-        return Err(invalid(
-            None,
-            InvalidReason::AnnotationsOfAnotherDocument {
-                annotated: annotations.document,
-                document: identity,
-            },
-        ));
-    }
-    for pair in annotations.nodes.windows(2) {
-        if pair[0].site >= pair[1].site {
-            return Err(invalid(
-                Some(&pair[1].site),
-                InvalidReason::AnnotationsOutOfOrder,
-            ));
-        }
-    }
-    for node in &annotations.nodes {
-        if document.node(&node.site).is_none() {
-            return Err(invalid(Some(&node.site), InvalidReason::AnnotationOfNoNode));
-        }
-    }
-    Ok(())
 }
 
 /// A call inside an expression that the statement rule refuses.

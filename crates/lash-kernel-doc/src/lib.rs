@@ -3,7 +3,7 @@
 //! The kernel is one small, dialect-free language with one meaning
 //! (`docs/kernel/semantics.md`). This crate is its vocabulary and nothing
 //! that runs: the values, the type grammar, the forms, the document with its
-//! manifest and annotation layer, library-function definitions with the
+//! manifest and optional source map, library-function definitions with the
 //! interface a native implementation satisfies, content-addressed
 //! identities, the JSON encoding, structural validation, the decoding of an
 //! inbound datum by a type, and the kernel text notation. A host that only
@@ -56,10 +56,7 @@ pub use ast::{
     Member, Node, Place, ProjectionRead, RecordEntry, Rhs, Site, Stmt, TryStmt, Unit,
 };
 pub use canonical::EncodeError;
-pub use document::{
-    Annotations, DecodeError, Document, KERNEL_VERSION, Label, MAX_NESTING_DEPTH, Manifest,
-    NodeAnnotation,
-};
+pub use document::{DecodeError, Document, KERNEL_VERSION, Label, MAX_NESTING_DEPTH, Manifest};
 pub use function::{
     FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition, Guard,
     Implementation, Measure, Operand,
@@ -90,7 +87,7 @@ pub use text::{
 pub use types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
 pub use validate::{
     Invalid, InvalidReason, StatementForm, StatementRuleViolation, check_statement,
-    validate_annotations, validate_definition, validate_definition_with_limits, validate_document,
+    validate_definition, validate_definition_with_limits, validate_document,
     validate_document_with_limits,
 };
 pub use value::{Bytes, Datum, ErrorDatum, Handle, InvalidBytes, TaskId, Timestamp, ValueKind};

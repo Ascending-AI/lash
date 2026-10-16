@@ -1,5 +1,5 @@
-//! The binary codecs of the kernel's types, forms, documents, annotations
-//! and library-function definitions (FIG-5887 §3): node kinds 10, 11 and 14.
+//! The binary codecs of the kernel's types, forms, documents and
+//! library-function definitions (FIG-5887 §3): node kinds 10 and 14.
 //! The rules are [`super`]'s.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -7,11 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{invalid, variant};
 use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
 use crate::{
-    Action, Annotations, Atom, Bytes, Callee, Catch, Closure, Document, DocumentId, Expr, Float,
-    Formula, Function, FunctionBody, FunctionDefinition, FunctionId, Guard, Implementation,
-    Integer, JoinMode, Label, Literal, Manifest, MapEntry, MapType, Member, Name, NodeAnnotation,
-    NumberPolicy, Operand, Param, Place, ProjectionRead, QualifiedName, RecordEntry, RecordType,
-    RecordTypeField, Rhs, Signature, Site, Stmt, TryStmt, Type,
+    Action, Atom, Bytes, Callee, Catch, Closure, Document, Expr, Float, Formula, Function,
+    FunctionBody, FunctionDefinition, FunctionId, Guard, Implementation, Integer, JoinMode,
+    Literal, Manifest, MapEntry, MapType, Member, Name, NumberPolicy, Operand, Param, Place,
+    ProjectionRead, QualifiedName, RecordEntry, RecordType, RecordTypeField, Rhs, Signature, Stmt,
+    TryStmt, Type,
 };
 
 // Types and signatures.
@@ -797,62 +797,7 @@ impl TokenCodec for Document {
     }
 }
 
-impl TokenCodec for Label {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        out.text(&self.title);
-        self.description.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            title: String::decode(input)?,
-            description: Option::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for NodeAnnotation {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
-        self.site.encode(out);
-        self.label.encode(out);
-        self.data.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
-        Ok(Self {
-            site: Site::decode(input)?,
-            label: Option::decode(input)?,
-            data: BTreeMap::decode(input)?,
-        })
-    }
-}
-
-/// Node kind 11's typed body: dialect and source text kept exactly.
-impl TokenCodec for Annotations {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
-        self.document.encode(out);
-        self.dialect.encode(out);
-        self.source.encode(out);
-        self.nodes.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
-        Ok(Self {
-            document: DocumentId::decode(input)?,
-            dialect: Option::decode(input)?,
-            source: Option::decode(input)?,
-            nodes: Vec::decode(input)?,
-        })
-    }
-}
-
-/// A JSON value a host keeps on an annotated node: a sum of null (0), bool
+/// A JSON value, as a host keeps it in a kernel body: a sum of null (0), bool
 /// (1), number (2), string (3), array (4) and object (5). A number is a sum
 /// of non-negative integer (0), negative integer (1) and finite float (2),
 /// each in exactly one spelling. An object's keys ascend by raw bytes.
