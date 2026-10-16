@@ -219,6 +219,17 @@ every continuation, including when a filtered page is empty. Pages examine
 at most 256 candidates plus one lookahead, without loading the whole roster.
 The continuation belongs to its issuing store and original filter.
 
+To transport a continuation, select a `lash::process::ProcessRosterTokenBudget`
+and call `cursor.to_token(budget)?`. Resume with
+`ProcessRosterCursor::from_token(&token, budget)?`. The default is 64 KiB of
+complete token text, including the version prefix and hex-encoded JSON.
+`ProcessRosterTokenBudget::new(bytes)` accepts nonzero budgets up to the
+16 MiB hard maximum (`MAX_BYTES`), bounding decoder allocation and parsing.
+Both operations return `ProcessRosterTokenError::TooLarge` when the token
+exceeds the selected budget; encoding refuses before issuing an unusable
+continuation. Keep the selected budget with the host's scan state and reuse
+it when reopening that scan; the codec reads no live configuration.
+
 The first page captures `change_cursor` before scanning, and every later
 page retains that fence. This is a convergent scan, rather than a snapshot
 across pages: concurrent inserts and updates can appear during enumeration.

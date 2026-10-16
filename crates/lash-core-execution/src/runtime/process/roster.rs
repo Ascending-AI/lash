@@ -7,10 +7,44 @@ use super::{
     ProcessStatusFilter, ScopeId,
 };
 
-// Bounds allocations and parsing before inspecting any untrusted token contents.
-const MAX_ROSTER_TOKEN_BYTES: usize = 64 * 1024;
+/// Host-selected maximum bytes in a roster transport token, including its version
+/// prefix and hex-encoded JSON. Use the same budget for encoding and decoding.
+/// This is transport admission policy, not a process execution setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessRosterTokenBudget {
+    max_bytes: usize,
+}
 
-/// Why an opaque roster token cannot be decoded. Start a fresh scan when its
+impl ProcessRosterTokenBudget {
+    /// The default admits at most 64 KiB of token text.
+    pub const DEFAULT: Self = Self {
+        max_bytes: 64 * 1024,
+    };
+
+    /// Hard maximum: 16 MiB of token text bounds decoder allocation and parsing.
+    pub const MAX_BYTES: usize = 16 * 1024 * 1024;
+
+    /// Selects a nonzero token budget up to [`Self::MAX_BYTES`].
+    pub const fn new(max_bytes: usize) -> Option<Self> {
+        if max_bytes == 0 || max_bytes > Self::MAX_BYTES {
+            None
+        } else {
+            Some(Self { max_bytes })
+        }
+    }
+
+    pub const fn max_bytes(self) -> usize {
+        self.max_bytes
+    }
+}
+
+impl Default for ProcessRosterTokenBudget {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Why an opaque roster token cannot be encoded or decoded. Start a fresh scan when its
 /// version is unsupported; tokens do not promise compatibility across all releases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -19,7 +53,7 @@ pub enum ProcessRosterTokenError {
     Malformed,
     #[error("the roster token version is unsupported; start a fresh scan")]
     UnsupportedVersion,
-    #[error("the roster token exceeds the 64 KiB decode limit")]
+    #[error("the roster token exceeds the selected token budget")]
     TooLarge,
 }
 
@@ -106,23 +140,34 @@ impl ProcessRosterCursor {
     /// Hosts must authorize reads themselves: the token is neither authorization
     /// nor a snapshot promise. Resume with the same filter through `Processes::list`,
     /// which validates the issuing store, selection and retained change fence.
-    /// Tokens over 64 KiB (including unusually large selector strings) cannot be decoded.
+    /// Refuses with [`ProcessRosterTokenError::TooLarge`] if the complete token
+    /// would exceed `budget`. A successful token decodes under that same budget.
     #[expect(
         clippy::expect_used,
         reason = "the private position codec contains only strings, integers, enums and struct fields, with no fallible serializer or JSON map keys"
     )]
-    pub fn to_token(&self) -> String {
+    pub fn to_token(
+        &self,
+        budget: ProcessRosterTokenBudget,
+    ) -> Result<String, ProcessRosterTokenError> {
         let bytes = serde_json::to_vec(&RosterTokenV1(self.clone()))
             .expect("roster positions contain only JSON-serializable values");
-        token_v1(&bytes)
+        let token_bytes = bytes.len().saturating_mul(2).saturating_add(2);
+        if token_bytes > budget.max_bytes() {
+            return Err(ProcessRosterTokenError::TooLarge);
+        }
+        Ok(token_v1(&bytes))
     }
 
-    /// Decodes at most 64 KiB of token text into position data. This does not
+    /// Decodes token text within the selected encoding budget. This does not
     /// validate the position against a store or authorize any read. Unsupported
     /// versions require a fresh scan.
-    pub fn from_token(token: &str) -> Result<Self, ProcessRosterTokenError> {
+    pub fn from_token(
+        token: &str,
+        budget: ProcessRosterTokenBudget,
+    ) -> Result<Self, ProcessRosterTokenError> {
         use ProcessRosterTokenError::{Malformed, TooLarge, UnsupportedVersion};
-        if token.len() > MAX_ROSTER_TOKEN_BYTES {
+        if token.len() > budget.max_bytes() {
             return Err(TooLarge);
         }
         let (version, encoded) = token.split_once('.').ok_or(Malformed)?;
@@ -243,10 +288,64 @@ impl ProcessRosterRecords {
 mod tests {
     use super::*;
 
+    /// FIG-6593: accepted large selectors either refuse encoding or resume at
+    /// exactly the same position under the host's selected token budget.
+    #[test]
+    fn issued_roster_tokens_resume_under_the_selected_budget() {
+        assert!(ProcessRosterTokenBudget::new(0).is_none());
+        assert!(ProcessRosterTokenBudget::new(ProcessRosterTokenBudget::MAX_BYTES).is_some());
+        assert!(ProcessRosterTokenBudget::new(ProcessRosterTokenBudget::MAX_BYTES + 1).is_none());
+        let default = ProcessRosterTokenBudget::default();
+        assert_eq!(default.max_bytes(), 64 * 1024);
+        let raised = ProcessRosterTokenBudget::new(512 * 1024).expect("host budget");
+        for label in ["x".repeat(32 * 1024), "\0".repeat(32 * 1024)] {
+            let filter = ProcessListFilter::decode(&serde_json::json!({
+                "identity_label": label,
+            }))
+            .expect("accepted selector");
+            let cursor = ProcessRosterCursor::new(
+                "store".into(),
+                filter,
+                crate::ProcessIdMint::sequential_id_for_testing(1),
+                crate::ProcessIdMint::sequential_id_for_testing(2),
+                ProcessChangeCursor::from_store_sequence(7),
+            );
+            assert_eq!(
+                cursor.to_token(default),
+                Err(ProcessRosterTokenError::TooLarge)
+            );
+            let token = cursor.to_token(raised).expect("larger host budget");
+            assert_eq!(
+                ProcessRosterCursor::from_token(&token, raised),
+                Ok(cursor.clone())
+            );
+            assert_eq!(
+                ProcessRosterCursor::from_token(&token, default),
+                Err(ProcessRosterTokenError::TooLarge)
+            );
+            let exact = ProcessRosterTokenBudget::new(token.len()).expect("exact budget");
+            assert_eq!(cursor.to_token(exact), Ok(token.clone()));
+            assert_eq!(
+                ProcessRosterCursor::from_token(&token, exact),
+                Ok(cursor.clone())
+            );
+            let short = ProcessRosterTokenBudget::new(token.len() - 1).expect("short budget");
+            assert_eq!(
+                cursor.to_token(short),
+                Err(ProcessRosterTokenError::TooLarge)
+            );
+            assert_eq!(
+                ProcessRosterCursor::from_token(&token, short),
+                Err(ProcessRosterTokenError::TooLarge)
+            );
+        }
+    }
+
     /// Token admission accepts a complete position and refuses malformed,
     /// unsupported or oversized input before it can be used for a read.
     #[test]
     fn roster_tokens_refuse_malformed_and_unsupported_versions() {
+        let budget = ProcessRosterTokenBudget::default();
         let cursor = ProcessRosterCursor::new(
             "store".into(),
             ProcessListFilter {
@@ -265,37 +364,38 @@ mod tests {
             crate::ProcessIdMint::sequential_id_for_testing(2),
             ProcessChangeCursor::from_store_sequence(7),
         );
-        let token = cursor.to_token();
-        assert_eq!(ProcessRosterCursor::from_token(&token), Ok(cursor));
+        let token = cursor.to_token(budget).expect("token within budget");
+        assert_eq!(ProcessRosterCursor::from_token(&token, budget), Ok(cursor));
         for token in ["", "1", "1.", "1.0", "1.gg", "v1.00", "1.7b7d"] {
             assert_eq!(
-                ProcessRosterCursor::from_token(token),
+                ProcessRosterCursor::from_token(token, budget),
                 Err(ProcessRosterTokenError::Malformed)
             );
         }
         let json = serde_json::to_vec(&RosterTokenV1(
-            ProcessRosterCursor::from_token(&token).expect("valid token"),
+            ProcessRosterCursor::from_token(&token, budget).expect("valid token"),
         ))
         .expect("position JSON");
         let mut position: serde_json::Value = serde_json::from_slice(&json).expect("position");
         position["filter"]["unknown"] = serde_json::json!(true);
         assert_eq!(
-            ProcessRosterCursor::from_token(&token_v1(
-                &serde_json::to_vec(&position).expect("JSON")
-            )),
+            ProcessRosterCursor::from_token(
+                &token_v1(&serde_json::to_vec(&position).expect("JSON")),
+                budget
+            ),
             Err(ProcessRosterTokenError::Malformed),
         );
         let deep = format!("{}0{}", "[".repeat(200), "]".repeat(200));
         assert_eq!(
-            ProcessRosterCursor::from_token(&token_v1(deep.as_bytes())),
+            ProcessRosterCursor::from_token(&token_v1(deep.as_bytes()), budget),
             Err(ProcessRosterTokenError::Malformed)
         );
         assert_eq!(
-            ProcessRosterCursor::from_token(&token.replacen("1.", "2.", 1)),
+            ProcessRosterCursor::from_token(&token.replacen("1.", "2.", 1), budget),
             Err(ProcessRosterTokenError::UnsupportedVersion)
         );
         assert_eq!(
-            ProcessRosterCursor::from_token(&"x".repeat(MAX_ROSTER_TOKEN_BYTES + 1)),
+            ProcessRosterCursor::from_token(&"x".repeat(budget.max_bytes() + 1), budget),
             Err(ProcessRosterTokenError::TooLarge)
         );
     }

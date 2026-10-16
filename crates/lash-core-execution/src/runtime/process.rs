@@ -137,7 +137,7 @@ pub use references::ProcessLiveReferenceView;
 mod roster;
 pub use roster::{
     MAX_PROCESS_ROSTER_PAGE_SIZE, ProcessChangeBounds, ProcessRosterCursor, ProcessRosterRecords,
-    ProcessRosterTokenError,
+    ProcessRosterTokenBudget, ProcessRosterTokenError,
 };
 
 #[cfg(any(test, feature = "testing"))]

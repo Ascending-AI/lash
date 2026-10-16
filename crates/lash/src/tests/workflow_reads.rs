@@ -167,7 +167,9 @@ async fn a_roster_and_changes_converge_and_restart_after_compaction() {
         ..lash_core::ProcessListFilter::default()
     };
     let transported = |cursor: lash_core::ProcessRosterCursor| {
-        lash_core::ProcessRosterCursor::from_token(&cursor.to_token())
+        let budget = crate::process::ProcessRosterTokenBudget::default();
+        let token = cursor.to_token(budget).expect("token within budget");
+        crate::process::ProcessRosterCursor::from_token(&token, budget)
             .expect("transported position")
     };
     let bound = std::num::NonZeroUsize::new(1).expect("bound");
