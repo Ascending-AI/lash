@@ -4,7 +4,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "lash": "//crates/lash:lash",
-            "lash_sim": "//crates/lash-sim:lash-sim",
+            "lash_provider_fixtures": "//crates/lash-provider-fixtures:lash-provider-fixtures",
             "tempfile": "//third-party/rust:p0372",
             "tokio": "//third-party/rust:p0381"
         },
@@ -769,6 +769,26 @@ PACKAGE_DEPS = {
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "reqwest": "//third-party/rust:p0281",
             "serde_json": "//third-party/rust:p0322"
+        }
+    },
+    "lash-internal-provider-fixtures": {
+        "build": {},
+        "dev": {
+            "lash_core": "//crates/lash-core:lash-core",
+            "tokio": "//third-party/rust:p0381"
+        },
+        "normal": {
+            "async_trait": "//third-party/rust:p0016",
+            "bytes": "//third-party/rust:p0040",
+            "lash_core": "//crates/lash-core:lash-core",
+            "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
+            "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",
+            "lash_provider_google": "//crates/lash-provider-google:lash-provider-google",
+            "lash_provider_openai": "//crates/lash-provider-openai:lash-provider-openai",
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322",
+            "tokio": "//third-party/rust:p0381"
         }
     },
     "lash-internal-provider-google": {
@@ -1558,6 +1578,7 @@ PACKAGE_DEPS = {
             "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_protocol_standard": "//crates/lash-protocol-standard:lash-protocol-standard",
             "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",
+            "lash_provider_fixtures": "//crates/lash-provider-fixtures:lash-provider-fixtures",
             "lash_provider_google": "//crates/lash-provider-google:lash-provider-google",
             "lash_provider_openai": "//crates/lash-provider-openai:lash-provider-openai",
             "lash_rlm_types": "//crates/lash-rlm-types:lash-rlm-types",

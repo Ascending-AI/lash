@@ -10,8 +10,8 @@ use lash::prompt::{PromptPlacement, PromptPlan, PromptSectionId, PromptSectionKe
 use lash_core::facade_support::TraceDetailPolicy;
 use serde_json::json;
 
-use crate::provider::ScriptedLlmHttpTransport;
-use crate::runtime_providers::{
+use lash_provider_fixtures::provider::ScriptedLlmHttpTransport;
+use lash_provider_fixtures::runtime_providers::{
     OPENAI_COMPATIBLE, runtime_provider_components, runtime_script_for_text,
 };
 

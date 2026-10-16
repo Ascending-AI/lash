@@ -23,7 +23,7 @@ use lash_sansio::llm::types::{
 use lash_sansio::{FailureCode, TurnFailureCode};
 use serde_json::{Value, json};
 
-use crate::provider::{
+use lash_provider_fixtures::provider::{
     HeaderMatcher, ProviderWireEvent, ProviderWireRequestMatch, ProviderWireScript,
     ScriptedLlmHttpTransport,
 };
@@ -111,25 +111,17 @@ impl Dialect {
 
     fn script(self) -> ProviderWireScript {
         let source = match self {
-            Self::Anthropic => {
-                include_str!("../provider-scripts/canonical/anthropic.messages-text-stream.json")
-            }
+            Self::Anthropic => lash_provider_fixtures::canonical_scripts::ANTHROPIC_MESSAGES_TEXT,
             Self::GoogleLegacy | Self::GoogleGemini3 | Self::GoogleClaudeOnVertex => {
-                include_str!(
-                    "../provider-scripts/canonical/google.stream-generate-content-text-stream.json"
-                )
+                lash_provider_fixtures::canonical_scripts::GOOGLE_STREAM_GENERATE_TEXT
             }
             Self::OpenAiChat | Self::OpenRouter | Self::CompatibleDefault => {
-                include_str!(
-                    "../provider-scripts/canonical/openai-compatible.chat-tool-call-split-stream.json"
-                )
+                lash_provider_fixtures::canonical_scripts::OPENAI_COMPAT_TOOL_CALL
             }
             Self::OpenAiResponses => {
-                include_str!("../provider-scripts/canonical/openai.responses-text-stream.json")
+                lash_provider_fixtures::canonical_scripts::OPENAI_RESPONSES_TEXT
             }
-            Self::CodexSse => {
-                include_str!("../provider-scripts/canonical/codex.responses-text-stream.json")
-            }
+            Self::CodexSse => lash_provider_fixtures::canonical_scripts::CODEX_RESPONSES_TEXT,
         };
         let mut script: Value = serde_json::from_str(source).expect("canonical script JSON");
         script["request_match"] = json!({"any": true});

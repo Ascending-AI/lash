@@ -15,8 +15,8 @@ use lash_sansio::SessionId;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::provider::ProviderWireScript;
 use crate::trace::OracleVerdict;
+use lash_provider_fixtures::provider::ProviderWireScript;
 
 pub const DURABLE_CONTENT_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.durable-content.v1");

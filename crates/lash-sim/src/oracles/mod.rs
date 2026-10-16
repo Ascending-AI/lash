@@ -9,7 +9,6 @@ use serde_json::{Value, json};
 
 use crate::provider_mutations::is_transport_provider_mutation;
 use crate::runtime_contracts::{RuntimeAgentFrameInvariantFacts, RuntimeUsageInvariantFacts};
-use crate::runtime_providers::MIGRATED_RUNTIME_PROVIDER_KINDS;
 use crate::scheduler::{
     ACTIVE_TURN_INPUT_STATE, BoundaryKind, DeliveredBoundary, PendingRuntimeBoundary,
     QueuedIngressMode, RuntimeCompletionFamily,
@@ -18,6 +17,7 @@ use crate::scheduler::{
 use crate::scheduler::{PENDING_RUNTIME_BOUNDARY_SCHEMA, RuntimeCompletionUnit};
 use crate::store::CheckpointWriteEvent;
 use crate::trace::{AbstractWorldView, OracleVerdict, WorkloadExpectations};
+use lash_provider_fixtures::runtime_providers::MIGRATED_RUNTIME_PROVIDER_KINDS;
 
 pub const CROSS_SESSION_ISOLATION_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::model("sim.oracle.cross-session-isolation.v1");

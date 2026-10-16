@@ -29,14 +29,6 @@ use lash::rlm::TerminationMode;
 use lash_vm_runtime::ToolDefinitionBindingExt as _;
 
 use crate::artifacts::*;
-use crate::canonical_scripts::{
-    ANTHROPIC_MESSAGES_TEXT, CANONICAL_SCRIPTS, CODEX_RESPONSES_DISCONNECT,
-    CODEX_RESPONSES_RATE_LIMIT, CODEX_RESPONSES_TEXT, CODEX_RESPONSES_TOOL_CALL,
-    GOOGLE_GENERATE_TEXT, GOOGLE_STREAM_GENERATE_TEXT, OPENAI_COMPAT_DISCONNECT,
-    OPENAI_COMPAT_RATE_LIMIT, OPENAI_COMPAT_RESPONSE_START_TIMEOUT,
-    OPENAI_COMPAT_STREAM_CHUNK_TIMEOUT, OPENAI_COMPAT_TOOL_CALL, OPENAI_COMPAT_VALIDATION,
-    OPENAI_RESPONSES_TEXT,
-};
 use crate::generator::{
     GENERATOR_VERSION, GeneratedWorkload, SimShard, WorkloadProfileError, generate_workload,
     validate_workload_profile,
@@ -47,21 +39,12 @@ use crate::oracles::{
     live_provider_failure_coverage, peak_concurrent_live_turns, pending_tool_completion,
     runtime_final_value_semantic, runtime_provider_turn, scenario_contract_generated_facts,
 };
-use crate::provider::{
-    ProviderWireEvent, ProviderWireHeader, ProviderWireScript, ScriptedLlmHttpExchange,
-    ScriptedLlmHttpTransport, ScriptedTransportSchedule,
-};
 use crate::provider_mutations::ProviderMutationMatrixCache;
 use crate::replay::{ReplayError, replay_trace};
 use crate::runtime_contracts::{
     RuntimeTurnObservation, require_passed, runtime_agent_frame_invariant_facts,
     runtime_final_value_invariant_facts, runtime_graph_invariant_facts, runtime_turn_contract,
     runtime_usage_invariant_facts,
-};
-use crate::runtime_providers::{
-    ANTHROPIC, OPENAI_COMPATIBLE, live_failure_script, runtime_provider_components,
-    runtime_script_for_text, runtime_script_for_turn, runtime_scripts_for_turns,
-    scripted_turn_from_provider_boundary, scripted_turns_from_ingress, suspend_roundtrip_scripts,
 };
 use crate::scheduler::{
     BoundaryDeliveryLog, BoundaryEvent, BoundaryKind, BoundaryScheduler, RuntimeCompletionFamily,
@@ -78,6 +61,23 @@ use crate::trace::{
     TraceIoError, WorkloadExpectations, write_event_lines, write_replay_report, write_trace,
 };
 use lash_durable_test::SimClock;
+use lash_provider_fixtures::canonical_scripts::{
+    ANTHROPIC_MESSAGES_TEXT, CANONICAL_SCRIPTS, CODEX_RESPONSES_DISCONNECT,
+    CODEX_RESPONSES_RATE_LIMIT, CODEX_RESPONSES_TEXT, CODEX_RESPONSES_TOOL_CALL,
+    GOOGLE_GENERATE_TEXT, GOOGLE_STREAM_GENERATE_TEXT, OPENAI_COMPAT_DISCONNECT,
+    OPENAI_COMPAT_RATE_LIMIT, OPENAI_COMPAT_RESPONSE_START_TIMEOUT,
+    OPENAI_COMPAT_STREAM_CHUNK_TIMEOUT, OPENAI_COMPAT_TOOL_CALL, OPENAI_COMPAT_VALIDATION,
+    OPENAI_RESPONSES_TEXT,
+};
+use lash_provider_fixtures::provider::{
+    ProviderWireEvent, ProviderWireHeader, ProviderWireScript, ScriptedLlmHttpExchange,
+    ScriptedLlmHttpTransport, ScriptedTransportSchedule,
+};
+use lash_provider_fixtures::runtime_providers::{
+    ANTHROPIC, OPENAI_COMPATIBLE, live_failure_script, runtime_provider_components,
+    runtime_script_for_text, runtime_script_for_turn, runtime_scripts_for_turns,
+    scripted_turn_from_provider_boundary, scripted_turns_from_ingress, suspend_roundtrip_scripts,
+};
 
 pub const FIXED_SCRIPT_PROFILE: &str = "tiny-fixed-provider-scripts";
 pub const FIXED_SCRIPT_EVENTS: &str = "events.jsonl";

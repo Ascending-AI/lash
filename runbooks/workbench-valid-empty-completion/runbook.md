@@ -16,7 +16,7 @@ and zero assistant bytes.
 `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=valid-empty-completion`. The launcher
 resolves the `provider-wire-fixtures` Buck2 feature target and builds with
 `--config=judged`. The fixture
-`crates/lash-sim/provider-scripts/runtime/openai-compatible.chat-valid-empty-stop.json`
+`crates/lash-provider-fixtures/provider-scripts/runtime/openai-compatible.chat-valid-empty-stop.json`
 backs `OpenAiCompatibleProvider` with `ScriptedLlmHttpTransport`. It supplies
 native finish reason `stop`, model `openai/gpt-5.4`, and 7 input / 0 output tokens.
 The model name identifies fixture evidence, not a paid model request. An

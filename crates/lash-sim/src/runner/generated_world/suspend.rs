@@ -304,7 +304,7 @@ impl GeneratedRuntimeWorld {
                 session: event.actor_alias.clone(),
                 result_digest: crate::invariants::result_digest(
                     &crate::content_oracle::ToolResultContent::from_tool_value(
-                        crate::runtime_providers::SUSPEND_TOOL_CALL_ID,
+                        lash_provider_fixtures::runtime_providers::SUSPEND_TOOL_CALL_ID,
                         &turn.tool_name,
                         &resolution,
                     )
@@ -379,7 +379,7 @@ impl GeneratedRuntimeWorld {
             transport: Arc::clone(&turn.transport),
             scripts: turn.scripts.clone(),
             tool_result: crate::content_oracle::ToolResultContent::from_tool_value(
-                crate::runtime_providers::SUSPEND_TOOL_CALL_ID,
+                lash_provider_fixtures::runtime_providers::SUSPEND_TOOL_CALL_ID,
                 &turn.tool_name,
                 &resolution,
             ),

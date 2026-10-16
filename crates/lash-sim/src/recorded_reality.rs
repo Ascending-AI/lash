@@ -12,7 +12,7 @@ use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::{OpenAiCompatibleProvider, OpenAiProvider};
 use serde_json::json;
 
-use crate::{
+use lash_provider_fixtures::provider::{
     ProviderWireProvenance, ProviderWireProvenanceKind, ProviderWireScript,
     ScriptedLlmHttpTransport,
 };
@@ -475,11 +475,11 @@ async fn no_credentials_reach_request_debug_recordings_or_traces() {
         let recorder = Arc::new(crate::RecordingLlmHttpTransport::new(
             inspect.clone(),
             crate::ProviderRecordingConfig::new(output.path(), lane, lane).with_request_match(
-                crate::ProviderWireRequestMatch {
+                lash_provider_fixtures::provider::ProviderWireRequestMatch {
                     any: false,
                     headers: [(
                         header.to_string(),
-                        crate::provider::HeaderMatcher {
+                        lash_provider_fixtures::provider::HeaderMatcher {
                             equals: Some(format!("{prefix}{MARKER}")),
                             ..Default::default()
                         },

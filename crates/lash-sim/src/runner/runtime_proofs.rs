@@ -210,7 +210,7 @@ pub(super) async fn run_live_turn_facts(
         read_view.messages().iter().any(|message| {
             message.parts.iter().any(|part| {
                 part.content()
-                    .contains(crate::runtime_providers::LIVE_FAILURE_LEAK_PROSE)
+                    .contains(lash_provider_fixtures::runtime_providers::LIVE_FAILURE_LEAK_PROSE)
             })
         })
     });

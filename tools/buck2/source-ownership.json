@@ -894,5 +894,11 @@
       "src/readable.rs"
     ],
     "unit_test_includes": []
+  },
+  "crates/lash-provider-fixtures": {
+    "compile_data": [
+      "provider-scripts/canonical/*.json",
+      "provider-scripts/runtime/*.json"
+    ]
   }
 }

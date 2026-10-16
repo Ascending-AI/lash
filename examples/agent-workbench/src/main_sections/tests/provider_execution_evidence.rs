@@ -56,44 +56,48 @@ fn assert_provider_evidence(
 async fn provider_execution_evidence_reaches_the_record_surfaces() {
     for (provider_kind, response_id, served_model, finish) in [
         (
-            lash_sim::runtime_providers::GOOGLE_OAUTH,
+            lash_provider_fixtures::runtime_providers::GOOGLE_OAUTH,
             "google-evidence-1",
             "gemini-3.1-pro-served",
             "STOP",
         ),
         (
-            lash_sim::runtime_providers::ANTHROPIC,
+            lash_provider_fixtures::runtime_providers::ANTHROPIC,
             "msg_anthropic_evidence_1",
             "claude-sonnet-4-20250514-served",
             "end_turn",
         ),
     ] {
         let answer = finish_cell(&format!("{provider_kind} execution evidence"));
-        let script = if provider_kind == lash_sim::runtime_providers::GOOGLE_OAUTH {
-            lash_sim::runtime_providers::google_runtime_script_for_text_with_explicit_zero_reasoning(
+        let script = if provider_kind == lash_provider_fixtures::runtime_providers::GOOGLE_OAUTH {
+            lash_provider_fixtures::runtime_providers::google_runtime_script_for_text_with_explicit_zero_reasoning(
                 &answer,
             )
             .expect("the Google explicit-zero provider fixture")
         } else {
-            lash_sim::runtime_providers::runtime_script_for_text(provider_kind, &answer)
-                .expect("the provider evidence fixture")
+            lash_provider_fixtures::runtime_providers::runtime_script_for_text(
+                provider_kind,
+                &answer,
+            )
+            .expect("the provider evidence fixture")
         };
         // The first call fails before any response and is retried.
         let mut failed_before_response = script.clone();
         failed_before_response.name = format!("{provider_kind}.retryable-before-response");
-        *failed_before_response.timeline_mut() =
-            vec![lash_sim::ProviderWireEvent::TransportError {
+        *failed_before_response.timeline_mut() = vec![
+            lash_provider_fixtures::provider::ProviderWireEvent::TransportError {
                 at: 0,
                 message: "connection failed before response".to_string(),
                 retryable: Some(true),
-            }];
+            },
+        ];
         failed_before_response.expected_provider = Some(json!({
             "failure": "transport",
             "response_started": false,
             "retryable": true,
         }));
         let transport = Arc::new(
-            lash_sim::ScriptedLlmHttpTransport::from_scripts([
+            lash_provider_fixtures::provider::ScriptedLlmHttpTransport::from_scripts([
                 failed_before_response,
                 script.clone(),
                 script,
@@ -101,8 +105,11 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
             .expect("valid provider scripts"),
         );
         let (mut provider, model, _) =
-            lash_sim::runtime_providers::runtime_provider_components(provider_kind, &transport)
-                .expect("the provider fixture's components");
+            lash_provider_fixtures::runtime_providers::runtime_provider_components(
+                provider_kind,
+                &transport,
+            )
+            .expect("the provider fixture's components");
         let mut options = provider.options();
         options.reliability = options
             .reliability

@@ -1470,7 +1470,7 @@ async fn live_provider_failure_oracle_bites_on_a_committing_turn() {
     // synthetic facts.
     let script = runtime_script_for_text(
         OPENAI_COMPATIBLE,
-        crate::runtime_providers::LIVE_FAILURE_LEAK_PROSE,
+        lash_provider_fixtures::runtime_providers::LIVE_FAILURE_LEAK_PROSE,
     )
     .expect("valid success control script");
     let facts = run_live_turn_facts(7, OPENAI_COMPATIBLE, script, "success_control", 1)

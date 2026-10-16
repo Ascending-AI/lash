@@ -15,7 +15,7 @@ use lash_llm_transport::{
 };
 use serde_json::Value;
 
-use crate::provider::{
+use lash_provider_fixtures::provider::{
     PROVIDER_WIRE_SCRIPT_SCHEMA, ProviderWireEndpoint, ProviderWireEvent, ProviderWireHeader,
     ProviderWireProvenance, ProviderWireProvenanceKind, ProviderWireRequestMatch,
     ProviderWireScript,
@@ -248,7 +248,7 @@ impl RecordingExchange {
             if !body.is_empty() {
                 timeline.push(ProviderWireEvent::Chunk {
                     at: response_finished_at,
-                    payload: crate::provider::ProviderWireChunkPayload::Data(body),
+                    payload: lash_provider_fixtures::provider::ProviderWireChunkPayload::Data(body),
                 });
             }
             timeline.push(match stream_error {
@@ -761,8 +761,8 @@ mod tests {
     use std::collections::VecDeque;
 
     use super::*;
-    use crate::provider::{HeaderMatcher, JsonMatcher, ScriptedLlmHttpTransport};
     use lash_llm_transport::{LlmHttpMethod, read_http_body_text};
+    use lash_provider_fixtures::provider::{HeaderMatcher, JsonMatcher, ScriptedLlmHttpTransport};
 
     const REQUEST_SECRET: &str = "sk-live-recording-secret";
     const HEADER_SECRET: &str = "response-cookie-secret";

@@ -552,7 +552,7 @@ s3 = { packages = ["lash-internal-s3-store"] }
 
 # Compile inputs a variant needs only when one of its features is on.
 [feature_compile_data.agent-workbench]
-provider-wire-fixtures = ["//crates/lash-sim:package_files"]
+provider-wire-fixtures = ["//crates/lash-provider-fixtures:package_files"]
 
 # --- Shared filegroups ---------------------------------------------------------
 

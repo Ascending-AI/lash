@@ -13,7 +13,7 @@ use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse, LlmHttpTransport};
 use lash_sansio::sync::MutexExt;
 use serde_json::Value;
 
-use crate::provider::{ProviderWireScript, ScriptedLlmHttpTransport};
+use lash_provider_fixtures::provider::{ProviderWireScript, ScriptedLlmHttpTransport};
 
 pub const TYPESCRIPT_CLOSE_DELIMITER: &str = "</typescript>";
 
@@ -41,9 +41,11 @@ impl ProviderStopDialect {
 
     pub const fn provider_kind(self) -> &'static str {
         match self {
-            Self::OpenAiCompatibleChat => crate::runtime_providers::OPENAI_COMPATIBLE,
-            Self::AnthropicMessages => crate::runtime_providers::ANTHROPIC,
-            Self::GoogleGenerateContent => crate::runtime_providers::GOOGLE_OAUTH,
+            Self::OpenAiCompatibleChat => {
+                lash_provider_fixtures::runtime_providers::OPENAI_COMPATIBLE
+            }
+            Self::AnthropicMessages => lash_provider_fixtures::runtime_providers::ANTHROPIC,
+            Self::GoogleGenerateContent => lash_provider_fixtures::runtime_providers::GOOGLE_OAUTH,
         }
     }
 }
@@ -165,7 +167,7 @@ pub const PROVIDER_STOP_VARIATION_MATRIX: &[ProviderStopFixture] = &[
 /// exhibit the provider-consumed delimiter behavior modeled by this corpus.
 #[cfg(test)]
 const PROVIDER_STOP_VARIATION_EXCLUSIONS: &[(&str, &str)] = &[(
-    crate::runtime_providers::OPENAI,
+    lash_provider_fixtures::runtime_providers::OPENAI,
     "OpenAI Responses emits no provider wire stop field",
 )];
 
@@ -296,7 +298,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::runtime_providers::runtime_provider_components;
+    use lash_provider_fixtures::runtime_providers::runtime_provider_components;
 
     #[test]
     fn provider_stop_variation_matrix_has_both_rows_for_every_stop_capable_dialect() {
@@ -336,7 +338,7 @@ mod tests {
         assert!(covered.is_disjoint(&excluded));
         assert_eq!(
             covered.union(&excluded).copied().collect::<BTreeSet<_>>(),
-            crate::runtime_providers::MIGRATED_RUNTIME_PROVIDER_KINDS
+            lash_provider_fixtures::runtime_providers::MIGRATED_RUNTIME_PROVIDER_KINDS
                 .iter()
                 .copied()
                 .collect::<BTreeSet<_>>()

@@ -5,13 +5,13 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::provider_mutations::{TRANSPORT_PROVIDER_MUTATIONS, is_transport_provider_mutation};
-use crate::runtime_providers::{
-    MIGRATED_RUNTIME_PROVIDER_KINDS, ScriptedUsage, runtime_provider_kind_for_session,
-    runtime_script_name_for_kind,
-};
 use crate::scheduler::{BoundaryEvent, BoundaryKind, QueuedIngressMode, next_seed};
 use crate::trace::{StableAliases, WorkloadExpectations};
 use lash_core::testing::adversarial_text::{TextBudget, adversarial_count, adversarial_text};
+use lash_provider_fixtures::runtime_providers::{
+    MIGRATED_RUNTIME_PROVIDER_KINDS, ScriptedUsage, runtime_provider_kind_for_session,
+    runtime_script_name_for_kind,
+};
 
 pub const GENERATOR_VERSION: &str = "lash-sim.generated-workload.v11";
 pub const WORKLOAD_FAMILY: &str = "deterministic-runtime-state-machine";

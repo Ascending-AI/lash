@@ -33,7 +33,7 @@ futures-util = { workspace = true }
 lash = { workspace = true, features = ["rlm", "sqlite", "postgres", "mcp", "http-transport", "openai", "dialect-typescript", "dialect-python"] }
 delegation = { workspace = true }
 # Opt-in provider wire test fixtures; never selected by the teaching host.
-lash-sim = { path = "../../crates/lash-sim", optional = true }
+lash-provider-fixtures = { workspace = true, optional = true }
 percent-encoding = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 rmcp = { workspace = true, features = ["elicitation", "macros", "server", "transport-io", "transport-streamable-http-server"] }
@@ -54,10 +54,10 @@ lash = { workspace = true, features = ["worker", "testing", "typescript", "workf
 # turn an accidentally-exhausted Lash VM execution bound into a test failure.
 # The judged host must not carry them — see `[profile.judged]` in the workspace
 # manifest and the build-geometry rule in `runbooks/RULES.md`.
-lash-sim = { path = "../../crates/lash-sim" }
+lash-provider-fixtures = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
 default = []
-provider-wire-fixtures = ["dep:lash-sim"]
+provider-wire-fixtures = ["dep:lash-provider-fixtures"]
 e2e-tools = ["lash/testing"]

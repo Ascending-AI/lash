@@ -33,7 +33,7 @@ pub struct FixedScriptManifest {
 pub struct ScriptHashManifest {
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub provenance: Option<crate::ProviderWireProvenance>,
+    pub provenance: Option<lash_provider_fixtures::provider::ProviderWireProvenance>,
     pub name: String,
     pub provider_kind: String,
     pub sha256: String,

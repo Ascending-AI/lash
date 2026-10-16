@@ -916,14 +916,15 @@ impl BackendRunner {
     )]
     fn build_lifecycle_core(&self) -> lash::LashCore {
         let transport = Arc::new(
-            lash_sim::ScriptedLlmHttpTransport::from_scripts([])
+            lash_provider_fixtures::provider::ScriptedLlmHttpTransport::from_scripts([])
                 .expect("empty provider script queue"),
         );
-        let (provider, model, _) = lash_sim::runtime_providers::runtime_provider_components(
-            lash_sim::runtime_providers::OPENAI_COMPATIBLE,
-            &transport,
-        )
-        .expect("build differential lifecycle provider");
+        let (provider, model, _) =
+            lash_provider_fixtures::runtime_providers::runtime_provider_components(
+                lash_provider_fixtures::runtime_providers::OPENAI_COMPATIBLE,
+                &transport,
+            )
+            .expect("build differential lifecycle provider");
         lash::LashCore::standard_builder(self.lifecycle_backend.clone())
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())

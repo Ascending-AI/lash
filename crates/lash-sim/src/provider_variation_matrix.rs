@@ -22,10 +22,10 @@ use lash_sansio::session_model::{Message, MessageRole, render_prompt, shared_par
 use lash_sansio::sync::MutexExt;
 use serde_json::{Value, json};
 
-use crate::provider::{
+use crate::provider_variations::TYPESCRIPT_CLOSE_DELIMITER;
+use lash_provider_fixtures::provider::{
     ProviderWireEndpoint, ProviderWireEvent, ProviderWireScript, ScriptedLlmHttpTransport,
 };
-use crate::provider_variations::TYPESCRIPT_CLOSE_DELIMITER;
 
 #[path = "provider_variation_matrix/schema.rs"]
 mod schema;
@@ -994,7 +994,7 @@ fn recorded_script(dialect: &str, variation: &str, recording: &Recording) -> Pro
         timeline
     };
     ProviderWireScript::from_parts(
-        crate::provider::PROVIDER_WIRE_SCRIPT_SCHEMA.to_string(),
+        lash_provider_fixtures::provider::PROVIDER_WIRE_SCRIPT_SCHEMA.to_string(),
         format!("{dialect}.{variation}.{}", recording.case),
         dialect.to_string(),
         ProviderWireEndpoint {

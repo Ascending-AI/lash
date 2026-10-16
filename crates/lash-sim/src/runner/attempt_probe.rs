@@ -19,7 +19,7 @@
 use super::*;
 use crate::content_oracle::SessionContent;
 use crate::generator::{generated_text, generated_usage};
-use crate::runtime_providers::{ScriptedUsage, runtime_script_value_for_turn};
+use lash_provider_fixtures::runtime_providers::{ScriptedUsage, runtime_script_value_for_turn};
 
 const RETRIED_SESSION: &str = "sim-attempt-probe-retried";
 const EXHAUSTED_SESSION: &str = "sim-attempt-probe-exhausted";

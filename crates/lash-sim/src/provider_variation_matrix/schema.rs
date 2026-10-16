@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::provider::{ProviderWireHeader, ProviderWireRequestMatch};
+use lash_provider_fixtures::provider::{ProviderWireHeader, ProviderWireRequestMatch};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

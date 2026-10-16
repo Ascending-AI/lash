@@ -44,6 +44,7 @@ members = [
     "crates/lash-provider-anthropic",
     "crates/lash-provider-google",
     "crates/lash-provider-openai",
+    "crates/lash-provider-fixtures",
     "crates/lash-sim",
     "crates/lash-perf",
     "crates/lash-regress",
@@ -336,6 +337,7 @@ lash-protocol-standard = { package = "lash-internal-protocol-standard", path = "
 lash-provider-anthropic = { package = "lash-internal-provider-anthropic", path = "crates/lash-provider-anthropic", version = "=0.0.0-dev" }
 lash-provider-google = { package = "lash-internal-provider-google", path = "crates/lash-provider-google", version = "=0.0.0-dev" }
 lash-provider-openai = { package = "lash-internal-provider-openai", path = "crates/lash-provider-openai", version = "=0.0.0-dev" }
+lash-provider-fixtures = { package = "lash-internal-provider-fixtures", path = "crates/lash-provider-fixtures", version = "=0.0.0-dev" }
 lash-regress = { path = "crates/lash-regress", version = "=0.0.0-dev", features = ["utf16"] }
 lash-rlm-types = { package = "lash-internal-rlm-types", path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
 lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", version = "=0.0.0-dev" }

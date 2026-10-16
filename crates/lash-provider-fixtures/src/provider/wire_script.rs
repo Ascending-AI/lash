@@ -73,7 +73,7 @@ impl ProviderWireScript {
         &mut self.timeline
     }
 
-    pub(crate) fn from_parts(
+    pub fn from_parts(
         schema: String,
         name: String,
         provider_kind: String,
@@ -94,7 +94,7 @@ impl ProviderWireScript {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), LlmTransportError> {
+    pub fn validate(&self) -> Result<(), LlmTransportError> {
         if self.schema != PROVIDER_WIRE_SCRIPT_SCHEMA {
             return Err(script_validation_error(format!(
                 "Provider Wire Script `{}` uses unsupported schema `{}`",

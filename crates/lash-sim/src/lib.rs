@@ -2,7 +2,6 @@ pub mod backend;
 pub mod backend_fault;
 #[cfg(test)]
 mod cache_regression;
-mod canonical_scripts;
 pub mod chaos_soak;
 pub mod content_oracle;
 pub mod crash_matrix;
@@ -28,7 +27,6 @@ pub mod invariants;
 pub mod minimize;
 pub mod oracles;
 mod postgres_test_isolation;
-pub mod provider;
 pub mod provider_mutations;
 #[cfg(test)]
 mod provider_variation_matrix;
@@ -37,7 +35,6 @@ pub mod recording;
 pub mod replay;
 pub mod runner;
 pub mod runtime_contracts;
-pub mod runtime_providers;
 pub mod scheduler;
 pub mod session_hold;
 pub mod sqlite_faults;
@@ -153,11 +150,6 @@ pub use artifacts::{
     FixedScriptManifest, FixedScriptProof, FixedScriptReport, GeneratedSimProfileReport,
     ScriptHashManifest,
 };
-pub use provider::{
-    ProviderWireChunkPayload, ProviderWireEndpoint, ProviderWireEvent, ProviderWireProvenance,
-    ProviderWireProvenanceKind, ProviderWireRequestMatch, ProviderWireScript,
-    ScriptedLlmHttpTransport, ScriptedTransportSchedule,
-};
 pub use recording::{ProviderRecordingConfig, RecordingLlmHttpTransport};
 pub use runner::{
     FIXED_SCRIPT_PROFILE, run_fixed_script_profile, run_generated_sim_profile,
@@ -201,3 +193,6 @@ pub fn quick_seed_sweep(full: usize) -> usize {
 
 #[cfg(test)]
 mod runtime_feedback;
+
+#[cfg(test)]
+mod runtime_provider_tests;

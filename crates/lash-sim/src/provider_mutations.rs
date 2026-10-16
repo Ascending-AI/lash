@@ -12,14 +12,14 @@ use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::{OpenAiCompatibleProvider, OpenAiProvider};
 use serde_json::{Value, json};
 
-use crate::canonical_scripts::{
+use crate::scheduler::BoundaryEvent;
+use crate::trace::value_digest;
+use lash_provider_fixtures::canonical_scripts::{
     ANTHROPIC_MESSAGES_TEXT, GOOGLE_STREAM_GENERATE_TEXT, OPENAI_COMPAT_DISCONNECT,
     OPENAI_COMPAT_RATE_LIMIT, OPENAI_COMPAT_RESPONSE_START_TIMEOUT,
     OPENAI_COMPAT_STREAM_CHUNK_TIMEOUT, OPENAI_COMPAT_TOOL_CALL, OPENAI_RESPONSES_TEXT,
 };
-use crate::provider::{ProviderWireScript, ScriptedLlmHttpTransport};
-use crate::scheduler::BoundaryEvent;
-use crate::trace::value_digest;
+use lash_provider_fixtures::provider::{ProviderWireScript, ScriptedLlmHttpTransport};
 
 #[derive(Debug)]
 pub struct ProviderMutationExecutionError {

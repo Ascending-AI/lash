@@ -32,9 +32,9 @@ dependencies = [
  "delegation",
  "dotenvy",
  "futures-util",
+ "lash-internal-provider-fixtures",
  "lash-rmcp",
  "lash-runtime",
- "lash-sim",
  "percent-encoding",
  "reqwest",
  "rusqlite",
@@ -2683,6 +2683,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-internal-provider-fixtures"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "lash-internal-core",
+ "lash-internal-llm-transport",
+ "lash-internal-provider-anthropic",
+ "lash-internal-provider-google",
+ "lash-internal-provider-openai",
+ "lash-internal-sansio",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "lash-internal-provider-google"
 version = "0.0.0-dev"
 dependencies = [
@@ -3397,6 +3414,7 @@ dependencies = [
  "lash-internal-protocol-rlm",
  "lash-internal-protocol-standard",
  "lash-internal-provider-anthropic",
+ "lash-internal-provider-fixtures",
  "lash-internal-provider-google",
  "lash-internal-provider-openai",
  "lash-internal-rlm-types",

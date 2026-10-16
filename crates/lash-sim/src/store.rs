@@ -445,7 +445,7 @@ impl ModelStore {
                 // recorded before generated usage ran the canonical scripts'
                 // fixed counts.
                 let turn_usage =
-                    match crate::runtime_providers::scripted_turn_from_provider_boundary(
+                    match lash_provider_fixtures::runtime_providers::scripted_turn_from_provider_boundary(
                         &event.payload,
                     )
                     .ok()
