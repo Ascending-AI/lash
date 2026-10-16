@@ -109,7 +109,7 @@ fn run(
         host: Vec::new(),
     };
     let spools = tempfile::tempdir().expect("spool directory");
-    let spools = SpoolRoot::open(spools.path(), 1 << 30).expect("spools");
+    let spools = SpoolRoot::open(spools.path(), 1 << 30, 1 << 20).expect("spools");
     let bounds = lash_kernel_vm::Bounds {
         charge: 1_000_000,
         memory: 16 << 20,

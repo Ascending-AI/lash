@@ -422,6 +422,8 @@ pub enum HostResource {
     StagingBytes,
     ReadBatch,
     HostWork,
+    /// Staged pages plus distinct external references in the parent's spool.
+    StagingEntries,
 }
 
 /// How a native call ends without a value, after the cutover.

@@ -235,7 +235,7 @@ impl Parent {
     /// The page service of runs pinning `dialect`'s helper release.
     fn new(dialect: &str) -> Self {
         let directory = tempfile::tempdir().expect("spool directory");
-        let spools = SpoolRoot::open(directory.path(), 1 << 30).expect("spools");
+        let spools = SpoolRoot::open(directory.path(), 1 << 30, 1 << 20).expect("spools");
         let spool = SharedSpool::new(spools.spool(StageLeaseId(1)).expect("spool"));
         let releases = lash_vm_broker::kernel::state::release_manifests().expect("releases");
         let release = releases
@@ -1444,7 +1444,7 @@ main {}"#,
         join_members: 10,
     };
     let spools = tempfile::tempdir().unwrap();
-    let spools = SpoolRoot::open(spools.path(), 1 << 30).unwrap();
+    let spools = SpoolRoot::open(spools.path(), 1 << 30, 1 << 20).unwrap();
     let direct_start = start();
     let mut direct = KernelMachine::start(
         Program {

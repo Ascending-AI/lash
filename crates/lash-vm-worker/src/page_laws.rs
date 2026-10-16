@@ -5,9 +5,8 @@
 //! No machine runs on the paged heap yet (FIG-6188), so each law's worker
 //! drives its page source with a scripted reader over the same page shapes
 //! the heap uses: a checkpoint root, a heap header and an order-statistic
-//! sequence tree. The store is a fake behind the page service's leased
-//! reads; the SQLite store's `PageStore` is the publication layer's
-//! (FIG-6191).
+//! sequence tree. Most laws use a fake behind the page service's leased
+//! reads; the configured staging-entry refusal runs over SQLite memory.
 #![expect(
     clippy::expect_used,
     clippy::panic,
@@ -272,7 +271,7 @@ fn fence() -> MessageFence {
 /// The worker's statement waits in its exchange; the parent holds no other
 /// worker to serve it with.
 fn served<T: Send + 'static>(
-    pages: &mut ActivationPages<Store>,
+    pages: &mut impl PageExchange,
     clean: u64,
     workload: impl FnOnce(&mut WirePageSource) -> T + Send + 'static,
 ) -> (T, PageTraffic) {
@@ -357,7 +356,7 @@ fn a_fresh_worker_reads_the_header_and_touched_pages_only() {
     let store = Arc::new(Store::default());
     let (root, held) = committed_list(&store, 100_000);
     let spools = tempfile::tempdir().expect("dir");
-    let spools = SpoolRoot::open(spools.path(), 1 << 20).expect("spools");
+    let spools = SpoolRoot::open(spools.path(), 1 << 20, 1 << 20).expect("spools");
     let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
     let start = root_ref(&pages);
     let (value, traffic) = served(&mut pages, 64 << 20, move |source| {
@@ -384,7 +383,7 @@ fn a_fault_mid_native_resumes_on_the_same_stack() {
     let store = Arc::new(Store::default());
     let (root, _) = committed_list(&store, 5_000);
     let spools = tempfile::tempdir().expect("dir");
-    let spools = SpoolRoot::open(spools.path(), 1 << 20).expect("spools");
+    let spools = SpoolRoot::open(spools.path(), 1 << 20, 1 << 20).expect("spools");
     let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
     let start = root_ref(&pages);
     let ((cold, warm), traffic) = served(&mut pages, 64 << 20, move |source| {
@@ -423,7 +422,7 @@ fn a_one_worker_pool_serves_pages_without_another_worker() {
     let store = Arc::new(Store::default());
     let (root, _) = committed_list(&store, 2_000);
     let spools = tempfile::tempdir().expect("dir");
-    let spools = SpoolRoot::open(spools.path(), 1 << 20).expect("spools");
+    let spools = SpoolRoot::open(spools.path(), 1 << 20, 1 << 20).expect("spools");
     let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
     let start = root_ref(&pages);
     // A few leaves' worth resident: a pass evicts what it read first.
@@ -461,7 +460,7 @@ fn a_forged_foreign_or_stale_capability_reads_nothing() {
     let (root, _) = committed_list(&store, 100);
     let key = CapabilityKey::fresh();
     let spools = tempfile::tempdir().expect("dir");
-    let spools = SpoolRoot::open(spools.path(), 1 << 20).expect("spools");
+    let spools = SpoolRoot::open(spools.path(), 1 << 20, 1 << 20).expect("spools");
     let valid = root_capability(&activation(&store, &spools, root.id, key.clone(), 7));
     let mut forged = valid;
     forged.mac[0] ^= 1;
@@ -572,7 +571,7 @@ fn a_missing_or_corrupt_page_is_infrastructure_never_absence() {
             }
         }
         let spools = tempfile::tempdir().expect("dir");
-        let spools = SpoolRoot::open(spools.path(), 1 << 20).expect("spools");
+        let spools = SpoolRoot::open(spools.path(), 1 << 20, 1 << 20).expect("spools");
         let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
         let start = root_ref(&pages);
         let (read, _) = served(&mut pages, 1 << 20, move |source| {
@@ -600,7 +599,7 @@ fn a_worker_reads_back_what_it_sealed_through_its_stage_capability() {
     let (root, _) = committed_list(&store, 100);
     let committed = store.pages.lock().expect("pages").len();
     let spools = tempfile::tempdir().expect("dir");
-    let spools = SpoolRoot::open(spools.path(), 1 << 20).expect("spools");
+    let spools = SpoolRoot::open(spools.path(), 1 << 20, 1 << 20).expect("spools");
     let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
     let start = root_ref(&pages);
     let (outcome, traffic) = served(&mut pages, 0, move |source| {
@@ -677,7 +676,7 @@ fn sealed_pages_cross_in_one_batch() {
     let store = Arc::new(Store::default());
     let (root, _) = committed_list(&store, 10);
     let spools = tempfile::tempdir().expect("dir");
-    let spools = SpoolRoot::open(spools.path(), 1 << 20).expect("spools");
+    let spools = SpoolRoot::open(spools.path(), 1 << 20, 1 << 20).expect("spools");
     let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
     const CHAIN: usize = 40;
     let (exchanges, traffic) = served(&mut pages, 0, move |source| {
@@ -726,7 +725,7 @@ fn version_churn_keeps_grants_for_live_pages_only() {
     let store = Arc::new(Store::default());
     let (root, _) = committed_list(&store, 10);
     let spools = tempfile::tempdir().expect("dir");
-    let spools = SpoolRoot::open(spools.path(), 64 << 20).expect("spools");
+    let spools = SpoolRoot::open(spools.path(), 64 << 20, 1 << 20).expect("spools");
     let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
     let ((peak, read), _) = served(&mut pages, 0, move |source| {
         let seal = |source: &mut WirePageSource, label: String, children: Vec<PageRef>| {
@@ -790,4 +789,89 @@ fn a_page_crosses_named_by_its_store_content_address() {
         assert_eq!(PageEnvelope::digest(bytes), id.0);
         assert_eq!(PageEnvelope::new(bytes.to_vec()).id, id.0);
     }
+}
+
+/// FIG-6452: host configuration alone bounds spool entries, and exceeding
+/// it crosses the real page wire as infrastructure, over SQLite memory.
+#[test]
+fn a_configured_staging_entry_limit_is_typed_over_sqlite() {
+    use lash_kernel_doc::heap::HostResource;
+    use lash_vm_protocol::page::{PageRefusal, PageReply, PageRequest};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let stores = runtime
+        .block_on(lash_sqlite_store::SqliteStoreSet::memory())
+        .expect("SQLite memory");
+    let directory = tempfile::tempdir().expect("spools");
+    let mut config =
+        lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper("unused"));
+    config.staging_dir = Some(directory.path().to_owned());
+    config.staging_max_entries = 1;
+    let service = lash_vm_client::service::Service::new(config);
+    let spool = service
+        .spools()
+        .expect("configured spools")
+        .spool(StageLeaseId(1))
+        .expect("spool");
+    let mut pages = ActivationPages::new(
+        Arc::new(stores.durable_store()),
+        None,
+        Duration::from_secs(20),
+        CapabilityKey::fresh(),
+        1,
+        Box::new(spool),
+        Arc::new(lash_core_execution::runtime::SystemClock),
+        Duration::from_secs(60),
+        PageLimits::within(ProtocolBounds::standard().decode),
+    );
+    let (refused, _) = served(&mut pages, 0, |source| {
+        for label in ["first", "first"] {
+            let mut tokens = TokenWriter::new();
+            tokens.text(label);
+            source
+                .seal(PageBody {
+                    kind: PageKind::PAYLOAD_LEAF,
+                    tokens: tokens.into_bytes(),
+                    children: Vec::new(),
+                })
+                .expect("one distinct page fits");
+            source
+                .port()
+                .flush()
+                .expect("duplicate does not consume an entry");
+        }
+        let mut tokens = TokenWriter::new();
+        tokens.text("second");
+        source
+            .seal(PageBody {
+                kind: PageKind::PAYLOAD_LEAF,
+                tokens: tokens.into_bytes(),
+                children: Vec::new(),
+            })
+            .expect("queued for admission");
+        source.port().flush()
+    });
+    assert_eq!(
+        refused,
+        Err(HeapFault::Exhausted {
+            resource: HostResource::StagingEntries,
+        })
+    );
+    assert_eq!(pages.usage().pages, 1, "refused page was never admitted");
+    let mut tokens = TokenWriter::new();
+    tokens.text("third");
+    let third = frame(PageKind::PAYLOAD_LEAF, &tokens);
+    let reply = runtime.block_on(pages.serve(PageRequest::Seal {
+        pages: vec![PageEnvelope {
+            id: third.id.0,
+            envelope: third.bytes.to_vec(),
+        }],
+        children: Vec::new(),
+    }));
+    let refusal = PageRefusal::StagingEntryLimit { entries: 1 };
+    assert_eq!(reply, PageReply::Refused(refusal.clone()));
+    assert!(InfrastructureOutcome::PageRefused { refusal }.is_retryable());
 }

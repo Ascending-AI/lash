@@ -353,7 +353,7 @@ fn a_ready_worker_serves_its_first_turn_at_a_warm_turns_cost() {
         outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
         incoming: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
         lease: 0,
-        spools: SpoolRoot::open(spools.path(), 1 << 30).expect("spools"),
+        spools: SpoolRoot::open(spools.path(), 1 << 30, 1 << 20).expect("spools"),
         pages: None,
         runtime: tokio::runtime::Builder::new_current_thread()
             .enable_all()

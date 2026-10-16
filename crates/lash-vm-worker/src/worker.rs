@@ -1033,6 +1033,7 @@ fn heap_fault(fault: lash_kernel_doc::heap::HeapFault) -> PoolError {
                 KernelResource::DirtyResidency => page::HostResource::DirtyResidency,
                 KernelResource::PinnedPages => page::HostResource::PinnedPages,
                 KernelResource::StagingBytes => page::HostResource::StagingBytes,
+                KernelResource::StagingEntries => page::HostResource::StagingEntries,
                 KernelResource::ReadBatch => page::HostResource::ReadBatch,
                 KernelResource::HostWork => page::HostResource::HostWork,
             },

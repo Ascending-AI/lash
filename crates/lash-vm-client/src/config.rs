@@ -179,22 +179,26 @@ impl Default for WorkerConfinement {
 /// they do not consume this directory. Tool results encoded into checkpoint
 /// pages do consume it, under the same quota as other pages.
 ///
-/// Let `Q = staging_quota_bytes`, `N` be the staged-page count when a
-/// candidate is built, and `E` its distinct directly referenced committed
-/// pages. During
+/// Let `Q = staging_quota_bytes` and `P = staging_max_entries`. During
 /// successful spool operations, peak file contents per spool are bounded by
-/// `Q + 99 * (N + E)` bytes: page contents total at most `Q`, and manifest
-/// sorting holds at most three copies of each 33-byte digest record (walk
-/// queue, input runs and merge output). A partial page write replaces its
-/// temporary name by rename; it does not add a second copy of the page.
+/// `Q + 99 * P` bytes: page contents total at most `Q`, and staged pages plus
+/// distinct external references total at most `P`. Manifest sorting holds at
+/// most three copies of each 33-byte digest record (walk queue, input runs
+/// and merge output). The reference index uses empty files with counts in
+/// their names. A partial page write replaces its temporary name by rename;
+/// it does not add a second copy of the page.
 ///
-/// A conservative bound using only the configured quota is
-/// `Q + 99 * floor(Q / 7)` bytes per spool. Each envelope uses at least seven
-/// bytes, and each distinct external reference needs a 32-byte child-table
-/// entry in a staged envelope, so `7 * N + 32 * E <= Q` and
-/// `N + E <= floor(Q / 7)`. At the standard 1 GiB quota this bound is
-/// 16,259,519,035 bytes (about 15.14 GiB); it allows pathological tiny pages,
-/// rather than predicting a typical session's usage.
+/// At the standard `Q = 1 GiB` and `P = 16,384`, the bound is
+/// **1,075,363,840 bytes** (about 1.002 GiB) per spool. The standard entry
+/// limit is `Q / 64 KiB`; changing either field does not rescale the other.
+///
+/// Quota-only footnote: without an entry limit, the conservative bound is
+/// `Q + 99 * floor(Q / 7)` bytes. Each envelope uses at least seven bytes,
+/// and each distinct external reference needs a 32-byte child-table entry
+/// in a staged envelope. Thus `7 * N + 32 * E <= Q`, where `N` is staged
+/// pages and `E` is distinct external refs, giving `N + E <= floor(Q / 7)`.
+/// At 1 GiB this is 16,259,519,035 bytes (about 15.14 GiB), allowing
+/// pathological tiny pages rather than predicting typical usage.
 ///
 /// A code-mode session's cells share one turn spool, so this is also its
 /// per-active-session bound. Multiply by the host's maximum number of live
@@ -206,13 +210,15 @@ impl Default for WorkerConfinement {
 /// Failed filesystem operations can leave scratch files until the spool is
 /// dropped; the successful-operation bound does not cover repeated I/O failures.
 ///
-/// FIG-6449 measured four concurrent producers sharing a full standard-quota
-/// spool: 16,385 pages, including maximum-size 65,536-byte pages, no external
-/// references, and a candidate sort over five runs. Peak file contents were
-/// 1,075,363,939 bytes, exactly `Q + 99 * N` and below the quota-only bound.
-/// The spool subtree used 1,080,016,896 allocated bytes at that peak on the
-/// measurement filesystem. Peak process RSS was 4,608 KiB under an 8 GiB
-/// address-space cap. This measures checkpoint staging, not an upload limit.
+/// FIG-6452 measured live staged entries across five lash-perf replay
+/// scenarios on SQLite file stores under an 8 GiB address-space cap.
+/// Maximum / nearest-rank p99 of per-spool peaks: heavy TypeScript analysis
+/// 260 / 260 (14 spools), heavy Python analysis 261 / 261 (14 spools), and
+/// heavy workflow 32 / 32 (17 spools). Coding-heavy and 18-way fan-out used
+/// native tools and created no spools (zero staged entries). The default
+/// 16,384 entries gives over 62 times the measured maximum, above the
+/// required fourfold headroom. Largest peak process RSS was 255,560 KiB.
+/// These synthetic observations tune headroom, not a typical-session SLO.
 ///
 /// An authoritative publication deletes its candidate's pages and manifest;
 /// unrelated staged pages remain until retention or the turn ends. Ambiguous
@@ -242,6 +248,15 @@ pub struct PoolConfig {
     /// outcome. Manifest scratch space is additional: see [`PoolConfig`]
     /// for the peak-capacity formula. The standard quota is 1 GiB.
     pub staging_quota_bytes: u64,
+    /// The most staged pages plus distinct external references per spool.
+    /// Duplicate seals and shared references count once; retention and
+    /// settlement release entries. Zero refuses every new page. Passing the
+    /// limit is the host outcome `StageFault::EntryLimit` (or
+    /// `PageRefusal::StagingEntryLimit` over the worker wire).
+    /// Standard: 16,384 (`1 GiB / 64 KiB`), over 62 times the measured
+    /// replay maximum of 261 entries (FIG-6452). See [`PoolConfig`] for
+    /// capacity, measurements and the independent byte quota.
+    pub staging_max_entries: u64,
     /// The directory for the parent's page spools. `None` uses
     /// `std::env::temp_dir().join("lash-staging")`. See [`PoolConfig`] for
     /// contents, per-session peak capacity, measurement and cleanup lifetime.
@@ -259,7 +274,8 @@ impl PoolConfig {
     /// `dhat-heap` feature (20 s at standard bounds). Serving-worker silence
     /// and checkout deadlines keep their configured bounds;
     /// working policy uses `WorkerTuning::standard`; confinement uses
-    /// `WorkerConfinement::standard`; an activation stages at most 1 GiB. FIG-4157/4162 measured
+    /// `WorkerConfinement::standard`; a spool stages at most 1 GiB and 16,384
+    /// entries (pages plus distinct external refs). FIG-4157/4162 measured
     /// synthetic workloads, not optimal concurrency or arbitrary guest spend.
     pub fn standard(entry: WorkerEntry) -> Self {
         Self {
@@ -284,6 +300,7 @@ impl PoolConfig {
             restart_window: Duration::from_secs(60),
             max_restarts: 8,
             staging_quota_bytes: 1 << 30,
+            staging_max_entries: (1 << 30) / (64 << 10),
             staging_dir: None,
         }
     }

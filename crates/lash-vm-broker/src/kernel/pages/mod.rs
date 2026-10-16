@@ -69,6 +69,9 @@ pub use spool::{DiskSpool, SpoolRoot};
 /// A spool fault as the heap fault the activation's page port answers.
 pub(super) fn staging(fault: StageFault) -> HeapFault {
     match fault {
+        StageFault::EntryLimit { .. } => HeapFault::Exhausted {
+            resource: HostResource::StagingEntries,
+        },
         StageFault::Quota { .. } => HeapFault::Exhausted {
             resource: HostResource::StagingBytes,
         },
@@ -930,6 +933,7 @@ fn store_refusal(error: DurableError) -> PageRefusal {
 fn stage_refusal(fault: StageFault) -> PageRefusal {
     match fault {
         StageFault::Quota { quota } => PageRefusal::StagingExhausted { bytes: quota },
+        StageFault::EntryLimit { limit } => PageRefusal::StagingEntryLimit { entries: limit },
         StageFault::HashMismatch(_) => PageRefusal::Corrupt,
         StageFault::Unauthorized { .. } => PageRefusal::Unauthorized,
         StageFault::Missing(_) => PageRefusal::Missing,

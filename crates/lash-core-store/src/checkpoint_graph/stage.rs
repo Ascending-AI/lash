@@ -41,6 +41,9 @@ pub struct StageUsage {
 pub enum StageFault {
     #[error("the staging quota of {quota} bytes is exhausted")]
     Quota { quota: u64 },
+    /// Staged pages plus distinct external references exceed host policy.
+    #[error("the staging entry limit of {limit} entries is exhausted")]
+    EntryLimit { limit: u64 },
     #[error("staged page {0} does not hash to its identity")]
     HashMismatch(NodeId),
     /// A sealed page names a child that is neither protected nor staged.

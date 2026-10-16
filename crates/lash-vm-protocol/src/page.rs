@@ -285,6 +285,8 @@ pub enum PageRefusal {
     Deadline,
     #[error("the store is unavailable")]
     StoreUnavailable,
+    #[error("the activation's staging entry limit of {entries} entries is exhausted")]
+    StagingEntryLimit { entries: u64 },
 }
 
 impl PageRefusal {
@@ -332,6 +334,8 @@ pub enum HostResource {
     StagingBytes,
     ReadBatch,
     HostWork,
+    /// Staged pages plus distinct external references in the parent's spool.
+    StagingEntries,
 }
 
 impl HeapFault {

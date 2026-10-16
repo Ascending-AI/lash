@@ -188,7 +188,7 @@ fn id_of(entry: &ManifestEntry) -> NodeId {
 #[test]
 fn a_manifest_is_the_reachable_staged_dag_in_digest_order() {
     let dir = tempfile::tempdir().expect("dir");
-    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let root = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("root");
     let mut spool = root.spool(StageLeaseId(1)).expect("spool");
     let (c1, c2) = (page("c1", &[]), page("c2", &[]));
     let committed: BTreeSet<NodeId> = [c1.id, c2.id].into();
@@ -278,7 +278,7 @@ const TOUCHES_PER_PAGE: u64 = 12;
 #[test]
 fn a_large_candidate_builds_streams_and_settles_in_bounded_memory_and_linear_work() {
     let dir = tempfile::tempdir().expect("dir");
-    let root = SpoolRoot::open(dir.path(), 64 << 20).expect("root");
+    let root = SpoolRoot::open(dir.path(), 64 << 20, 1 << 20).expect("root");
     let mut spool = root.spool(StageLeaseId(1)).expect("spool");
     let committed = page("committed", &[]);
     let protected = |id: &NodeId| *id == committed.id;
@@ -354,7 +354,7 @@ fn a_large_candidate_builds_streams_and_settles_in_bounded_memory_and_linear_wor
 #[tokio::test]
 async fn staging_refuses_an_unprotected_child() {
     let dir = tempfile::tempdir().expect("dir");
-    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let root = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("root");
     let mut spool = root.spool(StageLeaseId(1)).expect("spool");
     let stranger = page("stranger", &[]);
     let parent = page("parent", &[stranger.id]);
@@ -424,7 +424,7 @@ async fn staging_refuses_an_unprotected_child() {
 #[tokio::test]
 async fn a_reused_committed_child_resolves_after_a_spill() {
     let dir = tempfile::tempdir().expect("dir");
-    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let root = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("root");
     let store = Arc::new(Committed::default());
     let reused = page("reused", &[]);
     let base = page("base", &[reused.id]);
@@ -486,7 +486,7 @@ async fn a_reused_committed_child_resolves_after_a_spill() {
 #[tokio::test]
 async fn an_ambiguous_publication_keeps_its_spool_until_resolved() {
     let dir = tempfile::tempdir().expect("dir");
-    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let root = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("root");
     let store = Arc::new(Committed::default());
     let kept = page("kept", &[]);
     let base = page("base", &[kept.id]);
@@ -603,7 +603,7 @@ async fn a_quota_failure_is_a_host_outcome() {
     let small = page("small", &[]);
     let large = page(&"x".repeat(2_000), &[]);
     let quota = small.len() + 10;
-    let root = SpoolRoot::open(dir.path(), quota).expect("root");
+    let root = SpoolRoot::open(dir.path(), quota, 1 << 20).expect("root");
     let store = Arc::new(Committed::default());
     let base = page("base", &[]);
     store.commit(&base);
@@ -742,7 +742,7 @@ impl LeasedReads for Expiring {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_warm_cache_read_after_the_lease_expired_is_refused_like_a_cold_one() {
     let dir = tempfile::tempdir().expect("dir");
-    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let root = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("root");
     let clock = lash_durable_test::SimClock::new();
     let ttl = Duration::from_secs(3);
     let store = Arc::new(Expiring::new(&clock, ttl));
@@ -799,7 +799,7 @@ async fn a_warm_cache_read_after_the_lease_expired_is_refused_like_a_cold_one() 
 async fn a_held_activation_renews_its_lease_through_a_tool_twice_its_ttl() {
     use lash_core_execution::runtime::Clock;
     let dir = tempfile::tempdir().expect("dir");
-    let root = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+    let root = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("root");
     let clock = lash_durable_test::SimClock::new();
     let ttl = Duration::from_secs(3);
     let store = Arc::new(Expiring::new(&clock, ttl));
@@ -888,7 +888,7 @@ async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
     store.commit(&base);
     let before = store.pages.lock().expect("pages").clone();
     for cut in ["after a spill", "after a candidate"] {
-        let crashed = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+        let crashed = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("root");
         let mut pages = activation(&store, &crashed, base.id);
         let top = page(cut, &[]);
         let top_cap = sealed(seal(&mut pages, &top, Vec::new()).await);
@@ -902,7 +902,7 @@ async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
                 )
                 .expect("candidate");
         }
-        let live = SpoolRoot::open(dir.path(), 1 << 20).expect("a live sibling");
+        let live = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("a live sibling");
         assert_eq!(
             parent_dirs(dir.path()),
             2,
@@ -912,7 +912,7 @@ async fn a_crashed_parents_spool_is_reaped_and_the_committed_root_stands() {
         std::mem::forget(pages);
         drop(crashed);
         drop(live);
-        let next = SpoolRoot::open(dir.path(), 1 << 20).expect("root");
+        let next = SpoolRoot::open(dir.path(), 1 << 20, 1 << 20).expect("root");
         assert_eq!(
             parent_dirs(dir.path()),
             1,
@@ -953,7 +953,7 @@ fn parents_opening_at_once_never_reap_a_live_sibling() {
                     for open in 0..OPENS {
                         // A parent that drops its root dies: the next open
                         // reaps its directory.
-                        let root = match SpoolRoot::open(dir.path(), 1 << 20) {
+                        let root = match SpoolRoot::open(dir.path(), 1 << 20, 1 << 20) {
                             Ok(root) => root,
                             Err(error) => {
                                 failures.push(format!("open {open}: {error}"));
@@ -980,4 +980,83 @@ fn parents_opening_at_once_never_reap_a_live_sibling() {
         PARENTS * OPENS,
         &failures[..failures.len().min(5)]
     );
+}
+
+/// FIG-6452: the spool counts staged pages and distinct external refs once,
+/// refuses before admission, and releases capacity on retention/settlement.
+#[test]
+fn an_entry_limit_counts_distinct_refs_and_releases_removed_entries() {
+    let dir = tempfile::tempdir().expect("dir");
+    let root = SpoolRoot::open(dir.path(), 1 << 20, 4).expect("root");
+    let mut spool = root.spool(StageLeaseId(1)).expect("spool");
+    let a = page("external-a", &[]);
+    let b = page("external-b", &[]);
+    let first = page("first", &[a.id, a.id]);
+    let second = page("second", &[a.id]);
+    let third = page("third", &[b.id]);
+    spool
+        .seal(first.clone(), &|_| true)
+        .expect("page plus one ref");
+    spool
+        .seal(first.clone(), &|_| true)
+        .expect("duplicate seal");
+    spool
+        .seal(second.clone(), &|_| true)
+        .expect("shared ref counts once");
+    let before = spool.usage();
+    assert_eq!(
+        spool.seal(third.clone(), &|_| true),
+        Err(StageFault::EntryLimit { limit: 4 })
+    );
+    assert_eq!(spool.usage(), before);
+    assert!(!spool.contains(&third.id));
+    spool
+        .seal(a.clone(), &|_| true)
+        .expect("external becomes staged without a new entry");
+    spool
+        .seal(b.clone(), &|_| true)
+        .expect("exactly at the limit");
+    let extra = page("extra", &[]);
+    assert_eq!(
+        spool.seal(extra.clone(), &|_| true),
+        Err(StageFault::EntryLimit { limit: 4 })
+    );
+    spool.retain(&[second.id]).expect("keeps second and a");
+    spool
+        .seal(third.clone(), &|_| true)
+        .expect("retention freed first and b");
+    let commit = CommitId([61; 32]);
+    drop(spool.candidate(second.id, None, commit).expect("candidate"));
+    spool.settle(commit).expect("settles second and a");
+    spool
+        .seal(extra.clone(), &|_| true)
+        .expect("settlement freed entries");
+    let last = page("last", &[]);
+    spool
+        .seal(last, &|_| true)
+        .expect("fills released capacity");
+    assert_eq!(
+        spool.seal(first.clone(), &|_| true),
+        Err(StageFault::EntryLimit { limit: 4 })
+    );
+    let commit = CommitId([62; 32]);
+    drop(
+        spool
+            .candidate(third.id, None, commit)
+            .expect("external candidate"),
+    );
+    spool
+        .settle(commit)
+        .expect("settlement releases the last external ref");
+    spool
+        .seal(first, &|_| true)
+        .expect("page and ref fit again");
+
+    let zero = SpoolRoot::open(dir.path(), 1 << 20, 0).expect("zero limit");
+    let mut empty = zero.spool(StageLeaseId(2)).expect("empty spool");
+    assert_eq!(
+        empty.seal(extra, &|_| true),
+        Err(StageFault::EntryLimit { limit: 0 })
+    );
+    assert_eq!(empty.usage().pages, 0);
 }

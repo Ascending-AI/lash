@@ -441,6 +441,9 @@ fn refused(refusal: PageRefusal, page: PageId) -> HeapFault {
         PageRefusal::BatchTooLarge { .. } => HeapFault::Exhausted {
             resource: HostResource::ReadBatch,
         },
+        PageRefusal::StagingEntryLimit { .. } => HeapFault::Exhausted {
+            resource: HostResource::StagingEntries,
+        },
         PageRefusal::StagingExhausted { .. } => HeapFault::Exhausted {
             resource: HostResource::StagingBytes,
         },

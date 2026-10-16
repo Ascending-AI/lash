@@ -5,7 +5,8 @@
 //! digest, and the directory is the index, so the parent's memory holds the
 //! spool's usage and nothing per page. Writes stream straight to disk
 //! through a rename, so a buffer holds at most the page being written. A
-//! quota bounds the bytes staged.
+//! quota bounds the bytes staged; a host entry limit bounds the staged pages
+//! plus distinct external references and therefore manifest scratch.
 //!
 //! A candidate is built at a park: a walk of the candidate root's staged
 //! DAG that stops at committed references, marking each page it reaches in
@@ -234,13 +235,15 @@ impl SpoolMeter {
 pub struct SpoolRoot {
     dir: PathBuf,
     quota: u64,
+    max_entries: u64,
     /// Held locked until the process ends.
     _lock: fs::File,
 }
 
 impl SpoolRoot {
     /// Opens this process's directory under `parent`, a directory the host
-    /// gives its parents for staging, with a quota of `quota` bytes per
+    /// gives its parents for staging, with a quota of `quota` bytes and
+    /// at most `max_entries` staged pages plus distinct external references per
     /// spool. The spools of parents that died are deleted first: a spool
     /// never survives its parent, and their activations resume from their
     /// committed roots.
@@ -248,7 +251,7 @@ impl SpoolRoot {
     /// # Errors
     ///
     /// [`StageFault::Io`] when the directory cannot be prepared.
-    pub fn open(parent: &Path, quota: u64) -> Result<Self, StageFault> {
+    pub fn open(parent: &Path, quota: u64, max_entries: u64) -> Result<Self, StageFault> {
         fs::create_dir_all(parent).map_err(|error| io(&error))?;
         // Parents open one at a time: a sibling's directory is reaped only
         // after its open, which holds its lock from the moment the lock
@@ -274,6 +277,7 @@ impl SpoolRoot {
         Ok(Self {
             dir,
             quota,
+            max_entries,
             _lock: lock,
         })
     }
@@ -287,6 +291,7 @@ impl SpoolRoot {
         let dir = self.dir.join(format!("{:016x}", lease.0));
         fs::create_dir(&dir).map_err(|error| io(&error))?;
         fs::create_dir(dir.join("pages")).map_err(|error| io(&error))?;
+        fs::create_dir(dir.join("refs")).map_err(|error| io(&error))?;
         Ok(DiskSpool {
             lease,
             dir,
@@ -296,6 +301,8 @@ impl SpoolRoot {
                 quota_bytes: self.quota,
             },
             candidate: None,
+            entries: 0,
+            max_entries: self.max_entries,
             meter: Arc::default(),
         })
     }
@@ -314,6 +321,8 @@ pub struct DiskSpool {
     dir: PathBuf,
     usage: StageUsage,
     candidate: Option<Candidate>,
+    entries: u64,
+    max_entries: u64,
     meter: Arc<SpoolMeter>,
 }
 
@@ -329,6 +338,50 @@ impl DiskSpool {
 
     fn page(&self, id: &NodeId) -> PathBuf {
         self.pages().join(id.to_hex())
+    }
+
+    /// Incoming edges from staged pages, including edges to staged children.
+    /// The count is a filename under the child's digest directory. These
+    /// empty files add no content bytes to Q + 99 * P, and the index stays
+    /// on disk rather than growing a per-entry map in the parent.
+    fn references(&self, id: &NodeId) -> Result<u64, StageFault> {
+        let dir = self.dir.join("refs").join(id.to_hex());
+        let mut names = match fs::read_dir(dir) {
+            Ok(names) => names,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(io(&error)),
+        };
+        let entry = names
+            .next()
+            .transpose()
+            .map_err(|error| io(&error))?
+            .ok_or_else(|| StageFault::Io("a staging reference count is missing".to_owned()))?;
+        entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse().ok())
+            .ok_or_else(|| StageFault::Io("a staging reference count is invalid".to_owned()))
+    }
+
+    fn reference(&mut self, id: &NodeId, add: bool) -> Result<(), StageFault> {
+        let old = self.references(id)?;
+        let next = if add { old + 1 } else { old - 1 };
+        let dir = self.dir.join("refs").join(id.to_hex());
+        match (old, next) {
+            (0, _) => {
+                fs::create_dir(&dir).map_err(|error| io(&error))?;
+                fs::write(dir.join(next.to_string()), []).map_err(|error| io(&error))?;
+                self.entries += u64::from(!self.staged(id));
+            }
+            (_, 0) => {
+                fs::remove_file(dir.join(old.to_string())).map_err(|error| io(&error))?;
+                fs::remove_dir(&dir).map_err(|error| io(&error))?;
+                self.entries -= u64::from(!self.staged(id));
+            }
+            _ => fs::rename(dir.join(old.to_string()), dir.join(next.to_string()))
+                .map_err(|error| io(&error))?,
+        }
+        Ok(())
     }
 
     fn staged(&self, id: &NodeId) -> bool {
@@ -364,7 +417,14 @@ impl DiskSpool {
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(io(&error)),
         };
+        let bytes = self.read(id)?;
+        let envelope =
+            parse_envelope(&bytes, Some(*id)).map_err(|_| StageFault::HashMismatch(*id))?;
         fs::remove_file(&path).map_err(|error| io(&error))?;
+        self.entries -= u64::from(self.references(id)? == 0);
+        for child in envelope.children.iter() {
+            self.reference(&child, false)?;
+        }
         self.usage.pages -= 1;
         self.usage.bytes -= len;
         Ok(())
@@ -410,10 +470,29 @@ impl StageSpool for DiskSpool {
                 quota: self.usage.quota_bytes,
             });
         }
+        // The canonical child table is distinct. Count the union of staged
+        // pages and their direct children before writing anything; an external
+        // reference that becomes staged already occupies its entry.
+        let own_entry = u64::from(self.references(&page.id)? == 0);
+        let mut added = own_entry;
+        for child in envelope.children.iter() {
+            if !self.staged(&child) && self.references(&child)? == 0 {
+                added += 1;
+            }
+        }
+        if self.entries.saturating_add(added) > self.max_entries {
+            return Err(StageFault::EntryLimit {
+                limit: self.max_entries,
+            });
+        }
         let target = self.page(&page.id);
         let partial = self.pages().join(format!(".partial-{}", page.id.to_hex()));
         fs::write(&partial, &page.bytes).map_err(|error| io(&error))?;
         fs::rename(&partial, &target).map_err(|error| io(&error))?;
+        self.entries += own_entry;
+        for child in envelope.children.iter() {
+            self.reference(&child, true)?;
+        }
         #[cfg(feature = "perf-witness")]
         lash_core_execution::perf_witness::record_spool_bytes(page.bytes.len());
         self.usage.pages += 1;
