@@ -647,6 +647,7 @@ mod named_component_laws {
         hooks: Mutex<Vec<String>>,
         /// Session plugin builds for a process owner.
         process_plugin_builds: AtomicUsize,
+        offered: Mutex<Option<Arc<lash::plugins::ToolCatalog>>>,
     }
 
     impl Witness {
@@ -709,6 +710,7 @@ mod named_component_laws {
         key: ProcessConfigKey<()>,
         shape: Shape,
         witness: Arc<Witness>,
+        authority: bool,
     }
 
     impl ProcessComponentFactory for Counting {
@@ -755,8 +757,12 @@ mod named_component_laws {
                     reg.tool_calls().check_result(key, check)?;
                 }
                 Shape::Tool => {
-                    reg.tools()
-                        .provider(lash::tool_provider_key!("record"), |_, _| Ok(a_provider()))?;
+                    let provider = if self.authority {
+                        lash::tool_provider_key!("tools")
+                    } else {
+                        lash::tool_provider_key!("record")
+                    };
+                    reg.tools().provider(provider, |_, _| Ok(a_provider()))?;
                     reg.tool_calls().check_result(key, check)?;
                 }
                 Shape::Presenter => {
@@ -795,7 +801,7 @@ mod named_component_laws {
         }
     }
 
-    struct Inert;
+    struct Inert(Arc<Witness>);
 
     impl lash::plugins::SessionPlugin for Inert {
         fn id(&self) -> &'static str {
@@ -806,6 +812,23 @@ mod named_component_laws {
         fn declare(
             reg: &mut lash_core::plugin::PluginRegistrar<Self>,
         ) -> std::result::Result<(), lash_core::plugin::PluginError> {
+            reg.prompt().section(
+                lash_core::plugin::prompt::PromptSectionSpec::new(
+                    lash::prompt::PromptSectionKey::new("authority-offer")
+                        .expect("the probe section key"),
+                    lash::prompt::PromptPlacement::CurrentContext,
+                ),
+                |this, _| {
+                    let witness = Arc::clone(&this.0);
+                    Ok(Arc::new(
+                        move |input: &lash_core::plugin::prompt::PromptInput<'_>| {
+                            *witness.offered.lock_recover() =
+                                Some(Arc::clone(input.offered().catalog()));
+                            Ok(lash_core::plugin::prompt::SectionText::Omit)
+                        },
+                    ))
+                },
+            )?;
             Ok(())
         }
     }
@@ -831,7 +854,7 @@ mod named_component_laws {
                     if matches!(ctx.owner, lash_core::RuntimeOwner::Process(_)) {
                         self.0.process_plugin_builds.fetch_add(1, Ordering::SeqCst);
                     }
-                    Ok(Arc::new(Inert))
+                    Ok(Arc::new(Inert(Arc::clone(&self.0))))
                 },
             ))
         }
@@ -980,11 +1003,6 @@ mod named_component_laws {
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
-                lash::plugins::PluginDeclaration::initial(A.component()),
-                lash::plugins::PluginSpec::new()
-                    .with_tool_provider(lash::tool_provider_key!("record"), a_provider()),
-            )))
             .plugin(Arc::new(CountingPlugin(Arc::clone(&witness))))
             .plugin(Arc::new(
                 lash::process_controls::SessionProcessAdminPluginFactory::new(
@@ -993,6 +1011,10 @@ mod named_component_laws {
                 ),
             ));
         if authority {
+            builder = builder.plugin(Arc::new(lash::tools::SelectedToolsPlugin::new(
+                A.component(),
+                a_provider(),
+            )));
             builder = builder.tools(
                 lash::tool_provider_key!("authority"),
                 Arc::new(lash::tools::StaticToolProvider::new(
@@ -1000,6 +1022,12 @@ mod named_component_laws {
                     AnswerA,
                 )),
             );
+        } else {
+            builder = builder.plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+                lash::plugins::PluginDeclaration::initial(A.component()),
+                lash::plugins::PluginSpec::new()
+                    .with_tool_provider(lash::tool_provider_key!("record"), a_provider()),
+            )));
         }
         for (key, shape) in [
             (CHECK, Shape::Check),
@@ -1014,6 +1042,7 @@ mod named_component_laws {
                     key,
                     shape,
                     witness: Arc::clone(&witness),
+                    authority,
                 }),
                 key,
             );
@@ -1204,6 +1233,7 @@ mod named_component_laws {
     struct AuthorityProbe {
         calls: AtomicUsize,
         override_bytes: Mutex<Option<Option<Vec<u8>>>>,
+        override_env_ref: Mutex<Option<lash::process::ProcessEnvRef>>,
     }
 
     struct CountingAuthority {
@@ -1222,7 +1252,14 @@ mod named_component_laws {
         > {
             self.reads.calls.fetch_add(1, Ordering::SeqCst);
             let result = self.inner.process_authority(id).await?;
-            Ok(result.map(|(record, bytes)| {
+            Ok(result.map(|(mut record, bytes)| {
+                if let Some(env_ref) = self.reads.override_env_ref.lock_recover().clone() {
+                    if let lash_core::ProcessInput::Engine { launch, .. } =
+                        Arc::make_mut(&mut record.input)
+                    {
+                        launch.env = env_ref;
+                    }
+                }
                 let bytes = if record.env_ref().is_some() {
                     self.reads
                         .override_bytes
@@ -1352,12 +1389,57 @@ mod named_component_laws {
             1,
             "one read by reference"
         );
-        // The host's current offer no longer names A's tool: the read
-        // reports the linked effect as excess, by path and tool.
-        let offered = lash::plugins::ToolCatalog::from_tool_definitions(vec![
-            a_definition("b"),
-            a_definition("c"),
-        ]);
+        let session = world
+            .core
+            .session("authority-session".into())
+            .open()
+            .await
+            .unwrap();
+        let offering_a = world.witness.offered.lock_recover().clone().unwrap();
+        assert!(
+            may_address_process(&world.core.processes(), &record.id, &offering_a)
+                .await
+                .unwrap()
+        );
+        let config = session.admin().config();
+        let revision = config.revision().await.unwrap();
+        let outcome = config
+            .apply(
+                lash::config::ConfigWrite::new("remove-linked-tool", revision),
+                lash::config::ConfigTransaction::new().then_entry(
+                    lash::tools::SetToolSelection {
+                        tools: lash::tools::ToolSelection::AllExcept(vec![
+                            lash::tools::ToolId::from(format!("tool:{A_TOOL}")),
+                        ]),
+                    }
+                    .to(A.component()),
+                ),
+            )
+            .await
+            .unwrap()
+            .await_outcome(&config)
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                outcome,
+                lash::config::ConfigTransactionOutcome::Applied { .. }
+            ),
+            "the provider narrowing commits: {outcome:?}"
+        );
+        assert_eq!(config.revision().await.unwrap(), revision + 1);
+        *world.witness.offered.lock_recover() = None;
+        session
+            .send(lash::TurnInput::text("read the narrowed offer"))
+            .output()
+            .await
+            .unwrap();
+        let offered = world.witness.offered.lock_recover().clone().unwrap();
+        assert!(!offered.has_callable_tool(A_TOOL));
+        assert!(offered.has_callable_tool("b"));
+        assert!(offered.has_callable_tool("c"));
+        // A committed session narrowing leaves the recorded env, settings and
+        // provenance unchanged, while its linked effect is now excess.
         assert_eq!(
             world
                 .core
@@ -1381,10 +1463,6 @@ mod named_component_laws {
                 .await
                 .unwrap()
         );
-        let offering_a = lash::plugins::ToolCatalog::from_tool_definitions(vec![
-            a_definition(A_TOOL),
-            a_definition("b"),
-        ]);
         assert!(
             may_address_process(&world.core.processes(), &record.id, &offering_a)
                 .await
@@ -1495,6 +1573,33 @@ mod named_component_laws {
                 lash::plugins::ProcessEnvLoadError::Mismatched(_)
             ))
         ));
+        // A matching content address does not imply a readable environment.
+        // Both reads must preserve the decoder's cause rather than report a mismatch.
+        let invalid = b"{}";
+        let invalid_ref = lash_core_store::process_identity::process_env_ref_for_bytes(invalid);
+        let cause = ProcessEnv::from_store_bytes(invalid)
+            .unwrap_err()
+            .to_string();
+        *reads.override_env_ref.lock_recover() = Some(invalid_ref.clone());
+        for result in [
+            world
+                .core
+                .processes()
+                .environment(&record.id)
+                .await
+                .map(|_| ()),
+            world.core.processes().env(&invalid_ref).await.map(|_| ()),
+        ] {
+            match result {
+                Err(lash::EmbedError::ProcessEnvLoad(
+                    lash::plugins::ProcessEnvLoadError::Undecodable { env_ref, message },
+                )) => {
+                    assert_eq!(env_ref, invalid_ref);
+                    assert_eq!(message, cause, "the decode cause is retained");
+                }
+                other => panic!("correctly addressed invalid bytes must be Undecodable: {other:?}"),
+            }
+        }
         assert_eq!(world.witness.builds(A), builds);
     }
 

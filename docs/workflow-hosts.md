@@ -562,8 +562,8 @@ grants have separate helpers in `lash::process::authority`.
 
 This short host check is compiled in
 [processes_evidence.rs](../crates/lash/tests/processes_evidence.rs). It admits
-engine processes whose tool names fit and leaves child-session authorization
-for the host's separate policy:
+engine processes whose linked tool identities and dispatch surfaces are
+offered, and leaves child-session authorization for the host's separate policy:
 
 ```rust
 async fn may_address_process(

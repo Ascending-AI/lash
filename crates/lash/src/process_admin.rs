@@ -63,7 +63,7 @@ fn decode_environment(
     env_ref: &lash_core::ProcessEnvRef,
     bytes: &[u8],
 ) -> Result<lash_core::ProcessEnv> {
-    if !env_ref.matches_store_bytes(bytes) {
+    if lash_core_store::process_identity::process_env_ref_for_bytes(bytes) != *env_ref {
         return Err(crate::plugins::ProcessEnvLoadError::Mismatched(env_ref.clone()).into());
     }
     lash_core::ProcessEnv::from_store_bytes(bytes).map_err(|error| {

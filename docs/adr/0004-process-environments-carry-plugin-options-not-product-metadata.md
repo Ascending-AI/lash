@@ -3,9 +3,10 @@
 ## Decision
 
 An engine process runs under the complete immutable `ProcessEnv` its starter
-states. It carries model data, attachment rules, limits, Restricted tool
-access, capability refs and ordered process component configs. Each component
-declares one format for both its config and step-state namespace. A component
+states. It carries model data, attachment rules, limits, exact effect
+links retaining provider, tool identity and dispatch surface, capability refs
+and ordered process component configs. Each component declares one format for
+both its config and step-state namespace. A component
 decodes its own config to reconstruct its providers, catalog contributions,
 hooks, presentation and named-session read grants. These are process
 components from a separate registry; session plugin options are a session's
