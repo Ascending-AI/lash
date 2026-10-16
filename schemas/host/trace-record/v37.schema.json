@@ -5732,7 +5732,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/trace-record/v38",
+  "$id": "https://lash.dev/schemas/trace-record/v37",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "One durable trace record: the envelope fields plus the flattened\nevent, whose `type` tag names the variant.",
   "oneOf": [
@@ -6869,7 +6869,7 @@
     },
     "schema_version": {
       "enum": [
-        38
+        37
       ],
       "format": "uint32",
       "minimum": 0,
@@ -6888,6 +6888,6 @@
   ],
   "title": "TraceRecord",
   "type": "object",
-  "x-lash-schema-version": 38,
+  "x-lash-schema-version": 37,
   "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
 }
