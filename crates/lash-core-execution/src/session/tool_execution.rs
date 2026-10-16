@@ -338,7 +338,6 @@ impl RuntimeExecutionContext<'_> {
                             std::sync::Arc::clone(&self.dispatch.state),
                             std::sync::Arc::new(facts),
                             std::sync::Arc::clone(&self.dispatch.attachment_store),
-                            duration_ms,
                             &plan,
                         ),
                     )

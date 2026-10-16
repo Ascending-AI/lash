@@ -925,7 +925,7 @@ async fn tools_with_a_lifecycle_observer_certify_full() {
                     let observed = Arc::clone(&observed);
                     Box::pin(async move {
                         let name = match event {
-                            PluginLifecycleEvent::SessionRestored(_) => "restored",
+                            PluginLifecycleEvent::SessionRestored { .. } => "restored",
                             PluginLifecycleEvent::TurnFinalized(_) => "finalized",
                             PluginLifecycleEvent::SessionConfigChanged(_) => "config-changed",
                         };

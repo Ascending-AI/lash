@@ -998,7 +998,8 @@ pub mod plugins {
     /// across frame and fork boundaries. Advance progress after successful,
     /// idempotent output and schedule reconciliation independently of hooks.
     pub use lash_core::{
-        facade_support::PluginLifecycleEvent, facade_support::SessionConfigChangedContext,
+        facade_support::ModelCallAddress, facade_support::PluginLifecycleEvent,
+        facade_support::SessionConfigChangedContext, facade_support::SessionConfigField,
     };
     pub use lash_plugin_standard_compaction::{
         OMITTED_ATTACHMENT_PLACEHOLDER, StandardCompactionConfig, StandardCompactionPluginFactory,

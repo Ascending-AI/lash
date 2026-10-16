@@ -22,6 +22,10 @@ mod host_forwarder;
 mod support;
 
 use support::*;
+
+/// Local metadata from the provider's actual attempt scope; not a stream event
+/// or a stored receipt field.
+type ScopedStreamRx = tokio::sync::mpsc::UnboundedReceiver<(LlmStreamEvent, Option<u32>)>;
 mod terminal;
 
 pub(in crate::runtime) use drain::CallDrains;
@@ -87,6 +91,7 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
         chunk: String,
+        address: &crate::plugin::ModelCallAddress,
     ) -> Result<StreamChunkOutcome, LlmCallError> {
         if !self.session.plugins().has_assistant_stream_hooks() {
             return Ok(StreamChunkOutcome {
@@ -100,7 +105,7 @@ impl RuntimeTurnDriver<'_> {
         let transforms = self
             .session
             .plugins()
-            .transform_assistant_stream(&self.session_id, chunk)
+            .transform_assistant_stream(address, chunk)
             .await
             .map_err(|err| LlmCallError {
                 message: err.to_string(),
@@ -151,14 +156,15 @@ impl RuntimeTurnDriver<'_> {
         capsule: &crate::runtime::AssistantStreamCapsule,
     ) -> Result<crate::runtime::RuntimeAssistantResponseHooksOutcome, RuntimeEffectControllerError>
     {
+        let address = self.receipt_hook_address()?.clone();
         let original = response.clone();
         let plugins = self.session.plugins();
         let stream_hook_states = plugins
-            .replay_assistant_stream(&self.session_id, capsule)
+            .replay_assistant_stream(&address, capsule)
             .await
             .map_err(response_derivation_error)?;
         let transforms = plugins
-            .transform_assistant_response(&self.session_id, response, plan, &stream_hook_states)
+            .transform_assistant_response(&address, response, plan, &stream_hook_states)
             .await
             .map_err(response_derivation_error)?;
         let mut current: Option<LlmResponse> = None;
@@ -182,12 +188,27 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         capsule: &crate::runtime::AssistantStreamCapsule,
     ) -> Result<(), RuntimeEffectControllerError> {
+        if capsule.finishing().1.is_empty() {
+            return Ok(());
+        }
+        let address = self.receipt_hook_address()?;
         self.session
             .plugins()
-            .replay_assistant_stream(&self.session_id, capsule)
+            .replay_assistant_stream(address, capsule)
             .await
             .map(drop)
             .map_err(response_derivation_error)
+    }
+
+    fn receipt_hook_address(
+        &self,
+    ) -> Result<&crate::plugin::ModelCallAddress, RuntimeEffectControllerError> {
+        self.model_call_address.as_ref().ok_or_else(|| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "a model receipt with assistant callbacks must contain its call identity",
+            )
+        })
     }
 
     /// Runs one unjournaled attempt of an admitted model call on the
@@ -216,11 +237,22 @@ impl RuntimeTurnDriver<'_> {
             crate::runtime::AssistantStreamCapsule::new(stream_callbacks, finished_callbacks);
         // What a stream hook still holds of an earlier stream on this worker,
         // one whose derivation never ran here, is not this stream's.
-        self.reset_assistant_stream_hooks().await;
+        let address = crate::plugin::ModelCallAddress {
+            session_id: self.session_id.clone(),
+            turn_id: self.turn_id.clone(),
+            call_id: crate::provider::call_id_for_scope(&request.scope),
+            attempt: request.scope.attempt,
+        };
+        self.reset_assistant_stream_hooks(&address).await;
         let LlmCallDispatch { provider } = dispatch;
-        let (llm_stream_tx, mut llm_stream_rx) = crate::session_model::llm_stream_channel();
+        let (llm_stream_tx, mut llm_stream_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut request = (*request).clone();
-        request.stream_events = transport_stream_events(&provider, Some(llm_stream_tx));
+        request.stream_events = Some(
+            crate::llm::types::LlmEventSender::new_scoped(move |event, scope| {
+                let _ = llm_stream_tx.send((event, scope.and_then(|scope| scope.attempt)));
+            })
+            .with_scope(request.scope.clone()),
+        );
         let protocol_suppressed_stop_sequences =
             request.generation.stop_sequences_suppressed_by_protocol();
         let request_model = request.model.wire_model().to_string();
@@ -321,6 +353,7 @@ impl RuntimeTurnDriver<'_> {
         let mut reasoning_attempt_correlations = Vec::new();
         let mut stream_chunks = Vec::new();
         let mut stream_state = LlmStreamState {
+            address,
             trace: call
                 .as_ref()
                 .map_or_else(|| self.trace.clone(), |call| call.standing().clone()),
@@ -829,7 +862,7 @@ impl RuntimeTurnDriver<'_> {
     /// for its state here: the call's derivation finishes them from its
     /// receipt. A failure is logged; the derivation discards their state
     /// again before it replays the receipt's stream.
-    async fn reset_assistant_stream_hooks(&mut self) {
+    async fn reset_assistant_stream_hooks(&mut self, address: &crate::plugin::ModelCallAddress) {
         if !self.session.plugins().has_assistant_stream_finished_hooks() {
             return;
         }
@@ -837,7 +870,7 @@ impl RuntimeTurnDriver<'_> {
             .session
             .plugins()
             .finish_assistant_stream(
-                &self.session_id,
+                address,
                 crate::plugin::AssistantStreamFinishReason::AttemptReset,
             )
             .await
@@ -1085,7 +1118,7 @@ impl RuntimeTurnDriver<'_> {
             state.stream_chunks.push(text.clone());
         }
         let outcome = self
-            .transform_assistant_stream_chunk(forwarder, text)
+            .transform_assistant_stream_chunk(forwarder, text, &state.address)
             .await?;
         if outcome.abort_requested {
             *state.abort_requested = true;
@@ -1191,9 +1224,10 @@ impl RuntimeTurnDriver<'_> {
     async fn forward_provider_stream_event(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
-        stream_event: LlmStreamEvent,
+        (stream_event, attempt): (LlmStreamEvent, Option<u32>),
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
+        state.address.attempt = attempt;
         if self.trace.is_observed()
             && matches!(
                 stream_event,
@@ -1209,7 +1243,7 @@ impl RuntimeTurnDriver<'_> {
         }
         match stream_event {
             LlmStreamEvent::AttemptReset => {
-                self.reset_assistant_stream_hooks().await;
+                self.reset_assistant_stream_hooks(&state.address).await;
                 state.stream_chunks.clear();
                 forwarder.send_semantic_turn_activity(
                     None,
@@ -1456,7 +1490,7 @@ impl RuntimeTurnDriver<'_> {
     async fn drain_provider_stream_queue(
         &mut self,
         forwarder: &mut ProviderHostForwarder<'_>,
-        llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,
+        llm_stream_rx: &mut ScopedStreamRx,
         state: &mut LlmStreamState<'_>,
     ) -> Result<(), LlmCallError> {
         while let Ok(stream_event) = llm_stream_rx.try_recv() {

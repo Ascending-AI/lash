@@ -346,9 +346,13 @@ impl LashRuntime {
         if let Err(error) = session
             .plugins()
             .dispatch(None)
-            .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored(
-                crate::SessionReadView::from_persisted_state(state),
-            ))
+            .emit_runtime_event(crate::PluginLifecycleEvent::SessionRestored {
+                session_id: state.session_id.clone(),
+                revision: state
+                    .checkpoint_ref
+                    .as_ref()
+                    .map(|_| crate::SessionRevision::new(state.head_revision)),
+            })
             .await
         {
             tracing::warn!(?error, "session restore observer failed");

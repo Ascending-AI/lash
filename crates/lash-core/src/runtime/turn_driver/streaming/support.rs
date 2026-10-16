@@ -65,7 +65,7 @@ pub(super) fn assistant_stream_finish_reason(
 /// Which of the recorded step's shift sources resolved first in one poll.
 pub(super) enum DrivePollOutcome<J> {
     Cancelled,
-    Stream(Box<Option<LlmStreamEvent>>),
+    Stream(Box<Option<(LlmStreamEvent, Option<u32>)>>),
     Joined(J),
 }
 
@@ -77,7 +77,7 @@ pub(super) enum DrivePollOutcome<J> {
 pub(super) async fn poll_drive_sources<T>(
     cancel: &CancellationToken,
     llm_task: &mut crate::task::JoinHandle<T>,
-    llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,
+    llm_stream_rx: &mut ScopedStreamRx,
     stream_closed: bool,
 ) -> DrivePollOutcome<Result<T, crate::task::JoinError>> {
     let cancelled = cancel.cancelled();

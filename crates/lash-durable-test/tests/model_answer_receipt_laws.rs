@@ -131,6 +131,10 @@ enum Hold {
 struct World {
     /// Provider sends of the turn's first call.
     sends: AtomicUsize,
+    hold_second: std::sync::atomic::AtomicBool,
+    stream_addresses: Mutex<Vec<lash::plugins::ModelCallAddress>>,
+    response_addresses: Mutex<Vec<lash::plugins::ModelCallAddress>>,
+    finished_addresses: Mutex<Vec<(Reason, lash::plugins::ModelCallAddress)>>,
     /// Every provider send.
     all_sends: AtomicUsize,
     /// What each response-hook run was handed: the response and the stream
@@ -214,6 +218,8 @@ enum Answer {
     AbortedCell,
     /// Two streamed deltas, then a provider failure no retry follows.
     Failed,
+    /// Two calls; the second retries once before answering.
+    RetryTool,
 }
 
 impl Answer {
@@ -227,15 +233,27 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("model-answer-receipt")
         .requires_streaming(true)
+        .generation_retry_guarantee(if matches!(answer, Answer::RetryTool) {
+            lash_core::provider::GenerationRetryGuarantee::Idempotent
+        } else {
+            lash_core::provider::GenerationRetryGuarantee::None
+        })
         .complete(move |request: LlmRequest| {
             let world = Arc::clone(&world);
             async move {
-                world.all_sends.fetch_add(1, Ordering::SeqCst);
+                let send_index = world.all_sends.fetch_add(1, Ordering::SeqCst);
                 let answered = request
                     .messages
                     .iter()
                     .any(|message| message.role == LlmRole::Assistant);
                 if answered {
+                    if matches!(answer, Answer::RetryTool) && send_index == 1 {
+                        stream(&request, &["retrying"]);
+                        return Err(lash_core::llm::transport::LlmTransportError::new("retry")
+                            .with_retry_verdict(
+                            lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                        ));
+                    }
                     return Ok(streamed(&request, &["do", "ne"]));
                 }
                 let send = world.sends.fetch_add(1, Ordering::SeqCst);
@@ -262,7 +280,7 @@ fn model(world: Arc<World>, answer: Answer) -> ProviderHandle {
                         let (middle, tail) = tail.split_at(6);
                         streamed(&request, &[head, middle, tail])
                     }
-                    Answer::Tool => {
+                    Answer::Tool | Answer::RetryTool => {
                         let mut response = streamed(&request, &["writing ", marker]);
                         response.parts.push(LlmOutputPart::ToolCall {
                             call_id: "call-write".to_owned(),
@@ -387,11 +405,16 @@ type Reason = lash::plugins::AssistantStreamFinishReason;
 fn plugin(world: &Arc<World>, hooks: Hooks) -> Arc<dyn lash::plugins::PluginFactory> {
     let chunks = Arc::new(Mutex::new(Vec::<String>::new()));
     let seen = Arc::clone(&chunks);
+    let streaming = Arc::clone(world);
     let mut spec = lash::plugins::PluginSpec::new();
     if hooks.stream() {
         spec = spec.with_assistant_stream(
             lash::hook_key!("chunks"),
             Arc::new(move |ctx| {
+                streaming
+                    .stream_addresses
+                    .lock_recover()
+                    .push(ctx.address.clone());
                 seen.lock_recover().push(ctx.chunk.clone());
                 Box::pin(async move {
                     Ok(lash::plugins::AssistantStreamTransform {
@@ -410,6 +433,10 @@ fn plugin(world: &Arc<World>, hooks: Hooks) -> Arc<dyn lash::plugins::PluginFact
                 let world = Arc::clone(&finishing);
                 let held = std::mem::take(&mut *chunks.lock_recover());
                 Box::pin(async move {
+                    world
+                        .finished_addresses
+                        .lock_recover()
+                        .push((ctx.reason, ctx.address));
                     if ctx.reason == Reason::AttemptReset {
                         return Ok(None);
                     }
@@ -434,6 +461,10 @@ fn plugin(world: &Arc<World>, hooks: Hooks) -> Arc<dyn lash::plugins::PluginFact
             Arc::new(move |ctx| {
                 let world = Arc::clone(&deriving);
                 Box::pin(async move {
+                    world
+                        .response_addresses
+                        .lock_recover()
+                        .push(ctx.address.clone());
                     let handed = json!({
                         "response": serde_json::to_value(&ctx.response).unwrap(),
                         "diagnostic": ctx.response.terminal_diagnostic,
@@ -443,7 +474,11 @@ fn plugin(world: &Arc<World>, hooks: Hooks) -> Arc<dyn lash::plugins::PluginFact
                         .derived
                         .lock_recover()
                         .push((handed, world.acknowledged.load(Ordering::SeqCst)));
-                    world.hold_if(Hold::Derivation).await;
+                    if !world.hold_second.load(Ordering::SeqCst)
+                        || !ctx.response.full_text().starts_with("writing ")
+                    {
+                        world.hold_if(Hold::Derivation).await;
+                    }
                     // A cell's text is the protocol's to parse: only prose
                     // is marked.
                     let mut response = ctx.response;
@@ -1814,4 +1849,94 @@ async fn a_successors_usage_and_parts_all_reach_the_feed() {
         "the uncut run publishes the answer's usage and parts: {uncut:#?}"
     );
     assert_eq!(derived_observations(true).await, uncut);
+}
+
+/// MODEL-HOOK-ADDRESS: live attempts are distinct; another node derives the
+/// second call from its receipt with the same address and no provider send.
+#[tokio::test]
+async fn model_hooks_keep_call_attempt_addresses_across_retry_and_receipt_takeover() {
+    let deployment = Deployment::new(
+        Setup::new(Answer::RetryTool, Hooks::All).b_on_its_own_core(Hooks::All),
+        |_| {},
+    )
+    .await;
+    deployment.world.hold_second.store(true, Ordering::SeqCst);
+    *deployment.world.hold.lock_recover() = Some(Hold::Derivation);
+    let _handle = deployment.send().await;
+    deployment
+        .until("second call's derivation holds", |d| d.world.held())
+        .await;
+    let before = deployment.world.response_addresses.lock_recover().clone();
+    let first = before.first().expect("the first call was derived").clone();
+    let second = before
+        .last()
+        .expect("the second call is being derived")
+        .clone();
+    assert_ne!(first.call_id, second.call_id);
+    assert_eq!(first.turn_id, second.turn_id);
+    assert_eq!(first.session_id, session());
+    assert_eq!(first.attempt, Some(1));
+    assert_eq!(second.attempt, Some(2));
+    assert!(
+        before
+            .iter()
+            .all(|address| address == &first || address == &second)
+    );
+    deployment.take_over().await;
+    deployment.settle().await;
+    let responses = deployment.world.response_addresses.lock_recover().clone();
+    assert!(
+        responses.len() > before.len(),
+        "the other node derived the receipt"
+    );
+    assert_eq!(&responses[..before.len()], before.as_slice());
+    assert!(
+        responses[before.len()..]
+            .iter()
+            .all(|address| address == &second),
+        "every repeated derivation keeps the receipt's answering address"
+    );
+    let finishes = deployment.world.finished_addresses.lock_recover();
+    let terminals: Vec<_> = finishes
+        .iter()
+        .filter(|(reason, _)| *reason != Reason::AttemptReset)
+        .map(|(_, address)| address.clone())
+        .collect();
+    assert!(terminals.contains(&first) && terminals.contains(&second));
+    assert!(
+        terminals
+            .iter()
+            .all(|address| address == &first || address == &second)
+    );
+    assert_eq!(terminals.last(), Some(&second));
+    assert!(
+        finishes
+            .windows(2)
+            .filter(|pair| pair[1].0 != Reason::AttemptReset)
+            .all(|pair| pair[0] == (Reason::AttemptReset, pair[1].1.clone())),
+        "the replay's synthetic reset names the receipt's answering attempt"
+    );
+    drop(finishes);
+    let streamed = deployment.world.stream_addresses.lock_recover();
+    assert!(
+        streamed
+            .iter()
+            .all(|address| address.session_id == first.session_id
+                && address.turn_id == first.turn_id)
+    );
+    let distinct: std::collections::BTreeSet<_> = streamed
+        .iter()
+        .map(|address| (address.call_id.0.clone(), address.attempt))
+        .collect();
+    let expected: std::collections::BTreeSet<_> = [
+        (first.call_id.0.clone(), Some(1)),
+        (second.call_id.0.clone(), Some(1)),
+        (second.call_id.0.clone(), Some(2)),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(distinct, expected, "{streamed:?}");
+    assert_eq!(deployment.world.all_sends.load(Ordering::SeqCst), 3);
+    drop(streamed);
+    deployment.end();
 }

@@ -48,14 +48,13 @@ const BEFORE: usize = 8;
 const AFTER: usize = 16;
 
 /// One `SessionConfigChanged` the plugin saw: the change's identity, the
-/// tool-call limits of its previous and current policy, and the one the
+/// changed policy fields and the tool-call limit the
 /// session's read service answered while the observer ran.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Seen {
     session: String,
     revision: u64,
-    previous: usize,
-    current: usize,
+    changed: std::collections::BTreeSet<lash::plugins::SessionConfigField>,
     served: usize,
 }
 
@@ -169,8 +168,7 @@ impl Observer {
                             seen.lock_recover().push(Seen {
                                 session: ctx.session_id.to_string(),
                                 revision: ctx.revision,
-                                previous: ctx.previous.max_tool_calls.get(),
-                                current: ctx.current.max_tool_calls.get(),
+                                changed: ctx.changed,
                                 served: snapshot.policy.max_tool_calls.get(),
                             });
                         }
@@ -252,7 +250,7 @@ async fn revision(session: &lash::LashSession) -> u64 {
 
 /// A committed config transaction reaches the session's config-change
 /// observers once, after its commit: they see the change's revision, the
-/// previous and the current policy, and the session they read already
+/// changed fields, and the session they read already
 /// serves the new one. The session's head no longer owes it, a later turn
 /// does not deliver it again, and a transaction that does not apply
 /// delivers nothing (FIG-5333, FIG-5397).
@@ -279,8 +277,7 @@ async fn a_committed_config_transaction_reaches_its_observers_once(tier: Tier) {
     let once = vec![Seen {
         session: name.to_owned(),
         revision: base + 1,
-        previous: BEFORE,
-        current: AFTER,
+        changed: [lash::plugins::SessionConfigField::MaxToolCalls].into(),
         served: AFTER,
     }];
     assert_eq!(
@@ -335,8 +332,7 @@ async fn a_config_transaction_applies_when_the_sessions_plugins_cannot_build(tie
     let change = Seen {
         session: name.to_owned(),
         revision: base + 1,
-        previous: BEFORE,
-        current: AFTER,
+        changed: [lash::plugins::SessionConfigField::MaxToolCalls].into(),
         served: AFTER,
     };
     assert_eq!(
@@ -414,8 +410,7 @@ async fn cold_config_changes_coalesce_until_the_next_successful_plugin_build_on_
     let latest = vec![Seen {
         session: name.to_owned(),
         revision: base + 3,
-        previous: AFTER + 8,
-        current: AFTER + 16,
+        changed: [lash::plugins::SessionConfigField::MaxToolCalls].into(),
         served: AFTER + 16,
     }];
     assert_eq!(
@@ -557,8 +552,7 @@ async fn a_pending_change_is_owed_to_its_recorded_observers_until_delivered_or_r
         vec![Seen {
             session: name.to_owned(),
             revision: base + 1,
-            previous: BEFORE,
-            current: AFTER,
+            changed: [lash::plugins::SessionConfigField::MaxToolCalls].into(),
             served: AFTER,
         }],
         "the observer still installed is delivered the change exactly once"
@@ -734,8 +728,7 @@ impl CutDelivery {
         let change = Seen {
             session: CUT_SESSION.to_owned(),
             revision: 1,
-            previous: BEFORE,
-            current: AFTER,
+            changed: [lash::plugins::SessionConfigField::MaxToolCalls].into(),
             served: AFTER,
         };
         let delivered = match cut {

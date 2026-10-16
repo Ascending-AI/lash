@@ -293,6 +293,7 @@ pub(super) fn turn_effect_executor(
         trace: driver.trace.clone(),
         admitted_body: driver.admitted_body.take(),
         model_attempt: driver.model_attempt,
+        model_call_address: driver.model_call_address.clone(),
         run_config: driver.run_config.clone(),
         surface_installed: driver.surface_installed,
     };

@@ -1076,7 +1076,12 @@ fn drive_plugin_stream(
             for chunk in chunks {
                 let transforms = plugins
                     .transform_assistant_stream(
-                        &SessionId::from("rlm-protocol-scenario-hooks"),
+                        &lash_core::plugin::ModelCallAddress {
+                            session_id: lash_core::SessionId::from("rlm-protocol-scenario-hooks"),
+                            turn_id: lash_core::TurnId::from("hook-turn"),
+                            call_id: lash_core::LlmCallId("hook-call".into()),
+                            attempt: Some(1),
+                        },
                         chunk.clone(),
                     )
                     .await
@@ -1101,7 +1106,12 @@ fn drive_plugin_stream(
             // stream-hook end states phase 2's response hooks read.
             let stream_hook_states = plugins
                 .finish_assistant_stream(
-                    &SessionId::from("rlm-protocol-scenario-hooks"),
+                    &lash_core::plugin::ModelCallAddress {
+                        session_id: lash_core::SessionId::from("rlm-protocol-scenario-hooks"),
+                        turn_id: lash_core::TurnId::from("hook-turn"),
+                        call_id: lash_core::LlmCallId("hook-call".into()),
+                        attempt: Some(1),
+                    },
                     if abort_requested {
                         AssistantStreamFinishReason::Aborted
                     } else {
@@ -1112,7 +1122,12 @@ fn drive_plugin_stream(
                 .expect("protocol-scenario stream-finished hook succeeds");
             let transforms = plugins
                 .transform_assistant_response(
-                    &SessionId::from("rlm-protocol-scenario-hooks"),
+                    &lash_core::plugin::ModelCallAddress {
+                        session_id: lash_core::SessionId::from("rlm-protocol-scenario-hooks"),
+                        turn_id: lash_core::TurnId::from("hook-turn"),
+                        call_id: lash_core::LlmCallId("hook-call".into()),
+                        attempt: Some(1),
+                    },
                     response.clone(),
                     &plugins.assistant_response_plan(),
                     &stream_hook_states,

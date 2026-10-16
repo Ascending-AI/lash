@@ -590,7 +590,6 @@ pub(super) async fn present_resolved(
         render: dispatch.facts.render.clone(),
         args: call.args.clone(),
         output: projected,
-        duration_ms: 0,
         artifacts: Arc::new(crate::runtime::effect::SessionPresentationArtifacts::new(
             context.attachment_store(),
         )),

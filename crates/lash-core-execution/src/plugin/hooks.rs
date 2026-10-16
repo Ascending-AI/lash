@@ -238,12 +238,74 @@ pub struct TurnHookContext {
     /// captured one, or the head's outside a run — never today's head
     /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
+    /// Draft decision input: a later committed-state read cannot reproduce it (rule A).
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionReadService>,
     pub turn_context: crate::TurnContext,
     /// Where this hook stands in the trace: under the turn's span, bound
     /// from the registered hook that runs and revoked when it returns.
     pub trace: crate::trace::ExtensionTrace,
+}
+
+/// The policy fields changed by a committed configuration transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SessionConfigField {
+    Model,
+    AttachmentAcceptance,
+    TurnBudget,
+    MaxToolCalls,
+    NoProgressBudget,
+    ChargeSafety,
+    Generation,
+}
+
+impl SessionConfigField {
+    /// Compare the committed transition, including when it supersedes an owed one.
+    pub fn between(
+        previous: &SessionPolicy,
+        current: &SessionPolicy,
+    ) -> std::collections::BTreeSet<Self> {
+        let SessionPolicy {
+            model,
+            attachment_acceptance,
+            turn_budget,
+            max_tool_calls,
+            no_progress_budget,
+            charge_safety,
+            generation,
+        } = previous;
+        [
+            (Self::Model, model != &current.model),
+            (
+                Self::AttachmentAcceptance,
+                attachment_acceptance != &current.attachment_acceptance,
+            ),
+            (Self::TurnBudget, turn_budget != &current.turn_budget),
+            (
+                Self::MaxToolCalls,
+                max_tool_calls != &current.max_tool_calls,
+            ),
+            (
+                Self::NoProgressBudget,
+                no_progress_budget != &current.no_progress_budget,
+            ),
+            (Self::ChargeSafety, charge_safety != &current.charge_safety),
+            (Self::Generation, generation != &current.generation),
+        ]
+        .into_iter()
+        .filter_map(|(field, changed)| changed.then_some(field))
+        .collect()
+    }
+}
+
+/// The logical model call and the provider attempt a hook observes or derives.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelCallAddress {
+    pub session_id: SessionId,
+    pub turn_id: crate::TurnId,
+    pub call_id: crate::LlmCallId,
+    /// None before dispatch; otherwise the ordinal on the provider's request scope.
+    pub attempt: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -253,8 +315,9 @@ pub struct SessionConfigChangedContext {
     /// change delivered again carries the same revision, so an observer that
     /// must act on a change once dedupes on it (FIG-5397).
     pub revision: u64,
-    pub previous: SessionPolicy,
-    pub current: SessionPolicy,
+    /// Fields changed by this revision, including on redelivery or supersession.
+    pub changed: std::collections::BTreeSet<SessionConfigField>,
+    /// Read the policy served for this delivery through `snapshot_current()`.
     pub sessions: Arc<dyn SessionReadService>,
 }
 
@@ -277,7 +340,14 @@ pub enum PluginLifecycleEvent {
     /// not durable: an owner lost after commit may never deliver the event.
     /// Observation only; hosts bill from provider attempt terminals (ADR 0127).
     TurnFinalized(TurnFinalized),
-    SessionRestored(SessionReadView),
+    /// The restored head's identity; revision zero is a durable create/fork
+    /// baseline, and absence means no checkpoint was committed. Read restored
+    /// state through the session's normal read API after restore completes;
+    /// the callback may run before the refreshed resident state is installed.
+    SessionRestored {
+        session_id: SessionId,
+        revision: Option<crate::SessionRevision>,
+    },
     /// A config transaction changed the session's policy. Observers see it
     /// once its change is committed, never for a transaction that was stale
     /// or refused. On a durable session the commit that applies the change
@@ -309,11 +379,14 @@ pub struct ToolResultProjectionContext {
     pub owner: crate::RuntimeOwner,
     pub call_id: crate::ToolCallId,
     pub tool_id: crate::ToolId,
+    /// Presentation decision input supplied before the call's settling commit (rule A).
     pub tool_name: String,
+    /// Presentation decision input supplied before the call's settling commit (rule A).
     pub render: Option<crate::RecordedRender>,
+    /// Presentation decision input supplied before the call's settling commit (rule A).
     pub args: serde_json::Value,
+    /// Presentation decision input supplied before the call's settling commit (rule A).
     pub output: crate::ToolCallOutput,
-    pub duration_ms: u64,
     /// The journaled artifact capability a presentation step retains bytes
     /// through (FIG-3420); [`NoPresentationArtifacts`] where the boundary
     /// supplies none.
@@ -346,6 +419,7 @@ pub struct CheckpointHookContext {
     /// inside a run.
     pub plugin_config: super::AdmittedPluginConfig,
     pub checkpoint: CheckpointKind,
+    /// Draft decision input: a later committed-state read cannot reproduce it (rule A).
     pub state: SessionReadView,
     pub sessions: Arc<dyn SessionReadService>,
     /// Where this hook stands in the trace: under the turn's span, bound
@@ -356,11 +430,14 @@ pub struct CheckpointHookContext {
 #[derive(Clone)]
 pub struct AssistantStreamHookContext {
     pub session_id: SessionId,
+    pub address: ModelCallAddress,
     /// The plugin configuration this hook runs under (FIG-4379): the
     /// running run's admitted configuration and its revision, a process's
     /// captured one, or the head's outside a run — never today's head
     /// inside a run.
+    /// Admitted decision input: a current-head read cannot reproduce this configuration (rule A).
     pub plugin_config: super::AdmittedPluginConfig,
+    /// Transform decision input, possibly rewritten by earlier callbacks (rule A).
     pub chunk: String,
 }
 
@@ -382,12 +459,16 @@ pub struct AssistantStreamTransform {
 #[derive(Clone)]
 pub struct AssistantResponseHookContext {
     pub session_id: SessionId,
+    pub address: ModelCallAddress,
     /// The plugin configuration this hook runs under (FIG-4379): the
     /// running run's admitted configuration and its revision, a process's
     /// captured one, or the head's outside a run — never today's head
     /// inside a run.
+    /// Admitted decision input: a current-head read cannot reproduce this configuration (rule A).
     pub plugin_config: super::AdmittedPluginConfig,
+    /// Transform decision input: earlier callbacks may have changed it (rule A).
     pub response: crate::LlmResponse,
+    /// Derived decision input: a later committed-state read cannot reproduce it (rule A).
     /// The state the paired [`AssistantStreamFinishedHook`] returned when
     /// the derivation finished the receipt's recorded stream, handed to this
     /// exact response callback identity in its plugin's stream-state format.
@@ -410,6 +491,9 @@ pub struct AssistantResponseTransform {
 pub enum AssistantStreamFinishReason {
     /// The provider abandoned one streaming attempt and will retry the same
     /// logical request from an empty response state.
+    /// A synthetic reset opening receipt replay names the receipt's answering
+    /// attempt; a live retry reset names the attempt whose state is discarded.
+    /// The reset before dispatch names the upcoming call with no attempt yet.
     AttemptReset,
     Complete,
     Aborted,
@@ -420,10 +504,12 @@ pub enum AssistantStreamFinishReason {
 #[derive(Clone)]
 pub struct AssistantStreamFinishedContext {
     pub session_id: SessionId,
+    pub address: ModelCallAddress,
     /// The plugin configuration this hook runs under (FIG-4379): the
     /// running run's admitted configuration and its revision, a process's
     /// captured one, or the head's outside a run — never today's head
     /// inside a run.
+    /// Admitted decision input: a current-head read cannot reproduce this configuration (rule A).
     pub plugin_config: super::AdmittedPluginConfig,
     pub reason: AssistantStreamFinishReason,
 }

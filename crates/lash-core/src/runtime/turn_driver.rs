@@ -124,6 +124,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// pin's: a re-sent attempt streams under an observation key of its own
     /// (`abandoned_stream::model_stream_key`).
     pub(super) model_attempt: u32,
+    /// The active receipt's identity, never reconstructed from a live counter.
+    pub(super) model_call_address: Option<crate::plugin::ModelCallAddress>,
     /// The configuration the turn's run executes under, as its checkpoint
     /// records it: the resolved shape, and the tool surface the latest
     /// environment sync installed (FIG-6021).

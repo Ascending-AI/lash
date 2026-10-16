@@ -476,17 +476,9 @@ pub(crate) struct WorkbenchConfigChanges {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkbenchConfigChange {
     pub(crate) session_id: SessionId,
-    pub(crate) previous_profile_key: String,
-    pub(crate) current_profile_key: String,
-    pub(crate) service_profile_key: String,
-}
-
-/// The model key a policy records, or empty for one that selects none.
-fn recorded_llm_profile_id(policy: &lash::runtime::SessionPolicy) -> String {
-    policy
-        .profile_key()
-        .map(ToString::to_string)
-        .unwrap_or_default()
+    pub(crate) revision: u64,
+    pub(crate) changed: std::collections::BTreeSet<lash::plugins::SessionConfigField>,
+    pub(crate) service_profile_key: Option<String>,
 }
 
 impl WorkbenchConfigChanges {
@@ -497,9 +489,9 @@ impl WorkbenchConfigChanges {
         let snapshot = ctx.sessions.snapshot_current().await?;
         *self.latest.lock_recover() = Some(WorkbenchConfigChange {
             session_id: ctx.session_id.clone(),
-            previous_profile_key: recorded_llm_profile_id(&ctx.previous),
-            current_profile_key: recorded_llm_profile_id(&ctx.current),
-            service_profile_key: recorded_llm_profile_id(&snapshot.policy),
+            revision: ctx.revision,
+            changed: ctx.changed.clone(),
+            service_profile_key: snapshot.policy.profile_key().map(ToString::to_string),
         });
         Ok(())
     }

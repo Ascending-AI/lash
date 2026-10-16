@@ -231,6 +231,15 @@ impl RuntimeTurnDriver<'_> {
                 },
         } = answer;
         self.model_attempt = attempt;
+        self.model_call_address =
+            call_record
+                .as_ref()
+                .map(|record| crate::plugin::ModelCallAddress {
+                    session_id: self.session_id.clone(),
+                    turn_id: self.turn_id.clone(),
+                    call_id: record.call_id.clone(),
+                    attempt: record.attempts.last().map(|attempt| attempt.ordinal),
+                });
         self.record_unknown_failed_call(machine, &result, call_record.as_ref())?;
         self.record_llm_outcome(&result, call_record, event_tx);
         // Whether the hooks run at all is the plan recorded with the
@@ -297,6 +306,15 @@ impl RuntimeTurnDriver<'_> {
             stream,
         } = answer;
         self.model_attempt = attempt;
+        self.model_call_address =
+            call_record
+                .as_ref()
+                .map(|record| crate::plugin::ModelCallAddress {
+                    session_id: self.session_id.clone(),
+                    turn_id: self.turn_id.clone(),
+                    call_id: record.call_id.clone(),
+                    attempt: record.attempts.last().map(|attempt| attempt.ordinal),
+                });
         self.record_unknown_failed_call(machine, &result, call_record.as_ref())?;
         // A completion the stop drops still owes the usage of a tail that
         // drains: the turn counts it unknown until the drain settles it.

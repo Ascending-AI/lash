@@ -145,7 +145,7 @@ use crate::plugin::{CheckpointHookContext, SessionConfigChangedContext, SessionR
 use crate::sansio::{LlmCallError, Response};
 use crate::session_model::{
     Message, MessageRole, Part, RuntimeSessionPolicy, SessionPolicy, SessionStreamEvent,
-    make_error_event, shared_parts, transport_stream_events,
+    make_error_event, shared_parts,
 };
 use crate::{
     CheckpointKind, PersistentRuntimeServices, PluginOperationInvokeError, RuntimeServices,

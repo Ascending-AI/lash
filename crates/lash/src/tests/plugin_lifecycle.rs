@@ -201,3 +201,214 @@ async fn finalization_identifies_a_committed_turn_readable_on_another_node() -> 
     other.shutdown().await?;
     Ok(())
 }
+
+/// RESTORE-ADDRESS: absence is unpersisted state; a durable fork at revision
+/// zero is still addressable, and a reopen identifies the store's actual head.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restore_notifications_identify_reopened_and_revision_zero_heads() -> Result<()> {
+    let (observed, mut observations) = tokio::sync::mpsc::unbounded_channel();
+    let observer = Arc::new(StaticPluginFactory::new(
+        crate::plugins::PluginDeclaration::initial("restore-address"),
+        crate::plugins::PluginSpec::new().with_runtime_event(
+            crate::hook_key!("restore"),
+            Arc::new(move |event| {
+                let observed = observed.clone();
+                Box::pin(async move {
+                    if let crate::plugins::PluginLifecycleEvent::SessionRestored {
+                        session_id,
+                        revision,
+                    } = event
+                    {
+                        observed
+                            .send((session_id, revision))
+                            .expect("the law receives restores");
+                    }
+                    Ok(())
+                })
+            }),
+        ),
+    ));
+    let backend = sqlite_memory_store_backend().await;
+    let store = backend.session_store_factory();
+    let unpersisted = SessionId::from("restore-unpersisted");
+    let mut factories = lash_core::testing::test_standard_protocol_factories();
+    factories.push(observer.clone());
+    let plugins = lash_core::facade_support::PluginHost::new(
+        factories,
+        lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock)),
+    )
+    .build_session(lash_core::plugin::PluginSessionRequest::creation(
+        unpersisted.clone(),
+        lash_core::plugin::SessionAuthorityContext::fixture(),
+    ))
+    .expect("storeless plugin session");
+    // A restored runtime has accepted plugin state even when no checkpoint
+    // has committed. Fresh assembly without this snapshot stays lazy.
+    let transition = plugins.host().transition_plugins(
+        lash_core::plugin::PluginTransitionRequest {
+            id: lash_core::plugin::PluginTransitionId(
+                lash_core::EffectAddress::new(
+                    lash_core::ExecutionScope::turn(unpersisted.clone(), "restore-fixture"),
+                    "plugin-transition",
+                )
+                .expect("fixture transition address"),
+            ),
+            owner: lash_core::RuntimeOwner::Session(unpersisted.clone()),
+            base: lash_core::plugin::PluginTransitionBase::Session {
+                head: lash_core::store::SessionHeadRef {
+                    generation: 0,
+                    revision: 0,
+                    leaf: None,
+                    checkpoint: None,
+                },
+            },
+            target: lash_core::store::plugin_writers::PluginAdmission::from_plugins(
+                plugins
+                    .host()
+                    .factories()
+                    .iter()
+                    .map(|factory| lash_core::store::plugin_writers::AdmittedPlugin {
+                        plugin: factory.id().into(),
+                        writer: factory.plugin_declaration().format_version,
+                    })
+                    .collect(),
+            ),
+        },
+        &plugins.export_state(),
+        &Default::default(),
+    );
+    plugins
+        .adopt_plugin_transition(&transition)
+        .expect("native plugin transition");
+    let mut state = lash_core::RuntimeSessionState {
+        session_id: unpersisted.clone(),
+        ..lash_core::RuntimeSessionState::fixture(lash_core::testing::standard_test_policy())
+    };
+    state
+        .capture_plugin_states(plugins.as_ref(), lash_core::store::FleetFormat::current())
+        .expect("unpersisted native plugin snapshot");
+    assert!(state.checkpoint_ref.is_none());
+    let host = lash_core::facade_support::RuntimeHostConfig::new(
+        backend.clone(),
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+        lash_core::ExecutionBudgets::recommended(),
+        lash_core::runtime::DeltaCoalescing::recommended(),
+        lash_core::facade_support::DataRetentionConfig::standard(),
+    );
+    let runtime = Box::pin(
+        lash_core::facade_support::LashRuntime::builder(
+            host,
+            crate::testing::runtime_lease_owner(),
+        )
+        .with_initial_state(state)
+        .with_plugin_session(plugins)
+        .build(),
+    )
+    .await
+    .expect("storeless runtime");
+    assert_eq!(
+        Some(
+            observations
+                .try_recv()
+                .expect("restore finished before constructor returned")
+        ),
+        Some((unpersisted, None))
+    );
+    drop(runtime);
+
+    let deploy = |serves| {
+        explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .serve_sessions(serves)
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(observer.clone())
+            .build(crate::testing::runtime_lease_owner())
+    };
+    let core = deploy(true)?;
+    let source = SessionId::from("restore-durable");
+    let durable = core
+        .session(source.clone())
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await?;
+    durable
+        .send(TurnInput::text("commit a head"))
+        .output()
+        .await?;
+    core.shutdown().await?;
+    while observations.try_recv().is_ok() {}
+    let head = store
+        .load_session_head_meta(&source)
+        .await?
+        .expect("committed head");
+    let reopened = deploy(true)?;
+    let session = reopened.session(source.clone()).open().await?;
+    // Opening a handle is lazy; the engine restores the runtime when it
+    // admits this turn. Its notification names the head before that turn.
+    session
+        .send(TurnInput::text("materialize the reopened runtime"))
+        .output()
+        .await?;
+    assert_eq!(
+        Some(
+            observations
+                .try_recv()
+                .expect("restore finished before constructor returned")
+        ),
+        Some((
+            source.clone(),
+            Some(lash_core::SessionRevision::new(head.head_revision))
+        ))
+    );
+    drop(session);
+    while observations.try_recv().is_ok() {}
+    let source_head = store
+        .load_session_head_meta(&source)
+        .await?
+        .expect("fork source head");
+    let fork_id = SessionId::from("restore-fork");
+    reopened
+        .fork_at(
+            &source,
+            lash_core::Target::Revision(source_head.head_revision),
+            crate::ForkRequest {
+                session_id: fork_id.clone(),
+                relation: lash_core::SessionRelation::Fork {
+                    source_session_id: source.clone(),
+                    source_node_id: None,
+                },
+                observed_processes: Vec::new(),
+            },
+        )
+        .await?;
+    let fork_head = store
+        .load_session_head_meta(&fork_id)
+        .await?
+        .expect("fork head");
+    assert_eq!(fork_head.head_revision, 0);
+    assert!(fork_head.checkpoint_ref.is_some());
+    let fork = reopened.session(fork_id.clone()).open().await?;
+    fork.send(TurnInput::text("materialize the revision-zero fork"))
+        .output()
+        .await?;
+    assert_eq!(
+        Some(
+            observations
+                .try_recv()
+                .expect("restore finished before constructor returned")
+        ),
+        Some((fork_id, Some(lash_core::SessionRevision::new(0))))
+    );
+    assert_eq!(
+        fork.policy_snapshot().max_tool_calls,
+        durable
+            .read()
+            .await?
+            .expect("source read")
+            .policy()
+            .max_tool_calls
+    );
+    drop(fork);
+    reopened.shutdown().await?;
+    Ok(())
+}

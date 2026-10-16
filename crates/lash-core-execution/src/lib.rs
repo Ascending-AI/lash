@@ -49,6 +49,7 @@ pub use lash_core_store::runtime_error::{
     IngressReservedSourceKeyRefusal,
 };
 pub use lash_core_store::runtime_owner::RuntimeOwner;
+pub use lash_core_store::session_identity::SessionRevision;
 pub use lash_core_store::surface_format;
 mod backend;
 pub mod execution_limits;
@@ -219,7 +220,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginSpec;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
-    pub use crate::plugin::SessionConfigChangedContext;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
     pub use crate::plugin::SessionObserverIntent;
@@ -244,6 +244,7 @@ pub mod facade_support {
         HookCause, KeyRejection, PluginStateError, PluginStateView, StateCommand,
         StateCommandRefusal, StateCommands, StateReducer, StateReduction,
     };
+    pub use crate::plugin::{ModelCallAddress, SessionConfigChangedContext, SessionConfigField};
     pub use crate::plugin::{
         PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,
     };

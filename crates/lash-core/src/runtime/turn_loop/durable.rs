@@ -417,6 +417,7 @@ impl LashRuntime {
             trace: turn_trace,
             admitted_body: None,
             model_attempt: 1,
+            model_call_address: None,
             run_config,
             surface_installed: false,
         });

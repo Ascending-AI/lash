@@ -600,8 +600,10 @@ impl LashRuntime {
                 SessionConfigChangedContext {
                     session_id: self.state.session_id.clone(),
                     revision,
-                    previous: change.previous.clone(),
-                    current: change.current.clone(),
+                    changed: crate::plugin::SessionConfigField::between(
+                        &change.previous,
+                        &change.current,
+                    ),
                     sessions: services.read_service(),
                 },
             )

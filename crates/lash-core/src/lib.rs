@@ -240,7 +240,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginSpec;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
-    pub use crate::plugin::SessionConfigChangedContext;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
     pub use crate::plugin::SessionObserverIntent;
@@ -264,6 +263,7 @@ pub mod facade_support {
         HookCause, KeyRejection, PluginStateError, PluginStateView, StateCommand,
         StateCommandRefusal, StateCommands, StateReducer, StateReduction,
     };
+    pub use crate::plugin::{ModelCallAddress, SessionConfigChangedContext, SessionConfigField};
     pub use crate::plugin::{
         PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginOperationFailure,
     };

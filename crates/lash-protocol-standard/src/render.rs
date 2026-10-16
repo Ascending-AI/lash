@@ -729,7 +729,6 @@ mod tests {
             }),
             args: serde_json::Value::Null,
             output,
-            duration_ms: 0,
             artifacts,
         }
     }

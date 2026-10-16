@@ -11,14 +11,14 @@ note: associated function defined here
   |            ^^^
 help: provide the arguments
   |
-7 |     let _ = lash::SessionSpec::new(/* model */, /* TurnBudget */, /* MaxToolCalls */);
-  |                                    +++++++++++++++++++++++++++++++++++++++++++++++++
+7 |     let _ = lash::SessionSpec::new(/* model */, /* lash::TurnBudget */, /* lash::MaxToolCalls */);
+  |                                    +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 error[E0061]: this function takes 3 arguments but 1 argument was supplied
   --> tests/ui/session_spec_requires_its_required_parts.rs:11:13
    |
 11 |     let _ = lash::SessionSpec::new(model);
-   |             ^^^^^^^^^^^^^^^^^^^^^^------- two arguments of type `TurnBudget` and `MaxToolCalls` are missing
+   |             ^^^^^^^^^^^^^^^^^^^^^^------- two arguments of type `lash::TurnBudget` and `lash::MaxToolCalls` are missing
    |
 note: associated function defined here
   --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
@@ -27,14 +27,14 @@ note: associated function defined here
    |            ^^^
 help: provide the arguments
    |
-11 |     let _ = lash::SessionSpec::new(model, /* TurnBudget */, /* MaxToolCalls */);
-   |                                         ++++++++++++++++++++++++++++++++++++++
+11 |     let _ = lash::SessionSpec::new(model, /* lash::TurnBudget */, /* lash::MaxToolCalls */);
+   |                                         ++++++++++++++++++++++++++++++++++++++++++++++++++
 
 error[E0061]: this function takes 3 arguments but 2 arguments were supplied
   --> tests/ui/session_spec_requires_its_required_parts.rs:15:13
    |
 15 |     let _ = lash::SessionSpec::new(model, lash::TurnBudget::Unbounded);
-   |             ^^^^^^^^^^^^^^^^^^^^^^------------------------------------ argument #3 of type `MaxToolCalls` is missing
+   |             ^^^^^^^^^^^^^^^^^^^^^^------------------------------------ argument #3 of type `lash::MaxToolCalls` is missing
    |
 note: associated function defined here
   --> $WORKSPACE/crates/lash-core-execution/src/session_model/mod.rs
@@ -43,8 +43,8 @@ note: associated function defined here
    |            ^^^
 help: provide the argument
    |
-15 |     let _ = lash::SessionSpec::new(model, lash::TurnBudget::Unbounded, /* MaxToolCalls */);
-   |                                                                      ++++++++++++++++++++
+15 |     let _ = lash::SessionSpec::new(model, lash::TurnBudget::Unbounded, /* lash::MaxToolCalls */);
+   |                                                                      ++++++++++++++++++++++++++
 
 error[E0599]: no associated function or constant named `default` found for struct `SessionSpec` in the current scope
   --> tests/ui/session_spec_requires_its_required_parts.rs:19:32

@@ -5,19 +5,56 @@ use std::sync::Arc;
 
 use super::types::LlmStreamEvent;
 
+type ScopedEventCallback =
+    dyn Fn(LlmStreamEvent, Option<&super::types::LlmRequestScope>) + Send + Sync;
+
 #[derive(Clone)]
-pub struct LlmEventSender(Arc<dyn Fn(LlmStreamEvent) + Send + Sync>);
+pub struct LlmEventSender {
+    send: Arc<ScopedEventCallback>,
+    scope: Option<Arc<super::types::LlmRequestScope>>,
+}
 
 impl LlmEventSender {
     pub fn new<F>(send: F) -> Self
     where
         F: Fn(LlmStreamEvent) + Send + Sync + 'static,
     {
-        Self(Arc::new(send))
+        Self::new_scoped(move |event, _| send(event))
+    }
+
+    /// Observe the actual request scope bound by the provider attempt.
+    pub fn new_scoped<F>(send: F) -> Self
+    where
+        F: Fn(LlmStreamEvent, Option<&super::types::LlmRequestScope>) + Send + Sync + 'static,
+    {
+        Self {
+            send: Arc::new(send),
+            scope: None,
+        }
+    }
+
+    /// Bind this copy to one attempt; previously bound copies keep their scope.
+    pub fn with_scope(&self, scope: super::types::LlmRequestScope) -> Self {
+        Self {
+            send: Arc::clone(&self.send),
+            scope: Some(Arc::new(scope)),
+        }
+    }
+
+    /// Transform events without dropping the scope bound by an upstream attempt.
+    pub fn map<F>(&self, map: F) -> Self
+    where
+        F: Fn(LlmStreamEvent) -> LlmStreamEvent + Send + Sync + 'static,
+    {
+        let send = Arc::clone(&self.send);
+        Self {
+            send: Arc::new(move |event, scope| send(map(event), scope)),
+            scope: self.scope.clone(),
+        }
     }
 
     pub fn send(&self, event: LlmStreamEvent) {
-        (self.0)(event);
+        (self.send)(event, self.scope.as_deref());
     }
 }
 

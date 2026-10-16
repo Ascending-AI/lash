@@ -15,7 +15,6 @@ use tokio_util::sync::ReusableBoxFuture;
 
 pub use super::process_lifecycle::SessionProcessEventKind;
 
-use crate::runtime::LashRuntime;
 use crate::runtime::RuntimeSessionState;
 
 const SESSION_CURSOR_PREFIX: &str = "lashsc2:";
@@ -33,41 +32,7 @@ use retention::ReplayRetention;
 #[path = "replay/publication.rs"]
 mod publication;
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
-#[serde(transparent)]
-pub struct SessionRevision(pub u64);
-
-impl SessionRevision {
-    /// Constructs a `SessionRevision` for store and durable-substrate implementors while resuming
-    /// live observation from a durable cursor.
-    pub fn new(revision: u64) -> Self {
-        Self(revision)
-    }
-
-    /// Exposes the monotonic session revision to live-replay store implementors for cursor
-    /// comparison without changing its ordering semantics.
-    pub fn as_u64(self) -> u64 {
-        self.0
-    }
-
-    pub(in crate::runtime) fn from_runtime(runtime: &LashRuntime) -> Self {
-        observation_revision(&runtime.state)
-    }
-
-    /// The observation revision of the durable head `head` names: what a
-    /// runtime that adopts that head projects (see [`observation_revision`]).
-    /// A head without a checkpoint has committed no turn, so its revision
-    /// is zero.
-    pub fn of_durable_head(head: &crate::store::SessionHeadMeta) -> Self {
-        Self(if head.checkpoint_ref.is_some() {
-            head.head_revision
-        } else {
-            0
-        })
-    }
-}
+pub use lash_core_execution::SessionRevision;
 
 /// The observation revision a session state projects: the committed head
 /// revision once a checkpoint exists, the turn index before the first one.

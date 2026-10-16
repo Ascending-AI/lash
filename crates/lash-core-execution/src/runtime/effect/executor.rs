@@ -296,15 +296,12 @@ pub(crate) fn unresolved_execution_env(
 
 /// Everything the presentation boundary needs that is not on the journaled
 /// command: the session's plugin chain, the facts a step may read, the
-/// store retained artifacts are `put` into, and
-/// how long the settled call took — an observation the steps may
-/// read, never part of the command's recorded identity.
+/// store its presentation steps retain artifacts in.
 pub struct PresentationLocalExecution {
     pub composition: Arc<crate::plugin::ExecutionComposition>,
     pub state: Arc<dyn crate::plugin::ExecutionState>,
     pub facts: Arc<crate::plugin::ToolPresentationFacts>,
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
-    pub duration_ms: u64,
 }
 
 impl PresentationLocalExecution {
@@ -341,7 +338,6 @@ impl PresentationLocalExecution {
             render,
             args,
             output: *output,
-            duration_ms: self.duration_ms,
             artifacts,
         };
         let presentation = Box::pin(
@@ -610,7 +606,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         state: Arc<dyn crate::plugin::ExecutionState>,
         facts: Arc<crate::plugin::ToolPresentationFacts>,
         attachment_store: Arc<crate::RuntimeAttachmentStore>,
-        duration_ms: u64,
         plan: &super::PresentationBinding,
     ) -> Self {
         let refusal = composition.validate_tool_presentation_plan(plan).err();
@@ -621,7 +616,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     state,
                     facts,
                     attachment_store,
-                    duration_ms,
                 },
             )),
             replay_trace: None,

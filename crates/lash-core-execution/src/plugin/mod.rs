@@ -109,8 +109,9 @@ pub use hooks::{
     AssistantStreamFinishReason, AssistantStreamFinishedContext, AssistantStreamFinishedHook,
     AssistantStreamHook, AssistantStreamHookContext, AssistantStreamTransform, BeforeTurnHook,
     CellFailureDiagnostic, CellFailureFeedbackHook, CheckpointHook, CheckpointHookContext,
-    NoPresentationArtifacts, PluginFuture, PluginLifecycleEvent, PluginLifecycleEventHook,
-    PluginLifecycleFuture, PluginSessionTask, SessionConfigChangedContext, ToolCatalogContributor,
+    ModelCallAddress, NoPresentationArtifacts, PluginFuture, PluginLifecycleEvent,
+    PluginLifecycleEventHook, PluginLifecycleFuture, PluginSessionTask,
+    SessionConfigChangedContext, SessionConfigField, ToolCatalogContributor,
     ToolPresentationArtifacts, ToolPresentationFacts, ToolPresentationInput,
     ToolPresentationPresenter, ToolPresentationStep, ToolResultProjectionContext, TurnFinalized,
     TurnHookContext, TurnHookReport, TurnResultHookContext,
@@ -297,16 +298,7 @@ mod tests {
                 SessionConfigChangedContext {
                     session_id: "typed-causes".into(),
                     revision: 1,
-                    previous: SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                        crate::NoProgressBudget::bounded(12),
-                    ),
-                    current: SessionPolicy::new(
-                        crate::TurnBudget::Unbounded,
-                        crate::MaxToolCalls::new(1024),
-                        crate::NoProgressBudget::bounded(12),
-                    ),
+                    changed: [SessionConfigField::MaxToolCalls].into(),
                     sessions: Arc::new(NoopSessionManager),
                 },
             )))

@@ -152,6 +152,7 @@ pub(super) struct LlmStreamDebugState {
 }
 
 pub(super) struct LlmStreamState<'a> {
+    pub(super) address: crate::plugin::ModelCallAddress,
     pub(super) trace: crate::trace::TraceStanding,
     pub(super) trace_context: lash_trace::TraceContext,
     pub(super) text_streamed: &'a mut bool,

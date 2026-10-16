@@ -942,7 +942,7 @@ impl RuntimeBuildProbePlugin {
                     Box::pin(async move {
                         if matches!(
                             event,
-                            lash_core::facade_support::PluginLifecycleEvent::SessionRestored(_)
+                            lash_core::facade_support::PluginLifecycleEvent::SessionRestored { .. }
                         ) {
                             counters
                                 .session_restored_events

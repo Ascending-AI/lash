@@ -184,13 +184,14 @@ async fn workbench_plugin_observes_session_config_policy_transition() {
         .expect("the turn after the change answers");
     assert!(turn.is_success(), "{turn:?}");
 
+    let revision = config.revision().await.expect("committed config revision");
     assert_eq!(
         config_changes.latest.lock_recover().clone(),
         Some(WorkbenchConfigChange {
             session_id: session_id.clone(),
-            previous_profile_key: "workbench-model-before".to_string(),
-            current_profile_key: "workbench-model-after".to_string(),
-            service_profile_key: "workbench-model-after".to_string(),
+            revision,
+            changed: [lash::plugins::SessionConfigField::Model].into(),
+            service_profile_key: Some("workbench-model-after".to_string()),
         })
     );
     let reopened = core

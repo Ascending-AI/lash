@@ -111,7 +111,7 @@ impl CommitBase {
         Some(Self {
             session: runtime.session_id().clone(),
             store,
-            revision: SessionRevision::from_runtime(runtime),
+            revision: crate::runtime::observation::observation_revision(&runtime.state),
             frame: runtime
                 .state
                 .current_frame_node_id

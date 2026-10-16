@@ -326,19 +326,18 @@ impl ProviderHandle {
         if let Some(stream_events) = request.stream_events.take() {
             let stream_route = serving_route.clone();
             let stream_sideband = sideband.clone();
-            request.stream_events =
-                Some(crate::llm::types::LlmEventSender::new(move |mut event| {
-                    if let crate::llm::types::LlmStreamEvent::Part(part) = &mut event {
-                        // Conflicting origins are deliberately preserved. The
-                        // stream remains foreign instead of being laundered into
-                        // the serving route; terminal response stamping surfaces
-                        // the typed contract error where a Result is available.
-                        if let Err(conflict) = part.stamp_replay_origin(&stream_route) {
-                            stream_sideband.record_origin_conflict(conflict);
-                        }
+            request.stream_events = Some(stream_events.map(move |mut event| {
+                if let crate::llm::types::LlmStreamEvent::Part(part) = &mut event {
+                    // Conflicting origins are deliberately preserved. The
+                    // stream remains foreign instead of being laundered into
+                    // the serving route; terminal response stamping surfaces
+                    // the typed contract error where a Result is available.
+                    if let Err(conflict) = part.stamp_replay_origin(&stream_route) {
+                        stream_sideband.record_origin_conflict(conflict);
                     }
-                    stream_events.send(event);
-                }));
+                }
+                event
+            }));
         }
         sideband
     }
@@ -468,6 +467,11 @@ impl ProviderHandle {
                 ));
             };
             sideband.begin_attempt(self.kind(), context.model().wire_model());
+            context.scope.attempt = Some(attempt_ordinal);
+            context.stream_events = context
+                .stream_events
+                .as_ref()
+                .map(|events| events.with_scope(context.scope.clone()));
             // Every bound of this attempt is clipped to what remains of the
             // total; the route's own bounds come back after.
             let window = reliability.for_window(remaining(clock.as_ref()));

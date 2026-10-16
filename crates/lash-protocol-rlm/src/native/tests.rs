@@ -784,7 +784,12 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
     };
     let transforms = session
         .transform_assistant_response(
-            &SessionId::from("native-plugin"),
+            &lash_core::plugin::ModelCallAddress {
+                session_id: lash_core::SessionId::from("native-plugin"),
+                turn_id: lash_core::TurnId::from("hook-turn"),
+                call_id: lash_core::LlmCallId("hook-call".into()),
+                attempt: Some(1),
+            },
             response,
             &session.assistant_response_plan(),
             &[],

@@ -422,7 +422,7 @@ impl RuntimeHandle {
     ) -> Self {
         let process_env_store = Arc::clone(&runtime.host.core.durability.process_env_store);
         let process_engines = runtime.host.core.process_engines.clone();
-        let revision = SessionRevision::from_runtime(&runtime);
+        let revision = observation_revision(&runtime.state);
         let cursor = live_replay_store.current_cursor(runtime.session_id(), revision);
         let (read_view, authority_fingerprint) = export_observation_state(&runtime);
         let observation = RuntimeObservation::from_runtime(
@@ -481,7 +481,7 @@ impl RuntimeHandle {
     /// drove, FIG-3600). The cursor moves to the live replay's current
     /// position.
     pub fn adopt_observation_from(&self, runtime: &LashRuntime) {
-        let revision = SessionRevision::from_runtime(runtime);
+        let revision = observation_revision(&runtime.state);
         let (read_view, authority_fingerprint) = export_observation_state(runtime);
         let cursor = self
             .live_replay_store
@@ -501,7 +501,7 @@ impl RuntimeHandle {
         reason = "resident history was validated on restore and emitted through typed writers"
     )]
     async fn publish_from_inner(&self, runtime: &LashRuntime, force_resident: bool) {
-        let revision = SessionRevision::from_runtime(runtime);
+        let revision = observation_revision(&runtime.state);
         let previous = self.observation.load_full();
         let turn_id = (previous.revision != revision)
             .then(|| runtime.last_committed_turn_id_for_revision(revision))

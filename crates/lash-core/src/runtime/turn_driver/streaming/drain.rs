@@ -21,7 +21,7 @@ type ProviderTask =
 /// accepted.
 pub(super) struct CallTail {
     pub(super) task: ProviderTask,
-    pub(super) stream: crate::session_model::LlmStreamEventRx,
+    pub(super) stream: ScopedStreamRx,
     pub(super) streamed_usage: LlmUsage,
     pub(super) sideband: crate::facade_support::ProviderCompletionSideband,
     pub(super) call_id: crate::LlmCallId,
@@ -205,7 +205,7 @@ impl CallTail {
         };
         // The tail's content is discarded; its usage is the fallback for a
         // response that reports none.
-        while let Ok(event) = self.stream.try_recv() {
+        while let Ok((event, _)) = self.stream.try_recv() {
             match event {
                 LlmStreamEvent::Usage(usage) => self.streamed_usage = usage,
                 LlmStreamEvent::AttemptReset => self.streamed_usage = LlmUsage::default(),

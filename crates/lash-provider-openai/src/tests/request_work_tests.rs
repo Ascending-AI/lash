@@ -94,7 +94,6 @@ async fn a_host_presenter_replaces_the_body_without_losing_error_marking() {
             render: None,
             args: Value::Null,
             output,
-            duration_ms: 0,
             artifacts: Arc::new(lash_core::facade_support::NoPresentationArtifacts),
         },
     })

@@ -350,7 +350,7 @@ impl RuntimeTurnServices {
         let controller = cx.scoped(AdmittedScope::turn(row.session.clone(), row.run.clone()))?;
         let live = self.runtimes.live_replay();
         let commit = CommitBase::of(&runtime);
-        let revision = crate::SessionRevision::from_runtime(&runtime);
+        let revision = crate::runtime::observation::observation_revision(&runtime.state);
         let (observer, publisher) = live_observer(&runtime, &live, &row.run);
         // The run starts from the head the runtime opened at: what it
         // changes from here is what its phases record (FIG-5301).
@@ -648,7 +648,7 @@ fn live_observer(
     let sink = Arc::new(LiveActivity {
         live: Arc::clone(live),
         session: runtime.session_id().clone(),
-        revision: crate::SessionRevision::from_runtime(runtime),
+        revision: crate::runtime::observation::observation_revision(&runtime.state),
     });
     let (observer, mut observations) = TurnObserver::open(
         &crate::runtime::NoopEventSink,

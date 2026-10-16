@@ -317,7 +317,6 @@ impl ProductionToolHandlers<'_> {
             render: prepared.input.facts.render.clone(),
             args: prepared.call.args.clone(),
             output,
-            duration_ms: 0,
             artifacts: Arc::new(crate::runtime::effect::SessionPresentationArtifacts::new(
                 self.context.attachment_store(),
             )),
