@@ -193,8 +193,9 @@ pub mod standard {
     /// building blocks: the compact contract of one tool and the compact
     /// spelling of a shape.
     pub use lash_tool_presenter_standard::{
-        CompactToolContract, STANDARD_TOOL_PRESENTER_ID, StandardPresenterConfig,
-        StandardToolPresenter, compact_contract, compact_type,
+        CompactNoteRow, CompactToolContract, STANDARD_TOOL_PRESENTER_ID, StandardPresenterConfig,
+        StandardToolPresenter, compact_contract, compact_definition, compact_name_allocator,
+        compact_note_line, compact_note_rows, compact_signature, compact_type,
     };
 }
 pub mod render {

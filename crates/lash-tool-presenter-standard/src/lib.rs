@@ -5,7 +5,7 @@
 //! writes is the compact, language-neutral projection a host shows where it
 //! documents those tools outside the specs (a discovery result, a catalog
 //! view): a one-line signature (`search({ query: str }) -> list[str]`) and
-//! one row per field.
+//! named definitions and path-only annotation rows.
 
 mod compact;
 
@@ -14,11 +14,16 @@ use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, ToolPresentationEntry, ToolPresentationRequest,
     ToolPresenter, listing,
 };
-use lash_tool_shape::{SchemaShape, ShapeConstraints, ShapeKind};
+use lash_tool_shape::{
+    DefinitionId, ReadableNameAllocator, SchemaDocument, SchemaShape, ShapeConstraints, ShapeKind,
+};
 use serde_json::Value;
+use std::collections::BTreeMap;
 
-pub use compact::compact_type;
-use compact::{compact_arguments, compact_doc_line, compact_row};
+pub use compact::{
+    CompactNoteRow, compact_definition, compact_note_line, compact_note_rows, compact_signature,
+    compact_type,
+};
 
 /// The standard presenter's id.
 pub const STANDARD_TOOL_PRESENTER_ID: &str = "lash.tools.compact.v1";
@@ -112,17 +117,24 @@ impl ToolPresenter for StandardToolPresenter {
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
         let depth = Self::config(config)?.schema_depth;
-        Ok(format!(
-            "{call_path}({}) -> {}",
-            compact_arguments(&lash_tool_presenter_api::inline_schema(
-                input.as_value(),
-                depth
-            )?),
-            compact_type(&lash_tool_presenter_api::inline_schema(
-                output.as_value(),
-                depth
-            )?)
-        ))
+        let input = SchemaDocument::from_json_schema(input.as_value(), depth)?;
+        let output = SchemaDocument::from_json_schema(output.as_value(), depth)?;
+        let mut names = compact_name_allocator(&[&input, &output], &[call_path]);
+        let input = Document::allocate(input, &mut names);
+        let output = Document::allocate(output, &mut names);
+        let mut parts = input.definitions()?;
+        for definition in output.definitions()? {
+            if !parts.contains(&definition) {
+                parts.push(definition);
+            }
+        }
+        // A signature-only response must carry the context binding its names.
+        parts.push(format!(
+            "{} -> {}",
+            compact_signature(call_path, &input.root(), &input.names)?,
+            compact_type(&output.root(), &output.names)?
+        ));
+        Ok(parts.join("\n"))
     }
 
     fn discovery_text(
@@ -131,22 +143,30 @@ impl ToolPresenter for StandardToolPresenter {
         contract: &ToolContract,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        listing::discovery_text(manifest, contract, Self::config(config)?.schema_depth)
+        Ok(
+            compact_contract(manifest, contract, &manifest.name, &Self::config(config)?)?
+                .render_markdown(),
+        )
     }
 }
 
 /// The compact projection of a tool: its one-line signature, its return
-/// type, a row per parameter and return field, its description and its
-/// examples under `config`'s cuts.
+/// type, reachable definitions and path-only parameter and return notes,
+/// plus its description and examples under `config`'s cuts.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompactToolContract {
     pub name: String,
     pub signature: String,
     pub returns: String,
+    /// Reachable named bodies and their notes, emitted once before the tool.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parameters: Vec<serde_json::Value>,
+    pub definitions: Vec<String>,
+    /// Use-site notes qualified by `input`; types are in the signature.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub return_fields: Vec<serde_json::Value>,
+    pub parameters: Vec<CompactNoteRow>,
+    /// Use-site notes qualified by `output`, retaining distinct union branches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub return_fields: Vec<CompactNoteRow>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -169,31 +189,86 @@ pub fn compact_contract(
     signature_name: &str,
     config: &StandardPresenterConfig,
 ) -> Result<CompactToolContract, PresentationRefusal> {
-    let input = lash_tool_presenter_api::inline_schema(
+    let input = SchemaDocument::from_json_schema(
         contract.input_schema.canonical.as_value(),
         config.schema_depth,
     )?;
-    let output = lash_tool_presenter_api::inline_schema(
+    let output = SchemaDocument::from_json_schema(
         contract.output_schema.canonical.as_value(),
         config.schema_depth,
     )?;
+    let default = match &contract.output_contract {
+        ToolOutputContract::FromInputSchema {
+            default_schema: Some(schema),
+            ..
+        } => Some(SchemaDocument::from_json_schema(
+            schema.as_value(),
+            config.schema_depth,
+        )?),
+        _ => None,
+    };
+    let documents = [&input, &output]
+        .into_iter()
+        .chain(default.iter())
+        .collect::<Vec<_>>();
+    let mut names = compact_name_allocator(&documents, &[signature_name]);
+    let mut input = Document::allocate(input, &mut names);
+    let output = Document::allocate(output, &mut names);
     let output_contract = &contract.output_contract;
-    let witnessed_input = witnessed_input(output_contract, &input);
+    // Root references keep their named body, including the witness field.
+    if let ShapeKind::Ref(id) = input.document.roots[0].kind {
+        let mut current = id;
+        let mut visited = std::collections::BTreeSet::new();
+        while visited.insert(current) {
+            let shape = &mut input.document.definitions[current.0].shape;
+            if let ShapeKind::Ref(next) = shape.kind {
+                current = next;
+            } else {
+                *shape = witnessed_input(output_contract, shape);
+                break;
+            }
+        }
+    } else {
+        input.document.roots[0] = witnessed_input(output_contract, &input.root());
+    }
+    let mut definitions = input.definitions()?;
+    let mut output_definitions = match output_contract {
+        ToolOutputContract::Static => output.definitions()?,
+        ToolOutputContract::FromInputSchema { .. } => Vec::new(),
+    };
+    output_definitions.retain(|definition| !definitions.contains(definition));
+    definitions.extend(output_definitions);
+    let (type_parameters, returns) = match output_contract {
+        ToolOutputContract::Static => (String::new(), compact_type(&output.root(), &output.names)?),
+        ToolOutputContract::FromInputSchema { .. } => {
+            let default = if let Some(document) = default {
+                let default = Document::allocate(document, &mut names);
+                for definition in default.definitions()? {
+                    if !definitions.contains(&definition) {
+                        definitions.push(definition);
+                    }
+                }
+                compact_type(&default.root(), &default.names)?
+            } else {
+                "any".to_string()
+            };
+            (format!("<T = {default}>"), "T".to_string())
+        }
+    };
     Ok(CompactToolContract {
         name: signature_name.to_string(),
-        signature: format!(
-            "{}{}({})",
-            signature_name,
-            type_parameter_suffix(output_contract, config.schema_depth)?.unwrap_or_default(),
-            compact_arguments(&witnessed_input)
-        ),
-        returns: return_type_label(output_contract, &output),
-        parameters: witnessed_input
-            .rows()
-            .iter()
-            .map(|row| compact_row(row, "name"))
-            .collect(),
-        return_fields: return_fields(output_contract, &output),
+        signature: compact_signature(
+            &format!("{signature_name}{type_parameters}"),
+            &input.root(),
+            &input.names,
+        )?,
+        returns,
+        definitions,
+        parameters: compact_note_rows(&input.root(), "input"),
+        return_fields: match output_contract {
+            ToolOutputContract::Static => compact_note_rows(&output.root(), "output"),
+            ToolOutputContract::FromInputSchema { .. } => Vec::new(),
+        },
         description: manifest.description.trim().to_string(),
         examples: listing::compact_examples(
             &contract.examples,
@@ -203,30 +278,96 @@ pub fn compact_contract(
     })
 }
 
-fn return_type_label(output_contract: &ToolOutputContract, output: &SchemaShape) -> String {
-    match output_contract {
-        ToolOutputContract::Static => compact_type(output),
-        ToolOutputContract::FromInputSchema { .. } => "T".to_string(),
+struct Document {
+    document: SchemaDocument,
+    names: BTreeMap<DefinitionId, String>,
+}
+
+/// Reserve compact notation words, tool names and the documents' host types
+/// before allocating readable reference names with the shared graph allocator.
+/// Pass every input, output and dynamic-default document in the same bundle.
+///
+/// ```rust,ignore
+/// let mut names = compact_name_allocator(&[&input, &output], &["lookup"]);
+/// let filter_name = names.allocate(&input, filter_id);
+/// ```
+pub fn compact_name_allocator(
+    documents: &[&SchemaDocument],
+    reserved: &[&str],
+) -> ReadableNameAllocator {
+    let mut allocator = ReadableNameAllocator::new(
+        [
+            "T", "TypeSpec", "process", "record", "list", "tuple", "enum", "any", "never", "str",
+            "int", "float", "bool", "null", "type", "true", "false", "input", "output",
+        ]
+        .into_iter()
+        .chain(reserved.iter().copied()),
+    );
+    for document in documents {
+        reserve_host_names(document, &mut allocator);
+    }
+    allocator
+}
+
+fn reserve_host_names(document: &SchemaDocument, allocator: &mut ReadableNameAllocator) {
+    fn reserve(shape: &SchemaShape, allocator: &mut ReadableNameAllocator) {
+        if let ShapeKind::Named(name) = &shape.kind {
+            allocator.reserve(name);
+        }
+        match &shape.kind {
+            ShapeKind::Object(object) => {
+                for field in &object.fields {
+                    reserve(&field.shape, allocator);
+                }
+                if let lash_tool_shape::ExtraKeys::Open(extra) = &object.extra_keys {
+                    reserve(extra, allocator);
+                }
+            }
+            ShapeKind::List(item) => reserve(item, allocator),
+            ShapeKind::Tuple(items) | ShapeKind::Union(items) => {
+                for item in items {
+                    reserve(item, allocator);
+                }
+            }
+            ShapeKind::Process(Some(process)) => {
+                for param in &process.params {
+                    reserve(&param.shape, allocator);
+                }
+                reserve(&process.output, allocator);
+            }
+            _ => {}
+        }
+    }
+    for shape in document.roots.iter().chain(
+        document
+            .definitions
+            .iter()
+            .map(|definition| &definition.shape),
+    ) {
+        reserve(shape, allocator);
     }
 }
 
-fn type_parameter_suffix(
-    output_contract: &ToolOutputContract,
-    depth: usize,
-) -> Result<Option<String>, PresentationRefusal> {
-    match output_contract {
-        ToolOutputContract::Static => Ok(None),
-        ToolOutputContract::FromInputSchema { default_schema, .. } => {
-            let default = default_schema
-                .as_ref()
-                .map(|schema| {
-                    lash_tool_presenter_api::inline_schema(schema.as_value(), depth)
-                        .map(|shape| compact_type(&shape))
-                })
-                .transpose()?
-                .unwrap_or_else(|| "any".to_string());
-            Ok(Some(format!("<T = {default}>")))
-        }
+impl Document {
+    fn allocate(document: SchemaDocument, allocator: &mut ReadableNameAllocator) -> Self {
+        let names = document
+            .reachable_closure(&document.roots)
+            .into_iter()
+            .map(|id| (id, allocator.allocate(&document, id)))
+            .collect();
+        Self { document, names }
+    }
+
+    fn root(&self) -> SchemaShape {
+        self.document.roots[0].clone()
+    }
+
+    fn definitions(&self) -> Result<Vec<String>, PresentationRefusal> {
+        self.document
+            .reachable_closure(&self.document.roots)
+            .into_iter()
+            .map(|id| compact_definition(&self.document, id, &self.names))
+            .collect()
     }
 }
 
@@ -251,29 +392,19 @@ fn witnessed_input(output_contract: &ToolOutputContract, input: &SchemaShape) ->
     input
 }
 
-fn return_fields(output_contract: &ToolOutputContract, output: &SchemaShape) -> Vec<Value> {
-    match output_contract {
-        ToolOutputContract::Static => output
-            .rows()
-            .iter()
-            .map(|row| compact_row(row, "path"))
-            .collect(),
-        ToolOutputContract::FromInputSchema { .. } => Vec::new(),
-    }
-}
-
 impl CompactToolContract {
     fn render_signature_head(&self) -> String {
         format!("{} -> {}", self.signature.trim(), self.returns.trim())
     }
 
-    /// The signature line, then its parameter and return-field rows.
+    /// The reachable definitions, signature line and path-only note rows.
     pub fn render_signature(&self) -> String {
-        let mut sections = vec![self.render_signature_head()];
+        let mut sections = self.definitions.clone();
+        sections.push(self.render_signature_head());
         let parameter_lines = self
             .parameters
             .iter()
-            .filter_map(compact_doc_line)
+            .map(compact_note_line)
             .collect::<Vec<_>>();
         if !parameter_lines.is_empty() {
             sections.push(format!("Parameters:\n{}", parameter_lines.join("\n")));
@@ -281,7 +412,7 @@ impl CompactToolContract {
         let return_field_lines = self
             .return_fields
             .iter()
-            .filter_map(compact_doc_line)
+            .map(compact_note_line)
             .collect::<Vec<_>>();
         if !return_field_lines.is_empty() {
             sections.push(format!("Return fields:\n{}", return_field_lines.join("\n")));
@@ -295,7 +426,7 @@ impl CompactToolContract {
         let return_field_lines = self
             .return_fields
             .iter()
-            .filter_map(compact_doc_line)
+            .map(compact_note_line)
             .collect::<Vec<_>>();
         if !return_field_lines.is_empty() {
             sections.push(format!("Return fields:\n{}", return_field_lines.join("\n")));
@@ -306,7 +437,8 @@ impl CompactToolContract {
     /// The contract as one markdown block: its signature heading, its
     /// description, its rows and its examples.
     pub fn render_markdown(&self) -> String {
-        let mut sections = vec![format!("### {}", self.render_signature_head())];
+        let mut sections = self.definitions.clone();
+        sections.push(format!("### {}", self.render_signature_head()));
         if !self.description.trim().is_empty() {
             sections.push(self.description.trim().to_string());
         }
@@ -315,7 +447,7 @@ impl CompactToolContract {
                 "Parameters:\n{}",
                 self.parameters
                     .iter()
-                    .filter_map(compact_doc_line)
+                    .map(compact_note_line)
                     .collect::<Vec<_>>()
                     .join("\n")
             ));
@@ -325,7 +457,7 @@ impl CompactToolContract {
                 "Return fields:\n{}",
                 self.return_fields
                     .iter()
-                    .filter_map(compact_doc_line)
+                    .map(compact_note_line)
                     .collect::<Vec<_>>()
                     .join("\n")
             ));

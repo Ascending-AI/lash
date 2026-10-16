@@ -1004,7 +1004,8 @@ mod tests {
         }
 
         fn schema_type(&self, shape: &SchemaShape) -> String {
-            lash_tool_presenter_standard::compact_type(shape)
+            lash_tool_presenter_standard::compact_type(shape, &Default::default())
+                .expect("fixture shape has no references")
         }
 
         fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String {

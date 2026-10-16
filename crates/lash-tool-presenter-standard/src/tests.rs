@@ -49,37 +49,29 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
     let contract = compact(&tool);
     assert_eq!(
         contract.signature,
-        "search_docs({ query: str, limit?: int <= 10 = 5 })"
+        "search_docs({ query: str, limit?: int })"
     );
     assert_eq!(
         contract.returns,
         "record{matches: list[str], next_page?: str | null}"
     );
     assert_eq!(
-        contract.parameters,
-        vec![
-            serde_json::json!({
-                "name": "query",
-                "type": "str",
-                "required": true,
-                "signature": "query: str"
-            }),
-            serde_json::json!({
-                "name": "limit",
-                "type": "int",
-                "required": false,
-                "signature": "limit?: int <= 10 = 5"
-            }),
-        ]
+        contract
+            .parameters
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap(),
+        vec![serde_json::json!({"path":"input.limit", "notes":["<= 10", "default 5"]})]
     );
     assert_eq!(contract.examples.len(), 2);
 
     let docs = compact(&tool).render_markdown();
     assert!(docs.contains(
-        "### search_docs({ query: str, limit?: int <= 10 = 5 }) -> record{matches: list[str], next_page?: str | null}"
+        "### search_docs({ query: str, limit?: int }) -> record{matches: list[str], next_page?: str | null}"
     ));
     assert!(!docs.contains("Returns:"));
-    assert!(docs.contains("Parameters:\n- `query: str`\n- `limit?: int <= 10 = 5`"));
+    assert!(docs.contains("Parameters:\n- `input.limit` (<= 10, default 5)"));
     assert!(docs.contains(
         "Examples: await tools.search_docs({ query: \"rust\" })?; await tools.search_docs({ query: \"rust\", limit: 3 })?"
     ));
@@ -127,10 +119,13 @@ fn compact_tool_contract_resolves_local_refs_in_string_or_list_parameters() {
     let signature = compact(&tool).render_signature();
 
     assert!(
-        signature.contains("module?: str | list[str] | null"),
+        signature.contains("module?: ModuleFilter | null"),
         "{signature}"
     );
-    assert!(!signature.contains("module?: any"), "{signature}");
+    assert!(
+        signature.contains("type ModuleFilter = str | list[str]"),
+        "{signature}"
+    );
 }
 
 #[test]
@@ -161,7 +156,7 @@ fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
     assert_eq!(contract.render_returns(), "");
     assert_eq!(
         compact(&tool).render_markdown(),
-        "### spawn_agent<T = any>({ output?: TypeSpec<T> }) -> T\nRun a child session\nParameters:\n- `output?: TypeSpec<T>`"
+        "### spawn_agent<T = any>({ output?: TypeSpec<T> }) -> T\nRun a child session"
     );
 }
 
@@ -295,90 +290,49 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
     .unwrap();
 
     let contract = compact(&tool);
+    // Branch-qualified paths retain annotations without repeating type text.
     assert_eq!(
-        serde_json::to_value(&contract).unwrap(),
-        serde_json::json!({
-            "name": "mcp__appworld__spotify_show_album_library",
-            "signature": "mcp__appworld__spotify_show_album_library({ access_token: str, page_index?: int >= 0 = 0, page_limit?: int >= 1 <= 20 = 5 })",
-            "returns": "record{response: list[record{added_at: str | null, album_id: int, genre: str, song_ids: list[int], title: str}] | record{message: str}}",
-            "parameters": [
-                {
-                    "name": "access_token",
-                    "type": "str",
-                    "required": true,
-                    "description": "Access token obtained from spotify app login.",
-                    "signature": "access_token: str"
-                },
-                {
-                    "name": "page_index",
-                    "type": "int",
-                    "required": false,
-                    "description": "The index of the page to return.",
-                    "signature": "page_index?: int >= 0 = 0"
-                },
-                {
-                    "name": "page_limit",
-                    "type": "int",
-                    "required": false,
-                    "description": "The maximum number of results to return per page.",
-                    "signature": "page_limit?: int >= 1 <= 20 = 5"
-                }
-            ],
-            "return_fields": [
-                {
-                    "path": "response",
-                    "type": "list[record]",
-                    "required": true,
-                    "description": "Albums in the user's library.",
-                    "signature": "response: list[record]"
-                },
-                {
-                    "path": "response[].added_at",
-                    "type": "str | null",
-                    "required": true,
-                    "description": "When the album was added to the library.",
-                    "signature": "response[].added_at: str | null"
-                },
-                {
-                    "path": "response[].album_id",
-                    "type": "int",
-                    "required": true,
-                    "signature": "response[].album_id: int"
-                },
-                {
-                    "path": "response[].genre",
-                    "type": "str",
-                    "required": true,
-                    "description": "Album genre.",
-                    "signature": "response[].genre: str min length 1"
-                },
-                {
-                    "path": "response[].song_ids",
-                    "type": "list[int]",
-                    "required": true,
-                    "signature": "response[].song_ids: list[int]"
-                },
-                {
-                    "path": "response[].title",
-                    "type": "str",
-                    "required": true,
-                    "signature": "response[].title: str min length 1"
-                },
-                {
-                    "path": "response.message",
-                    "type": "str",
-                    "required": true,
-                    "description": "Failure or status message.",
-                    "signature": "response.message: str"
-                }
-            ],
-            "description": "[MCP appworld] Search or show a list of albums in your album library.",
-            "examples": ["show album library"]
-        })
+        contract
+            .parameters
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap(),
+        vec![
+            serde_json::json!({"path":"input.access_token", "description":"Access token obtained from spotify app login."}),
+            serde_json::json!({"path":"input.page_index", "notes":[">= 0", "default 0"], "description":"The index of the page to return."}),
+            serde_json::json!({"path":"input.page_limit", "notes":[">= 1", "<= 20", "default 5"], "description":"The maximum number of results to return per page."}),
+        ]
     );
     assert_eq!(
-        contract.render_markdown(),
-        "### mcp__appworld__spotify_show_album_library({ access_token: str, page_index?: int >= 0 = 0, page_limit?: int >= 1 <= 20 = 5 }) -> record{response: list[record{added_at: str | null, album_id: int, genre: str, song_ids: list[int], title: str}] | record{message: str}}\n[MCP appworld] Search or show a list of albums in your album library.\nParameters:\n- `access_token: str` — Access token obtained from spotify app login.\n- `page_index?: int >= 0 = 0` — The index of the page to return.\n- `page_limit?: int >= 1 <= 20 = 5` — The maximum number of results to return per page.\nReturn fields:\n- `response: list[record]` — Albums in the user's library.\n- `response[].added_at: str | null` — When the album was added to the library.\n- `response[].album_id: int`\n- `response[].genre: str min length 1` — Album genre.\n- `response[].song_ids: list[int]`\n- `response[].title: str min length 1`\n- `response.message: str` — Failure or status message.\nExamples: show album library"
+        contract
+            .return_fields
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap(),
+        vec![
+            serde_json::json!({"path":"output.response|0", "description":"Albums in the user's library."}),
+            serde_json::json!({"path":"output.response|0[].added_at", "description":"When the album was added to the library."}),
+            serde_json::json!({"path":"output.response|0[].genre", "description":"Album genre.", "notes":["min length 1"]}),
+            serde_json::json!({"path":"output.response|0[].title", "notes":["min length 1"]}),
+            serde_json::json!({"path":"output.response|1.message", "description":"Failure or status message."}),
+        ]
+    );
+    assert!(
+        serde_json::from_value::<CompactNoteRow>(
+            serde_json::json!({"path":"input.q", "type":"str", "signature":"q: str"})
+        )
+        .is_err()
+    );
+    let docs = contract.render_markdown();
+    assert!(
+        docs.contains("- `output.response|0[].genre` (min length 1) — Album genre."),
+        "{docs}"
+    );
+    assert!(
+        !docs.contains("- `output.response|0[].genre: str"),
+        "{docs}"
     );
 }
 
@@ -435,18 +389,159 @@ fn compact_contract_renders_an_open_nested_schema_with_full_fidelity() {
     assert_eq!(
         compact(&tool).render_markdown(),
         concat!(
-            "### issues_search({ query: str min length 1, ",
+            "### issues_search({ query: str, ",
             "filter?: record{labels?: list[str], state?: enum[\"open\", \"closed\"], ...: str}, ",
             "sort?: list[record{field: str, descending?: bool}], ... }) -> list[record{id: int}]\n",
             "Search issues.\n",
             "Parameters:\n",
-            "- `query: str min length 1`\n",
-            "- `filter.labels?: list[str] max items 5`\n",
-            "- `filter.state?: enum[\"open\", \"closed\"]` — Issue state.\n",
-            "- `sort[].field: str`\n",
-            "- `sort[].descending?: bool = false`\n",
+            "- `input.query` (min length 1)\n",
+            "- `input.filter.labels` (max items 5)\n",
+            "- `input.filter.state` — Issue state.\n",
+            "- `input.sort[].descending` (default false)\n",
             "Return fields:\n",
-            "- `[].id: int > 0`"
+            "- `output[].id` (> 0)"
         )
     );
+}
+
+/// FIG-6494: recursive references are finite named edges, never widened types.
+#[test]
+fn recursive_filter_has_one_named_body_and_path_only_notes() {
+    let tool = ToolDefinition::raw(
+        "filter",
+        "filter",
+        "Filter records",
+        serde_json::json!({
+            "type":"object", "properties":{"filter":{"$ref":"#/$defs/Filter"}},
+            "$defs":{"Filter":{"type":"object", "additionalProperties":false,
+                "properties":{
+                    "and":{"type":"array", "items":{"$ref":"#/$defs/Filter"}},
+                    "field":{"type":"string", "description":"Field to compare", "minLength":1}
+                }}}
+        }),
+        serde_json::json!({"$defs":{"Filter":{"enum":["ok","failed"]}}, "$ref":"#/$defs/Filter"}),
+    )
+    .expect("admitted recursive contract")
+    .with_execution(std::time::Duration::from_secs(30));
+    let docs = compact(&tool).render_markdown();
+    assert_eq!(docs.matches("type Filter =").count(), 1, "{docs}");
+    assert!(docs.contains("and?: list[Filter]"), "{docs}");
+    assert!(
+        docs.contains("type Filter_2 = enum[\"ok\", \"failed\"]"),
+        "{docs}"
+    );
+    assert!(
+        docs.contains("- `Filter.field` (min length 1) — Field to compare"),
+        "{docs}"
+    );
+    assert!(!docs.contains("any"), "{docs}");
+    assert_eq!(docs.matches("Field to compare").count(), 1, "{docs}");
+}
+
+/// S1: a graph edge without an allocated name cannot become `any`.
+#[test]
+fn s1_compact_helpers_refuse_unbound_references() {
+    let document = SchemaDocument::from_json_schema(&serde_json::json!({"$ref":"#"}), 8).unwrap();
+    let names = BTreeMap::new();
+    assert!(compact_type(&document.roots[0], &names).is_err());
+    assert!(compact_definition(&document, DefinitionId(0), &names).is_err());
+    assert!(compact_signature("query", &document.roots[0], &names).is_err());
+}
+
+/// FIG-6494: sharing, mutual recursion and use-site notes retain their owners.
+#[test]
+fn reference_closures_preserve_mutual_edges_sharing_and_use_site_notes() {
+    let schema = serde_json::json!({
+        "$defs":{
+            "Left":{"type":"object", "properties":{"right":{"$ref":"#/$defs/Right"}}},
+            "Right":{"type":"object", "properties":{"left":{"$ref":"#/$defs/Left"}}},
+            "Field":{"enum":["id","title"], "description":"Comparison field"},
+            "type":{"type":"string"}, "input":{"type":"integer"}
+        },
+        "type":"object", "properties":{
+            "tree":{"$ref":"#/$defs/Left"},
+            "keyword":{"$ref":"#/$defs/type"}, "namespace":{"$ref":"#/$defs/input"},
+            "a":{"$ref":"#/$defs/Field", "description":"First operand"},
+            "b":{"$ref":"#/$defs/Field", "description":"Second operand"},
+            "c":{"$ref":"#/$defs/Field"}, "d":{"$ref":"#/$defs/Field"},
+            "e":{"$ref":"#/$defs/Field"}, "f":{"$ref":"#/$defs/Field"},
+            "a.b`":{"type":["string","null"], "description":"Quoted key"}
+        }
+    });
+    let tool = ToolDefinition::raw("Field", "Field", "Compare", schema.clone(), schema)
+        .unwrap()
+        .with_execution(std::time::Duration::from_secs(30));
+    let docs = compact(&tool).render_markdown();
+    for name in ["Left", "Right", "Field_2", "type_2", "input_2"] {
+        assert_eq!(docs.matches(&format!("type {name} =")).count(), 1, "{docs}");
+    }
+    assert!(docs.contains("right?: Right"), "{docs}");
+    assert!(docs.contains("left?: Left"), "{docs}");
+    assert_eq!(docs.matches("enum[\"id\", \"title\"]").count(), 1, "{docs}");
+    assert_eq!(docs.matches("Comparison field").count(), 1, "{docs}");
+    assert!(docs.contains("- `input.a` — First operand"), "{docs}");
+    assert!(docs.contains("- `output.b` — Second operand"), "{docs}");
+    assert!(docs.contains("\"a.b`\"?: str | null"), "{docs}");
+    assert!(
+        docs.contains("- `input[\"a.b\\u0060\"]` — Quoted key"),
+        "{docs}"
+    );
+    let config = serde_json::to_value(StandardPresenterConfig::standard()).unwrap();
+    let signature = StandardToolPresenter
+        .tool_signature(
+            "Field",
+            &tool.contract.input_schema.canonical,
+            &tool.contract.output_schema.canonical,
+            &config,
+        )
+        .unwrap();
+    assert_eq!(
+        signature.matches("type Field_2 =").count(),
+        1,
+        "{signature}"
+    );
+    let search = StandardToolPresenter
+        .discovery_text(&tool.manifest, &tool.contract, &config)
+        .unwrap();
+    assert_eq!(search.matches("Comparison field").count(), 1, "{search}");
+    assert_eq!(search.matches("type Left =").count(), 1, "{search}");
+}
+
+/// The dynamic-output witness rule also applies to a referenced input root;
+/// only the input and dynamic default's closures belong in its documentation.
+#[test]
+fn dynamic_witness_and_default_closure_survive_a_referenced_input_root() {
+    let tool = ToolDefinition::raw(
+        "ask",
+        "ask",
+        "Ask",
+        serde_json::json!({"$ref":"#/$defs/Input", "$defs":{"Input":{
+            "type":"object", "properties":{"output":{"type":"object"}}, "required":["output"]
+        }}}),
+        serde_json::json!({"$ref":"#/$defs/Unused", "$defs":{"Unused":{"type":"string"}}}),
+    )
+    .unwrap()
+    .with_execution(std::time::Duration::from_secs(30))
+    .with_output_from_input_schema(
+        "output",
+        Some(
+            JsonSchema::admit(serde_json::json!({
+                "$ref":"#/$defs/Result", "$defs":{"Result":{"enum":["yes","no"]}}
+            }))
+            .unwrap(),
+        ),
+    );
+    let compact = compact(&tool);
+    let docs = compact.render_markdown();
+    assert!(
+        docs.contains("type Input = record{output: TypeSpec<T>}"),
+        "{docs}"
+    );
+    assert!(
+        docs.contains("type Result = enum[\"yes\", \"no\"]"),
+        "{docs}"
+    );
+    assert!(docs.contains("### ask<T = Result>(Input) -> T"), "{docs}");
+    assert!(!docs.contains("Unused"), "{docs}");
+    assert!(compact.return_fields.is_empty());
 }

@@ -67,16 +67,61 @@ fn an_open_nested_schema_reaches_the_provider_spec_and_the_schema_docs_whole() {
     assert_eq!(
         docs.text,
         concat!(
-            "### issues_search({ query: str min length 1, ",
+            "### issues_search({ query: str, ",
             "filter?: record{labels?: list[str], state?: enum[\"open\", \"closed\"]}, ",
             "sort?: list[record{field: str}] }) -> str\n",
             "Search issues.\n",
             "Parameters:\n",
-            "- `query: str min length 1`\n",
-            "- `filter.labels?: list[str]`\n",
-            "- `filter.state?: enum[\"open\", \"closed\"]` — Issue state.\n",
-            "- `sort[].field: str max length 32`"
+            "- `input.query` (min length 1)\n",
+            "- `input.filter.state` — Issue state.\n",
+            "- `input.sort[].field` (max length 32)"
         )
+    );
+}
+
+/// FIG-6494: documentation cannot transform either provider-native schema.
+#[test]
+fn provider_native_schemas_are_byte_identical_to_the_canonical_contract() {
+    let schema = serde_json::json!({
+        "type":"object", "properties":{"filter":{"$ref":"#/$defs/Filter"}},
+        "$defs":{"Filter":{"type":"object", "properties":{
+            "and":{"type":"array", "items":{"$ref":"#/$defs/Filter"}},
+            "value":{"type":["string","null"], "description":"A nullable value"}
+        }, "additionalProperties":false}}
+    });
+    let tool = lash_core::ToolDefinition::raw("query", "query", "Query", schema.clone(), schema)
+        .expect("valid recursive schemas")
+        .with_execution(std::time::Duration::from_secs(30));
+    let canonical_input = serde_json::to_vec(tool.contract.input_schema.canonical()).unwrap();
+    let canonical_output = serde_json::to_vec(tool.contract.output_schema.canonical()).unwrap();
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
+    let config = StandardProtocolConfig {
+        batch: BatchSugar::Disabled,
+        ..Default::default()
+    };
+    let docs = config
+        .tool_docs(&catalog)
+        .expect("finite graph documentation");
+    assert_eq!(
+        docs.text.matches("type Filter =").count(),
+        1,
+        "{}",
+        docs.text
+    );
+    assert!(docs.text.contains("and?: list[Filter]"), "{}", docs.text);
+    let preamble = StandardProtocolDriver { config }.build_preamble(ProtocolBuildInput {
+        tool_catalog: Arc::new(catalog),
+        plugin_extensions: Default::default(),
+        writer_formats: lash_core::build_newest_writer_formats(),
+    });
+    assert_eq!(preamble.tool_specs.len(), 1);
+    assert_eq!(
+        serde_json::to_vec(preamble.tool_specs[0].input_schema.canonical()).unwrap(),
+        canonical_input
+    );
+    assert_eq!(
+        serde_json::to_vec(preamble.tool_specs[0].output_schema.canonical()).unwrap(),
+        canonical_output
     );
 }
 
