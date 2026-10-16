@@ -315,7 +315,6 @@ mod tests {
                 ProcessExternalRef {
                     backend: "test".to_string(),
                     id: "external".to_string(),
-                    metadata: None,
                     segment_ordinal: None,
                 },
             )
@@ -372,7 +371,6 @@ mod tests {
                 ProcessExternalRef {
                     backend: "test".to_string(),
                     id: "external".to_string(),
-                    metadata: None,
                     segment_ordinal: None,
                 },
             )

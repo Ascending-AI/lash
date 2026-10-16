@@ -27,7 +27,6 @@ pub async fn external_ref_is_written_compare_and_set_by_segment_ordinal(
     let reference = |ordinal: Option<u64>, id: &str| crate::ProcessExternalRef {
         backend: "workflow-engine".to_string(),
         id: id.to_string(),
-        metadata: None,
         segment_ordinal: ordinal,
     };
     let recorded = |record: &crate::ProcessRecord| {
@@ -91,7 +90,6 @@ pub async fn external_ref_is_written_compare_and_set_by_segment_ordinal(
                 crate::ProcessExternalRef {
                     backend: "other-backend".to_string(),
                     id: "workflow#9".to_string(),
-                    metadata: None,
                     segment_ordinal: Some(9),
                 },
             )
@@ -109,5 +107,57 @@ pub async fn external_ref_is_written_compare_and_set_by_segment_ordinal(
         recorded(&record),
         ("workflow#2".to_string(), Some(2)),
         "a refused cross-backend write must leave the recorded owner untouched"
+    );
+}
+
+/// PROCESS-EXTERNAL-METADATA-IS-HOST-OWNED: the adapter owns opaque data,
+/// keyed by process id; only execution identity crosses the registry boundary.
+#[expect(clippy::expect_used, reason = "conformance-law fixture setup")]
+pub async fn process_external_metadata_is_host_owned(registry: Arc<dyn ProcessRegistry>) {
+    let identity = serde_json::json!({
+        "backend": "workflow-engine",
+        "id": "workflow#1",
+        "segment_ordinal": 1
+    });
+    let mut host_data = identity.clone();
+    host_data["metadata"] = serde_json::json!({"billing_account": "host-only"});
+    assert!(
+        serde_json::from_value::<crate::ProcessExternalRef>(host_data).is_err(),
+        "opaque host metadata must not be admitted as an execution binding"
+    );
+    let reference = serde_json::from_value(identity.clone()).expect("execution identity");
+    let process_id = registry
+        .register_process(registration("external-metadata-host-owned"))
+        .await
+        .expect("register process")
+        .id;
+    let written = registry
+        .set_external_ref(&process_id, reference)
+        .await
+        .expect("bind execution identity");
+    assert_eq!(
+        serde_json::to_value(&written).expect("serialize stored process")["external_ref"],
+        identity
+    );
+    let record = crate::ProcessWorkObserver::new(registry.clone())
+        .process(&process_id)
+        .await
+        .expect("query process")
+        .expect("process exists");
+    assert_eq!(
+        serde_json::to_value(record.projection()).expect("serialize query projection")["external_ref"],
+        identity
+    );
+    let events = registry
+        .recent_events(&process_id, 1)
+        .await
+        .expect("binding event");
+    assert_eq!(
+        events
+            .last()
+            .expect("external-reference fact")
+            .fact
+            .payload()["external_ref"],
+        identity
     );
 }

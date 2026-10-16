@@ -461,7 +461,6 @@ async fn apply_operation(
             let external_ref = ProcessExternalRef {
                 backend: "property".to_string(),
                 id: format!("external-{value}"),
-                metadata: None,
                 segment_ordinal: None,
             };
             if handles

@@ -405,7 +405,6 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
             &ProcessExternalRef {
                 backend: "fixture".to_string(),
                 id: "external".to_string(),
-                metadata: None,
                 segment_ordinal: None,
             },
         ),

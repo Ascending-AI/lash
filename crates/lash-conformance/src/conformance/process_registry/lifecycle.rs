@@ -108,7 +108,6 @@ pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
             crate::ProcessExternalRef {
                 backend: "lifecycle-clock".to_string(),
                 id: "external".to_string(),
-                metadata: None,
                 segment_ordinal: None,
             },
         )
@@ -369,7 +368,6 @@ pub(super) async fn lifecycle_transition_refusals_are_backend_invariant(
             crate::ProcessExternalRef {
                 backend: "first-backend".to_string(),
                 id: "first-id".to_string(),
-                metadata: None,
                 segment_ordinal: None,
             },
         )
@@ -382,7 +380,6 @@ pub(super) async fn lifecycle_transition_refusals_are_backend_invariant(
                 crate::ProcessExternalRef {
                     backend: "second-backend".to_string(),
                     id: "second-id".to_string(),
-                    metadata: None,
                     segment_ordinal: None,
                 },
             )

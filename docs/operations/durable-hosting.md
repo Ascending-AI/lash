@@ -1103,6 +1103,10 @@ returned process binding before permitting pruning: a start key deduplicates
 only while its process is retained, and Lash has no host delivery receipt
 table. A later duplicate consults the host's saved binding.
 
+`ProcessExternalRef` carries only `backend`, `id` and `segment_ordinal`.
+Hosts that used `ProcessExternalRef.metadata` keep that metadata in their own
+adapter keyed by process id.
+
 The process lifecycle log has a closed vocabulary: started, waiting with
 `call_id` and `tool_id`, resumed, effect outcome, effect omissions, cancel
 requested, observer added and removed, external reference set, and completed,

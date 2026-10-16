@@ -278,6 +278,7 @@ macro_rules! process_registry_tests {
                 (terminal_retention_ignores_later_observer_facts, "terminal-retention-clock"),
                 (a_resume_event_cannot_return_an_ended_process_to_running, "resume-after-terminal"),
                 (external_ref_is_written_compare_and_set_by_segment_ordinal, "external-ref-compare-and-set"),
+                (process_external_metadata_is_host_owned, "external-metadata-host-owned"),
                 (a_start_key_reports_created_then_existing_and_is_trusted, "start-key-disposition"),
                 (a_host_start_key_is_global_and_fences_its_originator, "host-start-key-global"),
                 (a_start_key_conflict_names_no_retained_process, "start-key-conflict-content-free"),

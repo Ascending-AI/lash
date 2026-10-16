@@ -1359,13 +1359,13 @@ impl ProcessIdentity {
     }
 }
 
-/// Durable backend reference for background work accepted outside the local process.
+/// Durable execution identity for background work accepted outside the local process.
+/// Hosts keep external metadata in their adapter, keyed by process id.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessExternalRef {
     pub backend: String,
     pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<serde_json::Value>,
     /// Execution segment this reference was minted for.
     ///
     /// A run that hands over to a successor is a new segment with its own

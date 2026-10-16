@@ -41,7 +41,6 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
             lash_core::ProcessExternalRef {
                 backend: "builder-clock".to_string(),
                 id: "builder-clock-ref".to_string(),
-                metadata: None,
                 segment_ordinal: None,
             },
         )

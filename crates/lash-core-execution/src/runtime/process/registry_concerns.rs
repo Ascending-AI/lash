@@ -242,7 +242,8 @@ pub trait ProcessRegistrar: Send + Sync {
         prepared: PreparedProcessRegistration,
     ) -> Result<ProcessRegistrationReceipt, PluginError>;
 
-    /// Attach a durable backend reference to a registered process.
+    /// Attach a durable execution identity to a registered process.
+    /// Host metadata stays in the adapter, keyed by process id.
     ///
     /// Implementations must reject unknown process ids. The first assignment
     /// stores the reference. Repeating the exact same assignment is an

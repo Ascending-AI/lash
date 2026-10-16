@@ -100,7 +100,6 @@ pub(super) async fn terminal_completion_replay_keeps_original_authority_and_writ
                         crate::ProcessExternalRef {
                             backend: "workflow-engine".into(),
                             id: "carrier".into(),
-                            metadata: None,
                             segment_ordinal: Some(ordinal),
                         },
                     )

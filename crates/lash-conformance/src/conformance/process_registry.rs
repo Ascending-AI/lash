@@ -17,7 +17,10 @@ mod observer_transfer;
 mod parent_end;
 mod registration;
 
-pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
+pub use external_ref::{
+    external_ref_is_written_compare_and_set_by_segment_ordinal,
+    process_external_metadata_is_host_owned,
+};
 pub use observer_transfer::a_failed_observer_transfer_leaves_no_partial_mutation;
 pub use registration::{
     a_host_start_key_after_prune_starts_new_for_any_originator,
@@ -962,7 +965,6 @@ async fn refolded_process_record_matches_stored_projection(
     reader: Arc<dyn ProcessRegistry>,
     case: &str,
 ) {
-    let cold = !Arc::ptr_eq(&(Arc::clone(&writer) as Arc<dyn ProcessRegistry>), &reader);
     let base = writer
         .register_process(ProcessRegistration::new(
             ProcessInput::Engine {
@@ -1010,7 +1012,6 @@ async fn refolded_process_record_matches_stored_projection(
             crate::ProcessExternalRef {
                 backend: "refold-conformance".to_string(),
                 id: format!("external:{process_id}"),
-                metadata: Some(serde_json::json!({ "cold": cold })),
                 segment_ordinal: None,
             },
         )

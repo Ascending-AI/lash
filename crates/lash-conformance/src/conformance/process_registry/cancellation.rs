@@ -234,7 +234,6 @@ pub(super) async fn contract(
             crate::ProcessExternalRef {
                 backend: "cancel-conformance".to_string(),
                 id: "invocation".to_string(),
-                metadata: None,
                 segment_ordinal: None,
             },
         )
