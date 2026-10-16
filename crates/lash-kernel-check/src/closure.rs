@@ -203,7 +203,11 @@ fn linked_units(graph: &Graph, catalog: &dyn FunctionCatalog, root: Unit) -> Lin
                         CalleeNode::Library(function) => library_call(unit, function, args),
                     },
                     ActNode::Await(policy) => library_call(unit, policy, args),
-                    ActNode::Sleep | ActNode::Join | ActNode::JoinMany(_) => {}
+                    ActNode::Sleep
+                    | ActNode::Join
+                    | ActNode::JoinMany(_)
+                    | ActNode::Yield
+                    | ActNode::Cancel => {}
                 }
                 continue;
             }

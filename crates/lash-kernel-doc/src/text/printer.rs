@@ -250,9 +250,9 @@ impl<'a> Printer<'a> {
                 self.out.push_str("remove ");
                 self.member(member);
             }
-            Stmt::Do { action } => {
+            Stmt::Do { value } => {
                 self.out.push_str("do ");
-                self.action(action);
+                self.expr(value);
             }
             Stmt::If {
                 condition,
@@ -637,6 +637,12 @@ impl<'a> Printer<'a> {
                         JoinMode::Race => "join race(",
                         JoinMode::Any => "join any(",
                     });
+                    self.exprs(act.args.iter());
+                    self.out.push(')');
+                }
+                ActKind::Yield => self.out.push_str("yield"),
+                ActKind::Cancel => {
+                    self.out.push_str("cancel(");
                     self.exprs(act.args.iter());
                     self.out.push(')');
                 }

@@ -89,6 +89,7 @@ pub(super) const DATA: &str = r####"{
 "e0963e935d4bfffeb2927d762c0f29b8fb0cf42c4a8257ff5f6997bcc1702101":[{"text":"𓕡񰍋󞶍򋴖󼷬񑵷𶊍󅤈"},{"text":"󨔅񆕏𖱅󚇝񒿞񕠁𐓱񸚸𔖵𧱾򐄆𵺄􎼹𩺧񦑚񫘒񡿾򮁁񚇁򩳂򕵻󛴁򪠻񠾫􂍴􁐲񨢚񞼋򣀕񂬵񆰣󨐻򙷳󚀈񜭈󉫞󻉫●𖩄򃖐𗇻𗷘򔜣󾝭􄯣񱖴򎪟󵒊񷒣򧂊𷳫񹳒򠅫򙶩󗃒򛒳󲴚򃷀"},{"bool":true},{"bool":false}],
 "e0965fb4ac0f16fd40ed2ece44fe070ed29db5e724f1619e295c982c9a7edd7d":[{"int":"-1"},{"set":85},{"text":"-0"},{"tuple":[{"int":"32"},{"int":"32"},{"bool":false},{"bool":false}]}],
 "e096e5864ec232da4198a029a2b39313a681981376ef3ad408378aa882d7c501":[{"float":"2.2250738585072014e-308"},{"set":87},{"text":"Hello, Wörld"},{"tuple":[{"int":"1180591620717411303424"},{"int":"1180591620717411303424"},{"bool":true},{"bool":true}]}],
+"e0975b23270060ce86e06ab41819dc8f87077484a12237921ee191307352ce57":{"charge":390,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "e0985fe4255c24369230972b5871ae59c7c4d5c50084e1364583829011f644f6":[{"record":1},{"text":"NaN"},{"text":"NaN"}],
 "e098d4d9fae0f4e6b3b5e5ac9d826c61750a942b67ffc02d3f6c340932393dae":[{"list":[{"int":"-935325277957733214"},{"int":"8487638591186561451"},{"int":"7859695474626676664"},{"int":"-7274676111427431113"},{"int":"7755459408979823325"},{"int":"3579745296989648264"},{"int":"8592065968553981283"}]}],
 "e09aaff4c644f5113d67c8585927db0560d236dc3107cd707e702b8e165ad094":[{"list":1},{"int":"-3"},{"text":"ab"}],

@@ -220,7 +220,14 @@ impl Reader {
         if let Some(native) = self.native_statement(expr) {
             return native;
         }
-        let (name, args) = invocation(expr)?;
+        let (name, args) = match invocation(expr) {
+            Ok(call) => call,
+            Err(_) => {
+                return Ok(k::Stmt::Do {
+                    value: self.expression(expr)?,
+                });
+            }
+        };
         Ok(match (name.as_str(), args.as_slice()) {
             ("try", [body]) => {
                 let function = self.function(body)?;
@@ -236,12 +243,9 @@ impl Reader {
                     finally: None,
                 })
             }
-            _ => {
-                return Err(invalid(
-                    "only handlerless Try needs a kernel statement form",
-                    Some(expr.span()),
-                ));
-            }
+            _ => k::Stmt::Do {
+                value: self.expression(expr)?,
+            },
         })
     }
 }

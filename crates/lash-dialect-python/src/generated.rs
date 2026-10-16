@@ -511,7 +511,7 @@ impl<'a> Reader<'a> {
         self.awaited_expr(c, 0)?
             .0
             .as_action()
-            .ok_or_else(|| invalid("a discarded nested action needs a binding"))
+            .ok_or_else(|| invalid("a statement-position action requires atom arguments"))
     }
     fn names(&self, c: &mut Cursor<'_>) -> Result<Vec<k::Name>> {
         c.expect("[")?;
@@ -645,7 +645,7 @@ impl<'a> Reader<'a> {
             "do" => {
                 c.end(true)?;
                 k::Stmt::Do {
-                    action: self.action_line(i, d)?,
+                    value: self.expr(i, d)?,
                 }
             }
             "if_" => {
@@ -899,9 +899,11 @@ impl<'a> Reader<'a> {
             k::Stmt::Remove { member: *member }
         } else if c.take("await ") {
             self.depth(depth + 1)?;
-            let action = self.await_call(&mut c)?;
+            let (act, _) = self.awaited_expr(&mut c, depth + 1)?;
             c.finish()?;
-            k::Stmt::Do { action }
+            k::Stmt::Do {
+                value: k::Expr::Act(Box::new(act)),
+            }
         } else if c.take("if ") {
             self.readable_if(c, indent, depth)?
         } else if c.take("for ") {
@@ -1030,67 +1032,80 @@ impl<'a> Reader<'a> {
             let k::Expr::Act(act) = self.inline(&mut c, depth + 1)? else {
                 return Err(invalid("expected a task action"));
             };
-            let action = act
-                .as_action()
-                .ok_or_else(|| invalid("a discarded nested action needs a binding"))?;
             c.finish()?;
-            k::Stmt::Do { action }
+            k::Stmt::Do {
+                value: k::Expr::Act(act),
+            }
         } else if let Some(action) = self.authored_call(&mut c)? {
             self.depth(depth + 1)?;
             c.finish()?;
-            k::Stmt::Do { action }
+            k::Stmt::Do {
+                value: action.into(),
+            }
         } else if !c.text.starts_with("k.") {
             // Parse the place separately from the RHS; an annotation is the
             // exact stored distinction between declaration and reassignment.
             let target = self.inline(&mut c, depth)?;
-            let explicit = if c.take(": Final") {
-                Some(true)
-            } else if c.take(": reassigned") {
-                Some(false)
+            if c.text.trim().is_empty() {
+                k::Stmt::Do { value: target }
             } else {
-                None
-            };
-            let declaration = if let k::Expr::Variable(name) = &target {
-                self.scope.bind(name, explicit).0
-            } else {
-                explicit.unwrap_or(false)
-            };
-            c.expect("=")?;
-            let value = self.inline_rhs(&mut c, depth + 1)?;
-            c.finish()?;
-            match target {
-                k::Expr::Variable(name) if declaration => k::Stmt::Let { name, value },
-                k::Expr::Variable(name) => k::Stmt::Assign {
-                    place: k::Place::Variable(name),
-                    value,
-                },
-                k::Expr::Member(m) if !declaration => k::Stmt::Assign {
-                    place: k::Place::Member(*m),
-                    value,
-                },
-                _ => return Err(invalid("invalid assignment place")),
+                let explicit = if c.take(": Final") {
+                    Some(true)
+                } else if c.take(": reassigned") {
+                    Some(false)
+                } else {
+                    None
+                };
+                let declaration = if let k::Expr::Variable(name) = &target {
+                    self.scope.bind(name, explicit).0
+                } else {
+                    explicit.unwrap_or(false)
+                };
+                c.expect("=")?;
+                let value = self.inline_rhs(&mut c, depth + 1)?;
+                c.finish()?;
+                match target {
+                    k::Expr::Variable(name) if declaration => k::Stmt::Let { name, value },
+                    k::Expr::Variable(name) => k::Stmt::Assign {
+                        place: k::Place::Variable(name),
+                        value,
+                    },
+                    k::Expr::Member(m) if !declaration => k::Stmt::Assign {
+                        place: k::Place::Member(*m),
+                        value,
+                    },
+                    _ => return Err(invalid("invalid assignment place")),
+                }
             }
         } else if Self::action_form(c.text) {
             self.depth(depth + 1)?;
             let action = self.action_cursor(&mut c)?;
             c.finish()?;
-            k::Stmt::Do { action }
+            k::Stmt::Do {
+                value: action.into(),
+            }
         } else {
-            let op = c.operation()?;
+            let mut probe = Cursor::new(c.text);
+            let op = probe.operation()?;
             let stmt = match op {
                 "break_" => k::Stmt::Break,
                 "continue_" => k::Stmt::Continue,
                 "print" | "finish" | "fail" => {
-                    let value = self.inline(&mut c, depth + 1)?;
+                    let value = self.inline(&mut probe, depth + 1)?;
                     match op {
                         "print" => k::Stmt::Print { value },
                         "finish" => k::Stmt::Finish { value },
                         _ => k::Stmt::Fail { value },
                     }
                 }
-                _ => return Err(invalid("unknown readable statement")),
+                _ => {
+                    let value = self.inline(&mut c, depth + 1)?;
+                    c.finish()?;
+                    self.closed(indent)?;
+                    return Ok(k::Stmt::Do { value });
+                }
             };
-            c.end(false)?;
+            probe.end(false)?;
             stmt
         };
         self.closed(indent)?;
@@ -1146,9 +1161,8 @@ impl<'a> Reader<'a> {
         let i = indent + 1;
         let d = depth + 1;
         let expr = match op {
-            "call" | "spawn" | "perform" | "sleep" | "join" | "join_many" | "await_" => {
-                self.nested_action_suite(op, &mut c, i, d)?
-            }
+            "call" | "spawn" | "perform" | "sleep" | "join" | "join_many" | "await_" | "yield_"
+            | "cancel" => self.nested_action_suite(op, &mut c, i, d)?,
             "field" | "index" => {
                 k::Expr::Member(Box::new(self.member(op == "field", &mut c, i, d)?))
             }

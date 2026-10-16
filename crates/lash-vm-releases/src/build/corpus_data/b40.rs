@@ -26,7 +26,6 @@ pub(super) const DATA: &str = r####"{
 "403ec8d6ea819e884a2118dd8e89e10c72150a8cf1307f91696fc3690a620770":{"charge":5,"outcome":"ok {\"int\":\"8223017879583765100\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "403f503919b2aa640ee93dece22119dd20d204ef5f0bfc5b87ea39b7db881ede":[{"list":[{"int":"7082967958027333427"},{"float":"-0.04458335229012033"},{"bool":true},{"text":"񣿳򙵌𓝶󩚘󛦵󡞆񹸩𗝕򁫻􎀎󎁎󖀎􉅎񂯬񵒻󷣒󡒣䑊򕑂񶱪󶐲ࡺ󏃪򨎋񭉌򟃨𰤉򍵛񥀡񗻁𶙼򠾰򫆯񜼌򻾒򲙭쥡򽂳񽇒򣋱򪻔񗂉𖘨񄓤╭񲹧񱿻󪤄򘅖󤧔񒑇򞏏񼿈򍩗񨰣񸯻󻈬󭩈󠯼򬋫򊎮奩񅶛𠯠󳷷򗑌𥖤񘐏쫇񁂒񊸳󴦯򾃼󬨽򂋩񟫬尙􇃡򬡀𫿐񐚯񍝢񏑌񼺤𗘹󞂕󀀔򣄔􏱶򶠎󋕞񫞴񑟛󋜴񹵚󚴡󭀻쵛􎘁񛾍򧮲󻧅򮿶􃦩񰖚𰬑􌵇񌔝򃇗򔹴񜿨𪡷郧򭐆󎐮𜑦𴑮򳅦𑪄𭾱񆁎񒴎󂫔󞦁񗸒"},"null"]}],
 "403f8c54a516da0a3eb232a625e5dec60235a8bcb34ef2ad1de2feae137237a7":[{"float":"-3.2631324198810117e-169"}],
-"40409d555167d362d2166b36db896e7398a0b1c30751d33313c3d45bfde209d7":[{"bool":false},{"int":"7879264006926179950"}],
 "4040c498305513e82606b28b2cea73f3a042c953715955d2ac10ca4ae5a28003":[{"text":"򯅢򤀀򓒀󎋩􎅬玮񐳉񝲐𽄩񉳋򳼲󘇌󫏏񆭨𦆾񫓽𑛔򪗹򃋲𲨗񦆃𿞀򬹯𶘳򬠿򁉯򷦋󑦸򂞋󬼄򓶚򧍡󍿇޸񖞷򚊸󼯽𕬪􊬜򐭊䯜🦀򠜻𣯵𶛂􍂏򈣮􅉿񓴛򱎡򴇆󏋅剠􂳄󲆝񜢞𒺏󖔒󰍘󲝞􄲐𨈉򩽍򾜳搽󏦵򁌆𾒠򏕩滃򠋞󭭛񫰭󭀕򈋵񊺰󦷭򗁶󛜖𽏸󯉟񑡻􆂋򹒊򶔣𹤩衛񤶋򪏐򾢗󽊆󝊣󇧆򀊵󥇰򻥓🋡󺍄񄤂񚼐𬑎󑩆󬯲񽓥񽸌􂪰񞃥𲑤񞴬ﷶ񱾍󤣲􉃣󏤂󄱰󱛨"}],
 "404165392916ad40665773088835ea4fa03f51e782d754dc0b48ac4c340f60cd":{"charge":56,"outcome":"ok {\"error\":{\"data\":{\"bool\":true},\"kind\":\"Hello, Wörld\",\"message\":\"Hello, Wörld\"}}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "4041d25119a6ec6d36763cec4a505313392b83c4bdff466d399149cb61c3d961":{"charge":5,"outcome":"ok {\"int\":\"4575619946367447570\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

@@ -163,6 +163,9 @@ main {{
   let first = join h
   let every = join all hs
   do cancel h
+  let cancelled = cancel h
+  let yielded = yield
+  let slept = sleep 0
   let twice = invoke helper.outer(first)
   let applied = apply f(&start)
   let again = call start(2)
@@ -363,6 +366,7 @@ fn walking_the_graph_view_reaches_every_node_and_slot() {
         "action:spawn",
         "action:yield",
         "block",
+        "expr:act",
         "expr:call",
         "expr:clock",
         "expr:closure",

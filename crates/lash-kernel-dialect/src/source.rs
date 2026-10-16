@@ -142,6 +142,14 @@ fn collect_calls(node: Node<'_>, called: &mut BTreeSet<FunctionId>) {
         ) => {
             called.insert(*function);
         }
+        Node::Expr(Expr::Act(act)) => match &act.kind {
+            lash_kernel_doc::ActKind::Call(Callee::Library(function))
+            | lash_kernel_doc::ActKind::Spawn(Callee::Library(function))
+            | lash_kernel_doc::ActKind::Await(function) => {
+                called.insert(*function);
+            }
+            _ => {}
+        },
         Node::Stmt(lash_kernel_doc::Stmt::For { via: Some(via), .. }) => {
             called.extend(via.functions())
         }

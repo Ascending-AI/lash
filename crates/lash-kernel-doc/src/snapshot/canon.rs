@@ -188,7 +188,7 @@ impl Renamer<'_, '_> {
                 self.rhs(value);
             }
             Stmt::Remove { member } => self.member(member),
-            Stmt::Do { action } => self.action(action),
+            Stmt::Do { value } => self.expr(value),
             Stmt::If {
                 condition,
                 then_block,
@@ -337,7 +337,9 @@ impl Renamer<'_, '_> {
                     | ActKind::Await(_)
                     | ActKind::Sleep { .. }
                     | ActKind::Join
-                    | ActKind::JoinMany(_) => {}
+                    | ActKind::JoinMany(_)
+                    | ActKind::Yield
+                    | ActKind::Cancel => {}
                 }
                 act.args.iter_mut().for_each(|arg| self.expr(arg));
             }

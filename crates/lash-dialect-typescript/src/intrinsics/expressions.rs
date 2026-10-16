@@ -66,7 +66,7 @@ impl Reader {
             return self.expression(&awaited.arg);
         }
         if let Some(action) = self.native_action(expr) {
-            return action.and_then(super::native::NativeAction::expression);
+            return action.map(super::native::NativeAction::expression);
         }
         if let Some(native) = self.native_expression(expr) {
             return native;

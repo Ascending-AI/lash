@@ -150,6 +150,7 @@ pub(super) const DATA: &str = r####"{
 "fbf76a06a9d10cfec79e25e0b56d6c5bf4d308219818cba2d5db0f0c0be42617":[{"list":85},{"int":"9223372036854775808"},"null"],
 "fbf9217d84d81c223862ad843a4aa158228e5c93cfbe02bb938543da03c04b98":[{"int":"6930089076365094676"}],
 "fbf9e2544a4657b7ed53158860eada88d6a30065836dd91973888ce0e8870869":{"charge":69,"outcome":"ok {\"float\":\"-7.463982780064846e18\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"fbfc96e81dfac71c8e350aa583478cb701f71deb9f505647e4ccc0d398296915":[{"text":"򙾀񢪿󄼪䜴咺񓢓򁀢ᢂ􌸳񌍯񐬩𔕿찵󆃭󧥬񝒞񛺷󜘊񒔆񼫌𤁙󌺙󓽄񰀺𙂺񂌛󋎝򺦺򄁩񡒩򧛀􈸭𙑱󄔙󵯓𥆤𭨇󽹳򁔏"},{"list":0}],
 "fbfca3f95fb0b4db62e7816b828e98ffbebdfe1713ed7388484603751a217a6f":{"charge":3,"outcome":"ok {\"float\":\"-4.017273503397867e-30\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "fbfe9c766ddd0cfa61c9c56f8a4ccfc14df522492be0ca912cc7eb0a0c346402":{"charge":546,"outcome":"ok {\"error\":{\"data\":{\"int\":\"2875605870982416124\"},\"kind\":\"𿙨񮖄󔅏򎰍񐂕񗯔𒸣񍂿􉛞󋙳旟󂓔󅶝󾩦󣀲󍛒𣷿󽁄񑳤򬏝񲬚󚷌𡎗򷁰񇂐񡑱񨈙򨅝󞌟񩄙񉑻鶓걨򣔰򧍚󨄼򩴾󐆄񳚇󞴪큰򗷐񣴫񸞑񺋞񞀛󹜛򭛵󬨘𨾌\",\"message\":\"򓌰򊅖񖎔𞑓򱵛澡򥔾󯰔𪓬𶂥񽄤󒾆󧩙򎳭򱉴𝝐񭻾򦛃𔣎\"}}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "fbfee5ca90938723c45f1b54c96c772ff3e9d87f7ac211da28490440e833d816":{"charge":836,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `🦀` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0}

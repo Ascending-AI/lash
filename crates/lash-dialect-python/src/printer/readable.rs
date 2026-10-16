@@ -102,7 +102,7 @@ impl Renderer<'_> {
     pub(super) fn inline_body(&mut self, expr: &k::Expr) {
         match expr {
             k::Expr::Literal(l) => self.literal(l),
-            k::Expr::Act(act) => self.nested_action(act),
+            k::Expr::Act(act) => self.nested_action(act, true),
             k::Expr::Variable(n) => self.name(n),
             k::Expr::Clock => self.out.write("k.clock()"),
             k::Expr::Random => self.out.write("k.random()"),
@@ -256,6 +256,8 @@ impl Renderer<'_> {
             } else {
                 "sleep(False"
             }),
+            k::ActKind::Yield => self.out.write("yield_("),
+            k::ActKind::Cancel => self.out.write("cancel("),
             k::ActKind::Join => self.out.write("join("),
             k::ActKind::JoinMany(mode) => {
                 self.out.write("join_many(");
@@ -279,8 +281,19 @@ impl Renderer<'_> {
             self.expr(arg);
         }
     }
-    fn nested_action(&mut self, act: &k::ActExpr) {
-        self.out.write("(");
+    fn nested_action(&mut self, act: &k::ActExpr, grouped: bool) {
+        if grouped {
+            self.out.write("(");
+        }
+        if !grouped
+            && let Some(k::Action::Call {
+                callee: k::Callee::Library(id),
+                args,
+            }) = act.as_action()
+            && self.authored_call(&id, &args, Some(&act.args))
+        {
+            return;
+        }
         match &act.kind {
             k::ActKind::Call(callee) | k::ActKind::Spawn(callee) => {
                 let spawn = matches!(act.kind, k::ActKind::Spawn(_));
@@ -341,6 +354,8 @@ impl Renderer<'_> {
             kind => {
                 match kind {
                     k::ActKind::Sleep { .. } => self.out.write("await sleep("),
+                    k::ActKind::Yield => self.out.write("await yield_task("),
+                    k::ActKind::Cancel => self.out.write("await cancel("),
                     k::ActKind::Join => self.out.write("await join("),
                     k::ActKind::JoinMany(mode) => self.out.write(match mode {
                         k::JoinMode::All => "await join_all(",
@@ -371,7 +386,9 @@ impl Renderer<'_> {
                 self.out.write(")");
             }
         }
-        self.out.write(")");
+        if grouped {
+            self.out.write(")");
+        }
     }
     // The caller owns the block's indentation and any clause label. Empty
     // suites spell pass, so every real block has a nonempty final-text range.
@@ -518,9 +535,12 @@ impl Renderer<'_> {
                 self.write_member(member);
                 self.out.write("\n");
             }
-            k::Stmt::Do { action } => {
+            k::Stmt::Do { value } if self.inline.contains(value) => {
                 self.out.begin_node(None);
-                self.action(action);
+                match value {
+                    k::Expr::Act(act) => self.nested_action(act, false),
+                    value => self.inline_body(value),
+                }
                 self.out.end_node();
                 self.out.write("\n");
             }

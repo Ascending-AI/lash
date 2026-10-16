@@ -256,8 +256,20 @@ impl Renderer<'_> {
                 self.member(member);
                 self.out.write(";");
             }
-            k::Stmt::Do { action } => {
-                self.node(k::Node::Action(action), None);
+            k::Stmt::Do { value } => {
+                let grouped = matches!(value, k::Expr::Record(_) | k::Expr::Closure(_));
+                if grouped {
+                    self.out.write("(");
+                }
+                self.out.begin_node(None);
+                match value {
+                    k::Expr::Act(act) => self.nested_action(act, false),
+                    value => self.expression(value),
+                }
+                self.out.end_node();
+                if grouped {
+                    self.out.write(")");
+                }
                 self.out.write(";");
             }
             k::Stmt::If {
@@ -595,8 +607,25 @@ impl Renderer<'_> {
             k::Action::Yield => self.out.write("await yieldTask()"),
         }
     }
-    fn nested_action(&mut self, act: &k::ActExpr) {
-        self.out.write("(");
+    fn nested_action(&mut self, act: &k::ActExpr, grouped: bool) {
+        if grouped {
+            self.out.write("(");
+        }
+        if !grouped
+            && let Some(k::Action::Call {
+                callee: k::Callee::Library(id),
+                args,
+            }) = act.as_action()
+            && self.operators.console_log(&id, &args)
+        {
+            // The console receiver spells the fixed absent receiver argument.
+            self.out.begin_node(None);
+            self.out.write("console.log(...");
+            self.out.end_node();
+            self.expr(&act.args[1]);
+            self.out.write(")");
+            return;
+        }
         match &act.kind {
             k::ActKind::Call(callee) | k::ActKind::Spawn(callee) => {
                 let spawn = matches!(act.kind, k::ActKind::Spawn(_));
@@ -643,6 +672,8 @@ impl Renderer<'_> {
                     } else {
                         "await sleep("
                     }),
+                    k::ActKind::Yield => self.out.write("await yieldTask("),
+                    k::ActKind::Cancel => self.out.write("await cancel("),
                     k::ActKind::Join => self.out.write("await join("),
                     k::ActKind::JoinMany(mode) => self.out.write(match mode {
                         k::JoinMode::All => "await Promise.all(",
@@ -670,7 +701,9 @@ impl Renderer<'_> {
                 self.out.write(")");
             }
         }
-        self.out.write(")");
+        if grouped {
+            self.out.write(")");
+        }
     }
     fn expression(&mut self, expr: &k::Expr) {
         match expr {
@@ -827,7 +860,7 @@ impl Renderer<'_> {
                 self.expr(&read.request);
                 self.out.write(")");
             }
-            k::Expr::Act(act) => self.nested_action(act),
+            k::Expr::Act(act) => self.nested_action(act, true),
         }
     }
 }

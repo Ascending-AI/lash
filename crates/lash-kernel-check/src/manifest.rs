@@ -76,7 +76,11 @@ fn scan(
                     ActKind::Await(policy) => {
                         functions.insert(*policy);
                     }
-                    ActKind::Sleep { .. } | ActKind::Join | ActKind::JoinMany(_) => {}
+                    ActKind::Sleep { .. }
+                    | ActKind::Join
+                    | ActKind::JoinMany(_)
+                    | ActKind::Cancel
+                    | ActKind::Yield => {}
                 },
             },
             Node::Action(action) => {

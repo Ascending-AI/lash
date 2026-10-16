@@ -71,8 +71,8 @@ impl Typer<'_> {
             StmtNode::Remove { member } => {
                 self.member_parts(&member);
             }
-            StmtNode::Do { action } => {
-                self.value(action);
+            StmtNode::Do { value } => {
+                self.value(value);
             }
             StmtNode::If {
                 condition,
@@ -316,6 +316,7 @@ impl Typer<'_> {
                         self.nested_call(&CalleeNode::Library(policy), &args, &found)
                     }
                     ActNode::Sleep => Type::Any,
+                    ActNode::Yield | ActNode::Cancel => Type::Null,
                 }
             }
         }

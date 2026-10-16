@@ -32,13 +32,9 @@ pub struct ParseError {
 pub enum ParseErrorReason {
     #[error("found {found}; expected {expected}")]
     Unexpected { found: String, expected: String },
-    /// `join`, `yield` and `cancel` are the whole right-hand side of their
-    /// own statement and cannot sit inside an expression (`K-EVAL-008`).
-    #[error(
-        "`{}` cannot sit inside an expression: make it the whole right-hand side of its own \
-         statement and name its result",
-        .form.keyword()
-    )]
+    /// An action appears where an atom-only spelling expects a variable
+    /// or literal. Parentheses spell a computed action argument.
+    #[error("`{}` is an action, not an atom; parenthesize an expression argument", .form.keyword())]
     StatementForm { form: StatementForm },
     /// An argument of a statement spelling of `join`, `cancel` or `sleep` is
     /// a variable or a literal.

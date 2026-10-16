@@ -864,7 +864,7 @@ mod tests {
     use super::*;
     use lash::workflow::authoring::{DataValue, ValueTarget};
     use lash::workflow::document::{
-        Action, Atom, EffectName, Expr, Literal, Node, Site, Stmt, Type, Unit, parse_document,
+        ActKind, Action, EffectName, Expr, Literal, Node, Site, Stmt, Type, Unit, parse_document,
     };
     use lash::workflow::edit::Position;
 
@@ -970,8 +970,15 @@ mod tests {
     }
 
     fn performs(node: Node<'_>, effect: &str) -> bool {
-        matches!(node, Node::Action(Action::Perform { effect: performed, .. })
-            if performed.to_string() == effect)
+        match node {
+            Node::Action(Action::Perform {
+                effect: performed, ..
+            }) => performed.as_str() == effect,
+            Node::Expr(Expr::Act(act)) => {
+                matches!(&act.kind, lash::workflow::document::ActKind::Perform { effect: performed, .. } if performed.as_str() == effect)
+            }
+            _ => false,
+        }
     }
 
     /// The four edits S38 makes: inside the `try` region one more recorded
@@ -988,26 +995,25 @@ mod tests {
         .expect("the inner loop");
         let inner_body = inner.child(1);
         let record = sites(document, |node| {
-            matches!(node, Node::Stmt(Stmt::Do { action }) if performs(Node::Action(action), "ledger.record"))
+            matches!(node, Node::Stmt(Stmt::Do { value }) if performs(Node::Expr(value), "ledger.record"))
         })
         .into_iter()
         .find(|site| site.path.starts_with(&inner_body.path))
         .expect("the inner loop records");
         let base = document.identity();
-        let Node::Action(Action::Perform {
-            effect,
-            args,
-            result,
-            ..
-        }) = document.node(&record.child(0)).unwrap()
-        else {
+        let Node::Expr(Expr::Act(act)) = document.node(&record.child(0)).unwrap() else {
             panic!("the record action")
         };
-        let data_args = args
+        let ActKind::Perform { effect, result, .. } = &act.kind else {
+            panic!("the record performs an effect")
+        };
+        let data_args = act
+            .args
             .iter()
-            .map(|atom| match atom {
-                Atom::Variable(name) => DataValue::Variable(name.clone()),
-                Atom::Literal(value) => DataValue::Literal(value.clone()),
+            .map(|expr| match expr {
+                Expr::Variable(name) => DataValue::Variable(name.clone()),
+                Expr::Literal(value) => DataValue::Literal(value.clone()),
+                _ => panic!("the fixture's ledger arguments are already bound"),
             })
             .collect();
         vec![

@@ -1021,3 +1021,29 @@ fn nested_join_resumes_exactly() {
 }
 
 mod protocol;
+
+/// FIG-6471 / CONT-EXACT: do discards only the final value; nested calls,
+/// waits, yields and computed cancellation keep their evaluation and resume order.
+#[test]
+fn do_expressions_resume_after_each_action_without_repeating_operands() {
+    case(
+        r#"fn child() { do perform echo("child") as Any return null }
+fn idle() { do yield return null }
+main {
+  do call child()
+  do [1, yield, perform echo("x") as Any]
+  try { do let(h = spawn call idle(), (cancel(h), join(h))) } catch e {}
+  return "done"
+}"#,
+        &["child", "x"],
+        &text("done"),
+        &[],
+        &[
+            PhaseRecord::Called,
+            PhaseRecord::Waiting,
+            PhaseRecord::Yielded,
+            PhaseRecord::Spawned,
+            PhaseRecord::Joining,
+        ],
+    );
+}

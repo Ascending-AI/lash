@@ -23,6 +23,7 @@ pub(super) const DATA: &str = r####"{
 "3d20355d7c6e036f515faf7c476840b10abfa8cb72cd36044a1216fe6fa0260b":{"charge":12576930903279361925,"outcome":"ok {\"float\":\"0.0\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "3d23c5a508b58bff1af2b22badaa33bba60bf0401f01547a162c79d8436c7fe2":[{"float":"-1.305718982864291e168"},{"float":"9.933799853359707e-37"}],
 "3d241dd4a7f1b378fffb996264077835e7facaab237486b0db4bdc91f9bad767":{"charge":10,"outcome":"ok {\"text\":\"a\"}","prepared_difference":null,"reservations":[[0,2]],"reserved":2,"spent":0},
+"3d254b48bad8023ba9deeea29f0fc20c40ae4ba0689a0c171708c276278f4293":[{"int":"2093390974885109485"},{"text":"󻶄򆷿񡃤􁏅򝂢񢆃򶼀󱟞󷉱𪻕򼋈񍥍򻦿򀤌򙈞񋒺򕥓򬄡󳓣񞙊𰜆􉺈➵򧢺򙫋🬾𮍈񠲎󔴗򡩍򇴹򹶃𩙸񄭔􏣂󋮳򑈄򼴠󗂺񞫛􅟎𜣡🬰󚃆󄐇񨵏󗦕􌀦򳠦򾗖􅎝􈡺󔏪򱅪򿷈񀀳􁓳򂀚􄃚󶃛򒃚󕈛"}],
 "3d25c66ea1aeac76e572d5c3257687eb3215040d2bbd1bbbccc8eb5981e85148":[{"float":"-2.9448871322109513e-300"},{"float":"4.229429175912748e-197"}],
 "3d2689b9d228a98c3db2976d6e583b3973db88f174da84e012ff754b18d496af":{"charge":998,"outcome":"raised \"number_range\" \"the regex's `lastIndex` is negative: it counts UTF-16 code units from the start of the input\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "3d2782652ee806230d5f5cb9a422daf4dfad3dca1f8303bdcbe01d7be197fec5":[{"int":"1"},{"int":"0"},{"tuple":[{"text":""},{"text":""}]},{"text":""},{"text":""}],

@@ -80,6 +80,7 @@ pub(super) const DATA: &str = r####"{
 "458358e75f806e4fb4eef6685d8bee9f97d1e42102933918f9732c6b3aca6814":{"charge":24,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "458363cfe475bb5d39e6a38953d41a7e0a3f51bef03518f9273819b6ca65f7de":{"charge":6,"outcome":"ok {\"float\":\"2.803500462063578e-55\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "458385e1e094f1931c13b9b474c371ed60c8e49e554f14a97b318cacc932fa23":[{"float":"-3.39570552113404e16"}],
+"45847ce87fde18596923b4f520a66d7a43763922e2e87cade3ce325d2ae31abe":[{"bool":true},{"text":"𧩟񌥫􌰹󏏡򱙆񶗪񸞡򇛮򻖃򿈨񛇌󈆯󦥬򁢾󡔏񇓥񪍌򹤊􀢸񱪩󐛜񋇑𮛲񣶿𾘄򞫈漝񛂃"}],
 "45849a7dfded47a27ecf210218d6c171b675a9e5d77f58191585aac4cef817fd":[{"float":"-1.1255662103099e-269"}],
 "45880edacd865527526c4cc8588963be28cfceebc2cfed379ae4a9a84c97c6af":{"charge":827,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `a` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "45883bb4f5a549883d915d50485064a292727dbed1d3de189642b8f80e42ea99":[{"text":"񨆍󴏎񐣉󟂘񆽹򚿧򼅸󅣺񬋋󏦎񻿽𝟂𮣭𸡼򏉬򝢈񫬹񈨏􆣛𼛊񤿇󜢘򱜉􈍧𕶡򯥚󳐨𞁀𠾀𯞟򐆰󡶳⭈𭄞􀼼􅐢􋀊𩏪򊱍񤉕񰆑󭟒󹣽񫂌𚓭󰛤􁟩񜞆𢶉򌾒򧲍𛇲􂀑񣰑񁘩󶩅󸇑𑊒񎰷舯􇳫􎣒𑆃􎵠􎂺𷯻🗌𹼧󽧙򧸪𸙖񵓚󜣳񮆢󗋡򑹄"},{"int":"-1046872689512099464"}],

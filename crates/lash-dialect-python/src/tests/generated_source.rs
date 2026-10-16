@@ -787,18 +787,33 @@ fn inventory_document() -> k::Document {
     ];
     document
         .main
-        .extend(actions.into_iter().map(|action| S::Do { action }));
+        .extend(actions.into_iter().enumerate().flat_map(|(index, action)| {
+            [
+                S::Let {
+                    name: k::Name::new(format!("action{index}")),
+                    value: k::Rhs::Action(action.clone()),
+                },
+                S::Do {
+                    value: action.into(),
+                },
+            ]
+        }));
     for mode in [
         k::JoinMode::All,
         k::JoinMode::AllSettled,
         k::JoinMode::Race,
         k::JoinMode::Any,
     ] {
+        let action = A::JoinMany {
+            mode,
+            tasks: Atom::Variable("value".into()),
+        };
+        document.main.push(S::Let {
+            name: k::Name::new(format!("joined{mode:?}")),
+            value: k::Rhs::Action(action.clone()),
+        });
         document.main.push(S::Do {
-            action: A::JoinMany {
-                mode,
-                tasks: Atom::Variable("value".into()),
-            },
+            value: action.into(),
         });
     }
     document.main.push(S::Finish {
@@ -861,8 +876,8 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
                 inventory_member(member);
                 "remove"
             }
-            k::Stmt::Do { action } => {
-                let _ = action;
+            k::Stmt::Do { value } => {
+                let _ = value;
                 "do"
             }
             k::Stmt::If {
@@ -986,8 +1001,6 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
                 let _ = (handle, request);
                 "read"
             }
-            // A nested action has no generated spelling: the printer
-            // refuses it, so the inventory document holds none.
             k::Expr::Act(act) => {
                 let k::ActExpr { kind, args } = act.as_ref();
                 let _ = (kind, args);
@@ -1201,6 +1214,7 @@ fn independent_inventory_covers_kernel_variants_and_stored_fields() {
         "clock",
         "random",
         "read",
+        "act",
         "call",
         "spawn",
         "perform",
@@ -1457,12 +1471,13 @@ fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unpr
         },
     );
     document.main.push(k::Stmt::Do {
-        action: k::Action::Perform {
+        value: (k::Action::Perform {
             effect,
             args: vec![],
             result: ty,
             then_yield: false,
-        },
+        })
+        .into(),
     });
     let source = roundtrip(&document, true).source;
     assert!(
@@ -1526,4 +1541,30 @@ fn authored_import_of_printed_source_needs_its_base() {
     );
     let read = crate::read(&printed.source, &document, Default::default()).unwrap();
     assert_eq!(read.identity(), document.identity());
+}
+
+/// FIG-6471 / G-SOURCE-EXACT: discarded expressions have exact source inverses.
+#[test]
+fn discarded_expressions_have_exact_source_inverses() {
+    let document = k::parse_document(
+        r#"kernel 1
+numbers float
+effect show(value: Any) -> Any
+fn child() { return null }
+main {
+  do perform show({text: "x"}) as Any
+  do {text: "pure"}
+  do clock
+  do fn() start() -> Any bare direct { return null }
+  do let(x = 1, x)
+  do [1, yield]
+  do cancel(spawn call child())
+  do join all([spawn call child()])
+  finish null
+}
+"#,
+    )
+    .unwrap();
+    let printed = roundtrip(&document, true);
+    assert!(printed.source.contains("tools.show"), "{}", printed.source);
 }

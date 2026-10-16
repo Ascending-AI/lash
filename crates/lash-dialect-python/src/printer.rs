@@ -217,10 +217,10 @@ impl Renderer<'_> {
                 self.rhs(value);
             }
             k::Stmt::Remove { member } => self.member_header("remove_", member),
-            k::Stmt::Do { action } => {
+            k::Stmt::Do { value } => {
                 self.out.write("with k.do(");
                 self.suite();
-                self.node(k::Node::Action(action), None);
+                self.expr(value);
             }
             k::Stmt::If {
                 condition,
@@ -463,54 +463,82 @@ impl Renderer<'_> {
             k::Callee::Library(id) => self.helper(id),
         }
     }
+    pub(super) fn authored_call(
+        &mut self,
+        id: &k::FunctionId,
+        args: &[k::Atom],
+        expressions: Option<&[k::Expr]>,
+    ) -> bool {
+        match self.operators.authored(id, args) {
+            Some(crate::generated_operators::Authored::Builtin(name)) => {
+                self.out.write(name);
+                self.out.write("(");
+                self.authored_args(args, expressions);
+                self.out.write(")");
+                return true;
+            }
+            Some(crate::generated_operators::Authored::Slice) => {
+                self.authored_arg(&args[0], expressions.map(|args| &args[0]));
+                self.out.write("[");
+                for (i, bound) in args[1..].iter().enumerate() {
+                    if i == 2
+                        && matches!(bound, k::Atom::Literal(k::Literal::Absent))
+                        && expressions.is_none()
+                    {
+                        break;
+                    }
+                    if i > 0 {
+                        self.out.write(":");
+                    }
+                    if !matches!(bound, k::Atom::Literal(k::Literal::Absent))
+                        || expressions.is_some()
+                    {
+                        self.authored_arg(bound, expressions.map(|args| &args[i + 1]));
+                    }
+                }
+                self.out.write("]");
+                return true;
+            }
+            Some(crate::generated_operators::Authored::TypeName) => {
+                self.out.write("type(");
+                self.authored_arg(&args[0], expressions.map(|args| &args[0]));
+                self.out.write(").__name__");
+                return true;
+            }
+            Some(crate::generated_operators::Authored::Method(method)) => {
+                self.authored_arg(&args[0], expressions.map(|args| &args[0]));
+                self.out.write(".");
+                self.out.write(&method);
+                self.out.write("(");
+                self.authored_args(&args[1..], expressions.map(|args| &args[1..]));
+                self.out.write(")");
+                return true;
+            }
+            None => {}
+        }
+        false
+    }
+    fn authored_arg(&mut self, atom: &k::Atom, expression: Option<&k::Expr>) {
+        match expression {
+            Some(expr) => self.inline_expr(expr),
+            None => self.atom(atom),
+        }
+    }
+    fn authored_args(&mut self, atoms: &[k::Atom], expressions: Option<&[k::Expr]>) {
+        for (index, atom) in atoms.iter().enumerate() {
+            if index > 0 {
+                self.out.write(", ");
+            }
+            self.authored_arg(atom, expressions.map(|args| &args[index]));
+        }
+    }
     fn action(&mut self, action: &k::Action) {
         match action {
             k::Action::Call { callee, args } => {
-                let authored = match callee {
-                    k::Callee::Library(id) => self.operators.authored(id, args),
-                    _ => None,
-                };
-                match authored {
-                    Some(crate::generated_operators::Authored::Builtin(name)) => {
-                        self.out.write(name);
-                        self.out.write("(");
-                        self.call_atoms(args);
-                        self.out.write(")");
-                        return;
-                    }
-                    Some(crate::generated_operators::Authored::Slice) => {
-                        self.atom(&args[0]);
-                        self.out.write("[");
-                        for (i, bound) in args[1..].iter().enumerate() {
-                            if i == 2 && matches!(bound, k::Atom::Literal(k::Literal::Absent)) {
-                                break;
-                            }
-                            if i > 0 {
-                                self.out.write(":");
-                            }
-                            if !matches!(bound, k::Atom::Literal(k::Literal::Absent)) {
-                                self.atom(bound);
-                            }
-                        }
-                        self.out.write("]");
-                        return;
-                    }
-                    Some(crate::generated_operators::Authored::TypeName) => {
-                        self.out.write("type(");
-                        self.atom(&args[0]);
-                        self.out.write(").__name__");
-                        return;
-                    }
-                    Some(crate::generated_operators::Authored::Method(method)) => {
-                        self.atom(&args[0]);
-                        self.out.write(".");
-                        self.out.write(&method);
-                        self.out.write("(");
-                        self.call_atoms(&args[1..]);
-                        self.out.write(")");
-                        return;
-                    }
-                    None => {}
+                if let k::Callee::Library(id) = callee
+                    && self.authored_call(id, args, None)
+                {
+                    return;
                 }
                 self.out.write("await ");
                 match callee {

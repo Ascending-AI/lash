@@ -102,7 +102,6 @@ pub(super) const DATA: &str = r####"{
 "a5b64b8fa2fc58b442a2f0c081051f9ca6c684680f95c0de56a7f4490e087a64":{"charge":3,"outcome":"ok {\"float\":\"2.0332467651558565e76\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "a5b71c2026fd3d10c89b19721c05d23622b1b4cf758b89fa325bac55ef7c0b72":[{"text":"􍢜򑰭򫕕󟥿􈝍􋜃󻲭󉂔𻂵񘺔󩢉𒧸񢞫񂗾🐵򁚝񏿰񄐏򾭇􎥑󱫃󿨶ᙂ𔋮􉿫񪸔𘩈򊥜񲤎𐓜𑏕󳢲򁡃񻢳򖌂񖵄􀢞󲌏󜺉󖕔󼒞󼊗򉫒񜭧󞤱򸚣󲍮󸪨󶖽𧀶񰽖𘃈񐧉󑾚򦜥󑂫󎁊񙼊򘪴񝂡򠝀"},{"int":"7075871316148041038"}],
 "a5ba605f5723c54e7254b272eb68d6b301e05352c3c82e659984bbd1792f174d":[{"bool":false},{"set":1}],
-"a5bb92777ca2f4f08ac809dae321ff14e3ed7c6841db0dd3afe29119a5977af1":["null",{"float":"3.255971342692636e-113"}],
 "a5bbed59cce7bbea1f4e1df4b41f9a579570f4eca5acc971a91e8a6464b7a601":{"charge":1,"outcome":"ok {\"map\":[[{\"int\":\"-1\"},{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"list\":[{\"int\":\"1\"}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]}]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "a5bdca89660bd486dde806f89ab95a889d17a6ca54cc9a9bf60985f14bec8f24":[{"float":"-1.744052817620949e-116"}],
 "a5c0debef88f2a068a823998ad4c3b980b809c2f6d8d0596c6417b8572228ac2":[{"list":[{"text":"򋄓򠊱𮫴𽀡򲯁򋏖󩄱񫁓󏇳򜻐𚍍󵽋뜵󿴛舡腥񰤧񔓵񟼼󧿂򋮽򑞊󜤥𦇷򱃴𝧕򯄦罄񗺺󍛇󹒪򯌃򌸥𰻹򳒤񶯍󏩚򍌮𺴈򤉒񉁖򺫶𗠣򩸓񳧯㒬􇇅𐩦󇧲򻾁󅂾𽖟򧿴󻘋񉖧𚝌򚼂򽛜񤑱򬢹𺅨ဪ𙢊󫴻񘂁񡏀񳗧𡙌罠򳞞󸹱򺬭𝼻􌉅󸂁񇇀匣򃍅穣󟙗񫩻"}]}],

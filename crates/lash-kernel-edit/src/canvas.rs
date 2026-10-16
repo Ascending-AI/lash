@@ -55,8 +55,12 @@ fn step(stmt: &Stmt) -> Option<u32> {
             (Some(value), index)
         }
         Stmt::Do {
-            action: Action::Perform { .. },
-        } => return Some(0),
+            value: Expr::Act(act),
+        } if matches!(act.kind, ActKind::Perform { .. })
+            && act.args.iter().all(|arg| !has_action(Node::Expr(arg))) =>
+        {
+            return Some(0);
+        }
         _ => return None,
     };
     if Node::Stmt(stmt)
@@ -229,9 +233,7 @@ impl Working {
                         },
                     },
                     None => Stmt::Do {
-                        action: act
-                            .as_action()
-                            .ok_or_else(|| at(&position.block, Cause::NonSeparableStep))?,
+                        value: Expr::Act(Box::new(act)),
                     },
                 };
                 self.edit(&Edit::InsertStatement {

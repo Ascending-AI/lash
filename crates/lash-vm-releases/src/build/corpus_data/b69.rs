@@ -96,7 +96,6 @@ pub(super) const DATA: &str = r####"{
 "698cbe94479b4a8fef422f43794eb4cb55027ee182a44c32cfcb77f4ff0d23ef":{"charge":113,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `n` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "698ff7ef9d4a7fa92fd6d9e3eb08c7fac0ff6ef47ad123c9d4c10032fe89670a":[{"float":"8.406945379788762e111"},{"float":"-6.022596621499157e-93"}],
 "6990e120c73a5583cbbfa8542c902475b0b7efc052575436237343ecf9418282":{"charge":337,"outcome":"raised \"type_error\" \"Date receiver required\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"6991bf10ac0a0a94b2095b22d55b43bd0fc2958c8baff33438079b21688d8b89":[{"int":"-6476290835346262343"},{"int":"-8212527254265398112"}],
 "6992e1099748b00d5e7010890a14cc8d94510c94c4c6ef2eb321ebe6fadba3a6":{"charge":335,"outcome":"ok {\"int\":\"-1\"}","prepared_difference":null,"reservations":[[0,1]],"reserved":1,"spent":0},
 "6992f061373e4c16af5dac0b5e30f21d961257de37a2dda1e465917ac4b647db":{"charge":5,"outcome":"ok {\"int\":\"8831907788579894703\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6993b7c82433044f1a11af25dba9839b9ba45a6e232b8479e931b12fde59ddcd":[{"int":"-271286874077054650"}],

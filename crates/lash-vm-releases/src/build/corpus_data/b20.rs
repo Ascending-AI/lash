@@ -116,6 +116,7 @@ pub(super) const DATA: &str = r####"{
 "20c49797ccc3722a8558ba9be71565402e5b28a604e0497d8af6d20d2f801d3a":[{"int":"-1873645385865062617"},{"float":"8.078967779826291e33"}],
 "20c7546cbd5f839eb90ec4214bbcc3410a54fd04e60ac0bb09f837df6a3cde2e":{"charge":2,"outcome":"ok {\"int\":\"63\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "20c79be10ceb4896ada76f87aca19ec3f5125859ae662198a1de2b1d9a64342f":{"charge":68,"outcome":"ok {\"float\":\"9.223372036854776e18\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"20c7a69f1ef86b4c0f6b1fbb9f6464b556f1d24780e5cb20613cae60be3bb084":[{"float":"4.211147981528798e-74"},{"int":"3593288055603191313"}],
 "20ca90a16b19707dbf8b29a5ffc686146d144b85f430bb9ffd0d05cd0f3c6a5c":[{"int":"-6036186256237389122"},{"float":"-4.146377729926161e97"}],
 "20cb640d6ba7da3f589da9c192a2cb18966462f59a32529b8d10ed6d0abdcef2":[{"text":"󧎴񐑓🢛󃶪񶝑󺷟𙥄𴵶񏙬򫚀򅿭򵸒񴸮󝔲񑠘󄸨񉊴窑󩰤𪨜󼱈􌿐󫁏򉣯򱰞𴾦󭊹񼽜򸧂𘑑򙴙򂱣𠳻𱘢򴒎򞦇󶮔򇙃󶹯򡝳񝮝򠝪󘷤񃇿𔁜󠏜"},{"float":"4.2851284187589606e-303"}],
 "20d1290147d42ad1d49606bfa63e4ae8de1840735c850306f5f379b850e1f97d":[{"int":"-3505467961980268681"}],

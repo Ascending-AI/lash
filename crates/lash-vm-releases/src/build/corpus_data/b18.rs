@@ -76,6 +76,7 @@ pub(super) const DATA: &str = r####"{
 "1876ca35ef0a1fa82fbe0235fa5ed58282a20fe37688fc1dc39c30d2e1e73925":{"charge":331,"outcome":"raised \"number_parse\" \"expected decimal digits with optional sign, point and exponent\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "18778fd3381f07831732965e0e71072922af83377b4e038eeee0d462f2adb008":{"charge":117,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `🦀` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "187aed3a53968e77a2c52ee95a9971e1be77fb877aa784f1965012175f1dabcf":{"charge":24,"outcome":"raised \"invalid_utf16\" \"UTF-16 unit is outside 0..65535\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"187e01902453d2894a041813eebe1327147bf238be2a1b380bb676aa7bc0e74e":[{"list":21},{"float":"-1.3401943535313465e-164"}],
 "1880601186a5fcb0da36aea485be3a4314bdabc73471c6bded7725fbf5040a3d":[{"list":85},{"int":"9223372036854775807"},{"int":"0"},{"int":"0"},{"bool":false},{"bool":false}],
 "1880678c7a9b4ece004b895d1c39ba7c49c0a4c79dd9cbc48ea833cdf78b3ac1":[{"float":"1.859457605945385e145"}],
 "188546a501ce0eb324f086ab96dbd4c94efd132aa19b855a6d3f9d1adf4fed42":[{"float":"-2.9671902376301685e248"},{"float":"-1.5694085361584875e-295"}],

@@ -64,7 +64,7 @@ export type ActKind = ({
   "spawn": Callee;
 } | "join" | {
   "join_many": JoinMode;
-} | {
+} | "yield" | "cancel" | {
   "await": FunctionId;
 });
 
@@ -915,7 +915,7 @@ export type Stmt = (("break" | "continue") | {
   };
 } | {
   "do": {
-    "action": Action;
+    "value": Expr;
   };
 } | {
   "if": {

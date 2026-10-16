@@ -121,7 +121,7 @@ pub(crate) fn replace_in_block(block: &mut Block, functions: &BTreeMap<FunctionI
                 replace_in_rhs(value, functions);
             }
             Stmt::Remove { member } => replace_in_member(member, functions),
-            Stmt::Do { action } => replace_in_action(action, functions),
+            Stmt::Do { value } => replace_in_expr(value, functions),
             Stmt::If {
                 condition,
                 then_block,

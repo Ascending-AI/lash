@@ -38,6 +38,8 @@ pub enum RolesRecord {
 /// The phase of the action a frame stands at (`K-EVAL-008`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PhaseRecord {
+    /// A `yield`: the task awaits its queued turn.
+    Yielded,
     /// A call: the callee's frame is above.
     Called,
     /// A `perform` or a `sleep`: the task waits on its request.
@@ -238,6 +240,7 @@ impl TokenCodec for PhaseRecord {
                 Self::Waiting => 1,
                 Self::Spawned => 2,
                 Self::Joining => 3,
+                Self::Yielded => 4,
             },
             0,
         );
@@ -250,6 +253,7 @@ impl TokenCodec for PhaseRecord {
             1 => Self::Waiting,
             2 => Self::Spawned,
             3 => Self::Joining,
+            4 => Self::Yielded,
             _ => return Err(TokenError::UnsupportedVariant { variant: tag }),
         })
     }

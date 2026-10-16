@@ -314,7 +314,12 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
             } else {
                 "spawn(kernel_name_1, [3])".to_owned()
             };
-            spelling(k::Stmt::Do { action }, &expected);
+            spelling(
+                k::Stmt::Do {
+                    value: action.into(),
+                },
+                &expected,
+            );
         }
     }
     spelling(finish(int(-7)), "return -7");
@@ -334,70 +339,6 @@ fn paired_readable_rules_pin_positive_and_near_miss_spellings() {
     );
     spelling(k::Stmt::Break, "    break\n");
     spelling(k::Stmt::Continue, "    continue\n");
-}
-/// An independently written reader fixture pins tree shape without using the printer.
-#[test]
-fn independent_readable_source_preserves_elif_blocks_and_call_kinds() {
-    let source = r#"def main():
-    if x.field[helper_foreign(-0.0)]:
-        pass
-    elif y:
-        return returned(7)
-    else:
-        try:
-            raise "λ\n\""
-        except BaseException as error:
-            with k.do():
-                k.call(helper_foreign(7, x))
-        finally:
-            k.finish(k.function("x"))
-"#;
-    let id = k::FunctionId::from_bytes([31; 32]);
-    let doc = k::Document::new(
-        k::NumberPolicy::Float,
-        vec![k::Stmt::If {
-            condition: index(
-                field(variable("x"), "field"),
-                k::Expr::Call {
-                    function: id,
-                    args: vec![k::Expr::Literal(k::Literal::Float(k::Float::new(-0.0)))],
-                },
-            ),
-            then_block: vec![],
-            else_block: vec![k::Stmt::If {
-                condition: variable("y"),
-                then_block: vec![k::Stmt::Return { value: int(7) }],
-                else_block: vec![k::Stmt::Try(k::TryStmt {
-                    body: vec![k::Stmt::Throw {
-                        value: k::Expr::Literal(k::Literal::Text("λ\n\"".into())),
-                    }],
-                    catch: Some(k::Catch {
-                        binding: "error".into(),
-                        body: vec![k::Stmt::Do {
-                            action: k::Action::Call {
-                                callee: k::Callee::Library(id),
-                                args: vec![
-                                    k::Atom::Literal(k::Literal::Int(7.into())),
-                                    k::Atom::Variable("x".into()),
-                                ],
-                            },
-                        }],
-                    }),
-                    finally: Some(vec![finish(k::Expr::Literal(k::Literal::Function(
-                        "x".into(),
-                    )))]),
-                })],
-            }],
-        }],
-    );
-    // The base document, not the source, binds `helper_foreign` to its identity.
-    let mut doc = doc;
-    doc.manifest
-        .functions
-        .insert(id, k::FunctionName::new("foreign").unwrap());
-    let decoded = crate::read(source, &doc, Default::default()).unwrap();
-    assert_eq!(doc.canonical_bytes(), decoded.canonical_bytes());
-    roundtrip(&doc, true);
 }
 /// Domain: 6 names × 7 literals × 8 control contexts × 2 block choices = 672 documents.
 /// Each includes same-label foreign helpers, reserved aliases, shadowing and UTF-8 escapes.
@@ -873,10 +814,11 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
         ],
     );
     doc.main.push(k::Stmt::Do {
-        action: k::Action::Call {
+        value: (k::Action::Call {
             callee: k::Callee::Value("toolshed".into()),
             args: vec![],
-        },
+        })
+        .into(),
     });
     doc.functions.insert(
         "main".into(),

@@ -27,30 +27,20 @@ fn call(expr: &s::Expr) -> Result<(&s::Expr, Vec<&s::Expr>), Diagnostic> {
     Ok((callee, call_arguments(call)?))
 }
 
-pub(super) enum NativeAction {
-    Nested(k::ActExpr),
-    Statement(k::Action),
-}
+pub(super) struct NativeAction(k::ActExpr);
 impl NativeAction {
-    pub(super) fn expression(self) -> Result<k::Expr, Diagnostic> {
-        match self {
-            Self::Nested(act) => Ok(k::Expr::Act(Box::new(act))),
-            Self::Statement(_) => Err(invalid("yield and cancel cannot nest", None)),
-        }
+    pub(super) fn expression(self) -> k::Expr {
+        k::Expr::Act(Box::new(self.0))
     }
     pub(super) fn rhs(self) -> k::Rhs {
-        match self {
-            Self::Nested(act) => match act.as_action() {
-                Some(action) => k::Rhs::Action(action),
-                None => k::Rhs::Expr(k::Expr::Act(Box::new(act))),
-            },
-            Self::Statement(action) => k::Rhs::Action(action),
+        match self.0.as_action() {
+            Some(action) => k::Rhs::Action(action),
+            None => k::Rhs::Expr(self.expression()),
         }
     }
-    fn statement(self) -> Result<k::Stmt, Diagnostic> {
-        match self.rhs() {
-            k::Rhs::Action(action) => Ok(k::Stmt::Do { action }),
-            _ => Err(invalid("a discarded nested action needs a binding", None)),
+    fn statement(self) -> k::Stmt {
+        k::Stmt::Do {
+            value: self.expression(),
         }
     }
 }
@@ -77,7 +67,7 @@ impl Reader {
                 let k::Action::Call { callee, args } = action else {
                     unreachable!()
                 };
-                NativeAction::Nested(k::ActExpr {
+                NativeAction(k::ActExpr {
                     kind: k::ActKind::Call(callee),
                     args: args
                         .into_iter()
@@ -105,7 +95,7 @@ impl Reader {
                         Some(expr.span()),
                     ));
                 };
-                Ok(NativeAction::Nested(k::ActExpr {
+                Ok(NativeAction(k::ActExpr {
                     kind: k::ActKind::Spawn(self.native_callee(callee)?),
                     args: array(args)?
                         .into_iter()
@@ -180,12 +170,7 @@ impl Reader {
         annotation: Option<&s::TsType>,
     ) -> Result<NativeAction, Diagnostic> {
         if let s::Expr::Await(inner) = expr {
-            let NativeAction::Nested(mut act) = self.awaited_action(&inner.arg, annotation)? else {
-                return Err(invalid(
-                    "only a tool call or sleep is awaited twice",
-                    Some(expr.span()),
-                ));
-            };
+            let NativeAction(mut act) = self.awaited_action(&inner.arg, annotation)?;
             match &mut act.kind {
                 k::ActKind::Perform { then_yield, .. } | k::ActKind::Sleep { then_yield }
                     if !*then_yield =>
@@ -199,7 +184,7 @@ impl Reader {
                     ));
                 }
             }
-            return Ok(NativeAction::Nested(act));
+            return Ok(NativeAction(act));
         }
         if !matches!(expr, s::Expr::Call(_)) {
             if annotation.is_some() {
@@ -214,7 +199,7 @@ impl Reader {
                     Some(expr.span()),
                 )
             })?;
-            return Ok(NativeAction::Nested(k::ActExpr {
+            return Ok(NativeAction(k::ActExpr {
                 kind: k::ActKind::Await(policy),
                 args: vec![self.expression(expr)?],
             }));
@@ -231,7 +216,7 @@ impl Reader {
                     Some(expr.span()),
                 ));
             }
-            return Ok(NativeAction::Nested(k::ActExpr {
+            return Ok(NativeAction(k::ActExpr {
                 kind: k::ActKind::Await(self.id(policy)?),
                 args: vec![self.expression(value)?],
             }));
@@ -250,7 +235,7 @@ impl Reader {
                 Some(annotation) => decode_type(annotation, self.limits)?,
                 None => k::Type::Any,
             };
-            return Ok(NativeAction::Nested(k::ActExpr {
+            return Ok(NativeAction(k::ActExpr {
                 kind: k::ActKind::Perform {
                     effect,
                     result,
@@ -268,12 +253,8 @@ impl Reader {
         let kind = match (spelling.as_deref(), arguments.as_slice()) {
             (Some("sleep"), [_]) => k::ActKind::Sleep { then_yield: false },
             (Some("join"), [_]) => k::ActKind::Join,
-            (Some("cancel"), [_]) => {
-                return Ok(NativeAction::Statement(k::Action::Cancel {
-                    task: self.atom(args[0])?,
-                }));
-            }
-            (Some("yieldTask"), []) => return Ok(NativeAction::Statement(k::Action::Yield)),
+            (Some("cancel"), [_]) => k::ActKind::Cancel,
+            (Some("yieldTask"), []) => k::ActKind::Yield,
             (
                 Some(
                     name @ ("Promise.all" | "Promise.allSettled" | "Promise.race" | "Promise.any"),
@@ -294,7 +275,7 @@ impl Reader {
             ) => return Err(invalid("wrong native action arity", Some(expr.span()))),
             _ => k::ActKind::Call(self.native_callee(callee)?),
         };
-        Ok(NativeAction::Nested(k::ActExpr {
+        Ok(NativeAction(k::ActExpr {
             kind,
             args: arguments,
         }))
@@ -334,7 +315,7 @@ impl Reader {
             })());
         }
         self.native_action(expr)
-            .map(|action| action.and_then(NativeAction::statement))
+            .map(|action| action.map(NativeAction::statement))
     }
     pub(super) fn native_expression(
         &mut self,

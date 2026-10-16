@@ -532,9 +532,8 @@ impl Parser {
                     }
                 }
             }
-            "do" => match self.action()? {
-                Some(action) => Stmt::Do { action },
-                None => return Err(self.unexpected("an action")),
+            "do" => Stmt::Do {
+                value: self.expr()?,
             },
             "if" => {
                 let condition = self.expr()?;
@@ -681,6 +680,20 @@ impl Parser {
                 };
                 return Ok(Some(ActExpr {
                     kind,
+                    args: vec![self.act_operand()?],
+                }));
+            }
+            Some(StatementForm::Yield) => {
+                self.position += 1;
+                return Ok(Some(ActExpr {
+                    kind: ActKind::Yield,
+                    args: vec![],
+                }));
+            }
+            Some(StatementForm::Cancel) => {
+                self.position += 1;
+                return Ok(Some(ActExpr {
+                    kind: ActKind::Cancel,
                     args: vec![self.act_operand()?],
                 }));
             }
@@ -986,7 +999,9 @@ impl Parser {
                 || self.is_word("let")
                 || self.is_word("sleep")
                 || self.is_word("join")
-                || self.is_word("await"));
+                || self.is_word("await")
+                || self.is_word("yield")
+                || self.is_word("cancel"));
         self.peek_at(offset) == &Token::LParen && !reserved
     }
 
@@ -1046,9 +1061,6 @@ impl Parser {
         }
         if let Some(act) = self.act()? {
             return Ok(Expr::Act(Box::new(act)));
-        }
-        if let Some(form) = self.statement_form() {
-            return Err(self.error(ParseErrorReason::StatementForm { form }));
         }
         if let Some(literal) = self.literal()? {
             return Ok(Expr::Literal(literal));

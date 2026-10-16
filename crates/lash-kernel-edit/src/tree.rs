@@ -64,7 +64,7 @@ impl<'a> NodeMut<'a> {
                     out.push(rhs(value));
                 }
                 Stmt::Remove { member } => push_member(member, &mut out),
-                Stmt::Do { action } => out.push(NodeMut::Action(action)),
+                Stmt::Do { value } => out.push(NodeMut::Expr(value)),
                 Stmt::If {
                     condition,
                     then_block,

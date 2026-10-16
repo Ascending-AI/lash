@@ -114,7 +114,10 @@ impl Layers {
             if let Some(span) = note.span {
                 self.locate(statement_site.clone(), span);
                 for (child, index) in Node::Stmt(statement).children().into_iter().zip(0u32..) {
-                    if matches!(child, Node::Action(_)) {
+                    if matches!(
+                        child,
+                        Node::Action(_) | Node::Expr(lash_kernel_doc::Expr::Act(_))
+                    ) {
                         self.locate(statement_site.child(index), span);
                     }
                 }

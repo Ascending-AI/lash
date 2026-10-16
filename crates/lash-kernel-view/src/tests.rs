@@ -852,3 +852,35 @@ fn the_view_lists_nested_actions_in_issue_order_and_their_arguments_edit_in_plac
     assert_eq!(draft.identity(), document.identity());
     assert_eq!(view_of(draft.document(), "notify"), view);
 }
+
+/// FIG-6471: text and graph round trips preserve a discarded computed
+/// action and its argument sites in the host view.
+#[test]
+fn do_computed_actions_round_trip_through_the_view() {
+    let document = parse_document(
+        r#"kernel 1
+numbers float
+effect show(value: Any) -> Any
+entry demo() -> Any
+fn demo() { do perform show({text: "x"}) as Any return null }
+main { finish null }
+"#,
+    )
+    .unwrap();
+    let view = view_of(&document, "demo");
+    let action = &view.dataflow.actions[0];
+    assert_eq!(action.site, site("demo", &[0, 0]));
+    assert_eq!(
+        view.statements[0].actions.as_slice(),
+        std::slice::from_ref(&action.site)
+    );
+    assert_eq!(action.kind, SiteKind::Perform);
+    assert_eq!(action.args[0].site, Some(site("demo", &[0, 0, 0])));
+    assert!(matches!(action.args[0].expression, Expr::Record(_)));
+    let printed = lash_kernel_doc::print_document(&document);
+    let reparsed = parse_document(&printed).unwrap();
+    let bytes = lash_kernel_doc::graph_tokens::encode_body(&document);
+    let decoded = lash_kernel_doc::graph_tokens::decode_body::<Document>(&bytes).unwrap();
+    assert_eq!(view_of(&reparsed, "demo"), view);
+    assert_eq!(view_of(&decoded, "demo"), view);
+}

@@ -1,12 +1,11 @@
 //! The kernel's forms as one closed tree (`K-FORM-001`).
 //!
-//! A form that may pause a task, or that calls anything but a native
-//! library function, is an action. It is either a statement's whole
-//! right-hand side, an [`Action`] with [`Atom`] arguments, or an
-//! [`Expr::Act`] nested in an expression, with expression arguments. A task
-//! may pause at either (`K-EVAL-008`). What the types cannot say, that an
-//! [`Expr::Call`] names a function with a native implementation, is checked
-//! by validation.
+//! A form that may pause a task, or call a non-native library function,
+//! is an action. Every action has an [`Expr::Act`] spelling with expression
+//! arguments; `do` always holds an expression. A whole right-hand side with
+//! [`Atom`] arguments uses [`Rhs::Action`]. A task may pause at either
+//! (`K-EVAL-008`). Validation checks that [`Expr::Call`] names a function
+//! with a native implementation.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -38,9 +37,9 @@ pub enum Stmt {
     Remove {
         member: Member,
     },
-    /// Runs an action and discards its result.
+    /// Evaluates an expression for effect and discards its result.
     Do {
-        action: Action,
+        value: Expr,
     },
     If {
         condition: Expr,
@@ -326,6 +325,10 @@ pub enum ActKind {
     Join,
     /// Waits on the list of task handles that is its one argument.
     JoinMany(JoinMode),
+    /// Gives other ready tasks their turn.
+    Yield,
+    /// Cancels the task handle that is its one argument.
+    Cancel,
     /// Awaits its one argument by the await policy (`K-TASK-026`).
     Await(FunctionId),
 }
@@ -367,6 +370,9 @@ impl ActExpr {
                 duration: one(args)?,
                 then_yield: *then_yield,
             },
+            ActKind::Yield if args.is_empty() => Action::Yield,
+            ActKind::Yield => return None,
+            ActKind::Cancel => Action::Cancel { task: one(args)? },
             ActKind::Join => Action::Join { task: one(args)? },
             ActKind::JoinMany(mode) => Action::JoinMany {
                 mode: *mode,
@@ -549,7 +555,7 @@ impl<'a> Node<'a> {
                     out.push(rhs_node(value));
                 }
                 Stmt::Remove { member } => push_member(member, &mut out),
-                Stmt::Do { action } => out.push(Node::Action(action)),
+                Stmt::Do { value } => out.push(Node::Expr(value)),
                 Stmt::If {
                     condition,
                     then_block,
@@ -669,7 +675,8 @@ fn stmt_closures(stmt: &mut Stmt, visit: &mut dyn FnMut(&mut Closure)) {
             rhs_closures(value, visit);
         }
         Stmt::Remove { member } => member_closures(member, visit),
-        Stmt::Do { .. } | Stmt::Break | Stmt::Continue => {}
+        Stmt::Do { value } => expr_closures(value, visit),
+        Stmt::Break | Stmt::Continue => {}
         Stmt::If {
             condition,
             then_block,
@@ -767,5 +774,52 @@ fn expr_closures(expr: &mut Expr, visit: &mut dyn FnMut(&mut Closure)) {
             .args
             .iter_mut()
             .for_each(|arg| expr_closures(arg, visit)),
+    }
+}
+
+/// Canonical expression spelling of a statement-position action.
+impl From<Action> for Expr {
+    fn from(action: Action) -> Self {
+        let expr = |atom: &Atom| match atom {
+            Atom::Variable(name) => Expr::Variable(name.clone()),
+            Atom::Literal(literal) => Expr::Literal(literal.clone()),
+        };
+        let (kind, args) = match &action {
+            Action::Call { callee, args } => (ActKind::Call(callee.clone()), args.iter().collect()),
+            Action::Spawn { callee, args } => {
+                (ActKind::Spawn(callee.clone()), args.iter().collect())
+            }
+            Action::Perform {
+                effect,
+                args,
+                result,
+                then_yield,
+            } => (
+                ActKind::Perform {
+                    effect: effect.clone(),
+                    result: result.clone(),
+                    then_yield: *then_yield,
+                },
+                args.iter().collect(),
+            ),
+            Action::Sleep {
+                duration,
+                then_yield,
+            } => (
+                ActKind::Sleep {
+                    then_yield: *then_yield,
+                },
+                vec![duration],
+            ),
+            Action::Join { task } => (ActKind::Join, vec![task]),
+            Action::JoinMany { mode, tasks } => (ActKind::JoinMany(*mode), vec![tasks]),
+            Action::Await { policy, value } => (ActKind::Await(*policy), vec![value]),
+            Action::Yield => (ActKind::Yield, vec![]),
+            Action::Cancel { task } => (ActKind::Cancel, vec![task]),
+        };
+        Expr::Act(Box::new(ActExpr {
+            kind,
+            args: args.into_iter().map(expr).collect::<Vec<_>>(),
+        }))
     }
 }

@@ -302,6 +302,8 @@ impl Graph {
                     ActKind::Call(Callee::Declared(_))
                     | ActKind::Perform { .. }
                     | ActKind::Sleep { .. }
+                    | ActKind::Yield
+                    | ActKind::Cancel
                     | ActKind::Join
                     | ActKind::JoinMany(_)
                     | ActKind::Spawn(_) => {
@@ -397,8 +399,8 @@ impl Graph {
                     };
                     self.alias(value, target);
                 }
-                Stmt::Do { action } => {
-                    self.action(action, &scope, owner);
+                Stmt::Do { value } => {
+                    self.expr(value, &scope, owner);
                 }
                 Stmt::Remove { member } => {
                     self.member(member, &scope, owner);
@@ -689,10 +691,11 @@ fn argument_apply_changes_total_census() {
     body.block.insert(
         1,
         Stmt::Do {
-            action: Action::Call {
+            value: (Action::Call {
                 callee: Callee::Value(Name::new("value")),
                 args: Vec::new(),
-            },
+            })
+            .into(),
         },
     );
     let id = seeded.identity();

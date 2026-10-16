@@ -28,6 +28,7 @@ pub(super) const DATA: &str = r####"{
 "5b36ba7225bc5361420ddc6548a0b60d8c3ffe348a30672e340d769d4df43a06":{"charge":5,"outcome":"ok {\"int\":\"-1705707544895037052\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "5b38cca6986646dde01902f62533b6edb957c2cb1b66b570f25c2189a14801c9":{"charge":25,"outcome":"raised \"number_range\" \"expected a nonnegative machine-sized integer\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "5b39effbc7543d1455937181b243792e215cc6b0967c857a8fd7d1d5e09fd57a":[{"record":0},{"text":"a"},{"int":"3"}],
+"5b3de2b3d4572c414049e6b47de8be0015c795fe43de54d936c97a3cab49baa1":["null",{"list":25}],
 "5b3e2b8e1658cdd822a610f36796c6a08a6ef56ad7df5425942cf65500207776":[{"map":8},{"float":"2.3743062110058378e-153"}],
 "5b3e81adae15cab58efa4349e86eed0f5377cca858f6502cde802f56922f83c8":[{"record":0},{"text":"񡙭񝴁󑳻󁠂򱚲򳀟򸦿񶽬𾂲󭿳񁺌󩶱𥻊𼓷򷲾🦀񰮸򦎯𳒨𿫁𭍴񓯒󒤥􅀷􅍗뀱𣾎񉊣򖅆􅠄𨖴󲮿󇘨򨳄򬓝񥰔󓦬󞣟򷃎򢖯󆸤࿸𲷧񍑼𰣔􅿅򫰺򫇂񵈡񹳅򮚼񖱱򿣩񧕘򥾲𺾍𛾒󠱭𼜵񮯻񈋬󀳩񗊰񛁕򉙵󀠙󓩉󷡽񮯍򭭚񜑬󿋤񣸁񘸽"}],
 "5b3ff54cce871b490954564c1b4b34f1aa3bc27fac9a93dd62d058ac59b6f621":[{"float":"-2.926913977097107e-134"},{"float":"3.4367522235496047e-268"}],

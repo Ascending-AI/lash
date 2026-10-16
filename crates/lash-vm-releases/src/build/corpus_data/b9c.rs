@@ -133,6 +133,7 @@ pub(super) const DATA: &str = r####"{
 "9cc3a63fc35123621ef2e1bef6a96fc268fa86ac2a5a75a300343b7c62e02865":{"charge":293,"outcome":"raised \"normalization_form\" \"expected NFC, NFD, NFKC or NFKD\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "9cc3d567fe9f00fa99afa8f5dfc6da4eb87b56a80fd705840b37a03920c3b10a":{"charge":460,"outcome":"raised \"number_range\" \"expected a nonnegative machine-sized integer\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "9cc498fd73763b3cc8c33d743c4d3edfd77b7b2f3d6a816ec2ea0624c68588c0":[{"int":"-3461287740703424597"}],
+"9cc52f7ee40f6dc5d4d0cf20b15ccf559a0804c214cb6d753511cddc1fa5f1ee":{"charge":7,"outcome":"ok {\"float\":\"-8.403577425013237e18\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "9cc65e6d4bde483c38dd86851d7a214396b016a3e15ee008568f7ee1d1941e48":[{"map":32},{"float":"1.042400329862399e280"}],
 "9cca92be83f1eff8c024a5990b49fb13d918513bf4fe3101f712e6fc70ddcaa6":[{"int":"-8750267267373366640"},{"float":"-3.65234955625152e144"}],
 "9ccad8f32b220d8f53950611095281613d637ca9341fc039bfb23a016275690f":["null","null",{"text":"-0"}],

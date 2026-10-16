@@ -18,8 +18,8 @@ use super::{
     error, fault, raise,
 };
 use crate::compile::{
-    Action, ActionKind, Atom, Callee, CodeId, Executable, Form, LibId, LibRun, Nested,
-    NestedCallee, NestedKind, StmtId,
+    Action, ActionKind, Atom, Callee, CodeId, Executable, Form, LibId, Nested, NestedCallee,
+    NestedKind, StmtId,
 };
 use crate::heap::value_bytes;
 use crate::interface::{Bound, EffectMode, EffectRequest, Host, Request, SleepRequest, WaitId};
@@ -217,14 +217,26 @@ impl KernelMachine {
                     self.enter(task, host, site)?;
                 }
                 let (target, at) = self.nested_target(exe, callee, args)?;
-                let enters = match &target {
-                    Target::Code(..) => true,
-                    Target::Library(lib) => matches!(exe.lib(*lib).run, LibRun::Body(_)),
+                let count = count - (at - args);
+                let flow = match target {
+                    Target::Library(lib) => {
+                        let name = &exe.lib(lib).definition.name;
+                        match self
+                            .answer(task, exe, lib, at, count, at)
+                            .map_err(|interrupt| interrupt.in_function(name))?
+                        {
+                            super::ops::Answer::Done => Flow::Done,
+                            super::ops::Answer::Body(code) => {
+                                self.capture(task, entry, act, PhaseRecord::Called)?;
+                                self.enter_body(task, exe, lib, code, at, Some(stmt))?
+                            }
+                        }
+                    }
+                    target @ Target::Code(..) => {
+                        self.capture(task, entry, act, PhaseRecord::Called)?;
+                        self.call(task, exe, stmt, target, at, count)?
+                    }
                 };
-                if enters {
-                    self.capture(task, entry, act, PhaseRecord::Called)?;
-                }
-                let flow = self.call(task, exe, stmt, target, at, count - (at - args))?;
                 Ok(self.answered_at(flow, at, args))
             }
             // An operation's native answers at once; only a call whose body
@@ -252,10 +264,15 @@ impl KernelMachine {
                 Ok(self.answered_at(flow, at, args))
             }
             NestedKind::Perform { effect, result, .. } => {
+                let crosses = host.crosses_functions();
                 let mut copied = Vec::with_capacity(count);
                 for at in args..args + count {
                     let value = self.take(at);
-                    copied.push(self.copy_out(&value)?);
+                    copied.push(if crosses {
+                        self.copy_out_tool_arg(&value)?
+                    } else {
+                        self.copy_out(&value)?
+                    });
                 }
                 if self.effect_mode(effect)? == EffectMode::Read {
                     // A read completes here, inside its statement, and the
@@ -310,6 +327,31 @@ impl KernelMachine {
                         Ok(Flow::Step)
                     }
                 }
+            }
+            NestedKind::Yield => {
+                if !library {
+                    self.enter(task, host, site)?;
+                }
+                self.capture(task, entry, act, PhaseRecord::Yielded)?;
+                self.task(task)?.wake(Incoming::Value(Value::Null), false);
+                self.frame(task)?.awaiting = Some(stmt);
+                self.ready.push_back(task)?;
+                self.current = None;
+                Ok(Flow::Step)
+            }
+            NestedKind::Cancel => {
+                if !library {
+                    self.enter(task, host, site)?;
+                }
+                let Value::Task(target) = self.take(args) else {
+                    return raise("type_error", "`cancel` takes a task handle");
+                };
+                if target == task {
+                    return Err(Interrupt::raised(cancelled()));
+                }
+                self.cancel(target)?;
+                self.put(args, Value::Null);
+                Ok(Flow::Done)
             }
             NestedKind::Sleep { .. } => {
                 let duration = self.take(args);

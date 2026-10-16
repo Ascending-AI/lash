@@ -189,7 +189,7 @@ fn an_awaited_rejection_nothing_catches_ends_the_run() {
 fn an_awaited_sleep_is_one_sleep() {
     assert_eq!(
         main_text_with_effects("await sleep(5);"),
-        "do sleep 5.0 then yield"
+        "do sleep(5.0) then yield"
     );
 }
 

@@ -472,7 +472,7 @@ impl TokenCodec for ActKind {
                 effect.encode(out);
                 result.encode(out);
             }
-            Self::Sleep { .. } | Self::Join => out.sum(number, 0),
+            Self::Sleep { .. } | Self::Join | Self::Yield | Self::Cancel => out.sum(number, 0),
             Self::JoinMany(mode) => {
                 out.sum(number, 1);
                 mode.encode(out);
@@ -488,7 +488,7 @@ impl TokenCodec for ActKind {
         let number = variant(input, |variant| match variant {
             0 | 3 | 5 | 6 => Some(1),
             1 | 7 => Some(2),
-            2 | 4 | 8 => Some(0),
+            2 | 4 | 8 | 9 | 10 => Some(0),
             _ => None,
         })?;
         Ok(match number {
@@ -504,7 +504,9 @@ impl TokenCodec for ActKind {
             3 => Self::Spawn(Callee::decode(input)?),
             4 => Self::Join,
             5 => Self::JoinMany(JoinMode::decode(input)?),
-            _ => Self::Await(FunctionId::decode(input)?),
+            6 => Self::Await(FunctionId::decode(input)?),
+            9 => Self::Yield,
+            _ => Self::Cancel,
         })
     }
 }
@@ -868,9 +870,9 @@ impl TokenCodec for Stmt {
                 out.sum(number, 1);
                 member.encode(out);
             }
-            Self::Do { action } => {
+            Self::Do { value } => {
                 out.sum(number, 1);
-                action.encode(out);
+                value.encode(out);
             }
             Self::If {
                 condition,
@@ -953,7 +955,7 @@ impl TokenCodec for Stmt {
                     member: Member::decode(input)?,
                 },
                 3 => Self::Do {
-                    action: Action::decode(input)?,
+                    value: Expr::decode(input)?,
                 },
                 4 => Self::If {
                     condition: Expr::decode(input)?,

@@ -724,6 +724,8 @@ pub(crate) struct Nested {
 
 /// What a nested action does.
 pub(crate) enum NestedKind {
+    Yield,
+    Cancel,
     /// A `call`, `apply` or `invoke`: of a declared function, a closure or
     /// function reference, or a library function, which enters a frame
     /// when it runs its body.

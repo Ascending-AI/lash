@@ -164,6 +164,14 @@ impl RegisteredFunction {
                         ) => {
                             callees.insert(*function);
                         }
+                        crate::Node::Expr(crate::Expr::Act(act)) => match &act.kind {
+                            crate::ActKind::Call(crate::Callee::Library(function))
+                            | crate::ActKind::Spawn(crate::Callee::Library(function))
+                            | crate::ActKind::Await(function) => {
+                                callees.insert(*function);
+                            }
+                            _ => {}
+                        },
                         crate::Node::Stmt(crate::Stmt::For { via: Some(via), .. }) => {
                             callees.extend(via.functions());
                         }

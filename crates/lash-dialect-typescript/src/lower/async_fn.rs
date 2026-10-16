@@ -306,10 +306,11 @@ impl Lowerer<'_> {
                     unreachable!("`sleep` is checked to take one argument");
                 };
                 self.emit(Stmt::Do {
-                    action: Action::Sleep {
+                    value: (Action::Sleep {
                         duration,
                         then_yield,
-                    },
+                    })
+                    .into(),
                 });
                 Ok(Operand::undefined())
             }

@@ -346,6 +346,8 @@ fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
                 ActNode::Perform { .. } => SiteKind::Perform,
                 ActNode::Sleep => SiteKind::Sleep,
                 ActNode::Spawn(_) => SiteKind::Spawn,
+                ActNode::Yield => SiteKind::Yield,
+                ActNode::Cancel => SiteKind::Cancel,
                 ActNode::Join => SiteKind::Join,
                 ActNode::JoinMany(_) => SiteKind::JoinMany,
                 ActNode::Await(_) => SiteKind::Await,
@@ -505,7 +507,11 @@ fn effect_sets(graph: &mut Graph, catalog: &dyn FunctionCatalog) {
                 ActNode::Await(policy) => {
                     reach(unit, &CalleeNode::Library(*policy), catalog, &mut applies);
                 }
-                ActNode::Sleep | ActNode::Join | ActNode::JoinMany(_) => {}
+                ActNode::Sleep
+                | ActNode::Join
+                | ActNode::JoinMany(_)
+                | ActNode::Yield
+                | ActNode::Cancel => {}
             },
             NodeKind::Expr(ExprNode::Call { function, .. }) => {
                 unit.through_values |= library_applies(catalog, function, &mut applies);

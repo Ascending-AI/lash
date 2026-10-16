@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 
 use lash_kernel_check::{Admitted, Environment, admit, requirements};
 use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Atom, Block, Document, DocumentId, Expr, Member, Name, Node, Place,
-    Rhs, Site, StatementForm, Stmt, Unit,
+    Action, Atom, Block, Document, DocumentId, Expr, Member, Name, Node, Place, Rhs, Site, Stmt,
+    Unit,
 };
 
 use crate::edit::{Edit, Position};
@@ -80,63 +80,6 @@ fn arguments(action: &mut Action) -> Vec<&mut Atom> {
         | Action::Await { value: atom, .. } => vec![atom],
         Action::Yield => Vec::new(),
     }
-}
-
-/// The form a refusal names an action by.
-fn form(action: &Action) -> StatementForm {
-    match action {
-        Action::Call { .. } => StatementForm::Call,
-        Action::Perform { .. } => StatementForm::Perform,
-        Action::Sleep { .. } => StatementForm::Sleep,
-        Action::Join { .. } | Action::JoinMany { .. } => StatementForm::Join,
-        Action::Yield => StatementForm::Yield,
-        Action::Spawn { .. } => StatementForm::Spawn,
-        Action::Cancel { .. } => StatementForm::Cancel,
-        Action::Await { .. } => StatementForm::Await,
-    }
-}
-
-/// A statement's action spelled as a nested action, its atoms
-/// expressions, when the form has a nested spelling.
-fn nested(action: &Action) -> Option<ActExpr> {
-    let expr = |atom: &Atom| match atom {
-        Atom::Variable(name) => Expr::Variable(name.clone()),
-        Atom::Literal(literal) => Expr::Literal(literal.clone()),
-    };
-    let (kind, args) = match action {
-        Action::Call { callee, args } => (ActKind::Call(callee.clone()), args.iter().collect()),
-        Action::Spawn { callee, args } => (ActKind::Spawn(callee.clone()), args.iter().collect()),
-        Action::Perform {
-            effect,
-            args,
-            result,
-            then_yield,
-        } => (
-            ActKind::Perform {
-                effect: effect.clone(),
-                result: result.clone(),
-                then_yield: *then_yield,
-            },
-            args.iter().collect(),
-        ),
-        Action::Sleep {
-            duration,
-            then_yield,
-        } => (
-            ActKind::Sleep {
-                then_yield: *then_yield,
-            },
-            vec![duration],
-        ),
-        Action::Join { task } => (ActKind::Join, vec![task]),
-        Action::JoinMany { mode, tasks } => (ActKind::JoinMany(*mode), vec![tasks]),
-        Action::Await { policy, value } => (ActKind::Await(*policy), vec![value]),
-        Action::Yield | Action::Cancel { .. } => return None,
-    };
-    Some(ActExpr {
-        kind,
-        args: args.into_iter().map(expr).collect::<Vec<_>>(),
-    })
 }
 
 /// The right-hand side of the `let` or assignment whose right-hand side is
@@ -372,7 +315,6 @@ impl Working {
         };
         let rhs = match node(&mut self.document, &site) {
             Some(NodeMut::Action(action)) => {
-                let form = form(action);
                 let count = arguments(action).len();
                 if slot >= count {
                     return Err(missing(count));
@@ -384,14 +326,14 @@ impl Working {
                     self.shadow(&site).edited = true;
                     return Ok(());
                 }
-                let Some(mut act) = nested(action) else {
-                    return Err(at(base, EditDiagnosticKind::ArgumentNotAtom { form }));
+                let Expr::Act(mut act) = Expr::from(action.clone()) else {
+                    unreachable!()
                 };
                 act.args[slot] = argument.clone();
                 let Some(rhs) = rhs_at(&mut self.document, &site) else {
-                    return Err(at(base, EditDiagnosticKind::ArgumentNotAtom { form }));
+                    unreachable!("statement actions are right-hand sides");
                 };
-                *rhs = Rhs::Expr(Expr::Act(Box::new(act)));
+                *rhs = Rhs::Expr(Expr::Act(act));
                 rhs
             }
             Some(NodeMut::Expr(Expr::Act(act))) => {

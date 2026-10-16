@@ -40,6 +40,7 @@ pub(super) const DATA: &str = r####"{
 "bd3df619efa7c23456f5eb961e7a3e656ca1e591bad03a11af699b6b2d08dbfd":["null",{"float":"-0.0"},{"int":"0"}],
 "bd3e5635590d667c8388d531045e872b87845ab7bab68670fe8902816a4e855c":[{"int":"7236895797407940939"},{"float":"-2.5266329861193714e229"}],
 "bd3fb09b9a4be52e2d04379ad8a0742ddc1927b745106de0a635dfa03172ba1c":{"charge":7,"outcome":"ok {\"record\":[[\"corpus\",{\"int\":\"2\"}],[\"\",\"null\"]]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"bd407109a22711b47480147976ecc19ca153ac6f429025f964f4eadec2d9a988":{"charge":7,"outcome":"ok {\"float\":\"5.404762335226289e183\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "bd42badb1f41dcb9a14226703664c7077cdf7eb4266b0a4ed63ce76866b4e11b":[{"int":"-5326106434581866608"}],
 "bd431aafc1fc534f0fd7f57681ff22c2085f814c37f6ffcafc6d1ca6e9699cad":{"charge":281,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `0` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "bd436d8986534ee95a0fb9a6ab2343f65a20354c28326773beaaa025c1ea5af2":[{"float":"9.722970907043342e-77"}],

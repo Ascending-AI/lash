@@ -27,6 +27,8 @@ impl Reader<'_> {
             "sleep" => k::ActKind::Sleep {
                 then_yield: flag(c)?,
             },
+            "yield_" => k::ActKind::Yield,
+            "cancel" => k::ActKind::Cancel,
             "join" => k::ActKind::Join,
             "join_many" => k::ActKind::JoinMany(match c.string()?.as_str() {
                 "all" => k::JoinMode::All,
@@ -145,6 +147,8 @@ impl Reader<'_> {
         let mut probe = Cursor::new(c.text);
         let primitive = probe.word().ok().and_then(|name| match name {
             "sleep" => Some(k::ActKind::Sleep { then_yield: false }),
+            "yield_task" => Some(k::ActKind::Yield),
+            "cancel" => Some(k::ActKind::Cancel),
             "join" => Some(k::ActKind::Join),
             "join_all" => Some(k::ActKind::JoinMany(k::JoinMode::All)),
             "join_all_settled" => Some(k::ActKind::JoinMany(k::JoinMode::AllSettled)),
@@ -155,6 +159,10 @@ impl Reader<'_> {
         if let Some(mut kind) = primitive {
             c.text = probe.text;
             c.expect("(")?;
+            if matches!(kind, k::ActKind::Yield) {
+                c.expect(")")?;
+                return Ok((k::ActExpr { kind, args: vec![] }, nesting + 1));
+            }
             let (arg, h) = self.inline_value(c, nesting + 1)?;
             self.depth(h)?;
             if c.take(",") {

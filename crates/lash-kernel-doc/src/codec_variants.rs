@@ -236,6 +236,8 @@ impl CodecVariant for ActKind {
                 then_yield: true, ..
             } => 7,
             Self::Sleep { then_yield: true } => 8,
+            Self::Yield => 9,
+            Self::Cancel => 10,
         }
     }
 }

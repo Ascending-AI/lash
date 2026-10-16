@@ -117,6 +117,7 @@ impl fmt::Display for ContinuationRefusal {
 
 fn phase_name(phase: PhaseRecord) -> &'static str {
     match phase {
+        PhaseRecord::Yielded => "yielded",
         PhaseRecord::Called => "called",
         PhaseRecord::Waiting => "waiting",
         PhaseRecord::Spawned => "spawned",
@@ -1025,13 +1026,16 @@ fn continuation(
     };
     let kind = matches!(
         (pending.phase, &entry.kind),
-        (
-            PhaseRecord::Called,
-            NestedKind::Call(_) | NestedKind::Body(_)
-        ) | (
-            PhaseRecord::Waiting,
-            NestedKind::Perform { .. } | NestedKind::Sleep { .. }
-        ) | (PhaseRecord::Spawned, NestedKind::Spawn(_))
+        (PhaseRecord::Yielded, NestedKind::Yield)
+            | (
+                PhaseRecord::Called,
+                NestedKind::Call(_) | NestedKind::Body(_)
+            )
+            | (
+                PhaseRecord::Waiting,
+                NestedKind::Perform { .. } | NestedKind::Sleep { .. }
+            )
+            | (PhaseRecord::Spawned, NestedKind::Spawn(_))
             | (
                 PhaseRecord::Joining,
                 NestedKind::Join | NestedKind::JoinMany(_)
@@ -1044,6 +1048,10 @@ fn continuation(
         });
     }
     let agrees = match pending.phase {
+        PhaseRecord::Yielded => matches!(
+            parked,
+            ParkKind::Valued { handle: false } | ParkKind::Raised
+        ),
         PhaseRecord::Called => parked == ParkKind::Returned,
         PhaseRecord::Waiting => match parked {
             ParkKind::Requested | ParkKind::Raised => true,

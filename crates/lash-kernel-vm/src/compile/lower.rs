@@ -171,12 +171,10 @@ impl Compiler<'_> {
                 });
                 Form::Plain
             }
-            doc::Stmt::Do { action } => {
-                let action = self.child(0, |c| c.action(action));
-                ops.push(Op::Act);
-                ops.uses(Reg(0));
+            doc::Stmt::Do { value } => {
+                self.child(0, |c| c.expr(&mut ops, value, Reg(0)));
                 ops.push(Op::End);
-                Form::Action(action)
+                Form::Plain
             }
             doc::Stmt::If {
                 condition,
@@ -697,6 +695,8 @@ impl Compiler<'_> {
                         then_yield: *then_yield,
                     },
                     doc::ActKind::Spawn(callee) => NestedKind::Spawn(runs(callee)),
+                    doc::ActKind::Yield => NestedKind::Yield,
+                    doc::ActKind::Cancel => NestedKind::Cancel,
                     doc::ActKind::Join => NestedKind::Join,
                     doc::ActKind::JoinMany(mode) => NestedKind::JoinMany(*mode),
                     // An await is a call of its policy with the value

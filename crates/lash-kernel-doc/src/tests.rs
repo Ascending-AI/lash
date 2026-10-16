@@ -126,6 +126,10 @@ main {{
   let some = join any hs
   do join `all`
   do cancel h
+  let cancelled = cancel h
+  let yielded = yield
+  let slept = sleep 0
+  let slept_later = sleep 0 then yield
   let twice = invoke helper.twice(first)
   let again = call worker(&worker)
   let applied = apply g(null, absent, true, -1, 2.5, "t", b"")
@@ -214,6 +218,7 @@ fn kernel_text_round_trips_documents_that_use_every_form() {
         "callee:value",
         "expr:act:await",
         "expr:act:call",
+        "expr:act:cancel",
         "expr:act:join",
         "expr:act:join_many",
         "expr:act:perform",
@@ -221,6 +226,7 @@ fn kernel_text_round_trips_documents_that_use_every_form() {
         "expr:act:sleep",
         "expr:act:sleep:then_yield",
         "expr:act:spawn",
+        "expr:act:yield",
         "expr:call",
         "expr:clock",
         "expr:closure",
@@ -381,6 +387,8 @@ fn collect_forms(node: Node<'_>, forms: &mut std::collections::BTreeSet<&'static
                     crate::ActKind::Sleep { then_yield: false } => "expr:act:sleep",
                     crate::ActKind::Sleep { then_yield: true } => "expr:act:sleep:then_yield",
                     crate::ActKind::Spawn(_) => "expr:act:spawn",
+                    crate::ActKind::Yield => "expr:act:yield",
+                    crate::ActKind::Cancel => "expr:act:cancel",
                     crate::ActKind::Join => "expr:act:join",
                     crate::ActKind::JoinMany(_) => "expr:act:join_many",
                     crate::ActKind::Await(_) => "expr:act:await",
@@ -475,30 +483,6 @@ fn a_body_only_library_function_is_invoked_inside_an_expression() {
     ))
     .unwrap();
     assert_eq!(validate_document(&invoked, &catalog), Ok(()));
-}
-
-/// `K-FORM-001`: `yield` and `cancel` are statement forms only. Kernel
-/// text refuses each inside an expression with a typed error at the form;
-/// the tree has no node that could hold one. A `join` and an `await` may
-/// nest (`K-EVAL-008`).
-#[test]
-fn yield_and_cancel_are_refused_inside_an_expression() {
-    let cases = [
-        ("let y = map{1: yield}", StatementForm::Yield, (8, 16)),
-        (
-            "let h = 1\nlet y = set{cancel h}",
-            StatementForm::Cancel,
-            (9, 13),
-        ),
-    ];
-    for (statements, form, (line, column)) in cases {
-        let error = parse_document(&main_of(statements)).unwrap_err();
-        assert_eq!(
-            (error.reason.clone(), error.line, error.column),
-            (ParseErrorReason::StatementForm { form }, line, column),
-            "{statements}: {error}"
-        );
-    }
 }
 
 /// `K-ID-001`: the identity is over behaviour alone, and over all of it.
@@ -881,4 +865,41 @@ fn logarithmic_charge_rounds_up_and_round_trips() {
             encoded
         );
     }
+}
+
+/// K-FORM-001 / FIG-6471: do evaluates any expression for effect.
+#[test]
+fn do_expressions_round_trip_through_text_json_and_graph() {
+    let document = crate::parse_document(
+        r#"kernel 1
+numbers float
+effect show(value: Any) -> Any
+main {
+  do perform show({text: "x"}) as Any
+  do {text: "discarded"}
+  do join ([spawn call child()])
+  do cancel (spawn call child())
+  do yield
+  finish null
+}
+fn child() { return null }
+"#,
+    )
+    .expect("do accepts computed action arguments and pure expressions");
+    crate::validate_document(&document, &crate::FunctionRegistry::new())
+        .expect("valid do expressions");
+    assert_eq!(
+        crate::parse_document(&crate::print_document(&document)).unwrap(),
+        document
+    );
+    assert_eq!(
+        serde_json::from_str::<crate::Document>(&serde_json::to_string(&document).unwrap())
+            .unwrap(),
+        document
+    );
+    let bytes = crate::graph_tokens::encode_body(&document);
+    assert_eq!(
+        crate::graph_tokens::decode_body::<crate::Document>(&bytes).unwrap(),
+        document
+    );
 }

@@ -222,7 +222,7 @@ pub enum StmtNode {
         member: MemberNode,
     },
     Do {
-        action: NodeId,
+        value: NodeId,
     },
     If {
         condition: NodeId,
@@ -398,6 +398,8 @@ pub enum ExprNode {
 /// What a nested action does: its statement form's kind, without atoms.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ActNode {
+    Yield,
+    Cancel,
     Call(CalleeNode),
     Perform {
         effect: EffectName,
@@ -450,7 +452,7 @@ impl GraphNode {
                     out.push(*value);
                 }
                 StmtNode::Remove { member } => member.push_children(&mut out),
-                StmtNode::Do { action } => out.push(*action),
+                StmtNode::Do { value } => out.push(*value),
                 StmtNode::If {
                     condition,
                     then_block,

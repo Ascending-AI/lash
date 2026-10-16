@@ -2,6 +2,7 @@
 pub(super) const DATA: &str = r####"{
 "6202224c0c78d1ed06de5a733493104c31b1e86d8be931a8616382c6da203313":{"charge":5,"outcome":"ok {\"int\":\"4403230755670795046\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6202a610bc3a3c591577dc6a642aa7bf920f735217f78b5a84ba32a93b348406":[{"int":"8391481336953709832"}],
+"6205dd658b1f563b8069256af136d2036993964ad73ef6636a5981a6296e14e5":{"charge":7,"outcome":"ok {\"float\":\"-6.298555977932936e18\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "6209656274a413f6fdaeb15279df5da0923989f538730bce98a55d7c341f1bdd":{"charge":4,"outcome":"ok {\"float\":\"-8.927579024282858e18\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "620d9adafb43cc6b3c1e0e836d2f7c6287e93e94525b0e417b6363e71a16bcb7":[{"text":"񅗷𘊜򔂙󞉘􇮜􉡫𼖛"}],
 "620e897950c29722e72e9f971c7f0d3a5eab61a68f2f0ed56857d6f91b96209f":[{"text":"not a date"},{"text":"not a date"},{"map":1}],
@@ -19,6 +20,7 @@ pub(super) const DATA: &str = r####"{
 "6223a122dd821b589b79a588faacb0f3b4f5827add44acc136a0b380b51510e4":[{"int":"6023242450245177952"},{"text":"򙇻󽀘򩆸󜢛󾗊􉢁򯏰𙨗󞓣􍿪𞫕򤁀񖣀񸸑𤕍򃲇崾𕰄򯞼񝽓󟀭񍪍򲁸𶈸񦣼񵄭򾋏򬋊𠯏󺈘󚅜󢤞񻓌򍺥󰩘󪹌񇐐򕃸󢁙򩁙󸬹󔑯𯜧󻤉񍀻ꍛ򦳝𘥄𹝖򜷸񐹣􌚿񪣲鬣򞓕򇉜𘦸󅪫򗃞󷶿񋊄㳡򋓘򊆱񽢲򚆃󑰀󍘸"}],
 "6224b7c9ada596322f9ba5ec00e46b9b05525b372c3711da58abf007e14bfb28":{"charge":355,"outcome":"raised \"unordered\" \"a sort comparator returned NaN\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "62254c2a0aeb2d4b7ea3cd437fc347436de8a96d01bf461a9ce2bebb3f62cdfb":[{"float":"-4.642738650058902e-198"}],
+"6225b4d950f671551e59ab131af4f5f53e67e33874492451afeeed13b0b11186":[{"int":"-8476765416657012137"},{"list":13}],
 "6225c653dad51322954adaae3a5c88fe0b436f8e29c9a251cb9b1087a7de11c9":[{"int":"-1833801896950759639"}],
 "6228b3f81fc80d47d86f57aa86d7ae479c8c2097158349f275b416bc61aa3a98":[{"record":1},{"text":"򌣢󔯳󍖤󍜏񵵡򮎛򰒜𳆕𫚶󵉛􄠿󇽯򘱑󔜉񻯇󷭰򡮆𓰱򲀉򕨉񜛽񩀰ᴐ򻌪򯻌񼘱񛏽򛟚򐘵򲍹򩅿"}],
 "622940ecc2a875fd9ec0ced11b0b379c0a688ee6e1941f730a549d2e8d9a9866":{"charge":44,"outcome":"ok {\"record\":[]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

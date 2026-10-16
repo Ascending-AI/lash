@@ -1202,26 +1202,19 @@ impl Lowerer<'_> {
         if let Some((rhs, note)) = self.take_binding_of(&value) {
             let nested_written = note.nested_written;
             match rhs {
-                Rhs::Action(action) => self.push(Stmt::Do { action }, note.blocks),
-                Rhs::Expr(expr) => {
-                    // Kept: an expression may raise, and a host may read it.
-                    let Expr::Variable(name) = value.expr else {
-                        unreachable!("a taken binding is a variable");
-                    };
-                    self.push(
-                        Stmt::Let {
-                            name,
-                            value: Rhs::Expr(expr),
-                        },
-                        note.blocks,
-                    );
-                }
+                Rhs::Action(action) => self.push(
+                    Stmt::Do {
+                        value: action.into(),
+                    },
+                    note.blocks,
+                ),
+                Rhs::Expr(expr) => self.push(Stmt::Do { value: expr }, note.blocks),
             }
             if let Some(note) = self.buf.notes.last_mut() {
                 note.nested_written = nested_written;
             }
         } else if !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)) {
-            let _ = self.let_expr(value.expr, value.ty);
+            self.emit(Stmt::Do { value: value.expr });
         }
     }
 

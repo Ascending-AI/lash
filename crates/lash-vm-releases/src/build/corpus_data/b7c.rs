@@ -170,7 +170,6 @@ pub(super) const DATA: &str = r####"{
 "7cf8acb57d983b320f44112d6b10fac29f45c6edaed90b2b8db20a3581e86bfb":[{"list":0},{"int":"-2539212724246254512"}],
 "7cf916c133b58cb0084901b10e17e0bfaaca293182f1596e78b3fb785c3cc364":{"charge":3,"outcome":"ok {\"float\":\"4.765820401382466e185\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "7cfa8a642e0201f6f7fc266454dca8b333c0ab25bd0d4457c4199680530db1b8":{"charge":527,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
-"7cfdd354d1992ef5c743f0a07519c2a06a14fa88702de0a5f5e6d22461a3e84b":[{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[{"text":"Hello, Wörld"},{"text":"Hello, Wörld"},{"text":"ab"}]},{"list":[{"float":"2.6369665264101637e41"},{"int":"-8798521814748109189"},{"bool":true},{"float":"-5.592419049798499e76"},{"list":12}]}],
 "7cfe6228570f7654ec6b2ed5143bb28d4ee22bdf3100b69c3352bf6161ad7993":[{"float":"-5.756779756763863e208"},{"int":"-615917767114646399"}],
 "7cfe7020acdd3da5a3c63af5233f2fe6faf490b7406b6f3dd3459e67fb365b61":[{"text":"򠟙𦶖࣍󪎜񿧛񹃨򡯉񍆾􎮝𷤊󈝸򷹶弊񠼴𱀪󿪊󛟿𽭐񳛦𩼋񅋵𶌐񠗖𺑝𬑕钝𵣴녅񱥧墕󸭤󩍲𧳔򟴭󛮗𼴠򛪺󻥏𼟽񹼲𭒌򟘥򕢉񣙸𫠔򐉤𫵠򥨚񌈮򂐪񧫢򰒗⍞𯺘򸭥򷜳椝𑂏򎭮󴼸􆦦򋋵𜃐򘕑𐈛񹫟𺘪򼷦􃧽򭓎𭋧򭂂񤶣񡗸򈯓𦸄񥷘񬕣򂈩𶐭󏆥󚜆𮧈򜈛𼥟󋌍􀜫񥧥񮨖򘡂󄇒󴿑󮌎񥍈񼷮򁟵󅂚򻒻񍬒򟘤𗣈񛸹񀜅"},{"int":"7128303473430730315"}]
 }"####;

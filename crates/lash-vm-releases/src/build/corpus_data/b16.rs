@@ -143,5 +143,6 @@ pub(super) const DATA: &str = r####"{
 "16ef58f42c629e4942b64afb52732bc9c4fc6e7cb2d0e9a569266b981a62d3ca":{"charge":5,"outcome":"ok {\"int\":\"5394162010220765282\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "16f98ea95e0e696edbd1c3d03aa392a173e072594c3cd3bfeba856edf05e35d2":[{"float":"2.5244583781667716e205"}],
 "16fb36b9b1e79665db2ffe1769ea31599245cdd99a6b970516adc272d8030c31":{"charge":736,"outcome":"memory","prepared_difference":null,"reservations":[[0,18446744073709551615]],"reserved":0,"spent":0},
-"16fc8347e1f63385865d9a8c1b2122efad383d0c7dcaabd3fa00934b025df11c":{"charge":3,"outcome":"ok {\"float\":\"-6.250454116863171e209\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0}
+"16fc8347e1f63385865d9a8c1b2122efad383d0c7dcaabd3fa00934b025df11c":{"charge":3,"outcome":"ok {\"float\":\"-6.250454116863171e209\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"16ffdf0077a74693f7d5339077ee8df5423ecc55beab0e62ad73ea8421cceab7":[{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[]},{"map":[]},{"set":[]},{"record":[]},{"list":[{"float":"nan"},{"text":"0"},{"int":"9223372036854775807"},{"float":"inf"},{"float":"3.25"}]},{"list":[{"int":"7049648313077541650"},{"text":"󈟫려񤡔󓿄񷺻򷒆򠯯񟀸󣷘򿞣󑂌񻆭񚖎􈍅򋔃񑪩󷓜򺶟𕤄𧲶򾏏𝗈󉡣󨖓񛱘󥴠򮎚􋓝󗣴򓬅񎠳𒼣󔎽񨁺񽧺󬃉󱬈𺌾𑿸𨏇󚌀򑡆􅏶򷳑󗑨񔊀򺸅ఙ󂙁񝉍񆢩瘸񛣔񭺥"},{"int":"-1278234753729009708"},{"bool":true},{"list":20},"null"]}]
 }"####;

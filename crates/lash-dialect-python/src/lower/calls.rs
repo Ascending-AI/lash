@@ -794,7 +794,9 @@ impl Lowerer<'_> {
                         return Ok(Operand::none());
                     }
                 };
-                self.emit(Stmt::Do { action });
+                self.emit(Stmt::Do {
+                    value: action.into(),
+                });
                 Ok(Operand::none())
             }
             "gather" => {

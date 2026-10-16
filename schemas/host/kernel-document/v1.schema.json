@@ -117,6 +117,16 @@
           "type": "object"
         },
         {
+          "const": "yield",
+          "description": "Gives other ready tasks their turn.",
+          "type": "string"
+        },
+        {
+          "const": "cancel",
+          "description": "Cancels the task handle that is its one argument.",
+          "type": "string"
+        },
+        {
           "additionalProperties": false,
           "description": "Awaits its one argument by the await policy (`K-TASK-026`).",
           "properties": {
@@ -1446,17 +1456,17 @@
         },
         {
           "additionalProperties": false,
-          "description": "Runs an action and discards its result.",
+          "description": "Evaluates an expression for effect and discards its result.",
           "properties": {
             "do": {
               "additionalProperties": false,
               "properties": {
-                "action": {
-                  "$ref": "#/$defs/Action"
+                "value": {
+                  "$ref": "#/$defs/Expr"
                 }
               },
               "required": [
-                "action"
+                "value"
               ],
               "type": "object"
             }

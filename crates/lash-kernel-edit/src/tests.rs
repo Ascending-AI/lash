@@ -7,8 +7,8 @@ use lash_kernel_check::{Environment, RefusalReason};
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageGrant, PageId, PageRef};
 use lash_kernel_doc::{
     ActExpr, ActKind, Datum, Document, DocumentId, EffectName, ErrorDatum, Expr, FunctionRegistry,
-    Handle, Integer, InvalidReason, Literal, Name, Node, Param, Signature, Site, StatementForm,
-    Stmt, Timestamp, Type, Unit, parse_document, print_document,
+    Handle, Integer, InvalidReason, Literal, Name, Node, Param, Signature, Site, Stmt, Timestamp,
+    Type, Unit, parse_document, print_document,
 };
 use lash_kernel_state::paged::census_impl::Census;
 use lash_kernel_state::paged::{
@@ -1216,9 +1216,6 @@ fn canvas_refusal_wire() {
             index: 3,
             arguments: 1,
         },
-        Cause::ArgumentNotAtom {
-            form: StatementForm::Perform,
-        },
         Cause::NoSuchFunction {
             name: Name::new("missing"),
         },
@@ -1410,6 +1407,56 @@ main {
             format!("{:?}", written.as_node()),
             format!("{:?}", reading.node(&site).unwrap()),
             "{site}"
+        );
+    }
+}
+
+/// FIG-6471 / K-EDIT-004: every discarded action accepts expression arguments.
+#[test]
+fn set_argument_on_do_keeps_computed_values_in_the_expression() {
+    let registry = FunctionRegistry::new();
+    let environment = env(&registry);
+    for (original, computed) in [
+        (
+            "perform send(null) as Any",
+            "perform send({text: \"x\"}) as Any",
+        ),
+        ("join h", "join(let(task = h, task))"),
+        ("join all hs", "join all(let(tasks = hs, tasks))"),
+        ("cancel h", "cancel(let(task = h, task))"),
+    ] {
+        // The declared callee spelling also keeps the setup independent of edits.
+        let source = format!(
+            "kernel 1\nnumbers float\neffect send(value: Any) -> Any\nfn child() {{ return null }}\nmain {{ let h = spawn call child() let hs = [h] do {original} finish null }}"
+        );
+        let document = parse_document(&source).unwrap();
+        let mut working = Working::open(&document);
+        let expected =
+            parse_document(&source.replace(&format!("do {original}"), &format!("do {computed}")))
+                .unwrap();
+        let Stmt::Do {
+            value: Expr::Act(act),
+        } = &expected.main[2]
+        else {
+            panic!("do action")
+        };
+        assert!(
+            working
+                .edit(&crate::Edit::SetArgument {
+                    action: site(&[2, 0]),
+                    index: 0,
+                    argument: act.args[0].clone(),
+                })
+                .is_ok(),
+            "computed {original}"
+        );
+        let published = working.publish(document.identity(), &environment).unwrap();
+        let mut expected = expected;
+        expected.manifest.effects = published.document.manifest.effects.clone();
+        assert_eq!(published.document, expected);
+        assert_eq!(
+            parse_document(&print_document(&published.document)).unwrap(),
+            expected
         );
     }
 }

@@ -38,9 +38,8 @@ fn at(site: &Option<Site>) -> String {
         .unwrap_or_default()
 }
 
-/// An action form, as a refusal names it: one with no expression spelling
-/// (`join`, `yield`, `cancel`) nested in an expression, or one the body of
-/// a function with a native implementation may not run (`K-LIB-004`).
+/// An action form, as a refusal names one the body of a function with a
+/// native implementation may not run (`K-LIB-004`).
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -493,7 +492,7 @@ impl Scope<'_> {
                 self.check_rhs(value, &child())
             }
             Stmt::Remove { member } => self.check_member(member, &mut child),
-            Stmt::Do { action } => self.check_action(action, &child()),
+            Stmt::Do { value } => self.check_expr(value, &child()),
             Stmt::If {
                 condition,
                 then_block,
@@ -584,6 +583,8 @@ impl Scope<'_> {
             ActKind::Spawn(_) => StatementForm::Spawn,
             ActKind::Join | ActKind::JoinMany(_) => StatementForm::Join,
             ActKind::Await(_) => StatementForm::Await,
+            ActKind::Yield => StatementForm::Yield,
+            ActKind::Cancel => StatementForm::Cancel,
         };
         // As for a statement action (`K-LIB-004`): a body beside a native
         // may call functions that state one and apply a closure it holds.
@@ -625,7 +626,7 @@ impl Scope<'_> {
                 check_arity(effect.as_str(), act.args.len(), signature, site)?;
                 check_type(result).map_err(|reason| invalid(Some(site), reason))?;
             }
-            ActKind::Sleep { .. } | ActKind::Join | ActKind::JoinMany(_) => {
+            ActKind::Sleep { .. } | ActKind::Join | ActKind::JoinMany(_) | ActKind::Cancel => {
                 if act.args.len() != 1 {
                     return Err(invalid(
                         Some(site),
@@ -634,6 +635,19 @@ impl Scope<'_> {
                             given: act.args.len(),
                             required: 1,
                             accepted: 1,
+                        },
+                    ));
+                }
+            }
+            ActKind::Yield => {
+                if !act.args.is_empty() {
+                    return Err(invalid(
+                        Some(site),
+                        InvalidReason::CallArity {
+                            name: "yield".into(),
+                            given: act.args.len(),
+                            required: 0,
+                            accepted: 0,
                         },
                     ));
                 }

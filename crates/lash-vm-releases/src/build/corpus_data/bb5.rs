@@ -97,6 +97,7 @@ pub(super) const DATA: &str = r####"{
 "b5acdd6bd6e3232e44f2c21da8ddd101f32515a3b1bd6e152af3f127545909b8":[{"float":"8.260767037052255e-64"},{"int":"-6505328029042453751"}],
 "b5adddbec3383aae3e325c30e54ea83371e0b0b5ca845a73f0c699a74ba99f75":[{"float":"-inf"},{"float":"3.25"}],
 "b5ae53ab91bcb3a4e6bc48ea7411448ab0c539568755d61c89f2538622749445":[{"record":123},{"text":"[]"},{"text":"Hello, Wörld"}],
+"b5b2005ee5b48dce60b965d8b9df2ebfaa1e790d79749f266a7d4c5371a271ac":{"charge":408,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b5b244be46983b18febd5ed4d19ec669cbd6b149f978bf6aa54fb374da878aa8":[{"float":"5.197104857981112e210"},{"set":2},{"text":"񾄆񁕄󃁮򌾎𪞑򅂞񪖿򙤴𚼆󴇘򖅛񒭙󻥏񦇽𨑾򢳶󤔯𨙥򽰩񒗑򒿚𽤅򿟷񺧘𥢋鳺񗕃􌕩􍚣󅇎񧣭󒭜򜰊󊄒󷫐蘥򲉩􈑭󗀥򣮅𐲲鰫󀟓񡄜򿸾󇡂򢨲𜣦񩋷򟰒敪񥄠󱖂񏴩򂢓񬘂򭌎򪌨򡩮񵟚򅿵󦨊򯹞󇠢񎩒򯤆䵴񱃮򫅏񖗭󦉦𣬢󢇔󜪗񈣂񖕓󭭙𝺯󹣒򡝣񨦍򕇞󾫽󕉨𴫌򟝙񺛷󉡺󶗊򺦁𹺒𜌯􄅩󆆫𸾨򄒷𜇾񻏽𶇚󈾙𾳆󣊟𖬺󢕬򈘦ꪪ𴅿𼀽񾣽򟩬񪲘񸧁󎒒󧏛󟗼񢌗"},{"tuple":[{"int":"6114556020247634577"},{"int":"-8518459738767193452"},{"bool":true},{"bool":false}]}],
 "b5b3e0c0337d0b22f16efd6a2d35d785bbe5600f11c9b9a45cead6f93ab89253":[{"float":"2.185810689392807e-74"},{"int":"4813068080650942767"}],
 "b5b426dd873bce22763a50f0c1208c9d587177d6e83f891bb407e7df6f61a8e3":[{"float":"1.7036311664821567e-164"}],

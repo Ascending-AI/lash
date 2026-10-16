@@ -205,8 +205,8 @@ impl Linker {
             Stmt::Remove { member } => StmtNode::Remove {
                 member: self.member(member, &mut slots, id, scope),
             },
-            Stmt::Do { action } => StmtNode::Do {
-                action: self.action(action, slots.take(), id, scope),
+            Stmt::Do { value } => StmtNode::Do {
+                value: self.expr(value, slots.take(), id, scope),
             },
             Stmt::If {
                 condition,
@@ -543,6 +543,8 @@ impl Linker {
                         result: result.clone(),
                     },
                     ActKind::Sleep { .. } => ActNode::Sleep,
+                    ActKind::Yield => ActNode::Yield,
+                    ActKind::Cancel => ActNode::Cancel,
                     ActKind::Join => ActNode::Join,
                     ActKind::JoinMany(mode) => ActNode::JoinMany(*mode),
                     ActKind::Await(policy) => ActNode::Await(*policy),

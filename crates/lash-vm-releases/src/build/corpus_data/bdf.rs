@@ -74,6 +74,7 @@ pub(super) const DATA: &str = r####"{
 "df94eeb928a536bf59ce1b513e1dd2fd9a3391d783824c00fd3a610ddee82c84":{"charge":112223,"outcome":"ok {\"text\":\"򑉜􌥸󫻪𦼗󂸉󹐕󩑽򅠕󃯥􆃒񎺓񾎎򵷉𶜲󢅼󹨾򫊊䍯򦨩񙪽򻫈𷆽򞰞񯱆򧈾􅵚􇵠󥖚􍮱񢉆񧖂𥟩񴼆堘񙢨󠖙􆗒󺎙񙪞򠀫󁣫񓘚􂛶𥤻򙽉򚠷𫪧񧨒񇡦󋴖󚯬񑖻􃅐𻬲񜣄확񑊹򬻜𸙁󥜍쳣󒾺񮅥𾇧󱇤򐳇𶤞󃁌򼔬熦򎃅󮹄񂊘𐛝𵖐ጻ򬿝񬴂𦠘󛫈񦆽𘠾񠪮򙜻\"}","prepared_difference":null,"reservations":[[0,660]],"reserved":660,"spent":0},
 "df951d5bed3f578cb4873f37b2a27b1f752168380009ce8f5d2a98fa7e9197c4":[{"text":"󘔒񷲘𝁡񇦁󮜲𶹼󢞠񗟯𾫀񩼕󞵫񄁱溱𡠬􈤜󲄎򰳌񫏕􈗲𜹹𨆥󺿦ᄹ񕝛񁔵"},{"int":"-3212635530240177057"}],
 "df96db6628e378398cd2edc777c2bf7d5716c6116b2d7afa9819d3c20dbfc81f":{"charge":68,"outcome":"ok {\"float\":\"-0.5234675282329225\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"df972fa581c15381690f9ca7623eabbbd7836bd96b93c5dfd6dc3b0580011967":{"charge":6,"outcome":"ok {\"float\":\"7.077948371107501e-55\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "df989aa9c2fac03329b1f39eda7723e478f186533f87e6ee0bcb7cf4edc3b9d3":[{"int":"-7992289782968133529"},{"float":"4.285610005348777e161"}],
 "df9c197e9f9a45c6c1bda502aaa309868978ec5de5aa0c50e502cb4a516ba98b":{"charge":1227,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "df9c1fc5407a87d03d03c2b7b70bc38831ce90ee797d52a7706e089e77d6ae8b":[{"text":"򚕫𧛡򁱌򒅴򛸶񫫊󔤿󔱭󭾵񜽊񪱔򚨌񓙘򵘴򍾘􆨧񦔳󻌹󩐟򎣷󧋦춃󂓘󢊑񲊔󊧑񍃂𽗣򻺈񫗵򱏞򖉹𙛽󇒐񊩹󤕭񥪧󭟒񭣽򤰌𜎔焓򀜱񼅿򘴽񙕧񪞍򽦂󹒱􃷘𧎣󴶄󷈟圻񿅕𷗷󀓜󅿕航󀦮񹨽񓑉򸱡𻤹񞠋𠼛𱗅򇊮򜟋򐢄󫆕󮾶𰏩𧆮􄓍𗔄򊋮񺘫򊦧􀜴𺸺𽯦򽟑񂘾򋗲􋰙򕄡򚷃򳉘󤐼ྴ󲺫󞐶󀁾󸏾񈝹񲨷򐞣򌍬񫏪􋈍򚰩񲄱묳𡺅󇇸񠜛񌗕󰤞񴪌𴤙󕏋󒞬񭋣󅦆񩢵񨓄򧛍񫽠𖀞񶵞󶰄"}],

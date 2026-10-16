@@ -152,22 +152,25 @@ fn helper_calls_keep_expression_action_and_callee_kinds_unambiguous() {
                 }),
             },
             k::Stmt::Do {
-                action: k::Action::Spawn {
+                value: (k::Action::Spawn {
                     callee: k::Callee::Library(other),
                     args: vec![],
-                },
+                })
+                .into(),
             },
             k::Stmt::Do {
-                action: k::Action::Call {
+                value: (k::Action::Call {
                     callee: k::Callee::Declared("result".into()),
                     args: vec![],
-                },
+                })
+                .into(),
             },
             k::Stmt::Do {
-                action: k::Action::Call {
+                value: (k::Action::Call {
                     callee: k::Callee::Value("result".into()),
                     args: vec![],
-                },
+                })
+                .into(),
             },
         ],
     );
@@ -262,7 +265,7 @@ fn readable_controls_names_and_implicit_else_preserve_statement_boundaries() {
         && let k::Stmt::If { else_block, .. } = &mut body[0]
     {
         else_block.push(k::Stmt::Do {
-            action: k::Action::Yield,
+            value: (k::Action::Yield).into(),
         });
     }
     assert!(
@@ -833,12 +836,13 @@ fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
         ),
     ] {
         document.main.push(k::Stmt::Do {
-            action: k::Action::Perform {
+            value: (k::Action::Perform {
                 effect: effect.clone(),
                 args,
                 result,
                 then_yield: false,
-            },
+            })
+            .into(),
         });
     }
     let printed = roundtrip(&document, true).source;

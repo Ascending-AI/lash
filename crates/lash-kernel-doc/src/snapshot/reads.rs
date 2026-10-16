@@ -64,7 +64,7 @@ impl CodeReads {
                 self.rhs(value, bound);
             }
             Stmt::Remove { member } => self.member(member, bound),
-            Stmt::Do { action } => self.action(action, bound),
+            Stmt::Do { value } => self.expr(value, bound),
             Stmt::If {
                 condition,
                 then_block,
@@ -229,7 +229,11 @@ impl CodeReads {
                     ActKind::Await(policy) => {
                         self.library.insert(*policy);
                     }
-                    ActKind::Sleep { .. } | ActKind::Join | ActKind::JoinMany(_) => {}
+                    ActKind::Sleep { .. }
+                    | ActKind::Join
+                    | ActKind::JoinMany(_)
+                    | ActKind::Yield
+                    | ActKind::Cancel => {}
                 }
                 act.args.iter().for_each(|arg| self.expr(arg, bound));
             }

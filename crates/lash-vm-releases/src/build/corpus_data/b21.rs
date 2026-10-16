@@ -91,6 +91,7 @@ pub(super) const DATA: &str = r####"{
 "21b26342bc38cdcaafffb2b011db9e5ef7f0cf8261633c2a657e4c5714a960d1":[{"int":"9223372036854775808"},"null"],
 "21b5d59d9507fe16c037fb9b28a9325618b07bcedd9850c1859db4cf3e2bf6f8":[{"int":"8686214601306009695"}],
 "21b6065eb2cdfc3ac7d200876bc833698c4038c3e18ef2c171ed21d4b46068f7":{"charge":41,"outcome":"ok {\"int\":\"-1\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
+"21b6f959be1543284ca694734ce732ec3da6c7160c961c76e32b79c1c838a648":["null",{"int":"3893300610010127215"}],
 "21ba82201890a6fb2808edac888dfce24512db745bb74e6438ca6f384baaba81":[{"list":85},{"int":"-1"},{"int":"32"},{"int":"32"},{"bool":false},{"bool":false}],
 "21bfa5cb58d7996db67d82207856c21febfea35d64c6713b6c396e9aa49d83cf":{"charge":130,"outcome":"raised \"regex.syntax\" \"invalid regular expression flags: `H` is not a flag\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "21c33e03b6018a30d3f025fd7916a76b1f99419fecff71e533a1cdfbd85d633e":[{"float":"-8.223277033491508e-42"},{"float":"-5.2236221650994335e-238"}],

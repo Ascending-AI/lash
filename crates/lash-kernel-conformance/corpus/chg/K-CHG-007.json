@@ -19,12 +19,12 @@
             ]
           }
         },
-        "charged": 26
+        "charged": 27
       }
     },
     {
       "name": "callback code is charged within a library body",
-      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nuse collection.map = @18c35b30da8cd10ab2c0039bcc1712e89e5bfa9b87727ec514d1f12b78460ea7\nuse collection.function_check = @a76697deec5c174c74ed173a04b4207532f093c3fa95ae478cdebc9c38466e0c\nmain { let xs = [1] let cb = fn(x) { return x } let ys = invoke collection.map(xs, cb) finish ys }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nuse collection.map = @e53667241c9bc18ec09e9d87a62b8b454107ba20a05623719dd7ee2f662862f9\nuse collection.function_check = @a76697deec5c174c74ed173a04b4207532f093c3fa95ae478cdebc9c38466e0c\nmain { let xs = [1] let cb = fn(x) { return x } let ys = invoke collection.map(xs, cb) finish ys }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -37,7 +37,7 @@
             ]
           }
         },
-        "charged": 36
+        "charged": 37
       }
     }
   ]

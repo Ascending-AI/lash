@@ -36,7 +36,6 @@ pub(super) const DATA: &str = r####"{
 "f43854830e85924f7dd39638fd9cad6ebd10f422e983975bc0074266e071fb8f":[{"text":"񆔮𷁤𳎄󳣣򇑒󠐺򃺲񊡏񚓟򝉖򭡲򞅂怀𔋀󆑅񬇍𱬎"},{"int":"5761741360964400824"}],
 "f438e002799cb28ea7bfb5974c39c2159d7cce71c53dcbc29b393bd278c71df6":[{"text":""},{"int":"0"},{"text":"["}],
 "f43ac4524bfd446ce447d8fd1a1f1a6c4059a606bc30d1316954d08e9cb545bd":[{"list":85},{"float":"-1.0"},"null"],
-"f43c1e81014ff29f8c81818faa318277e8736481d7f2d047943d6b3ce5997692":[{"float":"-1.0014883443527024e167"},{"list":0}],
 "f43c441ac81d60036f7c4f076a4dd0cec885cb899091c942915ec77c512f9472":[{"int":"851365919277787642"},{"float":"-1.884964613597073e78"}],
 "f43ffa1c5cbc48c572a2483b4daffddc053171d6d7004a2c3b3e48bdddb66064":{"charge":4,"outcome":"raised \"type_error\" \"collection has the wrong kind\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "f442a689c821d631404dd8d393f38204c60790486a40b394502393f4f5db441f":[{"list":0},{"float":"-2.1371213516945517e-164"}],

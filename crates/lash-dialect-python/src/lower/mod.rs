@@ -358,10 +358,11 @@ pub(crate) fn lower_with_calls(
         let cancel = lowerer.function("tasks.cancel_all")?;
         let finally = Buf {
             stmts: vec![Stmt::Do {
-                action: Action::Call {
+                value: (Action::Call {
                     callee: Callee::Library(cancel),
                     args: Vec::new(),
-                },
+                })
+                .into(),
             }],
             notes: vec![Note {
                 span: None,
@@ -930,7 +931,7 @@ impl Lowerer<'_> {
         let callee = Callee::Library(self.function(function)?);
         let args = self.atoms(args);
         self.emit(Stmt::Do {
-            action: Action::Call { callee, args },
+            value: (Action::Call { callee, args }).into(),
         });
         Ok(())
     }
@@ -1000,29 +1001,21 @@ impl Lowerer<'_> {
         if let Some((rhs, note)) = self.take_binding(&value) {
             let nested_written = note.nested_written;
             match rhs {
-                Rhs::Action(action) => self.push(Stmt::Do { action }, note.blocks),
+                Rhs::Action(action) => self.push(
+                    Stmt::Do {
+                        value: action.into(),
+                    },
+                    note.blocks,
+                ),
                 // An expression of natives changes nothing, but it may
                 // raise, so it stays, bound to a variable nothing reads.
-                Rhs::Expr(expr) => {
-                    let name = self.temp();
-                    self.push(
-                        Stmt::Let {
-                            name,
-                            value: Rhs::Expr(expr),
-                        },
-                        note.blocks,
-                    );
-                }
+                Rhs::Expr(expr) => self.push(Stmt::Do { value: expr }, note.blocks),
             }
             if let Some(note) = self.buf.notes.last_mut() {
                 note.nested_written = nested_written;
             }
         } else if !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)) {
-            let name = self.temp();
-            self.emit(Stmt::Let {
-                name,
-                value: Rhs::Expr(value.expr),
-            });
+            self.emit(Stmt::Do { value: value.expr });
         }
     }
 

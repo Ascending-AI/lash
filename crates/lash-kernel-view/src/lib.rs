@@ -847,7 +847,7 @@ impl<'a> Walk<'a> {
             }) => Some("duration"),
             Written::Statement(Action::Join { .. } | Action::Cancel { .. })
             | Written::Nested(ActExpr {
-                kind: ActKind::Join,
+                kind: ActKind::Join | ActKind::Cancel,
                 ..
             }) => Some("task"),
             Written::Statement(Action::JoinMany { .. })
@@ -928,6 +928,8 @@ impl<'a> Walk<'a> {
                 ActNode::Perform { .. } => SiteKind::Perform,
                 ActNode::Sleep => SiteKind::Sleep,
                 ActNode::Spawn(_) => SiteKind::Spawn,
+                ActNode::Yield => SiteKind::Yield,
+                ActNode::Cancel => SiteKind::Cancel,
                 ActNode::Join => SiteKind::Join,
                 ActNode::JoinMany(_) => SiteKind::JoinMany,
                 ActNode::Await(_) => SiteKind::Await,

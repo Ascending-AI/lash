@@ -5,12 +5,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::Lowered;
-use lash_kernel_doc::{Document, Node, Site, Unit};
+use lash_kernel_doc::{Document, Expr, Node, Site, Unit};
 
 /// Every statement and action site of `document`'s code.
 fn code_sites(document: &Document) -> Vec<(Site, String)> {
     fn walk(node: Node<'_>, site: Site, out: &mut Vec<(Site, String)>) {
-        if matches!(node, Node::Stmt(_) | Node::Action(_)) {
+        if matches!(
+            node,
+            Node::Stmt(_) | Node::Action(_) | Node::Expr(Expr::Act(_))
+        ) {
             out.push((site.clone(), format!("{node:?}")));
         }
         for (child, index) in node.children().into_iter().zip(0u32..) {

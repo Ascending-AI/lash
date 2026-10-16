@@ -116,7 +116,6 @@ pub(super) const DATA: &str = r####"{
 "4abef83739e3dfea8a68f5e64db7b3ebb231fc47041c965196955c25310c574b":[{"text":"𹎝𤿺󜯥𘴲񅚨򛀅󟸥򪪙𜆌񫴏󨶵ퟮ󒏁𜧆𢗕򼃞󳓟𕭶󦉀𒂄򜇅󪜆󶏈򷴏瀵򙎕񜇲񮓱􍽸󲋆𨬃󄃕񶌔񻛒񱔿𫳕󽻬򴉑񙚕𬓸蝱󷠿򱜏񮋡򑵤𯱞񠰦𤮾񱢩鋘򗷽󤙆򓥊󉆸ኛ򏉾򞐚󎅒󖰐򨻈ᷕ𬂮򴺯񃟲򠜝򨁓񤶓􃏈𭎯񡿈󵯷򄺀󝈝󽫹𧤌򖓾ﾷ񃞈菧󑔠򽄊񫸨󣅔󼐶񊸾鋢𭅇󫄥󔄇𠡅򱼕챫񜄳񤉱񺊵󳊰򠓕􉾜즣񞓰򢤹󠼫"}],
 "4abf143d26cc13338d32d5865a25513ee2abc74a20d3ac8c666d03456e5bc30a":{"charge":4,"outcome":"ok {\"float\":\"7.997024686070162e-227\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "4abfc12b7d25a344ab1e8d1ad3294dfe19fee8671792b362b584daf580440f6f":[{"text":"Infinity"},{"text":"Infinity"},{"text":"Infinity"}],
-"4abfe82cbf1b6a7eda7f2efd0591eaba42473828d682aea484aff7f0726352fc":{"charge":15,"outcome":"ok {\"list\":[{\"float\":\"5.891568460423522e-280\"},{\"float\":\"-4.256612553721432e-198\"},{\"float\":\"3.2598815527331187e37\"},{\"float\":\"4.302783969460084e-134\"},{\"bool\":false},{\"bool\":true},{\"float\":\"1.1066168173435585e269\"},{\"float\":\"-3.1537031446572427e-176\"},{\"int\":\"-4112979973693513337\"}]}","prepared_difference":null,"reservations":[[9,0]],"reserved":144,"spent":0},
 "4ac219c5e3718438ced04c41f28832a0b573bbff2c865ec2029217cb5326b719":[{"record":117},{"text":""}],
 "4ac396e0f7af3bf7b0a489d27a7924a4e627562bd252f0d0d80f42e0fbb994fb":[{"text":""},{"text":"Hello, Wörld"},{"int":"3"}],
 "4ac4c6a6688d16a06b27adc7a734aeb19e63d5a63d3024c550b21e0377bf23c9":{"charge":346,"outcome":"ok {\"bool\":false}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

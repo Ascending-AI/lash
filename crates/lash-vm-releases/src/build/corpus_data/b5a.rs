@@ -131,6 +131,7 @@ pub(super) const DATA: &str = r####"{
 "5aee335e63519ca33562aab44982339c1ddee2632d25879b9332d69acfc16a2a":[{"int":"5134694722838681274"}],
 "5aef3ca37629113bd97cca4f818a68c27292c46e1481053e13484279eff1927b":[{"text":"12.5"},{"int":"-7"},{"text":"a"}],
 "5af04c76fde8295c87c8aa1371c08904a0278964e9ebf3557c950eef99519e93":[{"float":"-7.369945595893527e-155"}],
+"5af07a5174abf74cca4f9438ebca09a65715a8482b8f1644557c9a5755437c35":[{"list":[]},{"list":[{"int":"8509179349190278022"},{"list":0},{"int":"7702199691325672010"}]}],
 "5af1688d38fd6bff30b6d44dbbd6f55b83100671faef902c2428f2f22f457401":{"charge":449,"outcome":"declined","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "5af1d3adf3cb12c88ebcf7374d4e9b49dce229575eb76b28421ffa86cfce0c9b":{"charge":20,"outcome":"ok {\"text\":\"null\"}","prepared_difference":null,"reservations":[[0,8]],"reserved":8,"spent":0},
 "5af2ede64c59bdf4cb39330d16e53450ae7f40c1258b624d571676f30ac82524":{"charge":189,"outcome":"raised \"type_error\" \"collection has the wrong kind\" \"null\"","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

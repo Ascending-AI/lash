@@ -126,8 +126,9 @@ fn direct_calls_charge_only_emitted_statements_atoms_and_body_expressions() {
     ));
     // Private entry declaration: 2. Body closure and packed closure: 2 each.
     // Function token: statement + tuple node + six nodes + six writes = 14.
-    // Calls: statement + receiver/argument atoms + return statement/variable.
-    assert_eq!(machine.meters().charged, 2 + 2 + 2 + 14 + 5 + 4 + 5);
+    // Calls: statement + discarded action expression + receiver/argument atoms
+    // + return statement/variable (K-CHG-002).
+    assert_eq!(machine.meters().charged, 2 + 2 + 2 + 14 + 6 + 5 + 6);
 }
 
 /// Locate the source base case through any numeric admission branch.

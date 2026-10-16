@@ -145,28 +145,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "A computed argument of an action that has no expression spelling\nwhere it stands: the action of a `do`, a `join` or a `cancel`. Bind\nthe value with a `let` first.",
-          "properties": {
-            "argument_not_atom": {
-              "additionalProperties": false,
-              "properties": {
-                "form": {
-                  "$ref": "#/$defs/StatementForm"
-                }
-              },
-              "required": [
-                "form"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "argument_not_atom"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "properties": {
             "no_such_function": {
               "additionalProperties": false,
@@ -1348,7 +1326,7 @@
       "type": "object"
     },
     "StatementForm": {
-      "description": "An action form, as a refusal names it: one with no expression spelling\n(`join`, `yield`, `cancel`) nested in an expression, or one the body of\na function with a native implementation may not run (`K-LIB-004`).",
+      "description": "An action form, as a refusal names one the body of a function with a\nnative implementation may not run (`K-LIB-004`).",
       "enum": [
         "call",
         "perform",

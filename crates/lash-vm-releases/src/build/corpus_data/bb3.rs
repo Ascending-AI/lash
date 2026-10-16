@@ -105,6 +105,7 @@ pub(super) const DATA: &str = r####"{
 "b3b2e144fa9dc2b0c021e49b52e313ab501cef9e6f6fd648c3d9c7981a126b49":[{"list":[{"int":"-2018026141176759786"},{"int":"-6049120481582343858"}]},{"list":[{"float":"2.4301944220186568e-12"},{"text":"񴹃񉠟򜓯򑪦󥔓􀅹񶼻󱤥񪙗򠋛搞󏅖𤄴򎺶򃣫򨁚󍷚􇓡򝱈񆏰񮴷󿴭ᆗ󳙴ꌘ񋙞𓒲񗁛񈹻񂾧ﰸ񡿀򨇿򝴼򝖆󍦭񬅞򛥜󗜮所󐊄񼶁񳙚𫊶򯩓񷅧󟙅򻛩𮧄򽬗󟝡񕛏󃖢𓥉񋅻򾓙󕵐⟪𸼥򅍻񼴝񪧇𵕔򔻾򌟣򖒬񋥥򬥗󀔅򝑏􄀧󀥧􅢵򸭄􇭒󫤤񰭖񟻀񹼽񡕃󗶩𱄒񓶰韋󹠤񝀔񪲴򰛭񳎠󍿇􊶸𰣣򡠲񦺂𾣟񛛎񗀣𸈃𚿇񌽘"},"null",{"list":0},{"text":"򸈻􌯿񂾨򻯷򥵀񾟺󮂵𮰴󷳬򌤕󕯇ᚰ󻺝𤒠򜰩󐇱➲󳝽񒡓"},{"float":"-1.1986100647695368e-128"}]}],
 "b3b3fd816364e158b51a8018f60a3f6c490b3d0815e10e0ca754b76163ed6038":{"charge":394,"outcome":"ok {\"list\":[{\"list\":[{\"text\":\"󦍴򳲲񘑋񍮃󷓴񅤝񈓯𦠦񔝶򇱸𬂀򏼁񀲿𲝦󘪨񛞽򻦒󥡡좑񃝀񠔮򿲤𘁝􍒉񨽠򿑾􃘖𓯺󲌍򠠋𻻛򻝦󢦈󋇛񻡸􍼈Ⓐ򓥿𹓍򰊤񼾡򻱾񇺆𘟻򦀴񟷴񼄏\"},{\"text\":\"\"}]}]}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b3b6171704f38c234c44c8073dfb32d0d1e872e6b54fb600c6b8a7a0b4be72d5":[{"float":"-1.5"},{"int":"0"}],
+"b3b7bdd450f88eb66e330c22d142ba6a54aceb33bd8297d4f70b99782cb70f27":[{"float":"3.561319029105625e-132"},{"int":"-5292753448001619855"}],
 "b3bc2d843e2cdd234e79a1f1a3709532f85f7e141004224af312285f245d513f":{"charge":11,"outcome":"ok {\"float\":\"2.1880137772369877e-181\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},
 "b3c2653981392bd07a28bd7b3a821cddf92c870813e25410cca019445b49eac1":[{"bytes":"61ff"},{"int":"-7"},{"int":"1"}],
 "b3c2b02a43d5f99d4a9d46f979f74e50f4ef9adba62abfefa79f86b2ba7ab8ba":{"charge":19,"outcome":"ok {\"int\":\"4118666482530775769\"}","prepared_difference":null,"reservations":[],"reserved":0,"spent":0},

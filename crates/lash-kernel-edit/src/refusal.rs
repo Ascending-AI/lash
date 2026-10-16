@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use lash_kernel_check::{Refusal, RefusalReason};
-use lash_kernel_doc::{DocumentId, InvalidReason, Name, Site, StatementForm};
+use lash_kernel_doc::{DocumentId, InvalidReason, Name, Site};
 
 use crate::tree::NodeClass;
 
@@ -91,14 +91,6 @@ pub enum EditDiagnosticKind {
     NoCondition,
     #[error("the action has {arguments} argument(s); there is none at {index}")]
     NoSuchArgument { index: u32, arguments: u32 },
-    /// A computed argument of an action that has no expression spelling
-    /// where it stands: the action of a `do`, a `join` or a `cancel`. Bind
-    /// the value with a `let` first.
-    #[error(
-        "this `{}` takes a variable or a literal as its argument; bind the value with a `let` first",
-        .form.keyword()
-    )]
-    ArgumentNotAtom { form: StatementForm },
     #[error("function `{name}` is not declared")]
     NoSuchFunction { name: Name },
     #[error("function `{name}` is not an entry")]
@@ -155,7 +147,6 @@ impl EditDiagnosticKind {
             Self::IntoItself => "into_itself",
             Self::NoCondition => "no_condition",
             Self::NoSuchArgument { .. } => "no_such_argument",
-            Self::ArgumentNotAtom { .. } => "argument_not_atom",
             Self::NoSuchFunction { .. } => "no_such_function",
             Self::NoSuchEntry { .. } => "no_such_entry",
             Self::InvalidCorrespondence => "invalid_correspondence",
