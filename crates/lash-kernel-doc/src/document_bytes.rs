@@ -8,6 +8,8 @@ use crate::{Document, DocumentId, IdentifiedDocument, KernelDataLimits, graph_to
 
 /// The one host token grammar this build accepts. No migration or fallback
 /// decoder is provided for opaque host blobs.
+/// version_surface = "coexist"
+/// version_guard(items(DOCUMENT_GRAMMAR_VERSION, decode))
 pub const DOCUMENT_GRAMMAR_VERSION: u32 = 1;
 
 /// An opaque document, its lash-issued identity and its grammar tag.
