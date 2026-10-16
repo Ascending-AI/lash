@@ -9,8 +9,9 @@
 //!
 //! Import through [`SchemaDocument::from_json_schema`]. Local references stay
 //! graph edges, including recursive ones. Unsupported schemas and exhausted
-//! resources return [`ShapeImportRefusal`]; only an unconstrained schema is
-//! [`ShapeKind::Unknown`]. Validation remains the contract's responsibility.
+//! resources return [`ShapeImportRefusal`]. Value refinements remain explicit
+//! notes even when the base type is [`ShapeKind::Unknown`]. Validation remains
+//! the contract's responsibility.
 
 mod document;
 mod import;
@@ -152,6 +153,21 @@ pub enum ExtraKeys {
     Open(Box<SchemaShape>),
 }
 
+// Refinements preserved verbatim because a language type cannot encode them.
+const VALUE_NOTE_KEYWORDS: &[&str] = &[
+    "minProperties",
+    "maxProperties",
+    "multipleOf",
+    "uniqueItems",
+    "contains",
+    "minContains",
+    "maxContains",
+    "propertyNames",
+    "patternProperties",
+    "dependentRequired",
+    "not",
+];
+
 /// The refinements a schema node states, kept as annotations.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ShapeConstraints {
@@ -165,6 +181,9 @@ pub struct ShapeConstraints {
     pub max_items: Option<u64>,
     pub pattern: Option<String>,
     pub format: Option<String>,
+    /// Value-narrowing JSON Schema keywords, rendered as compact JSON notes.
+    /// These constrain the node at its own path, including reference overlays.
+    pub value_notes: Vec<(String, Value)>,
 }
 
 /// A process call signature.
@@ -230,6 +249,11 @@ impl ShapeConstraints {
         if let Some(value) = &self.format {
             notes.push(format!("format {value}"));
         }
+        notes.extend(
+            self.value_notes
+                .iter()
+                .map(|(keyword, value)| format!("{keyword} {value}")),
+        );
         notes
     }
 
@@ -248,11 +272,20 @@ impl ShapeConstraints {
             max_items: count("maxItems"),
             pattern: text("pattern"),
             format: text("format"),
+            value_notes: VALUE_NOTE_KEYWORDS
+                .iter()
+                .filter_map(|keyword| {
+                    schema
+                        .get(*keyword)
+                        .map(|value| ((*keyword).into(), value.clone()))
+                })
+                .collect(),
         }
     }
 
     /// Keeps use-site values stated here, filling absent notes from `inner`.
-    /// Assertion intersections must be admitted separately by the importer.
+    /// Both sets of value-refinement notes remain: they apply conjunctively.
+    /// Structural assertion intersections must be admitted by the importer.
     ///
     /// ```
     /// # use lash_tool_shape::ShapeConstraints;
@@ -260,6 +293,12 @@ impl ShapeConstraints {
     /// assert!(notes.is_empty());
     /// ```
     pub fn overlay(self, inner: Self) -> Self {
+        let mut value_notes = self.value_notes;
+        for note in inner.value_notes {
+            if !value_notes.contains(&note) {
+                value_notes.push(note);
+            }
+        }
         Self {
             minimum: self.minimum.or(inner.minimum),
             exclusive_minimum: self.exclusive_minimum.or(inner.exclusive_minimum),
@@ -271,6 +310,7 @@ impl ShapeConstraints {
             max_items: self.max_items.or(inner.max_items),
             pattern: self.pattern.or(inner.pattern),
             format: self.format.or(inner.format),
+            value_notes,
         }
     }
 }

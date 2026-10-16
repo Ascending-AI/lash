@@ -58,20 +58,24 @@ fn forms() -> Vec<lash_core::ToolDefinition> {
         ),
         form(
             "composed",
-            serde_json::json!({ "allOf": [{ "type": "object" }, { "required": ["q"] }] }),
+            serde_json::json!({ "allOf": [{
+                "type": "object", "required": ["q"], "properties": { "q": true },
+            }] }),
         ),
         form(
             "chosen",
             serde_json::json!({ "oneOf": [
-                { "type": "object", "required": ["a"] },
-                { "type": "object", "required": ["b"] },
+                { "type": "object", "required": ["a"], "properties": { "a": true } },
+                { "type": "object", "required": ["b"], "properties": { "b": true } },
             ] }),
         ),
         form(
             "referenced",
             serde_json::json!({
                 "$ref": "#/definitions/Query",
-                "definitions": { "Query": { "type": "object", "required": ["q"] } },
+                "definitions": { "Query": {
+                    "type": "object", "required": ["q"], "properties": { "q": true },
+                } },
             }),
         ),
         form(

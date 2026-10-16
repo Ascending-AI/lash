@@ -175,11 +175,90 @@ fn s1_resource_exhaustion_refuses_instead_of_erasing_a_subtree() {
     assert_eq!(doc.reachable_closure(&doc.roots).len(), 2);
 }
 
+/// S1 permits explicit notes for refinements that do not change a value's type.
+#[test]
+fn s1_value_narrowing_keywords_keep_path_notes_and_unsupported_constructs_refuse() {
+    for (kind, keyword, value) in [
+        ("object", "minProperties", json!(1)),
+        ("object", "maxProperties", json!(3)),
+        ("number", "multipleOf", json!(0.5)),
+        ("array", "uniqueItems", json!(true)),
+        ("array", "contains", json!({"type":"integer"})),
+        ("array", "minContains", json!(1)),
+        ("array", "maxContains", json!(2)),
+        ("object", "propertyNames", json!({"pattern":"^x"})),
+        (
+            "object",
+            "patternProperties",
+            json!({"^x":{"type":"string"}}),
+        ),
+        ("object", "dependentRequired", json!({"x":["y"]})),
+        ("string", "not", json!({"const":"forbidden"})),
+    ] {
+        let expected = vec![format!("{keyword} {value}")];
+        for schema in [
+            json!({"type":kind}),
+            json!({"$ref":"#/$defs/Value"}),
+            json!({"anyOf":[{"type":kind},{"type":"null"}]}),
+            json!({"allOf":[{"type":kind}]}),
+        ] {
+            let mut root = json!({"type":"object", "properties":{"value":schema},
+                "$defs":{"Value":{"type":kind}}});
+            let base = document(root.clone());
+            root["properties"]["value"][keyword] = value.clone();
+            let doc = document(root);
+            let shape = field(&doc.roots[0], "value");
+            assert_eq!(
+                std::mem::discriminant(&shape.kind),
+                std::mem::discriminant(&field(&base.roots[0], "value").kind),
+                "{keyword} preserves the base type"
+            );
+            assert_eq!(shape.constraints.notes(), expected, "{keyword}");
+            let rows = doc.note_rows();
+            assert_eq!(rows.len(), 1, "{keyword}");
+            assert_eq!(rows[0].path, "$0.value");
+            assert_eq!(rows[0].shape.constraints.notes(), expected);
+        }
+    }
+    let doc = document(json!({"allOf":[{"type":"string", "not":{"const":"inner"}}],
+        "not":{"const":"outer"}}));
+    assert_eq!(
+        doc.roots[0].constraints.notes(),
+        [r#"not {"const":"outer"}"#, r#"not {"const":"inner"}"#,],
+        "a composition must retain both refinements of the same keyword"
+    );
+    let doc = document(json!({"patternProperties":{"^x":{"type":"string"}},
+        "additionalProperties":false}));
+    let ShapeKind::Object(object) = &doc.roots[0].kind else {
+        panic!("pattern properties describe an object")
+    };
+    assert!(matches!(&object.extra_keys, ExtraKeys::Open(_)));
+    for keyword in [
+        "if",
+        "then",
+        "else",
+        "dependentSchemas",
+        "unevaluatedProperties",
+        "unevaluatedItems",
+        "$dynamicRef",
+        "$anchor",
+        "inventedKeyword",
+    ] {
+        assert_eq!(
+            SchemaDocument::from_json_schema(&json!({keyword: {}}), 8),
+            Err(ShapeImportRefusal::UnsupportedConstruct {
+                keyword: keyword.into()
+            }),
+            "{keyword}"
+        );
+    }
+    let doc = document(json!({"type":"string", "x-host":{"anything":true}}));
+    assert_eq!(doc.roots[0], SchemaShape::from(ShapeKind::Str));
+}
+
 #[test]
 fn s1_unsupported_constructs_and_assertion_siblings_refuse() {
     for schema in [
-        json!({"not":{"type":"string"}}),
-        json!({"type":"object", "patternProperties":{"x":{}}}),
         json!({"$ref":"#", "type":"string"}),
         json!({"allOf":[{"type":"string"},{"type":"number"}]}),
         json!({"anyOf":[{"type":"string"}], "minimum":1}),

@@ -5,8 +5,8 @@ use serde_json::{Map, Value};
 
 use crate::{
     DefinitionId, ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaDefinition,
-    SchemaDocument, SchemaShape, ShapeConstraints, ShapeField, ShapeKind, X_LASH_KEYWORD,
-    XLashType, is_named_type_reference, union_kind,
+    SchemaDocument, SchemaShape, ShapeConstraints, ShapeField, ShapeKind, VALUE_NOTE_KEYWORDS,
+    X_LASH_KEYWORD, XLashType, is_named_type_reference, union_kind,
 };
 
 /// Hard limits on anonymous nesting and total imported nodes, not repeated
@@ -254,49 +254,52 @@ impl<'a> Importer<'a> {
 
     fn check_keywords(&self, map: &Map<String, Value>) -> Result<()> {
         for keyword in map.keys() {
-            if !matches!(
-                keyword.as_str(),
-                "$schema"
-                    | "$comment"
-                    | "$defs"
-                    | "definitions"
-                    | "title"
-                    | "description"
-                    | "default"
-                    | "examples"
-                    | "deprecated"
-                    | "readOnly"
-                    | "writeOnly"
-                    | "$ref"
-                    | "x-lash"
-                    | "allOf"
-                    | "anyOf"
-                    | "oneOf"
-                    | "enum"
-                    | "const"
-                    | "type"
-                    | "properties"
-                    | "required"
-                    | "additionalProperties"
-                    | "items"
-                    | "prefixItems"
-                    | "additionalItems"
-                    | "minimum"
-                    | "maximum"
-                    | "exclusiveMinimum"
-                    | "exclusiveMaximum"
-                    | "minLength"
-                    | "maxLength"
-                    | "minItems"
-                    | "maxItems"
-                    | "pattern"
-                    | "format"
-            ) {
+            if !keyword.starts_with("x-")
+                && !VALUE_NOTE_KEYWORDS.contains(&keyword.as_str())
+                && !matches!(
+                    keyword.as_str(),
+                    "$schema"
+                        | "$comment"
+                        | "$defs"
+                        | "definitions"
+                        | "title"
+                        | "description"
+                        | "default"
+                        | "examples"
+                        | "deprecated"
+                        | "readOnly"
+                        | "writeOnly"
+                        | "$ref"
+                        | "x-lash"
+                        | "allOf"
+                        | "anyOf"
+                        | "oneOf"
+                        | "enum"
+                        | "const"
+                        | "type"
+                        | "properties"
+                        | "required"
+                        | "additionalProperties"
+                        | "items"
+                        | "prefixItems"
+                        | "additionalItems"
+                        | "minimum"
+                        | "maximum"
+                        | "exclusiveMinimum"
+                        | "exclusiveMaximum"
+                        | "minLength"
+                        | "maxLength"
+                        | "minItems"
+                        | "maxItems"
+                        | "pattern"
+                        | "format"
+                )
+            {
                 return Err(unsupported(keyword));
             }
         }
-        // A reference or composition with assertion siblings is an
-        // intersection. No supported shape spells an arbitrary intersection.
+        // Structural assertion siblings form an intersection that the shape
+        // cannot spell. Value refinements remain explicit use-site notes.
         let composition = ["$ref", "allOf", "anyOf", "oneOf", "x-lash"]
             .iter()
             .filter(|key| map.contains_key(**key))
@@ -394,9 +397,14 @@ impl<'a> Importer<'a> {
                 union_kind(members)
             }
             Some(_) => return Err(invalid("type")),
-            None if ["properties", "required", "additionalProperties"]
-                .iter()
-                .any(|key| map.contains_key(*key)) =>
+            None if [
+                "properties",
+                "required",
+                "additionalProperties",
+                "patternProperties",
+            ]
+            .iter()
+            .any(|key| map.contains_key(*key)) =>
             {
                 self.object(map, depth)?
             }
@@ -501,6 +509,11 @@ impl<'a> Importer<'a> {
                 .unwrap_or(usize::MAX)
         });
         let extra_keys = match map.get("additionalProperties") {
+            // Pattern-matching keys remain possible even when unmatched keys
+            // are closed; the note carries their conditional value constraints.
+            _ if map.contains_key("patternProperties") => {
+                ExtraKeys::Open(Box::new(SchemaShape::unknown()))
+            }
             Some(Value::Bool(false)) => ExtraKeys::Closed,
             Some(schema) => ExtraKeys::Open(Box::new(self.shape(schema, depth + 1)?)),
             None => ExtraKeys::Unstated,
