@@ -384,6 +384,7 @@ was acknowledged, which is the record's first-writer receipt:
 | `turn_started` | opens `invoke_agent` (a live hint; the span is built from its close) | the session actor, after `turn.admit` | the scope's retained start |
 | `turn_completed` | `invoke_agent` | the session actor, after the commit that writes the turn's terminal (`turn.commit`, a refusal, a cancel, a session close) | the owner's clock at the acknowledgement |
 | `domain_completed` (process) | `lash.process {kind}` or `invoke_workflow {name}` | the process actor, after `process.terminal` | the terminal's retained `occurred_at_ms` |
+| `domain_completed` (workflow node) | `lash.workflow.node {site}` | the process actor, after the `process.advance` that hands the occurrence's step outcome to the engine, or after `process.terminal` for an occurrence still open | that commit's store clock |
 | `domain_completed` (tool intent) | `lash.tool_intent`, `lash.tool_intent.executed`, `lash.tool_intent.refused` | the host ingress, after the ledger retains the settlement | the settlement's retained time |
 | none | `lash.parked_work.parks` | the session or process actor, after the commit that parks it | not timed |
 
@@ -420,9 +421,25 @@ its submission's producer. The submission
 that first retains the settlement exports `lash.tool_intent` and counts the
 outcome; a redelivery of the key finds the settlement and exports nothing.
 
-Process tool scopes retain their process parent. The SQL commit wrapper
-owns the Live permit for its physical budget validation and histogram
-observation.
+A process's tool step is admitted with its trace scope, so its call is an
+`execute_tool` span opened by the admitting owner and closed by the owner
+whose `step.outcome` retained the outcome. Its parent is the process span,
+or, when the process retained `trace_nodes`, the span of the workflow
+occurrence that issued it: `lash.workflow.node {site}`, whose id is derived
+from the process span and the occurrence's whole `EffectIdentity` (task,
+site, occurrence and loop iterations), so a loop, a recursion or spawned
+tasks running one site are distinct nodes and every owner names the same
+one. A node starts at its step's admission, which retains that start in the
+step's tool scope, and closes once, as `lash.outcome` of its step's answer,
+on the owner whose `process.advance` handed that answer to the engine; an
+occurrence still open when the process ends closes `cancelled` with its
+terminal. It carries `lash.workflow.node.site` and
+`lash.workflow.node.occurrence` (the identity's canonical JSON). Whether a
+process has node spans is the `trace_nodes` its registration retained,
+never the closing owner's own policy. A `call_dynamic` resolution step
+stays under the process span; the call of its matched tool starts the node.
+The SQL commit wrapper owns the Live permit for its physical budget
+validation and histogram observation.
 
 Recorded model usage and provider responses remain result data. Lash has no
 billing ledger, and tracing never resends a provider request.
@@ -459,7 +476,8 @@ name is omitted. Internal processes have no model attributes or GenAI usage.
 
 Hosts that store this: `ProcessRegistration` and `ProcessRecord` gain required
 `trace_class: "internal" | "workflow"` beside the retained execution facts.
-Trace-record schema 37 changes in place to add operational model facts,
+Trace-record schema 38 adds the workflow node subject of a
+`domain_completed`. Schema 37 changed in place to add operational model facts,
 trace-owned attempt metadata, typed process/workflow subjects and the turn's
 admitted-input count;
 it removes model/provider/usage fields from domain completions. The stored

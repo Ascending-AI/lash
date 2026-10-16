@@ -18,6 +18,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `lash.tool_intent` | Internal | Transition | — |
 | `lash.process` | Internal | Transition | — |
 | `invoke_workflow` | Internal | Transition | gen_ai.invoke_workflow.internal |
+| `lash.workflow.node` | Internal | Transition | — |
 | `execute_tool` | Internal | Transition | gen_ai.execute_tool.internal |
 | `lash.extension` | Internal | Live | — |
 
@@ -80,6 +81,8 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `lash.process.kind` | String | Provenance | process, workflow |
 | `lash.process.label` | String | Provenance | process, workflow |
 | `gen_ai.workflow.name` | String | Provenance | workflow |
+| `lash.workflow.node.site` | String | Provenance | workflow_node |
+| `lash.workflow.node.occurrence` | String | Provenance | workflow_node |
 | `lash.tool.id` | String | Provenance | tool |
 | `lash.tool.attempts` | Integer | Provenance | tool |
 | `lash.tool.provider_call_id` | String | Provenance | tool |
@@ -125,7 +128,7 @@ Scope `lash`, version `1.0`. GenAI snapshot `open-telemetry/semantic-conventions
 | `cell` | 29 |
 | `process` | 26 |
 | `workflow` | 24 |
-| `workflow_node` | 20 |
+| `workflow_node` | 22 |
 | `tool_intent` | 24 |
 | `extension` | 26 |
 | `point` | 22 |

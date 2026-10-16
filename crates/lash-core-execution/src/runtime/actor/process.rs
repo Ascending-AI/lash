@@ -10,6 +10,7 @@ mod carry;
 pub mod component_formats;
 mod driver;
 mod effects;
+mod node_trace;
 mod session_turn;
 #[doc(hidden)]
 pub mod state_graph;

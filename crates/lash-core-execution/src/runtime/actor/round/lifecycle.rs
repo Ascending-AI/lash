@@ -547,15 +547,25 @@ impl Lifecycle {
         Ok(())
     }
 
+    /// Hand the bodies `folded`'s committed state to observe
+    /// ([`MemberBodies::observe`]), with the members this activation
+    /// admitted and has not started, and those whose outcomes its own
+    /// acknowledged commits wrote since the last observation. A process
+    /// observes each fold before it hands a settled step to its engine,
+    /// which drops the step's run from the next fold.
+    pub(crate) fn observe(&mut self, folded: &RunFold) {
+        for view in folded.rounds() {
+            self.bodies.observe(view, &self.fresh, &self.settled);
+        }
+        self.settled.clear();
+    }
+
     async fn act_with(&mut self, folded: &RunFold, starting: bool) -> Result<Act, RoundError> {
         // What the rows committed publishes before anything reads it: an
         // earlier activation's outcomes on a resume, and outcomes whose
         // acknowledgement was lost.
         self.publish_committed(folded)?;
-        for view in folded.rounds() {
-            self.bodies.observe(view, &self.fresh, &self.settled);
-        }
-        self.settled.clear();
+        self.observe(folded);
         // An outcome the rows already have came back on an unacknowledged
         // commit: it is not written again.
         self.finished.retain(|id, result| {

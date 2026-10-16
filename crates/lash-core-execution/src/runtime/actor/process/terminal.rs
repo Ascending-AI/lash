@@ -209,7 +209,8 @@ pub fn record_park(tx: &mut ActorTx, reason: &ProcessParkReason) {
 }
 
 impl super::activation::ProcessActivation {
-    /// Commit `tx`, which records `process`'s terminal, and report it.
+    /// Commit `tx`, which records `process`'s terminal, and report it with
+    /// the workflow node spans `nodes` the terminal closes.
     ///
     /// The acknowledged commit is the terminal's first writer: an owner that
     /// finds the process ended commits no terminal and reports none. The
@@ -221,6 +222,7 @@ impl super::activation::ProcessActivation {
         owned: &lash_durable::runner::Owned,
         tx: ActorTx,
         process: &ProcessId,
+        nodes: super::node_trace::NodeCloses,
     ) -> Result<(), DurableError> {
         owned
             .commit(tx, lash_durable::CommitLabel::PROCESS_TERMINAL)
@@ -235,6 +237,9 @@ impl super::activation::ProcessActivation {
         let Ok(Some(record)) = self.backend.process_registry().get_process(process).await else {
             return Ok(());
         };
+        if let crate::ProcessLifecycleState::Terminal { occurred_at_ms, .. } = &record.lifecycle {
+            nodes.publish(Some(tracing), &record, *occurred_at_ms);
+        }
         let (
             Some(scope),
             crate::ProcessLifecycleState::Terminal {

@@ -43,7 +43,7 @@
 //! steps already running to commit their outcomes, then releases the actor
 //! `ready` under `drain.release`, for a node of the next build to claim.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core_store::tool_run::{AvailableEvidence, CompletionSource};
@@ -59,6 +59,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::driver::{Blocked, Driver, Immediate, InFlight, StoredWaitId};
 use super::effects::{record_effect, record_omitted_effects, record_ran};
+use super::node_trace::{NodeCloses, StepCall, StepToolSpans};
 use super::session_turn::SessionTurns;
 use super::step_admission::{Consumed, Handoff};
 use super::succession::{Current, Succession};
@@ -260,6 +261,8 @@ impl ProcessActivation {
             steps: Arc::clone(&self.steps),
             runtime: Arc::new(StepRuntime::new(steps_cx.clone())),
             seen: Mutex::default(),
+            tracing: self.tracing.clone(),
+            spans: StepToolSpans::default(),
         });
         let mut live = Live {
             lifecycle: Lifecycle::new(
@@ -627,7 +630,8 @@ impl ProcessActivation {
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &cancelled(origin, true))?;
             tx.ack_seen();
-            self.commit_terminal(owned, tx, process).await?;
+            self.commit_terminal(owned, tx, process, NodeCloses::default())
+                .await?;
             return Ok(Pass::Again);
         }
         let rows = driver
@@ -687,6 +691,7 @@ impl ProcessActivation {
         }
         live.lifecycle.declare(policies);
         live.bodies.saw(&record, &driver);
+        live.lifecycle.observe(&fold);
         // A draining node advances nothing more: it waits for the steps
         // that run to commit their outcomes, then hands the process to the
         // next build at this committed phase.
@@ -708,6 +713,9 @@ impl ProcessActivation {
             Succession::Ended(pass) => return Ok(pass),
             Succession::AsWritten(tx) => *tx,
         };
+        // What this pass may hand the engine: the commit that consumes a
+        // step's outcome closes its occurrence's node.
+        let held = record.trace_nodes.then(|| driver.steps.clone());
         let event = match self
             .next_event(
                 &mut tx,
@@ -767,6 +775,13 @@ impl ProcessActivation {
                 return Ok(Pass::Released);
             }
         };
+        let nodes = match (&event, &held) {
+            (EngineEvent::StepSettled { step, outcome, .. }, Some(held)) => held
+                .get(step)
+                .map(|consumed| NodeCloses::consumed(&record, &fold, consumed, outcome))
+                .unwrap_or_default(),
+            _ => NodeCloses::default(),
+        };
         if matches!(event, EngineEvent::Started { .. }) {
             driver.effect_occurrence_cap = self.evidence.process_effect_occurrences();
             driver.cancel_grace_ms =
@@ -793,7 +808,8 @@ impl ProcessActivation {
                 &crate::ProcessOutcome::from_tool_output(output),
             )?;
             tx.ack_seen();
-            self.commit_terminal(owned, tx, process).await?;
+            let nodes = nodes.and(NodeCloses::open(&record, &fold, &driver));
+            self.commit_terminal(owned, tx, process, nodes).await?;
             return Ok(Pass::Again);
         }
         let (next, action) = match engine.advance(state, event) {
@@ -846,7 +862,8 @@ impl ProcessActivation {
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &outcome)?;
             tx.ack_seen();
-            self.commit_terminal(owned, tx, process).await?;
+            let nodes = nodes.and(NodeCloses::open(&record, &fold, &driver));
+            self.commit_terminal(owned, tx, process, nodes).await?;
             return Ok(Pass::Again);
         }
         tx.write(DomainWrite::Process(ProcessWrite::Advance {
@@ -868,6 +885,7 @@ impl ProcessActivation {
         }
         super::state_graph::write_engine_state(&mut tx, process, kind, &next, root.as_ref())?;
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+        nodes.publish(self.tracing.as_ref(), &record, millis(now));
         if let Some(requires) = requires {
             live.requires = requires;
         }
@@ -965,7 +983,10 @@ impl ProcessActivation {
             let mut tx = owned.begin().await?;
             record_terminal(&mut tx, process, &commit_refused(&message))?;
             tx.ack_seen();
-            match self.commit_terminal(owned, tx, process).await {
+            match self
+                .commit_terminal(owned, tx, process, NodeCloses::default())
+                .await
+            {
                 Ok(()) => return Ok(Pass::Again),
                 Err(error @ DurableError::OwnershipLost(_)) => return Err(error),
                 Err(_) => {}
@@ -1043,7 +1064,8 @@ impl ProcessActivation {
             tx.write(DomainWrite::ActorPark { reason_json: None });
         }
         tx.ack_seen();
-        self.commit_terminal(owned, tx, process).await?;
+        self.commit_terminal(owned, tx, process, NodeCloses::default())
+            .await?;
         Ok(Pass::Again)
     }
 
@@ -1379,6 +1401,10 @@ pub(super) struct StepBodies {
     /// outcomes publish into.
     pub(super) runtime: Arc<StepRuntime>,
     seen: Mutex<SeenSteps>,
+    /// What the steps' tool spans are reported through; none on a node
+    /// given no tracing.
+    tracing: Option<crate::trace::TraceRuntime>,
+    spans: StepToolSpans,
 }
 
 /// The process and its in-flight steps' requests, by call, as a pass read
@@ -1418,6 +1444,40 @@ fn unknown_step() -> SettledOutput {
 }
 
 impl MemberBodies for StepBodies {
+    fn observe(
+        &self,
+        round: &round::RoundView,
+        admitted_here: &BTreeSet<lash_durable::domain::AdmittedId>,
+        settled_here: &BTreeSet<lash_durable::domain::AdmittedId>,
+    ) {
+        self.spans.observe(
+            self.tracing.as_ref(),
+            round,
+            admitted_here,
+            settled_here,
+            |call, tool| {
+                let (record, request) = self.step(call)?;
+                let name = self
+                    .runtime
+                    .built_tools()
+                    .and_then(|built| {
+                        built
+                            .catalog
+                            .tools
+                            .iter()
+                            .find(|entry| entry.manifest.id == *tool)
+                            .map(|entry| entry.manifest.name.clone())
+                    })
+                    .unwrap_or_else(|| tool.to_string());
+                Some(StepCall {
+                    process: record.id.clone(),
+                    request,
+                    tool: name,
+                })
+            },
+        );
+    }
+
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {
         match self.step(execution.call()) {
             Some((record, step)) => self.steps.body(&self.runtime, &record, &step, execution),

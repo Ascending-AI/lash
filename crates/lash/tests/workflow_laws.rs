@@ -190,6 +190,26 @@ async fn core_with_process_tools(
     process_tools: bool,
     echo: EchoComponent,
 ) -> lash::LashCore {
+    builder_with_process_tools(stores, process_tools, echo)
+        .await
+        .build(node_identity(boot))
+        .expect("the core builds")
+}
+
+/// The lease identity of the incarnation `boot` of the one deployment.
+fn node_identity(boot: &str) -> lash_core::LeaseOwnerIdentity {
+    lash_core::LeaseOwnerIdentity::opaque(
+        lash_core::LeaseOwnerId::new("workflow-laws-worker"),
+        lash_core::LeaseIncarnationId::new(format!("workflow-laws-{boot}")),
+    )
+}
+
+/// A node's builder over `stores`, before it is built.
+async fn builder_with_process_tools(
+    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    process_tools: bool,
+    echo: EchoComponent,
+) -> lash::LashCoreBuilder {
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let backend = lash_conformance::backend_over(stores);
     let workers = lash::vm::WorkerService::default();
@@ -244,11 +264,6 @@ async fn core_with_process_tools(
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .build(lash_core::LeaseOwnerIdentity::opaque(
-            lash_core::LeaseOwnerId::new("workflow-laws-worker"),
-            lash_core::LeaseIncarnationId::new(format!("workflow-laws-{boot}")),
-        ))
-        .expect("the core builds")
 }
 
 /// The environment a workflow process runs under: `tools.echo`, and with
@@ -1602,3 +1617,5 @@ async fn typescript_import_reports_missing_tools_as_admission_refusals() {
 #[cfg(all(feature = "typescript", feature = "python"))]
 #[path = "workflow_laws/generated_source.rs"]
 mod generated_source;
+#[path = "workflow_laws/node_spans.rs"]
+mod node_spans;

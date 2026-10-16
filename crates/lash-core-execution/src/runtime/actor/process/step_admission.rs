@@ -16,6 +16,7 @@ use lash_sansio::{ToolCallAdmission, ToolCallPosition};
 use super::activation::{Live, Pass, corrupt, millis, refused, unavailable};
 use super::driver::{Blocked, Driver, Immediate, InFlight, Pinned, StoredWaitId};
 use super::effects::record_omitted_effects;
+use super::node_trace::NodeCloses;
 use super::terminal::{ProcessParkReason, record_terminal};
 use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft, RoundDraft, RunFold};
 use crate::runtime::actor::waits::{self, ParkDeadline, WaitDeadline, WaitPurpose, WaitSpec};
@@ -207,7 +208,8 @@ impl ProcessActivation {
         record_omitted_effects(&mut tx, process, driver, self.fleet());
         record_terminal(&mut tx, process, &outcome)?;
         tx.ack_seen();
-        self.commit_terminal(owned, tx, process).await?;
+        self.commit_terminal(owned, tx, process, NodeCloses::default())
+            .await?;
         Ok(Pass::Again)
     }
 
@@ -304,6 +306,13 @@ impl ProcessActivation {
                     .unwrap_or(u64::MAX),
                 request,
             };
+            let trace = super::node_trace::step_trace_scope(
+                self.tracing.as_ref(),
+                record,
+                &step.request,
+                &step.call,
+                millis(now),
+            );
             drafts.push(
                 ExecutionDraft::new(
                     step.call.clone(),
@@ -313,7 +322,8 @@ impl ProcessActivation {
                     step.limit(),
                     admitted.park,
                 )
-                .with_binding(admitted.binding),
+                .with_binding(admitted.binding)
+                .with_trace(trace),
             );
             settled.push(admitted.settled.map(|output| {
                 self.steps

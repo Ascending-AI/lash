@@ -32,9 +32,21 @@ pub struct TraceAttemptObservation {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum TraceDomainSubject {
-    Process { kind: String, label: Option<String> },
-    Workflow { kind: String, name: Option<String> },
-    ToolIntent { kind: lash_sansio::ToolIntentKind },
+    Process {
+        kind: String,
+        label: Option<String>,
+    },
+    Workflow {
+        kind: String,
+        name: Option<String>,
+    },
+    /// One occurrence of a workflow node, by its whole effect identity.
+    WorkflowNode {
+        at: lash_sansio::EffectIdentity,
+    },
+    ToolIntent {
+        kind: lash_sansio::ToolIntentKind,
+    },
 }
 
 /// How a durable domain operation ended.

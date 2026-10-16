@@ -89,6 +89,10 @@ pub enum SpanKey<'a> {
     Scope { scope: &'a TraceScopeId },
     /// A code cell: its foreground graph key.
     Cell { graph_key: &'a str },
+    /// One occurrence of a workflow node: its whole effect identity (task,
+    /// site, occurrence and enclosing loop iterations), since a site alone
+    /// does not name an execution.
+    Node { at: &'a lash_sansio::EffectIdentity },
 }
 
 const SPAN_DOMAIN: &[u8] = b"lash.span\0";

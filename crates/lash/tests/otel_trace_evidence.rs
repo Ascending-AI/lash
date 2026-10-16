@@ -38,7 +38,7 @@ fn install<M: otel::metrics::MeterProvider>(
 /// the reference a host diffs its exported shape against. Regenerate it with:
 ///
 /// ```sh
-/// kiln test //crates/lash:otel_trace_evidence__test__fv_78b3f86b \
+/// kiln test //crates/lash:otel_trace_evidence__test --local-test-execution \
 ///     --test_arg=--ignored \
 ///     --test_arg=--exact \
 ///     --test_arg=instrumentation_contract_document_is_regenerated \

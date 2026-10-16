@@ -689,6 +689,14 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
             kind: "lashvm".into(),
             name: Some("example".into()),
         },
+        TraceDomainSubject::WorkflowNode {
+            at: lash_sansio::EffectIdentity {
+                task: lash_sansio::TaskIdentity::Main,
+                site: lash_sansio::Site::new(lash_sansio::Unit::Main, [2, 0]),
+                occurrence: 1,
+                loops: Vec::new(),
+            },
+        },
     ]
     .into_iter()
     .chain(
@@ -700,6 +708,7 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
         let kind = match &subject {
             TraceDomainSubject::Process { .. } => TraceSpanKind::Process,
             TraceDomainSubject::Workflow { .. } => TraceSpanKind::Workflow,
+            TraceDomainSubject::WorkflowNode { .. } => TraceSpanKind::WorkflowNode,
             TraceDomainSubject::ToolIntent { .. } => TraceSpanKind::ToolIntent,
         };
         let completion =
@@ -736,6 +745,20 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
                         .attributes
                         .contains(&A::WorkflowName.value(name.unwrap()))
                 );
+            }
+            TraceDomainSubject::WorkflowNode { at } => {
+                // A node is named by its site and keyed by its whole
+                // occurrence.
+                assert_eq!(emitted.name, format!("lash.workflow.node {}", at.site));
+                assert!(
+                    emitted
+                        .attributes
+                        .contains(&A::WorkflowNodeSite.value(at.site.to_string()))
+                );
+                assert!(emitted.attributes.contains(
+                    &A::WorkflowNodeOccurrence.value(serde_json::to_string(&at).unwrap())
+                ));
+                assert!(emitted.attributes.contains(&A::Outcome.value("completed")));
             }
             TraceDomainSubject::ToolIntent { kind } => {
                 assert_eq!(emitted.name, DomainSpan::Intent.definition().name);

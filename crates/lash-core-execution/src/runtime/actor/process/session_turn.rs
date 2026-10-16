@@ -254,7 +254,8 @@ impl ProcessActivation {
     ) -> Result<Pass, DurableError> {
         record_terminal(&mut tx, process, outcome)?;
         tx.ack_seen();
-        self.commit_terminal(owned, tx, process).await?;
+        self.commit_terminal(owned, tx, process, super::node_trace::NodeCloses::default())
+            .await?;
         Ok(Pass::Again)
     }
 }

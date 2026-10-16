@@ -709,6 +709,8 @@ struct Projection<'a> {
     model: Option<&'a str>,
     tool: Option<&'a str>,
     process: Option<&'a str>,
+    /// A workflow node's site, which names its span.
+    site: Option<String>,
     attempt: Option<&'a crate::TraceModelAttempt>,
     usage: Option<Result<LlmUsage, TokenUsageOverflow>>,
     extension: Option<&'a crate::ExtensionSpanRecord>,
@@ -720,6 +722,7 @@ impl<'a> Projection<'a> {
             model: None,
             tool: None,
             process: None,
+            site: None,
             attempt: None,
             usage: None,
             extension: None,
@@ -759,6 +762,13 @@ impl<'a> Projection<'a> {
                     projection.process = name.as_deref();
                 }
             }
+            (TraceSpanKind::WorkflowNode, TraceEvent::DomainCompleted { completion }) => {
+                let TraceDomainSubject::WorkflowNode { at } = &completion.subject else {
+                    return None;
+                };
+                projection.span = DomainSpan::WorkflowNode;
+                projection.site = Some(at.site.to_string());
+            }
             (TraceSpanKind::ToolIntent, TraceEvent::DomainCompleted { completion }) => {
                 projection.span = DomainSpan::Intent;
                 projection.tool = completion.tool_name.as_deref();
@@ -789,6 +799,7 @@ impl<'a> Projection<'a> {
             DomainSpan::Model => self.model,
             DomainSpan::Tool | DomainSpan::ExecCode => self.tool,
             DomainSpan::Process | DomainSpan::Workflow => self.process,
+            DomainSpan::WorkflowNode => self.site.as_deref(),
             _ => None,
         };
         match suffix {
@@ -912,6 +923,15 @@ impl<'a> Projection<'a> {
                             out.push(A::ProcessLabel.value(name.clone()));
                             out.push(A::WorkflowName.value(name.clone()));
                         }
+                    }
+                    TraceDomainSubject::WorkflowNode { at } => {
+                        out.push(A::WorkflowNodeSite.value(at.site.to_string()));
+                        // The canonical JSON of the whole identity, as the
+                        // kernel's node facts key the occurrence.
+                        out.push(
+                            A::WorkflowNodeOccurrence
+                                .value(serde_json::to_string(at).unwrap_or_default()),
+                        );
                     }
                     TraceDomainSubject::ToolIntent { kind } => {
                         out.push(A::ToolIntentKind.value(kind.as_str()))

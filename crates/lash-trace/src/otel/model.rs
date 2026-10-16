@@ -235,6 +235,7 @@ impl OtelTelemetry {
                     model: None,
                     tool: None,
                     process: None,
+                    site: None,
                     attempt: Some(attempt),
                     usage: None,
                     extension: None,

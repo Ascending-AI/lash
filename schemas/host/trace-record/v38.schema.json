@@ -2984,6 +2984,24 @@
         },
         {
           "additionalProperties": false,
+          "description": "One occurrence of a workflow node, by its whole effect identity.",
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/EffectIdentity"
+            },
+            "type": {
+              "const": "workflow_node",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "at"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "kind": {
               "$ref": "#/$defs/ToolIntentKind"
@@ -5714,7 +5732,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/trace-record/v37",
+  "$id": "https://lash.dev/schemas/trace-record/v38",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "One durable trace record: the envelope fields plus the flattened\nevent, whose `type` tag names the variant.",
   "oneOf": [
@@ -6851,7 +6869,7 @@
     },
     "schema_version": {
       "enum": [
-        37
+        38
       ],
       "format": "uint32",
       "minimum": 0,
@@ -6870,6 +6888,6 @@
   ],
   "title": "TraceRecord",
   "type": "object",
-  "x-lash-schema-version": 37,
+  "x-lash-schema-version": 38,
   "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
 }

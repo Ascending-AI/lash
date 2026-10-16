@@ -195,6 +195,9 @@ attributes! {
         ProcessKind => ("lash.process.kind", String, TraceSpanKindSet::of(&[K::Process, K::Workflow])),
         ProcessLabel => ("lash.process.label", String, TraceSpanKindSet::of(&[K::Process, K::Workflow])),
         WorkflowName => ("gen_ai.workflow.name", String, TraceSpanKindSet::of(&[K::Workflow])),
+        WorkflowNodeSite => ("lash.workflow.node.site", String, TraceSpanKindSet::of(&[K::WorkflowNode])),
+        WorkflowNodeOccurrence => ("lash.workflow.node.occurrence", String,
+            TraceSpanKindSet::of(&[K::WorkflowNode])),
         ToolId => ("lash.tool.id", String, TraceSpanKindSet::of(&[K::Tool])),
         ToolAttempts => ("lash.tool.attempts", Integer, TraceSpanKindSet::of(&[K::Tool])),
         ProviderCallId => ("lash.tool.provider_call_id", String, TraceSpanKindSet::of(&[K::Tool])),
@@ -305,6 +308,7 @@ spans! {
     Intent => ("lash.tool_intent", Internal, Transition, None),
     Process => ("lash.process", Internal, Transition, None),
     Workflow => ("invoke_workflow", Internal, Transition, Some("gen_ai.invoke_workflow.internal")),
+    WorkflowNode => ("lash.workflow.node", Internal, Transition, None),
     ExecCode => ("execute_tool", Internal, Transition, Some("gen_ai.execute_tool.internal")),
     Extension => ("lash.extension", Internal, Live, None),
 }

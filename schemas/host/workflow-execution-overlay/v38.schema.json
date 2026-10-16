@@ -2014,7 +2014,7 @@
       "type": "object"
     }
   },
-  "$id": "https://lash.dev/schemas/workflow-execution-overlay/v37",
+  "$id": "https://lash.dev/schemas/workflow-execution-overlay/v38",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "What one execution did, keyed into the workflow document it ran.\n\nThe overlay holds only what was observed: per-site occurrence states,\nbranch choices, child links and the bounded history they fold from. The\nstatic structure (nodes, labels, kinds, edges, the arms of a branch) is\nthe document's; a site with no observation is not listed here.",
   "properties": {
@@ -2118,7 +2118,7 @@
     },
     "schema_version": {
       "enum": [
-        37
+        38
       ],
       "format": "uint32",
       "minimum": 0,
@@ -2170,6 +2170,6 @@
   ],
   "title": "WorkflowExecutionOverlay",
   "type": "object",
-  "x-lash-schema-version": 37,
+  "x-lash-schema-version": 38,
   "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
 }
