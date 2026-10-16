@@ -366,8 +366,8 @@ packages = ["lash-dialect-typescript"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["test262_kernel"]
 data = ["//crates/lash-dialect-typescript:test262_corpus"]
-# Forty libtest laws partition the recorded corpus. Run each in its own
-# action so the full Test262 census cannot monopolize a package batch.
+# The 160 execution laws partition the recorded corpus into smaller units;
+# measured law costs balance them over forty actions without extending the watchdog.
 shards = 40
 
 # These carry the relocated suites that assert over captured `tracing` events.
