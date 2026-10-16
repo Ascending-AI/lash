@@ -7,7 +7,7 @@ use lash_kernel_doc::{
     Document, DocumentId, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName,
     FunctionRegistry, KernelVersion, RegistryError, Site,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The migration a breaking kernel version ships from the version before
 /// it (`K-VER-004`). Each function is total: it answers its result or a
@@ -45,7 +45,7 @@ impl Rewritten {
 }
 
 /// Why a document is not rewritten for the next version.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 #[non_exhaustive]
 pub enum DocumentRefusal {
@@ -67,7 +67,7 @@ pub enum DocumentRefusal {
 }
 
 /// Why a parked run is not carried onto a rewritten document.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 #[non_exhaustive]
 pub enum ParkedRefusal {
@@ -83,11 +83,40 @@ pub enum ParkedRefusal {
     /// a cleanup block there is under way, or a task or an effect is
     /// identified by it.
     #[error("the run stands on {site}, which the rewrite does not carry ({held})")]
-    SiteNotCarried { site: Site, held: &'static str },
+    SiteNotCarried { site: Site, held: Box<str> },
     #[error("the run pins library function {function}, which the rewrite does not redeclare")]
     FunctionNotCarried { function: FunctionId },
     #[error("the run holds a state the next version cannot express: {detail}")]
     StateNotCarried { detail: String },
+}
+
+/// Why a kernel process is not carried to the next kernel version.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, thiserror::Error)]
+#[serde(rename_all = "snake_case", tag = "refused")]
+#[non_exhaustive]
+pub enum KernelMigrationRefusal {
+    #[error("document {document} is not retained")]
+    DocumentMissing { document: DocumentId },
+    #[error("document {document} is not rewritten: {refusal}")]
+    Document {
+        document: DocumentId,
+        refusal: DocumentRefusal,
+    },
+    /// The rewritten document is not one this build runs: a function it
+    /// lists, redeclared for the next version, is not in this build's
+    /// library.
+    #[error("document {document}, rewritten, is not admitted: {reason}")]
+    NotAdmitted {
+        document: DocumentId,
+        reason: String,
+    },
+    #[error("the run parked under document {document} is not carried: {refusal}")]
+    Parked {
+        document: DocumentId,
+        refusal: ParkedRefusal,
+    },
+    #[error("the process's stored state does not decode: {message}")]
+    State { message: String },
 }
 
 /// The migration this build ships from `version` to the version that

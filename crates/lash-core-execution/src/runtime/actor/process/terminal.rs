@@ -47,8 +47,8 @@ pub enum ProcessParkReason {
         kind: String,
         /// Its version.
         version: u32,
-        /// The engine's typed reason, as its own data.
-        refusal: serde_json::Value,
+        /// The kernel migration's typed refusal.
+        refusal: lash_kernel_migrate::KernelMigrationRefusal,
         /// The reason in words.
         message: String,
     },

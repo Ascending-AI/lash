@@ -15,7 +15,7 @@
 //! migrator this build ships (FIG-6193). A build that interprets the
 //! version it parked under and holds every function its document reaches
 //! resumes it in that version, to its end. Any other build refuses it,
-//! typed ([`ParkedRefusal::StateNotCarried`]), and parks it with its rows
+//! typed ([`lash_kernel_migrate::ParkedRefusal::StateNotCarried`]), and parks it with its rows
 //! intact, to be resumed by a build that retains what it pins.
 //!
 //! [`plan_migration`] is that carrying without a store, which `lashctl`
@@ -26,39 +26,12 @@ use std::sync::Arc;
 
 use lash_core::{EngineState, EngineStateFormat, EngineStateRefusal, ProcessId};
 use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, KernelVersion, validate_document};
-use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal, Rewritten, migration_from};
+use lash_kernel_migrate::{DocumentRefusal, Rewritten, migration_from};
 
 use super::state::{KernelEngineState, KernelProcessInput, Phase};
 use super::{DocumentStoreError, KernelDocuments, KernelProcessEngine, advance};
 
-/// Why a kernel process is not carried to the next kernel version.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, thiserror::Error)]
-#[serde(rename_all = "snake_case", tag = "refused")]
-#[non_exhaustive]
-pub enum KernelMigrationRefusal {
-    #[error("document {document} is not retained")]
-    DocumentMissing { document: DocumentId },
-    #[error("document {document} is not rewritten: {refusal}")]
-    Document {
-        document: DocumentId,
-        refusal: DocumentRefusal,
-    },
-    /// The rewritten document is not one this build runs: a function it
-    /// lists, redeclared for the next version, is not in this build's
-    /// library.
-    #[error("document {document}, rewritten, is not admitted: {reason}")]
-    NotAdmitted {
-        document: DocumentId,
-        reason: String,
-    },
-    #[error("the run parked under document {document} is not carried: {refusal}")]
-    Parked {
-        document: DocumentId,
-        refusal: ParkedRefusal,
-    },
-    #[error("the process's stored state does not decode: {message}")]
-    State { message: String },
-}
+pub use lash_kernel_migrate::KernelMigrationRefusal;
 
 /// A document's rewrite for the next kernel version, checked against the
 /// library that will run it.
@@ -182,16 +155,19 @@ impl KernelStateMigration {
 
 fn fatal(refusal: &KernelMigrationRefusal) -> EngineStateRefusal {
     EngineStateRefusal {
-        refusal: serde_json::to_value(refusal).unwrap_or(serde_json::Value::Null),
+        refusal: refusal.clone(),
         message: refusal.to_string(),
         fatal: true,
     }
 }
 
 fn retried(message: impl std::fmt::Display) -> EngineStateRefusal {
+    let message = message.to_string();
     EngineStateRefusal {
-        refusal: serde_json::Value::Null,
-        message: message.to_string(),
+        refusal: KernelMigrationRefusal::State {
+            message: message.clone(),
+        },
+        message,
         fatal: false,
     }
 }

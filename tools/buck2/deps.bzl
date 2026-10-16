@@ -323,6 +323,7 @@ PACKAGE_DEPS = {
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "rmp_serde": "//third-party/rust:p0285",

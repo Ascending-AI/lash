@@ -504,3 +504,203 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
         );
     }
 }
+
+/// FIG-6447: a host reads every migration refusal as owned typed data,
+/// both directly and after it has crossed the engine and actor boundaries.
+fn migration_refusal_round_trip(
+    refusal: super::KernelMigrationRefusal,
+    tag: &str,
+    cause: Option<&str>,
+) {
+    let encoded = serde_json::to_string(&refusal).expect("a refusal encodes");
+    let decoded: super::KernelMigrationRefusal =
+        serde_json::from_str(&encoded).expect("a host deserializes an owned refusal");
+    assert_eq!(decoded, refusal);
+    let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(value["refused"], tag);
+    if let Some(cause) = cause {
+        assert_eq!(value["refusal"]["reason"], cause);
+    }
+    let engine = lash_core::EngineStateRefusal {
+        refusal: refusal.clone(),
+        message: refusal.to_string(),
+        fatal: true,
+    };
+    let encoded = serde_json::to_string(&engine).unwrap();
+    assert_eq!(
+        serde_json::from_str::<lash_core::EngineStateRefusal>(&encoded).unwrap(),
+        engine
+    );
+    let park = lash_core::ProcessParkReason::MigrationRefused {
+        kind: "lashvm".to_owned(),
+        version: 1,
+        refusal: refusal.clone(),
+        message: refusal.to_string(),
+    };
+    let decoded: lash_core::ProcessParkReason = serde_json::from_str(&park.encode()).unwrap();
+    assert_eq!(decoded, park);
+    let lash_core::ProcessParkReason::MigrationRefused { refusal: found, .. } = decoded else {
+        panic!("a migration refusal stays a migration refusal");
+    };
+    assert_eq!(found, refusal);
+}
+
+macro_rules! migration_refusal_law {
+    ($name:ident, $variant:ident { $($field:ident: $value:expr),* $(,)? }, $tag:literal) => {
+        #[test]
+        fn $name() {
+            migration_refusal_round_trip(
+                super::KernelMigrationRefusal::$variant { $($field: $value),* },
+                $tag,
+                None,
+            );
+        }
+    };
+    ($name:ident, $outer:ident, $inner:ident, $variant:ident { $($field:ident: $value:expr),* $(,)? }, $tag:literal, $cause:literal) => {
+        #[test]
+        fn $name() {
+            let refusal = crate::$inner::$variant { $($field: $value),* };
+            let encoded = serde_json::to_string(&refusal).unwrap();
+            assert_eq!(serde_json::from_str::<crate::$inner>(&encoded).unwrap(), refusal);
+            migration_refusal_round_trip(
+                super::KernelMigrationRefusal::$outer {
+                    document: DocumentId::from_bytes([1; 32]),
+                    refusal,
+                },
+                $tag,
+                Some($cause),
+            );
+        }
+    };
+}
+
+migration_refusal_law!(
+    migration_document_missing_round_trips,
+    DocumentMissing {
+        document: DocumentId::from_bytes([1; 32])
+    },
+    "document_missing"
+);
+migration_refusal_law!(
+    migration_not_admitted_round_trips,
+    NotAdmitted {
+        document: DocumentId::from_bytes([1; 32]),
+        reason: "missing library".to_owned()
+    },
+    "not_admitted"
+);
+migration_refusal_law!(
+    migration_state_round_trips,
+    State {
+        message: "invalid state".to_owned()
+    },
+    "state"
+);
+migration_refusal_law!(
+    migration_document_version_round_trips,
+    Document,
+    DocumentRefusal,
+    Version { found: 2, from: 1 },
+    "document",
+    "version"
+);
+migration_refusal_law!(
+    migration_document_function_not_held_round_trips,
+    Document,
+    DocumentRefusal,
+    FunctionNotHeld {
+        function: lash_kernel_doc::FunctionId::from_bytes([2; 32])
+    },
+    "document",
+    "function_not_held"
+);
+migration_refusal_law!(
+    migration_document_function_retired_round_trips,
+    Document,
+    DocumentRefusal,
+    FunctionRetired {
+        function: lash_kernel_doc::FunctionId::from_bytes([2; 32]),
+        name: lash_kernel_doc::FunctionName::try_from("retired.function".to_owned()).unwrap(),
+    },
+    "document",
+    "function_retired"
+);
+migration_refusal_law!(
+    migration_document_form_not_carried_round_trips,
+    Document,
+    DocumentRefusal,
+    FormNotCarried {
+        site: Site::new(Unit::Main, vec![2, 1]),
+        detail: "unsupported node".to_owned(),
+    },
+    "document",
+    "form_not_carried"
+);
+migration_refusal_law!(
+    migration_document_encode_round_trips,
+    Document,
+    DocumentRefusal,
+    Encode {
+        message: "invalid document".to_owned()
+    },
+    "document",
+    "encode"
+);
+migration_refusal_law!(
+    migration_document_correspondence_round_trips,
+    Document,
+    DocumentRefusal,
+    Correspondence {},
+    "document",
+    "correspondence"
+);
+migration_refusal_law!(
+    migration_parked_version_round_trips,
+    Parked,
+    ParkedRefusal,
+    Version { found: 2, from: 1 },
+    "parked",
+    "version"
+);
+migration_refusal_law!(
+    migration_parked_document_round_trips,
+    Parked,
+    ParkedRefusal,
+    Document {
+        parked: DocumentId::from_bytes([1; 32]),
+        rewritten: DocumentId::from_bytes([3; 32])
+    },
+    "parked",
+    "document"
+);
+migration_refusal_law!(
+    migration_parked_site_not_carried_round_trips,
+    Parked,
+    ParkedRefusal,
+    SiteNotCarried {
+        site: Site::new(Unit::Main, vec![2, 1]),
+        held: "task".into(),
+    },
+    "parked",
+    "site_not_carried"
+);
+migration_refusal_law!(
+    migration_parked_function_not_carried_round_trips,
+    Parked,
+    ParkedRefusal,
+    FunctionNotCarried {
+        function: lash_kernel_doc::FunctionId::from_bytes([2; 32])
+    },
+    "parked",
+    "function_not_carried"
+);
+migration_refusal_law!(
+    migration_parked_state_not_carried_round_trips,
+    Parked,
+    ParkedRefusal,
+    StateNotCarried {
+        detail: "heap pages cannot be carried".to_owned()
+    },
+    "parked",
+    "state_not_carried"
+);

@@ -2278,6 +2278,7 @@ dependencies = [
  "lash-internal-trace",
  "lash-kernel-check",
  "lash-kernel-doc",
+ "lash-kernel-migrate",
  "rmp-serde",
  "schemars",
  "serde",

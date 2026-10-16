@@ -19,7 +19,7 @@ doctest = false
 [features]
 # Keep the execution kernel portable by default.
 default = []
-synthetic-next = ["lash-core-store/synthetic-next"]
+synthetic-next = ["lash-core-store/synthetic-next", "lash-kernel-migrate/synthetic-next"]
 otel-trace = ["lash-trace/otel", "lash-core-ids/otel-trace", "lash-core-llm/otel-trace", "lash-core-store/otel-trace", "lash-core-effect/otel-trace"]
 # Internal performance instrumentation. Production builds leave every call
 # site compiled out unless an internal witness explicitly enables this feature.
@@ -38,6 +38,7 @@ lash-core-effect = { workspace = true }
 lash-durable = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-migrate = { workspace = true }
 lash-sansio = { workspace = true, features = ["schema-validation"] }
 lash-trace = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util", "sync", "time", "rt", "rt-multi-thread", "macros"] }

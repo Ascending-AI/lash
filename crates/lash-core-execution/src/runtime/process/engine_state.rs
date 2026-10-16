@@ -130,8 +130,8 @@ pub trait EngineStateMigration: Send + Sync {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EngineStateRefusal {
-    /// The engine's typed reason, as its own data.
-    pub refusal: serde_json::Value,
+    /// The kernel migration's typed refusal.
+    pub refusal: lash_kernel_migrate::KernelMigrationRefusal,
     /// The reason in words.
     pub message: String,
     /// The same state will be refused again: the process is parked with

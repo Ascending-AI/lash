@@ -36,8 +36,8 @@ mod synthetic;
 
 pub use adopt::adopt;
 pub use migration::{
-    DocumentRefusal, MigrateRegistryError, Migration, ParkedRefusal, Rewritten, migrate_registry,
-    migration_from,
+    DocumentRefusal, KernelMigrationRefusal, MigrateRegistryError, Migration, ParkedRefusal,
+    Rewritten, migrate_registry, migration_from,
 };
 pub use rewrite::{Redeclared, redeclare, replace_functions, unchanged};
 pub use saved::saved_function;
