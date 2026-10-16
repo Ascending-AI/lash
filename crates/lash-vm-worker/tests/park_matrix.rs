@@ -178,8 +178,7 @@ fn page_plan() -> PagePlan {
         std::sync::OnceLock::new();
     let (_, spools) = SPOOLS.get_or_init(|| {
         let dir = tempfile::tempdir().expect("a staging directory");
-        let spools =
-            SpoolRoot::open(dir.path(), 1 << 30, 1 << 20).expect("the staging directory opens");
+        let spools = SpoolRoot::open(dir.path(), 1 << 30).expect("the staging directory opens");
         (dir, Arc::new(spools))
     });
     PagePlan::over(

@@ -162,28 +162,6 @@
             "staging_exhausted"
           ],
           "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "staging_entry_limit": {
-              "properties": {
-                "entries": {
-                  "format": "uint64",
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "entries"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "staging_entry_limit"
-          ],
-          "type": "object"
         }
       ]
     },

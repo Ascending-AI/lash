@@ -83,10 +83,6 @@ fn page_and_carry_wire_vectors_preserve_the_1_0_contract() -> Result<(), Box<dyn
             },
             json!({"refused": {"batch_too_large": {"pages": u64::MAX, "bytes": u64::MAX}}}),
         ),
-        (
-            PageRefusal::StagingEntryLimit { entries: u64::MAX },
-            json!({"refused": {"staging_entry_limit": {"entries": u64::MAX}}}),
-        ),
     ] {
         let reply = PageReply::Refused(refusal);
         assert_eq!(serde_json::to_value(&reply)?, prior);

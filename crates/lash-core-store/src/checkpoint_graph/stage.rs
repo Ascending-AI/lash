@@ -27,7 +27,8 @@ use super::node::{EncodedNode, NodeId};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StageLeaseId(pub u64);
 
-/// What a spool holds, against its quota.
+/// What a spool holds: its staged pages and their bytes, and the quota
+/// those bytes share with each entry's manifest scratch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StageUsage {
     pub pages: u64,
@@ -41,9 +42,6 @@ pub struct StageUsage {
 pub enum StageFault {
     #[error("the staging quota of {quota} bytes is exhausted")]
     Quota { quota: u64 },
-    /// Staged pages plus distinct external references exceed host policy.
-    #[error("the staging entry limit of {limit} entries is exhausted")]
-    EntryLimit { limit: u64 },
     #[error("staged page {0} does not hash to its identity")]
     HashMismatch(NodeId),
     /// A sealed page names a child that is neither protected nor staged.

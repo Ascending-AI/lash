@@ -335,7 +335,7 @@ impl Service {
 
     /// The staging directory this parent's activations open their spools
     /// under ([`PoolConfig::staging_dir`]), opened on first use with the
-    /// configured per-spool byte quota and entry limit.
+    /// configured per-spool byte quota.
     ///
     /// # Errors
     ///
@@ -352,12 +352,7 @@ impl Service {
                     .staging_dir
                     .clone()
                     .unwrap_or_else(|| std::env::temp_dir().join("lash-staging"));
-                SpoolRoot::open(
-                    &dir,
-                    self.config.staging_quota_bytes,
-                    self.config.staging_max_entries,
-                )
-                .map(Arc::new)
+                SpoolRoot::open(&dir, self.config.staging_quota_bytes).map(Arc::new)
             })
             .clone()
     }

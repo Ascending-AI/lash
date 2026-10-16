@@ -5,8 +5,9 @@
 //! digest, and the directory is the index, so the parent's memory holds the
 //! spool's usage and nothing per page. Writes stream straight to disk
 //! through a rename, so a buffer holds at most the page being written. A
-//! quota bounds the bytes staged; a host entry limit bounds the staged pages
-//! plus distinct external references and therefore manifest scratch.
+//! quota bounds the spool's file contents: each staged page's bytes, plus
+//! [`ENTRY_BYTES`] of manifest scratch for each staged page and each
+//! distinct external reference (FIG-6512).
 //!
 //! A candidate is built at a park: a walk of the candidate root's staged
 //! DAG that stops at committed references, marking each page it reaches in
@@ -75,6 +76,10 @@ fn hex(bytes: &[u8]) -> String {
 /// by digest.
 const RECORD: usize = 33;
 type Record = [u8; RECORD];
+/// What one staged page or distinct external reference charges the quota
+/// beside its page bytes: the manifest scratch its record can occupy at
+/// once, in the walk's queue, a sorted run and a merge's output.
+pub(crate) const ENTRY_BYTES: u64 = 3 * RECORD as u64;
 /// The records one sorted run holds in memory: the sort's one buffer that
 /// grows with its input, up to this bound.
 const RUN_RECORDS: usize = 4096;
@@ -238,23 +243,22 @@ impl SpoolMeter {
 pub struct SpoolRoot {
     dir: PathBuf,
     quota: u64,
-    max_entries: u64,
     /// Held locked until the process ends.
     _lock: fs::File,
 }
 
 impl SpoolRoot {
     /// Opens this process's directory under `parent`, a directory the host
-    /// gives its parents for staging, with a quota of `quota` bytes and
-    /// at most `max_entries` staged pages plus distinct external references per
-    /// spool. The spools of parents that died are deleted first: a spool
-    /// never survives its parent, and their activations resume from their
-    /// committed roots.
+    /// gives its parents for staging, with a quota of `quota` bytes per
+    /// spool: page bytes plus 99 bytes of manifest scratch for each staged
+    /// page and distinct external reference. The spools of parents that
+    /// died are deleted first: a spool never survives its parent, and their
+    /// activations resume from their committed roots.
     ///
     /// # Errors
     ///
     /// [`StageFault::Io`] when the directory cannot be prepared.
-    pub fn open(parent: &Path, quota: u64, max_entries: u64) -> Result<Self, StageFault> {
+    pub fn open(parent: &Path, quota: u64) -> Result<Self, StageFault> {
         fs::create_dir_all(parent).map_err(|error| io(&error))?;
         // Parents open one at a time: a sibling's directory is reaped only
         // after its open, which holds its lock from the moment the lock
@@ -280,7 +284,6 @@ impl SpoolRoot {
         Ok(Self {
             dir,
             quota,
-            max_entries,
             _lock: lock,
         })
     }
@@ -305,7 +308,6 @@ impl SpoolRoot {
             },
             candidate: None,
             entries: 0,
-            max_entries: self.max_entries,
             meter: Arc::default(),
         })
     }
@@ -324,8 +326,9 @@ pub struct DiskSpool {
     dir: PathBuf,
     usage: StageUsage,
     candidate: Option<Candidate>,
+    /// Staged pages plus distinct external references, each charged
+    /// [`ENTRY_BYTES`] of the quota.
     entries: u64,
-    max_entries: u64,
     meter: Arc<SpoolMeter>,
 }
 
@@ -333,6 +336,11 @@ impl DiskSpool {
     #[cfg(test)]
     pub(crate) fn meter(&self) -> Arc<SpoolMeter> {
         Arc::clone(&self.meter)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn entries(&self) -> u64 {
+        self.entries
     }
 
     fn pages(&self) -> PathBuf {
@@ -345,8 +353,8 @@ impl DiskSpool {
 
     /// Incoming edges from staged pages, including edges to staged children.
     /// The count is a filename under the child's digest directory. These
-    /// empty files add no content bytes to Q + 99 * P, and the index stays
-    /// on disk rather than growing a per-entry map in the parent.
+    /// empty files add no content bytes beyond the entry's charge, and the
+    /// index stays on disk rather than growing a per-entry map in the parent.
     fn references(&self, id: &NodeId) -> Result<u64, StageFault> {
         let dir = self.dir.join("refs").join(id.to_hex());
         let mut names = match fs::read_dir(dir) {
@@ -467,12 +475,6 @@ impl StageSpool for DiskSpool {
                 child,
             });
         }
-        let len = page.bytes.len() as u64;
-        if self.usage.bytes.saturating_add(len) > self.usage.quota_bytes {
-            return Err(StageFault::Quota {
-                quota: self.usage.quota_bytes,
-            });
-        }
         // The canonical child table is distinct. Count the union of staged
         // pages and their direct children before writing anything; an external
         // reference that becomes staged already occupies its entry.
@@ -483,9 +485,15 @@ impl StageSpool for DiskSpool {
                 added += 1;
             }
         }
-        if self.entries.saturating_add(added) > self.max_entries {
-            return Err(StageFault::EntryLimit {
-                limit: self.max_entries,
+        let len = page.bytes.len() as u64;
+        let charged = self.usage.bytes.saturating_add(len).saturating_add(
+            self.entries
+                .saturating_add(added)
+                .saturating_mul(ENTRY_BYTES),
+        );
+        if charged > self.usage.quota_bytes {
+            return Err(StageFault::Quota {
+                quota: self.usage.quota_bytes,
             });
         }
         let target = self.page(&page.id);
