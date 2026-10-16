@@ -998,4 +998,28 @@ mod laws {
         frames.flush_holdings().unwrap();
         assert_eq!(frames.rows.len(), 1);
     }
+
+    /// FIG-6470: scalar call results have no payload
+    /// to canonicalize; repeated calls must not clone them through the heap.
+    #[test]
+    fn scalar_call_bindings_do_not_canonicalize_payloads() {
+        let mut source = String::from("fn echo(x) { return x } main {");
+        for index in 0..64 {
+            let value = ["null", "absent", "true", "1.5"][index % 4];
+            source.push_str(&format!("let v{index} = call echo({value}) "));
+        }
+        source.push_str("return v63 }");
+        let mut embedder = Embedder::new(&source);
+        let before = embedder.machine.storage.binding_canonicalizations;
+        use crate::Machine;
+        assert!(matches!(
+            Machine::run(&mut embedder.machine, &mut embedder.world, u64::MAX).unwrap(),
+            crate::Step::Ended(crate::End::Finished(_))
+        ));
+        assert_eq!(
+            embedder.machine.storage.binding_canonicalizations - before,
+            0,
+            "scalar bindings must bypass payload canonicalization"
+        );
+    }
 }

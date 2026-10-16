@@ -249,6 +249,8 @@ struct FrameStorage {
 #[derive(Debug, Default)]
 struct Storage {
     frames: Vec<FrameStorage>,
+    #[cfg(test)]
+    binding_canonicalizations: usize,
 }
 
 struct Frame {

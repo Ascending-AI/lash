@@ -620,10 +620,23 @@ impl KernelMachine {
         shared: bool,
         value: Value,
     ) -> Result<(), Halt> {
-        let value = self.heap_write(|heap| {
-            heap.canonical_value(value.clone())
-                .map_err(super::write_halt)
-        })?;
+        // Scalars have no resident payload to move into pages. Avoid cloning
+        // the full value through the fallible canonicalization/retry path.
+        let value = if matches!(
+            &value,
+            Value::Null | Value::Absent | Value::Bool(_) | Value::Float(_)
+        ) {
+            value
+        } else {
+            #[cfg(test)]
+            {
+                self.storage.binding_canonicalizations += 1;
+            }
+            self.heap_write(|heap| {
+                heap.canonical_value(value.clone())
+                    .map_err(super::write_halt)
+            })?
+        };
         let state = if shared {
             SlotState::Cell(self.alloc(ObjectInit::Variable(value))?)
         } else {
