@@ -74,8 +74,8 @@ Laws: `lash-kernel-state`'s `paged::laws::heap`
 (`a_point_write_in_a_huge_list_seals_one_leaf_path`,
 `a_tiny_update_among_many_objects_seals_one_directory_path`,
 `aliases_see_one_mutation_across_seal_and_open`,
-`cycles_seal_as_a_page_dag`, `a_text_length_read_touches_no_payload_page`)
-and `paged::laws::root` (`every_record_round_trips_canonically`,
+`cycles_seal_as_a_page_dag`, `a_cold_text_length_observation_reads_no_payload_leaf`)
+and `paged::laws::root` (`saved_meters_preserve_a_nonzero_next_join_on_decode`,
 `a_checkpoint_root_fits_its_root_bound`).
 
 ### 2. The saved state is a checkpoint root
@@ -188,7 +188,7 @@ Laws: `crates/lash-vm-worker/src/page_laws.rs`
 `a_forged_foreign_or_stale_capability_reads_nothing`,
 `a_missing_or_corrupt_page_is_infrastructure_never_absence`,
 `sealed_pages_cross_in_one_batch`,
-`a_page_crosses_named_by_its_store_content_address`).
+`a_transported_page_keeps_its_blob_address_and_token_vector`).
 
 ### 4. Infrastructure failures are never guest outcomes
 
@@ -272,7 +272,7 @@ no execution-record publication.
 
 Laws: `lash-kernel-vm`'s `laws::census`
 (`an_unreachable_cycle_never_fails_an_allocation`,
-`the_verdict_is_the_same_warm_evicted_and_reopened`, `parks_never_collect`,
+`the_verdict_is_the_same_warm_evicted_and_reopened`, `ordinary_parks_do_not_collect`,
 `refinement_counts_registers_native_args_and_reservations`,
 `a_large_partially_shared_detach_frees_only_the_dead_part`,
 `an_interrupted_refinement_is_infrastructure`,

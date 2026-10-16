@@ -441,20 +441,128 @@ fn an_interrupted_refinement_is_infrastructure() {
     ));
 }
 
-#[test]
-fn parks_never_collect() {
-    let saved = certificate(64, 2); // detached cycle, deliberately retained
-    let mut census = Census::restore(saved, LogicalBytes(128)).unwrap();
-    for _ in 0..100 {
-        let parked = census.certificate();
-        census = Census::restore(parked, LogicalBytes(128)).unwrap();
+/// Counts calls into the real tracing policy, even if a trace fails before
+/// it can increment its persisted refinement certificate.
+struct CountedCensus {
+    real: Census,
+    traces: std::rc::Rc<std::cell::Cell<u64>>,
+}
+impl AllocationCensus for CountedCensus {
+    fn restore(saved: AccountingCertificate, bound: LogicalBytes) -> Result<Self, CensusFault> {
+        Ok(Self {
+            real: Census::restore(saved, bound)?,
+            traces: Default::default(),
+        })
     }
-    assert_eq!(census.certificate(), saved);
-    assert!(matches!(
-        census.reserve(LogicalBytes(32)),
-        ReservationDecision::Granted(_)
-    ));
-    assert_eq!(census.certificate().refinements, 0);
+    fn certificate(&self) -> AccountingCertificate {
+        self.real.certificate()
+    }
+    fn added(&mut self, cost: LogicalBytes, entities: u64) -> Result<(), CensusFault> {
+        self.real.added(cost, entities)
+    }
+    fn changed(&mut self, before: LogicalBytes, after: LogicalBytes) -> Result<(), CensusFault> {
+        self.real.changed(before, after)
+    }
+    fn reserve(&mut self, bytes: LogicalBytes) -> ReservationDecision {
+        self.real.reserve(bytes)
+    }
+    fn refine(
+        &mut self,
+        graph: &mut dyn CensusGraph,
+        transient: &TransientRoots<'_>,
+        pending: PendingReservation,
+    ) -> Result<RefinedDecision, CensusFault> {
+        self.traces.set(self.traces.get() + 1);
+        self.real.refine(graph, transient, pending)
+    }
+}
+struct CountedSource {
+    real: super::embedder::Source,
+    reads: std::rc::Rc<std::cell::Cell<u64>>,
+}
+impl PageSource for CountedSource {
+    fn read(&mut self, pages: &[PageRef]) -> Result<Vec<PageAnswer>, HeapFault> {
+        self.reads.set(self.reads.get() + pages.len() as u64);
+        self.real.read(pages)
+    }
+    fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+        self.real.seal(body)
+    }
+}
+
+/// S7: ordinary parks and cold reopens perform no tracing, even with
+/// reachable state and detached garbage in the allocation census.
+#[test]
+fn ordinary_parks_do_not_collect() {
+    use super::embedder::{Embedder, ROOMY, int, result};
+    use crate::{KernelMachine, Layout, Machine, Step};
+    let mut embedder = Embedder::new(
+        r#"main {
+        let held = [7]
+        let garbage = [99]
+        set garbage = null
+        do perform echo("first") as Any
+        do perform echo("second") as Any
+        return held[0]
+    }"#,
+    );
+    let traces = std::rc::Rc::new(std::cell::Cell::new(0));
+    let reads = std::rc::Rc::new(std::cell::Cell::new(0));
+    let policy = |saved| {
+        Box::new(CountedCensus {
+            real: Census::restore(saved, LogicalBytes(ROOMY.memory)).unwrap(),
+            traces: traces.clone(),
+        }) as Box<dyn AllocationCensus>
+    };
+    let (program, _) = embedder.program(true);
+    embedder.machine = KernelMachine::start(
+        program,
+        ROOMY,
+        super::embedder::Setup::default().start,
+        Box::new(CountedSource {
+            real: embedder.source.clone(),
+            reads: reads.clone(),
+        }),
+        policy(certificate(0, 0)),
+    )
+    .unwrap();
+    for label in ["first", "second"] {
+        assert!(matches!(embedder.run(), Step::Parked(_)));
+        assert_eq!(traces.get(), 0, "run must not trace at park");
+        let before = reads.get();
+        let charged = embedder.machine.meters().charged;
+        let (root, saved) = embedder.checkpoint();
+        assert_eq!(traces.get(), 0, "seal must not trace");
+        assert_eq!(saved.refinements, 0);
+        assert_eq!(
+            reads.get(),
+            before,
+            "sealing warm dirty state demands no cold pages"
+        );
+        assert_eq!(root.meters.charged, charged);
+        let (program, _) = embedder.program(true);
+        embedder.machine = KernelMachine::open_with_layout(
+            program,
+            ROOMY,
+            &root,
+            Vec::new(),
+            Box::new(CountedSource {
+                real: embedder.source.clone(),
+                reads: reads.clone(),
+            }),
+            policy(saved),
+            Layout::default(),
+        )
+        .unwrap();
+        assert_eq!(traces.get(), 0, "cold open must not trace");
+        assert_eq!(embedder.machine.accounting(), saved);
+        assert_eq!(embedder.machine.meters().charged, charged);
+        embedder.deliver(label);
+    }
+    assert_eq!(result(embedder.run_to_end(&[])), int(7));
+    assert_eq!(embedder.asked(), ["first", "second"]);
+    assert_eq!(traces.get(), 0);
+    assert!(reads.get() > 0, "the resumed machine read real cold pages");
 }
 
 #[test]

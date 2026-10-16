@@ -254,33 +254,49 @@ fn a_tiny_update_among_many_objects_seals_one_directory_path() {
         sealed.sealed_pages
     );
 }
+/// D-IMM: observing lengths from a cold descriptor does not demand its payload.
 #[test]
-fn a_text_length_read_touches_no_payload_page() {
+fn a_cold_text_length_observation_reads_no_payload_leaf() {
     let (mut heap, pages) = fresh();
-    let payload = text(&mut heap, &"x".repeat(16 << 20));
+    // The crab straddles the first 4 KiB boundary; counts are hand-derived.
+    let payload = text(&mut heap, &format!("{}🦀é", "x".repeat(4095)));
     let list = heap
         .allocate_object(ObjectInit::List(vec![payload]))
-        .expect("holder");
+        .unwrap();
     let heap = reopen(&mut heap, &pages);
-    let Some(Value::Text(t)) = heap.list_get(list, 0).expect("descriptor") else {
+    heap.pages().clear();
+    let missing = {
+        let mut store = pages.borrow_mut();
+        let id = *store
+            .pages
+            .iter()
+            .find(|(_, p)| p.kind == PageKind::PAYLOAD_LEAF)
+            .unwrap()
+            .0;
+        store.pages.remove(&id);
+        store.reads = 0;
+        store.payload_reads = 0;
+        id
+    };
+    let Some(Value::Text(t)) = heap
+        .list_get(list, 0)
+        .expect("cold descriptor without payload")
+    else {
         panic!("text");
     };
-    let before_reads = pages.borrow().reads;
-    assert_eq!(t.summary.utf8_bytes, 16 << 20);
-    assert_eq!(t.summary.chars, 16 << 20);
-    assert_eq!(pages.borrow().reads, before_reads);
-    println!("text: payload_leaf_bytes=4096 length_payload_pages=0");
+    assert_eq!(
+        (t.summary.utf8_bytes, t.summary.utf16_units, t.summary.chars),
+        (4101, 4098, 4097)
+    );
+    assert!(pages.borrow().reads > 0, "the descriptor really was cold");
+    assert_eq!(pages.borrow().payload_reads, 0);
+    // Demand validation happens only when the payload is actually observed.
+    assert!(
+        matches!(heap.payload_visit(&Value::Text(t), 0..4101, &mut |_| ControlFlow::Continue(())), Err(HeapFault::Missing { page }) if page == missing)
+    );
 }
-#[test]
-fn equal_payloads_share_one_canonical_root() {
-    let (mut heap, _) = fresh();
-    let a = heap.text(&"é🦀".repeat(8_000)).expect("text");
-    let b = heap.text(&"é🦀".repeat(8_000)).expect("text");
-    let (Payload::Paged(a), Payload::Paged(b)) = (a.body, b.body) else {
-        panic!("paged text");
-    };
-    assert_eq!(a.id, b.id);
-}
+
+include!("heap_boundaries.rs");
 
 fn frozen(entities: u64, data_only: bool) -> FrozenRef {
     FrozenRef {

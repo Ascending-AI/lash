@@ -334,8 +334,10 @@ Laws:
   - `aliases_see_one_mutation_across_seal_and_open`
   - `cycles_seal_as_a_page_dag`
   - `map_iteration_survives_removal_and_reinsertion_across_seal`
-  - `a_text_length_read_touches_no_payload_page`
-  - `equal_payloads_share_one_canonical_root`
+  - `a_cold_text_length_observation_reads_no_payload_leaf`
+  - `payload_leaf_boundaries_follow_the_frozen_4096_byte_rule`
+  - `list_leaf_boundaries_follow_the_frozen_64_cell_rule`
+  - `keyed_leaf_boundaries_follow_the_frozen_8192_byte_rule`
 - Kernel unit, `//crates/lash-kernel-vm:lash-kernel-vm__unit_test`, in
   `crates/lash-kernel-vm/src/laws/paged.rs`:
   - `a_page_fault_mid_native_neither_reruns_nor_recharges`
@@ -487,10 +489,11 @@ read.
 Laws:
 
 - Kernel unit, `crates/lash-kernel-state/src/paged/laws/root.rs`:
-  - `every_record_round_trips_canonically`
+  - `saved_meters_preserve_a_nonzero_next_join_on_decode`
   - `a_checkpoint_root_fits_its_root_bound`
   - `a_kernel_whole_root_is_refused`
 - Kernel unit, `crates/lash-kernel-vm/src/laws/paged.rs`:
+  - `a_cold_resume_allocates_after_the_existing_list_join`
   - `a_frame_resumes_at_its_semantic_site_in_every_layout`
   - `every_step_seals_the_same_root_in_every_layout`, the KIR image law
     carried over to roots
@@ -682,7 +685,7 @@ Laws:
   - `refinement_counts_registers_native_args_and_reservations`
   - `a_large_partially_shared_detach_frees_only_the_dead_part`
   - `an_interrupted_refinement_is_infrastructure`
-  - `parks_never_collect`
+  - `ordinary_parks_do_not_collect`
   - `census_garbage_stays_within_the_logical_bound`
 
 ### S8 Frozen families and cell carry
@@ -1173,11 +1176,12 @@ cells/rows per leaf; 8192 target bytes; 4096 payload bytes; 256-byte inline
 immutable/small-body threshold. A point update in a 100k-element list sealed
 6 pages and 5105 bytes; its cold lookup read 5 pages. A point update among
 100k small objects sealed 5 pages and 6896 bytes; its cold lookup read 4
-pages. A 16 MiB text length loaded no payload pages. Counts include the
-changed directory path and heap header. Full paths:
+pages. A cold Unicode text length lookup loads no payload pages, even
+with a missing payload leaf. Counts include the changed directory path
+and heap header. Full paths:
 `paged::laws::heap::{a_point_write_in_a_huge_list_seals_one_leaf_path,
 a_tiny_update_among_many_objects_seals_one_directory_path,
-a_text_length_read_touches_no_payload_page}`.
+a_cold_text_length_observation_reads_no_payload_leaf}`.
 
 ### S3/S4/S7 amendment: cost no more than the pre-heap baseline (FIG-6321)
 
@@ -1190,7 +1194,7 @@ S3, the page exchange:
   `Run { sealed }`. A park therefore adds no `Pages` exchange (FIG-6288).
 - `PageEnvelope` crosses as its envelope bytes alone; its id is derived as
   the store's content address (`lash-blob/v2`). `PageCapability` crosses as
-  81 bytes. Law: `page_laws::a_page_crosses_named_by_its_store_content_address`.
+  81 bytes. Law: `page_laws::a_transported_page_keeps_its_blob_address_and_token_vector`.
 - `Start.warm` carries, as read replies, the pages the start's carried
   session or checkpoint root names and those beneath them that the
   session's last activation read, warmed or sealed (`PageHints`, at most 256

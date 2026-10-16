@@ -869,20 +869,42 @@ fn version_churn_keeps_grants_for_live_pages_only() {
     );
 }
 
-/// A page crosses the wire named by the store's content address of its
-/// envelope: the parent admits a carried seal batch, and the worker checks a
-/// read reply, under the id the page is committed as, so each side derives
-/// the name from the bytes alone (FIG-6321).
+/// FIG-6321: a real seal and cold read cross the page wire with the store's
+/// blob-domain digest and the exact hand-authored boolean vector.
 #[test]
-fn a_page_crosses_named_by_its_store_content_address() {
-    let store = Store::default();
-    committed_list(&store, 200);
-    let pages = store.pages.lock().expect("pages");
-    assert!(pages.len() > 3, "the fixture commits a tree of pages");
-    for (id, bytes) in pages.iter() {
-        assert_eq!(PageEnvelope::digest(bytes), id.0);
-        assert_eq!(PageEnvelope::new(bytes.to_vec()).id, id.0);
-    }
+fn a_transported_page_keeps_its_blob_address_and_token_vector() {
+    let store = Arc::new(Store::default());
+    let (root, _) = committed_list(&store, 1);
+    let spools = tempfile::tempdir().expect("spools");
+    let spools = SpoolRoot::open(spools.path(), 1 << 20, 1 << 20).expect("spools");
+    let mut pages = activation(&store, &spools, root.id, CapabilityKey::fresh(), 1);
+    let ((page, answer), traffic) = served(&mut pages, 0, |source| {
+        // seq(2), true, false; these tokens do not use the production writer.
+        let page = source
+            .seal(PageBody {
+                kind: PageKind::SEQUENCE_LEAF,
+                tokens: vec![9, 2, 2, 1],
+                children: Vec::new(),
+            })
+            .expect("seal over wire");
+        source.port().flush().expect("seal crosses");
+        let answer = source.read(&[page]).expect("cold read over wire").remove(0);
+        (page, answer)
+    });
+    assert_eq!(answer.kind, PageKind::SEQUENCE_LEAF);
+    assert_eq!(&*answer.tokens, &[9, 2, 2, 1]);
+    assert!(answer.children.is_empty());
+    // LASH, kind 1002 (ea 07), no children, four physical token bytes.
+    let envelope = b"LASH\xea\x07\x00\x04\x09\x02\x02\x01";
+    assert_eq!(
+        lash_core_execution::BlobRef::digest_for_content(envelope),
+        page.id.0
+    );
+    assert_eq!(
+        pages.staged(NodeId(page.id.0)).expect("transported seal"),
+        NodeId(page.id.0)
+    );
+    assert_eq!(traffic.pages_requested, 1);
 }
 
 /// FIG-6452: host configuration alone bounds spool entries, and exceeding

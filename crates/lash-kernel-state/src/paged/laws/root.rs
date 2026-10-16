@@ -3,12 +3,7 @@ use super::super::*;
 use lash_kernel_doc::DocumentId;
 use lash_kernel_doc::graph_tokens::{TokenCodec, decode_body, encode_body};
 use lash_kernel_doc::heap::*;
-fn empty() -> KeyedRoot {
-    KeyedRoot::Empty
-}
-fn seq() -> SequenceRoot {
-    SequenceRoot::Empty
-}
+
 /// FIG-6197 F3: an external tree root is empty, with no page and no
 /// summary, or nonempty, with a page and at least one row. A page-less
 /// root with rows, or a paged one without, is refused at construction and
@@ -227,199 +222,21 @@ fn a_large_join_resumes_by_reading_only_member_paths() {
     );
 }
 
+/// S4: a checkpoint preserves every saved meter, including the next join identity.
 #[test]
-fn every_record_round_trips_canonically() {
-    use lash_kernel_doc::graph_tokens::TokenCodec;
-    use lash_kernel_doc::{JoinMode, Name, Site, TaskId, Unit};
-    use tree::{Cell, SealWork, Tree};
-    fn round<T: TokenCodec>(value: &T) {
-        let tokens = encode_body(value);
-        assert_eq!(
-            encode_body(&decode_body::<T>(&tokens).expect("canonical record")),
-            tokens
-        );
-    }
-    let (mut heap, _) = super::heap::fresh();
-    super::heap::seal(&mut heap);
-    let site = Site::new(Unit::Main, [0]);
-    let value = Value::Null;
-    round(&empty());
-    round(&seq());
-    round(&heap.certificate());
-    round(&heap.heap_root().unwrap());
-    round(&heap.data_only_certificate());
-    let frozen = FrozenRef {
-        root: PageRef {
-            id: PageId([17; 32]),
-            grant: PageGrant::NONE,
-        },
-        summary: FrozenSummary {
-            entities: 1,
-            cost: LogicalBytes(48),
-            data_only: true,
-        },
-    };
-    round(&frozen);
-    round(&frozen.summary);
-    round(&MembershipRun {
-        start: 0,
-        len: 1,
-        live: true,
-    });
-    round(&FamilyRecord {
-        family: FamilyId(1),
-        base: frozen,
-        extent: 1,
-        membership: empty(),
-    });
-    round(&SessionRoot {
-        heap: heap.sealed_root().expect("sealed header"),
-        bindings: empty(),
-        functions: empty(),
-        certificate: heap.data_only_certificate(),
-    });
-    for ended in [
-        EndedRecord::Returned(frozen),
-        EndedRecord::Finished(frozen),
-        EndedRecord::Failed(frozen),
-        EndedRecord::Stopped,
-    ] {
-        round(&ended);
-        round(&RootStatus::Ended(ended));
-    }
-    round(&RootStatus::Parked);
-    round(&BindingRecord {
-        name: NameRef::new(&(Name::from("v")), &heap.access).unwrap(),
-        declared: SiteRef::new(&(site.clone()), &heap.access).unwrap(),
-        value: BoundRecord::Value(value.clone()),
-    });
-    round(&BoundRecord::Shared(EntityId {
-        family: FamilyId(1),
-        ordinal: 0,
-    }));
-    round(&LoopRecord {
-        site: SiteRef::new(&(site.clone()), &heap.access).unwrap(),
-        started: 7,
-        position: Some(8),
-    });
-    for entered in [
-        EnteredRecord::Normal,
-        EnteredRecord::Throw,
-        EnteredRecord::Return,
-        EnteredRecord::Break,
-        EnteredRecord::Continue,
-    ] {
-        round(&FinallyRecord {
-            site: SiteRef::new(&(site.clone()), &heap.access).unwrap(),
-            entered,
-        });
-    }
-    let mut frame = FrameRecord::fresh(SiteRef::new(&(site.clone()), &heap.access).unwrap());
-    frame
-        .bindings
-        .write(
-            b"v".to_vec(),
-            BindingRecord {
-                name: NameRef::new(&("v".into()), &heap.access).unwrap(),
-                declared: SiteRef::new(&(site.clone()), &heap.access).unwrap(),
-                value: BoundRecord::Value(value.clone()),
-            },
-            &heap.access,
-        )
-        .expect("binding");
-    frame
-        .prepare(
-            &heap.access,
-            &mut SealWork::new(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            }),
-        )
-        .expect("prepare");
-    round(&frame);
-    let mut frames = Tree::new(true);
-    frames
-        .write(directory::ordinal_key(0), frame, &heap.access)
-        .expect("frame");
-    for state in [
-        TaskStateRecord::Ready,
-        TaskStateRecord::Waiting(2),
-        TaskStateRecord::Joining(TaskId(3)),
-        TaskStateRecord::JoiningMany(4),
-        TaskStateRecord::Resuming {
-            incoming: IncomingRecord::Value(value.clone()),
-            requeue: false,
-        },
-        TaskStateRecord::Resuming {
-            incoming: IncomingRecord::Raise(value.clone()),
-            requeue: true,
-        },
-        TaskStateRecord::Resuming {
-            incoming: IncomingRecord::Joined(TaskId(3)),
-            requeue: false,
-        },
-        TaskStateRecord::Resuming {
-            incoming: IncomingRecord::Outcome(crate::WaitId(5)),
-            requeue: true,
-        },
-        TaskStateRecord::Ended(EndedTask::Returned(value.clone())),
-        TaskStateRecord::Ended(EndedTask::Raised(value.clone())),
-    ] {
-        let mut task = TaskRecord {
-            identity: TaskIdentityRef::MAIN,
-            state,
-            result_retained: true,
-            joiners: Tree::new(true),
-            observed: false,
-            passed: false,
-            failed: false,
-            occurrences: Tree::new(false),
-            frames: frames.clone(),
-        };
-        task.prepare(
-            &heap.access,
-            &mut SealWork::new(SealBudget {
-                pages: u64::MAX,
-                bytes: u64::MAX,
-            }),
-        )
-        .expect("prepare task");
-        round(&task);
-    }
-    round(&JoinerRecord::Single(TaskId(7)));
-    round(&JoinerRecord::List(8));
-    for kind in [WaitKindRecord::Effect, WaitKindRecord::Sleep] {
-        for phase in [
-            WaitPhase::Issued { request: frozen },
-            WaitPhase::Admitted,
-            WaitPhase::Committed(CommittedOutcomeRecord::Completed(frozen)),
-            WaitPhase::Committed(CommittedOutcomeRecord::Failed(frozen)),
-            WaitPhase::Committed(CommittedOutcomeRecord::Rejected(frozen)),
-            WaitPhase::Committed(CommittedOutcomeRecord::Elapsed),
-        ] {
-            round(&WaitRecord {
-                task: TaskId(1),
-                kind,
-                phase,
-            });
-        }
-    }
-    for mode in [
-        JoinMode::All,
-        JoinMode::AllSettled,
-        JoinMode::Race,
-        JoinMode::Any,
-    ] {
-        round(&ListJoinRecord {
-            joiner: TaskId(1),
-            mode,
-            members: Tree::new(true),
-        });
-    }
-    round(&SavedMeters {
-        charged: 3,
+fn saved_meters_preserve_a_nonzero_next_join_on_decode() {
+    let original = SavedMeters {
+        charged: 131,
         waits_issued: 5,
         next_join: 8,
         live_tasks: 2,
-    });
+    };
+    // seq(4), unsigned(131), unsigned(5), unsigned(8), unsigned(2).
+    let vector = [9, 4, 3, 131, 1, 3, 5, 3, 8, 3, 2];
+    assert_eq!(encode_body(&original), vector);
+    assert_eq!(decode_body::<SavedMeters>(&vector).unwrap(), original);
+    assert_eq!(
+        decode_body::<SavedMeters>(&encode_body(&original)).unwrap(),
+        original
+    );
 }

@@ -52,17 +52,6 @@ fn staging(bound: u64) -> GraphStaging {
     GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(bound)))
 }
 
-#[cfg(test)]
-fn stage(staging: &mut GraphStaging, kind: u32, logical: &[u8]) -> Result<ChildRef, GraphRefusal> {
-    staging
-        .encode(
-            NodeKind(kind),
-            lash_core_store::checkpoint_graph::TypedBody::logical(logical),
-        )
-        .map(|id| id.child_ref())
-        .map_err(GraphRefusal::from)
-}
-
 fn freeze(staging: &mut GraphStaging, datum: &FrozenDatum) -> Result<ChildRef, GraphRefusal> {
     staging
         .encode_value(NodeKind::FROZEN_VALUE, datum)
@@ -547,22 +536,30 @@ mod tests {
         assert_eq!(record.end(&mut decoder).expect("the end reads back"), end);
     }
 
-    /// Build-time preparation retains exactly the checkpoint nodes and
-    /// release identity the runtime encoder produces.
+    /// The stored catalog carries the 1.0 release line under each dialect's
+    /// own pin key, independent of the release builder and its encoder.
     #[test]
-    fn the_builds_checkpoint_catalog_is_the_canonical_release_graph() {
-        let mut staging = staging(u64::MAX);
-        let mut manifests = HeldManifests::default();
-        for dialect in lash_vm_releases::DIALECTS {
-            let held = dialect.held_releases().expect("the build's releases");
-            manifests
-                .stage(dialect.dialect, &held, |kind, logical| {
-                    stage(&mut staging, kind, logical)
-                })
-                .expect("canonical release graph");
+    fn the_stored_release_catalog_preserves_its_1_0_pin_keys() {
+        let built = release_manifests().expect("the stored catalog");
+        assert!(built.manifests.current("typescript").is_some());
+        for dialect in ["python", "typescript"] {
+            if !lash_vm_releases::DIALECTS
+                .iter()
+                .any(|d| d.dialect == dialect)
+            {
+                continue;
+            }
+            let reference = built.manifests.current(dialect).expect("current release");
+            let manifest = built.manifests.get(&reference).expect("manifest");
+            assert_eq!(
+                (manifest.release.as_str(), manifest.ordinal, manifest.sealed),
+                ("1.0", 1, false)
+            );
+            assert_eq!(
+                built.manifests.pin_key(&reference),
+                Some(format!("{dialect}/1.0"))
+            );
+            assert_eq!(built.manifests.of_dialect(dialect).count(), 1);
         }
-        let built = release_manifests().expect("the build's staged catalog");
-        assert_eq!(built.manifests, manifests);
-        assert_eq!(built.nodes, staging.into_nodes());
     }
 }

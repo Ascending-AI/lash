@@ -595,3 +595,41 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
         }
     }
 }
+
+/// S4/K-TASK: a saved list join keeps its identity when another join is
+/// allocated after a cold resume; neither live join overwrites the other.
+#[test]
+fn a_cold_resume_allocates_after_the_existing_list_join() {
+    use super::embedder::{Embedder, result, text};
+    use crate::{Layout, Step};
+    use lash_kernel_doc::Datum::List;
+    let mut embedder = Embedder::new(
+        r#"
+fn work(tag) { let x = perform echo(tag) as Any return x }
+fn gather(h) { let hs = [h] let xs = join all hs return xs }
+main {
+    let a = spawn call work("a")
+    let first = spawn call gather(a)
+    do perform echo("gate") as Any
+    let b = spawn call work("b")
+    let hs = [b]
+    let second = join all hs
+    let done = join first
+    return [done, second]
+}"#,
+    );
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    let (root, certificate) = embedder.checkpoint();
+    assert_eq!(root.meters.next_join, 1);
+    assert_eq!(root.joins.len(), 1);
+    embedder.open_at(&root, certificate, Layout::default(), true);
+    embedder.deliver("gate");
+    assert!(matches!(embedder.run(), Step::Parked(_)));
+    let (root, _) = embedder.checkpoint();
+    assert_eq!(root.meters.next_join, 2);
+    assert_eq!(root.joins.len(), 2, "both live join identities survive");
+    assert_eq!(
+        result(embedder.run_to_end(&["b", "a"])),
+        List(vec![List(vec![text("a")]), List(vec![text("b")])])
+    );
+}

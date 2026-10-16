@@ -185,7 +185,7 @@ pub struct PageEnvelope {
 /// its envelope, so its digest is that blob's (`lash-core-store`'s
 /// `BlobRef::digest_for_content`). It must equal
 /// `lash-checkpoint-encoder`'s blob domain: the law
-/// `a_page_crosses_named_by_its_store_content_address` in `lash-vm-worker`
+/// `a_transported_page_keeps_its_blob_address_and_token_vector` in `lash-vm-worker`
 /// pins it.
 /// version_surface = "coexist"
 /// version_guard(items(PAGE_DIGEST_DOMAIN), items(digest))
