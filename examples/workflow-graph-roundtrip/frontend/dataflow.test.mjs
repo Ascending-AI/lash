@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  planInputEdit,
   encodeValue,
   constantValue,
-  planEndAfter,
-  planConstantPromotion,
   constantText,
 } from "./dataflow.mjs";
 test("editing an integral Float constant preserves its numeric kind, including inside typed records", () => {
@@ -21,45 +20,6 @@ test("editing an integral Float constant preserves its numeric kind, including i
     known: true,
     value: 1,
   });
-});
-
-test("ending at an output preserves the producer and later code in its lexical block", () => {
-  const unit = { function: "example" };
-  const block = { unit, path: [0, 0, 0] };
-  const s = {
-    site: { unit, path: [0, 0, 0, 1] },
-    block,
-    statement: { let: {} },
-  };
-  const next = {
-    site: { unit, path: [0, 0, 0, 2] },
-    block,
-    statement: { do: {} },
-  };
-  const source = { binding: 4, expression: { variable: "report" } };
-  const node = { s, outputs: [source] };
-  const workflow = { view: { statements: [s, next] } };
-  const original = structuredClone(workflow);
-  for (const operation of ["return", "finish"]) {
-    assert.deepEqual(planEndAfter(workflow, node, source, operation), [
-      {
-        insert_statement: {
-          at: { block, before: next.site },
-          statement: { [operation]: { value: source.expression } },
-        },
-      },
-    ]);
-  }
-  assert.deepEqual(workflow, original);
-  next.statement = { return: { value: { literal: "null" } } };
-  assert.deepEqual(planEndAfter(workflow, node, source, "finish"), [
-    {
-      replace_statement: {
-        statement: next.site,
-        with: { finish: { value: source.expression } },
-      },
-    },
-  ]);
 });
 
 test("constant editor text preserves negative zero through an unchanged scalar or structured save", () => {
@@ -95,44 +55,31 @@ test("saving structured constants preserves numeric kinds when canonical facets 
   assert.deepEqual(encodeValue(1, "int"), { literal: { int: "1" } });
 });
 
-test("promotion cannot snapshot a connected or computed While condition outside its loop", () => {
-  const unit = { function: "demo" };
-  const port = {
-    target: { expression: { unit, path: [1, 0] } },
-    context: { block: { unit, path: [] }, statement: { unit, path: [1] } },
-  };
+
+// CANVAS-VALUE: host ports address whole arguments and canonical nested data.
+test("effect argument edits use closed values and canonical field paths", () => {
+  const site = (path) => ({ unit: { function: "demo" }, path });
+  const action = site([0, 0]);
+  const argument = site([0, 0, 0]);
+  const field = site([0, 0, 0, 0]);
+  const value = { literal: { text: "edited" } };
   const workflow = {
-    view: { dataflow: { bindings: [{ id: 0, name: "proceed" }] } },
+    identity: "0".repeat(64),
+    view: { statements: [], dataflow: {
+      actions: [{ site: action, kind: "perform", args: [{ site: argument }] }],
+      expressions: [],
+    } },
   };
-  const original = structuredClone(workflow);
-  for (const value of [
-    { variable: "proceed" },
-    { call: { function: "condition", args: [] } },
+  for (const [port, path] of [
+    [{ target: { action, index: 0 } }, []],
+    [{ target: { expression: field }, context: { statement: site([0]) } }, [0]],
   ]) {
-    assert.throws(
-      () => planConstantPromotion(workflow, port, value, "condition_value"),
-      /Only constants/,
-    );
+    assert.deepEqual(planInputEdit(workflow, port, value), [{ set_value: {
+      base: workflow.identity,
+      target: { tool_argument: { action, index: 0, path } },
+      value,
+    } }]);
+    assert.throws(() => planInputEdit(workflow, port, { closure: { body: [] } }), /source edit/);
   }
-  assert.deepEqual(workflow, original);
-  const value = { literal: { bool: true } };
-  assert.deepEqual(
-    planConstantPromotion(workflow, port, value, "condition_value"),
-    [
-      {
-        insert_statement: {
-          at: { block: port.context.block, before: port.context.statement },
-          statement: {
-            let: { name: "condition_value", value: { expr: value } },
-          },
-        },
-      },
-      {
-        replace_expression: {
-          expression: port.target.expression,
-          with: { variable: "condition_value" },
-        },
-      },
-    ],
-  );
+  assert.throws(() => planInputEdit(workflow, {}, value), /source edit/);
 });

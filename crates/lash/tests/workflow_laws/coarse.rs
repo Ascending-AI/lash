@@ -178,8 +178,8 @@ fn coarse_eval() {
         };
         assert!(
             matches!(*invalid.reason,
-            lash::workflow::document::InvalidReason::NestedActionPosition { position: actual }
-                if actual == position),
+            lash::workflow::document::InvalidReason::NestedActionPosition { position: ref actual }
+                if actual.as_ref() == position),
             "expected {position}, got {invalid:?}"
         );
     };

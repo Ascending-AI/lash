@@ -688,25 +688,8 @@ dialog::backdrop {
   font-size: 21px;
   padding: 0 7px;
 }
-#advanced {
+#source-editor {
   width: 1100px;
-}
-.advanced-layout {
-  display: grid;
-  grid-template-columns: 1fr 330px;
-  gap: 20px;
-}
-.inspector {
-  grid-row: span 2;
-  border-left: 1px solid var(--line);
-  padding-left: 20px;
-}
-.bottom {
-  grid-column: 1/-1;
-  min-width: 0;
-}
-.canvas-panel {
-  min-width: 0;
 }
 .section-label,
 .button-row,
@@ -727,20 +710,7 @@ dialog::backdrop {
   font-size: 10px;
   color: var(--muted);
 }
-.queue-list {
-  margin: 16px 0;
-  font-size: 12px;
-}
-.queue-step {
-  padding: 6px;
-  background: #f5f6f7;
-  margin: 5px 0;
-  display: flex;
-  justify-content: space-between;
-}
-.queue-step button {
-  padding: 0 6px;
-}
+
 .button-row {
   margin: 12px 0;
 }
@@ -809,9 +779,6 @@ dialog::backdrop {
     font-size: 11px;
     padding: 7px;
   }
-  header #advanced-button {
-    display: none;
-  }
   .viewbar {
     padding: 0 16px;
   }
@@ -834,9 +801,6 @@ dialog::backdrop {
   .add-step {
     right: 12px;
     bottom: calc(19px + var(--trace));
-  }
-  .advanced-layout {
-    display: block;
   }
   .inspector {
     border: 0;
@@ -873,13 +837,13 @@ dialog::backdrop {
   overflow-wrap: anywhere;
 }
 @media (max-width: 760px) {
-  header #advanced-button {
+  header #source-button {
     display: block;
     font-size: 0;
     padding: 5px;
     width: 26px;
   }
-  header #advanced-button::after {
+  header #source-button::after {
     content: "⋯";
     font-size: 18px;
   }

@@ -171,7 +171,7 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
     let refused = client
         .post(format!("{base}/workflow/edits"))
         .json(&json!({"version": opened["version"], "edits": [
-            {"replace_expression": {"expression": literal, "with": {"variable": "nowhere"}}},
+            {"set_value": {"base": opened["identity"], "target": {"literal": {"expression": literal}}, "value": {"variable": "nowhere"}}},
         ]}))
         .send()
         .await
@@ -199,9 +199,10 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
         client
             .post(format!("{base}/workflow/edits"))
             .json(&json!({"version": opened["version"], "edits": [
-                {"replace_expression": {
-                    "expression": literal,
-                    "with": {"literal": {"text": "Edited as a kernel document"}},
+                {"set_value": {
+                    "base": opened["identity"],
+                    "target": {"literal": {"expression": literal}},
+                    "value": {"literal": {"text": "Edited as a kernel document"}},
                 }},
             ]}))
             .send()
@@ -241,7 +242,8 @@ async fn a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_docu
         client
             .post(format!("{base}/workflow/plan"))
             .json(&json!({"version": edited["version"], "operations": [
-                {"insert_effect": {
+                {"insert_step": {
+                    "base": edited["identity"],
                     "at": {"block": bound["block"], "before": bound["site"]},
                     "effect": "display.show_message",
                     "args": [{"record": [{"field": "text", "value": {"literal": {"text": "Added through public authoring"}}}]}],
@@ -376,9 +378,10 @@ async fn each_edit_response_maps_its_immediate_base() {
         let first = &previous["view"]["statements"][0];
         let response = answer(client.post(format!("{base}/workflow/edits")).json(&json!({
             "version": previous["version"],
-            "edits": [{"insert_statement": {
+            "edits": [{"insert_step": {
+                "base": previous["identity"],
                 "at": {"block": first["block"], "before": first["site"]},
-                "statement": {"let": {"name": format!("correspondence_probe_{number}"), "value": {"expr": {"literal": "null"}}}}
+                "effect": "display.show_message", "args": [{"record":[{"field":"text","value":{"literal":{"text":"probe"}}}]}], "result":"null", "binding": format!("correspondence_probe_{number}")
             }}]
         })).send().await.expect("edit")).await;
         assert_eq!(
@@ -800,4 +803,39 @@ async fn a_counted_run_reports_each_statement_as_often_as_its_loop_ran_it() {
         .map(|ran| ran["runs"].as_u64().expect("observed"))
         .sum();
     assert_eq!(started, ran, "the path starts what the counts say ran");
+}
+
+/// CANVAS-CLOSED: neither endpoint accepts the retired tree writes or passthrough.
+#[tokio::test]
+async fn canvas_closed_http() {
+    let (base, _) = serve().await;
+    let client = reqwest::Client::new();
+    let opened = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+    for path in ["edits", "plan"] {
+        let mut body = json!({"version":opened["version"]});
+        body[if path == "edits" {
+            "edits"
+        } else {
+            "operations"
+        }] = json!([
+            {"edit":{"replace_statement":{"statement":{"unit":"main","path":[0]},"with":{"finish":{"value":{"literal":"null"}}}}}}
+        ]);
+        let response = client
+            .post(format!("{base}/workflow/{path}"))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+        let error: Value = response.json().await.unwrap();
+        assert_eq!(
+            serde_json::from_value::<lash::workflow::edit::EditDiagnosticKind>(
+                error["error"]["details"]["cause"].clone()
+            )
+            .unwrap(),
+            lash::workflow::edit::EditDiagnosticKind::UnsupportedCanvasEdit
+        );
+    }
+    let unchanged = answer(client.get(format!("{base}/workflow")).send().await.unwrap()).await;
+    assert_eq!(unchanged["identity"], opened["identity"]);
 }

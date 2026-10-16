@@ -18,7 +18,10 @@ pub(crate) enum NodeMut<'a> {
 }
 
 /// What a site addresses, for a diagnostic.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum NodeClass {
     Block,
     Statement,

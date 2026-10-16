@@ -71,7 +71,7 @@ function references(value, name) {
   );
 }
 // Only a single-use, adjacent record binding is safe for this small form editor.
-// Other inputs remain canonical expressions available through Advanced.
+// Other computations are edited in source.
 export function simpleBinding(workflow, s, value) {
   if (!value?.variable) return;
   const siblings = statementsIn(workflow, s.block);

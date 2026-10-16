@@ -26,46 +26,6 @@ fn k_chg_006() {
 }
 
 #[test]
-fn k_edit_001() {
-    super::run_rule("K-EDIT-001", include_str!("../../protocol/edit/K-EDIT-001.json"));
-}
-
-#[test]
-fn k_edit_002() {
-    super::run_rule("K-EDIT-002", include_str!("../../protocol/edit/K-EDIT-002.json"));
-}
-
-#[test]
-fn k_edit_003() {
-    super::run_rule("K-EDIT-003", include_str!("../../protocol/edit/K-EDIT-003.json"));
-}
-
-#[test]
-fn k_edit_004() {
-    super::run_rule("K-EDIT-004", include_str!("../../protocol/edit/K-EDIT-004.json"));
-}
-
-#[test]
-fn k_edit_005() {
-    super::run_rule("K-EDIT-005", include_str!("../../protocol/edit/K-EDIT-005.json"));
-}
-
-#[test]
-fn k_edit_008() {
-    super::run_rule("K-EDIT-008", include_str!("../../protocol/edit/K-EDIT-008.json"));
-}
-
-#[test]
-fn k_edit_009() {
-    super::run_rule("K-EDIT-009", include_str!("../../protocol/edit/K-EDIT-009.json"));
-}
-
-#[test]
-fn k_edit_010() {
-    super::run_rule("K-EDIT-010", include_str!("../../protocol/edit/K-EDIT-010.json"));
-}
-
-#[test]
 fn k_eff_011() {
     super::run_rule("K-EFF-011", include_str!("../../protocol/eff/K-EFF-011.json"));
 }

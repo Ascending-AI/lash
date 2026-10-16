@@ -387,6 +387,14 @@
         }
       ]
     },
+    "Branch": {
+      "enum": [
+        "then",
+        "else",
+        "body"
+      ],
+      "type": "string"
+    },
     "Bytes": {
       "pattern": "^([0-9a-f]{2})*$",
       "type": "string"
@@ -477,636 +485,145 @@
       ],
       "type": "object"
     },
-    "Edit": {
-      "description": "One typed change to a document.",
+    "DataMapEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/DataValue"
+        },
+        "value": {
+          "$ref": "#/$defs/DataValue"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    "DataRecordEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/DataValue"
+        }
+      },
+      "required": [
+        "field",
+        "value"
+      ],
+      "type": "object"
+    },
+    "DataValue": {
+      "description": "Data that can be connected to a value slot; no executable syntax.",
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
-            "insert_statement": {
-              "additionalProperties": false,
-              "properties": {
-                "at": {
-                  "$ref": "#/$defs/Position"
-                },
-                "statement": {
-                  "$ref": "#/$defs/Stmt"
-                }
-              },
-              "required": [
-                "at",
-                "statement"
-              ],
-              "type": "object"
+            "literal": {
+              "$ref": "#/$defs/Literal"
             }
           },
           "required": [
-            "insert_statement"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Removes a statement and everything under it.",
-          "properties": {
-            "remove_statement": {
-              "additionalProperties": false,
-              "properties": {
-                "statement": {
-                  "$ref": "#/$defs/Site"
-                }
-              },
-              "required": [
-                "statement"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "remove_statement"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Moves a statement and everything under it. Every node moved\nsurvives.",
-          "properties": {
-            "move_statement": {
-              "additionalProperties": false,
-              "properties": {
-                "statement": {
-                  "$ref": "#/$defs/Site"
-                },
-                "to": {
-                  "$ref": "#/$defs/Position"
-                }
-              },
-              "required": [
-                "statement",
-                "to"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "move_statement"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Copies a statement and everything under it. The copy is new: no node\nof it corresponds to a node of the base.",
-          "properties": {
-            "clone_statement": {
-              "additionalProperties": false,
-              "properties": {
-                "statement": {
-                  "$ref": "#/$defs/Site"
-                },
-                "to": {
-                  "$ref": "#/$defs/Position"
-                }
-              },
-              "required": [
-                "statement",
-                "to"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "clone_statement"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Replaces a whole statement. The statement survives; what was under\nit does not.",
-          "properties": {
-            "replace_statement": {
-              "additionalProperties": false,
-              "properties": {
-                "statement": {
-                  "$ref": "#/$defs/Site"
-                },
-                "with": {
-                  "$ref": "#/$defs/Stmt"
-                }
-              },
-              "required": [
-                "statement",
-                "with"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "replace_statement"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Replaces an expression, at any depth. The expression survives; what\nwas under it does not.",
-          "properties": {
-            "replace_expression": {
-              "additionalProperties": false,
-              "properties": {
-                "expression": {
-                  "$ref": "#/$defs/Site"
-                },
-                "with": {
-                  "$ref": "#/$defs/Expr"
-                }
-              },
-              "required": [
-                "expression",
-                "with"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "replace_expression"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Replaces an action: the right-hand side that calls, performs, waits,\nspawns or cancels.",
-          "properties": {
-            "replace_action": {
-              "additionalProperties": false,
-              "properties": {
-                "action": {
-                  "$ref": "#/$defs/Site"
-                },
-                "with": {
-                  "$ref": "#/$defs/Action"
-                }
-              },
-              "required": [
-                "action",
-                "with"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "replace_action"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Replaces one argument of an action, a statement's own or one nested\nin an expression, counted from 0 in the order the action writes them.\nA `sleep`, `join`, `join` of a list and `cancel` have the one\nargument. The action survives; the argument it had does not.\n\nA computed argument of a `let`'s or an assignment's own action makes\nthe right-hand side that action nested as an expression, and an\nargument that leaves a nested whole right-hand side all variables\nand literals makes it the statement's action again: the one spelling\nkernel text reads (`K-FORM-001`). A `do`'s action, a `join` and a\n`cancel` take only a variable or a literal.",
-          "properties": {
-            "set_argument": {
-              "additionalProperties": false,
-              "properties": {
-                "action": {
-                  "$ref": "#/$defs/Site"
-                },
-                "argument": {
-                  "$ref": "#/$defs/Expr"
-                },
-                "index": {
-                  "format": "uint32",
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "action",
-                "index",
-                "argument"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "set_argument"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Replaces the condition of an `if` or a `while`.",
-          "properties": {
-            "set_condition": {
-              "additionalProperties": false,
-              "properties": {
-                "condition": {
-                  "$ref": "#/$defs/Expr"
-                },
-                "statement": {
-                  "$ref": "#/$defs/Site"
-                }
-              },
-              "required": [
-                "statement",
-                "condition"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "set_condition"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Sets or clears the `catch` of a `try`. The `try`, its body and its\n`finally` survive.",
-          "properties": {
-            "set_catch": {
-              "additionalProperties": false,
-              "properties": {
-                "catch": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/$defs/Catch"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "statement": {
-                  "$ref": "#/$defs/Site"
-                }
-              },
-              "required": [
-                "statement"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "set_catch"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Sets or clears the `finally` of a `try`. The `try`, its body and its\n`catch` survive.",
-          "properties": {
-            "set_finally": {
-              "additionalProperties": false,
-              "properties": {
-                "finally": {
-                  "items": {
-                    "$ref": "#/$defs/Stmt"
-                  },
-                  "type": [
-                    "array",
-                    "null"
-                  ]
-                },
-                "statement": {
-                  "$ref": "#/$defs/Site"
-                }
-              },
-              "required": [
-                "statement"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "set_finally"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Renames a variable where it is declared and in every use that\nresolves to that declaration.\n\n`declared_at` is the node that declares it: the `let`, the `for`,\nthe `try` of its `catch`, the closure expression, or a declared\nfunction's body for one of its parameters.",
-          "properties": {
-            "rename_variable": {
-              "additionalProperties": false,
-              "properties": {
-                "declared_at": {
-                  "$ref": "#/$defs/Site"
-                },
-                "name": {
-                  "$ref": "#/$defs/Name"
-                },
-                "to": {
-                  "$ref": "#/$defs/Name"
-                }
-              },
-              "required": [
-                "declared_at",
-                "name",
-                "to"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "rename_variable"
+            "literal"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
           "properties": {
-            "insert_function": {
-              "additionalProperties": false,
-              "properties": {
-                "function": {
-                  "$ref": "#/$defs/Function"
-                },
-                "name": {
-                  "$ref": "#/$defs/Name"
-                }
-              },
-              "required": [
-                "name",
-                "function"
-              ],
-              "type": "object"
+            "variable": {
+              "$ref": "#/$defs/Name"
             }
           },
           "required": [
-            "insert_function"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Removes a declared function, and its entry when it has one.",
-          "properties": {
-            "remove_function": {
-              "additionalProperties": false,
-              "properties": {
-                "name": {
-                  "$ref": "#/$defs/Name"
-                }
-              },
-              "required": [
-                "name"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "remove_function"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Replaces a declared function's parameters and body. Its body block\nsurvives; what was under it does not.",
-          "properties": {
-            "replace_function": {
-              "additionalProperties": false,
-              "properties": {
-                "function": {
-                  "$ref": "#/$defs/Function"
-                },
-                "name": {
-                  "$ref": "#/$defs/Name"
-                }
-              },
-              "required": [
-                "name",
-                "function"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "replace_function"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Renames a declared function in its declaration, its entry and every\ncall, spawn and reference of it.",
-          "properties": {
-            "rename_function": {
-              "additionalProperties": false,
-              "properties": {
-                "from": {
-                  "$ref": "#/$defs/Name"
-                },
-                "to": {
-                  "$ref": "#/$defs/Name"
-                }
-              },
-              "required": [
-                "from",
-                "to"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "rename_function"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Sets which of `main`'s top-level variables are the program's own\n(`K-SES-001`).",
-          "properties": {
-            "set_private_bindings": {
-              "additionalProperties": false,
-              "properties": {
-                "names": {
-                  "items": {
-                    "$ref": "#/$defs/Name"
-                  },
-                  "type": "array",
-                  "uniqueItems": true
-                }
-              },
-              "required": [
-                "names"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "set_private_bindings"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Makes a declared function one a host may start, under `signature`.",
-          "properties": {
-            "insert_entry": {
-              "additionalProperties": false,
-              "properties": {
-                "function": {
-                  "$ref": "#/$defs/Name"
-                },
-                "signature": {
-                  "$ref": "#/$defs/Signature"
-                }
-              },
-              "required": [
-                "function",
-                "signature"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "insert_entry"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Makes a declared function no longer one a host may start. The\nfunction stays.",
-          "properties": {
-            "remove_entry": {
-              "additionalProperties": false,
-              "properties": {
-                "function": {
-                  "$ref": "#/$defs/Name"
-                }
-              },
-              "required": [
-                "function"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "remove_entry"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "[`Edit::RenameFunction`] of a function that is an entry.",
-          "properties": {
-            "rename_entry": {
-              "additionalProperties": false,
-              "properties": {
-                "from": {
-                  "$ref": "#/$defs/Name"
-                },
-                "to": {
-                  "$ref": "#/$defs/Name"
-                }
-              },
-              "required": [
-                "from",
-                "to"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "rename_entry"
+            "variable"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
           "properties": {
-            "set_entry_signature": {
-              "additionalProperties": false,
-              "properties": {
-                "function": {
-                  "$ref": "#/$defs/Name"
-                },
-                "signature": {
-                  "$ref": "#/$defs/Signature"
-                }
+            "tuple": {
+              "items": {
+                "$ref": "#/$defs/DataValue"
               },
-              "required": [
-                "function",
-                "signature"
-              ],
-              "type": "object"
+              "type": "array"
             }
           },
           "required": [
-            "set_entry_signature"
+            "tuple"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "Sets the signature the document expects of an effect it performs.",
           "properties": {
-            "set_effect_signature": {
-              "additionalProperties": false,
-              "properties": {
-                "effect": {
-                  "$ref": "#/$defs/QualifiedName"
-                },
-                "signature": {
-                  "$ref": "#/$defs/Signature"
-                }
+            "list": {
+              "items": {
+                "$ref": "#/$defs/DataValue"
               },
-              "required": [
-                "effect",
-                "signature"
-              ],
-              "type": "object"
+              "type": "array"
             }
           },
           "required": [
-            "set_effect_signature"
+            "list"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "Sets how an effect result's bare number decodes (`K-EFF-006`).",
           "properties": {
-            "set_number_policy": {
-              "additionalProperties": false,
-              "properties": {
-                "numbers": {
-                  "$ref": "#/$defs/NumberPolicy"
-                }
+            "set": {
+              "items": {
+                "$ref": "#/$defs/DataValue"
               },
-              "required": [
-                "numbers"
-              ],
-              "type": "object"
+              "type": "array"
             }
           },
           "required": [
-            "set_number_policy"
+            "set"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "Adopts a corrected library function: every call of `from` in the\ndocument becomes a call of `to` (`K-VER-002`).",
           "properties": {
-            "replace_function_identity": {
-              "additionalProperties": false,
-              "properties": {
-                "from": {
-                  "$ref": "#/$defs/FunctionId"
-                },
-                "to": {
-                  "$ref": "#/$defs/FunctionId"
-                }
+            "map": {
+              "items": {
+                "$ref": "#/$defs/DataMapEntry"
               },
-              "required": [
-                "from",
-                "to"
-              ],
-              "type": "object"
+              "type": "array"
             }
           },
           "required": [
-            "replace_function_identity"
+            "map"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "record": {
+              "items": {
+                "$ref": "#/$defs/DataRecordEntry"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "record"
           ],
           "type": "object"
         }
       ]
+    },
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
     },
     "Expr": {
       "description": "An expression, evaluated within one statement. Only an [`Expr::Act`]\nin it may pause the task (`K-EVAL-008`).",
@@ -1366,28 +883,6 @@
       "pattern": "^(nan|-?inf|-?(0|[1-9][0-9]*)\\.[0-9]+|-?[1-9](\\.[0-9]+)?e-?[1-9][0-9]*)$",
       "type": "string"
     },
-    "Function": {
-      "additionalProperties": false,
-      "description": "A declared function's parameters and body.",
-      "properties": {
-        "body": {
-          "items": {
-            "$ref": "#/$defs/Stmt"
-          },
-          "type": "array"
-        },
-        "params": {
-          "items": {
-            "$ref": "#/$defs/Name"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "body"
-      ],
-      "type": "object"
-    },
     "FunctionId": {
       "pattern": "^[0-9a-f]{64}$",
       "type": "string"
@@ -1594,21 +1089,6 @@
     "Name": {
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
-    },
-    "NumberPolicy": {
-      "description": "How a document's effect results decode a number whose type says only\n\"number\" (`K-EFF-006`).",
-      "oneOf": [
-        {
-          "const": "float",
-          "description": "Every bare number is a float.",
-          "type": "string"
-        },
-        {
-          "const": "by_spelling",
-          "description": "A number written with no fraction and no exponent is an integer; any\nother is a float.",
-          "type": "string"
-        }
-      ]
     },
     "Param": {
       "additionalProperties": false,
@@ -2384,68 +1864,388 @@
           "type": "object"
         }
       ]
+    },
+    "ValueTarget": {
+      "description": "All addresses are exact sites in the operation's base document.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "literal": {
+              "additionalProperties": false,
+              "properties": {
+                "expression": {
+                  "$ref": "#/$defs/Site"
+                }
+              },
+              "required": [
+                "expression"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "literal"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "initializer": {
+              "additionalProperties": false,
+              "properties": {
+                "statement": {
+                  "$ref": "#/$defs/Site"
+                }
+              },
+              "required": [
+                "statement"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "initializer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "tool_argument": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "$ref": "#/$defs/Site"
+                },
+                "index": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "path": {
+                  "description": "Canonical child indices within the argument, empty for its root.",
+                  "items": {
+                    "format": "uint32",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "action",
+                "index"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "tool_argument"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Wrapper": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "if": {
+              "additionalProperties": false,
+              "properties": {
+                "condition": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "condition"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "if"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "for": {
+              "additionalProperties": false,
+              "properties": {
+                "binding": {
+                  "$ref": "#/$defs/Name"
+                },
+                "iterable": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "binding",
+                "iterable"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "for"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A new try has an empty catch and no finally.",
+          "properties": {
+            "try": {
+              "additionalProperties": false,
+              "properties": {
+                "catch_binding": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "catch_binding"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "try"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "$id": "https://lash.dev/schemas/kernel-authoring-operation/v1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "One host authoring operation, lowered by [`plan`] to canonical edits.\n\nLash owns this operation data and its serialized representation. Hosts own\ntheir transport, revision and authentication envelope, embedding batches as\n`Vec<Operation>`. Save the expanded [`Transaction`] as the exact edit record\nto replay against its base and admission context.",
+  "description": "Every supported canvas operation, admitted atomically through [`crate::Draft::apply`].\nStructural operations accept only separable perform/tool steps. While loops\nsupport condition editing; creating or removing one requires source.",
   "oneOf": [
     {
       "additionalProperties": false,
-      "description": "The complete existing edit vocabulary, with base-document targets.",
       "properties": {
-        "edit": {
-          "$ref": "#/$defs/Edit"
-        }
-      },
-      "required": [
-        "edit"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "description": "Insert a named effect result, its inputs written as its arguments.\n\n`binding` is the caller's name, preserved verbatim. Ordinary admission\ndecides whether the name, scope, effect and result type are valid.",
-      "properties": {
-        "insert_effect": {
+        "set_value": {
           "additionalProperties": false,
           "properties": {
-            "args": {
-              "description": "Arguments in evaluation order, any expressions.",
-              "items": {
-                "$ref": "#/$defs/Expr"
-              },
-              "type": "array"
+            "base": {
+              "$ref": "#/$defs/DocumentId"
             },
-            "at": {
-              "$ref": "#/$defs/Position",
-              "description": "Insertion position in the transaction's base document."
+            "target": {
+              "$ref": "#/$defs/ValueTarget"
             },
-            "binding": {
-              "$ref": "#/$defs/Name",
-              "description": "Caller-selected output name. It is preserved, not made fresh."
-            },
-            "effect": {
-              "$ref": "#/$defs/QualifiedName",
-              "description": "The effect to perform, checked against the admission environment."
-            },
-            "result": {
-              "$ref": "#/$defs/Type",
-              "description": "The result type stated by the canonical `perform` action."
+            "value": {
+              "$ref": "#/$defs/DataValue"
             }
           },
           "required": [
-            "at",
-            "effect",
-            "args",
-            "result",
-            "binding"
+            "base",
+            "target",
+            "value"
           ],
           "type": "object"
         }
       },
       "required": [
-        "insert_effect"
+        "set_value"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "insert_step": {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "items": {
+                "$ref": "#/$defs/DataValue"
+              },
+              "type": "array"
+            },
+            "at": {
+              "$ref": "#/$defs/Position"
+            },
+            "base": {
+              "$ref": "#/$defs/DocumentId"
+            },
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Name"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "effect": {
+              "$ref": "#/$defs/QualifiedName"
+            },
+            "result": {
+              "$ref": "#/$defs/Type"
+            }
+          },
+          "required": [
+            "base",
+            "at",
+            "effect",
+            "args",
+            "result"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "insert_step"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "remove_step": {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/Site"
+            },
+            "base": {
+              "$ref": "#/$defs/DocumentId"
+            }
+          },
+          "required": [
+            "base",
+            "action"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "remove_step"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "move_step": {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/Site"
+            },
+            "base": {
+              "$ref": "#/$defs/DocumentId"
+            },
+            "to": {
+              "$ref": "#/$defs/Position"
+            }
+          },
+          "required": [
+            "base",
+            "action",
+            "to"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "move_step"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "wrap_steps": {
+          "additionalProperties": false,
+          "properties": {
+            "base": {
+              "$ref": "#/$defs/DocumentId"
+            },
+            "first": {
+              "$ref": "#/$defs/Site"
+            },
+            "last": {
+              "$ref": "#/$defs/Site"
+            },
+            "wrapper": {
+              "$ref": "#/$defs/Wrapper"
+            }
+          },
+          "required": [
+            "base",
+            "first",
+            "last",
+            "wrapper"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "wrap_steps"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "unwrap_steps": {
+          "additionalProperties": false,
+          "properties": {
+            "base": {
+              "$ref": "#/$defs/DocumentId"
+            },
+            "branch": {
+              "$ref": "#/$defs/Branch"
+            },
+            "wrapper": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "base",
+            "wrapper",
+            "branch"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "unwrap_steps"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "change_condition": {
+          "additionalProperties": false,
+          "properties": {
+            "base": {
+              "$ref": "#/$defs/DocumentId"
+            },
+            "condition": {
+              "$ref": "#/$defs/Expr"
+            },
+            "statement": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "base",
+            "statement",
+            "condition"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "change_condition"
       ],
       "type": "object"
     }

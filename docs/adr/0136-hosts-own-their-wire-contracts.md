@@ -27,13 +27,14 @@ variant names and typed payloads. This typed JSON is the readable host form,
 so hosts may exchange it directly without a wire mirror.
 
 Authoring `Operation` is also Lash-owned serialized request data (FIG-6350,
-Sam's FIG-6349 ruling). Its externally tagged `edit` and `insert_effect` cases
+Sam's FIG-6349 ruling). Its externally tagged closed canvas operation cases
 reuse the existing nested encodings and reject unknown structural fields.
 Lash publishes its JSON Schema and TypeScript declarations; hosts embed
 `Vec<Operation>` in their own transport, revision and authentication envelope.
-The expanded `Transaction` is the exact edit record to save and replay against
-its base and admission context. Each operation plans to one edit, with no
-generated temporaries (FIG-6461): a computed effect input stays an argument.
+The `Transaction` holds those same operations for replay against its base and
+admission context. InsertStep keeps data inputs inside the performed action,
+with no generated temporaries. Atomic entry extraction also publishes a typed
+document/effect result and refusal schema (FIG-6477).
 
 Other core types carry no wire-stability promise; a host may serialize them
 when its own contract permits it.

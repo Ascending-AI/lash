@@ -2,8 +2,6 @@ import {
   buildDataflow,
   availableName,
   planInputEdit,
-  planConstantPromotion,
-  planEndAfter,
   encodeValue as expression,
   sourceOptions,
   typeName,
@@ -60,12 +58,9 @@ let workflow,
   finalOutput,
   observationGap = false,
   // The selected item and whether its inspector is open (selection.mjs),
-  // and the statement it shows, which Advanced edits.
+  // and the statement it shows.
   focus = NOTHING,
   selected,
-  operations = [],
-  plan,
-  tab = "source",
   busy = false,
   running = false;
 let statuses = new Map(),
@@ -128,16 +123,10 @@ function errorText(error) {
 function controls() {
   document
     .querySelectorAll(
-      "[data-write], #queue button, #node-panel .save-node, .add-port",
+      "[data-write], #node-panel .save-node, .add-port",
     )
     .forEach((button) => (button.disabled = busy || running || !workflow));
-  $("apply").disabled = busy || running || !plan;
-  $("preview").disabled = busy || running || !operations.length;
   $("run").disabled = busy || running || !workflow?.definition;
-  $("rename").disabled ||= !statementNodes.get(
-    key(selected?.site ?? { unit: "main" }),
-  )?.let;
-  $("replace").disabled ||= !selected;
 }
 async function action(work) {
   busy = true;
@@ -182,7 +171,6 @@ function show(next, correspondence) {
   $("source").scrollTop = 0;
   $("source").scrollLeft = 0;
   $("entry").value = next.entry;
-  $("direct").value = "[]";
   const mappedScope =
     previousScope &&
     correspondence?.entries?.find(
@@ -194,183 +182,17 @@ function show(next, correspondence) {
   )?.block ?? scopes[0]?.block;
   renderScopes();
   renderCanvas();
-  renderPlacement();
   renderSelection();
-  renderPane();
   controls();
 }
-function renderPlacement() {
-  $("placement").replaceChildren(
-    ...viewOf(workflow).statements.map((statement, index) => {
-      const option = document.createElement("option");
-      option.value = String(index);
-      option.textContent = `${"↳ ".repeat(statement.depth)}${summary(statement.statement)}`;
-      option.selected = selected && key(statement.site) === key(selected.site);
-      return option;
-    }),
-  );
-}
-function renderSelection(reveal) {
-  const stmt = selected && statementNodes.get(key(selected.site));
-  $("selected-kind").textContent = stmt ? Object.keys(stmt)[0] : "—";
-  $("selection").textContent = selected
-    ? `${summary(selected.statement)}\nSite ${JSON.stringify(selected.site)}${stmt?.let ? `\nBinding: ${stmt.let.name}` : ""}`
-    : "Select a statement on the canvas.";
-  $("selection").style.whiteSpace = "pre-wrap";
-  markCode(reveal);
-}
-function renderPane() {
-  document
-    .querySelectorAll("[data-tab]")
-    .forEach((button) =>
-      button.classList.toggle("active", button.dataset.tab === tab),
-    );
-  $("source").hidden = tab !== "source";
-  $("source-actions").hidden = tab !== "source";
-  $("code").hidden = tab === "source";
-  $("code").textContent =
-    tab === "transaction"
-      ? plan
-        ? JSON.stringify(plan.transaction, null, 2)
-        : "Preview pending changes to inspect the typed transaction."
-      : (plan?.preview?.source ??
-        "Preview pending changes to inspect the resulting TypeScript.");
-}
-function invalidate() {
-  plan = undefined;
-  renderQueue();
-  renderPane();
-  controls();
-}
-function renderQueue() {
-  $("queue-count").textContent =
-    `${operations.length} operation${operations.length === 1 ? "" : "s"}`;
-  $("queue").replaceChildren(
-    ...operations.map((step, index) => {
-      const row = document.createElement("div");
-      row.className = "queue-step";
-      const label = document.createElement("span");
-      label.textContent = `${index + 1}. ${step.insert_effect ? step.insert_effect.effect : Object.keys(step.edit)[0]}`;
-      const remove = document.createElement("button");
-      remove.textContent = "×";
-      remove.setAttribute("aria-label", `Remove operation ${index + 1}`);
-      remove.disabled = busy || running;
-      remove.onclick = () => {
-        operations.splice(index, 1);
-        invalidate();
-      };
-      row.append(label, remove);
-      return row;
-    }),
-  );
-  if (!operations.length)
-    $("queue").textContent = "Queue helpers and direct edits in any order.";
-}
-$("queue-helper").onclick = () =>
-  action(async () => {
-    const target = viewOf(workflow).statements[Number($("placement").value)];
-    if (!target) throw Error("Select an insertion position.");
-    const input = JSON.parse($("payload").value);
-    const effect = {
-      at: { block: target.block, before: target.site },
-      effect: $("effect").value,
-      args: [$("input-mode").value === "json" ? expression(input) : input],
-      result: "any",
-    };
-    effect.binding = $("binding").value.trim();
-    if (!effect.binding)
-      throw Error("Enter a result binding before queuing this effect.");
-    operations.push({ insert_effect: effect });
-    invalidate();
-    report("Effect queued. Preview checks the complete transaction.");
-  });
-$("queue-direct").onclick = () =>
-  action(async () => {
-    const edits = JSON.parse($("direct").value);
-    if (!Array.isArray(edits) || !edits.length)
-      throw Error("Enter a non-empty JSON list of typed edits.");
-    operations.push(...edits.map((edit) => ({ edit })));
-    invalidate();
-    report("Direct edits queued in order.");
-  });
-$("rename").onclick = () => {
-  const stmt = statementNodes.get(key(selected.site));
-  if (!stmt?.let) return;
-  $("direct").value = JSON.stringify(
-    [
-      {
-        rename_variable: {
-          declared_at: selected.site,
-          name: stmt.let.name,
-          to: `${stmt.let.name}_renamed`,
-        },
-      },
-    ],
-    null,
-    2,
-  );
-};
-$("replace").onclick = () => {
-  const stmt = statementNodes.get(key(selected.site));
-  $("direct").value = JSON.stringify(
-    [{ replace_statement: { statement: selected.site, with: stmt } }],
-    null,
-    2,
-  );
-};
-$("effect").onchange = () => {
-  $("input-mode").value = "json";
-  $("payload").value = JSON.stringify(presets[$("effect").value], null, 2);
-};
-$("input-mode").onchange = () => {
-  $("input-help").textContent =
-    $("input-mode").value === "json"
-      ? "Records and lists are written in place as the step's argument."
-      : 'One canonical Expr, e.g. {"variable":"customer"}. Names resolve in the target scope.';
-};
-$("placement").onchange = () => {
-  const statement = viewOf(workflow).statements[Number($("placement").value)];
-  if (statement) selectStatementKey(key(statement.site), "both");
-};
-$("preview").onclick = () =>
-  action(async () => {
-    plan = undefined;
-    plan = await call("/workflow/plan", { version: workflow.version, operations });
-    renderPane();
-    report(
-      `Preview ready · ${plan.transaction.edits.length} typed edits · saved revision ${workflow.version} unchanged.`,
-    );
-  });
-$("apply").onclick = () =>
-  action(async () => {
-    if (!plan) return;
-    const answer = await call("/workflow/edits", {
-      version: plan.version,
-      edits: plan.transaction.edits,
-    });
-    operations = [];
-    plan = undefined;
-    show(answer.workflow, answer.correspondence);
-    renderQueue();
-    report(
-      `Applied revision ${workflow.version}. Generated statements can now be selected and edited directly.`,
-    );
-  });
-$("clear").onclick = () => {
-  operations = [];
-  invalidate();
-  report("Pending changes cleared.");
-};
+function renderSelection(reveal) { markCode(reveal); }
 $("import").onclick = () =>
   action(async () => {
-    if (operations.length)
-      throw Error("Apply or clear pending changes before importing source.");
     const next = await call("/workflow/source", {
       version: workflow.version,
       source: $("source").value,
       entry: $("entry").value,
     });
-    plan = undefined;
     selected = undefined;
     show(next);
     $("example").value = "";
@@ -380,14 +202,10 @@ async function loadExample(id) {
   const example = examples.find((entry) => entry.id === id);
   if (!example) return;
   await action(async () => {
-    if (operations.length)
-      throw Error("Apply or clear pending changes before loading an example.");
     if (dialect === "python" && example.pythonRefused) setDialect("typescript");
     const next = await call("/workflow/select", { id, dialect });
     selected = undefined;
-    plan = undefined;
     show(next);
-    renderPane();
     fit();
     report(`Loaded ${example.name} · ${dialectName(dialect)}.`);
   });
@@ -450,11 +268,6 @@ function renderExamples() {
   );
   $("example").value = selected;
 }
-for (const button of document.querySelectorAll("[data-tab]"))
-  button.onclick = () => {
-    tab = button.dataset.tab;
-    renderPane();
-  };
 // The run on the canvas and in the trace panel. What it shows comes from
 // the run's events: lash's overlay statuses, coverage and replayed path.
 function resetRun() {
@@ -1164,12 +977,6 @@ function drawNode(node, x, y) {
           report(
             `Connect ${port.name}: choose an input port, or press Escape to cancel.`,
           );
-          if (node.s) {
-            const end = el("button", "end-output", "End here with this output");
-            end.disabled = busy || running;
-            end.onclick = () => openEndStep(node, port);
-            $("result").append(end);
-          }
           document
             .querySelectorAll(".data-port.output")
             .forEach((p) => p.classList.remove("chosen"));
@@ -1459,8 +1266,6 @@ function fields(parent, info, values) {
     );
 }
 async function applyVisual(changes) {
-  if (operations.length)
-    throw Error("Apply or clear the pending changes in Advanced first.");
   const planned = await call("/workflow/plan", {
     version: workflow.version,
     operations: changes,
@@ -1511,7 +1316,8 @@ function newNode(effect) {
       const values = read();
       await applyVisual([
         {
-          insert_effect: {
+          insert_step: {
+            base: workflow.identity,
             at: insertAt,
             effect,
             args: [expression(values)],
@@ -1738,11 +1544,8 @@ function renderInvocationInputs(container) {
     });
   container.append(save);
 }
-function freshBinding(base = "value") {
-  return availableName(workflow, base);
-}
 function replacePort(port, value) {
-  return planInputEdit(workflow, port, value).map((edit) => ({ edit }));
+  return planInputEdit(workflow, port, value);
 }
 function connectPort(port, source) {
   if (busy || running) return;
@@ -1762,6 +1565,13 @@ function openPort(node, port) {
     node.kind === "output" ? "RESULT MAPPING" : "EDIT INPUT",
   );
   identity(container, node.info);
+  if (!port.target) {
+    container.append(el("p", "help", "Edit this code in source, then re-import the document."));
+    const source = el("button", null, "Edit source");
+    source.onclick = () => $("source-editor").showModal();
+    container.append(source);
+    return;
+  }
   container.append(el("h3", null, `${port.name} · ${typeName(port.type)}`));
   const modeLabel = el("label", null, "Value source");
   modeLabel.htmlFor = "mapping-mode";
@@ -1770,7 +1580,6 @@ function openPort(node, port) {
   for (const [value, label] of [
     ["constant", "Constant"],
     ["connection", "Connected value"],
-    ["expression", "Expression (advanced)"],
   ]) {
     const option = el("option", null, label);
     option.value = value;
@@ -1786,14 +1595,12 @@ function openPort(node, port) {
     ? "constant"
     : current >= 0
       ? "connection"
-      : "expression";
+      : "constant";
   container.append(modeLabel, mode);
   const editor = el("div", "mapping-editor");
   container.append(editor);
-  const details = el("details", "promote-value");
   let read;
   function draw() {
-    details.hidden = mode.value !== "constant";
     editor.replaceChildren();
     if (mode.value === "constant") {
       const hostConfig = node.info.fields?.find((f) => f[0] === port.name)?.[3];
@@ -1890,22 +1697,6 @@ function openPort(node, port) {
           );
         return option.expression;
       };
-    } else {
-      const label = el("label", null, "Canonical expression");
-      label.htmlFor = "mapping-expression";
-      const input = el("textarea");
-      input.id = "mapping-expression";
-      input.value = JSON.stringify(port.expression, null, 2);
-      editor.append(
-        label,
-        input,
-        el(
-          "p",
-          "help",
-          "This edits a canonical expression. Library calls remain opaque; the transaction is checked by Lash.",
-        ),
-      );
-      read = () => JSON.parse(input.value);
     }
   }
   mode.onchange = draw;
@@ -1913,81 +1704,7 @@ function openPort(node, port) {
   const save = el("button", "primary save-node", "Save mapping");
   save.onclick = () => action(() => applyVisual(replacePort(port, read())));
   container.append(save);
-  details.append(el("summary", null, "Make this constant a named value"));
-  const nameLabel = el("label", null, "Value name");
-  nameLabel.htmlFor = "value-name";
-  const name = el("input");
-  name.id = "value-name";
-  name.value = freshBinding(
-    port.name.replace(/[^a-zA-Z0-9_]/g, "_") + "_value",
-  );
-  const promote = el("button", "save-node", "Create value node");
-  promote.onclick = () =>
-    action(async () => {
-      const binding = name.value.trim();
-      const changes = planConstantPromotion(workflow, port, read(), binding);
-      await applyVisual(changes.map((edit) => ({ edit })));
-      renderCanvas();
-      report(`Created ${binding}`);
-    });
-  details.append(nameLabel, name, promote);
-  container.append(details);
   renderCanvas();
-  controls();
-}
-
-function openEndStep(node, source) {
-  if (busy || running) return;
-  connecting = undefined;
-  report("");
-  document
-    .querySelectorAll(".data-port.chosen")
-    .forEach((port) => port.classList.remove("chosen"));
-  setFocus(open(focus, itemOf(node)));
-  const container = panel("END HERE");
-  identity(container, node.info);
-  container.append(el("h3", null, `${source.name} · ${typeName(source.type)}`));
-  const label = el("label", null, "End behavior");
-  label.htmlFor = "end-operation";
-  const select = el("select");
-  select.id = "end-operation";
-  for (const [value, text] of [
-    ["finish", "Finish the whole invocation"],
-    ["return", "Return from this function"],
-  ]) {
-    const option = el("option", null, text);
-    option.value = value;
-    select.append(option);
-  }
-  const explanation = el("p", "help");
-  const update = () => {
-    explanation.textContent =
-      select.value === "finish"
-        ? "Insert Finish immediately after this step. Later steps will not run. Inside a nested function, this also ends its caller's invocation. Finish skips finally blocks."
-        : "Insert Return immediately after this step. Ordinary later steps in this function will not run. Enclosing finally blocks still run and can change the result; a nested function's caller can continue.";
-  };
-  select.onchange = update;
-  update();
-  const save = el("button", "primary save-node", "End here with this output");
-  save.onclick = () =>
-    action(() =>
-      applyVisual(
-        planEndAfter(workflow, node, source, select.value).map((edit) => ({
-          edit,
-        })),
-      ),
-    );
-  container.append(
-    label,
-    select,
-    explanation,
-    el(
-      "p",
-      "help",
-      "An immediately following Return or Finish is replaced. Other later statements stay in the document; deleting the terminal step makes them reachable again.",
-    ),
-    save,
-  );
   controls();
 }
 
@@ -2075,22 +1792,6 @@ function openNode(node) {
         ),
       );
     }
-    const returnable = node.outputs.filter(
-      (port) => port.binding !== undefined && !port.discarded && !port.stored,
-    );
-    if (node.s && returnable.length) {
-      container.append(el("h3", null, "End with an output"));
-      for (const port of returnable) {
-        const end = el(
-          "button",
-          "mapping-button",
-          `${port.name} · End here with this output`,
-        );
-        end.setAttribute("aria-label", `End here with ${port.name}`);
-        end.onclick = () => openEndStep(node, port);
-        container.append(end);
-      }
-    }
     if (node.kind === "output" && !node.workflowOutput)
       container.append(
         el(
@@ -2100,27 +1801,6 @@ function openNode(node) {
         ),
       );
     if (node.binding) {
-      const label = el("label", null, "Output name");
-      label.htmlFor = "output-name";
-      const input = el("input");
-      input.id = "output-name";
-      input.value = node.binding.name;
-      const rename = el("button", "save-node", "Rename value");
-      rename.onclick = () =>
-        action(() =>
-          applyVisual([
-            {
-              edit: {
-                rename_variable: {
-                  declared_at: node.binding.site,
-                  name: node.binding.name,
-                  to: input.value.trim(),
-                },
-              },
-            },
-          ]),
-        );
-      container.append(label, input, rename);
       if (node.binding.assigned)
         container.append(
           el(
@@ -2147,23 +1827,17 @@ function openNode(node) {
         el(
           "p",
           "help",
-          "Nested blocks are available from the scope menu. Advanced exposes the complete canonical action.",
+          "Nested blocks are available from the scope menu. Use source to change code outside the canvas operations.",
         ),
       );
-      const advanced = el("button", null, "Open in Advanced");
-      advanced.onclick = () => {
-        $("advanced").showModal();
-        $("replace").click();
-        $("direct-details").open = true;
-      };
-      container.append(advanced);
+
     }
-    if (node.s) {
+    if (node.s && node.kind === "action") {
       const remove = el("button", "danger save-node", "Delete node");
       remove.onclick = () =>
         action(() =>
           applyVisual([
-            { edit: { remove_statement: { statement: node.s.site } } },
+            { remove_step: { base: workflow.identity, action: node.action?.site ?? actionOf(workflow, node.s)?.site } },
           ]),
         );
       container.append(remove);
@@ -2340,7 +2014,6 @@ function setFocus(next, reveal) {
     $("node-panel").hidden = true;
     $("node-form").replaceChildren();
   }
-  renderPlacement();
   renderSelection(reveal);
   applySelection();
   if (reveal === "canvas" || reveal === "both") revealItem(focus.selected);
@@ -2516,7 +2189,7 @@ function setupVisual() {
   };
   window.addEventListener("resize", fit);
   $("close-panel").onclick = () => setFocus(close(focus));
-  $("advanced-button").onclick = () => $("advanced").showModal();
+  $("source-button").onclick = () => $("source-editor").showModal();
   $("history-button").onclick = () => showTrace($("trace").hidden);
   $("trace-toggle").onclick = () => {
     const collapsed = document
@@ -2743,7 +2416,6 @@ $("run").onclick = () => run();
 setupVisual();
 setupCodePane();
 controls();
-renderQueue();
 await action(async () => {
   show(await call("/workflow"));
   examples = await call("/workflows");

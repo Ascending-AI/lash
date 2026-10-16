@@ -368,8 +368,9 @@ async fn open_workflow(
 /// each diagnostic with the edit and the site it is about.
 async fn edit_workflow(
     State(state): State<AppState>,
-    Json(request): Json<EditWorkflowRequest>,
+    request: Result<Json<EditWorkflowRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Json<EditWorkflowResponse>, ErrorResponse> {
+    let Json(request) = request.map_err(authoring_http::unsupported)?;
     let environment = state.environment().await?;
     let _publishing = state.publishing.lock().await;
     let current = state.current();
@@ -400,6 +401,7 @@ async fn edit_workflow(
                             None => serde_json::Value::Null,
                         },
                         "message": diagnostic.kind.to_string(),
+                        "cause": diagnostic.kind, "location": diagnostic.location,
                     })
                 })
                 .collect::<Vec<_>>();

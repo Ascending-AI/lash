@@ -6,8 +6,8 @@
 //! arbitrary JSON: an edit carries no host data.
 
 use lash_kernel_doc::KERNEL_VERSION;
-use lash_kernel_edit::Transaction;
 use lash_kernel_edit::authoring::Operation;
+use lash_kernel_edit::{EditRefusal, Extraction, Transaction};
 use schemars::JsonSchema;
 use serde_json::{Value, json};
 
@@ -17,6 +17,8 @@ fn main() -> Result<(), String> {
     let documents = vec![
         document::<Operation>("kernel-authoring-operation")?,
         document::<Transaction>("kernel-edit-transaction")?,
+        document::<Extraction>("kernel-entry-extraction")?,
+        document::<EditRefusal>("kernel-edit-refusal")?,
     ];
     println!("{}", Value::Array(documents));
     Ok(())

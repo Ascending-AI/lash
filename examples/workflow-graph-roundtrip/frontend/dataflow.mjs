@@ -212,7 +212,7 @@ export function sourceOptions(view, port) {
   return (port.available ?? []).flatMap((id) => {
     const binding = view.bindings.get(id);
     if (!binding) return [];
-    return view.outputPorts(binding).map((output) => ({
+    return view.outputPorts(binding).filter((output) => output.expression?.variable !== undefined).map((output) => ({
       ...output,
       label: `${binding.name}${output.path.length ? "." + output.path.join(".") : ""} · ${typeName(output.type)}${binding.assigned ? " · variable" : ""}`,
     }));
@@ -273,80 +273,37 @@ export function availableName(workflow, base = "value") {
   while (names.has(name)) name = base + "_" + index++;
   return name;
 }
-// One edit: an expression is replaced where it stands, and an action's
-// argument is set to any expression in place, with no temporary. Lash
-// refuses a computed argument for a `do`, `join` or `cancel` action.
+// Build only a closed canvas operation. Source owns arbitrary code changes.
 export function planInputEdit(workflow, port, value) {
-  if (port.target.expression)
-    return [
-      {
-        replace_expression: {
-          expression: port.target.expression,
-          with: value,
-        },
-      },
-    ];
-  return [
-    {
-      set_argument: {
-        action: port.target.action,
-        index: port.target.index,
-        argument: value,
-      },
-    },
-  ];
-}
-
-export function planConstantPromotion(workflow, port, value, name) {
-  if (!constantValue(value).known)
-    throw Error(
-      "Only constants can become named values. Keep connected values and expressions at their original evaluation site.",
-    );
-  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name))
-    throw Error("Use a name starting with a letter or underscore.");
-  if (viewOf(workflow).dataflow.bindings.some((binding) => binding.name === name))
-    throw Error("Choose a new value name.");
-  return [
-    {
-      insert_statement: {
-        at: { block: port.context.block, before: port.context.statement },
-        statement: { let: { name, value: { expr: value } } },
-      },
-    },
-    ...planInputEdit(workflow, port, { variable: name }),
-  ];
-}
-
-// The source remains a normal step. Termination is a separate canonical statement.
-export function planEndAfter(workflow, node, source, operation) {
-  if (!["return", "finish"].includes(operation))
-    throw Error("Choose Return or Finish.");
-  if (
-    !node.s ||
-    !node.outputs.some(
-      (port) =>
-        port.binding === source.binding &&
-        !port.discarded &&
-        !port.stored &&
-        JSON.stringify(port.expression) === JSON.stringify(source.expression),
-    )
-  )
-    throw Error("Choose a named output from this step.");
-  const siblings = statementsIn(workflow, node.s.block);
-  const index = siblings.findIndex(
-    (s) => siteKey(s.site) === siteKey(node.s.site),
-  );
-  if (index < 0) throw Error("The source step is no longer in this document.");
-  const next = siblings[index + 1];
-  const statement = { [operation]: { value: source.expression } };
-  if (next?.statement.return || next?.statement.finish)
-    return [{ replace_statement: { statement: next.site, with: statement } }];
-  return [
-    {
-      insert_statement: {
-        at: { block: node.s.block, ...(next ? { before: next.site } : {}) },
-        statement,
-      },
-    },
-  ];
+  if (!port.target) throw Error("This code requires a source edit. Open Edit source, change it and re-import.");
+  function data(value) {
+    if (value?.literal !== undefined) return !(value.literal && typeof value.literal === "object" && "function" in value.literal);
+    if (typeof value?.variable === "string") return true;
+    for (const kind of ["list", "tuple", "set"]) if (Array.isArray(value?.[kind])) return value[kind].every(data);
+    if (Array.isArray(value?.record)) return value.record.every((entry) => data(entry.value));
+    if (Array.isArray(value?.map)) return value.map.every((entry) => data(entry.key) && data(entry.value));
+    return false;
+  }
+  if (!data(value)) throw Error("This computation requires a source edit. Connect a named value or set data here.");
+  const base = workflow.identity;
+  if (port.target.action) return [{ set_value: { base, target: { tool_argument: { action: port.target.action, index: port.target.index, path: [] } }, value } }];
+  const expression = port.target.expression;
+  const same = (a, b) => siteKey(a) === siteKey(b);
+  const statement = viewOf(workflow).statements.find((s) => same(s.site, port.context.statement));
+  if (statement && expression.path.length === statement.site.path.length + 1 && expression.path.at(-1) === 0 && (statement.statement.if || statement.statement.while)) {
+    return [{ change_condition: { base, statement: statement.site, condition: value } }];
+  }
+  for (const action of viewOf(workflow).dataflow.actions) {
+    if (action.kind !== "perform") continue;
+    for (const [index, arg] of action.args.entries()) {
+      if (!arg.site || JSON.stringify(arg.site.unit) !== JSON.stringify(expression.unit) || !arg.site.path.every((p, i) => p === expression.path[i])) continue;
+      return [{ set_value: { base, target: { tool_argument: { action: action.site, index, path: expression.path.slice(arg.site.path.length) } }, value } }];
+    }
+  }
+  if (statement?.statement.let && same(expression, { ...statement.site, path: [...statement.site.path, 0] })) {
+    return [{ set_value: { base, target: { initializer: { statement: statement.site } }, value } }];
+  }
+  const slot = viewOf(workflow).dataflow.expressions.find((e) => same(e.site, expression));
+  if (slot?.expression.literal !== undefined) return [{ set_value: { base, target: { literal: { expression } }, value } }];
+  throw Error("This code requires a source edit. Open Edit source, change it and re-import.");
 }

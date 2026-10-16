@@ -1,19 +1,15 @@
-//! Laws of the edits. Each pins a named rule of
-//! `docs/kernel/semantics.md`.
-
-use lash_kernel_doc::Correspondence;
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
-
+//! CANVAS and EXTRACT laws for the public boundary.
+use crate::apply::Working;
+use crate::authoring::{Branch, DataValue, Operation, ValueTarget, Wrapper};
+use crate::tree::NodeMut;
+use crate::{Draft, EditDiagnosticKind as Cause, EditRefusal, Position, Transaction};
 use lash_kernel_check::{Environment, RefusalReason};
-use lash_kernel_doc::{
-    Action, Atom, Catch, Datum, Document, EffectName, ErrorDatum, Expr, Function,
-    FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Handle, Integer, Literal,
-    Member, Name, Node, NumberPolicy, Param, Rhs, Signature, Site, Stmt, Timestamp, Type, Unit,
-    parse_definition, parse_document,
-};
-
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes, PageGrant, PageId, PageRef};
+use lash_kernel_doc::{
+    ActExpr, ActKind, Datum, Document, DocumentId, EffectName, ErrorDatum, Expr, FunctionRegistry,
+    Handle, Integer, InvalidReason, Literal, Name, Node, Param, Signature, Site, StatementForm,
+    Stmt, Timestamp, Type, Unit, parse_document, print_document,
+};
 use lash_kernel_state::paged::census_impl::Census;
 use lash_kernel_state::paged::{
     AccountingCertificate, AccountingMetric, AllocationCensus as _, PageAnswer, PageBody,
@@ -22,155 +18,785 @@ use lash_kernel_state::paged::{
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Program, Request, Step, Target,
 };
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
-use crate::apply::Working;
-use crate::tree::NodeMut;
-use crate::{
-    Draft, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal, Location, NodeClass, Position,
-    Transaction,
-};
-
-/// The library the laws run against: a native function, the corrected
-/// definition that replaces it, and a function the environment lacks.
-struct Library {
-    catalog: BTreeMap<FunctionId, FunctionDefinition>,
-    neg: FunctionId,
-    corrected: FunctionId,
-    absent: FunctionId,
-}
-
-fn library() -> Library {
-    let mut catalog = BTreeMap::new();
-    let mut register = |text: &str, held: bool| {
-        let definition = parse_definition(text).unwrap_or_else(|error| panic!("{error}\n{text}"));
-        let function = definition.identity();
-        if held {
-            catalog.insert(function, definition);
-        }
-        function
-    };
-    let neg = register(
-        "function num.neg(x: Number) -> Number\nkernel 1\ncharge 1\nnative\n",
-        true,
-    );
-    let corrected = register(
-        "function num.neg(x: Number) -> Number\nkernel 1\ncharge 2\nnative\n",
-        true,
-    );
-    let absent = register(
-        "function num.neg(x: Number) -> Number\nkernel 1\ncharge 3\nnative\n",
-        false,
-    );
-    Library {
-        catalog,
-        neg,
-        corrected,
-        absent,
-    }
-}
-
-fn document(text: &str) -> Document {
-    parse_document(text).unwrap_or_else(|error| panic!("{error}\n{text}"))
-}
-
-fn name(name: &str) -> Name {
-    Name::new(name)
-}
-
-fn effect(name: &str) -> EffectName {
-    EffectName::new(name).unwrap()
-}
-
-fn text_to_any(param: &str) -> Signature {
-    Signature {
-        params: vec![Param {
-            name: name(param),
-            ty: Type::Text,
-            optional: false,
-        }],
-        result: Type::Any,
-    }
-}
-
-/// An environment that provides `fetch(url: Text) -> Any`,
-/// `notify(text: Text) -> Any` and the library.
-fn environment(library: &Library) -> Environment<'_> {
-    let mut environment = Environment::new(&library.catalog);
-    environment
+fn doc(body: &str) -> Document {
+    let mut document = parse_document(&format!(
+        "kernel 1\nnumbers float\neffect send(value: Any) -> Any\nmain {{ {body} }}"
+    ))
+    .unwrap();
+    let required = lash_kernel_check::requirements(&document, &FunctionRegistry::new());
+    document
+        .manifest
         .effects
-        .insert(effect("fetch"), text_to_any("url"));
-    environment
-        .effects
-        .insert(effect("notify"), text_to_any("text"));
-    environment
+        .retain(|effect, _| required.effects.contains(effect));
+    document
 }
-
-fn main(path: &[u32]) -> Site {
-    Site::new(Unit::Main, path)
+fn site(path: &[u32]) -> Site {
+    Site::new(Unit::Main, path.to_vec())
 }
-
-fn function(function: &str, path: &[u32]) -> Site {
-    Site::new(Unit::Function(name(function)), path)
+fn value(text: &str) -> DataValue {
+    DataValue::Literal(Literal::Text(text.into()))
 }
-
-fn text(text: &str) -> Expr {
-    Expr::Literal(Literal::Text(text.to_string()))
+fn expr(text: &str) -> Expr {
+    Expr::Literal(Literal::Text(text.into()))
 }
-
-fn print(value: &str) -> Stmt {
-    Stmt::Print { value: text(value) }
+fn env(registry: &FunctionRegistry) -> Environment<'_> {
+    let mut env = Environment::new(registry);
+    env.effects.insert(
+        EffectName::new("send").unwrap(),
+        Signature {
+            params: vec![Param {
+                name: Name::new("value"),
+                ty: Type::Any,
+                optional: false,
+            }],
+            result: Type::Any,
+        },
+    );
+    env
 }
-
-fn before(site: Site) -> Position {
-    Position::before(site).unwrap()
-}
-
-/// Every site of `document`, read from the document alone.
-fn sites(document: &Document) -> Vec<Site> {
-    fn walk(node: Node<'_>, site: Site, out: &mut Vec<Site>) {
-        for (index, child) in (0u32..).zip(node.children()) {
-            walk(child, site.child(index), out);
-        }
-        out.push(site);
-    }
-    let mut out = Vec::new();
-    walk(Node::Block(&document.main), main(&[]), &mut out);
-    for (name, function) in &document.functions {
-        let site = Site::new(Unit::Function(name.clone()), []);
-        walk(Node::Block(&function.body), site, &mut out);
-    }
-    out.sort();
-    out
-}
-
-fn open(text: &str) -> Draft {
-    Draft::open(document(text)).unwrap()
-}
-
-fn transaction(draft: &Draft, edits: Vec<Edit>) -> Transaction {
+fn batch(draft: &Draft, edits: Vec<Operation>) -> Transaction {
     Transaction {
         base: draft.identity(),
         edits,
     }
 }
-
-fn refused(draft: &mut Draft, edits: Vec<Edit>, environment: &Environment<'_>) -> EditRefusal {
-    let held = draft.document().clone();
-    let refusal = draft
-        .apply(&transaction(draft, edits), environment)
-        .expect_err("the transaction was published");
-    // `K-EDIT-001`: a refused transaction changes nothing.
-    assert_eq!(&held, draft.document());
-    refusal
+fn rejected(
+    draft: &mut Draft,
+    edits: Vec<Operation>,
+    environment: &Environment<'_>,
+) -> EditRefusal {
+    let held = draft.clone();
+    let error = draft.apply(&batch(draft, edits), environment).unwrap_err();
+    assert_eq!(draft.document(), held.document());
+    assert_eq!(draft.identity(), held.identity());
+    assert_eq!(
+        draft.correspondence_since_open(),
+        held.correspondence_since_open()
+    );
+    // Transport retains the complete cause, including nested checker fields.
+    let json = serde_json::to_string(&error).unwrap();
+    assert_eq!(serde_json::from_str::<EditRefusal>(&json).unwrap(), error);
+    error
+}
+fn insert(base: DocumentId, at: Position, binding: &str) -> Operation {
+    Operation::InsertStep {
+        base,
+        at,
+        effect: EffectName::new("send").unwrap(),
+        args: vec![value("new")],
+        result: Type::Any,
+        binding: Some(Name::new(binding)),
+    }
 }
 
-/// What a run did that its host saw.
-#[derive(Debug, PartialEq)]
-struct Ran {
-    /// Each effect performed, with its arguments, in request order.
-    effects: Vec<(EffectName, Vec<Datum>)>,
-    printed: Vec<Datum>,
-    result: Datum,
+/// CANVAS-CLOSED: raw syntax and the old passthrough cannot decode.
+#[test]
+fn canvas_closed() {
+    let base = doc("").identity();
+    let raw = serde_json::json!({"base": base, "edits": [{"replace_statement": {"statement": {"unit":"main","path":[0]}, "with":{"finish":{"value":{"literal":"null"}}}}}]});
+    assert!(
+        Transaction::from_json(&raw.to_string()).is_err(),
+        "raw statement replacement reached the public edit boundary"
+    );
+    let node = serde_json::json!({"unit": "main", "path": [0]});
+    for retired in [
+        serde_json::json!({"set_label": {"node": node.clone(), "label": {"title": "host"}}}),
+        serde_json::json!({"set_data": {"node": node.clone(), "key": "layout", "value": {"x": 1}}}),
+    ] {
+        assert!(serde_json::from_value::<Operation>(retired.clone()).is_err());
+        assert!(
+            Transaction::from_json(
+                &serde_json::json!({"base": base, "edits": [retired]}).to_string()
+            )
+            .is_err()
+        );
+    }
+    for name in [
+        "replace_statement",
+        "replace_expression",
+        "rename_variable",
+        "rename_function",
+        "rename_entry",
+        "set_entry_signature",
+        "set_effect_signature",
+        "replace_function_identity",
+        "insert_statement",
+        "set_catch",
+        "set_finally",
+        "clone_statement",
+        "edit",
+        "insert_effect",
+    ] {
+        let raw = serde_json::json!({name: {"base":base,"statement":{"unit":"main","path":[0]},"with":{"finish":{"value":{"literal":"null"}}}}});
+        assert!(
+            serde_json::from_value::<Operation>(raw.clone()).is_err(),
+            "{name}"
+        );
+        assert!(
+            Transaction::from_json(&serde_json::json!({"base":base,"edits":[raw]}).to_string())
+                .is_err()
+        );
+    }
+    for executable in [
+        serde_json::json!({"clock":{}}),
+        serde_json::json!({"act": {"kind":"sleep", "args":[]}}),
+        serde_json::json!({"closure":{"params":[],"body":[]}}),
+        serde_json::json!({"call":{"function":"bad","args":[]}}),
+    ] {
+        assert!(serde_json::from_value::<DataValue>(executable).is_err());
+    }
+    let schema = serde_json::to_value(schemars::schema_for!(Operation)).unwrap();
+    let kinds: Vec<_> = schema["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| s["properties"].as_object().unwrap().keys().cloned())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "set_value",
+            "insert_step",
+            "remove_step",
+            "move_step",
+            "wrap_steps",
+            "unwrap_steps",
+            "change_condition"
+        ]
+    );
+    let operation = insert(base, Position::end(site(&[])), "sent");
+    let mut json = serde_json::to_value(operation).unwrap();
+    json["insert_step"]["arbitrary"] = true.into();
+    assert!(serde_json::from_value::<Operation>(json).is_err());
+}
+
+/// CANVAS-VALUE: only data enters value slots; surviving actions keep order and identity.
+#[test]
+fn canvas_value() {
+    let registry = FunctionRegistry::new();
+    let env = env(&registry);
+    let mut draft = Draft::open(doc(r#"let input = "old" let sent = perform send(input) as Any then yield let outer = perform send({a: perform send("child") as Any, b: "before"}) as Any finish sent"#)).unwrap();
+    let base = draft.identity();
+    let applied = draft
+        .apply(
+            &batch(
+                &draft,
+                vec![
+                    Operation::SetValue {
+                        base,
+                        target: ValueTarget::Initializer {
+                            statement: site(&[0]),
+                        },
+                        value: value("new"),
+                    },
+                    Operation::SetValue {
+                        base,
+                        target: ValueTarget::ToolArgument {
+                            action: site(&[1, 0]),
+                            index: 0,
+                            path: vec![],
+                        },
+                        value: DataValue::Variable(Name::new("input")),
+                    },
+                    Operation::SetValue {
+                        base,
+                        target: ValueTarget::ToolArgument {
+                            action: site(&[2, 0]),
+                            index: 0,
+                            path: vec![1],
+                        },
+                        value: DataValue::List(vec![value("after")]),
+                    },
+                    Operation::SetValue {
+                        base,
+                        target: ValueTarget::Literal {
+                            expression: site(&[2, 0, 0, 0, 0]),
+                        },
+                        value: value("changed child"),
+                    },
+                ],
+            ),
+            &env,
+        )
+        .unwrap();
+    for path in [&[1, 0][..], &[2, 0], &[2, 0, 0, 0]] {
+        assert_eq!(
+            applied.correspondence.successor(&site(path)),
+            Some(&site(path))
+        );
+    }
+    for value in [
+        DataValue::List(vec![DataValue::Variable(Name::new("input"))]),
+        DataValue::Variable(Name::new("input")),
+    ] {
+        let base = draft.identity();
+        let applied = draft
+            .apply(
+                &batch(
+                    &draft,
+                    vec![Operation::SetValue {
+                        base,
+                        target: ValueTarget::ToolArgument {
+                            action: site(&[1, 0]),
+                            index: 0,
+                            path: vec![],
+                        },
+                        value,
+                    }],
+                ),
+                &env,
+            )
+            .unwrap();
+        assert_eq!(
+            applied.correspondence.successor(&site(&[1, 0])),
+            Some(&site(&[1, 0]))
+        );
+        // Argument normalization preserves the action's scheduling semantics.
+        match draft.document().node(&site(&[1, 0])).unwrap() {
+            Node::Action(lash_kernel_doc::Action::Perform { then_yield, .. }) => {
+                assert!(*then_yield)
+            }
+            Node::Expr(Expr::Act(act)) => assert!(matches!(
+                act.kind,
+                ActKind::Perform {
+                    then_yield: true,
+                    ..
+                }
+            )),
+            _ => panic!("the perform survives value edits"),
+        }
+        assert_eq!(
+            parse_document(&print_document(draft.document())).unwrap(),
+            *draft.document()
+        );
+    }
+    let current = draft.identity();
+    for target in [
+        ValueTarget::Initializer {
+            statement: site(&[1]),
+        },
+        ValueTarget::Literal {
+            expression: site(&[2, 0]),
+        },
+        ValueTarget::ToolArgument {
+            action: site(&[2, 0]),
+            index: 0,
+            path: vec![],
+        },
+    ] {
+        let error = rejected(
+            &mut draft,
+            vec![Operation::SetValue {
+                base: current,
+                target,
+                value: value("no"),
+            }],
+            &env,
+        );
+        assert_eq!(error.diagnostics[0].kind, Cause::NotValueTarget);
+    }
+    let error = rejected(
+        &mut draft,
+        vec![Operation::SetValue {
+            base: current,
+            target: ValueTarget::Initializer {
+                statement: site(&[0]),
+            },
+            value: DataValue::Variable(Name::new("missing")),
+        }],
+        &env,
+    );
+    assert!(matches!(
+        error.diagnostics[0].kind,
+        Cause::Refused(RefusalReason::UnboundVariable { .. })
+    ));
+    let error = rejected(
+        &mut draft,
+        vec![Operation::SetValue {
+            base,
+            target: ValueTarget::Initializer {
+                statement: site(&[0]),
+            },
+            value: value("stale"),
+        }],
+        &env,
+    );
+    assert!(matches!(error.diagnostics[0].kind, Cause::StaleBase { .. }));
+    let error = rejected(
+        &mut draft,
+        vec![Operation::SetValue {
+            base: current,
+            target: ValueTarget::Initializer {
+                statement: site(&[0]),
+            },
+            value: DataValue::Literal(Literal::Function(Name::new("code"))),
+        }],
+        &env,
+    );
+    assert_eq!(error.diagnostics[0].kind, Cause::ValueOutsideCanvasSet);
+}
+
+/// CANVAS-STEP: exact separable effects move as subtrees, without repairing scope or outputs.
+#[test]
+fn canvas_step() {
+    let registry = FunctionRegistry::new();
+    let env = env(&registry);
+    let mut draft = Draft::open(doc(
+        r#"let a = perform send("a") as Any let b = perform send("b") as Any finish a"#,
+    ))
+    .unwrap();
+    let base = draft.identity();
+    let transaction = batch(
+        &draft,
+        vec![
+            insert(base, Position::before(site(&[2])).unwrap(), "c"),
+            Operation::MoveStep {
+                base,
+                action: site(&[1, 0]),
+                to: Position::before(site(&[0])).unwrap(),
+            },
+        ],
+    );
+    let decoded = Transaction::from_json(&transaction.to_json().unwrap()).unwrap();
+    assert_eq!(decoded, transaction);
+    let applied = draft.apply(&decoded, &env).unwrap();
+    assert_eq!(
+        applied.correspondence.successor(&site(&[1, 0])),
+        Some(&site(&[0, 0]))
+    );
+    assert_eq!(
+        applied.correspondence.successor(&site(&[0, 0])),
+        Some(&site(&[1, 0]))
+    );
+    assert_eq!(applied.correspondence.predecessor(&site(&[2])), None);
+    let base = draft.identity();
+    let error = rejected(
+        &mut draft,
+        vec![Operation::RemoveStep {
+            base,
+            action: site(&[1, 0]),
+        }],
+        &env,
+    );
+    assert!(matches!(
+        error.diagnostics[0].kind,
+        Cause::Refused(RefusalReason::UnboundVariable { .. })
+    ));
+    draft
+        .apply(
+            &batch(
+                &draft,
+                vec![Operation::RemoveStep {
+                    base,
+                    action: site(&[0, 0]),
+                }],
+            ),
+            &env,
+        )
+        .unwrap();
+    for source in [
+        r#"let got = [perform send("nested") as Any] finish got"#,
+        r#"let got = perform send(perform send("nested") as Any) as Any finish got"#,
+        "let got = sleep 1 finish got",
+    ] {
+        let mut draft = Draft::open(doc(source)).unwrap();
+        let base = draft.identity();
+        let error = rejected(
+            &mut draft,
+            vec![Operation::RemoveStep {
+                base,
+                action: site(&[0, 0, 0]),
+            }],
+            &env,
+        );
+        assert!(matches!(
+            error.diagnostics[0].kind,
+            Cause::NonSeparableStep | Cause::NoSuchNode
+        ));
+    }
+    let mut receiver_source =
+        doc(r#"let target = {} set target.field = perform send("rhs") as Any"#);
+    let Stmt::Assign {
+        place: lash_kernel_doc::Place::Member(lash_kernel_doc::Member::Field { target, .. }),
+        ..
+    } = &mut receiver_source.main[1]
+    else {
+        unreachable!()
+    };
+    *target = Expr::Act(Box::new(ActExpr {
+        kind: ActKind::Perform {
+            effect: EffectName::new("send").unwrap(),
+            result: Type::Any,
+            then_yield: false,
+        },
+        args: vec![expr("receiver")],
+    }));
+    let mut receiver = Draft::open(receiver_source).unwrap();
+    let base = receiver.identity();
+    let error = rejected(
+        &mut receiver,
+        vec![Operation::RemoveStep {
+            base,
+            action: site(&[1, 1]),
+        }],
+        &env,
+    );
+    assert_eq!(error.diagnostics[0].kind, Cause::NonSeparableStep);
+    let mut scoped = Draft::open(doc(
+        r#"if true { let x = "inner" let sent = perform send(x) as Any } finish null"#,
+    ))
+    .unwrap();
+    let base = scoped.identity();
+    let error = rejected(
+        &mut scoped,
+        vec![Operation::MoveStep {
+            base,
+            action: site(&[0, 1, 1, 0]),
+            to: Position::end(site(&[])),
+        }],
+        &env,
+    );
+    assert!(matches!(
+        error.diagnostics[0].kind,
+        Cause::Refused(RefusalReason::UnboundVariable { .. })
+    ));
+    let mut shadowed = Draft::open(doc(r#"let x = "outer" let sent = perform send(x) as Any if true { let x = "inner" } finish null"#)).unwrap();
+    let base = shadowed.identity();
+    let error = rejected(
+        &mut shadowed,
+        vec![Operation::MoveStep {
+            base,
+            action: site(&[1, 0]),
+            to: Position::end(site(&[2, 1])),
+        }],
+        &env,
+    );
+    assert_eq!(error.diagnostics[0].kind, Cause::EscapingBinding);
+    let mut nested = Draft::open(doc(r#"if true { do perform send("x") as Any }"#)).unwrap();
+    let base = nested.identity();
+    let error = rejected(
+        &mut nested,
+        vec![Operation::MoveStep {
+            base,
+            action: site(&[0, 0]),
+            to: Position::end(site(&[0, 1])),
+        }],
+        &env,
+    );
+    assert_eq!(error.diagnostics[0].kind, Cause::IntoItself);
+}
+
+/// CANVAS-WRAP: wrappers preserve children and discard only empty arms.
+#[test]
+fn canvas_wrap() {
+    let registry = FunctionRegistry::new();
+    let env = env(&registry);
+    for wrapper in [
+        Wrapper::If {
+            condition: Expr::Literal(Literal::Bool(true)),
+        },
+        Wrapper::For {
+            binding: Name::new("item"),
+            iterable: Expr::List(vec![expr("x")]),
+        },
+        Wrapper::Try {
+            catch_binding: Name::new("error"),
+        },
+    ] {
+        let original =
+            doc(r#"do perform send("a") as Any do perform send("b") as Any finish null"#);
+        let mut draft = Draft::open(original.clone()).unwrap();
+        let base = draft.identity();
+        let body = if matches!(wrapper, Wrapper::Try { .. }) {
+            0
+        } else {
+            1
+        };
+        let branch = if matches!(wrapper, Wrapper::If { .. }) {
+            Branch::Then
+        } else {
+            Branch::Body
+        };
+        let applied = draft
+            .apply(
+                &batch(
+                    &draft,
+                    vec![Operation::WrapSteps {
+                        base,
+                        first: site(&[0, 0]),
+                        last: site(&[1, 0]),
+                        wrapper,
+                    }],
+                ),
+                &env,
+            )
+            .unwrap();
+        assert_eq!(
+            applied.correspondence.successor(&site(&[0, 0])),
+            Some(&site(&[0, body, 0, 0]))
+        );
+        assert_eq!(
+            applied.correspondence.successor(&site(&[1, 0])),
+            Some(&site(&[0, body, 1, 0]))
+        );
+        let base = draft.identity();
+        draft
+            .apply(
+                &batch(
+                    &draft,
+                    vec![Operation::UnwrapSteps {
+                        base,
+                        wrapper: site(&[0]),
+                        branch,
+                    }],
+                ),
+                &env,
+            )
+            .unwrap();
+        assert_eq!(draft.document(), &original);
+        assert_eq!(
+            draft.correspondence_since_open().successor(&site(&[0, 0])),
+            Some(&site(&[0, 0]))
+        );
+    }
+    for (source, branch, cause) in [
+        (
+            r#"if true { do perform send("keep") as Any } else { print 1 }"#,
+            Branch::Then,
+            Cause::NonEmptyDiscardedArm,
+        ),
+        (
+            r#"try { do perform send("keep") as Any } catch error { print error }"#,
+            Branch::Body,
+            Cause::NonEmptyDiscardedArm,
+        ),
+        (
+            r#"try { } finally { print 1 }"#,
+            Branch::Body,
+            Cause::NonEmptyDiscardedArm,
+        ),
+        (
+            r#"for item in [1] { do perform send(item) as Any }"#,
+            Branch::Body,
+            Cause::EscapingBinding,
+        ),
+        (
+            "for item in [1] { break }",
+            Branch::Body,
+            Cause::ControlTargetLost,
+        ),
+        (
+            "for item in [1] { if true { continue } }",
+            Branch::Body,
+            Cause::ControlTargetLost,
+        ),
+        ("while true {}", Branch::Body, Cause::UnsupportedCanvasEdit),
+        (
+            r#"for item in perform send(1) as Any {}"#,
+            Branch::Body,
+            Cause::ActionInHeader,
+        ),
+    ] {
+        let mut draft = Draft::open(doc(source)).unwrap();
+        let base = draft.identity();
+        let error = rejected(
+            &mut draft,
+            vec![Operation::UnwrapSteps {
+                base,
+                wrapper: site(&[0]),
+                branch,
+            }],
+            &env,
+        );
+        assert_eq!(error.diagnostics[0].kind, cause);
+    }
+    let mut local = Draft::open(doc(
+        "for item in [1] { let item = 2 print item for nested in [1] { break } }",
+    ))
+    .unwrap();
+    let base = local.identity();
+    local
+        .apply(
+            &batch(
+                &local,
+                vec![Operation::UnwrapSteps {
+                    base,
+                    wrapper: site(&[0]),
+                    branch: Branch::Body,
+                }],
+            ),
+            &env,
+        )
+        .unwrap();
+    for wrapper in [
+        Wrapper::If {
+            condition: expr("wrong"),
+        },
+        Wrapper::For {
+            binding: Name::new("item"),
+            iterable: Expr::Literal(Literal::Bool(true)),
+        },
+    ] {
+        let mut draft = Draft::open(doc(r#"do perform send("a") as Any"#)).unwrap();
+        let base = draft.identity();
+        let error = rejected(
+            &mut draft,
+            vec![Operation::WrapSteps {
+                base,
+                first: site(&[0, 0]),
+                last: site(&[0, 0]),
+                wrapper,
+            }],
+            &env,
+        );
+        assert!(matches!(
+            error.diagnostics[0].kind,
+            Cause::Refused(RefusalReason::ArgumentType { .. })
+        ));
+    }
+    let mut draft = Draft::open(doc(
+        r#"do perform send("a") as Any print 1 do perform send("b") as Any"#,
+    ))
+    .unwrap();
+    let base = draft.identity();
+    let error = rejected(
+        &mut draft,
+        vec![Operation::WrapSteps {
+            base,
+            first: site(&[0, 0]),
+            last: site(&[2, 0]),
+            wrapper: Wrapper::Try {
+                catch_binding: Name::new("error"),
+            },
+        }],
+        &env,
+    );
+    assert_eq!(error.diagnostics[0].kind, Cause::NotContiguousSteps);
+    let mut draft = Draft::open(doc(
+        r#"do perform send("a") as Any if true { do perform send("b") as Any }"#,
+    ))
+    .unwrap();
+    let base = draft.identity();
+    let error = rejected(
+        &mut draft,
+        vec![Operation::WrapSteps {
+            base,
+            first: site(&[0, 0]),
+            last: site(&[1, 1, 0, 0]),
+            wrapper: Wrapper::Try {
+                catch_binding: Name::new("error"),
+            },
+        }],
+        &env,
+    );
+    assert_eq!(error.diagnostics[0].kind, Cause::NotContiguousSteps);
+}
+
+/// CANVAS-CONDITION: if/while headers cannot add or erase action sites.
+#[test]
+fn canvas_condition() {
+    let registry = FunctionRegistry::new();
+    let env = env(&registry);
+    let mut draft =
+        Draft::open(doc("let flag = true if flag {} while false {} finish null")).unwrap();
+    let base = draft.identity();
+    draft
+        .apply(
+            &batch(
+                &draft,
+                vec![
+                    Operation::ChangeCondition {
+                        base,
+                        statement: site(&[1]),
+                        condition: Expr::Literal(Literal::Bool(false)),
+                    },
+                    Operation::ChangeCondition {
+                        base,
+                        statement: site(&[2]),
+                        condition: Expr::Variable(Name::new("flag")),
+                    },
+                ],
+            ),
+            &env,
+        )
+        .unwrap();
+    let base = draft.identity();
+    let error = rejected(
+        &mut draft,
+        vec![Operation::ChangeCondition {
+            base,
+            statement: site(&[1]),
+            condition: Expr::Variable(Name::new("missing")),
+        }],
+        &env,
+    );
+    assert!(matches!(
+        error.diagnostics[0].kind,
+        Cause::Refused(RefusalReason::UnboundVariable { .. })
+    ));
+    let error = rejected(
+        &mut draft,
+        vec![Operation::ChangeCondition {
+            base,
+            statement: site(&[1]),
+            condition: expr("wrong"),
+        }],
+        &env,
+    );
+    assert!(matches!(
+        error.diagnostics[0].kind,
+        Cause::Refused(RefusalReason::ArgumentType { .. })
+    ));
+    // A literal slot or its binding cannot bypass condition admission.
+    for expression in [site(&[1, 0]), site(&[0, 0])] {
+        let error = rejected(
+            &mut draft,
+            vec![Operation::SetValue {
+                base,
+                target: ValueTarget::Literal { expression },
+                value: value("not a boolean"),
+            }],
+            &env,
+        );
+        assert!(matches!(
+            error.diagnostics[0].kind,
+            Cause::Refused(RefusalReason::ArgumentType { .. })
+        ));
+    }
+    let mut action_header = Draft::open(doc(r#"if perform send("test") as Bool {}"#)).unwrap();
+    let base = action_header.identity();
+    let error = rejected(
+        &mut action_header,
+        vec![Operation::ChangeCondition {
+            base,
+            statement: site(&[0]),
+            condition: Expr::Literal(Literal::Bool(true)),
+        }],
+        &env,
+    );
+    assert_eq!(error.diagnostics[0].kind, Cause::ActionInHeader);
+    let condition = Expr::Act(Box::new(ActExpr {
+        kind: ActKind::Perform {
+            effect: EffectName::new("send").unwrap(),
+            result: Type::Bool,
+            then_yield: false,
+        },
+        args: vec![expr("test")],
+    }));
+    let base = draft.identity();
+    let error = rejected(
+        &mut draft,
+        vec![Operation::ChangeCondition {
+            base,
+            statement: site(&[1]),
+            condition,
+        }],
+        &env,
+    );
+    assert_eq!(error.diagnostics[0].kind, Cause::ActionInHeader);
 }
 
 #[derive(Default)]
@@ -239,14 +865,26 @@ impl PageSource for Pages {
     }
 }
 
-/// Runs `document`'s `main` on the kernel machine to its end, answering
-/// every effect with `answer`.
-fn run(document: &Document, answer: &Datum) -> Ran {
-    let program = Program {
-        release: PageId([8; 32]),
-        document: Arc::new(document.clone()),
-        library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
-    };
+/// CANVAS-ATOMIC: refusals leave the draft intact; editing never retargets a parked run.
+#[test]
+fn canvas_atomic() {
+    let registry = FunctionRegistry::new();
+    let environment = env(&registry);
+    let original = doc(r#"let sent = perform send("wait") as Any finish "old""#);
+    let mut draft = Draft::open(original.clone()).unwrap();
+    let base = draft.identity();
+    let error = rejected(
+        &mut draft,
+        vec![
+            insert(base, Position::before(site(&[1])).unwrap(), "added"),
+            Operation::RemoveStep {
+                base,
+                action: site(&[88]),
+            },
+        ],
+        &environment,
+    );
+    assert_eq!(error.diagnostics[0].edit, Some(1));
     let bounds = Bounds {
         charge: 1_000_000,
         memory: 1 << 20,
@@ -254,14 +892,6 @@ fn run(document: &Document, answer: &Datum) -> Ran {
         live_tasks: 4,
         requests_per_park: 4,
         join_members: 4,
-    };
-    let start = CellStart {
-        owner: PageId([9; 32]),
-        target: Target::Main,
-        args: Vec::new(),
-        session: None,
-        modes: Default::default(),
-        host: Vec::new(),
     };
     let census = Census::restore(
         AccountingCertificate {
@@ -273,1080 +903,319 @@ fn run(document: &Document, answer: &Datum) -> Ran {
         LogicalBytes(bounds.memory),
     )
     .unwrap();
+    let program = Program {
+        release: PageId([8; 32]),
+        document: Arc::new(original.clone()),
+        library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
+    };
     let mut machine = KernelMachine::start(
         program,
         bounds,
-        start,
+        CellStart {
+            owner: PageId([9; 32]),
+            target: Target::Main,
+            args: vec![],
+            session: None,
+            modes: Default::default(),
+            host: vec![],
+        },
         Box::new(Pages::default()),
         Box::new(census),
     )
     .unwrap();
     let mut host = Printer::default();
-    let mut effects = Vec::new();
-    loop {
-        match machine.run(&mut host, u64::MAX).unwrap() {
-            Step::Parked(park) => {
-                for request in park.requests {
-                    let Request::Effect(request) = request else {
-                        panic!("the document sleeps");
-                    };
-                    effects.push((request.effect, request.args));
-                    machine
-                        .deliver(request.wait, Outcome::Completed(answer.clone()))
-                        .unwrap();
-                }
-            }
-            Step::Slice => {}
-            Step::Ended(End::Finished(finished)) => {
-                return Ran {
-                    effects,
-                    printed: host.printed,
-                    result: finished.result,
-                };
-            }
-            Step::Ended(end) => panic!("the run ended with {end:?}"),
-        }
-    }
-}
-
-/// A document in the shape a front end emits: every operand of a
-/// statement-position form is hoisted to a temporary first, in evaluation
-/// order (`K-EVAL-001`).
-const LOWERED: &str = r#"kernel 1
-numbers float
-effect fetch(url: Text) -> Any
-effect notify(text: Text) -> Any
-
-main {
-  let t1 = "https://a"
-  let page = perform fetch(t1) as Any
-  let t2 = page.ok
-  if t2 {
-    let t3 = "done"
-    do perform notify(t3) as Any
-  }
-  finish page
-}
-"#;
-
-/// Gate 3 of the design (§11), `K-EDIT-001` to `K-EDIT-003`: a host that
-/// links no dialect changes an effect argument, inserts a statement and
-/// replaces a condition with typed edits alone, and the document it gets
-/// admits, runs on the kernel machine and does what the edits say.
-#[test]
-fn a_host_with_no_dialect_changes_an_argument_inserts_a_statement_and_replaces_a_condition() {
-    let library = library();
-    let environment = environment(&library);
-    let mut draft = open(LOWERED);
-    let quoted = |text: &str| Datum::Text(text.to_string());
-    let page = Datum::Record(vec![
-        ("ok".to_string(), Datum::Bool(true)),
-        ("ready".to_string(), Datum::Bool(false)),
-    ]);
-    // As lowered: it fetches `a` and, the page being ok, notifies.
-    assert_eq!(
-        run(draft.document(), &page),
-        Ran {
-            effects: vec![
-                (effect("fetch"), vec![quoted("https://a")]),
-                (effect("notify"), vec![quoted("done")]),
-            ],
-            printed: vec![],
-            result: page.clone(),
-        }
-    );
-
-    let edits = vec![
-        Edit::SetArgument {
-            action: main(&[1, 0]),
-            index: 0,
-            argument: Expr::Literal(Literal::Text("https://b".to_string())),
-        },
-        Edit::InsertStatement {
-            at: before(main(&[3])),
-            statement: Stmt::Print {
-                value: Expr::Variable(name("page")),
-            },
-        },
-        Edit::SetCondition {
-            statement: main(&[3]),
-            condition: Expr::Member(Box::new(Member::Field {
-                target: Expr::Variable(name("page")),
-                field: "ready".to_string(),
-            })),
-        },
-    ];
-    let applied = draft
-        .apply(&transaction(&draft, edits), &environment)
-        .unwrap();
-
-    let expected = document(
-        r#"kernel 1
-numbers float
-effect fetch(url: Text) -> Any
-effect notify(text: Text) -> Any
-
-main {
-  let t1 = "https://a"
-  let page = perform fetch("https://b") as Any
-  let t2 = page.ok
-  print page
-  if page.ready {
-    let t3 = "done"
-    do perform notify(t3) as Any
-  }
-  finish page
-}
-"#,
-    );
-    assert_eq!(draft.document(), &expected);
-    assert_eq!(applied.admitted.identity, expected.identity());
-    assert_eq!(draft.identity(), applied.admitted.identity);
-    // As edited: it fetches `b`, prints the page and, the page not being
-    // ready, does not notify.
-    assert_eq!(
-        run(draft.document(), &page),
-        Ran {
-            effects: vec![(effect("fetch"), vec![quoted("https://b")])],
-            printed: vec![page.clone()],
-            result: page,
-        }
-    );
-    // The `perform` a parked run would be waiting at is the same node.
-    let perform = applied.correspondence.survivor(&main(&[1, 0])).unwrap();
-    assert_eq!((&perform.to, perform.edited), (&main(&[1, 0]), true));
-    // The `if` moved down by the inserted statement.
-    assert_eq!(
-        applied.correspondence.successor(&main(&[3])),
-        Some(&main(&[4]))
-    );
-}
-
-/// The document the correspondence law edits: every kind of node an edit
-/// names.
-fn subject(library: &Library) -> String {
-    format!(
-        r#"kernel 1
-numbers float
-effect fetch(url: Text) -> Any
-use num.neg = @{neg}
-entry start(n: Int) -> Any
-
-fn start(n) {{
-  return n
-}}
-
-fn helper(n) {{
-  return n
-}}
-
-main {{
-  let a = num.neg(1)
-  if a {{
-    print "then"
-  }}
-  let b = [a, 2]
-  try {{
-    print b
-  }} catch e {{
-    print e
-  }}
-  let r = perform fetch("u") as Any
-  let k = call start(a)
-  finish r
-}}
-"#,
-        neg = library.neg,
-    )
-}
-
-/// What a case expects of the nodes under a site of the base.
-enum Fate {
-    /// The node and everything under it is gone.
-    Gone(Site),
-    /// The node and everything under it is at this site now.
-    Moved(Site, Site),
-}
-
-fn fate(rules: &[Fate], site: &Site) -> Option<Site> {
-    let under = |prefix: &Site| site.unit == prefix.unit && site.path.starts_with(&prefix.path);
-    for rule in rules {
-        match rule {
-            Fate::Gone(prefix) if under(prefix) => return None,
-            Fate::Moved(from, to) if under(from) => {
-                let mut path = to.path.clone();
-                path.extend(&site.path[from.path.len()..]);
-                return Some(Site::new(to.unit.clone(), path));
-            }
-            _ => {}
-        }
-    }
-    Some(site.clone())
-}
-
-/// `main`'s statements `first..=last` each move by `by`.
-fn shifted(first: u32, last: u32, by: i32) -> Vec<Fate> {
-    (first..=last)
-        .map(|index| {
-            Fate::Moved(
-                main(&[index]),
-                main(&[index.checked_add_signed(by).unwrap()]),
-            )
-        })
-        .collect()
-}
-
-struct Case {
-    edit: Edit,
-    /// The first rule a site is under decides it; a site under none stays
-    /// where it is.
-    fates: Vec<Fate>,
-    /// The base sites of the nodes an edit wrote.
-    edited: Vec<Site>,
-}
-
-fn case(edit: Edit, fates: Vec<Fate>, edited: &[Site]) -> Case {
-    Case {
-        edit,
-        fates,
-        edited: edited.to_vec(),
-    }
-}
-
-fn cases(library: &Library) -> Vec<Case> {
-    let any = Signature {
-        params: vec![Param {
-            name: name("n"),
-            ty: Type::Any,
-            optional: false,
-        }],
-        result: Type::Any,
+    let Step::Parked(park) = machine.run(&mut host, u64::MAX).unwrap() else {
+        panic!("the effect parks")
     };
-    let returns = |value: &str| Function {
-        params: vec![name("n")],
-        body: vec![Stmt::Return { value: text(value) }],
-    };
-    let mut removed = vec![Fate::Gone(main(&[1]))];
-    removed.extend(shifted(2, 6, -1));
-    let mut move_into_try = vec![Fate::Moved(main(&[1]), main(&[2, 0, 1]))];
-    move_into_try.extend(shifted(2, 6, -1));
-    vec![
-        case(
-            Edit::InsertStatement {
-                at: before(main(&[1])),
-                statement: print("new"),
-            },
-            shifted(1, 6, 1),
-            &[],
-        ),
-        case(
-            Edit::RemoveStatement {
-                statement: main(&[1]),
-            },
-            removed,
-            &[],
-        ),
-        // Into a block that the removal itself shifts.
-        case(
-            Edit::MoveStatement {
-                statement: main(&[1]),
-                to: Position::end(main(&[3, 0])),
-            },
-            move_into_try,
-            &[],
-        ),
-        case(
-            Edit::CloneStatement {
-                statement: main(&[1]),
-                to: before(main(&[2])),
-            },
-            shifted(2, 6, 1),
-            &[],
-        ),
-        case(
-            Edit::ReplaceStatement {
-                statement: main(&[1]),
-                with: print("replaced"),
-            },
-            vec![
-                Fate::Gone(main(&[1, 0])),
-                Fate::Gone(main(&[1, 1])),
-                Fate::Gone(main(&[1, 2])),
-            ],
-            &[main(&[1])],
-        ),
-        case(
-            Edit::ReplaceExpression {
-                expression: main(&[2, 0]),
-                with: Expr::List(vec![text("only")]),
-            },
-            vec![Fate::Gone(main(&[2, 0, 0])), Fate::Gone(main(&[2, 0, 1]))],
-            &[main(&[2, 0])],
-        ),
-        case(
-            Edit::ReplaceAction {
-                action: main(&[4, 0]),
-                with: Action::Perform {
-                    effect: effect("fetch"),
-                    args: vec![Atom::Literal(Literal::Text("w".to_string()))],
-                    result: Type::Any,
-                    then_yield: false,
-                },
-            },
-            vec![],
-            &[main(&[4, 0])],
-        ),
-        case(
-            Edit::SetArgument {
-                action: main(&[4, 0]),
-                index: 0,
-                argument: Expr::Literal(Literal::Text("v".to_string())),
-            },
-            vec![],
-            &[main(&[4, 0])],
-        ),
-        case(
-            Edit::SetCondition {
-                statement: main(&[1]),
-                condition: Expr::Literal(Literal::Bool(true)),
-            },
-            vec![],
-            &[main(&[1, 0])],
-        ),
-        case(
-            Edit::SetCatch {
-                statement: main(&[3]),
-                catch: Some(Catch {
-                    binding: name("error"),
-                    body: vec![print("caught")],
-                }),
-            },
-            vec![Fate::Gone(main(&[3, 1]))],
-            &[main(&[3])],
-        ),
-        case(
-            Edit::SetFinally {
-                statement: main(&[3]),
-                finally: Some(vec![print("after")]),
-            },
-            vec![],
-            &[main(&[3])],
-        ),
-        case(
-            Edit::RenameVariable {
-                declared_at: main(&[2]),
-                name: name("b"),
-                to: name("c"),
-            },
-            vec![],
-            &[main(&[2]), main(&[3, 0, 0, 0])],
-        ),
-        case(
-            Edit::InsertFunction {
-                name: name("extra"),
-                function: returns("extra"),
-            },
-            vec![],
-            &[],
-        ),
-        case(
-            Edit::RemoveFunction {
-                name: name("helper"),
-            },
-            vec![Fate::Gone(function("helper", &[]))],
-            &[],
-        ),
-        case(
-            Edit::ReplaceFunction {
-                name: name("helper"),
-                function: returns("replaced"),
-            },
-            vec![Fate::Gone(function("helper", &[0]))],
-            &[function("helper", &[])],
-        ),
-        case(
-            Edit::RenameFunction {
-                from: name("helper"),
-                to: name("assistant"),
-            },
-            vec![Fate::Moved(
-                function("helper", &[]),
-                function("assistant", &[]),
-            )],
-            &[],
-        ),
-        case(
-            Edit::SetPrivateBindings {
-                names: BTreeSet::from([name("a")]),
-            },
-            vec![],
-            &[],
-        ),
-        case(
-            Edit::InsertEntry {
-                function: name("helper"),
-                signature: any.clone(),
-            },
-            vec![],
-            &[],
-        ),
-        case(
-            Edit::RemoveEntry {
-                function: name("start"),
-            },
-            vec![],
-            &[],
-        ),
-        // The call of the entry is written; its body moves to the new unit.
-        case(
-            Edit::RenameEntry {
-                from: name("start"),
-                to: name("begin"),
-            },
-            vec![Fate::Moved(function("start", &[]), function("begin", &[]))],
-            &[main(&[5, 0])],
-        ),
-        case(
-            Edit::SetEntrySignature {
-                function: name("start"),
-                signature: any,
-            },
-            vec![],
-            &[],
-        ),
-        case(
-            Edit::SetEffectSignature {
-                effect: effect("fetch"),
-                signature: text_to_any("address"),
-            },
-            vec![],
-            &[],
-        ),
-        case(
-            Edit::SetNumberPolicy {
-                numbers: NumberPolicy::BySpelling,
-            },
-            vec![],
-            &[],
-        ),
-        case(
-            Edit::ReplaceFunctionIdentity {
-                from: library.neg,
-                to: library.corrected,
-            },
-            vec![],
-            &[main(&[0, 0])],
-        ),
-    ]
-}
-
-/// The edit's kind. The match is exhaustive, so a new edit kind does not
-/// compile until it is named here and given a case.
-fn kind(edit: &Edit) -> &'static str {
-    match edit {
-        Edit::InsertStatement { .. } => "insert_statement",
-        Edit::RemoveStatement { .. } => "remove_statement",
-        Edit::MoveStatement { .. } => "move_statement",
-        Edit::CloneStatement { .. } => "clone_statement",
-        Edit::ReplaceStatement { .. } => "replace_statement",
-        Edit::ReplaceExpression { .. } => "replace_expression",
-        Edit::ReplaceAction { .. } => "replace_action",
-        Edit::SetArgument { .. } => "set_argument",
-        Edit::SetCondition { .. } => "set_condition",
-        Edit::SetCatch { .. } => "set_catch",
-        Edit::SetFinally { .. } => "set_finally",
-        Edit::RenameVariable { .. } => "rename_variable",
-        Edit::InsertFunction { .. } => "insert_function",
-        Edit::RemoveFunction { .. } => "remove_function",
-        Edit::ReplaceFunction { .. } => "replace_function",
-        Edit::RenameFunction { .. } => "rename_function",
-        Edit::SetPrivateBindings { .. } => "set_private_bindings",
-        Edit::InsertEntry { .. } => "insert_entry",
-        Edit::RemoveEntry { .. } => "remove_entry",
-        Edit::RenameEntry { .. } => "rename_entry",
-        Edit::SetEntrySignature { .. } => "set_entry_signature",
-        Edit::SetEffectSignature { .. } => "set_effect_signature",
-        Edit::SetNumberPolicy { .. } => "set_number_policy",
-        Edit::ReplaceFunctionIdentity { .. } => "replace_function_identity",
-    }
-}
-
-const EDIT_KINDS: usize = 24;
-
-/// `K-EDIT-004`: after each kind of edit, every node of the base that
-/// survives maps to the node it became and to no other, a node that does
-/// not survive maps to nothing, and the nodes marked edited are the ones
-/// the edit wrote.
-#[test]
-fn after_each_edit_kind_every_surviving_node_maps_to_its_successor_and_no_other() {
-    let library = library();
-    let environment = environment(&library);
-    let subject = subject(&library);
-    let base = document(&subject);
-    let cases = cases(&library);
-    let kinds: BTreeSet<&str> = cases.iter().map(|case| kind(&case.edit)).collect();
-    assert_eq!(kinds.len(), EDIT_KINDS, "an edit kind has no case");
-
-    for case in cases {
-        let kind = kind(&case.edit);
-        let mut draft = open(&subject);
-        let applied = draft
-            .apply(&transaction(&draft, vec![case.edit]), &environment)
-            .unwrap_or_else(|refusal| panic!("{kind}: {refusal}"));
-
-        let expected: Vec<(Site, Site, bool)> = sites(&base)
-            .into_iter()
-            .filter_map(|site| {
-                let to = fate(&case.fates, &site)?;
-                let edited = case.edited.contains(&site);
-                Some((site, to, edited))
-            })
-            .collect();
-        let found: Vec<(Site, Site, bool)> = applied
-            .correspondence
-            .entries()
-            .iter()
-            .map(|entry| (entry.from.clone(), entry.to.clone(), entry.edited))
-            .collect();
-        assert_eq!(found, expected, "{kind}");
-
-        // Every successor is a node of the result, and no two nodes share
-        // one.
-        let result = sites(draft.document());
-        let successors: BTreeSet<&Site> = found.iter().map(|(_, to, _)| to).collect();
-        assert_eq!(successors.len(), found.len(), "{kind}");
-        assert!(successors.iter().all(|to| result.contains(to)), "{kind}");
-        assert_eq!(applied.correspondence.base, base.identity());
-        assert_eq!(applied.correspondence.result, draft.identity(), "{kind}");
-    }
-}
-
-/// `K-EDIT-002`: a statement moved later in its own block lands ahead of
-/// the statement the position named, counted after it is taken out; a
-/// statement cannot move into itself.
-#[test]
-fn a_move_lands_where_its_position_says_and_never_inside_itself() {
-    let library = library();
-    let environment = environment(&library);
-    let mut draft = open(&subject(&library));
-    let applied = draft
+    let registry = FunctionRegistry::new();
+    let environment = env(&registry);
+    draft
         .apply(
-            &transaction(
+            &batch(
                 &draft,
-                vec![Edit::MoveStatement {
-                    statement: main(&[1]),
-                    to: before(main(&[4])),
-                }],
-            ),
-            &environment,
-        )
-        .unwrap();
-    let successor = |index: u32| applied.correspondence.successor(&main(&[index])).cloned();
-    assert_eq!(
-        [1, 2, 3, 4].map(successor),
-        [3, 1, 2, 4].map(|index| Some(main(&[index])))
-    );
-
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::MoveStatement {
-            statement: main(&[2]),
-            to: Position::end(main(&[2, 0])),
-        }],
-        &environment,
-    );
-    assert_eq!(
-        refusal.diagnostics,
-        vec![EditDiagnostic {
-            edit: Some(0),
-            location: Some(Location::Base(main(&[2]))),
-            kind: EditDiagnosticKind::IntoItself,
-        }]
-    );
-}
-
-/// `K-EDIT-010`: a transaction that holds every kind of edit, and the
-/// correspondence it publishes, are the same values after a trip through
-/// JSON; an unknown member is refused.
-#[test]
-fn a_transaction_and_its_correspondence_round_trip_through_json() {
-    let library = library();
-    let environment = environment(&library);
-    let draft = open(&subject(&library));
-    let transaction = transaction(
-        &draft,
-        cases(&library).into_iter().map(|case| case.edit).collect(),
-    );
-    let json = transaction.to_json().unwrap();
-    assert_eq!(Transaction::from_json(&json).unwrap(), transaction);
-    // Clearing a clause is written by leaving it out.
-    let cleared = Edit::SetCatch {
-        statement: main(&[3]),
-        catch: None,
-    };
-    let json = serde_json::to_string(&cleared).unwrap();
-    assert_eq!(
-        json,
-        r#"{"set_catch":{"statement":{"unit":"main","path":[3]}}}"#
-    );
-    assert_eq!(serde_json::from_str::<Edit>(&json).unwrap(), cleared);
-
-    let unknown = r#"{"remove_statement":{"statement":{"unit":"main","path":[3]},"force":true}}"#;
-    assert!(serde_json::from_str::<Edit>(unknown).is_err());
-    let unknown = format!(r#"{{"base":"{}","edits":[],"note":1}}"#, draft.identity());
-    assert!(Transaction::from_json(&unknown).is_err());
-
-    let mut edited = draft.clone();
-    let applied = edited
-        .apply(
-            &Transaction {
-                base: draft.identity(),
-                edits: vec![Edit::RemoveStatement {
-                    statement: main(&[1]),
-                }],
-            },
-            &environment,
-        )
-        .unwrap();
-    let json = serde_json::to_string(&applied.correspondence).unwrap();
-    assert_eq!(
-        serde_json::from_str::<Correspondence>(&json).unwrap(),
-        applied.correspondence
-    );
-}
-
-/// `K-EDIT-003`: a hoisted temporary is an ordinary variable. An edit that
-/// leaves one used before it is bound is refused by the scope rule, naming
-/// the use, in `main` and in a declared function alike.
-#[test]
-fn an_edit_that_leaves_a_hoisted_temporary_used_before_it_is_bound_is_refused() {
-    let library = library();
-    let environment = environment(&library);
-    let unbound = |site: Site, variable: &str| EditDiagnostic {
-        edit: None,
-        location: Some(Location::Edited(site)),
-        kind: EditDiagnosticKind::Refused(RefusalReason::UnboundVariable {
-            name: name(variable),
-        }),
-    };
-
-    // Removing the temporary's `let`.
-    let mut draft = open(LOWERED);
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::RemoveStatement {
-            statement: main(&[0]),
-        }],
-        &environment,
-    );
-    assert_eq!(refusal.diagnostics, vec![unbound(main(&[0, 0]), "t1")]);
-
-    // Moving the use ahead of the `let`.
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::MoveStatement {
-            statement: main(&[1]),
-            to: before(main(&[0])),
-        }],
-        &environment,
-    );
-    assert_eq!(refusal.diagnostics, vec![unbound(main(&[0, 0]), "t1")]);
-
-    // Moving a statement out of the block that binds what it uses.
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::MoveStatement {
-            statement: main(&[3, 1, 1]),
-            to: Position::end(main(&[])),
-        }],
-        &environment,
-    );
-    assert_eq!(refusal.diagnostics, vec![unbound(main(&[5, 0]), "t3")]);
-
-    let mut draft = open(
-        r#"kernel 1
-numbers float
-effect fetch(url: Text) -> Any
-
-fn load(base) {
-  let t1 = [base, "/x"]
-  let t2 = t1[0]
-  let page = perform fetch(t2) as Any
-  return page
-}
-
-main {
-  let got = call load("u")
-  finish got
-}
-"#,
-    );
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::RemoveStatement {
-            statement: function("load", &[1]),
-        }],
-        &environment,
-    );
-    assert_eq!(
-        refusal.diagnostics,
-        vec![unbound(function("load", &[1, 0]), "t2")]
-    );
-}
-
-/// `K-EDIT-001`, `K-EDIT-002`: a transaction applies whole or not at all,
-/// a fault names its edit and the site the edit named, a later edit names a
-/// node by its site in the base wherever an earlier edit put it, and a
-/// transaction written against another document is refused.
-#[test]
-fn a_transaction_applies_whole_against_its_base_or_not_at_all() {
-    let library = library();
-    let environment = environment(&library);
-    let mut draft = open(&subject(&library));
-    let opened = draft.identity();
-
-    let remove = |index: u32| Edit::RemoveStatement {
-        statement: main(&[index]),
-    };
-    let fault = |edit: u32, site: Site, kind: EditDiagnosticKind| {
-        vec![EditDiagnostic {
-            edit: Some(edit),
-            location: Some(Location::Base(site)),
-            kind,
-        }]
-    };
-    // The second edit names a node the first removed.
-    let refusal = refused(
-        &mut draft,
-        vec![
-            remove(1),
-            Edit::SetCondition {
-                statement: main(&[1]),
-                condition: text("x"),
-            },
-        ],
-        &environment,
-    );
-    assert_eq!(
-        refusal.diagnostics,
-        fault(1, main(&[1]), EditDiagnosticKind::NoSuchNode)
-    );
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::ReplaceExpression {
-            expression: main(&[1]),
-            with: text("x"),
-        }],
-        &environment,
-    );
-    assert_eq!(
-        refusal.diagnostics,
-        fault(
-            0,
-            main(&[1]),
-            EditDiagnosticKind::WrongNode {
-                expected: NodeClass::Expression,
-                found: NodeClass::Statement,
-            }
-        )
-    );
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::SetArgument {
-            action: main(&[4, 0]),
-            index: 1,
-            argument: Expr::Literal(Literal::Null),
-        }],
-        &environment,
-    );
-    assert_eq!(
-        refusal.diagnostics,
-        fault(
-            0,
-            main(&[4, 0]),
-            EditDiagnosticKind::NoSuchArgument {
-                index: 1,
-                arguments: 1,
-            }
-        )
-    );
-
-    // Both edits name base sites: the second finds the `try` where the
-    // first left it.
-    let applied = draft
-        .apply(
-            &transaction(
-                &draft,
-                vec![
-                    remove(1),
-                    Edit::SetFinally {
-                        statement: main(&[3]),
-                        finally: Some(vec![print("after")]),
+                vec![Operation::SetValue {
+                    base,
+                    target: ValueTarget::Literal {
+                        expression: site(&[1, 0]),
                     },
-                ],
+                    value: value("new"),
+                }],
             ),
             &environment,
         )
         .unwrap();
-    assert!(matches!(
-        draft.document().main[2],
-        Stmt::Try(ref scope) if scope.finally.is_some()
-    ));
-
-    let stale = Transaction {
-        base: opened,
-        edits: vec![remove(0)],
+    assert_ne!(draft.identity(), base);
+    for request in park.requests {
+        let Request::Effect(request) = request else {
+            panic!("the effect waits")
+        };
+        machine
+            .deliver(request.wait, Outcome::Completed(Datum::Null))
+            .unwrap();
+    }
+    let Step::Ended(End::Finished(finished)) = machine.run(&mut host, u64::MAX).unwrap() else {
+        panic!("the pinned run finishes")
     };
-    let held = draft.document().clone();
-    let refusal = draft.apply(&stale, &environment).unwrap_err();
-    assert_eq!(
-        refusal.diagnostics,
-        vec![EditDiagnostic {
-            edit: None,
-            location: None,
-            kind: EditDiagnosticKind::StaleBase {
-                base: opened,
-                current: applied.admitted.identity,
-            },
-        }]
-    );
-    assert_eq!(refusal.diagnostics[0].kind.code(), "stale_base");
-    assert_eq!(draft.document(), &held);
-
-    // The draft's own correspondence composes the transactions since it
-    // opened.
-    let second = draft
-        .apply(&transaction(&draft, vec![remove(4)]), &environment)
-        .unwrap();
-    let since_open = draft.correspondence_since_open();
-    assert_eq!(
-        (since_open.base, since_open.result),
-        (opened, draft.identity())
-    );
-    assert_eq!(
-        Some(since_open),
-        applied.correspondence.then(&second.correspondence).as_ref()
-    );
-    assert_eq!(since_open.successor(&main(&[1])), None);
-    assert_eq!(since_open.successor(&main(&[5])), None);
-    let finish = since_open.survivor(&main(&[6])).unwrap();
-    assert_eq!((&finish.to, finish.edited), (&main(&[4]), false));
-    assert_eq!(since_open.predecessor(&main(&[2])), Some(&main(&[3])));
-    assert!(since_open.survivor(&main(&[3])).unwrap().edited);
+    assert_eq!(finished.result, Datum::Text("old".into()));
 }
 
-/// `K-EDIT-005`, `K-EDIT-009`: the manifest a draft publishes is the one the edited code
-/// derives. An effect newly performed is listed with the environment's
-/// signature, one no longer performed is dropped, an adopted function is
-/// listed in place of the one it corrects, and a function the environment
-/// lacks is refused by name.
+/// EXTRACT-REACHABLE: the whole-cell entry slice retains its reachable code,
+/// drops unrelated main/functions/private bindings and reports exactly its effects.
 #[test]
-fn the_published_manifest_is_the_one_the_edited_code_derives() {
-    let library = library();
-    let environment = environment(&library);
-    let mut draft = open(&subject(&library));
-    let notify = Stmt::Do {
-        action: Action::Perform {
-            effect: effect("notify"),
-            args: vec![Atom::Literal(Literal::Text("hi".to_string()))],
-            result: Type::Any,
-            then_yield: false,
-        },
-    };
-    let edits = vec![
-        Edit::InsertStatement {
-            at: before(main(&[6])),
-            statement: notify,
-        },
-        Edit::ReplaceStatement {
-            statement: main(&[4]),
-            with: Stmt::Let {
-                name: name("r"),
-                value: Rhs::Expr(text("none")),
-            },
-        },
-        Edit::ReplaceFunctionIdentity {
-            from: library.neg,
-            to: library.corrected,
-        },
-    ];
-    draft
-        .apply(&transaction(&draft, edits), &environment)
-        .unwrap();
-    let manifest = &draft.document().manifest;
-    assert_eq!(
-        manifest.effects,
-        BTreeMap::from([(effect("notify"), text_to_any("text"))])
-    );
-    assert_eq!(
-        manifest.functions.keys().collect::<Vec<_>>(),
-        vec![&library.corrected]
-    );
-
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::ReplaceFunctionIdentity {
-            from: library.corrected,
-            to: library.absent,
-        }],
-        &environment,
-    );
-    assert_eq!(
-        refusal.diagnostics,
-        vec![EditDiagnostic {
-            edit: None,
-            location: None,
-            kind: EditDiagnosticKind::Refused(RefusalReason::MissingFunction {
-                function: library.absent,
-                name: FunctionName::new("num.neg").unwrap(),
-            }),
-        }]
-    );
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::ReplaceFunctionIdentity {
-            from: library.neg,
-            to: library.corrected,
-        }],
-        &environment,
-    );
-    assert_eq!(
-        refusal.diagnostics,
-        vec![EditDiagnostic {
-            edit: Some(0),
-            location: None,
-            kind: EditDiagnosticKind::FunctionNotCalled {
-                function: library.neg,
-            },
-        }]
-    );
-}
-
-/// `K-EDIT-007`: a rename reaches the declaration and every use that
-/// resolves to it and no other variable of that name, keeps a private
-/// binding private, and is refused when the new name would change what
-/// some name refers to.
-#[test]
-fn a_rename_follows_one_declaration_and_refuses_capture() {
-    let library = library();
-    let environment = environment(&library);
-    let source = r#"kernel 1
-numbers float
-private total
-
-fn scale(n) {
-  let twice = [n, n]
-  return twice
-}
-
-main {
-  let total = 1
-  let other = 2
-  let f = fn(total) {
-    return total
-  }
-  if other {
-    let inner = 3
-    print [inner, total]
-  }
-  let h = spawn apply f(total)
-  let got = join h
-  finish [total, other]
-}
-"#;
-    let mut draft = open(source);
-    let edits = vec![
-        Edit::RenameVariable {
-            declared_at: main(&[0]),
-            name: name("total"),
-            to: name("sum"),
-        },
-        Edit::RenameVariable {
-            declared_at: function("scale", &[]),
-            name: name("n"),
-            to: name("factor"),
-        },
-        Edit::RenameVariable {
-            declared_at: main(&[2, 0]),
-            name: name("total"),
-            to: name("x"),
-        },
-    ];
-    draft
-        .apply(&transaction(&draft, edits), &environment)
-        .unwrap();
-    let expected = document(
+fn extract_reachable() {
+    let source = parse_document(
         r#"kernel 1
 numbers float
-private sum
-
-fn scale(factor) {
-  let twice = [factor, factor]
-  return twice
+effect send(value: Any) -> Any
+effect unused(value: Any) -> Any
+entry hello(to: Any) -> Any
+entry other(to: Any) -> Any
+private secret
+fn hello(to) {
+  let callback = fn() { return &indirect }
+  let sent = call helper(to)
+  let task = spawn call helper(to)
+  do cancel task
+  return callback
 }
-
-main {
-  let sum = 1
-  let other = 2
-  let f = fn(x) {
-    return x
-  }
-  if other {
-    let inner = 3
-    print [inner, sum]
-  }
-  let h = spawn apply f(sum)
-  let got = join h
-  finish [sum, other]
-}
+fn helper(to) { let sent = perform send(to) as Any return sent }
+fn indirect() { return &helper }
+fn other(to) { let ignored = perform unused(to) as Any return ignored }
+main { let secret = "cell" let made = perform unused(&hello) as Any finish made }
 "#,
-    );
-    assert_eq!(draft.document(), &expected);
-
-    let collides = |declared_at: Site, from: &str, to: &str| {
-        vec![EditDiagnostic {
-            edit: Some(0),
-            location: Some(Location::Base(declared_at)),
-            kind: EditDiagnosticKind::RenameCollides {
-                from: name(from),
-                to: name(to),
-            },
-        }]
-    };
-    // `other` would come to mean the renamed variable where it is read.
-    let rename = |declared_at: Site, from: &str, to: &str| Edit::RenameVariable {
-        declared_at,
-        name: name(from),
-        to: name(to),
-    };
-    let refusal = refused(
-        &mut draft,
-        vec![rename(main(&[1]), "other", "sum")],
-        &environment,
-    );
-    assert_eq!(refusal.diagnostics, collides(main(&[1]), "other", "sum"));
-    // The inner `inner` would hide the renamed variable from its own use.
-    let refusal = refused(
-        &mut draft,
-        vec![rename(main(&[0]), "sum", "inner")],
-        &environment,
-    );
-    assert_eq!(refusal.diagnostics, collides(main(&[0]), "sum", "inner"));
-    let refusal = refused(
-        &mut draft,
-        vec![rename(main(&[1]), "missing", "y")],
-        &environment,
+    )
+    .unwrap();
+    let registry = FunctionRegistry::new();
+    let environment = env(&registry);
+    let extraction = crate::extract_entry(&source, &Name::new("hello"), &environment).unwrap();
+    assert!(extraction.document.main.is_empty());
+    assert!(extraction.document.private_bindings.is_empty());
+    assert_eq!(
+        extraction
+            .document
+            .entries
+            .keys()
+            .map(Name::as_str)
+            .collect::<Vec<_>>(),
+        ["hello"]
     );
     assert_eq!(
-        refusal.diagnostics,
-        vec![EditDiagnostic {
-            edit: Some(0),
-            location: Some(Location::Base(main(&[1]))),
-            kind: EditDiagnosticKind::NoSuchBinding {
-                name: name("missing"),
-            },
-        }]
+        extraction
+            .document
+            .functions
+            .keys()
+            .map(Name::as_str)
+            .collect::<Vec<_>>(),
+        ["hello", "helper", "indirect"]
     );
+    assert_eq!(
+        extraction.requirements,
+        BTreeSet::from([EffectName::new("send").unwrap()])
+    );
+    assert_eq!(
+        extraction
+            .document
+            .manifest
+            .effects
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        extraction.requirements
+    );
+    let applied = extraction.applied.as_ref().unwrap();
+    assert_eq!(applied.correspondence.successor(&site(&[0])), None);
+    let hello = Site::new(Unit::Function(Name::new("hello")), [0]);
+    assert_eq!(applied.correspondence.successor(&hello), Some(&hello));
+    assert_eq!(source.main.len(), 3);
+    let json = serde_json::to_value(&extraction).unwrap();
+    assert!(json.get("applied").is_none());
+    let decoded: crate::Extraction = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded.document, extraction.document);
+    assert_eq!(decoded.requirements, extraction.requirements);
+    assert!(decoded.applied.is_none());
+    for (entry, environment) in [
+        ("missing", env(&registry)),
+        ("hello", Environment::new(&registry)),
+    ] {
+        let error = crate::extract_entry(&source, &Name::new(entry), &environment).unwrap_err();
+        assert_eq!(
+            serde_json::from_str::<EditRefusal>(&serde_json::to_string(&error).unwrap()).unwrap(),
+            error
+        );
+        if entry == "missing" {
+            assert!(matches!(
+                error.diagnostics[0].kind,
+                Cause::NoSuchEntry { .. }
+            ));
+        } else {
+            assert!(matches!(
+                error.diagnostics[0].kind,
+                Cause::Refused(RefusalReason::MissingEffect { .. })
+            ));
+        }
+    }
+    let mut broken = source.clone();
+    broken.functions.get_mut(&Name::new("helper")).unwrap().body = vec![Stmt::Return {
+        value: Expr::Literal(Literal::Function(Name::new("absent"))),
+    }];
+    let error = crate::extract_entry(&broken, &Name::new("hello"), &environment).unwrap_err();
+    assert!(matches!(
+        error.diagnostics[0].kind,
+        Cause::Refused(RefusalReason::Invalid(
+            InvalidReason::FunctionNotDeclared { .. }
+        ))
+    ));
+    assert_eq!(
+        serde_json::from_str::<EditRefusal>(&serde_json::to_string(&error).unwrap()).unwrap(),
+        error
+    );
+}
+
+/// The refusal wire is an owned typed sum, including checker causes.
+#[test]
+fn canvas_refusal_wire() {
+    let base = doc("").identity();
+    let causes = vec![
+        Cause::UnsupportedCanvasEdit,
+        Cause::NotValueTarget,
+        Cause::ValueOutsideCanvasSet,
+        Cause::NonSeparableStep,
+        Cause::NotContiguousSteps,
+        Cause::ActionInHeader,
+        Cause::NonEmptyDiscardedArm,
+        Cause::EscapingBinding,
+        Cause::ControlTargetLost,
+        Cause::StaleBase {
+            base,
+            current: base,
+        },
+        Cause::NoSuchNode,
+        Cause::WrongNode {
+            expected: crate::NodeClass::Action,
+            found: crate::NodeClass::Expression,
+        },
+        Cause::NotInBlock,
+        Cause::IntoItself,
+        Cause::NoCondition,
+        Cause::NoSuchArgument {
+            index: 3,
+            arguments: 1,
+        },
+        Cause::ArgumentNotAtom {
+            form: StatementForm::Perform,
+        },
+        Cause::NoSuchFunction {
+            name: Name::new("missing"),
+        },
+        Cause::NoSuchEntry {
+            name: Name::new("missing"),
+        },
+        Cause::InvalidCorrespondence,
+        Cause::Invalid(InvalidReason::LoopControlOutsideLoop {
+            keyword: "break".into(),
+        }),
+        Cause::Refused(RefusalReason::UnboundVariable {
+            name: Name::new("missing"),
+        }),
+    ];
+    let registry = FunctionRegistry::new();
+    let signature = env(&registry).effects.values().next().unwrap().clone();
+    let function = lash_kernel_doc::parse_definition(
+        "function sample.fn(value: Any) -> Any\nkernel 1\ncharge 1\nbody { return value }",
+    )
+    .unwrap()
+    .identity();
+    let name = lash_kernel_doc::FunctionName::new("sample.fn").unwrap();
+    let effect = EffectName::new("send").unwrap();
+    let checker_causes = vec![
+        RefusalReason::Invalid(InvalidReason::InvalidType {
+            problem: "invalid type".into(),
+        }),
+        RefusalReason::MissingEffect {
+            effect: effect.clone(),
+        },
+        RefusalReason::EffectSignature {
+            effect: effect.clone(),
+            expected: signature.clone(),
+            provided: signature,
+            mismatch: Box::new(lash_kernel_check::SignatureMismatch {
+                side: lash_kernel_check::SignatureSide::Output,
+                path: "/output".into(),
+                expected: Type::Text,
+                provided: Type::Int,
+            }),
+        },
+        RefusalReason::MissingFunction {
+            function,
+            name: name.clone(),
+        },
+        RefusalReason::UnboundVariable {
+            name: Name::new("missing"),
+        },
+        RefusalReason::ArgumentType {
+            callee: "send".into(),
+            param: Name::new("value"),
+            expected: Type::Text,
+            found: Type::Int,
+        },
+        RefusalReason::PerformResult {
+            effect: effect.clone(),
+            declared: Type::Int,
+            stated: Type::Text,
+        },
+        RefusalReason::EffectNotPerformed { effect },
+        RefusalReason::FunctionNotReached {
+            function,
+            name: name.clone(),
+        },
+        RefusalReason::FunctionNotListed {
+            function,
+            name: name.clone(),
+            through: function,
+        },
+        RefusalReason::FunctionName {
+            function,
+            listed: name.clone(),
+            defined: name,
+        },
+    ];
+    let causes = causes
+        .into_iter()
+        .chain(checker_causes.into_iter().map(Cause::Refused))
+        .chain([Cause::Invalid(InvalidReason::NestedActionPosition {
+            position: "a while condition".into(),
+        })]);
+    for kind in causes {
+        let error = EditRefusal {
+            diagnostics: vec![crate::EditDiagnostic {
+                edit: Some(0),
+                location: Some(crate::Location::Base(site(&[0]))),
+                kind,
+            }],
+        };
+        assert_eq!(
+            serde_json::from_str::<EditRefusal>(&serde_json::to_string(&error).unwrap()).unwrap(),
+            error
+        );
+    }
+}
+
+/// Every site of `document`, read from the document alone.
+fn sites(document: &Document) -> Vec<Site> {
+    fn walk(node: Node<'_>, site: Site, out: &mut Vec<Site>) {
+        for (index, child) in (0u32..).zip(node.children()) {
+            walk(child, site.child(index), out);
+        }
+        out.push(site);
+    }
+    let mut out = Vec::new();
+    walk(Node::Block(&document.main), site(&[]), &mut out);
+    for (name, function) in &document.functions {
+        let site = Site::new(Unit::Function(name.clone()), []);
+        walk(Node::Block(&function.body), site, &mut out);
+    }
+    out.sort();
+    out
 }
 
 /// `K-ID-004`: a site addresses the same node for writing as it does for
@@ -1411,7 +1280,7 @@ main {
   finish got
 }
 "#;
-    let mut document = document(source);
+    let mut document = parse_document(source).unwrap();
     let reading = document.clone();
     let all = sites(&reading);
     assert_eq!(Working::open(&reading).sites(), all);
@@ -1428,369 +1297,4 @@ main {
             "{site}"
         );
     }
-}
-
-/// Entry extraction retains references as well as calls, and publication
-/// derives exactly the selected entry's requirements (`K-EDIT-005`, `K-FN-001`).
-#[test]
-fn extracting_an_entry_reports_exactly_its_reachable_effect_requirements() {
-    let library = library();
-    let environment = environment(&library);
-    let source = document(&format!(
-        r#"kernel 1
-numbers float
-effect fetch(url: Text) -> Any
-effect notify(text: Text) -> Any
-use num.neg = @{neg}
-entry chosen() -> Any
-entry other() -> Any
-private secret
-
-fn chosen() {{
-  let callback = fn() {{
-    return &indirect
-  }}
-  do call direct(&indirect)
-  let task = spawn call direct(&indirect)
-  do cancel task
-  return callback
-}}
-
-fn direct(callback) {{
-  let n = num.neg(1)
-  return n
-}}
-
-fn indirect() {{
-  let got = perform fetch("u") as Any
-  return got
-}}
-
-fn other() {{
-  let got = perform notify("unused") as Any
-  return got
-}}
-
-main {{
-  let secret = 1
-  print secret
-  finish "cell"
-}}
-"#,
-        neg = library.neg,
-    ));
-    let original = lash_kernel_check::derive(&source, &library.catalog).unwrap();
-    let effects = &original
-        .unit(&Unit::Function(name("chosen")))
-        .unwrap()
-        .effects;
-    let extraction = crate::extract_entry(&source, &name("chosen")).unwrap();
-    assert_eq!(extraction.requirements, effects.effects);
-    let transaction = extraction.transaction;
-    assert_eq!(transaction.base, source.identity());
-    let mut draft = Draft::open(source.clone()).unwrap();
-    draft.apply(&transaction, &environment).unwrap();
-    let extracted = draft.document();
-    assert_eq!(
-        extracted
-            .manifest
-            .effects
-            .keys()
-            .cloned()
-            .collect::<BTreeSet<_>>(),
-        effects.effects,
-    );
-    assert_eq!(
-        lash_kernel_doc::print_document(extracted),
-        format!(
-            r#"kernel 1
-numbers float
-effect fetch(url: Text) -> Any
-use num.neg = @{neg}
-entry chosen() -> Any
-
-fn chosen() {{
-  let callback = fn() {{
-    return &indirect
-  }}
-  do call direct(&indirect)
-  let task = spawn call direct(&indirect)
-  do cancel task
-  return callback
-}}
-
-fn direct(callback) {{
-  let n = num.neg(1)
-  return n
-}}
-
-fn indirect() {{
-  let got = perform fetch("u") as Any
-  return got
-}}
-
-main {{}}
-"#,
-            neg = library.neg,
-        ),
-    );
-}
-
-/// Extraction reports typed unknown entries and dangling declared references.
-#[test]
-fn extracting_an_entry_refuses_unknown_entries_and_broken_references() {
-    let mut source = document(
-        "kernel 1\nnumbers float\nentry start() -> Any\nfn start() {\n  return null\n}\nmain {}\n",
-    );
-    let refusal = crate::extract_entry(&source, &name("missing")).unwrap_err();
-    assert_eq!(
-        refusal.diagnostics[0].kind,
-        EditDiagnosticKind::NoSuchEntry {
-            name: name("missing")
-        }
-    );
-    source.functions.get_mut(&name("start")).unwrap().body = vec![Stmt::Return {
-        value: Expr::Literal(Literal::Function(name("missing"))),
-    }];
-    let refusal = crate::extract_entry(&source, &name("start")).unwrap_err();
-    assert_eq!(
-        refusal.diagnostics[0].kind,
-        EditDiagnosticKind::Refused(RefusalReason::Invalid(
-            lash_kernel_doc::InvalidReason::FunctionNotDeclared {
-                name: name("missing")
-            },
-        ))
-    );
-}
-
-/// K-EVAL-001/002, K-CLO-001 and K-EDIT-003: branches are lazy,
-/// expression locals shadow only in their body, survive capture, and are editable.
-#[test]
-fn lazy_expression_branches_and_scoped_captures_round_trip_through_edits() {
-    let library = library();
-    let environment = environment(&library);
-    let mut draft = open(
-        r#"kernel 1
-numbers float
-main {
-  let outer = 9
-  let pair = (if(true, let(outer = outer, outer), null.missing), let(outer = 1, fn() { return outer }))
-  let f = pair[1]
-  let got = apply f()
-  finish (pair[0], outer, got)
-}
-"#,
-    );
-    assert_eq!(
-        run(draft.document(), &Datum::Null).result,
-        Datum::Tuple(vec![
-            Datum::Int(9.into()),
-            Datum::Int(9.into()),
-            Datum::Int(1.into())
-        ])
-    );
-    let branch = main(&[1, 0, 0, 1]);
-    let graph = lash_kernel_check::derive(draft.document(), &library.catalog).unwrap();
-    assert!(matches!(
-        graph.node_at(&branch).map(|node| &node.kind),
-        Some(lash_kernel_check::NodeKind::Expr(_))
-    ));
-    let replace = Edit::ReplaceExpression {
-        expression: branch,
-        with: Expr::Literal(Literal::Int(42.into())),
-    };
-    draft
-        .apply(&transaction(&draft, vec![replace]), &environment)
-        .unwrap();
-    let printed = lash_kernel_doc::print_document(draft.document());
-    assert_eq!(parse_document(&printed).unwrap(), *draft.document());
-    assert_eq!(
-        run(draft.document(), &Datum::Null).result,
-        Datum::Tuple(vec![
-            Datum::Int(42.into()),
-            Datum::Int(9.into()),
-            Datum::Int(1.into())
-        ])
-    );
-}
-
-/// `K-EDIT-004`, `K-FORM-001`: setting an argument writes any expression.
-/// A computed argument of a `let`'s action nests the action as the whole
-/// right-hand side, an argument that leaves such a right-hand side all
-/// variables and literals makes it the statement's action again, and a
-/// nested action's argument is set in place. Each action survives, edited;
-/// the argument it had does not. A `do`'s action takes only a variable or a
-/// literal, and the refusal names its form.
-#[test]
-fn setting_an_argument_writes_any_expression_in_the_one_spelling_text_reads() {
-    let library = library();
-    let environment = environment(&library);
-    let mut draft = open(
-        r#"kernel 1
-numbers float
-effect fetch(url: Text) -> Any
-effect notify(text: Text) -> Any
-
-main {
-  let url = "https://a"
-  let page = perform fetch(url) as Any
-  let shown = perform notify(if(true, "x", "y")) as Any
-  let pair = [perform fetch(url) as Any, 1]
-  do perform notify(url) as Any
-  finish [page, shown, pair]
-}
-"#,
-    );
-    let computed = Expr::If {
-        cond: Box::new(Expr::Literal(Literal::Bool(true))),
-        then: Box::new(text("b")),
-        r#else: Box::new(text("c")),
-    };
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::SetArgument {
-            action: main(&[4, 0]),
-            index: 0,
-            argument: computed.clone(),
-        }],
-        &environment,
-    );
-    assert_eq!(
-        refusal.diagnostics[0].kind,
-        EditDiagnosticKind::ArgumentNotAtom {
-            form: lash_kernel_doc::StatementForm::Perform
-        }
-    );
-    let refusal = refused(
-        &mut draft,
-        vec![Edit::SetArgument {
-            action: main(&[5, 0]),
-            index: 0,
-            argument: text("x"),
-        }],
-        &environment,
-    );
-    assert_eq!(
-        refusal.diagnostics[0].kind,
-        EditDiagnosticKind::WrongNode {
-            expected: NodeClass::Action,
-            found: NodeClass::Expression,
-        }
-    );
-
-    let applied = draft
-        .apply(
-            &transaction(
-                &draft,
-                vec![
-                    Edit::SetArgument {
-                        action: main(&[1, 0]),
-                        index: 0,
-                        argument: computed,
-                    },
-                    Edit::SetArgument {
-                        action: main(&[2, 0]),
-                        index: 0,
-                        argument: Expr::Variable(name("url")),
-                    },
-                    Edit::SetArgument {
-                        action: main(&[3, 0, 0]),
-                        index: 0,
-                        argument: text("c"),
-                    },
-                ],
-            ),
-            &environment,
-        )
-        .unwrap();
-    let expected = document(
-        r#"kernel 1
-numbers float
-effect fetch(url: Text) -> Any
-effect notify(text: Text) -> Any
-
-main {
-  let url = "https://a"
-  let page = perform fetch(if(true, "b", "c")) as Any
-  let shown = perform notify(url) as Any
-  let pair = [perform fetch("c") as Any, 1]
-  do perform notify(url) as Any
-  finish [page, shown, pair]
-}
-"#,
-    );
-    assert_eq!(draft.document(), &expected);
-    assert_eq!(applied.admitted.identity, expected.identity());
-    let fate = |site: Site| {
-        applied
-            .correspondence
-            .survivor(&site)
-            .map(|survivor| (survivor.to.clone(), survivor.edited))
-    };
-    assert_eq!(fate(main(&[1, 0])), Some((main(&[1, 0]), true)));
-    assert_eq!(fate(main(&[2, 0])), Some((main(&[2, 0]), true)));
-    assert_eq!(fate(main(&[2, 0, 0])), None);
-    assert_eq!(fate(main(&[3, 0])), Some((main(&[3, 0]), false)));
-    assert_eq!(fate(main(&[3, 0, 0])), Some((main(&[3, 0, 0]), true)));
-    assert_eq!(fate(main(&[3, 0, 0, 0])), None);
-    assert_eq!(fate(main(&[3, 0, 1])), Some((main(&[3, 0, 1]), false)));
-}
-
-/// `K-EDIT-007`, `K-EDIT-008`, `K-EDIT-009`: a rename and an adoption
-/// reach the callee of an action nested in an expression as they reach a
-/// statement's: the closure a nested `apply` calls, the function a nested
-/// `call` or `spawn` names, the library function a nested `invoke` names.
-#[test]
-fn renames_and_adoption_reach_the_callees_of_nested_actions() {
-    let library = library();
-    let environment = environment(&library);
-    let source = |closure: &str, function: &str, neg: FunctionId| {
-        format!(
-            r#"kernel 1
-numbers float
-use num.neg = @{neg}
-
-fn {function}(value) {{
-  return value
-}}
-
-main {{
-  let {closure} = fn(v) {{
-    return v
-  }}
-  let a = [apply {closure}(1), call {function}(2), spawn call {function}(3)]
-  let b = [invoke num.neg(1)]
-  finish [a, b]
-}}
-"#
-        )
-    };
-    let mut draft = open(&source("f", "wrap", library.neg));
-    draft
-        .apply(
-            &transaction(
-                &draft,
-                vec![
-                    Edit::RenameVariable {
-                        declared_at: main(&[0]),
-                        name: name("f"),
-                        to: name("g"),
-                    },
-                    Edit::RenameFunction {
-                        from: name("wrap"),
-                        to: name("wrapped"),
-                    },
-                    Edit::ReplaceFunctionIdentity {
-                        from: library.neg,
-                        to: library.corrected,
-                    },
-                ],
-            ),
-            &environment,
-        )
-        .unwrap();
-    assert_eq!(
-        draft.document(),
-        &document(&source("g", "wrapped", library.corrected))
-    );
 }

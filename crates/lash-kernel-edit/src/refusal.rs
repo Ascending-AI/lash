@@ -1,16 +1,19 @@
 //! Why a transaction is refused, as typed data.
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use lash_kernel_check::{Refusal, RefusalReason};
-use lash_kernel_doc::{DocumentId, FunctionId, InvalidReason, Name, Site, StatementForm};
+use lash_kernel_doc::{DocumentId, InvalidReason, Name, Site, StatementForm};
 
 use crate::tree::NodeClass;
 
 /// Everything that keeps a transaction from being published. The draft it
 /// was applied to is unchanged.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize, JsonSchema)]
 #[error("{}", list(.diagnostics))]
+#[serde(deny_unknown_fields)]
 pub struct EditRefusal {
     pub diagnostics: Vec<EditDiagnostic>,
 }
@@ -23,7 +26,8 @@ fn list(diagnostics: &[EditDiagnostic]) -> String {
         .join("; ")
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EditDiagnostic {
     /// The edit at fault, by its position in the transaction. `None` when
     /// the fault is of the transaction as a whole or of the document it
@@ -34,7 +38,8 @@ pub struct EditDiagnostic {
 }
 
 /// The node a diagnostic is about.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Location {
     /// A site the edit named, in the transaction's base document.
     Base(Site),
@@ -58,10 +63,11 @@ impl fmt::Display for EditDiagnostic {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize, JsonSchema)]
 #[non_exhaustive]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum EditDiagnosticKind {
-    /// `K-EDIT-002`: the transaction was written against another document.
+    /// `CANVAS-CLOSED`: the transaction was written against another document.
     #[error("the transaction is based on document {base}; the draft holds {current}")]
     StaleBase {
         base: DocumentId,
@@ -83,8 +89,6 @@ pub enum EditDiagnosticKind {
     IntoItself,
     #[error("the statement is not an `if` or a `while`, so it has no condition")]
     NoCondition,
-    #[error("the statement is not a `try`")]
-    NotATry,
     #[error("the action has {arguments} argument(s); there is none at {index}")]
     NoSuchArgument { index: u32, arguments: u32 },
     /// A computed argument of an action that has no expression spelling
@@ -95,28 +99,35 @@ pub enum EditDiagnosticKind {
         .form.keyword()
     )]
     ArgumentNotAtom { form: StatementForm },
-    #[error("the node declares no variable `{name}`")]
-    NoSuchBinding { name: Name },
-    /// The new name would change which declaration some use resolves to.
-    #[error("renaming `{from}` to `{to}` would change what a name here refers to")]
-    RenameCollides { from: Name, to: Name },
-    #[error("function `{name}` is already declared")]
-    FunctionExists { name: Name },
     #[error("function `{name}` is not declared")]
     NoSuchFunction { name: Name },
-    #[error("function `{name}` is already an entry")]
-    EntryExists { name: Name },
     #[error("function `{name}` is not an entry")]
     NoSuchEntry { name: Name },
-    #[error("the document calls no library function {function}")]
-    FunctionNotCalled { function: FunctionId },
+    #[error("this operation requires a source edit")]
+    UnsupportedCanvasEdit,
+    #[error("this site is not a canvas value target")]
+    NotValueTarget,
+    #[error("this value contains executable syntax")]
+    ValueOutsideCanvasSet,
+    #[error("this action is not a separable perform step; edit source")]
+    NonSeparableStep,
+    #[error("select complete contiguous sibling steps")]
+    NotContiguousSteps,
+    #[error("changing this header would add or discard action sites; edit source")]
+    ActionInHeader,
+    #[error("an arm or handler that would be discarded is not empty")]
+    NonEmptyDiscardedArm,
+    #[error("this edit would change the binding a surviving use resolves to")]
+    EscapingBinding,
+    #[error("this edit would remove a break or continue target")]
+    ControlTargetLost,
     /// Surviving nodes do not define a one-to-one relation.
     #[error("surviving nodes do not form an injective correspondence")]
     InvalidCorrespondence,
     /// The document cannot be read at all.
     #[error("{0}")]
     Invalid(InvalidReason),
-    /// `K-EDIT-003`: the edited document is not admitted.
+    /// `CANVAS-ATOMIC`: the edited document is not admitted.
     #[error("{0}")]
     Refused(RefusalReason),
 }
@@ -128,22 +139,25 @@ impl EditDiagnosticKind {
     /// For `Refused`, inspect the nested `RefusalReason::code()` for the checker reason.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::UnsupportedCanvasEdit => "unsupported_canvas_edit",
+            Self::NotValueTarget => "not_value_target",
+            Self::ValueOutsideCanvasSet => "value_outside_canvas_set",
+            Self::NonSeparableStep => "non_separable_step",
+            Self::NotContiguousSteps => "not_contiguous_steps",
+            Self::ActionInHeader => "action_in_header",
+            Self::NonEmptyDiscardedArm => "non_empty_discarded_arm",
+            Self::EscapingBinding => "escaping_binding",
+            Self::ControlTargetLost => "control_target_lost",
             Self::StaleBase { .. } => "stale_base",
             Self::NoSuchNode => "no_such_node",
             Self::WrongNode { .. } => "wrong_node",
             Self::NotInBlock => "not_in_block",
             Self::IntoItself => "into_itself",
             Self::NoCondition => "no_condition",
-            Self::NotATry => "not_a_try",
             Self::NoSuchArgument { .. } => "no_such_argument",
             Self::ArgumentNotAtom { .. } => "argument_not_atom",
-            Self::NoSuchBinding { .. } => "no_such_binding",
-            Self::RenameCollides { .. } => "rename_collides",
-            Self::FunctionExists { .. } => "function_exists",
             Self::NoSuchFunction { .. } => "no_such_function",
-            Self::EntryExists { .. } => "entry_exists",
             Self::NoSuchEntry { .. } => "no_such_entry",
-            Self::FunctionNotCalled { .. } => "function_not_called",
             Self::InvalidCorrespondence => "invalid_correspondence",
             Self::Invalid(_) => "invalid",
             Self::Refused(_) => "refused",

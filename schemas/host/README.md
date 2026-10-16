@@ -30,6 +30,8 @@ target runs all of them:
 | `kernel-function-declarations` | kernel `FunctionDeclarations` | `KERNEL_VERSION` | `crates/lash-kernel-doc/src/bin/kernel_schema_generator.rs` |
 | `kernel-function` | kernel `FunctionDefinition` | `KERNEL_VERSION` | `crates/lash-kernel-doc/src/bin/kernel_schema_generator.rs` |
 | `kernel-authoring-operation` | kernel edit `authoring::Operation` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
+| `kernel-entry-extraction` | atomic extracted document and effects | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
+| `kernel-edit-refusal` | typed edit and extraction refusal | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
 | `kernel-edit-transaction` | kernel edit `Transaction` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
 | `kernel-correspondence` | kernel edit `Correspondence` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
 | `kernel-workflow-view` | kernel edit `view::WorkflowView` | `KERNEL_VERSION` | `crates/lash-kernel-edit/src/bin/kernel_edit_schema_generator.rs` |
@@ -37,7 +39,7 @@ target runs all of them:
 The runtime registers and validates the process-event payload schemas. The
 three kernel documents are the stored forms of `lash-kernel-doc`
 ([kernel semantics](../../docs/kernel/semantics.md), `K-DOC-004`), and the
-two kernel edit documents are the data of `lash-kernel-edit` (`K-EDIT-010`);
+kernel canvas and extraction documents are the data of `lash-kernel-edit` (`CANVAS-CLOSED`, `EXTRACT-REACHABLE`);
 the authoring operation is Lash-owned request data embedded in host envelopes,
 and the workflow view is the read a host edits against (`lash::workflow::view`). A parked
 run has no JSON document: it is the persistent heap's checkpoint pages

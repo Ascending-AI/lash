@@ -7,8 +7,8 @@ use lash::workflow::document::Correspondence;
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
+use lash::workflow::authoring::Operation;
 use lash::workflow::document::{Document, Name, Site, SourceMap};
-use lash::workflow::edit::Edit;
 use lash::workflow::view::{PathStep, WorkflowCoverage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -109,7 +109,7 @@ pub struct OpenWorkflowRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditWorkflowRequest {
     pub version: u64,
-    pub edits: Vec<Edit>,
+    pub edits: Vec<Operation>,
 }
 
 /// The version an edit transaction saved, and where each node of the

@@ -15,7 +15,7 @@ use lash_kernel_doc::Correspondence;
 ///
 /// A draft holds nothing derived. Each transaction is applied to a copy,
 /// admitted against the environment the host passes, and either replaces
-/// what the draft holds or changes nothing (`K-EDIT-001`).
+/// what the draft holds or changes nothing (`CANVAS-ATOMIC`).
 #[derive(Clone, Debug)]
 pub struct Draft {
     document: Document,
@@ -83,10 +83,38 @@ impl Draft {
                 }],
             });
         }
+        let structural = transaction.edits.iter().any(|operation| {
+            matches!(
+                operation,
+                crate::authoring::Operation::MoveStep { .. }
+                    | crate::authoring::Operation::WrapSteps { .. }
+                    | crate::authoring::Operation::UnwrapSteps { .. }
+            )
+        });
+        let before = if structural {
+            Some(
+                lash_kernel_check::derive(&self.document, environment.functions)
+                    .map_err(|error| refused(None, error))?,
+            )
+        } else {
+            None
+        };
         let mut working = Working::open(&self.document);
         for (index, edit) in (0u32..).zip(&transaction.edits) {
+            if edit.base() != self.identity {
+                return Err(EditRefusal {
+                    diagnostics: vec![EditDiagnostic {
+                        edit: Some(index),
+                        location: None,
+                        kind: EditDiagnosticKind::StaleBase {
+                            base: edit.base(),
+                            current: self.identity,
+                        },
+                    }],
+                });
+            }
             working
-                .edit(edit, environment.functions)
+                .canvas(edit, environment.functions)
                 .map_err(|fault| match *fault {
                     FaultKind::At(location, kind) => EditRefusal {
                         diagnostics: vec![EditDiagnostic {
@@ -99,6 +127,53 @@ impl Draft {
                 })?;
         }
         let published = working.publish(self.identity, environment)?;
+        // Check the resulting header facets, including changes reached through
+        // edited literals or bindings rather than ChangeCondition itself.
+        for node in published.admitted.graph.nodes() {
+            let (child, expected, valid): (_, _, fn(&lash_kernel_doc::Type) -> bool) =
+                match &node.kind {
+                    lash_kernel_check::NodeKind::Stmt(
+                        lash_kernel_check::StmtNode::If { condition, .. }
+                        | lash_kernel_check::StmtNode::While { condition, .. },
+                    ) => (*condition, lash_kernel_doc::Type::Bool, can_be_bool),
+                    lash_kernel_check::NodeKind::Stmt(lash_kernel_check::StmtNode::For {
+                        iterable,
+                        ..
+                    }) => (
+                        *iterable,
+                        lash_kernel_doc::Type::List(Box::new(lash_kernel_doc::Type::Any)),
+                        can_be_iterable,
+                    ),
+                    _ => continue,
+                };
+            let node = published.admitted.graph.node(child);
+            if let Some(found) = &node.facet
+                && !valid(found)
+            {
+                return Err(refused(
+                    None,
+                    lash_kernel_check::Refusal {
+                        errors: vec![lash_kernel_check::Refused {
+                            site: Some(node.site.clone()),
+                            reason: lash_kernel_check::RefusalReason::ArgumentType {
+                                callee: "wrapper".into(),
+                                param: lash_kernel_doc::Name::new("header"),
+                                expected,
+                                found: found.clone(),
+                            },
+                        }],
+                    },
+                ));
+            }
+        }
+        if let Some(before) = before {
+            crate::canvas::preserve_bindings(
+                &before,
+                &published.admitted.graph,
+                &published.correspondence,
+                &transaction.edits,
+            )?;
+        }
         if let Some(since_open) = self.since_open.then(&published.correspondence) {
             self.since_open = since_open;
         }
@@ -108,5 +183,25 @@ impl Draft {
             correspondence: published.correspondence,
             admitted: published.admitted,
         })
+    }
+}
+
+fn can_be_bool(ty: &lash_kernel_doc::Type) -> bool {
+    match ty {
+        lash_kernel_doc::Type::Bool | lash_kernel_doc::Type::Any => true,
+        lash_kernel_doc::Type::Union(members) => members.iter().any(can_be_bool),
+        _ => false,
+    }
+}
+
+fn can_be_iterable(ty: &lash_kernel_doc::Type) -> bool {
+    match ty {
+        lash_kernel_doc::Type::Any
+        | lash_kernel_doc::Type::List(_)
+        | lash_kernel_doc::Type::Tuple(_)
+        | lash_kernel_doc::Type::Map(_)
+        | lash_kernel_doc::Type::Set(_) => true,
+        lash_kernel_doc::Type::Union(members) => members.iter().any(can_be_iterable),
+        _ => false,
     }
 }

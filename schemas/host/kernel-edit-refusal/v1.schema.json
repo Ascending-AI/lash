@@ -1,0 +1,1548 @@
+{
+  "$defs": {
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "EditDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "edit": {
+          "description": "The edit at fault, by its position in the transaction. `None` when\nthe fault is of the transaction as a whole or of the document it\nleaves.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/EditDiagnosticKind"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Location"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "EditDiagnosticKind": {
+      "oneOf": [
+        {
+          "enum": [
+            "into_itself",
+            "no_condition",
+            "unsupported_canvas_edit",
+            "not_value_target",
+            "value_outside_canvas_set",
+            "non_separable_step",
+            "not_contiguous_steps",
+            "action_in_header",
+            "non_empty_discarded_arm",
+            "escaping_binding",
+            "control_target_lost"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`CANVAS-CLOSED`: the transaction was written against another document.",
+          "properties": {
+            "stale_base": {
+              "additionalProperties": false,
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/DocumentId"
+                },
+                "current": {
+                  "$ref": "#/$defs/DocumentId"
+                }
+              },
+              "required": [
+                "base",
+                "current"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "stale_base"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "no_such_node",
+          "description": "The site names no node of the base document, or a node an earlier\nedit of the transaction removed.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "wrong_node": {
+              "additionalProperties": false,
+              "properties": {
+                "expected": {
+                  "$ref": "#/$defs/NodeClass"
+                },
+                "found": {
+                  "$ref": "#/$defs/NodeClass"
+                }
+              },
+              "required": [
+                "expected",
+                "found"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "wrong_node"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "not_in_block",
+          "description": "`before` is not a statement of the block the position names.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "no_such_argument": {
+              "additionalProperties": false,
+              "properties": {
+                "arguments": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "index": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "index",
+                "arguments"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "no_such_argument"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A computed argument of an action that has no expression spelling\nwhere it stands: the action of a `do`, a `join` or a `cancel`. Bind\nthe value with a `let` first.",
+          "properties": {
+            "argument_not_atom": {
+              "additionalProperties": false,
+              "properties": {
+                "form": {
+                  "$ref": "#/$defs/StatementForm"
+                }
+              },
+              "required": [
+                "form"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "argument_not_atom"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "no_such_function": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "no_such_function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "no_such_entry": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "no_such_entry"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "invalid_correspondence",
+          "description": "Surviving nodes do not define a one-to-one relation.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The document cannot be read at all.",
+          "properties": {
+            "invalid": {
+              "$ref": "#/$defs/InvalidReason"
+            }
+          },
+          "required": [
+            "invalid"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`CANVAS-ATOMIC`: the edited document is not admitted.",
+          "properties": {
+            "refused": {
+              "$ref": "#/$defs/RefusalReason"
+            }
+          },
+          "required": [
+            "refused"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "InvalidReason": {
+      "oneOf": [
+        {
+          "enum": [
+            "empty_name",
+            "limit_measures_result",
+            "empty_formula",
+            "guard_without_native",
+            "empty_guard_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kernel_version": {
+              "additionalProperties": false,
+              "properties": {
+                "found": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "supported": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "found",
+                "supported"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kernel_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "too_deep": {
+              "additionalProperties": false,
+              "properties": {
+                "limit": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "limit"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "too_deep"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "duplicate_param": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "duplicate_param"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "duplicate_field": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "duplicate_field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "loop_control_outside_loop": {
+              "additionalProperties": false,
+              "properties": {
+                "keyword": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "keyword"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "loop_control_outside_loop"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A library call written as an expression's own call names a\nfunction with no native implementation: a call of it is an\naction, `invoke`.",
+          "properties": {
+            "call_not_native": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "name": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "function",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "call_not_native"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function_of_another_version": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "name": {
+                  "$ref": "#/$defs/QualifiedName"
+                },
+                "required": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "written_for": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "function",
+                "name",
+                "written_for",
+                "required"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_of_another_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function_not_listed": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                }
+              },
+              "required": [
+                "function"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_not_listed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function_not_resolved": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                }
+              },
+              "required": [
+                "function"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_not_resolved"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "call_arity": {
+              "additionalProperties": false,
+              "properties": {
+                "accepted": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "given": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "required": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name",
+                "given",
+                "required",
+                "accepted"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "call_arity"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "effect_not_listed": {
+              "additionalProperties": false,
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "effect"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "effect_not_listed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function_not_declared": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_not_declared"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "declared_function_in_library": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "declared_function_in_library"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "perform_in_library": {
+              "additionalProperties": false,
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "effect"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "perform_in_library"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entry_not_declared": {
+              "additionalProperties": false,
+              "properties": {
+                "entry": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "entry"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "entry_not_declared"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entry_arity": {
+              "additionalProperties": false,
+              "properties": {
+                "declared": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "entry": {
+                  "$ref": "#/$defs/Name"
+                },
+                "signature": {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "entry",
+                "signature",
+                "declared"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "entry_arity"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "invalid_type": {
+              "additionalProperties": false,
+              "properties": {
+                "problem": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "problem"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "invalid_type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "required_after_optional": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "required_after_optional"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "formula_unknown_param": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "formula_unknown_param"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-LIB-011`: a native version versions a native implementation.",
+          "properties": {
+            "native_version_without_native": {
+              "additionalProperties": false,
+              "properties": {
+                "version": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "version"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "native_version_without_native"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "native_version_zero",
+          "description": "`K-LIB-011`: native versions count from 1.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-LIB-003`: a function with a native implementation takes no\nfunction.",
+          "properties": {
+            "native_takes_function": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "native_takes_function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-LIB-004`: a body that stands beside a native implementation\ncannot wait.",
+          "properties": {
+            "native_body_may_wait": {
+              "additionalProperties": false,
+              "properties": {
+                "form": {
+                  "$ref": "#/$defs/StatementForm"
+                }
+              },
+              "required": [
+                "form"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "native_body_may_wait"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An action nested where no frame can stand at it: a `while`\ncondition, or an assignment's place.",
+          "properties": {
+            "nested_action_position": {
+              "additionalProperties": false,
+              "properties": {
+                "position": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "position"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "nested_action_position"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "action_as_expression",
+          "description": "A right-hand side that is one action with variable and literal\narguments is the statement's action, not an expression: the one\nspelling kernel text reads back.",
+          "type": "string"
+        }
+      ]
+    },
+    "Location": {
+      "description": "The node a diagnostic is about.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A site the edit named, in the transaction's base document.",
+          "properties": {
+            "base": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "base"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A site of the document as the transaction had edited it when the\nfault was found: the document it would have published, for a fault\nof admission.",
+          "properties": {
+            "edited": {
+              "$ref": "#/$defs/Site"
+            }
+          },
+          "required": [
+            "edited"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MapType": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Type"
+        },
+        "value": {
+          "$ref": "#/$defs/Type"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "NodeClass": {
+      "description": "What a site addresses, for a diagnostic.",
+      "enum": [
+        "block",
+        "statement",
+        "action",
+        "expression"
+      ],
+      "type": "string"
+    },
+    "Param": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "optional": {
+          "description": "The argument may be omitted, and is then absent (`K-FN-004`). No\nrequired parameter follows an optional one.",
+          "type": "boolean"
+        },
+        "ty": {
+          "$ref": "#/$defs/Type"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "QualifiedName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
+    "RecordType": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/RecordTypeField"
+          },
+          "type": "array"
+        },
+        "rest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Type"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The type of every field not named in `fields`. `None` closes the\nrecord: it has no other field."
+        }
+      },
+      "type": "object"
+    },
+    "RecordTypeField": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "optional": {
+          "description": "The field may be missing.",
+          "type": "boolean"
+        },
+        "ty": {
+          "$ref": "#/$defs/Type"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "type": "object"
+    },
+    "RefusalReason": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The document, or the body of a library function it reaches, fails\nstructural validation (`K-DOC-005`), a call by name of a function\nwith no native implementation among them (`K-LIB-002`).",
+          "properties": {
+            "invalid": {
+              "$ref": "#/$defs/InvalidReason"
+            }
+          },
+          "required": [
+            "invalid"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-ADM-001`: the environment provides no such effect.",
+          "properties": {
+            "missing_effect": {
+              "additionalProperties": false,
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "effect"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "missing_effect"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-ADM-002`: the environment's effect does not serve the signature\nthe document expects.",
+          "properties": {
+            "effect_signature": {
+              "additionalProperties": false,
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                },
+                "expected": {
+                  "$ref": "#/$defs/Signature"
+                },
+                "mismatch": {
+                  "$ref": "#/$defs/SignatureMismatch"
+                },
+                "provided": {
+                  "$ref": "#/$defs/Signature"
+                }
+              },
+              "required": [
+                "effect",
+                "expected",
+                "provided",
+                "mismatch"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "effect_signature"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-ADM-003`: the environment holds no function of this identity.",
+          "properties": {
+            "missing_function": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "name": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "function",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "missing_function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-FORM-003`: a variable is read or assigned where no enclosing scope\nhas declared it.",
+          "properties": {
+            "unbound_variable": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "unbound_variable"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-ADM-005`: an argument can never be a value of its parameter's\ntype.",
+          "properties": {
+            "argument_type": {
+              "additionalProperties": false,
+              "properties": {
+                "callee": {
+                  "type": "string"
+                },
+                "expected": {
+                  "$ref": "#/$defs/Type"
+                },
+                "found": {
+                  "$ref": "#/$defs/Type"
+                },
+                "param": {
+                  "$ref": "#/$defs/Name"
+                }
+              },
+              "required": [
+                "callee",
+                "param",
+                "expected",
+                "found"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "argument_type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-ADM-006`: a `perform` states a result type no result of the\neffect's signature can have.",
+          "properties": {
+            "perform_result": {
+              "additionalProperties": false,
+              "properties": {
+                "declared": {
+                  "$ref": "#/$defs/Type"
+                },
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                },
+                "stated": {
+                  "$ref": "#/$defs/Type"
+                }
+              },
+              "required": [
+                "effect",
+                "declared",
+                "stated"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "perform_result"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-ADM-007`: the manifest lists an effect nothing performs.",
+          "properties": {
+            "effect_not_performed": {
+              "additionalProperties": false,
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "effect"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "effect_not_performed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-ADM-007`: the manifest lists a function nothing reaches.",
+          "properties": {
+            "function_not_reached": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "name": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "function",
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_not_reached"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-ADM-007`: a function reached through another function's body is\nnot in the manifest.",
+          "properties": {
+            "function_not_listed": {
+              "additionalProperties": false,
+              "properties": {
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "name": {
+                  "$ref": "#/$defs/QualifiedName"
+                },
+                "through": {
+                  "$ref": "#/$defs/FunctionId"
+                }
+              },
+              "required": [
+                "function",
+                "name",
+                "through"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_not_listed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "`K-ADM-007`: a function is listed under a name its definition does\nnot carry.",
+          "properties": {
+            "function_name": {
+              "additionalProperties": false,
+              "properties": {
+                "defined": {
+                  "$ref": "#/$defs/QualifiedName"
+                },
+                "function": {
+                  "$ref": "#/$defs/FunctionId"
+                },
+                "listed": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "function",
+                "listed",
+                "defined"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "function_name"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Signature": {
+      "additionalProperties": false,
+      "description": "What a function, an effect or an entry takes and returns.",
+      "properties": {
+        "params": {
+          "items": {
+            "$ref": "#/$defs/Param"
+          },
+          "type": "array"
+        },
+        "result": {
+          "$ref": "#/$defs/Type"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "type": "object"
+    },
+    "SignatureMismatch": {
+      "additionalProperties": false,
+      "description": "The first incompatible part found by the signature's serving relation.\n`path` uses JSON pointer escaping in the projected type structure:\n`/input`, `/output`, and their properties, items or additional properties.\nThe types are the kernel's projections, not the original JSON schemas.",
+      "properties": {
+        "expected": {
+          "$ref": "#/$defs/Type"
+        },
+        "path": {
+          "type": "string"
+        },
+        "provided": {
+          "$ref": "#/$defs/Type"
+        },
+        "side": {
+          "$ref": "#/$defs/SignatureSide"
+        }
+      },
+      "required": [
+        "side",
+        "path",
+        "expected",
+        "provided"
+      ],
+      "type": "object"
+    },
+    "SignatureSide": {
+      "description": "The side of an effect signature that cannot serve its declaration.",
+      "enum": [
+        "input",
+        "output"
+      ],
+      "type": "string"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "StatementForm": {
+      "description": "An action form, as a refusal names it: one with no expression spelling\n(`join`, `yield`, `cancel`) nested in an expression, or one the body of\na function with a native implementation may not run (`K-LIB-004`).",
+      "enum": [
+        "call",
+        "perform",
+        "sleep",
+        "join",
+        "yield",
+        "spawn",
+        "cancel",
+        "await"
+      ],
+      "type": "string"
+    },
+    "Type": {
+      "oneOf": [
+        {
+          "enum": [
+            "null",
+            "absent",
+            "bool",
+            "int",
+            "float",
+            "text",
+            "bytes",
+            "timestamp",
+            "error"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "any",
+          "description": "Every value.",
+          "type": "string"
+        },
+        {
+          "const": "number",
+          "description": "An integer or a float. In an effect's result this is the bare number\nthe document's number policy decodes (`K-EFF-006`).",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tuple of exactly these member types.",
+          "properties": {
+            "tuple": {
+              "items": {
+                "$ref": "#/$defs/Type"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "tuple"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "list": {
+              "$ref": "#/$defs/Type"
+            }
+          },
+          "required": [
+            "list"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "map": {
+              "$ref": "#/$defs/MapType"
+            }
+          },
+          "required": [
+            "map"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set": {
+              "$ref": "#/$defs/Type"
+            }
+          },
+          "required": [
+            "set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "record": {
+              "$ref": "#/$defs/RecordType"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A text that is one of these.",
+          "properties": {
+            "enum": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "enum"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A closure or a function reference that takes and returns these.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Signature"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A task handle whose task ends with this.",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/Type"
+            }
+          },
+          "required": [
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A handle of this host kind.",
+          "properties": {
+            "handle": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A value of any one of these types. Two or more, none itself a union.",
+          "properties": {
+            "union": {
+              "items": {
+                "$ref": "#/$defs/Type"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "union"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-edit-refusal/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Everything that keeps a transaction from being published. The draft it\nwas applied to is unchanged.",
+  "properties": {
+    "diagnostics": {
+      "items": {
+        "$ref": "#/$defs/EditDiagnostic"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "diagnostics"
+  ],
+  "title": "EditRefusal",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

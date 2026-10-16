@@ -216,59 +216,46 @@ refused path, or one no tool answers, reaches the code as a catchable
 
 ## Editing
 
-Open the document as a `Draft` and apply kernel edits to it.
+Open a `Draft` and submit closed canvas operations. Every operation carries the
+base document identity and exact Sites in that base.
 
 ```rust,ignore
-use lash::workflow::edit::{Draft, Edit, Position, Transaction};
+use lash::workflow::authoring::{DataValue, Operation, ValueTarget};
+use lash::workflow::edit::{Draft, Position, Transaction};
 
 let mut draft = Draft::open(document)?;
-
-let applied = draft.apply(
-    &Transaction {
-        base: draft.identity(),
-        edits: vec![
-            Edit::ReplaceExpression { expression: threshold_site, with: new_expr },
-            Edit::InsertStatement { at: Position::end(try_body_site), statement },
-            Edit::CloneStatement { statement: record_site, to: Position::end(loop_body_site) },
-        ],
-    },
-    &environment.checker(),
-)?;
+let base = draft.identity();
+let applied = draft.apply(&Transaction { base, edits: vec![
+    Operation::SetValue { base, target: ValueTarget::Literal { expression: threshold_site }, value: new_value },
+    Operation::InsertStep { base, at: Position::end(try_body_site), effect, args, result, binding: Some(output_name) },
+]}, &environment.checker())?;
 ```
 
-Every site in a transaction is a site of its `base`, the document the draft
-held when the transaction was written; an edit never has to account for the
-edits before it. A transaction applies whole or not at all. The result is
-checked against the environment before the draft takes it, so a draft never
-holds a document its last transaction broke. A refused transaction leaves
-the draft unchanged and answers an `EditRefusal` whose diagnostics each name
-the edit or the site they are about.
+The supported operations are SetValue, InsertStep, RemoveStep, MoveStep,
+WrapSteps, UnwrapSteps and ChangeCondition. Values are data or in-scope binding
+references. Structural step operations accept separable perform/tool steps;
+nonseparable nested actions require source. Wrap/unwrap supports if/for/try,
+with empty discarded arms and preserved binding/control targets. While loops
+support condition changes only. Source replacement and re-import own renames,
+declarations, arbitrary code, handlers and terminal structure.
 
-`Edit` has an edit for every part of the document:
+A batch applies whole after checker admission or changes neither draft nor
+correspondence. Refusals preserve typed target, structural and checker causes.
+Operations, transactions, correspondence and refusal data serialize; hosts own
+their transport and revision envelope. The schemas are under `schemas/host/`.
+Labels and layout stay host data, keyed by Sites and carried through the
+returned correspondence. Editing never relocates a parked run.
 
-| To change | Use |
-| --- | --- |
-| Which statements a block holds, and their order | `InsertStatement`, `CloneStatement`, `RemoveStatement`, `MoveStatement` |
-| A whole statement | `ReplaceStatement` |
-| Any expression, at any depth | `ReplaceExpression` |
-| A statement's action, or an argument of any action, nested ones included | `ReplaceAction`, `SetArgument` (any expression) |
-| A condition, a `try`'s clauses | `SetCondition`, `SetCatch`, `SetFinally` |
-| The name of a variable everywhere it resolves | `RenameVariable` |
-| Declared functions | `InsertFunction`, `ReplaceFunction`, `RemoveFunction`, `RenameFunction` |
-| Entries | `InsertEntry`, `RemoveEntry`, `RenameEntry`, `SetEntrySignature` |
-| The manifest | `SetEffectSignature`, `SetNumberPolicy`, `ReplaceFunctionIdentity` |
-| `main`'s own variables | `SetPrivateBindings` |
+To make a workflow from a cell's entry, call
+`extract_entry(&document, &entry, &environment.checker())`. The atomic result
+contains the admitted document and exact effect requirements, without exposing
+the removal/cleanup primitives. Store that document directly. Its optional
+`applied` admission/correspondence is in-process only and is omitted on the wire.
+A missing entry refuses with typed `NoSuchEntry`; admission causes remain typed.
 
-`Edit`, `Transaction` and `Correspondence` are serializable, so a client can
-send a transaction as JSON and get the correspondence back.
-
-No edit carries host data. Labels, layout and anything else a host keeps
-about a node live with the host, keyed by site; after an edit, carry them to
-the new sites through the transaction's `Correspondence`.
-
-Statements, expressions and actions in an edit are kernel AST values. A host
-that takes text from a person can accept kernel notation and parse it; a
-form builds the value directly.
+A definition id is a content address. Holding or copying one proves content
+only, not possession. Lash performs no possession check; the host authorizes
+who may create or run a workflow from an id.
 
 ## Identity through edits
 
@@ -283,7 +270,7 @@ answers a `Correspondence` from its base to the result: one `Survivor` per
 node of the base that is still there, with where it was (`from`), where it
 is (`to`), and whether an edit wrote it (`edited`). A node with no survivor
 was removed. A node of the result that no survivor ends at is new: authored
-by an edit, or a clone. `successor(&site)` and `predecessor(&site)` walk it
+by an insertion or a new wrapper. `successor(&site)` and `predecessor(&site)` walk it
 in either direction, and `then` composes two.
 
 Key anything you keep per node (canvas position, comments, selection) by

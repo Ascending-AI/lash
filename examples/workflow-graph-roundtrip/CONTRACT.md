@@ -90,46 +90,33 @@ scope names, port labels (an argument with no effect parameter `name` is
 
 ## Editing
 
-```http
-POST /workflow/edits
-Content-Type: application/json
+`POST /workflow/edits` accepts `{ version, edits: Operation[] }`. Each operation
+carries `base`, the saved document identity, and exact base Sites. The closed
+operation families are `set_value`, `insert_step`, `remove_step`, `move_step`,
+`wrap_steps`, `unwrap_steps`, and `change_condition`.
 
-{
-  "version": 2,
-  "edits": [
-    { "replace_expression": {
-        "expression": { "unit": { "function": "onboarding" }, "path": [3, 0, 0] },
-        "with": { "literal": { "text": "Hello" } } } }
-  ]
-}
+For example, a literal slot can be changed with:
+
+```json
+{"set_value":{"base":"<saved identity>","target":{"literal":{"expression":{"unit":{"function":"onboarding"},"path":[3,0,0]}}},"value":{"literal":{"text":"Hello"}}}}
 ```
 
-`edits` is a list of `lash::workflow::edit::Edit` values; every site in it
-is a site of the saved version's document. The transaction applies whole or
-not at all. On success the draft is saved as the next version and published,
-and the response is `{ workflow, correspondence }`: `correspondence.entries`
-lists each surviving node as `{ from, to, edited }`. A node of the old
-version with no entry was removed; a site of the new version no entry ends
-at is new.
+The batch applies whole or not at all. Success saves the new version and returns
+`{ workflow, correspondence }`, whose entries are `{ from, to, edited }`.
+Refusals leave the saved version unchanged and answer HTTP 422 `edit_refused`
+with `details.diagnostics: [{ edit, site, location, message, cause }]`. `cause` is Lash's
+serialized `EditDiagnosticKind`, retaining nested checker fields. Unsupported
+or malformed operations answer `unsupported_canvas_edit` and its typed cause.
 
-A refused transaction is HTTP 422 `edit_refused` with
-`details.diagnostics: [{ edit, site, message }]`, and the saved version is
-unchanged.
+`POST /workflow/plan` accepts `{ version, operations: Operation[] }` and previews
+the same closed batch against a cloned draft, returning
+`{ version, transaction, preview, correspondence }`. It cannot expand raw edits.
+Send its transaction's `edits` to `/workflow/edits` against the same version to
+save. Preview refusals are HTTP 422 `plan_refused`, with typed diagnostics.
 
-`POST /workflow/plan` accepts `{ version, operations: Operation[] }` using
-Lash's `lash::workflow::authoring::Operation` wire contract:
-`{ "edit": <Edit> }` or `{ "insert_effect": { at, effect, args, result, binding } }`.
-Unknown operation tags and structural fields are refused during decoding.
-Lash publishes its JSON Schema and TypeScript declarations under
-`schemas/host/kernel-authoring-operation/`. The example owns the HTTP transport,
-revision and authentication envelope; Lash owns the operation data.
-The adapter calls `plan` before admitting the transaction against a cloned
-draft. It returns the canonical transaction and preview without changing the
-saved version. Send the returned edits to `/workflow/edits` to save against that
-same version. Save the expanded `Transaction` for exact edit replay against its
-base and admission context. Each operation plans to one edit, and a computed
-effect input stays an argument of a nested `perform`. Planning refusals are
-HTTP 422 `plan_refused`, with diagnostic indices into the planned edits.
+Lash publishes the operation schema and TypeScript declarations under
+`schemas/host/kernel-authoring-operation/`. The example owns its HTTP and
+revision envelope. Source replacement and re-import handle other changes.
 
 ## Running
 

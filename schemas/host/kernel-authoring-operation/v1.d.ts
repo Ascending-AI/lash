@@ -2,37 +2,54 @@
 // JSON Schema remains authoritative for value constraints and validation.
 
 /**
- * One host authoring operation, lowered by [`plan`] to canonical edits.
- *
- * Lash owns this operation data and its serialized representation. Hosts own
- * their transport, revision and authentication envelope, embedding batches as
- * `Vec<Operation>`. Save the expanded [`Transaction`] as the exact edit record
- * to replay against its base and admission context.
+ * Every supported canvas operation, admitted atomically through [`crate::Draft::apply`].
+ * Structural operations accept only separable perform/tool steps. While loops
+ * support condition editing; creating or removing one requires source.
  */
 export type Operation = ({
-  "edit": Edit;
+  "set_value": {
+    "base": DocumentId;
+    "target": ValueTarget;
+    "value": DataValue;
+  };
 } | {
-  "insert_effect": {
-    /**
-     * Arguments in evaluation order, any expressions.
-     */
-    "args": Array<Expr>;
-    /**
-     * Insertion position in the transaction's base document.
-     */
+  "insert_step": {
+    "args": Array<DataValue>;
     "at": Position;
-    /**
-     * Caller-selected output name. It is preserved, not made fresh.
-     */
-    "binding": Name;
-    /**
-     * The effect to perform, checked against the admission environment.
-     */
+    "base": DocumentId;
+    "binding"?: (Name | null);
     "effect": QualifiedName;
-    /**
-     * The result type stated by the canonical `perform` action.
-     */
     "result": Type;
+  };
+} | {
+  "remove_step": {
+    "action": Site;
+    "base": DocumentId;
+  };
+} | {
+  "move_step": {
+    "action": Site;
+    "base": DocumentId;
+    "to": Position;
+  };
+} | {
+  "wrap_steps": {
+    "base": DocumentId;
+    "first": Site;
+    "last": Site;
+    "wrapper": Wrapper;
+  };
+} | {
+  "unwrap_steps": {
+    "base": DocumentId;
+    "branch": Branch;
+    "wrapper": Site;
+  };
+} | {
+  "change_condition": {
+    "base": DocumentId;
+    "condition": Expr;
+    "statement": Site;
   };
 });
 
@@ -138,6 +155,8 @@ export type Atom = ({
   "literal": Literal;
 });
 
+export type Branch = ("then" | "else" | "body");
+
 export type Bytes = string;
 
 /**
@@ -168,127 +187,36 @@ export type Closure = {
   "params"?: Array<Name>;
 };
 
+export type DataMapEntry = {
+  "key": DataValue;
+  "value": DataValue;
+};
+
+export type DataRecordEntry = {
+  "field": string;
+  "value": DataValue;
+};
+
 /**
- * One typed change to a document.
+ * Data that can be connected to a value slot; no executable syntax.
  */
-export type Edit = ({
-  "insert_statement": {
-    "at": Position;
-    "statement": Stmt;
-  };
+export type DataValue = ({
+  "literal": Literal;
 } | {
-  "remove_statement": {
-    "statement": Site;
-  };
+  "variable": Name;
 } | {
-  "move_statement": {
-    "statement": Site;
-    "to": Position;
-  };
+  "tuple": Array<DataValue>;
 } | {
-  "clone_statement": {
-    "statement": Site;
-    "to": Position;
-  };
+  "list": Array<DataValue>;
 } | {
-  "replace_statement": {
-    "statement": Site;
-    "with": Stmt;
-  };
+  "set": Array<DataValue>;
 } | {
-  "replace_expression": {
-    "expression": Site;
-    "with": Expr;
-  };
+  "map": Array<DataMapEntry>;
 } | {
-  "replace_action": {
-    "action": Site;
-    "with": Action;
-  };
-} | {
-  "set_argument": {
-    "action": Site;
-    "argument": Expr;
-    "index": number;
-  };
-} | {
-  "set_condition": {
-    "condition": Expr;
-    "statement": Site;
-  };
-} | {
-  "set_catch": {
-    "catch"?: (Catch | null);
-    "statement": Site;
-  };
-} | {
-  "set_finally": {
-    "finally"?: (Array<Stmt> | null);
-    "statement": Site;
-  };
-} | {
-  "rename_variable": {
-    "declared_at": Site;
-    "name": Name;
-    "to": Name;
-  };
-} | {
-  "insert_function": {
-    "function": Function;
-    "name": Name;
-  };
-} | {
-  "remove_function": {
-    "name": Name;
-  };
-} | {
-  "replace_function": {
-    "function": Function;
-    "name": Name;
-  };
-} | {
-  "rename_function": {
-    "from": Name;
-    "to": Name;
-  };
-} | {
-  "set_private_bindings": {
-    "names": Array<Name>;
-  };
-} | {
-  "insert_entry": {
-    "function": Name;
-    "signature": Signature;
-  };
-} | {
-  "remove_entry": {
-    "function": Name;
-  };
-} | {
-  "rename_entry": {
-    "from": Name;
-    "to": Name;
-  };
-} | {
-  "set_entry_signature": {
-    "function": Name;
-    "signature": Signature;
-  };
-} | {
-  "set_effect_signature": {
-    "effect": QualifiedName;
-    "signature": Signature;
-  };
-} | {
-  "set_number_policy": {
-    "numbers": NumberPolicy;
-  };
-} | {
-  "replace_function_identity": {
-    "from": FunctionId;
-    "to": FunctionId;
-  };
+  "record": Array<DataRecordEntry>;
 });
+
+export type DocumentId = string;
 
 /**
  * An expression, evaluated within one statement. Only an [`Expr::Act`]
@@ -336,14 +264,6 @@ export type Expr = ({
 });
 
 export type Float = string;
-
-/**
- * A declared function's parameters and body.
- */
-export type Function = {
-  "body": Array<Stmt>;
-  "params"?: Array<Name>;
-};
 
 export type FunctionId = string;
 
@@ -397,12 +317,6 @@ export type Member = ({
  * validation refuses the empty name.
  */
 export type Name = string;
-
-/**
- * How a document's effect results decode a number whose type says only
- * "number" (`K-EFF-006`).
- */
-export type NumberPolicy = ("float" | "by_spelling");
 
 export type Param = {
   "name": Name;
@@ -588,4 +502,41 @@ export type Unit = ("main" | {
   "function": Name;
 } | {
   "library": FunctionId;
+});
+
+/**
+ * All addresses are exact sites in the operation's base document.
+ */
+export type ValueTarget = ({
+  "literal": {
+    "expression": Site;
+  };
+} | {
+  "initializer": {
+    "statement": Site;
+  };
+} | {
+  "tool_argument": {
+    "action": Site;
+    "index": number;
+    /**
+     * Canonical child indices within the argument, empty for its root.
+     */
+    "path"?: Array<number>;
+  };
+});
+
+export type Wrapper = ({
+  "if": {
+    "condition": Expr;
+  };
+} | {
+  "for": {
+    "binding": Name;
+    "iterable": Expr;
+  };
+} | {
+  "try": {
+    "catch_binding": Name;
+  };
 });

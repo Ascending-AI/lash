@@ -3,7 +3,7 @@
 This example demonstrates a visual editor over Lash's canonical workflow
 documents and typed edits. It consumes the public
 `lash::workflow::authoring::{Operation, plan}` API to compose higher-level
-helpers with direct edits. `src/authoring_http.rs` and `frontend/index.html`
+closed value and step operations. `src/authoring_http.rs` and `frontend/index.html`
 own the transport and presentation; the planner lives in `lash-kernel-edit`.
 Both paths produce the same canonical transaction and use the same admission.
 
@@ -147,12 +147,9 @@ it. Clicking a linked line selects that statement: the canvas switches to its
 scope and scrolls to its node, without opening it; double-click the line to
 open it. Edits and imports refresh the pane.
 
-**Advanced** contains TypeScript import/export and the
-helper/direct-edit transaction inspector. Queue a direct edit between
-two helpers, preview their combined transaction, then apply it. The preview
-validates a cloned draft without publishing. Generated statements remain
-available to direct edits. Import validates before replacing the document and
-resets site selection; direct edits carry correspondence within a draft.
+**Edit source** opens whole-source replacement for renames, declarations and
+code changes. Import validates before replacing the document and resets site
+selection. Canvas edits carry correspondence within a draft.
 
 The TypeScript pane uses Lash's exact readable printer: named async functions,
 awaited tool calls and ordinary expressions. The `k.document(...)` header carries
@@ -160,14 +157,10 @@ structured metadata needed for exact reconstruction; it is not an escaped JSON
 document. Importing an unchanged export preserves the kernel document identity.
 The host does not rewrite the printed source or recover dialect patterns.
 
-Inputs support constants, connected values and canonical expressions. Constants
-can stay inline or become named value nodes. Only constants can be promoted;
-reads and computed expressions retain their original evaluation point.
-Promoting a constant inserts a binding and replaces its use in one transaction. Named values can be renamed;
-record values expose fields and a whole-object editor. Adjacent, single-use,
-unassigned and uncaptured input records can appear inside their consuming action.
-Shared records keep their own nodes. Explicit expansion is browser presentation
-state and follows edit correspondence.
+Inputs support constants and in-scope data values. Records expose fields and a
+whole-object editor. Arbitrary computation, constant promotion and renaming
+belong in source. Explicit expansion is presentation state and follows
+correspondence.
 
 Lash's view carries binding identity, lexical availability, expression sites,
 assignment destinations and callable ownership from the canonical graph. The
@@ -194,65 +187,43 @@ execution order entering it and a typed `result` input, with no outgoing
 execution connection. The editor does not invent a terminal tile for a block
 without an explicit terminal statement.
 
-Click a named output port and choose **End here with this output**, or use the
-same shortcut in the step inspector. Choose Finish or Return. The transaction
-inserts the selected statement immediately after the producer, or replaces an
-immediately following Return or Finish. Later statements remain in the document
-but are unreachable on that path. Deleting the terminal step restores the path.
-Editing an existing terminal's result mapping changes only its value; it does
-not move termination earlier or skip intervening effects. The shortcut emits
-ordinary canonical edits and adds no kernel or dialect behavior.
+Terminal structure is edited in source. The canvas can set an existing literal
+without inserting or replacing Return or Finish statements.
 
 ## Public authoring API
 
-`lash::workflow::authoring::plan(&draft, operations)` produces an ordinary
-`Transaction` from an array, vector or iterator of `Operation`s.
-`Operation::InsertEffect`
-accepts a base-document position, effect name, expression arguments, result
-type and explicit result binding. `Operation::Edit` accepts any existing `Edit`.
-It inserts one statement, `let <binding> = perform <effect>(<args>)`; a
-computed argument stays an argument, in a `perform` nested as the whole
-right-hand side. The planner performs no I/O, publication, admission or runtime execution.
+`lash::workflow::authoring::Operation` is the closed canvas vocabulary:
+SetValue, InsertStep, RemoveStep, MoveStep, WrapSteps, UnwrapSteps and
+ChangeCondition. Every operation carries the document identity it addresses.
+`Transaction { base, edits }` contains those operations; `Draft::apply` admits
+the whole batch or changes nothing. InsertStep accepts data arguments and an
+optional result binding, not arbitrary statements or callbacks. Nested actions
+that cannot be moved as a complete step require source.
 
-```rust
-use lash::workflow::authoring::{Operation, plan};
-use lash::workflow::document::{EffectName, Name, Type};
-
-// The host supplies a draft, insertion position, input expression and raw edit.
-let transaction = plan(&draft, [
-    Operation::InsertEffect {
-        at: insertion,
-        effect: EffectName::new("research.search")?,
-        args: vec![search_input],
-        result: Type::Any,
-        binding: Name::new("evidence"),
-    },
-    Operation::Edit(raw_edit),
-]);
+```rust,ignore
+use lash::workflow::authoring::{DataValue, Operation};
+use lash::workflow::edit::Transaction;
+let base = draft.identity();
+let transaction = Transaction { base, edits: vec![Operation::InsertStep {
+    base, at: insertion, effect: EffectName::new("research.search")?,
+    args: vec![DataValue::Variable(Name::new("input"))],
+    result: Type::Any, binding: Some(Name::new("evidence")),
+}] };
 let applied = draft.apply(&transaction, &environment)?;
 ```
 
-The same helpers accept documents imported from TypeScript or changed by direct
-edits. Hosts retain their own templates, HTTP transport, revisions, layout and
-publication policy. Lash owns the serialized operation data: `edit` and
-`insert_effect` are externally tagged cases, with unknown tags and structural
-fields refused. The example sends `{ version, operations: Operation[] }`
-directly to `/workflow/plan`. Its JSON Schema and generated TypeScript types are
-in `schemas/host/kernel-authoring-operation/`. Save the expanded `Transaction`
-for exact edit replay against its base and admission context. Host layout and
-presentation do not belong in the authoring API.
+Hosts own transport, revisions, layout and publication. The operation schema
+and TypeScript types live in `schemas/host/kernel-authoring-operation/`.
+`/workflow/plan` previews the same operations on a clone; `/workflow/edits`
+saves them. Unknown operations have a typed `unsupported_canvas_edit` cause.
+All edit diagnostics retain their typed `cause`, including checker payloads.
 
-Each operation plans to one edit, so admission diagnostics index the operations
-in order. If a host later changes the returned transaction, it owns the effects
-of those additional edits.
-
-All edit targets are sites in the transaction's base document. Original nodes
-remain targetable after preceding insertions in the same batch. A newly inserted
-node receives a targetable site after admission; edit it in the next transaction,
-or construct its desired AST before insertion. Explicit output binding names
-and raw transformations remain caller choices, checked by normal admission.
-This example does not introduce persistent step groups, stable wrapper
-objects, a second graph model or unrestricted same-batch references to new nodes.
+Cell-to-definition slicing uses
+`extract_entry(&document, &entry, &environment)`. It returns an admitted document
+and exact effects, with no raw cleanup transaction. The document/effects and
+refusals have schemas under `kernel-entry-extraction` and `kernel-edit-refusal`.
+Admission and correspondence in `Extraction.applied` stay in-process; the wire
+omits them, and deserialization sets that field to `None`.
 
 ## Dialect independence verification
 
@@ -280,7 +251,7 @@ Lash's own laws (`lash-kernel-edit`'s `view_tests`) cover lexical source
 choices and shadowing, callable return ownership and assignment identity. The
 example's Rust laws cover the served view being Lash's, named invocation inputs
 reaching effects and the final output, and imported parameterized entries. Browser checks exercise
-promotion, renaming, rewiring, type mismatch rejection, actual research and KPI
+data-value rewiring, type mismatch rejection, actual research and KPI
 executions, output reset between runs and mobile layout.
 
 ## Dataflow examples
@@ -296,7 +267,7 @@ synthesis and comparison consume their actual mapped inputs.
 
 Each action shows named inputs and result ports. Record outputs also expose
 fields as connection sources. Double-click an input to edit its constant, select an
-available source or use the canonical expression editor. **Execution data** in an
+available source or use the data-value mapping. **Execution data** in an
 open node shows each retained call's input and output, with separate occurrences
 for repeated calls. Trace rows select the relevant node. The entry Return or Finish inspector
 shows the actual terminal result. A nested function Return never borrows the
@@ -305,8 +276,8 @@ begins; this example does not persist a run-history browser.
 
 The backend serves `lash::workflow::view::derive` verbatim: Lash projects the
 canonical document and graph into statements, scopes, dataflow and execution
-sites. `frontend/dataflow.mjs` projects ports from that view and plans ordinary
-canonical edits; it introduces no second persisted dataflow graph.
+sites. `frontend/dataflow.mjs` projects ports from that view and plans closed
+canvas operations; it introduces no second persisted dataflow graph.
 The example host owns port labels, layout, expansion state, invocation forms,
 mock defaults and transport. Kernel types, lexical bindings, Sites, edits and
 runtime records remain authoritative.

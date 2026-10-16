@@ -15,10 +15,12 @@ use lash::workflow::document::Correspondence;
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context as _, Result, bail, ensure};
+use lash::workflow::authoring::{DataRecordEntry, DataValue, Operation, ValueTarget};
 use lash::workflow::document::{
-    Action, Document, Expr, Literal, Name, Node, Rhs, Site, Stmt, Unit, parse_document,
+    Action, Atom, Document, EffectName, Expr, Literal, Name, Node, Rhs, Site, Stmt, Type, Unit,
+    parse_document,
 };
-use lash::workflow::edit::{Edit, Position};
+use lash::workflow::edit::Position;
 use lash_e2e::{Case, Host, NodeOptions};
 use serde_json::{Value, json};
 
@@ -139,30 +141,6 @@ fn within(site: &Site, under: &Site) -> bool {
 }
 
 /// The statement an action is the right-hand side of.
-fn statement_of(action: &Site) -> Site {
-    let mut statement = action.clone();
-    statement.path.pop();
-    statement
-}
-
-/// The statements of `main { <text> }`, as kernel text spells them.
-fn statements(text: &str) -> Result<Vec<Stmt>> {
-    Ok(parse_document(&format!(
-        "kernel 1\nnumbers float\neffect ledger.record(input: Any) -> Any\n\nmain {{\n{text}\n}}\n"
-    ))
-    .with_context(|| format!("`{text}` parses"))?
-    .main)
-}
-
-fn expression(text: &str) -> Result<Expr> {
-    let Ok([Stmt::Finish { value }]) =
-        <[Stmt; 1]>::try_from(statements(&format!("finish {text}"))?)
-    else {
-        bail!("`finish {text}` is one statement");
-    };
-    Ok(value)
-}
-
 /// The sites of the workflow the case edits, runs and reads the overlay at.
 struct Shape {
     /// The `try` statement and its two blocks.
@@ -178,7 +156,7 @@ struct Shape {
     /// The `review.request` action a run parks on.
     review: Site,
     /// The `ledger.record` actions of the inner loop body, in order: one in
-    /// the generated workflow, two once it is cloned.
+    /// the generated workflow, two once another is inserted.
     records: Vec<Site>,
     /// The `ledger.record` action an edit authored at the end of the `try`
     /// body; the generated workflow has none.
@@ -664,28 +642,31 @@ async fn s38(case: &mut Case) -> Result<()> {
         .post("/workflow/draft", &json!({"definition": old["id"]}))
         .await?;
     let draft = shape(&document(&opened["document"])?, "reviewed")?;
-    let Ok([bind, record]) = <[Stmt; 2]>::try_from(statements(
-        "let signed = {entry: \"signed-off\"}\ndo perform ledger.record(signed) as Any",
-    )?) else {
-        bail!("the authored statements are two");
+    let base_document = document(&opened["document"])?;
+    let base = base_document.identity();
+    let Node::Action(Action::Perform {
+        effect,
+        args,
+        result,
+        ..
+    }) = base_document
+        .node(&draft.records[0])
+        .context("record action")?
+    else {
+        bail!("the record action")
     };
+    let data_args = args
+        .iter()
+        .map(|atom| match atom {
+            Atom::Variable(name) => DataValue::Variable(name.clone()),
+            Atom::Literal(value) => DataValue::Literal(value.clone()),
+        })
+        .collect();
     let edits = json!({"edits": [
-        // In the try region: one more recorded entry, authored as kernel
-        // statements.
-        Edit::InsertStatement { at: Position::end(draft.try_body.clone()), statement: bind },
-        Edit::InsertStatement { at: Position::end(draft.try_body.clone()), statement: record },
-        // In the try region: the status a completed review ends with.
-        Edit::ReplaceExpression {
-            expression: draft.status.clone(),
-            with: expression("\"signed-off\"")?,
-        },
-        // In the inner loop: only larger lines are reviewed.
-        Edit::ReplaceExpression { expression: draft.threshold.clone(), with: expression("3")? },
-        // In the inner loop: every line is recorded twice.
-        Edit::CloneStatement {
-            statement: statement_of(&draft.records[0]),
-            to: Position::end(draft.inner_body.clone()),
-        },
+        Operation::InsertStep { base, at: Position::end(draft.try_body.clone()), effect: EffectName::new("ledger.record")?, args: vec![DataValue::Record(vec![DataRecordEntry { field: "entry".into(), value: DataValue::Literal(Literal::Text("signed-off".into())) }])], result: Type::Any, binding: Some(Name::new("signed")) },
+        Operation::SetValue { base, target: ValueTarget::Literal { expression: draft.status.clone() }, value: DataValue::Literal(Literal::Text("signed-off".into())) },
+        Operation::SetValue { base, target: ValueTarget::Literal { expression: draft.threshold.clone() }, value: DataValue::Literal(Literal::Int(3.into())) },
+        Operation::InsertStep { base, at: Position::end(draft.inner_body.clone()), effect: effect.clone(), args: data_args, result: result.clone(), binding: None },
     ]});
     case.write("edits.json", &edits)?;
     let edited = host.post("/workflow/draft/edits", &edits).await?;
@@ -747,7 +728,7 @@ async fn s38(case: &mut Case) -> Result<()> {
         old_shape.authored.is_none() && new_shape.authored.is_some(),
         "only the edited workflow records the authored entry"
     );
-    let [_, cloned] = new_shape.records.as_slice() else {
+    let [_, _inserted] = new_shape.records.as_slice() else {
         bail!(
             "the edited inner loop records twice: {:?}",
             new_shape.records
@@ -758,28 +739,6 @@ async fn s38(case: &mut Case) -> Result<()> {
         signed.len() == 2 && signed.iter().all(|site| within(site, &new_shape.try_body)),
         "the status and the authored entry are in the try body: {signed:?}"
     );
-    let new_sites: Vec<Site> = sites(&new_document, |_| true)?
-        .into_iter()
-        .filter(|site| moved.predecessor(site).is_none())
-        .collect();
-    let try_statements = sites(&new_document, |node| matches!(node, Node::Stmt(_)))?
-        .into_iter()
-        .filter(|site| site.path.len() == new_shape.try_body.path.len() + 1)
-        .filter(|site| within(site, &new_shape.try_body))
-        .collect::<Vec<_>>();
-    let [.., bound, recorded] = try_statements.as_slice() else {
-        bail!("the edited try body ends with the authored statements");
-    };
-    let cloned_statement = statement_of(cloned);
-    ensure!(
-        new_sites.len() == 7
-            && new_sites.iter().all(|site| {
-                within(site, bound) || within(site, recorded) || within(site, &cloned_statement)
-            })
-            && sites(&new_document, |_| true)?.len() == old_sites.len() + 7,
-        "the only new nodes are the authored statements and the clone: {new_sites:?}"
-    );
-
     // (d) A run of the edited definition: it parks inside the inner loop,
     // is resolved once, and parks there again on a later iteration.
     let new_run = start(case, "node-a", &new, "edited").await?;

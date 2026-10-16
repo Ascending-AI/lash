@@ -1,13 +1,13 @@
 //! Example-owned HTTP adapter for Lash's public authoring API.
-//! The planner knows no HTTP, revisions, example catalog or publication policy.
+//! The closed authoring vocabulary knows no HTTP, revisions, catalog or publication policy.
 
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use lash::workflow::WorkflowImport;
-use lash::workflow::authoring::{Operation, plan};
+use lash::workflow::authoring::Operation;
 use lash::workflow::document::{Correspondence, Document, Name};
-use lash::workflow::edit::{Draft, Transaction};
+use lash::workflow::edit::{Draft, EditDiagnosticKind, Transaction};
 use serde::{Deserialize, Serialize};
 
 use crate::{AppState, Dialect, ErrorResponse, Origin, WorkflowView, runtime};
@@ -107,12 +107,16 @@ pub(crate) struct PlanResponse {
 
 pub(crate) async fn preview(
     State(state): State<AppState>,
-    Json(request): Json<PlanRequest>,
+    request: Result<Json<PlanRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Json<PlanResponse>, ErrorResponse> {
+    let Json(request) = request.map_err(unsupported)?;
     let environment = state.environment().await?;
     let mut current = state.current();
     check_version(request.version, current.version)?;
-    let transaction = plan(&current.draft, request.operations);
+    let transaction = Transaction {
+        base: current.draft.identity(),
+        edits: request.operations,
+    };
     let applied = current
         .draft
         .apply(&transaction, &environment.checker())
@@ -122,7 +126,7 @@ pub(crate) async fn preview(
                 "plan_refused",
                 "The batch was refused; the current document is unchanged",
                 serde_json::json!({"transaction": &transaction, "diagnostics": refusal.diagnostics.iter().map(|diagnostic| {
-                serde_json::json!({"edit": diagnostic.edit, "message": diagnostic.kind.to_string()})
+                serde_json::json!({"edit": diagnostic.edit, "message": diagnostic.kind.to_string(), "cause": diagnostic.kind, "location": diagnostic.location})
             }).collect::<Vec<_>>()}),
             )
         })?;
@@ -143,4 +147,14 @@ fn check_version(sent: u64, current: u64) -> Result<(), ErrorResponse> {
     } else {
         Err(ErrorResponse::version_conflict(sent, current))
     }
+}
+
+/// Unknown or malformed canvas operations have one typed transport cause.
+pub(crate) fn unsupported(error: axum::extract::rejection::JsonRejection) -> ErrorResponse {
+    ErrorResponse::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "unsupported_canvas_edit",
+        error.body_text(),
+        serde_json::json!({"cause": EditDiagnosticKind::UnsupportedCanvasEdit}),
+    )
 }

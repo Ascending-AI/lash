@@ -542,8 +542,8 @@ impl HostArtifacts {
     ///
     /// The document is the whole cell, including `main` and other entries.
     /// To publish only the selected function (with `workflow-authoring`),
-    /// plan `workflow::edit::extract_entry` with its entry name, then apply
-    /// the returned `Extraction::transaction` through a `workflow::edit::Draft`
+    /// call `workflow::edit::extract_entry` with its entry name and checker environment;
+    /// use the returned admitted `Extraction::document`
     /// against the workflow environment. This keeps that entry and every
     /// declared function it reaches, and derives their manifest during
     /// application.

@@ -777,7 +777,7 @@ fn a_structural_fault_refuses_in_the_document_and_in_a_reached_body() {
         [Refused {
             site: Some(main_site(&[0])),
             reason: RefusalReason::Invalid(InvalidReason::LoopControlOutsideLoop {
-                keyword: "break"
+                keyword: "break".into()
             }),
         }]
     );

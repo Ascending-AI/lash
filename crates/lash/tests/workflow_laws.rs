@@ -12,8 +12,9 @@ use std::sync::Arc;
 
 use futures_util::StreamExt as _;
 
+use lash::workflow::authoring::{DataValue, Operation, ValueTarget};
 use lash::workflow::document::{Document, Expr, Literal, Name, Place, Rhs, Stmt, Unit};
-use lash::workflow::edit::{Draft, Edit, Transaction};
+use lash::workflow::edit::{Draft, Transaction};
 use lash::workflow::{WorkflowDocumentEntry, WorkflowPublication, WorkflowPublish, WorkflowRead};
 
 /// `guarded(name)`: binds `out` inside a `try`, sleeps once in each turn of
@@ -637,8 +638,10 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
         .expect("the kernel engine reads workflow documents");
     let entry = Name::new("guarded");
 
-    let document: Document =
-        lash::workflow::document::parse_document(GUARDED).expect("the document parses");
+    let document: Document = lash::workflow::document::parse_document(
+        &GUARDED.replace("set out = name", "set out = \"operator\""),
+    )
+    .expect("the document parses");
     let first = published(
         artifacts
             .publish_workflow(&pin, &document, &entry, &environment, None)
@@ -675,25 +678,20 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     assert_eq!(sleep.site.unit, unit);
     assert_eq!(sleep.loops.len(), 2, "the wait sits in the inner loop");
 
-    // Edit inside the `try` region: its first statement now binds a
-    // constant.
-    let guarded = graph
-        .statement_sites()
-        .find(|site| site.unit == unit && site.path.len() > 1 && site.path[0] == 1)
-        .expect("the first statement of the try body")
-        .clone();
+    // Change the existing status literal while preserving all control and action sites.
+    let guarded = graph.nodes().iter().find(|node| node.site.unit == unit && matches!(&node.kind, lash::workflow::graph::NodeKind::Expr(lash::workflow::graph::ExprNode::Literal(Literal::Text(text))) if text == "operator")).map(|node| node.site.clone()).expect("the status literal");
     let mut draft =
         Draft::open(inspection.document.document().clone()).expect("the document opens");
     let applied = draft
         .apply(
             &Transaction {
                 base: draft.identity(),
-                edits: vec![Edit::ReplaceStatement {
-                    statement: guarded.clone(),
-                    with: Stmt::Assign {
-                        place: Place::Variable(Name::new("out")),
-                        value: Rhs::Expr(Expr::Literal(Literal::Text("edited".to_owned()))),
+                edits: vec![Operation::SetValue {
+                    base: draft.identity(),
+                    target: ValueTarget::Literal {
+                        expression: guarded.clone(),
                     },
+                    value: DataValue::Literal(Literal::Text("edited".to_owned())),
                 }],
             },
             &checked.checker(),

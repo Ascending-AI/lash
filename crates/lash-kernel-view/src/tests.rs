@@ -5,8 +5,8 @@ use lash_kernel_doc::{
     Document, EffectName, Expr, FunctionCatalog, FunctionRegistry, Literal, Name, Place, Site,
     Stmt, Type, Unit, WorkflowDocumentEntry, parse_document,
 };
-use lash_kernel_edit::authoring::{Operation, plan};
-use lash_kernel_edit::{Draft, Position};
+use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
+use lash_kernel_edit::{Draft, Position, Transaction};
 use serde_json::Value;
 
 use crate::{BindingKind, CalleeView, ScopeKind, SiteKind, WorkflowView, derive};
@@ -165,16 +165,17 @@ main {
     environment.effects = document.manifest.effects.clone();
     let anchor = site("notify", &[1]);
     let effect = EffectName::new("mail.send").unwrap();
-    let transaction = plan(
-        &draft,
-        [Operation::InsertEffect {
+    let transaction = Transaction {
+        base: draft.identity(),
+        edits: vec![Operation::InsertStep {
+            base: draft.identity(),
             at: Position::before(anchor.clone()).unwrap(),
             effect: effect.clone(),
-            args: vec![Expr::Literal(Literal::Text("ops".into()))],
+            args: vec![DataValue::Literal(Literal::Text("ops".into()))],
             result: Type::Any,
-            binding: Name::new("copied"),
+            binding: Some(Name::new("copied")),
         }],
-    );
+    };
     let base = view_of(draft.document(), "notify");
     let applied = draft.apply(&transaction, &environment).expect("admitted");
     let moved = applied
@@ -722,8 +723,6 @@ main {
 /// read.
 #[test]
 fn the_view_lists_nested_actions_in_issue_order_and_their_arguments_edit_in_place() {
-    use lash_kernel_edit::{Edit, Transaction};
-
     let document = parse_document(NESTED).expect("a nested-action workflow");
     let view = view_of(&document, "notify");
     let at = |path: &[u32]| site("notify", path);
@@ -818,9 +817,12 @@ fn the_view_lists_nested_actions_in_issue_order_and_their_arguments_edit_in_plac
     let subject = at(&[0, 0, 1, 0]);
     let replace = |draft: &Draft, with: &str| Transaction {
         base: draft.identity(),
-        edits: vec![Edit::ReplaceExpression {
-            expression: subject.clone(),
-            with: Expr::Literal(Literal::Text(with.into())),
+        edits: vec![Operation::SetValue {
+            base: draft.identity(),
+            target: ValueTarget::Literal {
+                expression: subject.clone(),
+            },
+            value: DataValue::Literal(Literal::Text(with.into())),
         }],
     };
     let applied = draft

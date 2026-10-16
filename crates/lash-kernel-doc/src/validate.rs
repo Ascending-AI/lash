@@ -6,6 +6,9 @@
 //! type. Scopes, linking against an environment and derived facts belong to
 //! `lash-kernel-check`.
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use crate::ast::{
@@ -38,7 +41,10 @@ fn at(site: &Option<Site>) -> String {
 /// An action form, as a refusal names it: one with no expression spelling
 /// (`join`, `yield`, `cancel`) nested in an expression, or one the body of
 /// a function with a native implementation may not run (`K-LIB-004`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum StatementForm {
     Call,
     Perform,
@@ -65,7 +71,8 @@ impl StatementForm {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum InvalidReason {
     #[error("written for kernel version {found}; this reader supports version {supported}")]
@@ -79,7 +86,7 @@ pub enum InvalidReason {
     #[error("field `{field}` is written twice in one record")]
     DuplicateField { field: String },
     #[error("`{keyword}` is used outside a loop")]
-    LoopControlOutsideLoop { keyword: &'static str },
+    LoopControlOutsideLoop { keyword: Cow<'static, str> },
     /// A library call written as an expression's own call names a
     /// function with no native implementation: a call of it is an
     /// action, `invoke`.
@@ -132,7 +139,7 @@ pub enum InvalidReason {
         declared: usize,
     },
     #[error("invalid type: {problem}")]
-    InvalidType { problem: &'static str },
+    InvalidType { problem: Cow<'static, str> },
     #[error("a required parameter (`{name}`) follows an optional one")]
     RequiredAfterOptional { name: Name },
     #[error("a formula names `{name}`, which is not a parameter")]
@@ -164,7 +171,7 @@ pub enum InvalidReason {
     /// An action nested where no frame can stand at it: a `while`
     /// condition, or an assignment's place.
     #[error("an action cannot be nested in {position}")]
-    NestedActionPosition { position: &'static str },
+    NestedActionPosition { position: Cow<'static, str> },
     /// A right-hand side that is one action with variable and literal
     /// arguments is the statement's action, not an expression: the one
     /// spelling kernel text reads back.
@@ -885,7 +892,9 @@ fn nested_action(expr: &Expr, site: &Site, position: &'static str) -> Result<(),
             Node::Expr(Expr::Act(_)) => {
                 return Err(invalid(
                     Some(&at),
-                    InvalidReason::NestedActionPosition { position },
+                    InvalidReason::NestedActionPosition {
+                        position: position.into(),
+                    },
                 ));
             }
             Node::Expr(Expr::Closure(_)) => {}
@@ -905,7 +914,9 @@ fn loop_control(in_loop: bool, keyword: &'static str, site: &Site) -> Result<(),
     } else {
         Err(invalid(
             Some(site),
-            InvalidReason::LoopControlOutsideLoop { keyword },
+            InvalidReason::LoopControlOutsideLoop {
+                keyword: keyword.into(),
+            },
         ))
     }
 }
@@ -997,7 +1008,11 @@ fn check_signature(signature: &Signature) -> Result<(), Invalid> {
 }
 
 fn check_type(ty: &Type) -> Result<(), InvalidReason> {
-    let problem = |problem| Err(InvalidReason::InvalidType { problem });
+    let problem = |problem: &'static str| {
+        Err(InvalidReason::InvalidType {
+            problem: problem.into(),
+        })
+    };
     match ty {
         Type::Any
         | Type::Null

@@ -25,8 +25,9 @@ use lash::process::{
     ProcessObservationStreamItem, ProcessOriginator, ProcessStartRequest, ProcessStatus,
 };
 use lash::sync::MutexExt as _;
+use lash::workflow::authoring::Operation;
 use lash::workflow::document::{Document, Name};
-use lash::workflow::edit::{Draft, Edit, Location, Transaction};
+use lash::workflow::edit::{Draft, Location, Transaction};
 use lash::workflow::{
     WorkflowDocument, WorkflowDocumentRead, WorkflowExecutionOverlayAccumulator,
     WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish, WorkflowRead,
@@ -408,7 +409,7 @@ async fn read_draft(State(host): State<Host>) -> ApiResult {
 struct EditDraft {
     /// Kernel edits, as lash serializes them. Their sites are sites of the
     /// document the draft holds.
-    edits: Vec<Edit>,
+    edits: Vec<Operation>,
 }
 
 /// Apply `edits` to the draft as one transaction against the environment a
@@ -451,7 +452,7 @@ async fn edit_draft(State(host): State<Host>, Json(request): Json<EditDraft>) ->
                         }
                         None => Value::Null,
                     },
-                    "message": diagnostic.kind.to_string(),
+                    "message": diagnostic.kind.to_string(), "cause": diagnostic.kind, "location": diagnostic.location,
                 }))
                 .collect::<Vec<_>>(),
         }))),
@@ -850,7 +851,10 @@ async fn read_observer(
 #[expect(clippy::panic, reason = "test module: these laws fail by panicking")]
 mod tests {
     use super::*;
-    use lash::workflow::document::{Action, Expr, Literal, Node, Site, Stmt, Unit, parse_document};
+    use lash::workflow::authoring::{DataValue, ValueTarget};
+    use lash::workflow::document::{
+        Action, Atom, EffectName, Expr, Literal, Node, Site, Stmt, Type, Unit, parse_document,
+    };
     use lash::workflow::edit::Position;
 
     /// The workflow S38 runs, as a kernel document whose library functions
@@ -959,28 +963,10 @@ mod tests {
             if performed.to_string() == effect)
     }
 
-    /// The statements of `main { <text> }`, as kernel text spells them.
-    fn statements(text: &str) -> Vec<Stmt> {
-        parse_document(&format!(
-            "kernel 1\nnumbers float\neffect ledger.record(input: Any) -> Any\n\nmain {{\n{text}\n}}\n"
-        ))
-        .expect("the statements parse")
-        .main
-    }
-
-    fn expression(text: &str) -> Expr {
-        let Ok([Stmt::Finish { value }]) =
-            <[Stmt; 1]>::try_from(statements(&format!("finish {text}")))
-        else {
-            panic!("`finish {text}` is one statement");
-        };
-        value
-    }
-
     /// The four edits S38 makes: inside the `try` region one more recorded
     /// entry and another final status; inside the inner loop a higher review
     /// threshold and every line recorded twice.
-    fn edits(document: &Document) -> Vec<Edit> {
+    fn edits(document: &Document) -> Vec<Operation> {
         let region = one(document, "try", |node| {
             matches!(node, Node::Stmt(Stmt::Try(_)))
         });
@@ -996,33 +982,60 @@ mod tests {
         .into_iter()
         .find(|site| site.path.starts_with(&inner_body.path))
         .expect("the inner loop records");
-        let [bind, perform] = statements(
-            "let signed = {entry: \"signed-off\"}\ndo perform ledger.record(signed) as Any",
-        )
-        .try_into()
-        .expect("two statements");
+        let base = document.identity();
+        let Node::Action(Action::Perform {
+            effect,
+            args,
+            result,
+            ..
+        }) = document.node(&record.child(0)).unwrap()
+        else {
+            panic!("the record action")
+        };
+        let data_args = args
+            .iter()
+            .map(|atom| match atom {
+                Atom::Variable(name) => DataValue::Variable(name.clone()),
+                Atom::Literal(value) => DataValue::Literal(value.clone()),
+            })
+            .collect();
         vec![
-            Edit::InsertStatement {
+            Operation::InsertStep {
+                base,
                 at: Position::end(region.child(0)),
-                statement: bind,
+                effect: EffectName::new("ledger.record").unwrap(),
+                args: vec![DataValue::Record(vec![
+                    lash::workflow::authoring::DataRecordEntry {
+                        field: "entry".into(),
+                        value: DataValue::Literal(Literal::Text("signed-off".into())),
+                    },
+                ])],
+                result: Type::Any,
+                binding: Some(Name::new("signed")),
             },
-            Edit::InsertStatement {
-                at: Position::end(region.child(0)),
-                statement: perform,
+            Operation::SetValue {
+                base,
+                target: ValueTarget::Literal {
+                    expression: one(document, "status literal", |node| is_text(node, "reviewed")),
+                },
+                value: DataValue::Literal(Literal::Text("signed-off".into())),
             },
-            Edit::ReplaceExpression {
-                expression: one(document, "status literal", |node| is_text(node, "reviewed")),
-                with: expression("\"signed-off\""),
+            Operation::SetValue {
+                base,
+                target: ValueTarget::Literal {
+                    expression: one(document, "threshold literal", |node| {
+                        matches!(node, Node::Expr(Expr::Literal(Literal::Int(_))))
+                    }),
+                },
+                value: DataValue::Literal(Literal::Int(3.into())),
             },
-            Edit::ReplaceExpression {
-                expression: one(document, "threshold literal", |node| {
-                    matches!(node, Node::Expr(Expr::Literal(Literal::Int(_))))
-                }),
-                with: expression("3"),
-            },
-            Edit::CloneStatement {
-                statement: record,
-                to: Position::end(inner_body),
+            Operation::InsertStep {
+                base,
+                at: Position::end(inner_body),
+                effect: effect.clone(),
+                args: data_args,
+                result: result.clone(),
+                binding: None,
             },
         ]
     }

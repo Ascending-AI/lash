@@ -12,8 +12,8 @@ Poll `/healthz` for `{ "service": "workflow-graph-roundtrip", "status": "ok" }`.
 Use a fresh artifact directory. Stop only this test's server when finished.
 
 The default page is the visual editor. **Examples** selects workflows,
-**Canvas scope** selects canonical blocks, and **Advanced** contains source,
-the kernel document and the helper/direct-edit transaction queue. It is one
+**Canvas scope** selects canonical blocks, and **Edit source** contains source,
+and whole-source replacement. It is one
 editor with one saved document. See [the HTTP contract](../../examples/workflow-graph-roundtrip/CONTRACT.md).
 
 Save screenshots at each phase and the corresponding HTTP requests, responses
@@ -26,7 +26,7 @@ Require that its response and a fresh `/workflow` agree on `version`,
 `identity`, `definition` and `entry`, with no `notAdmitted` error. The canvas
 must show the selected entry, with branches and explicit scope navigation.
 
-Open **Advanced**. The TypeScript pane must contain
+Open **Edit source**. The TypeScript pane must contain
 `Welcome to the workflow graph`. Import that unchanged export and verify that
 `identity` and the canonical `document` are unchanged. The host revision may
 advance. Save `01-opened.json` and `01-opened.png`.
@@ -37,41 +37,27 @@ revision after an edit.
 
 ## 2. Refuse an invalid edit without saving
 
-Expand **Direct typed edit** and enter:
+Send `/workflow/plan` a `set_value` operation against the saved document identity,
+with the greeting's literal Site and value `{"variable":"nowhere"}`. Require
+HTTP 422 `plan_refused`, a typed unbound-variable cause, and unchanged saved
+identity and revision. Repeat a raw `replace_statement` request against both
+`/workflow/edits` and `/workflow/plan`; require `unsupported_canvas_edit` and
+unchanged identity. There is no raw-edit UI.
 
-```json
-[{"replace_expression":{"expression":<greeting-site>,"with":{"variable":"nowhere"}}}]
-```
+## 3. Apply a supported edit
 
-Press **Queue direct edits**, then **Preview transaction**. Require HTTP 422
-`plan_refused` with a diagnostic, a visible error, and unchanged saved document,
-identity and revision. **Apply changes** must remain disabled. Clear the queue.
-Save `02-refused.json` and `02-refused.png`.
+Double-click the greeting's input, set its constant to `Edited as a kernel
+document`, and save. Inspect the closed `set_value` operation and correspondence.
+Require revision +1 and a changed identity. Add a mock message with **Add step**;
+its preview uses `insert_step` and its data arguments remain inside the step.
+Save the requests/responses and screenshots.
 
-## 3. Preview and apply a valid edit
-
-Queue the same edit with `with` set to
-`{"literal":{"text":"Edited as a kernel document"}}`. Preview it.
-Require a successful plan with the expected ordinary typed edit and a preview
-containing the new greeting, while GET `/workflow` remains unchanged.
-
-Press **Apply changes**. Require revision +1, changed document identity,
-and correspondence mapping the edited expression. The TypeScript and Kernel
-document panes must now show the new greeting. Save `03-edited.json` and
-`03-edited.png`.
-
-The `lash-kernel-edit` authoring law separately checks a helper/direct/helper
-batch, fresh names across the complete batch, base-document anchors, and atomic
-refusal. The visual **Add step** flow must use the public
-`lash::workflow::authoring::plan` API and the same admission path. Inspect the
-`/workflow/plan` request: its host envelope is `{ version, operations }`, and
-operations use Lash's `edit` and `insert_effect` tags from the published
-`kernel-authoring-operation` schema. The expanded transaction is the exact edit
-record; planning the request again is a new plan.
+Use **Edit source** for renames, code/declaration changes and terminal structure.
+Import validates the whole replacement before saving it.
 
 ## 4. Run and approve
 
-Close Advanced and press **Run workflow**, recording SSE. Require the execution
+Close Edit source and press **Run workflow**, recording SSE. Require the execution
 panel to show the parked approval and a usable approval control. Approve it and
 poll until the invocation settles. Every site-bearing event must reference the
 run's document; call-only events must not replace aggregate node status.
@@ -94,7 +80,7 @@ Save `05-research.png`, `05-kpis.png` and each run's events.
 
 Run the example's Node tests using `node --test examples/workflow-graph-roundtrip/frontend/*.test.mjs`.
 They must exercise the active canvas and editing/approval implementations:
-constant promotion cannot hoist a reevaluated condition; generated names avoid
+closed operations reject arbitrary code; generated result names avoid
 all binding kinds; negative zero survives controls; pending approvals survive
 concurrent waits and late responses. Backend admission owns type compatibility.
 Use the example's focused Rust laws for canonical facets, atomic edits, named

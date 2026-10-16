@@ -2,40 +2,40 @@
 
 use std::collections::BTreeSet;
 
-use lash_kernel_check::entry_reachability;
+use crate::apply::Working;
+use lash_kernel_check::{Environment, entry_reachability};
 use lash_kernel_doc::{Document, EffectName, Name, Site, Unit};
 
 use crate::refusal::refused;
-use crate::{Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal, Transaction};
+use crate::{Applied, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal};
 
 /// An entry extraction and the effects its retained code performs.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Extraction {
-    /// The edits to apply against the source document.
-    pub transaction: Transaction,
+    /// The admitted extracted document.
+    pub document: Document,
+    /// In-process admission and surviving correspondence, present on extraction.
+    /// Omitted on the wire; a decoded result carries only the document and effects.
+    #[serde(skip)]
+    pub applied: Option<Applied>,
     /// Exactly the effects performed by the entry and its reachable declared
     /// functions and closures. Unrelated entries and `main` contribute none.
     pub requirements: BTreeSet<EffectName>,
 }
 
-/// Plan a document containing only `entry` and its reachable declared functions.
-///
-/// Reachability includes calls, spawns, closures and function-reference
-/// literals in every expression and atomic argument. The transaction removes
-/// all `main` statements, private bindings, other entries and unreachable
-/// functions. The returned requirements come from the same reachability walk.
-/// It is based on `document` and does not mutate it.
-///
-/// Apply with [`crate::Draft::apply`] against the publication environment. Application
-/// derives the remaining manifest and performs normal admission atomically.
-/// Planning needs no library catalog and does not certify types, scope or the
-/// environment; a planned transaction can still be refused on application.
+/// Extract only `entry` and its reachable declared functions and closures.
+/// Main, private bindings and unrelated declarations are removed atomically.
+/// The manifest is derived and the result admitted in `environment` before
+/// returning it. The input is unchanged on success and on refusal.
 ///
 /// # Errors
-///
-/// The entry is unknown, a reachable function is undeclared, or the document
-/// cannot be canonically encoded. Refusals retain the edit/checker's typed causes.
-pub fn extract_entry(document: &Document, entry: &Name) -> Result<Extraction, EditRefusal> {
+/// Unknown entries, dangling references and checker causes remain typed.
+pub fn extract_entry(
+    document: &Document,
+    entry: &Name,
+    environment: &Environment<'_>,
+) -> Result<Extraction, EditRefusal> {
     if !document.entries.contains_key(entry) {
         return Err(EditRefusal {
             diagnostics: vec![EditDiagnostic {
@@ -72,8 +72,26 @@ pub fn extract_entry(document: &Document, entry: &Name) -> Result<Extraction, Ed
     {
         edits.push(Edit::RemoveFunction { name: name.clone() });
     }
+    let mut working = Working::open(document);
+    for edit in edits {
+        working.edit(&edit).map_err(|fault| match *fault {
+            crate::apply::FaultKind::At(location, kind) => EditRefusal {
+                diagnostics: vec![EditDiagnostic {
+                    edit: None,
+                    location,
+                    kind,
+                }],
+            },
+            crate::apply::FaultKind::Unlinked(refusal) => refused(None, refusal),
+        })?;
+    }
+    let published = working.publish(base, environment)?;
     Ok(Extraction {
-        transaction: Transaction { base, edits },
+        document: published.document,
         requirements: reached.effects,
+        applied: Some(Applied {
+            correspondence: published.correspondence,
+            admitted: published.admitted,
+        }),
     })
 }

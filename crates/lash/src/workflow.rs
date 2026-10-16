@@ -56,19 +56,19 @@
 //! answers the [`WorkflowEnvironment`] a document is checked against: the
 //! effects its processes would be offered and the library functions the
 //! workers hold. With `workflow-authoring`, an `edit::Draft` opens a document
-//! and applies `edit::Edit`s in atomic `edit::Transaction`s against a base
-//! identity: insert, remove, move and replace statements and expressions,
-//! set bindings, conditions, loop and `try` headers, function signatures,
-//! and insert, remove, rename and retype entries. Each transaction is
-//! admitted whole against the environment or changes nothing, and a
+//! and applies `authoring::Operation`s in atomic `edit::Transaction`s against a base
+//! identity. Each transaction of values, effect steps, if/for/try wrappers
+//! and conditions is admitted whole against the environment or changes nothing. A
 //! refusal names the edit and the site (`edit::EditRefusal`).
 //!
-//! For effect inputs written as expressions, `authoring::plan` lowers an
-//! ordered batch of `authoring::Operation`s to the same transaction. Mix
-//! `authoring::Operation::InsertEffect` with ordinary
-//! `authoring::Operation::Edit`s; computed inputs become preceding bindings
-//! whose names avoid the whole batch. Planning neither mutates nor admits the
-//! draft. Inspect the transaction, then use `edit::Draft::apply` as usual.
+//! Canvas operations carry their base identity. SetValue accepts only data;
+//! step and wrapper operations reject nonseparable actions. Other changes go
+//! through whole-source replacement. `edit::extract_entry` atomically returns
+//! an admitted entry slice and its effect requirements.
+//!
+//! A workflow definition id is a content address. Holding or copying one proves
+//! content only, not possession. Lash performs no possession check; the host
+//! authorizes who may create or run a workflow from an id.
 //!
 //! Sites are structural paths, so they change under edits. Continuity is
 //! the [`document::Correspondence`] each applied transaction answers: where
@@ -225,8 +225,8 @@ pub mod graph {
 #[cfg(feature = "workflow-authoring")]
 pub mod edit {
     pub use lash_kernel_edit::{
-        Applied, Draft, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal, Extraction,
-        Location, NodeClass, Position, Transaction, extract_entry,
+        Applied, Draft, EditDiagnostic, EditDiagnosticKind, EditRefusal, Extraction, Location,
+        NodeClass, Position, Transaction, extract_entry,
     };
 }
 

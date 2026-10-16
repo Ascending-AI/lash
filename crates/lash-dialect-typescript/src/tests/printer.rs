@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use lash_kernel_dialect::{Environment, NamedLibrary, Printer};
 use lash_kernel_doc as k;
-use lash_kernel_edit::{Draft, Edit, Position, Transaction};
+use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
+use lash_kernel_edit::{Draft, Transaction};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, Step, Target,
 };
@@ -310,18 +311,17 @@ main {
             &Transaction {
                 base: draft.identity(),
                 edits: vec![
-                    Edit::SetArgument {
-                        action: main(&[1, 0]),
-                        index: 0,
-                        argument: k::Expr::Literal(k::Literal::Text("https://b".into())),
-                    },
-                    Edit::InsertStatement {
-                        at: Position::before(main(&[3])).unwrap(),
-                        statement: k::Stmt::Print {
-                            value: k::Expr::Variable("page".into()),
+                    Operation::SetValue {
+                        base: draft.identity(),
+                        target: ValueTarget::ToolArgument {
+                            action: main(&[1, 0]),
+                            index: 0,
+                            path: vec![],
                         },
+                        value: DataValue::Literal(k::Literal::Text("https://b".into())),
                     },
-                    Edit::SetCondition {
+                    Operation::ChangeCondition {
+                        base: draft.identity(),
                         statement: main(&[3]),
                         condition: k::Expr::Member(Box::new(k::Member::Field {
                             target: k::Expr::Variable("page".into()),

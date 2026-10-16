@@ -1,5 +1,7 @@
 //! Why a document is refused, as typed data.
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use lash_kernel_doc::{
@@ -49,7 +51,8 @@ impl From<Invalid> for Refused {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
 pub enum RefusalReason {
     /// The document, or the body of a library function it reaches, fails
@@ -160,7 +163,8 @@ pub(crate) fn refused(site: Option<&Site>, reason: RefusalReason) -> Refused {
 }
 
 /// The side of an effect signature that cannot serve its declaration.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum SignatureSide {
     Input,
     Output,
@@ -179,7 +183,8 @@ impl fmt::Display for SignatureSide {
 /// `path` uses JSON pointer escaping in the projected type structure:
 /// `/input`, `/output`, and their properties, items or additional properties.
 /// The types are the kernel's projections, not the original JSON schemas.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SignatureMismatch {
     pub side: SignatureSide,
     pub path: String,

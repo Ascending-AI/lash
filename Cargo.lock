@@ -3064,6 +3064,8 @@ name = "lash-kernel-check"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "schemars",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
 ]
@@ -3085,7 +3087,6 @@ dependencies = [
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
- "lash-kernel-edit",
  "lash-kernel-lib",
  "lash-kernel-state",
  "lash-kernel-vm",

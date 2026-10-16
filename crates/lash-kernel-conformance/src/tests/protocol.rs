@@ -13,7 +13,6 @@ use lash_kernel_vm::{
 
 use crate::{Case, CaseBounds, Shard};
 
-mod edits;
 mod execution;
 mod versions;
 
@@ -32,7 +31,6 @@ fn run_rule(rule: &str, text: &str) {
     assert_eq!(shard.rule, rule);
     for case in &shard.cases {
         match rule {
-            rule if rule.starts_with("K-EDIT-") => edits::check(rule, case),
             rule if rule.starts_with("K-VER-") => versions::check(rule, case),
             _ => execution::check(rule, case),
         }
@@ -125,31 +123,26 @@ fn owned_rules_have_cases_instead_of_pending_owners() {
     let pending: Vec<crate::PendingRule> =
         serde_json::from_str(include_str!("../../pending.json")).unwrap();
     let shards = super::corpus_shards();
-    let rules = (1..=10)
-        .filter(|n| *n != 6)
-        .map(|n| format!("K-EDIT-{n:03}"))
-        .chain(
-            [
-                "K-BND-003",
-                "K-CHG-003",
-                "K-CHG-004",
-                "K-CHG-005",
-                "K-CHG-006",
-                "K-LIB-010",
-                "K-SES-001",
-                "K-SES-002",
-                "K-SES-003",
-                "K-SITE-001",
-                "K-SITE-002",
-                "K-SITE-003",
-                "K-VER-003",
-                "K-VER-004",
-                "K-VER-005",
-                "K-EFF-011",
-            ]
-            .into_iter()
-            .map(str::to_owned),
-        );
+    let rules = [
+        "K-BND-003",
+        "K-CHG-003",
+        "K-CHG-004",
+        "K-CHG-005",
+        "K-CHG-006",
+        "K-LIB-010",
+        "K-SES-001",
+        "K-SES-002",
+        "K-SES-003",
+        "K-SITE-001",
+        "K-SITE-002",
+        "K-SITE-003",
+        "K-VER-003",
+        "K-VER-004",
+        "K-VER-005",
+        "K-EFF-011",
+    ]
+    .into_iter()
+    .map(str::to_owned);
     for rule in rules {
         assert!(
             shards
