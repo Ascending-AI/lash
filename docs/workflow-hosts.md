@@ -373,6 +373,18 @@ reference, so one publication is all a run needs.
 The admitted document is the draft's document: publication does not rewrite
 it. A run reports against its sites.
 
+A function a run handed to a tool arrives as a function value,
+`{"$lash_function": <FunctionValue>}`, and needs no publication to start.
+`ProcessStartRequest::inline(LASH_VM_ENGINE_KIND, value, args, launch, ..)`
+starts it under your key (`with_host_start_key`): realization checks the
+value against the build's library and its bounds, publishes its document
+and descriptor under the start, and the process then holds them. Nothing is
+published before that, and a refused value publishes nothing. An exact
+retry under the key answers the same process, from any point a crash cut
+the first attempt at; other bytes, arguments or launch under it are a
+`StartKeyConflict`. To keep the function for later starts, publish
+`value.document` at `value.entry` instead.
+
 Draft storage, revision names, undo, collaboration and the decision to start
 a run are yours. Lash stores definitions, not drafts.
 

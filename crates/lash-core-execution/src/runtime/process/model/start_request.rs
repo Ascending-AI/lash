@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    DeclaredLaunch, EngineLaunch, LifetimeDecision, ProcessInput, ProcessProvenance,
-    ProcessStartRegistration, ProcessStartTarget, SessionId,
+    DeclaredInlineLaunch, DeclaredLaunch, EngineLaunch, LifetimeDecision, ProcessInput,
+    ProcessProvenance, ProcessStartRegistration, ProcessStartTarget, SessionId,
 };
 
 /// A start request as a leaf tool attempt declares it: everything a process
@@ -118,6 +118,29 @@ impl ProcessStartDeclaration {
             ProcessStartTarget::Definition {
                 definition_id,
                 signature_claim,
+                args,
+                launch,
+            },
+            originator,
+            lifetime,
+        )
+    }
+
+    /// Declare a start of the function `launch` was held for, carried
+    /// inline, with `args`, under that launch. The declaration commits the
+    /// function's bytes: nothing is stored for it until the start is
+    /// realized, after the declaring outcome commits (FIG-6382).
+    pub fn inline(
+        args: serde_json::Map<String, serde_json::Value>,
+        launch: DeclaredInlineLaunch,
+        originator: super::ProcessOriginator,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        let (engine_kind, payload, launch) = launch.into_parts();
+        Self::of_target(
+            ProcessStartTarget::Inline {
+                engine_kind,
+                payload,
                 args,
                 launch,
             },
@@ -278,6 +301,34 @@ impl ProcessStartRequest {
             ProcessStartTarget::Definition {
                 definition_id,
                 signature_claim,
+                args,
+                launch,
+            },
+            originator,
+            lifetime,
+        )
+    }
+
+    /// A host's start of a function carried inline, `payload` being the
+    /// `engine_kind` engine's value of it (for the kernel engine, a function
+    /// value's `{"$lash_function": ..}` form), with `args`, under `launch`.
+    /// Realization checks and publishes the function under the start's
+    /// referrer, then starts the definition it is; nothing is published
+    /// before. An exact retry under the same host key answers the same
+    /// process, and different bytes, arguments or launch under it are a
+    /// [`crate::PluginError::StartKeyConflict`].
+    pub fn inline(
+        engine_kind: impl Into<String>,
+        payload: serde_json::Value,
+        args: serde_json::Map<String, serde_json::Value>,
+        launch: EngineLaunch,
+        originator: super::ProcessOriginator,
+        lifetime: impl Into<LifetimeDecision>,
+    ) -> Self {
+        Self::of_target(
+            ProcessStartTarget::Inline {
+                engine_kind: engine_kind.into(),
+                payload,
                 args,
                 launch,
             },

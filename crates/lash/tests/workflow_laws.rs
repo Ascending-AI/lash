@@ -229,7 +229,7 @@ async fn builder_with_process_tools(
 
 /// A node's builder over `stores` whose processes run on `workers`.
 async fn builder_on_workers(
-    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    stores: Arc<dyn lash_core::StoreSet>,
     process_tools: bool,
     echo: EchoComponent,
     workers: lash::vm::WorkerService,
@@ -1822,3 +1822,6 @@ mod coarse;
 #[cfg(feature = "typescript")]
 #[path = "workflow_laws/crossing.rs"]
 mod crossing;
+
+#[path = "workflow_laws/inline_starts.rs"]
+mod inline_starts;

@@ -1687,6 +1687,7 @@ lash_rust_integration_test(
         "tests/workflow_laws/crossing.rs",
         "tests/workflow_laws/documents.rs",
         "tests/workflow_laws/generated_source.rs",
+        "tests/workflow_laws/inline_starts.rs",
         "tests/workflow_laws/node_spans.rs",
     ],
     data_exclude = [

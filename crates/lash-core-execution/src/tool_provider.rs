@@ -586,12 +586,67 @@ impl<'run> AttemptContext<'run> {
         let payload = resolved
             .start_payload(&args)
             .map_err(|error| ResolveTargetError::Refused(error.to_string()))?;
+        let engine_kind = resolved.draft.engine_kind().as_str().to_owned();
+        let performed = engines
+            .performed_effects(&engine_kind, &payload)
+            .await
+            .map_err(|refusal| ResolveTargetError::Refused(refusal.to_string()))?;
         Ok(crate::ResolvedStartTarget {
             definition_id: resolved.id().clone(),
-            engine_kind: resolved.draft.engine_kind().as_str().to_owned(),
+            engine_kind,
             signature: resolved.definition.signature.clone(),
             payload,
             args,
+            performed,
+        })
+    }
+
+    /// The function `payload` carries inline for the `engine_kind` engine,
+    /// checked by that engine before a start policy runs (D8, FIG-6382): the
+    /// definition a start of it with `args` runs, its signature and the
+    /// effects it performs. Nothing is read from or written to a store: the
+    /// function is published only when its declared start is realized,
+    /// after this attempt's outcome commits.
+    ///
+    /// # Errors
+    ///
+    /// [`ResolveTargetError::Refused`] for an engine that starts no inline
+    /// function or a payload it refuses, a tool error;
+    /// [`ResolveTargetError::Fault`] for a retryable fault.
+    pub async fn resolve_inline_start(
+        &self,
+        engine_kind: &str,
+        payload: serde_json::Value,
+        args: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<crate::ResolvedInlineStart, ResolveTargetError> {
+        let refused_or_fault = |error: PluginError| match error.class() {
+            crate::PluginErrorClass::Terminal => ResolveTargetError::Refused(error.to_string()),
+            _ => ResolveTargetError::Fault(error),
+        };
+        let inline = self
+            .definition_engines
+            .inline_starts(engine_kind)
+            .map_err(refused_or_fault)?
+            .inspect(&payload)
+            .await
+            .map_err(refused_or_fault)?;
+        let resolved = crate::ResolvedProcessDefinition {
+            definition: crate::ProcessDefinition::new(inline.draft.id(), inline.signature),
+            draft: inline.draft,
+        };
+        let start_payload = resolved
+            .start_payload(&args)
+            .map_err(|error| ResolveTargetError::Refused(error.to_string()))?;
+        Ok(crate::ResolvedInlineStart {
+            target: crate::ResolvedStartTarget {
+                definition_id: resolved.id().clone(),
+                engine_kind: engine_kind.to_owned(),
+                signature: resolved.definition.signature,
+                payload: start_payload,
+                args,
+                performed: inline.performed,
+            },
+            payload,
         })
     }
 
@@ -631,13 +686,50 @@ impl<'run> AttemptContext<'run> {
         choice: &crate::ProcessStartChoice,
         target: &crate::ResolvedStartTarget,
     ) -> Result<crate::DeclaredDefinitionLaunch, crate::HoldEnvError> {
-        let launch = self
-            .declare_engine_launch(choice, &target.engine_kind, &target.payload)
-            .await?;
+        let launch = self.declare_target_launch(choice, target).await?;
         Ok(crate::DeclaredDefinitionLaunch::held(
             target.definition_id.clone(),
             launch,
         ))
+    }
+
+    /// [`declare_launch`](Self::declare_launch) for a start of the function
+    /// `start` carries inline: the launch binds that function, so a
+    /// declaration made with it starts exactly it.
+    ///
+    /// # Errors
+    ///
+    /// As [`declare_launch`](Self::declare_launch).
+    pub async fn declare_inline_launch(
+        &self,
+        choice: &crate::ProcessStartChoice,
+        start: &crate::ResolvedInlineStart,
+    ) -> Result<crate::DeclaredInlineLaunch, crate::HoldEnvError> {
+        let launch = self.declare_target_launch(choice, &start.target).await?;
+        Ok(crate::DeclaredInlineLaunch::held(
+            start.target.engine_kind.clone(),
+            start.payload.clone(),
+            launch,
+        ))
+    }
+
+    async fn declare_target_launch(
+        &self,
+        choice: &crate::ProcessStartChoice,
+        target: &crate::ResolvedStartTarget,
+    ) -> Result<crate::DeclaredLaunch, crate::HoldEnvError> {
+        let launch = crate::runtime::process::hold_launch_performing(
+            &self.definition_engines,
+            &self.execution_scope,
+            self.enclosing_env.as_deref(),
+            choice,
+            &target.engine_kind,
+            &target.payload,
+            &target.performed,
+        )
+        .await?;
+        self.held_launches.lock_recover().push(launch.env.clone());
+        Ok(crate::DeclaredLaunch::held(launch))
     }
 
     /// [`declare_launch`](Self::declare_launch) for a start of the `kind`

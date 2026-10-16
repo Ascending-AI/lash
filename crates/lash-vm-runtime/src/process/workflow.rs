@@ -122,7 +122,7 @@ fn unresolvable(message: String) -> lash_core::PluginError {
     )
 }
 
-fn store_fault(error: super::DocumentStoreError) -> lash_core::PluginError {
+pub(super) fn store_fault(error: super::DocumentStoreError) -> lash_core::PluginError {
     match error {
         super::DocumentStoreError::Store(error) => lash_core::PluginError::from(error),
         other => unresolvable(other.to_string()),

@@ -307,6 +307,10 @@ impl EmbedError {
             | Self::Session(SessionError::Plugin(lash_core::PluginError::Runtime(error))) => {
                 crate::process::HostArtifactRefusal::of_runtime(error)
             }
+            Self::Plugin(lash_core::PluginError::RuntimeEffectController(error))
+            | Self::Session(SessionError::Plugin(
+                lash_core::PluginError::RuntimeEffectController(error),
+            )) => crate::process::HostArtifactRefusal::of_controller(error),
             _ => None,
         }
     }

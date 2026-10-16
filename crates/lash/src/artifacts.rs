@@ -51,10 +51,23 @@ impl HostArtifactRefusal {
     }
 
     pub(crate) fn of_runtime(error: &lash_core::RuntimeError) -> Option<Self> {
+        Self::of_code(&error.code, error.ended_referrer())
+    }
+
+    /// The judgment a refusal carried through the effect controller states:
+    /// a start's realization refuses a definition it cannot hold this way.
+    pub(crate) fn of_controller(error: &lash_core::RuntimeEffectControllerError) -> Option<Self> {
+        Self::of_code(&error.code, error.ended_referrer())
+    }
+
+    fn of_code(
+        code: &lash_core::RuntimeErrorCode,
+        ended_referrer: Option<&ArtifactReferrer>,
+    ) -> Option<Self> {
         use lash_core::RuntimeErrorCode;
-        match error.code {
+        match code {
             RuntimeErrorCode::ArtifactReferrerEnded
-                if matches!(error.ended_referrer(), Some(ArtifactReferrer::HostPin(_))) =>
+                if matches!(ended_referrer, Some(ArtifactReferrer::HostPin(_))) =>
             {
                 Some(Self::PinReleased)
             }

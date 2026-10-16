@@ -48,6 +48,18 @@ pub struct ResolvedStartTarget {
     pub signature: ProcessSignature,
     pub payload: serde_json::Value,
     pub args: serde_json::Map<String, serde_json::Value>,
+    /// The effects a run of `payload` performs (P3), as its engine says.
+    pub performed: super::PerformedEffects,
+}
+
+/// A function a start carries inline, read and checked by its engine before
+/// the policy runs (D8, FIG-6382): the definition a start of it runs, and
+/// the function itself, which nothing stores until the start is realized.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedInlineStart {
+    pub target: ResolvedStartTarget,
+    /// The function, as its engine's payload.
+    pub payload: serde_json::Value,
 }
 
 /// The process a start is made inside: its recorded environment and
@@ -157,10 +169,7 @@ impl<'a> ProcessEnvCx<'a> {
         surface: &SurfaceTools,
         components: Vec<ProcessComponentEntry>,
     ) -> Result<ProcessEnv, ProcessEnvRefusal> {
-        let performed = self
-            .engines
-            .performed_effects(&self.target.engine_kind, &self.target.payload)
-            .await?;
+        let performed = &self.target.performed;
         let base = ProcessEnv::from_run(run, Default::default(), components.clone())?;
         let composition = self.engines.components().compose(&base, None)?;
         let config = crate::plugin::OwnerConfigView::components(Arc::new(base));
@@ -248,7 +257,7 @@ impl<'a> ProcessEnvCx<'a> {
             effects.insert(effect.clone(), link);
         }
         let candidate = ProcessEnv::from_run(run, effects, components)?;
-        self.engines.capture_env(&performed, &candidate)
+        self.engines.capture_env(performed, &candidate)
     }
 
     /// Restrict the enclosing process's environment to the effects the

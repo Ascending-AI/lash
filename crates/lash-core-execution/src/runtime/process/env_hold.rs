@@ -193,13 +193,27 @@ pub(crate) async fn hold_launch(
     kind: &str,
     payload: &serde_json::Value,
 ) -> Result<super::EngineLaunch, HoldEnvError> {
-    engines
-        .check_settings(kind, payload, choice.engine_settings.as_ref())
-        .map_err(|error| settings_error(kind, error))?;
     let performed = engines
         .performed_effects(kind, payload)
         .await
         .map_err(HoldEnvError::Refused)?;
+    hold_launch_performing(engines, scope, enclosing, choice, kind, payload, &performed).await
+}
+
+/// [`hold_launch`] for a start whose engine already said what it performs:
+/// one carried inline, whose payload no store holds yet.
+pub(crate) async fn hold_launch_performing(
+    engines: &super::ProcessEngineRegistry,
+    scope: &crate::ExecutionScope,
+    enclosing: Option<&super::EnclosingProcess>,
+    choice: &super::ProcessStartChoice,
+    kind: &str,
+    payload: &serde_json::Value,
+    performed: &super::PerformedEffects,
+) -> Result<super::EngineLaunch, HoldEnvError> {
+    engines
+        .check_settings(kind, payload, choice.engine_settings.as_ref())
+        .map_err(|error| settings_error(kind, error))?;
     let selection = match &choice.env {
         super::ProcessEnvChoice::Restrict => {
             let Some(enclosing) = enclosing else {
@@ -246,7 +260,7 @@ pub(crate) async fn hold_launch(
             (env, Some(held))
         }
     };
-    super::check_links(&env, &performed, &choice.fits).map_err(HoldEnvError::Refused)?;
+    super::check_links(&env, performed, &choice.fits).map_err(HoldEnvError::Refused)?;
     engines
         .components()
         .check_served(&std::sync::Arc::new(env))

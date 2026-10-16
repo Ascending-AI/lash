@@ -943,10 +943,11 @@ pub mod plugins {
     /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
     pub use lash_core::{
         AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
-        InspectedProcessDefinition, ProcessDocument, ProcessDocumentProvider, ProcessDocumentRead,
-        ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
-        ProcessExecutionDocumentRead, ProcessInfraError, ProcessRunOutcome, ProcessTraceClass,
-        ProtocolBuildInput, ProtocolDriverState, ProtocolTurnOptionsError, TurnDriverPreamble,
+        InlineDefinition, InlineStarts, InspectedProcessDefinition, ProcessDocument,
+        ProcessDocumentProvider, ProcessDocumentRead, ProcessDocumentRefRead, ProcessEngine,
+        ProcessEngineAdmission, ProcessEngineRegistration, ProcessExecutionDocumentRead,
+        ProcessInfraError, ProcessRunOutcome, ProcessTraceClass, ProtocolBuildInput,
+        ProtocolDriverState, ProtocolTurnOptionsError, TurnDriverPreamble,
     };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends
@@ -1129,11 +1130,12 @@ pub mod process {
     /// performed under and the input it takes.
     pub use lash_core::{CALL_DYNAMIC_EFFECT, DynamicCall, call_dynamic_endpoint};
     pub use lash_core::{
-        DeclaredDefinitionLaunch, DeclaredLaunch, EnclosingProcess, EngineLaunch, EngineSettings,
-        HoldEnvError, ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId,
-        ProcessComponentIdError, ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvChoice,
-        ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError, ProcessEnvRefusal, ProcessLimits,
-        ProcessModel, ProcessStartChoice, ResolvedStartTarget,
+        DeclaredDefinitionLaunch, DeclaredInlineLaunch, DeclaredLaunch, EnclosingProcess,
+        EngineLaunch, EngineSettings, HoldEnvError, ProcessComponentConfig, ProcessComponentEntry,
+        ProcessComponentId, ProcessComponentIdError, ProcessConfigKey, ProcessEnv,
+        ProcessEnvBuilder, ProcessEnvChoice, ProcessEnvCx, ProcessEnvPolicy, ProcessEnvPolicyError,
+        ProcessEnvRefusal, ProcessLimits, ProcessModel, ProcessStartChoice, ResolvedInlineStart,
+        ResolvedStartTarget,
     };
     /// What an env links each effect a process performs to: the tool, the
     /// component provider that serves it and the dispatch surface the link

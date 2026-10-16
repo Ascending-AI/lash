@@ -84,6 +84,13 @@ fn target() -> ResolvedStartTarget {
         signature: crate::ProcessSignature::Unknown,
         payload: serde_json::json!({}),
         args: Default::default(),
+        performed: std::collections::BTreeMap::from([(
+            crate::EffectName::new("search.run").unwrap(),
+            lash_sansio::tool_signature(
+                &tool().contract.input_schema.canonical,
+                &tool().contract.output_schema.canonical,
+            ),
+        )]),
     }
 }
 fn components(recorded: bool) -> Vec<ProcessComponentEntry> {

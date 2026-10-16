@@ -126,6 +126,20 @@ pub enum ProcessStartTarget {
         /// runs under, stated by the starter (D4, D10).
         launch: EngineLaunch,
     },
+    /// A start of a function carried inline: `payload` is the `engine_kind`
+    /// engine's own value of it (for the kernel engine a function value),
+    /// which no store holds yet. Realization has the engine check it and
+    /// publish what it runs under the start's referrer, then publishes its
+    /// descriptor and starts that definition exactly as a
+    /// [`Self::Definition`] start does (FIG-6382). The committed start
+    /// carries the bytes, so every redrive realizes the same definition.
+    Inline {
+        engine_kind: String,
+        payload: serde_json::Value,
+        #[serde(default)]
+        args: serde_json::Map<String, serde_json::Value>,
+        launch: EngineLaunch,
+    },
     /// A start of an input as its author stated it.
     #[serde(untagged)]
     Input(ProcessInput),
@@ -143,7 +157,7 @@ impl ProcessStartTarget {
     pub fn input(&self) -> Option<&ProcessInput> {
         match self {
             Self::Input(input) => Some(input),
-            Self::Definition { .. } => None,
+            Self::Definition { .. } | Self::Inline { .. } => None,
         }
     }
 
@@ -152,24 +166,24 @@ impl ProcessStartTarget {
     pub fn launch(&self) -> Option<&EngineLaunch> {
         match self {
             Self::Input(input) => input.launch(),
-            Self::Definition { launch, .. } => Some(launch),
+            Self::Definition { launch, .. } | Self::Inline { launch, .. } => Some(launch),
         }
     }
 
     /// Stored attachments the target carries, sorted and deduplicated. A
-    /// definition's arguments are opaque JSON and carry no typed attachments
-    /// (ADR 0124).
+    /// definition's arguments, and an inline function's, are opaque JSON and
+    /// carry no typed attachments (ADR 0124).
     pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
         match self {
             Self::Input(input) => input.stored_attachment_ids(),
-            Self::Definition { .. } => Vec::new(),
+            Self::Definition { .. } | Self::Inline { .. } => Vec::new(),
         }
     }
 
     /// The identity a start of this target is registered under until its
     /// realization admits one: an input's derived identity, or a definition
-    /// named by its id, which realization replaces with the identity its
-    /// engine admits.
+    /// named by its id, or an inline function, which realization replaces
+    /// with the identity its engine admits.
     pub fn identity(&self) -> ProcessIdentity {
         match self {
             Self::Input(input) => ProcessIdentity::from_process_input(input),
@@ -178,6 +192,12 @@ impl ProcessStartTarget {
                 label: None,
                 definition: None,
                 definition_id: Some(definition_id.clone()),
+            },
+            Self::Inline { .. } => ProcessIdentity {
+                kind: ProcessEngineKind::from("inline"),
+                label: None,
+                definition: None,
+                definition_id: None,
             },
         }
     }
@@ -367,6 +387,48 @@ impl DeclaredDefinitionLaunch {
 
     pub(crate) fn into_parts(self) -> (super::ProcessDefinitionId, EngineLaunch) {
         (self.definition, self.launch.into_launch())
+    }
+}
+
+/// A launch held for a start of one inline function: the engine and the
+/// payload its env was held and checked for are bound into it (P1), so a
+/// declaration made with it starts exactly that function.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredInlineLaunch {
+    engine_kind: String,
+    payload: serde_json::Value,
+    launch: DeclaredLaunch,
+}
+
+impl DeclaredInlineLaunch {
+    pub(crate) fn held(
+        engine_kind: String,
+        payload: serde_json::Value,
+        launch: DeclaredLaunch,
+    ) -> Self {
+        Self {
+            engine_kind,
+            payload,
+            launch,
+        }
+    }
+
+    /// The engine the function is started on.
+    pub fn engine_kind(&self) -> &str {
+        &self.engine_kind
+    }
+
+    /// The function, as its engine's payload.
+    pub fn payload(&self) -> &serde_json::Value {
+        &self.payload
+    }
+
+    pub fn launch(&self) -> &EngineLaunch {
+        self.launch.launch()
+    }
+
+    pub(crate) fn into_parts(self) -> (String, serde_json::Value, EngineLaunch) {
+        (self.engine_kind, self.payload, self.launch.into_launch())
     }
 }
 
@@ -821,8 +883,8 @@ impl ProcessStartRegistration {
     ///
     /// # Errors
     ///
-    /// The start itself, when its target names a definition: only
-    /// realization resolves one
+    /// The start itself, when its target names a definition or carries a
+    /// function inline: only realization resolves one
     /// ([`register_process_start`](crate::runtime::register_process_start)).
     pub fn stating_input(self) -> Result<ProcessRegistration, Box<Self>> {
         match self.input.as_ref() {
@@ -830,7 +892,9 @@ impl ProcessStartRegistration {
                 let input = Arc::new(input.clone());
                 Ok(self.with_input(input))
             }
-            ProcessStartTarget::Definition { .. } => Err(Box::new(self)),
+            ProcessStartTarget::Definition { .. } | ProcessStartTarget::Inline { .. } => {
+                Err(Box::new(self))
+            }
         }
     }
 

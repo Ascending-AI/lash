@@ -154,6 +154,7 @@ impl LayeredBackend {
         let stores = Arc::new(LayeredStoreSet {
             binding: inner_stores.binding_identity().clone(),
             attachment_referrers: inner_stores.attachment_referrers(),
+            definition_store: inner_stores.definition_store(),
             durable: None,
             wakes: None,
             inner: inner_stores,
@@ -191,6 +192,7 @@ impl LayeredStores {
             process_authority_reads: inner.process_authority_reads(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
+            definition_store: inner.definition_store(),
             obligation_ledgers: None,
             artifact_cleanup: inner.artifact_cleanup(),
             durable: None,
@@ -288,6 +290,17 @@ impl LayeredStores {
         self
     }
 
+    /// Replace the process-definition store with `layer` over it.
+    pub fn map_definition_store(
+        mut self,
+        layer: impl FnOnce(
+            Arc<dyn crate::ProcessDefinitionStore>,
+        ) -> Arc<dyn crate::ProcessDefinitionStore>,
+    ) -> Self {
+        self.0.definition_store = layer(self.0.definition_store);
+        self
+    }
+
     /// Answer every obligation kind's ledger with `layer` over the inner
     /// store set's ledger of that kind. The layer runs on each ledger read,
     /// so a recorder it installs keeps its state outside the ledger.
@@ -327,6 +340,7 @@ struct LayeredStoreSet {
     attachment_store: Arc<dyn AttachmentStore>,
     attachment_referrers: Arc<dyn crate::AttachmentReferrers>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
+    definition_store: Arc<dyn crate::ProcessDefinitionStore>,
     obligation_ledgers: Option<ObligationLedgerLayer>,
     artifact_cleanup: Arc<dyn crate::store::ArtifactCleanupLedger>,
 }
@@ -394,7 +408,7 @@ impl StoreSet for LayeredStoreSet {
     }
 
     fn definition_store(&self) -> Arc<dyn crate::ProcessDefinitionStore> {
-        self.inner.definition_store()
+        Arc::clone(&self.definition_store)
     }
 
     fn recovery_leader(&self) -> Arc<dyn crate::store::RecoveryLeaderStore> {

@@ -51,7 +51,7 @@ main {{
 /// A node over `stores` whose kernel engine holds no library function: the
 /// build after the one that wrote a document retired the helper release it
 /// used.
-fn retired_reader(stores: Arc<lash_sqlite_store::SqliteStoreSet>) -> lash::LashCore {
+pub(super) fn retired_reader(stores: Arc<lash_sqlite_store::SqliteStoreSet>) -> lash::LashCore {
     let backend = lash_conformance::backend_over(stores);
     let workers = lash::vm::WorkerService::default();
     let bounds = workers.config().run_bounds;

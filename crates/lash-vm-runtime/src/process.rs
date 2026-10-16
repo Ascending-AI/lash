@@ -15,6 +15,7 @@
 mod advance;
 mod documents;
 mod helpers;
+mod inline;
 mod migrate;
 mod pages;
 mod replay;
@@ -831,6 +832,9 @@ pub fn kernel_process_engine_registration(
     )
     .expect("the kernel engine and its admission share a fixed kind")
     .with_document_provider(Arc::new(workflow::KernelDocumentProvider {
+        engine: Arc::clone(&engine),
+    }))
+    .with_inline_starts(Arc::new(inline::KernelInlineStarts {
         engine: Arc::clone(&engine),
     }))
     .with_engine_steps(Arc::new(KernelEngineSteps::new(Arc::clone(&engine))))

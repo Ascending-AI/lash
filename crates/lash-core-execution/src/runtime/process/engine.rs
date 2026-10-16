@@ -396,6 +396,50 @@ pub trait ProcessDocumentProvider: Send + Sync {
     fn counts_statements(&self, settings: Option<&EngineSettings>) -> bool;
 }
 
+/// What an engine reads of a function a start carries inline: the
+/// definition a start of it runs, its signature and the effects it performs
+/// (P3). Derived from the payload alone: nothing stored is read.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InlineDefinition {
+    pub draft: super::ProcessDefinitionDraft,
+    pub signature: super::ProcessSignature,
+    pub performed: PerformedEffects,
+}
+
+/// An engine's start of a function carried inline
+/// ([`ProcessStartTarget::Inline`](super::ProcessStartTarget::Inline),
+/// FIG-6382). An engine registered without one refuses every inline start.
+///
+/// Core names no language here: the payload is the engine's own value of a
+/// function, which it checks itself.
+#[async_trait::async_trait]
+pub trait InlineStarts: Send + Sync {
+    /// Check `payload` and derive what a start of it runs. Stores nothing.
+    ///
+    /// # Errors
+    ///
+    /// A `DefinitionRefused` runtime error for a payload the engine refuses.
+    async fn inspect(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<InlineDefinition, crate::PluginError>;
+
+    /// [`Self::inspect`], then hold what the definition executes under
+    /// `claim` in the engine's own stores, written the way the engine writes
+    /// every document it admits. The descriptor is not published: the
+    /// caller publishes [`InlineDefinition::draft`] under the same claim.
+    ///
+    /// # Errors
+    ///
+    /// [`Self::inspect`]'s refusal, the claim's fence (`ReferrerEnded`), and
+    /// every store failure.
+    async fn realize(
+        &self,
+        claim: &crate::ReferrerClaim,
+        payload: &serde_json::Value,
+    ) -> Result<InlineDefinition, crate::PluginError>;
+}
+
 /// A process identity the engine registry produced.
 ///
 /// This is the only way an identity reaches a
@@ -479,6 +523,7 @@ pub struct ProcessEngineRegistration {
     state_migration: Option<Arc<dyn super::engine_state::EngineStateMigration>>,
     succession: Option<Arc<dyn super::succession::EngineSuccession>>,
     status_projection: Option<Arc<dyn super::engine_state::EngineStatusProjection>>,
+    inline_starts: Option<Arc<dyn InlineStarts>>,
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries:
         BTreeMap<super::engine_state::EngineStepKind, lash_sansio::ExecutionPolicy>,
@@ -507,6 +552,7 @@ impl ProcessEngineRegistration {
             state_migration: None,
             succession: None,
             status_projection: None,
+            inline_starts: None,
             engine_step_retries: BTreeMap::new(),
         })
     }
@@ -522,6 +568,7 @@ impl ProcessEngineRegistration {
             state_migration: None,
             succession: None,
             status_projection: None,
+            inline_starts: None,
             engine_step_retries: BTreeMap::new(),
         }
     }
@@ -578,6 +625,15 @@ impl ProcessEngineRegistration {
         self
     }
 
+    /// Declare how this engine starts a function carried inline
+    /// (FIG-6382); an engine registered without one refuses every inline
+    /// start.
+    #[must_use]
+    pub fn with_inline_starts(mut self, starts: Arc<dyn InlineStarts>) -> Self {
+        self.inline_starts = Some(starts);
+        self
+    }
+
     /// Retry the engine's `kind` steps under `policy` instead of the policy
     /// its [`EngineSteps`](super::engine_state::EngineSteps) declare: the
     /// host's override of the engine author's default, for this deployment.
@@ -598,6 +654,7 @@ impl ProcessEngineRegistration {
 struct KindHooks {
     successions: BTreeMap<String, Arc<dyn super::succession::EngineSuccession>>,
     status_projections: BTreeMap<String, Arc<dyn super::engine_state::EngineStatusProjection>>,
+    inline_starts: BTreeMap<String, Arc<dyn InlineStarts>>,
 }
 
 #[derive(Clone, Default)]
@@ -745,6 +802,7 @@ impl ProcessEngineRegistry {
             state_migration,
             succession,
             status_projection,
+            inline_starts,
             engine_step_retries: retries,
         } = registration;
         match steps {
@@ -776,6 +834,12 @@ impl ProcessEngineRegistry {
                 .status_projections
                 .insert(engine.kind().to_string(), projection),
             None => hooks.status_projections.remove(engine.kind()),
+        };
+        match inline_starts {
+            Some(starts) => hooks
+                .inline_starts
+                .insert(engine.kind().to_string(), starts),
+            None => hooks.inline_starts.remove(engine.kind()),
         };
         engines.insert(engine.kind().to_string(), engine);
         admissions.insert(admission.kind().to_string(), admission);
@@ -891,6 +955,21 @@ impl ProcessEngineRegistry {
     /// its registration declares it.
     pub fn succession(&self, kind: &str) -> Option<Arc<dyn super::succession::EngineSuccession>> {
         self.hooks.successions.get(kind).cloned()
+    }
+
+    /// How the `kind` engine starts a function carried inline.
+    ///
+    /// # Errors
+    ///
+    /// A `DefinitionRefused` runtime error when the engine is not
+    /// configured or starts no inline function.
+    pub fn inline_starts(&self, kind: &str) -> Result<Arc<dyn InlineStarts>, crate::PluginError> {
+        self.hooks.inline_starts.get(kind).cloned().ok_or_else(|| {
+            crate::PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::DefinitionRefused,
+                format!("process engine `{kind}` starts no function carried inline"),
+            ))
+        })
     }
 
     /// Every registered engine, by kind.

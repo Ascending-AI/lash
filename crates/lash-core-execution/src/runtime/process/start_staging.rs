@@ -354,7 +354,7 @@ impl RegisteredProcessStart {
                 let input = Arc::new(input.clone());
                 registration.with_input(input)
             }
-            ProcessStartTarget::Definition { .. } => {
+            ProcessStartTarget::Definition { .. } | ProcessStartTarget::Inline { .. } => {
                 let mut resolved = registration.with_input(Arc::clone(&self.record.input));
                 resolved.identity = self.record.identity.clone();
                 resolved
@@ -762,7 +762,14 @@ async fn stage<'a>(
 ) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
     let submitted_env_ref = registration.input.launch().map(|launch| launch.env.clone());
     let env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
-    let (definition, mut registration) = resolve_start_target(stores, &claim, registration).await?;
+    let (definition, mut registration) = resolve_start_target(
+        stores,
+        start_key,
+        &claim,
+        env.as_ref().is_none_or(|env| env.staged),
+        registration,
+    )
+    .await?;
     registration.trace_class = match registration.input.as_ref() {
         ProcessInput::Engine { kind, .. } => stores.engines.require(kind)?.trace_class(),
         ProcessInput::SessionTurn { .. } => super::ProcessTraceClass::Internal,
@@ -1218,12 +1225,16 @@ async fn stage_engine<'a>(
 }
 
 /// The registration a start's target resolves to: the input it states, or
-/// the engine start its definition is ([`stage_definition`]). This is the
-/// only place a start becomes a registration, so no registrar is ever handed
-/// an unresolved definition.
+/// the engine start its definition is ([`stage_definition`]), or the one
+/// the function it carries inline is once realized ([`stage_inline`]). This
+/// is the only place a start becomes a registration, so no registrar is ever
+/// handed an unresolved definition. `unfenced` is false when the start's
+/// environment met `Start(key)`'s fence: nothing more is staged there.
 async fn resolve_start_target<'a>(
     stores: &ProcessStartStores<'a>,
+    start_key: &StartKey,
     claim: &ReferrerClaim,
+    unfenced: bool,
     registration: ProcessStartRegistration,
 ) -> Result<(Option<StagedDefinition<'a>>, ProcessRegistration), RuntimeEffectControllerError> {
     match registration.input.as_ref() {
@@ -1262,7 +1273,131 @@ async fn resolve_start_target<'a>(
             .await?;
             Ok((Some(staged), registration))
         }
+        ProcessStartTarget::Inline {
+            engine_kind,
+            payload,
+            args,
+            launch,
+        } => {
+            let (staged, resolved) =
+                stage_inline(stores, start_key, claim, unfenced, engine_kind, payload).await?;
+            let registration =
+                definition_registration(stores, &registration, &resolved, args, launch).await?;
+            Ok((
+                Some(StagedDefinition {
+                    engines: stores.engines,
+                    ports: definition_ports(stores, resolved.id())?,
+                    id: resolved.id().clone(),
+                    staged,
+                }),
+                registration,
+            ))
+        }
     }
+}
+
+/// The artifact ports a start of `definition_id` holds it through.
+fn definition_ports<'a>(
+    stores: &ProcessStartStores<'a>,
+    definition_id: &super::ProcessDefinitionId,
+) -> Result<&'a ArtifactReferrerPorts, RuntimeEffectControllerError> {
+    stores.ports().ok_or_else(|| {
+        RuntimeEffectControllerError::foreign(
+            "process_definition_store_unavailable",
+            TurnFailureCause::Outcome,
+            format!(
+                "admitted {} starts definition `{definition_id}` but the executor has no \
+                 definition store to hold it",
+                stores.executor
+            ),
+        )
+    })
+}
+
+/// Realize a function a start carries inline (FIG-6382), in the order its
+/// crash cuts are proved in: its engine checks it, publishes its document
+/// and every declaration the store lacks under `Start(key)` through the one
+/// document writer, then its descriptor joins them under the same claim. The
+/// definition it answers is then started as [`stage_definition`] starts a
+/// stored one, and the row adopts the whole closure. Answers whether
+/// `Start(key)` holds it.
+///
+/// A key a process already holds stages nothing: that row is the start's
+/// outcome, and its record holds its closure or `Start(key)`'s guard carries
+/// it there; an exact retry is answered that process, another function under
+/// a host's key is refused here as a conflict, and other arguments or another
+/// launch are the registrar's conflict. A fenced `Start(key)` adds no late edge either:
+/// the definition is read, and the row's record holds it once registered.
+async fn stage_inline(
+    stores: &ProcessStartStores<'_>,
+    start_key: &StartKey,
+    claim: &ReferrerClaim,
+    unfenced: bool,
+    engine_kind: &str,
+    payload: &serde_json::Value,
+) -> Result<(bool, super::ResolvedProcessDefinition), RuntimeEffectControllerError> {
+    let engines = stores.engines;
+    let starts = engines.inline_starts(engine_kind)?;
+    let resolved = |inline: super::InlineDefinition| super::ResolvedProcessDefinition {
+        definition: super::ProcessDefinition::new(inline.draft.id(), inline.signature),
+        draft: inline.draft,
+    };
+    if let Some(retained) = stores.registry.get_process_by_start_key(start_key).await? {
+        let inline = starts.inspect(payload).await?;
+        // Another function under a key that fences content is the
+        // registrar's conflict, decided before anything of it is staged:
+        // its closure is held by nothing, and is not acquired here.
+        if start_key.fences_content()
+            && retained.identity.definition_id.as_ref() != Some(&inline.draft.id())
+        {
+            return Err(crate::PluginError::StartKeyConflict {
+                start_key: start_key.clone(),
+            }
+            .into());
+        }
+        return Ok((false, resolved(inline)));
+    }
+    let inline = if unfenced {
+        match starts.realize(claim, payload).await {
+            Ok(inline) => Some(inline),
+            Err(error) if super::artifact_referrer_ended(&error) == Some(&claim.referrer()) => None,
+            Err(error) => return Err(error.into()),
+        }
+    } else {
+        None
+    };
+    if let Some(inline) = inline {
+        let ports = definition_ports(stores, &inline.draft.id())?;
+        match ports
+            .publish_definition(engines, claim, &inline.draft)
+            .await
+        {
+            Ok(_) => return Ok((true, resolved(inline))),
+            Err(error) if super::artifact_referrer_ended(&error) == Some(&claim.referrer()) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    // `Start(key)` ended before this attempt held the closure: an earlier
+    // attempt settled the key. Only a definition something else holds is
+    // started.
+    let inline = starts.inspect(payload).await?;
+    let id = inline.draft.id();
+    if definition_ports(stores, &id)?
+        .read_definition(engines, &id)
+        .await?
+        .is_none()
+    {
+        return Err(definition_missing(&id));
+    }
+    Ok((false, resolved(inline)))
+}
+
+fn definition_missing(definition_id: &super::ProcessDefinitionId) -> RuntimeEffectControllerError {
+    crate::PluginError::Runtime(crate::RuntimeError::new(
+        crate::RuntimeErrorCode::DefinitionMissing,
+        format!("process definition `{definition_id}` is not stored: no referrer holds it"),
+    ))
+    .into()
 }
 
 /// A start by definition id (ADR 0113 §3.6, the crash table's "before start
@@ -1287,17 +1422,7 @@ async fn stage_definition<'a>(
     launch: &super::EngineLaunch,
 ) -> Result<(StagedDefinition<'a>, ProcessRegistration), RuntimeEffectControllerError> {
     let engines = stores.engines;
-    let Some(ports) = stores.ports() else {
-        return Err(RuntimeEffectControllerError::foreign(
-            "process_definition_store_unavailable",
-            TurnFailureCause::Outcome,
-            format!(
-                "admitted {} starts definition `{definition_id}` but the executor has no \
-                 definition store to hold it",
-                stores.executor
-            ),
-        ));
-    };
+    let ports = definition_ports(stores, definition_id)?;
     let (resolved, staged) = match ports
         .acquire_definition(engines, claim, definition_id)
         .await?
@@ -1305,13 +1430,7 @@ async fn stage_definition<'a>(
         super::DefinitionAcquisition::Held(resolved) => (resolved, true),
         super::DefinitionAcquisition::Ended => {
             let Some(resolved) = ports.read_definition(engines, definition_id).await? else {
-                return Err(crate::PluginError::Runtime(crate::RuntimeError::new(
-                    crate::RuntimeErrorCode::DefinitionMissing,
-                    format!(
-                        "process definition `{definition_id}` is not stored: no referrer holds it"
-                    ),
-                ))
-                .into());
+                return Err(definition_missing(definition_id));
             };
             (resolved, false)
         }
@@ -1325,13 +1444,35 @@ async fn stage_definition<'a>(
             .await
             .map_err(crate::PluginError::from)?;
     }
+    let registration =
+        definition_registration(stores, registration, &resolved, args, launch).await?;
+    Ok((
+        StagedDefinition {
+            engines,
+            ports,
+            id: resolved.id().clone(),
+            staged,
+        },
+        registration,
+    ))
+}
+
+/// The engine start a start of `resolved` with `args` registers, admitted
+/// exactly as every engine start is: the registration carries that engine
+/// input, and its identity names the definition id.
+async fn definition_registration(
+    stores: &ProcessStartStores<'_>,
+    registration: &ProcessStartRegistration,
+    resolved: &super::ResolvedProcessDefinition,
+    args: &serde_json::Map<String, serde_json::Value>,
+    launch: &super::EngineLaunch,
+) -> Result<ProcessRegistration, RuntimeEffectControllerError> {
     let kind = resolved.draft.engine_kind().as_str().to_owned();
     let payload = resolved.start_payload(args)?;
     let declared_label = registration.identity.label.clone();
-    let mut identity = engines.admit(&kind, &payload).await?.into_identity();
+    let mut identity = stores.engines.admit(&kind, &payload).await?.into_identity();
     identity.definition_id = Some(resolved.id().clone());
-    let id = resolved.id().clone();
-    let registration = registration
+    Ok(registration
         .clone()
         .with_input(Arc::new(ProcessInput::Engine {
             kind,
@@ -1339,16 +1480,7 @@ async fn stage_definition<'a>(
             launch: launch.clone(),
         }))
         .with_admitted_identity(super::AdmittedProcessIdentity::admitted(identity))
-        .with_host_facing_label(declared_label);
-    Ok((
-        StagedDefinition {
-            engines,
-            ports,
-            id,
-            staged,
-        },
-        registration,
-    ))
+        .with_host_facing_label(declared_label))
 }
 
 struct StagedDefinition<'a> {
