@@ -211,11 +211,42 @@ pub struct CheckpointRoot {
     pub session: KeyedRoot,
     /// The bindings the host projected into a session cell's `main`, which
     /// its carry leaves out: the host's, not the session's.
+    /// Admitted by `CellStart` within [`Self::HOST_METADATA_LIMIT`].
     pub host: Vec<lash_kernel_doc::Name>,
     pub meters: SavedMeters,
 }
 
 impl CheckpointRoot {
+    /// The encoded host-name list's byte budget (S1, FIG-6499).
+    ///
+    /// The 4096-byte root reserves 773 token bytes for its fixed fields:
+    /// struct header (2), kernel (6), document (34), release/owner (66),
+    /// target (3), nine full tree roots (9 * 58), heap (33), largest ended
+    /// status (66), and meters (41). All integers use their maximum widths.
+    /// Another 256 bytes cover the envelope: each of at most 13 distinct
+    /// child references adds at most one byte when moved to the child table,
+    /// plus the magic, kind, child count and body length.
+    ///
+    /// Names include their UTF-8 bytes and token headers, as does the list.
+    /// Even empty names cost two bytes, so this bounds their count as well
+    /// as each name. No guest allocation or park can grow the list.
+    pub const HOST_METADATA_LIMIT: usize =
+        4096 - (2 + 6 + 34 + 66 + 3 + 9 * 58 + 33 + 66 + 41) - 256;
+
+    /// The canonical host-name list's size, without allocating its encoding.
+    /// Overflow saturates so admission refuses it.
+    pub fn host_metadata_bytes<'a>(names: impl IntoIterator<Item = &'a str>) -> usize {
+        use lash_kernel_doc::graph_tokens::varint_len;
+        let mut count = 0_u64;
+        let mut bytes = 0_usize;
+        for name in names {
+            count = count.saturating_add(1);
+            bytes = bytes.saturating_add(1 + varint_len(name.len() as u64));
+            bytes = bytes.saturating_add(name.len());
+        }
+        bytes.saturating_add(1 + varint_len(count))
+    }
+
     /// The root a checkpoint-root page holds, each page it names granted
     /// what the page's answer grants that child: how an embedder opens a
     /// root it read through its page source. Its release and owner are

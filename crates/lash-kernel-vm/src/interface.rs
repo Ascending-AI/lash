@@ -396,6 +396,9 @@ pub enum StartError {
     UnknownEntry { entry: Name },
     #[error("the arguments do not fit the entry's signature: {problem}")]
     Arguments { problem: String },
+    /// The host's name list cannot fit every checkpoint root's page.
+    #[error("host-binding metadata of {actual} encoded bytes exceeds the {limit}-byte limit")]
+    HostMetadataTooLarge { limit: usize, actual: usize },
     #[error("the bindings are not a session's: {problem}")]
     Bindings { problem: String },
     /// The run binds as a read an effect its document's manifest does not

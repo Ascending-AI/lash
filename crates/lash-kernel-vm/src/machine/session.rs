@@ -18,6 +18,7 @@ pub(super) fn start(
     layout: Layout,
     limits: lash_kernel_doc::KernelDataLimits,
 ) -> Result<KernelMachine, StartError> {
+    CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
     let library = program.library.in_layout(layout);
     let admitted = library.admit(&program.document, limits)?;
     let exe = admitted

@@ -89,6 +89,18 @@ tasks, the ready order, waits, list joins, withdrawn waits and the ones the
 next park reports, read-bound effects and a session cell's bindings, plus
 its exact meters. The table is [kernel design §6](../kernel/design.md#6-parked-runs).
 
+- **Host binding admission (FIG-6499, S1).** The canonical host-name list
+  is at most 3067 bytes, including UTF-8 names and token headers. This
+  bounds both names and their count, even for empty names. The 4096-byte
+  root reserves 773 bytes for every other field at its maximum encoded
+  width and 256 bytes for framing. `CellStart` refuses excess metadata
+  before opening the heap; worker clients check before starting a worker.
+  RLM's `bind_json`, `merge` and `from_snapshot` admit configuration under
+  the same limit, reserving the built-in `history` name for later cells.
+  Refusals retain the encoded limit and actual byte count in
+  `StartError::HostMetadataTooLarge` or
+  `ProjectedBindingError::HostMetadataTooLarge`.
+
 - A frame persists semantic coordinates only: its pending statement's site
   and, at an action nested in it, that action's site, phase and operand
   roles by site (`K-EVAL-008`), bindings by name and declaring site, loops,

@@ -1,19 +1,45 @@
 use std::collections::BTreeMap;
 
-/// A read-only binding could not be bound: its name is taken.
+/// Why a host's read-only binding configuration was refused.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("projected binding `{name}` is already bound")]
-pub struct ProjectedBindingError {
-    name: String,
+pub enum ProjectedBindingError {
+    #[error("projected binding `{name}` is already bound")]
+    Duplicate { name: String },
+    /// Includes the reserved `history` name and canonical token headers.
+    #[error(
+        "projected binding `{name}` makes host metadata {actual} encoded bytes, exceeding the {limit}-byte limit"
+    )]
+    HostMetadataTooLarge {
+        name: String,
+        limit: usize,
+        actual: usize,
+    },
 }
 
 impl ProjectedBindingError {
     fn duplicate(name: String) -> Self {
-        Self { name }
+        Self::Duplicate { name }
+    }
+
+    /// A seed restore keeps the size refusal available to its host as a
+    /// typed source, rather than reducing it to protocol-error prose.
+    pub(crate) fn into_session_error(self) -> lash_core::SessionError {
+        match self {
+            error @ Self::HostMetadataTooLarge { .. } => {
+                lash_core::SessionError::ExecutionStateRestore {
+                    source: Box::new(error),
+                }
+            }
+            error @ Self::Duplicate { .. } => lash_core::SessionError::Protocol(format!(
+                "code mode projected seed snapshot rejected: {error}"
+            )),
+        }
     }
 
     pub fn name(&self) -> &str {
-        &self.name
+        match self {
+            Self::Duplicate { name } | Self::HostMetadataTooLarge { name, .. } => name,
+        }
     }
 }
 
@@ -58,7 +84,9 @@ impl CodeModeProjectedBindings {
     }
 
     /// Bind `name` to `value`. A session extension records the JSON as its
-    /// durable seed, so a binding is JSON (FIG-5134).
+    /// durable seed, so a binding is JSON (FIG-5134). The encoded name list,
+    /// including the built-in `history`, must fit the checkpoint root's
+    /// 3067-byte host-metadata budget (FIG-6499).
     pub fn bind_json(
         mut self,
         name: impl Into<String>,
@@ -67,6 +95,22 @@ impl CodeModeProjectedBindings {
         let name = name.into();
         if self.bindings.contains_key(&name) {
             return Err(ProjectedBindingError::duplicate(name));
+        }
+        // Reserve the built-in even when this cell does not mention it:
+        // an admitted session can bind history in any later cell.
+        let actual = lash_kernel_state::paged::CheckpointRoot::host_metadata_bytes(
+            self.bindings
+                .keys()
+                .map(String::as_str)
+                .chain([name.as_str(), super::HISTORY_PROJECTION]),
+        );
+        let limit = lash_kernel_state::paged::CheckpointRoot::HOST_METADATA_LIMIT;
+        if actual > limit {
+            return Err(ProjectedBindingError::HostMetadataTooLarge {
+                name,
+                limit,
+                actual,
+            });
         }
         self.bindings.insert(name, value);
         Ok(self)
@@ -109,10 +153,7 @@ impl CodeModeProjectedBindings {
 
     pub fn merge(mut self, other: Self) -> Result<Self, ProjectedBindingError> {
         for (name, value) in other.bindings {
-            if self.bindings.contains_key(&name) {
-                return Err(ProjectedBindingError::duplicate(name));
-            }
-            self.bindings.insert(name, value);
+            self = self.bind_json(name, value)?;
         }
         Ok(self)
     }
@@ -177,6 +218,80 @@ pub fn rlm_session_projection_extension(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-6499 / S1: a host configuration reserves the built-in history
+    /// name and refuses oversized metadata before any session starts.
+    #[test]
+    fn projected_host_metadata_is_bounded_at_configuration() {
+        let oversized =
+            CodeModeProjectedBindings::new().bind_json("h".repeat(3054), serde_json::Value::Null);
+        assert!(matches!(
+            oversized,
+            Err(ProjectedBindingError::HostMetadataTooLarge {
+                limit: 3067,
+                actual: 3068,
+                ..
+            })
+        ));
+        CodeModeProjectedBindings::new()
+            .bind_json("h".repeat(3053), serde_json::Value::Null)
+            .expect("the largest name plus history fits");
+        let left = CodeModeProjectedBindings::new()
+            .bind_json("h".repeat(3050), serde_json::Value::Null)
+            .unwrap();
+        let right = CodeModeProjectedBindings::new()
+            .bind_json("xy", serde_json::Value::Null)
+            .unwrap();
+        assert!(matches!(
+            left.merge(right),
+            Err(ProjectedBindingError::HostMetadataTooLarge {
+                limit: 3067,
+                actual: 3068,
+                ..
+            })
+        ));
+        let mut snapshot = lash_rlm_types::CodeModeProjectedSeedSnapshot::new();
+        snapshot.push(
+            "h".repeat(3054),
+            lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(serde_json::Value::Null),
+        );
+        assert!(matches!(
+            CodeModeProjectedBindings::from_snapshot(&snapshot),
+            Err(ProjectedBindingError::HostMetadataTooLarge {
+                limit: 3067,
+                actual: 3068,
+                ..
+            })
+        ));
+        let restored_error = CodeModeProjectedBindings::from_snapshot(&snapshot)
+            .err()
+            .expect("oversized seed")
+            .into_session_error();
+        let lash_core::SessionError::ExecutionStateRestore { source } = restored_error else {
+            panic!("seed admission must retain the typed refusal for its host");
+        };
+        assert!(matches!(
+            source.downcast_ref::<ProjectedBindingError>(),
+            Some(ProjectedBindingError::HostMetadataTooLarge {
+                limit: 3067,
+                actual: 3068,
+                ..
+            })
+        ));
+        let mut bindings = CodeModeProjectedBindings::new();
+        for ordinal in 0..1000 {
+            match bindings.bind_json(format!("h{ordinal}"), serde_json::Value::Null) {
+                Ok(next) => bindings = next,
+                Err(ProjectedBindingError::HostMetadataTooLarge { limit, actual, .. }) => {
+                    assert_eq!(limit, 3067);
+                    assert!(actual > limit);
+                    return;
+                }
+                Err(error) => panic!("distinct names: {error}"),
+            }
+        }
+        panic!("many short names must also be bounded");
+    }
 
     #[test]
     fn bind_rejects_duplicate_names() {

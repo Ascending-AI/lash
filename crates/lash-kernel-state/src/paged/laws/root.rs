@@ -43,40 +43,71 @@ fn a_tree_root_admits_only_its_occupancy() {
 }
 #[test]
 fn a_checkpoint_root_fits_its_root_bound() {
-    let root = CheckpointRoot {
-        kernel: 1,
-        document: DocumentId::from_bytes([1; 32]),
-        release: PageId([2; 32]),
-        owner: PageId([3; 32]),
-        target: CellTargetKind::Main,
-        functions: empty(),
-        status: RootStatus::Parked,
-        heap: PageRef {
-            id: PageId([4; 32]),
-            grant: PageGrant::NONE,
-        },
-        tasks: empty(),
-        ready: seq(),
-        waits: empty(),
-        joins: empty(),
-        withdrawn: empty(),
-        unreported: seq(),
-        reads: empty(),
-        session: empty(),
-        host: Vec::new(),
-        meters: SavedMeters {
-            charged: 0,
-            waits_issued: 0,
-            next_join: 0,
-            live_tasks: 0,
-        },
+    // FIG-6499 / S1: reserve the complete envelope as well as the largest
+    // scalar encodings, every nonempty tree and a terminal result descriptor.
+    // The admission budget is 4096 - 773 fixed token bytes - 256 framing bytes.
+    let page = |byte| PageRef {
+        id: PageId([byte; 32]),
+        grant: PageGrant::NONE,
     };
-    let body = encode_body(&root);
-    assert!(body.len() + 256 < 4096);
-    assert_eq!(
-        encode_body(&decode_body::<CheckpointRoot>(&body).expect("canonical root")),
-        body
-    );
+    let keyed = |byte| KeyedRoot::NonEmpty {
+        page: page(byte),
+        len: u64::MAX,
+        cost: LogicalBytes(u64::MAX),
+    };
+    let sequence = |byte| SequenceRoot::NonEmpty {
+        page: page(byte),
+        len: u64::MAX,
+        cost: LogicalBytes(u64::MAX),
+    };
+    for host in [
+        vec![lash_kernel_doc::Name::new("h".repeat(3062))],
+        vec![lash_kernel_doc::Name::new(""); 1532],
+    ] {
+        let root = CheckpointRoot {
+            kernel: u32::MAX,
+            document: DocumentId::from_bytes([1; 32]),
+            release: PageId([2; 32]),
+            owner: PageId([3; 32]),
+            target: CellTargetKind::Entry,
+            functions: keyed(4),
+            status: RootStatus::Ended(EndedRecord::Returned(FrozenRef {
+                root: page(5),
+                summary: FrozenSummary {
+                    entities: u64::MAX,
+                    cost: LogicalBytes(u64::MAX),
+                    data_only: true,
+                },
+            })),
+            heap: page(6),
+            tasks: keyed(7),
+            ready: sequence(8),
+            waits: keyed(9),
+            joins: keyed(10),
+            withdrawn: keyed(11),
+            unreported: sequence(12),
+            reads: keyed(13),
+            session: keyed(14),
+            host,
+            meters: SavedMeters {
+                charged: u64::MAX,
+                waits_issued: u64::MAX,
+                next_join: u64::MAX,
+                live_tasks: u32::MAX,
+            },
+        };
+        assert_eq!(
+            CheckpointRoot::host_metadata_bytes(root.host.iter().map(|name| name.as_str())),
+            3067,
+        );
+        assert_eq!(CheckpointRoot::HOST_METADATA_LIMIT, 3067);
+        let body = encode_body(&root);
+        assert!(body.len() + 256 <= 4096, "{} token bytes", body.len());
+        assert_eq!(
+            encode_body(&decode_body::<CheckpointRoot>(&body).expect("canonical root")),
+            body
+        );
+    }
 }
 
 /// S4/S7/K-BND-003: identity cursors add no Value header; tuple cursors

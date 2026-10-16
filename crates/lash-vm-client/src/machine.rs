@@ -206,6 +206,9 @@ impl RemoteMachines {
         start: RunStart,
         bounds: Bounds,
     ) -> Result<Self, KernelFailure> {
+        lash_kernel_vm::CellStart::admit_host_metadata(
+            start.host.iter().map(|(name, _)| name.as_str()),
+        )?;
         let prepared = service
             .documents
             .lock()

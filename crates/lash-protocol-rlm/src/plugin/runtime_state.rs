@@ -429,14 +429,8 @@ impl RlmRuntimeState {
         &self,
         snapshot: lash_rlm_types::CodeModeProjectedSeedSnapshot,
     ) -> Result<(), SessionError> {
-        let bindings = match CodeModeProjectedBindings::from_snapshot(&snapshot) {
-            Ok(bindings) => bindings,
-            Err(err) => {
-                return Err(SessionError::Protocol(format!(
-                    "code mode projected seed snapshot rejected: {err}"
-                )));
-            }
-        };
+        let bindings = CodeModeProjectedBindings::from_snapshot(&snapshot)
+            .map_err(crate::ProjectedBindingError::into_session_error)?;
         reject_reserved_projected_binding_names(&bindings)?;
         let mut guard = match self.session_projected_bindings.try_lock() {
             Ok(guard) => guard,
@@ -447,7 +441,7 @@ impl RlmRuntimeState {
         let merged = guard
             .clone()
             .merge(bindings)
-            .map_err(|err| SessionError::Protocol(err.to_string()))?;
+            .map_err(crate::ProjectedBindingError::into_session_error)?;
         *guard = merged;
         Ok(())
     }

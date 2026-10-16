@@ -37,7 +37,28 @@ pub struct CellStart {
     pub modes: EffectModes,
     /// The host's read-only bindings a cell's `main` starts with over the
     /// session's: bound at the start, and left out of the cell's carry.
+    /// Its name list must fit [`CheckpointRoot::HOST_METADATA_LIMIT`],
+    /// including token framing; start refuses it before opening the heap.
     pub host: Vec<(Name, Datum)>,
+}
+
+impl CellStart {
+    /// Admit the host's names before opening a heap or starting a worker.
+    ///
+    /// # Errors
+    ///
+    /// [`StartError::HostMetadataTooLarge`] when the encoded name list
+    /// exceeds the space reserved in every checkpoint root.
+    pub fn admit_host_metadata<'a>(
+        names: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), StartError> {
+        let actual = CheckpointRoot::host_metadata_bytes(names);
+        let limit = CheckpointRoot::HOST_METADATA_LIMIT;
+        if actual > limit {
+            return Err(StartError::HostMetadataTooLarge { limit, actual });
+        }
+        Ok(())
+    }
 }
 
 /// What a session cell's end makes of the bindings its carry would drop

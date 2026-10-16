@@ -78,6 +78,7 @@ impl<H> InProcess<H> {
         start: RunStart,
         host: H,
     ) -> Result<Self, KernelFailure> {
+        CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
         Ok(Self {
             hold: None,
             document: program.document.identity(),

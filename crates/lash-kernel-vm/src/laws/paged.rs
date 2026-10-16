@@ -542,3 +542,56 @@ fn a_failed_outcomes_number_tokens_are_decoded_before_it_is_frozen() {
     };
     assert_eq!(finished.result, int(2));
 }
+
+/// FIG-6499 / S1: host metadata is refused at admission, before a cell can
+/// publish an oversized checkpoint. Count token framing and UTF-8 bytes.
+#[test]
+fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
+    use super::embedder::{ROOMY, census};
+    use crate::{CellStart, EffectModes, KernelMachine, StartError, Target};
+    use lash_kernel_doc::{Datum, Name};
+    let embedder = Embedder::new("main { }");
+    for (names, refused_size) in [
+        (vec![Name::new("h".repeat(3062))], None),
+        (vec![Name::new("h".repeat(3063))], Some(3068)),
+        (vec![Name::new("é".repeat(2048))], Some(4101)),
+        (vec![Name::new(""); 1532], None),
+        (vec![Name::new(""); 1533], Some(3069)),
+    ] {
+        let (program, _) = embedder.program(false);
+        let result = KernelMachine::start(
+            program,
+            ROOMY,
+            CellStart {
+                owner: lash_kernel_doc::heap::PageId([9; 32]),
+                target: Target::Main,
+                args: Vec::new(),
+                session: None,
+                modes: EffectModes::recorded(),
+                host: names.into_iter().map(|name| (name, Datum::Null)).collect(),
+            },
+            Box::new(embedder.source.clone()),
+            census(ROOMY.memory),
+        );
+        if let Some(actual) = refused_size {
+            assert!(
+                matches!(
+                    result,
+                    Err(StartError::HostMetadataTooLarge { limit: 3067, actual: size })
+                        if size == actual
+                ),
+                "oversized host metadata must retain its typed limit and size"
+            );
+        } else {
+            let mut machine = result.expect("maximal metadata is admitted");
+            let sealed = machine
+                .seal(SealBudget {
+                    pages: u64::MAX,
+                    bytes: u64::MAX,
+                })
+                .unwrap()
+                .expect("admitted metadata seals");
+            assert!(encode_body(&sealed.root).len() + 256 <= 4096);
+        }
+    }
+}
