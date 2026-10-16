@@ -1,5 +1,18 @@
 {
   "dev": {
+    "lash-internal-core-worker/lash_core_worker": {
+      "target": {
+        "cpu_count": 1,
+        "legacy_peak_bytes": 0,
+        "memory_kb": 786432,
+        "oom_kills": 0,
+        "p95_cores": 0.99,
+        "p99_anon_peak_bytes": 176537600,
+        "p99_peak_bytes": 176537600,
+        "peak_bytes": 176537600,
+        "samples": 20
+      }
+    },
     "lash-internal-plugin-mcp/lash_plugin_mcp": {
       "target": {
         "cpu_count": 1,
@@ -24,6 +37,19 @@
         "p99_peak_bytes": 413863936,
         "peak_bytes": 413863936,
         "samples": 40
+      }
+    },
+    "lash-internal-provider-openai/lash_provider_openai": {
+      "target": {
+        "cpu_count": 1,
+        "legacy_peak_bytes": 0,
+        "memory_kb": 1048576,
+        "oom_kills": 0,
+        "p95_cores": 0.98,
+        "p99_anon_peak_bytes": 263610368,
+        "p99_peak_bytes": 263610368,
+        "peak_bytes": 263610368,
+        "samples": 20
       }
     },
     "lash-internal-vm-runtime/lash_vm_runtime": {

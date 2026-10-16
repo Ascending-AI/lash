@@ -17,11 +17,11 @@
   },
   "lash-internal-conformance/lash_conformance": {
     "cpu_count": 1,
-    "memory_kb": 3407872,
-    "p95_cores": 1.04,
-    "p99_peak_bytes": 2168094720,
-    "peak_bytes": 2168094720,
-    "samples": 30
+    "memory_kb": 1572864,
+    "p95_cores": 1.0,
+    "p99_peak_bytes": 760655872,
+    "peak_bytes": 772493312,
+    "samples": 360
   },
   "lash-internal-core-effect/lash_core_effect": {
     "cpu_count": 1,
