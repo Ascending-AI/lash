@@ -470,13 +470,15 @@ pub mod tools {
     pub use lash_tool_presenter_api::{
         PresentationRefusal, PresentedToolSection, RecordedToolPresenter, ToolDisclosure,
         ToolPresentationEntry, ToolPresentationRequest, ToolPresenter, ToolPresenterSlot,
-        WrappedToolPresenter, admit_over_standard, listing as presenter_listing, read_config,
+        WrappedToolPresenter, admit_over_standard, inline_schema, inline_shape,
+        listing as presenter_listing, read_config,
     };
     /// The shape a presenter reads a tool's JSON Schemas as.
     pub use lash_tool_shape::{
-        ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
-        ShapeField, ShapeKind, ShapeRow, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
-        is_named_type_reference,
+        CanonicalIdentity, DefinitionId, ExtraKeys, ImportLimits, ObjectShape, ProcessParamShape,
+        ProcessShape, ReadableNameAllocator, SchemaDefinition, SchemaDocument, SchemaShape,
+        ShapeConstraints, ShapeField, ShapeImportRefusal, ShapeKind, ShapeRow, X_LASH_KEYWORD,
+        XLashParam, XLashSignature, XLashType, is_named_type_reference,
     };
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{GetDefinitionIntent, PublishDefinitionIntent};

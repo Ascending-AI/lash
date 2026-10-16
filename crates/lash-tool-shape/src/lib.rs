@@ -7,13 +7,18 @@
 //! presenter only spells it; no presenter reads the raw schema again.
 //! Runtime-value inference constructs the same shape directly.
 //!
-//! The shape is a *view*, not a validator. It keeps what a reader needs: the
-//! fields of open objects and whether extra keys are allowed, which fields are
-//! required, nested objects and arrays, enums, unions and nullability, field
-//! descriptions, and constraints as annotations. Anything it cannot say
-//! becomes [`ShapeKind::Unknown`] rather than an error, because a schema that
-//! must be refused is refused where it enters the catalog. Validation never
-//! reads this crate; how deep a presenter imports is its own recorded choice.
+//! Import through [`SchemaDocument::from_json_schema`]. Local references stay
+//! graph edges, including recursive ones. Unsupported schemas and exhausted
+//! resources return [`ShapeImportRefusal`]; only an unconstrained schema is
+//! [`ShapeKind::Unknown`]. Validation remains the contract's responsibility.
+
+mod document;
+mod import;
+mod names;
+
+pub use document::{CanonicalIdentity, DefinitionId, SchemaDefinition, SchemaDocument};
+pub use import::{ImportLimits, ShapeImportRefusal};
+pub use names::ReadableNameAllocator;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
@@ -57,6 +62,12 @@ pub struct XLashParam {
 /// Named data types are dotted identifiers (`lash.ProcessRecord`). A URL
 /// or a relative file reference is a JSON Schema construct lash cannot
 /// resolve.
+///
+/// ```
+/// # use lash_tool_shape::is_named_type_reference;
+/// assert!(is_named_type_reference("lash.ProcessRecord"));
+/// assert!(!is_named_type_reference("https://example.com/schema.json"));
+/// ```
 pub fn is_named_type_reference(reference: &str) -> bool {
     !reference.is_empty()
         && reference.split('.').all(|segment| {
@@ -86,8 +97,12 @@ pub struct SchemaShape {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum ShapeKind {
-    /// Anything: an empty schema, or a construct the view cannot say.
+    /// Anything: an explicitly unconstrained schema.
     Unknown,
+    /// No value: the false schema.
+    Never,
+    /// An edge to a definition in the owning document.
+    Ref(DefinitionId),
     Null,
     Bool,
     Int,
@@ -236,8 +251,15 @@ impl ShapeConstraints {
         }
     }
 
-    /// Keeps what is stated here and takes the rest from `inner`.
-    fn or(self, inner: Self) -> Self {
+    /// Keeps use-site values stated here, filling absent notes from `inner`.
+    /// Assertion intersections must be admitted separately by the importer.
+    ///
+    /// ```
+    /// # use lash_tool_shape::ShapeConstraints;
+    /// let notes = ShapeConstraints::default().overlay(ShapeConstraints::default());
+    /// assert!(notes.is_empty());
+    /// ```
+    pub fn overlay(self, inner: Self) -> Self {
         Self {
             minimum: self.minimum.or(inner.minimum),
             exclusive_minimum: self.exclusive_minimum.or(inner.exclusive_minimum),
@@ -265,19 +287,6 @@ impl From<ShapeKind> for SchemaShape {
 }
 
 impl SchemaShape {
-    /// Reads a JSON Schema document as a shape, following nested containers
-    /// and references `max_depth` levels deep before it answers
-    /// [`ShapeKind::Unknown`]; the bound keeps a recursive schema's shape
-    /// finite. Local `#` references are resolved against `schema` itself.
-    pub fn from_json_schema(schema: &Value, max_depth: usize) -> Self {
-        ShapeImporter {
-            root: schema,
-            max_depth,
-            resolving: Vec::new(),
-        }
-        .import(schema, 0)
-    }
-
     pub fn unknown() -> Self {
         ShapeKind::Unknown.into()
     }
@@ -405,7 +414,7 @@ impl ShapeRow {
             .or(other.shape.description.clone());
         let default = self.shape.default.take().or(other.shape.default.clone());
         let constraints =
-            std::mem::take(&mut self.shape.constraints).or(other.shape.constraints.clone());
+            std::mem::take(&mut self.shape.constraints).overlay(other.shape.constraints.clone());
         let bare = |shape: &SchemaShape| SchemaShape::from(shape.kind.clone());
         self.shape = SchemaShape {
             kind: union_kind(vec![bare(&self.shape), bare(&other.shape)]),
@@ -417,7 +426,7 @@ impl ShapeRow {
 }
 
 /// Flattens nested unions, drops duplicates and puts `null` last. One
-/// remaining member is that member; none is [`ShapeKind::Unknown`].
+/// remaining member is that member; none is [`ShapeKind::Never`].
 fn union_kind(members: Vec<SchemaShape>) -> ShapeKind {
     fn add(member: SchemaShape, flat: &mut Vec<SchemaShape>) {
         if !flat.contains(&member) {
@@ -448,352 +457,11 @@ fn union_kind(members: Vec<SchemaShape>) -> ShapeKind {
     }
     flat.sort_by_key(|member| matches!(member.kind, ShapeKind::Null));
     match flat.len() {
-        0 => ShapeKind::Unknown,
+        0 => ShapeKind::Never,
         1 => flat.remove(0).kind,
         _ => ShapeKind::Union(flat),
     }
 }
 
-struct ShapeImporter<'a> {
-    max_depth: usize,
-    root: &'a Value,
-    /// The `#` references being expanded, so a cycle ends in
-    /// [`ShapeKind::Unknown`] instead of recursing.
-    resolving: Vec<&'a str>,
-}
-
-impl<'a> ShapeImporter<'a> {
-    fn import(&mut self, schema: &'a Value, depth: usize) -> SchemaShape {
-        let Some(map) = schema.as_object().filter(|map| !map.is_empty()) else {
-            return SchemaShape::unknown();
-        };
-        if depth >= self.max_depth {
-            return SchemaShape::unknown();
-        }
-        let inner = self.import_kind(map, depth);
-        let mut constraints = ShapeConstraints::from_schema(map).or(inner.constraints);
-        // On a number, `format` is a machine width (`uint8`, `double`), which
-        // tells a reader nothing the bounds do not.
-        if matches!(inner.kind, ShapeKind::Int | ShapeKind::Float) {
-            constraints.format = None;
-        }
-        // The node's own annotations win over the ones a `$ref` or a single
-        // `allOf` branch brought with it, per JSON Schema annotation rules.
-        SchemaShape {
-            kind: inner.kind,
-            description: map
-                .get("description")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|description| !description.is_empty())
-                .map(str::to_string)
-                .or(inner.description),
-            default: map.get("default").cloned().or(inner.default),
-            constraints,
-        }
-    }
-
-    fn import_kind(&mut self, map: &'a Map<String, Value>, depth: usize) -> SchemaShape {
-        if let Some(declaration) = map.get(X_LASH_KEYWORD) {
-            return self.import_lash_type(declaration, depth).into();
-        }
-        if let Some(reference) = map.get("$ref") {
-            return self.import_reference(reference, depth);
-        }
-        if let Some([branch]) = map
-            .get("allOf")
-            .and_then(Value::as_array)
-            .map(Vec::as_slice)
-        {
-            return self.import(branch, depth + 1);
-        }
-        if let Some(branches) = map
-            .get("anyOf")
-            .or_else(|| map.get("oneOf"))
-            .and_then(Value::as_array)
-        {
-            let members = branches
-                .iter()
-                .map(|branch| self.import(branch, depth + 1))
-                .collect();
-            return union_kind(members).into();
-        }
-        if let Some(values) = map.get("enum").and_then(Value::as_array) {
-            return literals_kind(values).into();
-        }
-        if let Some(value) = map.get("const") {
-            return literals_kind(std::slice::from_ref(value)).into();
-        }
-        match map.get("type") {
-            Some(Value::String(name)) => self.import_type(name, map, depth).into(),
-            Some(Value::Array(names)) => union_kind(
-                names
-                    .iter()
-                    .map(|name| match name.as_str() {
-                        Some(name) => self.import_type(name, map, depth).into(),
-                        None => SchemaShape::unknown(),
-                    })
-                    .collect(),
-            )
-            .into(),
-            Some(_) => SchemaShape::unknown(),
-            None if [
-                "properties",
-                "required",
-                "additionalProperties",
-                "patternProperties",
-            ]
-            .iter()
-            .any(|key| map.contains_key(*key)) =>
-            {
-                self.import_object(map, depth).into()
-            }
-            None if map.contains_key("items") || map.contains_key("prefixItems") => {
-                self.import_array(map, depth).into()
-            }
-            None => SchemaShape::unknown(),
-        }
-    }
-
-    fn import_reference(&mut self, reference: &'a Value, depth: usize) -> SchemaShape {
-        let Some(reference) = reference.as_str() else {
-            return SchemaShape::unknown();
-        };
-        let Some(pointer) = reference.strip_prefix('#') else {
-            return if is_named_type_reference(reference) {
-                ShapeKind::Named(reference.to_string()).into()
-            } else {
-                SchemaShape::unknown()
-            };
-        };
-        if self.resolving.contains(&reference) {
-            return SchemaShape::unknown();
-        }
-        let Some(target) = self.root.pointer(pointer) else {
-            return SchemaShape::unknown();
-        };
-        self.resolving.push(reference);
-        let shape = self.import(target, depth);
-        self.resolving.pop();
-        shape
-    }
-
-    fn import_lash_type(&mut self, declaration: &'a Value, depth: usize) -> ShapeKind {
-        // The declaration is decoded into its typed form and its nested
-        // schemas are then read from the document itself, so they borrow from
-        // it like every other node.
-        match XLashType::deserialize(declaration) {
-            Ok(XLashType::ProcessUnknown) => ShapeKind::Process(None),
-            Ok(XLashType::Process { signature }) => ShapeKind::Process(Some(ProcessShape {
-                params: signature
-                    .params
-                    .iter()
-                    .enumerate()
-                    .map(|(index, param)| ProcessParamShape {
-                        name: param.name.clone(),
-                        shape: self.import_at(
-                            declaration,
-                            &format!("/signature/params/{index}/schema"),
-                            depth + 1,
-                        ),
-                    })
-                    .collect(),
-                output: Box::new(self.import_at(declaration, "/signature/output", depth + 1)),
-            })),
-            Err(_) => ShapeKind::Unknown,
-        }
-    }
-
-    fn import_at(&mut self, parent: &'a Value, pointer: &str, depth: usize) -> SchemaShape {
-        match parent.pointer(pointer) {
-            Some(schema) => self.import(schema, depth),
-            None => SchemaShape::unknown(),
-        }
-    }
-
-    fn import_type(&mut self, name: &str, map: &'a Map<String, Value>, depth: usize) -> ShapeKind {
-        match name {
-            "string" => ShapeKind::Str,
-            "integer" => ShapeKind::Int,
-            "number" => ShapeKind::Float,
-            "boolean" => ShapeKind::Bool,
-            "null" => ShapeKind::Null,
-            "object" => self.import_object(map, depth),
-            "array" => self.import_array(map, depth),
-            _ => ShapeKind::Unknown,
-        }
-    }
-
-    fn import_object(&mut self, map: &'a Map<String, Value>, depth: usize) -> ShapeKind {
-        let required = map
-            .get("required")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>();
-        let mut fields = map
-            .get("properties")
-            .and_then(Value::as_object)
-            .into_iter()
-            .flatten()
-            .map(|(name, schema)| ShapeField {
-                name: name.clone(),
-                required: required.contains(&name.as_str()),
-                shape: self.import(schema, depth + 1),
-            })
-            .collect::<Vec<_>>();
-        // A stable sort: required fields move ahead in `required` order and
-        // the optional ones keep their property order behind them.
-        fields.sort_by_key(|field| {
-            required
-                .iter()
-                .position(|name| *name == field.name)
-                .unwrap_or(usize::MAX)
-        });
-        let extra_keys = match map.get("additionalProperties") {
-            _ if map.contains_key("patternProperties") => {
-                ExtraKeys::Open(Box::new(SchemaShape::unknown()))
-            }
-            Some(Value::Bool(false)) => ExtraKeys::Closed,
-            Some(schema) => ExtraKeys::Open(Box::new(self.import(schema, depth + 1))),
-            None => ExtraKeys::Unstated,
-        };
-        ShapeKind::Object(ObjectShape { fields, extra_keys })
-    }
-
-    fn import_array(&mut self, map: &'a Map<String, Value>, depth: usize) -> ShapeKind {
-        let positions = map
-            .get("prefixItems")
-            .and_then(Value::as_array)
-            .or_else(|| map.get("items").and_then(Value::as_array));
-        if let Some(positions) = positions {
-            return ShapeKind::Tuple(
-                positions
-                    .iter()
-                    .map(|schema| self.import(schema, depth + 1))
-                    .collect(),
-            );
-        }
-        ShapeKind::List(Box::new(match map.get("items") {
-            Some(schema) => self.import(schema, depth + 1),
-            None => SchemaShape::unknown(),
-        }))
-    }
-}
-
-fn literals_kind(values: &[Value]) -> ShapeKind {
-    let literals = values
-        .iter()
-        .filter(|value| !value.is_null())
-        .cloned()
-        .collect::<Vec<_>>();
-    let nullable = values.iter().any(Value::is_null);
-    match (literals.is_empty(), nullable) {
-        (true, true) => ShapeKind::Null,
-        (true, false) => ShapeKind::Unknown,
-        (false, false) => ShapeKind::Literals(literals),
-        (false, true) => ShapeKind::Union(vec![
-            ShapeKind::Literals(literals).into(),
-            ShapeKind::Null.into(),
-        ]),
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    /// The depth the shipped presenters import to.
-    const MAX_SHAPE_DEPTH: usize = 8;
-
-    fn shape(schema: Value) -> SchemaShape {
-        SchemaShape::from_json_schema(&schema, MAX_SHAPE_DEPTH)
-    }
-
-    fn field<'a>(shape: &'a SchemaShape, name: &str) -> &'a ShapeField {
-        shape
-            .fields()
-            .iter()
-            .find(|field| field.name == name)
-            .unwrap_or_else(|| panic!("field `{name}` in {shape:?}"))
-    }
-
-    #[test]
-    fn local_references_resolve_and_a_cycle_ends_in_unknown() {
-        let imported = shape(json!({
-            "$defs": {
-                "Node": {
-                    "type": "object",
-                    "description": "A node.",
-                    "properties": { "next": { "$ref": "#/$defs/Node" } }
-                }
-            },
-            "type": "object",
-            "properties": { "head": { "$ref": "#/$defs/Node", "description": "First node." } }
-        }));
-        let head = &field(&imported, "head").shape;
-        assert_eq!(head.description.as_deref(), Some("First node."));
-        assert_eq!(field(head, "next").shape.kind, ShapeKind::Unknown);
-        assert_eq!(
-            shape(json!({ "$ref": "lash.ProcessRecord" })).kind,
-            ShapeKind::Named("lash.ProcessRecord".to_string())
-        );
-        assert_eq!(
-            shape(json!({ "$ref": "https://example.com/schema.json" })).kind,
-            ShapeKind::Unknown
-        );
-    }
-
-    #[test]
-    fn nesting_past_the_depth_bound_ends_in_unknown() {
-        let mut schema = json!({ "type": "string" });
-        for _ in 0..(MAX_SHAPE_DEPTH + 3) {
-            schema = json!({ "type": "object", "properties": { "child": schema } });
-        }
-        let mut current = shape(schema);
-        let mut objects = 0;
-        while let ShapeKind::Object(object) = current.kind {
-            objects += 1;
-            current = object.fields.into_iter().next().expect("child").shape;
-        }
-        assert_eq!(objects, MAX_SHAPE_DEPTH);
-        assert_eq!(current.kind, ShapeKind::Unknown);
-    }
-
-    #[test]
-    fn lash_types_and_tuples_are_shapes() {
-        assert_eq!(
-            shape(json!({ "x-lash": { "kind": "process_unknown" } })).kind,
-            ShapeKind::Process(None)
-        );
-        assert_eq!(
-            shape(json!({ "x-lash": {
-                "kind": "process",
-                "signature": {
-                    "params": [{ "name": "event", "schema": { "type": "string" } }],
-                    "output": { "type": "integer" }
-                }
-            } }))
-            .kind,
-            ShapeKind::Process(Some(ProcessShape {
-                params: vec![ProcessParamShape {
-                    name: "event".to_string(),
-                    shape: ShapeKind::Str.into(),
-                }],
-                output: Box::new(ShapeKind::Int.into()),
-            }))
-        );
-        assert_eq!(
-            shape(json!({ "x-lash": { "kind": "proc" } })).kind,
-            ShapeKind::Unknown
-        );
-        assert_eq!(
-            shape(json!({ "type": "array", "prefixItems": [{ "type": "string" }, { "type": "integer" }] }))
-                .kind,
-            ShapeKind::Tuple(vec![ShapeKind::Str.into(), ShapeKind::Int.into()])
-        );
-    }
-}
+mod tests;

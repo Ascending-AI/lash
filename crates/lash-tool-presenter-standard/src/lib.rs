@@ -84,9 +84,9 @@ impl ToolPresenter for StandardToolPresenter {
             .iter()
             .map(|tool| {
                 compact_contract(tool.manifest, tool.contract, tool.call_path, &config)
-                    .render_markdown()
+                    .map(|contract| contract.render_markdown())
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(listing::list(request.tools, docs, request.disclosure))
     }
 
@@ -100,7 +100,7 @@ impl ToolPresenter for StandardToolPresenter {
             tool.contract,
             tool.call_path,
             &Self::config(config)?,
-        )
+        )?
         .render_markdown())
     }
 
@@ -114,8 +114,14 @@ impl ToolPresenter for StandardToolPresenter {
         let depth = Self::config(config)?.schema_depth;
         Ok(format!(
             "{call_path}({}) -> {}",
-            compact_arguments(&SchemaShape::from_json_schema(input.as_value(), depth)),
-            compact_type(&SchemaShape::from_json_schema(output.as_value(), depth))
+            compact_arguments(&lash_tool_presenter_api::inline_schema(
+                input.as_value(),
+                depth
+            )?),
+            compact_type(&lash_tool_presenter_api::inline_schema(
+                output.as_value(),
+                depth
+            )?)
         ))
     }
 
@@ -125,11 +131,7 @@ impl ToolPresenter for StandardToolPresenter {
         contract: &ToolContract,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Ok(listing::discovery_text(
-            manifest,
-            contract,
-            Self::config(config)?.schema_depth,
-        ))
+        listing::discovery_text(manifest, contract, Self::config(config)?.schema_depth)
     }
 }
 
@@ -155,31 +157,34 @@ pub struct CompactToolContract {
 /// `config`.
 ///
 /// ```rust,ignore
-/// let compact = compact_contract(&tool.manifest, &tool.contract, "lookup", &StandardPresenterConfig::standard());
+/// let compact = compact_contract(&tool.manifest, &tool.contract, "lookup", &StandardPresenterConfig::standard())?;
 /// assert_eq!(compact.render_markdown().lines().next(), Some("### lookup({ query: str }) -> str"));
 /// ```
+///
+/// # Errors
+/// Returns a typed schema import refusal when the contract cannot be presented.
 pub fn compact_contract(
     manifest: &ToolManifest,
     contract: &ToolContract,
     signature_name: &str,
     config: &StandardPresenterConfig,
-) -> CompactToolContract {
-    let input = SchemaShape::from_json_schema(
+) -> Result<CompactToolContract, PresentationRefusal> {
+    let input = lash_tool_presenter_api::inline_schema(
         contract.input_schema.canonical.as_value(),
         config.schema_depth,
-    );
-    let output = SchemaShape::from_json_schema(
+    )?;
+    let output = lash_tool_presenter_api::inline_schema(
         contract.output_schema.canonical.as_value(),
         config.schema_depth,
-    );
+    )?;
     let output_contract = &contract.output_contract;
     let witnessed_input = witnessed_input(output_contract, &input);
-    CompactToolContract {
+    Ok(CompactToolContract {
         name: signature_name.to_string(),
         signature: format!(
             "{}{}({})",
             signature_name,
-            type_parameter_suffix(output_contract, config.schema_depth).unwrap_or_default(),
+            type_parameter_suffix(output_contract, config.schema_depth)?.unwrap_or_default(),
             compact_arguments(&witnessed_input)
         ),
         returns: return_type_label(output_contract, &output),
@@ -195,7 +200,7 @@ pub fn compact_contract(
             config.example_limit,
             config.example_chars,
         ),
-    }
+    })
 }
 
 fn return_type_label(output_contract: &ToolOutputContract, output: &SchemaShape) -> String {
@@ -205,17 +210,22 @@ fn return_type_label(output_contract: &ToolOutputContract, output: &SchemaShape)
     }
 }
 
-fn type_parameter_suffix(output_contract: &ToolOutputContract, depth: usize) -> Option<String> {
+fn type_parameter_suffix(
+    output_contract: &ToolOutputContract,
+    depth: usize,
+) -> Result<Option<String>, PresentationRefusal> {
     match output_contract {
-        ToolOutputContract::Static => None,
+        ToolOutputContract::Static => Ok(None),
         ToolOutputContract::FromInputSchema { default_schema, .. } => {
             let default = default_schema
                 .as_ref()
                 .map(|schema| {
-                    compact_type(&SchemaShape::from_json_schema(schema.as_value(), depth))
+                    lash_tool_presenter_api::inline_schema(schema.as_value(), depth)
+                        .map(|shape| compact_type(&shape))
                 })
+                .transpose()?
                 .unwrap_or_else(|| "any".to_string());
-            Some(format!("<T = {default}>"))
+            Ok(Some(format!("<T = {default}>")))
         }
     }
 }

@@ -13,6 +13,7 @@ use lash_tool_shape::{ExtraKeys, ObjectShape, SchemaShape, ShapeKind};
 pub fn render_schema_shape(shape: &SchemaShape) -> String {
     match &shape.kind {
         ShapeKind::Unknown => "unknown".to_string(),
+        ShapeKind::Never => "never".to_string(),
         ShapeKind::Null => "null".to_string(),
         ShapeKind::Bool => "boolean".to_string(),
         ShapeKind::Int | ShapeKind::Float => "number".to_string(),

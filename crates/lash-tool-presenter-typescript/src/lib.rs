@@ -59,10 +59,13 @@ impl TypescriptToolPresenter {
         lash_tool_presenter_api::read_config(TYPESCRIPT_TOOL_PRESENTER_ID, config)
     }
 
-    fn doc(tool: &ToolPresentationEntry<'_>, config: TypescriptPresenterConfig) -> String {
+    fn doc(
+        tool: &ToolPresentationEntry<'_>,
+        config: TypescriptPresenterConfig,
+    ) -> Result<String, PresentationRefusal> {
         let input = &tool.contract.input_schema.canonical;
         let output = &tool.contract.output_schema.canonical;
-        let signature = signature(tool.call_path, input, output, config.schema_depth);
+        let signature = signature(tool.call_path, input, output, config.schema_depth)?;
         // Authored examples are Lash VM source; this presenter spells them.
         let examples = listing::compact_examples(
             &tool.contract.examples,
@@ -72,14 +75,14 @@ impl TypescriptToolPresenter {
         .iter()
         .map(|example| render_tool_example(example))
         .collect::<Vec<_>>();
-        listing::code_mode_tool_doc(
+        Ok(listing::code_mode_tool_doc(
             &signature,
             tool.manifest,
-            &SchemaShape::from_json_schema(input.as_value(), config.schema_depth),
-            &SchemaShape::from_json_schema(output.as_value(), config.schema_depth),
+            &lash_tool_presenter_api::inline_schema(input.as_value(), config.schema_depth)?,
+            &lash_tool_presenter_api::inline_schema(output.as_value(), config.schema_depth)?,
             &render_schema_shape,
             &examples,
-        )
+        ))
     }
 }
 
@@ -105,7 +108,7 @@ impl ToolPresenter for TypescriptToolPresenter {
             .tools
             .iter()
             .map(|tool| Self::doc(tool, config))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(listing::list(request.tools, docs, request.disclosure))
     }
 
@@ -114,7 +117,7 @@ impl ToolPresenter for TypescriptToolPresenter {
         tool: &ToolPresentationEntry<'_>,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Ok(Self::doc(tool, Self::config(config)?))
+        Self::doc(tool, Self::config(config)?)
     }
 
     fn tool_signature(
@@ -124,12 +127,7 @@ impl ToolPresenter for TypescriptToolPresenter {
         output: &JsonSchema,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Ok(signature(
-            call_path,
-            input,
-            output,
-            Self::config(config)?.schema_depth,
-        ))
+        signature(call_path, input, output, Self::config(config)?.schema_depth)
     }
 
     fn discovery_text(
@@ -138,27 +136,28 @@ impl ToolPresenter for TypescriptToolPresenter {
         contract: &ToolContract,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Ok(listing::discovery_text(
-            manifest,
-            contract,
-            Self::config(config)?.schema_depth,
-        ))
+        listing::discovery_text(manifest, contract, Self::config(config)?.schema_depth)
     }
 }
 
-fn signature(call_path: &str, input: &JsonSchema, output: &JsonSchema, depth: usize) -> String {
-    tool_signature(
+fn signature(
+    call_path: &str,
+    input: &JsonSchema,
+    output: &JsonSchema,
+    depth: usize,
+) -> Result<String, PresentationRefusal> {
+    Ok(tool_signature(
         call_path,
-        &SchemaShape::from_json_schema(input.as_value(), depth),
+        &lash_tool_presenter_api::inline_schema(input.as_value(), depth)?,
         input.accepts_empty_object(),
-        &SchemaShape::from_json_schema(output.as_value(), depth),
-    )
+        &lash_tool_presenter_api::inline_schema(output.as_value(), depth)?,
+    ))
 }
 
 /// One named definition: `type Name = <type>`.
 ///
 /// ```rust,ignore
-/// let shape = SchemaShape::from_json_schema(&json!({"type": "string"}), 8);
+/// let shape = lash_tool_presenter_api::inline_schema(&json!({"type": "string"}), 8)?;
 /// assert_eq!(schema_definition("Query", &shape), "type Query = string");
 /// ```
 pub fn schema_definition(name: &str, shape: &SchemaShape) -> String {
@@ -169,7 +168,7 @@ pub fn schema_definition(name: &str, shape: &SchemaShape) -> String {
 /// their types in TypeScript: `- `limit?: number` (>= 1) — Page size.`
 ///
 /// ```rust,ignore
-/// let rows = note_rows(&SchemaShape::from_json_schema(&input_schema, 8));
+/// let rows = note_rows(&lash_tool_presenter_api::inline_schema(&input_schema, 8)?);
 /// ```
 pub fn note_rows(shape: &SchemaShape) -> Vec<String> {
     listing::noted_field_rows(shape, &render_schema_shape)

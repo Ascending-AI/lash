@@ -11,12 +11,13 @@ use lash_tool_shape::{ExtraKeys, ObjectShape, SchemaShape, ShapeKind, ShapeRow};
 /// A shape's type in compact notation.
 ///
 /// ```rust,ignore
-/// let shape = SchemaShape::from_json_schema(&json!({"type": "array", "items": {"type": "integer"}}), 8);
+/// let shape = lash_tool_presenter_api::inline_schema(&json!({"type": "array", "items": {"type": "integer"}}), 8)?;
 /// assert_eq!(compact_type(&shape), "list[int]");
 /// ```
 pub fn compact_type(shape: &SchemaShape) -> String {
     match &shape.kind {
         ShapeKind::Unknown => "any".to_string(),
+        ShapeKind::Never => "never".to_string(),
         ShapeKind::Null => "null".to_string(),
         ShapeKind::Bool => "bool".to_string(),
         ShapeKind::Int => "int".to_string(),

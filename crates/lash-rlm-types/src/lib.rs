@@ -2,7 +2,7 @@ use lash_sansio::{
     CellFailure, CellFailureKind, CellOutcome, CellRecord, ExecutedCall, ExecutedCallOutcome,
     OutputValue, RetainedValue, TerminationMode, TurnProtocol, ValueShape,
 };
-use lash_tool_shape::{SchemaShape, ShapeKind};
+use lash_tool_shape::SchemaDocument;
 
 /// Read-only legacy protocol-owned assistant context paired with a code mode
 /// trajectory entry.
@@ -203,7 +203,7 @@ impl From<&CellOutcome> for HistoryStepOutcome {
 }
 
 /// One item of the `history` a cell reads. This serialized shape is the
-/// model-visible one: [`history_item_shape`] derives the type a prompt
+/// model-visible one: [`history_item_document`] derives the type a prompt
 /// declares from it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -268,7 +268,17 @@ impl RlmHistoryItem {
 /// write or leave out one it does. A dialect spells it through its schema
 /// renderer. `images` drops the step's `images` key for a session whose
 /// model is shown no images.
-pub fn history_item_shape(images: bool) -> SchemaShape {
+///
+/// ```
+/// # use lash_rlm_types::history_item_document;
+/// let document = history_item_document(true);
+/// assert_eq!(document.roots.len(), 1);
+/// ```
+#[expect(
+    clippy::expect_used,
+    reason = "the built-in serialized HistoryItem schema is pinned by its serialization law"
+)]
+pub fn history_item_document(images: bool) -> SchemaDocument {
     /// Deep enough for every nesting the item's own type has.
     const HISTORY_ITEM_DEPTH: usize = 8;
     // The serialize contract: a key the item may skip is optional.
@@ -276,15 +286,34 @@ pub fn history_item_shape(images: bool) -> SchemaShape {
         .for_serialize()
         .into_generator()
         .into_root_schema_for::<RlmHistoryItem>();
-    let mut shape = SchemaShape::from_json_schema(schema.as_value(), HISTORY_ITEM_DEPTH);
-    if !images && let ShapeKind::Union(members) = &mut shape.kind {
+    let mut schema = schema.as_value().clone();
+    let union = if schema.get("oneOf").is_some() {
+        "oneOf"
+    } else {
+        "anyOf"
+    };
+    if !images
+        && let Some(members) = schema
+            .get_mut(union)
+            .and_then(serde_json::Value::as_array_mut)
+    {
         for member in members {
-            if let ShapeKind::Object(object) = &mut member.kind {
-                object.fields.retain(|field| field.name != "images");
+            if let Some(properties) = member
+                .get_mut("properties")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                properties.remove("images");
+            }
+            if let Some(required) = member
+                .get_mut("required")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                required.retain(|name| name != "images");
             }
         }
     }
-    shape
+    SchemaDocument::from_json_schema(&schema, HISTORY_ITEM_DEPTH)
+        .expect("the built-in HistoryItem schema is representable")
 }
 
 #[cfg(test)]
@@ -505,8 +534,9 @@ mod rlm_step_serde_tests {
     /// for its `kind`, every required key is always written, and the
     /// declaration names no key that no item writes.
     #[test]
-    fn the_declared_history_item_shape_is_the_shape_items_serialize_as() {
-        let shape = super::history_item_shape(true);
+    fn the_declared_history_item_document_is_the_shape_items_serialize_as() {
+        let document = super::history_item_document(true);
+        let shape = &document.roots[0];
         let ShapeKind::Union(members) = &shape.kind else {
             panic!("a history item is one of its kinds: {shape:?}");
         };
@@ -559,7 +589,8 @@ mod rlm_step_serde_tests {
 
     #[test]
     fn a_session_without_images_declares_no_images_key() {
-        let shape = super::history_item_shape(false);
+        let document = super::history_item_document(false);
+        let shape = &document.roots[0];
         let ShapeKind::Union(members) = &shape.kind else {
             panic!("a history item is one of its kinds: {shape:?}");
         };
@@ -568,6 +599,11 @@ mod rlm_step_serde_tests {
                 .iter()
                 .flat_map(|member| member.fields())
                 .all(|field| field.name != "images")
+        );
+        assert_ne!(
+            document.canonical_identity(lash_tool_shape::DefinitionId(0)),
+            super::history_item_document(true).canonical_identity(lash_tool_shape::DefinitionId(0)),
+            "filter the source before importing so identity describes the displayed history"
         );
     }
 }

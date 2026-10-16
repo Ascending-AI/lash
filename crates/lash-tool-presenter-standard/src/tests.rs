@@ -9,6 +9,7 @@ fn compact(tool: &ToolDefinition) -> CompactToolContract {
         tool.name(),
         &StandardPresenterConfig::standard(),
     )
+    .expect("representable tool")
 }
 
 #[test]

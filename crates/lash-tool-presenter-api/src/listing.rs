@@ -237,14 +237,17 @@ fn field_row(row: &ShapeRow, schema_type: &dyn Fn(&SchemaShape) -> String) -> St
 /// names what a field holds finds the tool (FIG-1435).
 ///
 /// ```rust,ignore
-/// let text = listing::discovery_text(&tool.manifest, &tool.contract, 8);
+/// let text = listing::discovery_text(&tool.manifest, &tool.contract, 8)?;
 /// assert!(text.starts_with(&tool.manifest.name));
 /// ```
+///
+/// # Errors
+/// Returns a typed schema import refusal when the contract cannot be presented.
 pub fn discovery_text(
     manifest: &ToolManifest,
     contract: &ToolContract,
     schema_depth: usize,
-) -> String {
+) -> Result<String, crate::PresentationRefusal> {
     let mut lines = vec![manifest.name.clone()];
     let description = manifest.description.trim();
     if !description.is_empty() {
@@ -254,14 +257,14 @@ pub fn discovery_text(
         &contract.input_schema.canonical,
         &contract.output_schema.canonical,
     ] {
-        for row in SchemaShape::from_json_schema(schema.as_value(), schema_depth).rows() {
+        for row in crate::inline_schema(schema.as_value(), schema_depth)?.rows() {
             lines.push(match &row.shape.description {
                 Some(description) => format!("{}: {description}", row.path),
                 None => row.path,
             });
         }
     }
-    lines.join("\n")
+    Ok(lines.join("\n"))
 }
 
 /// Authored examples under a presenter's cuts: the first `limit` nonempty

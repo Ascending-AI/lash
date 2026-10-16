@@ -505,10 +505,11 @@ impl SessionDialect {
     /// the history collection: the dialect's spelling of the shape the item
     /// serializes as, which `lash-rlm-types` owns.
     pub(crate) fn history_item_definition(&self, images: bool) -> String {
-        self.language().schema_definition(
-            self.prompt_vocabulary().history_item_name,
-            &lash_rlm_types::history_item_shape(images),
-        )
+        self.language()
+            .schema_definition(self.prompt_vocabulary().history_item_name, &{
+                let document = lash_rlm_types::history_item_document(images);
+                lash_tool_presenter_api::inline_shape(&document, &document.roots[0], 8)
+            })
     }
 
     /// How a cell calls the finish tool `manifest`: Lash's `control.finish`

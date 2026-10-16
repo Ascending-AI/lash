@@ -49,17 +49,20 @@ impl PythonToolPresenter {
         lash_tool_presenter_api::read_config(PYTHON_TOOL_PRESENTER_ID, config)
     }
 
-    fn doc(tool: &ToolPresentationEntry<'_>, config: PythonPresenterConfig) -> String {
+    fn doc(
+        tool: &ToolPresentationEntry<'_>,
+        config: PythonPresenterConfig,
+    ) -> Result<String, PresentationRefusal> {
         let input = &tool.contract.input_schema.canonical;
         let output = &tool.contract.output_schema.canonical;
-        listing::code_mode_tool_doc(
-            &signature(tool.call_path, input, output, config.schema_depth),
+        Ok(listing::code_mode_tool_doc(
+            &signature(tool.call_path, input, output, config.schema_depth)?,
             tool.manifest,
-            &SchemaShape::from_json_schema(input.as_value(), config.schema_depth),
-            &SchemaShape::from_json_schema(output.as_value(), config.schema_depth),
+            &lash_tool_presenter_api::inline_schema(input.as_value(), config.schema_depth)?,
+            &lash_tool_presenter_api::inline_schema(output.as_value(), config.schema_depth)?,
             &render_shape,
             &[],
-        )
+        ))
     }
 }
 
@@ -85,7 +88,7 @@ impl ToolPresenter for PythonToolPresenter {
             .tools
             .iter()
             .map(|tool| Self::doc(tool, config))
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(listing::list(request.tools, docs, request.disclosure))
     }
 
@@ -94,7 +97,7 @@ impl ToolPresenter for PythonToolPresenter {
         tool: &ToolPresentationEntry<'_>,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Ok(Self::doc(tool, Self::config(config)?))
+        Self::doc(tool, Self::config(config)?)
     }
 
     fn tool_signature(
@@ -104,12 +107,7 @@ impl ToolPresenter for PythonToolPresenter {
         output: &JsonSchema,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Ok(signature(
-            call_path,
-            input,
-            output,
-            Self::config(config)?.schema_depth,
-        ))
+        signature(call_path, input, output, Self::config(config)?.schema_depth)
     }
 
     fn discovery_text(
@@ -118,27 +116,28 @@ impl ToolPresenter for PythonToolPresenter {
         contract: &ToolContract,
         config: &Value,
     ) -> Result<String, PresentationRefusal> {
-        Ok(listing::discovery_text(
-            manifest,
-            contract,
-            Self::config(config)?.schema_depth,
-        ))
+        listing::discovery_text(manifest, contract, Self::config(config)?.schema_depth)
     }
 }
 
-fn signature(call_path: &str, input: &JsonSchema, output: &JsonSchema, depth: usize) -> String {
-    tool_signature(
+fn signature(
+    call_path: &str,
+    input: &JsonSchema,
+    output: &JsonSchema,
+    depth: usize,
+) -> Result<String, PresentationRefusal> {
+    Ok(tool_signature(
         call_path,
-        &SchemaShape::from_json_schema(input.as_value(), depth),
+        &lash_tool_presenter_api::inline_schema(input.as_value(), depth)?,
         input.accepts_empty_object(),
-        &SchemaShape::from_json_schema(output.as_value(), depth),
-    )
+        &lash_tool_presenter_api::inline_schema(output.as_value(), depth)?,
+    ))
 }
 
 /// One named definition: `Name = <type>`.
 ///
 /// ```rust,ignore
-/// let shape = SchemaShape::from_json_schema(&json!({"type": "string"}), 8);
+/// let shape = lash_tool_presenter_api::inline_schema(&json!({"type": "string"}), 8)?;
 /// assert_eq!(schema_definition("Query", &shape), "Query = str");
 /// ```
 pub fn schema_definition(name: &str, shape: &SchemaShape) -> String {
@@ -149,7 +148,7 @@ pub fn schema_definition(name: &str, shape: &SchemaShape) -> String {
 /// their types in Python: `- `limit?: int` (>= 1) — Page size.`
 ///
 /// ```rust,ignore
-/// let rows = note_rows(&SchemaShape::from_json_schema(&input_schema, 8));
+/// let rows = note_rows(&lash_tool_presenter_api::inline_schema(&input_schema, 8)?);
 /// ```
 pub fn note_rows(shape: &SchemaShape) -> Vec<String> {
     listing::noted_field_rows(shape, &render_shape)
@@ -181,12 +180,13 @@ pub fn tool_signature(
 /// Spells a schema shape as a Python type.
 ///
 /// ```rust,ignore
-/// let shape = SchemaShape::from_json_schema(&json!({"type": "array", "items": {"type": "integer"}}), 8);
+/// let shape = lash_tool_presenter_api::inline_schema(&json!({"type": "array", "items": {"type": "integer"}}), 8)?;
 /// assert_eq!(render_shape(&shape), "list[int]");
 /// ```
 pub fn render_shape(shape: &SchemaShape) -> String {
     match &shape.kind {
         ShapeKind::Unknown => "Any".to_string(),
+        ShapeKind::Never => "Never".to_string(),
         ShapeKind::Null => "None".to_string(),
         ShapeKind::Bool => "bool".to_string(),
         ShapeKind::Int => "int".to_string(),

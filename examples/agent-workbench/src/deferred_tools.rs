@@ -381,15 +381,21 @@ struct DeferredSearchResult {
 impl DeferredSearchResult {
     /// A catalogued tool as the session's dialect shows it: the same
     /// signature and examples its resident tool docs would carry.
+    #[expect(
+        clippy::expect_used,
+        reason = "the fixed deferred tool schemas are pinned by the discovery laws"
+    )]
     fn new(call_path: &str, definition: &ToolDefinition) -> Self {
         use lash::rlm::typescript_tool_presenter::{
             TypescriptPresenterConfig, render_tool_example, tool_signature,
         };
-        use lash::tools::SchemaShape;
+        use lash::tools::inline_schema;
         let config = TypescriptPresenterConfig::standard();
         let contract = definition.contract();
-        let shape =
-            |schema: &serde_json::Value| SchemaShape::from_json_schema(schema, config.schema_depth);
+        let shape = |schema: &serde_json::Value| {
+            inline_schema(schema, config.schema_depth)
+                .expect("built-in deferred tool schemas are representable")
+        };
         let input = &contract.input_schema.canonical;
         Self {
             call_path: call_path.to_string(),

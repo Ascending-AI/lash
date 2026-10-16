@@ -26,7 +26,10 @@ use lash_sansio::{JsonSchema, ToolContract, ToolId, ToolManifest};
 use serde_json::Value;
 
 pub mod listing;
+mod projection;
 mod wrap;
+
+pub use projection::{inline_schema, inline_shape};
 
 pub use wrap::WrappedToolPresenter;
 
@@ -163,6 +166,12 @@ impl PresentedToolSection {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum PresentationRefusal {
+    /// The schema cannot be represented without losing contract information.
+    #[error("tool schema cannot be presented: {cause}")]
+    Shape {
+        #[from]
+        cause: lash_tool_shape::ShapeImportRefusal,
+    },
     /// The presenter does not take this config.
     #[error("tool presenter `{presenter}` refuses its config: {reason}")]
     Config { presenter: String, reason: String },
