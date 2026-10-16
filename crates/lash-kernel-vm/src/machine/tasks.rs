@@ -106,6 +106,9 @@ pub(super) struct Tasks {
     rows: Tree<TaskRecord>,
     cache: Vec<Option<(u64, Box<Task>)>>,
     protected: Option<TaskId>,
+    /// A validated slot of the protected task. Colliding task reads may
+    /// replace the other way, but cannot evict this statement's task.
+    active: Option<(u64, usize)>,
     #[cfg(test)]
     cache_probes: usize,
     access: Access<'static>,
@@ -120,6 +123,7 @@ impl Tasks {
         Self {
             rows,
             protected: None,
+            active: None,
             #[cfg(test)]
             cache_probes: 0,
             cache: (0..CACHED_TASKS).map(|_| None).collect(),
@@ -135,11 +139,19 @@ impl Tasks {
     }
     #[inline(always)]
     pub(super) fn get_mut(&mut self, index: usize) -> Result<Option<&mut Task>, HeapFault> {
+        let index = index as u64;
+        if let Some((id, slot)) = self.active
+            && id == index
+        {
+            return Ok(self.cache[slot].as_mut().map(|(_, task)| task.as_mut()));
+        }
+        // Another task starts a new segment, even when it shares a bucket
+        // with the protected task. Resolve both coordinates again on return.
+        self.invalidate_active();
         #[cfg(test)]
         {
             self.cache_probes += 1;
         }
-        let index = index as u64;
         let range = bucket(index);
         let slot = match self.cache[range.clone()]
             .iter()
@@ -151,13 +163,29 @@ impl Tasks {
                 None => return Ok(None),
             },
         };
+        if self.protected == Some(TaskId(index)) {
+            self.active = Some((index, slot));
+            if let Some((_, task)) = &mut self.cache[slot] {
+                task.frames.invalidate_active();
+            }
+        }
         Ok(self.cache[slot].as_mut().map(|(_, task)| task.as_mut()))
     }
     /// The running statement may have consumed its incoming state before it
     /// finishes reading another task. Its frame must remain resident until
     /// the step completes: Ready alone cannot restore that in-flight resume.
     pub(super) fn protect(&mut self, task: Option<TaskId>) {
+        self.invalidate_active();
         self.protected = task;
+    }
+    /// End a segment before a native can refine the heap, or before a
+    /// task-cache or statement boundary changes the active location.
+    pub(super) fn invalidate_active(&mut self) {
+        if let Some((_, slot)) = self.active.take()
+            && let Some((_, task)) = &mut self.cache[slot]
+        {
+            task.frames.invalidate_active();
+        }
     }
     fn replacement(&self, index: u64) -> Result<usize, HeapFault> {
         let range = bucket(index);
@@ -200,6 +228,7 @@ impl Tasks {
         Ok(Some(slot))
     }
     pub(super) fn push(&mut self, mut task: Task) -> Result<(), HeapFault> {
+        self.invalidate_active();
         let index = self.rows.len();
         let slot = self.replacement(index)?;
         self.evict(slot)?;
@@ -210,7 +239,9 @@ impl Tasks {
         Ok(())
     }
     pub(super) fn after_refinement(&mut self, rows: Tree<TaskRecord>) -> Result<(), HeapFault> {
+        self.invalidate_active();
         for (index, task) in self.cache.iter_mut().flatten() {
+            task.frames.invalidate_active();
             // The refined rows replace those last written.
             task.published = None;
             if matches!(task.record.state, TaskStateRecord::Ended(_))
@@ -354,5 +385,47 @@ mod laws {
             128,
             "a resident task must take one cache probe per read"
         );
+    }
+
+    /// FIG-6588: local operand count does not multiply task or top-frame
+    /// cache resolution within a non-yielding statement.
+    #[test]
+    fn local_operands_reuse_the_statements_validated_frame() {
+        let probes = |operands: usize| {
+            let values = vec!["value"; operands].join(", ");
+            let mut embedder = Embedder::new(&format!(
+                "fn f(value) {{ let out = ({values}) do perform echo(out) as Any }} main {{ do call f(7) }}"
+            ));
+            let task_probes = embedder.machine.tasks.cache_probes;
+            let frame_probes = embedder.machine.tasks.cache[bucket(0)]
+                .iter()
+                .flatten()
+                .find(|(id, _)| *id == 0)
+                .unwrap()
+                .1
+                .frames
+                .cache_probes;
+            assert!(matches!(embedder.run(), crate::Step::Parked(_)));
+            let machine = &embedder.machine;
+            let task = &machine.tasks.cache[bucket(0)]
+                .iter()
+                .flatten()
+                .find(|(id, _)| *id == 0)
+                .unwrap()
+                .1;
+            (
+                machine.tasks.cache_probes - task_probes,
+                task.frames.cache_probes - frame_probes,
+                machine.boundaries as usize,
+            )
+        };
+        let few = probes(2);
+        let many = probes(128);
+        assert_eq!(many, few, "local operands must reuse validated coordinates");
+        // Each statement validates once. Publishing the park after the
+        // protected step ends may resolve the location once more.
+        let segments = many.2 + 1;
+        assert!(many.0 <= segments, "task resolutions: {many:?}");
+        assert!(many.1 <= segments, "frame resolutions: {many:?}");
     }
 }

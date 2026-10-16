@@ -473,11 +473,16 @@ impl Frame {
 }
 
 pub(super) struct Frames {
+    #[cfg(test)]
+    pub(super) cache_probes: usize,
     pub(super) rows: Tree<FrameRecord>,
     len: u64,
     // Resident frames are ordered by depth. Cold lower frames stay in rows
     // until a return reaches them; push and pop always use the resident top.
     cache: Vec<(u64, Box<Frame>)>,
+    /// The resident top validated for this statement segment. Stack edits
+    /// and the task cache's segment boundaries invalidate this index.
+    active: Option<usize>,
     access: Access<'static>,
     exe: Arc<Executable>,
     parked: ParkKind,
@@ -493,9 +498,12 @@ impl Frames {
         parked: ParkKind,
     ) -> Self {
         Self {
+            #[cfg(test)]
+            cache_probes: 0,
             len: rows.len(),
             rows,
             cache: Vec::new(),
+            active: None,
             access,
             exe,
             parked,
@@ -507,7 +515,18 @@ impl Frames {
     pub(super) fn is_empty(&self) -> bool {
         self.len == 0
     }
+    pub(super) fn invalidate_active(&mut self) {
+        self.active = None;
+    }
+    #[inline(always)]
     pub(super) fn last_mut(&mut self) -> Result<Option<&mut Frame>, HeapFault> {
+        if let Some(at) = self.active {
+            return Ok(Some(self.cache[at].1.as_mut()));
+        }
+        #[cfg(test)]
+        {
+            self.cache_probes += 1;
+        }
         if self.is_empty() {
             return Ok(None);
         }
@@ -522,13 +541,18 @@ impl Frames {
             )?;
             self.cache.push((index, frame));
         }
+        self.active = Some(self.cache.len() - 1);
         Ok(self.cache.last_mut().map(|(_, frame)| frame.as_mut()))
     }
     pub(super) fn push(&mut self, frame: Box<Frame>) {
+        self.invalidate_active();
         // The live cache owns unpublished calls and their callers. Only a
         // reader needs their persistent rows; returning before that reader
         // discards the call without ever writing it.
         self.cache.push((self.len, frame));
+        // The push itself proves the new top resident; discard the old
+        // location and seed the new segment without resolving it again.
+        self.active = Some(self.cache.len() - 1);
         self.len += 1;
         self.parked = ParkKind::Fresh;
     }
@@ -537,12 +561,14 @@ impl Frames {
             return Ok(None);
         }
         self.last_mut()?;
+        self.invalidate_active();
         let frame = self.cache.pop().map(|(_, frame)| frame);
         self.len -= 1;
         self.parked = ParkKind::Returned;
         Ok(frame)
     }
     pub(super) fn clear(&mut self) {
+        self.invalidate_active();
         self.rows = Tree::new(true);
         self.len = 0;
         self.cache.clear();

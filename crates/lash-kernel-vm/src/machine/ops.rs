@@ -540,6 +540,9 @@ impl KernelMachine {
                     })
                     .transpose()?;
                 let mut counter = WorkCounter::new(limit);
+                // Prepared entries above cannot touch the heap. A general
+                // native starts a new frame-access segment before it can.
+                self.tasks.invalidate_active();
                 let answer = native.call(NativeCall {
                     args: &self.regs[args..end],
                     heap: &mut super::native_heap::CallHeap {
