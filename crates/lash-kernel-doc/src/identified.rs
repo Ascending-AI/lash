@@ -132,23 +132,31 @@ impl From<Document> for IdentifiedDocument {
 }
 
 /// This thread's document trips and kernel-text definition parses.
-/// Counting is a thread-local add, always on.
+/// Each counter is off until this thread calls its corresponding take
+/// function. Only aggregate counts are retained, never documents,
+/// identities or guest values (ADR 0123).
 pub mod document_work {
+    use std::cell::Cell;
+
     std::thread_local! {
-        static DEFINITION_PARSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        static DEFINITION_PARSES: Cell<Option<u64>> = const { Cell::new(None) };
     }
 
     pub(crate) fn note_definition_parse() {
-        let _ = DEFINITION_PARSES.try_with(|count| count.set(count.get() + 1));
+        let _ = DEFINITION_PARSES.try_with(|count| {
+            if let Some(parses) = count.get() {
+                count.set(Some(parses + 1));
+            }
+        });
     }
 
-    /// Kernel-text function parses on this thread since the last take.
+    /// Opts this thread into counting kernel-text function parses and
+    /// starts a fresh interval. Returns the count since its last take,
+    /// or zero on its first take. Counting stays enabled on this thread.
     #[must_use]
     pub fn take_definition_parses() -> u64 {
-        DEFINITION_PARSES.with(|count| count.replace(0))
+        DEFINITION_PARSES.with(|count| count.replace(Some(0)).unwrap_or_default())
     }
-
-    use std::cell::Cell;
 
     /// Whole-document encodes and decodes, by form.
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -160,29 +168,29 @@ pub mod document_work {
     }
 
     std::thread_local! {
-        static WORK: Cell<DocumentWork> = const {
-            Cell::new(DocumentWork {
-                token_encodes: 0,
-                token_decodes: 0,
-                json_encodes: 0,
-                json_decodes: 0,
-            })
-        };
+        static WORK: Cell<Option<DocumentWork>> = const { Cell::new(None) };
     }
 
     pub(crate) fn note(change: impl FnOnce(&mut DocumentWork)) {
         let _ = WORK.try_with(|work| {
-            let mut counted = work.get();
+            let Some(mut counted) = work.get() else {
+                return;
+            };
             change(&mut counted);
-            work.set(counted);
+            work.set(Some(counted));
         });
     }
 
-    /// What this thread did since the last take, and resets it.
+    /// Opts this thread into counting and starts a fresh interval. Returns
+    /// the counts since its last take, or zero on its first take. Counting
+    /// stays enabled on this thread for subsequent intervals.
     #[must_use]
     pub fn take() -> DocumentWork {
-        WORK.try_with(|work| work.replace(DocumentWork::default()))
-            .unwrap_or_default()
+        WORK.try_with(|work| {
+            work.replace(Some(DocumentWork::default()))
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
 }
 
@@ -193,6 +201,57 @@ mod tests {
 
     fn document() -> Document {
         crate::parse_document("kernel 1\nnumbers float\nmain { print 1 }").expect("document")
+    }
+
+    /// ADR 0123's opt-in rule also covers the definition parser's probe.
+    #[test]
+    fn definition_parse_work_is_opt_in_on_each_thread() {
+        std::thread::spawn(|| {
+            let definition =
+                "function test.identity(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }\n";
+            let _ = crate::parse_definition(definition).expect("definition");
+            assert_eq!(
+                document_work::take_definition_parses(),
+                0,
+                "definition parse work is disabled until this thread opts in"
+            );
+            let _ = crate::parse_definition(definition).expect("definition");
+            assert_eq!(document_work::take_definition_parses(), 1);
+            assert_eq!(document_work::take_definition_parses(), 0);
+        })
+        .join()
+        .expect("definition parse work law");
+    }
+
+    /// ADR 0123 admits opt-in diagnostics: an ordinary thread retains no
+    /// document work, and taking counts explicitly starts its interval.
+    #[test]
+    fn document_work_is_opt_in_on_each_thread() {
+        std::thread::spawn(|| {
+            let document = document();
+            let _ = document.canonical_bytes();
+            assert_eq!(
+                document_work::take(),
+                document_work::DocumentWork::default(),
+                "document work is disabled until this thread opts in"
+            );
+            let made = IdentifiedDocument::new(document);
+            let _ = IdentifiedDocument::decode_standard(made.body()).expect("decodes");
+            assert_eq!(
+                document_work::take(),
+                document_work::DocumentWork {
+                    token_encodes: 1,
+                    token_decodes: 1,
+                    ..Default::default()
+                }
+            );
+            assert_eq!(
+                document_work::take(),
+                document_work::DocumentWork::default()
+            );
+        })
+        .join()
+        .expect("document work law");
     }
 
     /// One encode makes the body and the identity; one decode of that body

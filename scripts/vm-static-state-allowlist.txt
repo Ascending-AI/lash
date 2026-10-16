@@ -9,6 +9,8 @@ crates/lash-dialect-typescript/src/lower/process.rs::<module>::NO_SESSION  # the
 crates/lash-kernel-dialect/src/dialect.rs::first::BINDINGS  # immutable empty binding set for the first cell; no guest input
 crates/lash-kernel-dialect/src/dialect.rs::first::FUNCTIONS  # immutable empty function map for the first cell; no guest input
 crates/lash-kernel-doc/src/graph_tokens.rs::<module>::KEYED  # hasher initialized only from the fixed logical-body domain; guest bytes update a per-call clone
+crates/lash-kernel-doc/src/identified.rs::<module>::DEFINITION_PARSES  # opt-in definition parse count, enabled per thread by document_work::take_definition_parses; holds only an aggregate integer, no definitions, identities or guest values (ADR 0123)
+crates/lash-kernel-doc/src/identified.rs::<module>::WORK  # opt-in document codec counts, enabled per thread by document_work::take; holds only four aggregate integers, no documents, identities or guest values (ADR 0123)
 crates/lash-regress/src/unicodetables.rs::<module>::BASIC_EMOJI  # Unicode property data table; no guest input
 crates/lash-regress/src/unicodetables.rs::<module>::EMOJI_KEYCAP_SEQUENCE  # Unicode property data table; no guest input
 crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_FLAG_SEQUENCE  # Unicode property data table; no guest input
