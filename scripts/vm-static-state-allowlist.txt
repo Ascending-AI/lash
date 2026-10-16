@@ -6,6 +6,9 @@
 
 crates/lash-dialect-typescript/src/builtins/mod.rs::table::TABLE  # build table of the dialect's built-in rows, derived from constants; no guest input
 crates/lash-dialect-typescript/src/lower/process.rs::<module>::NO_SESSION  # the constant empty binding set a process body lowers against; no guest input
+crates/lash-kernel-dialect/src/dialect.rs::first::BINDINGS  # immutable empty binding set for the first cell; no guest input
+crates/lash-kernel-dialect/src/dialect.rs::first::FUNCTIONS  # immutable empty function map for the first cell; no guest input
+crates/lash-kernel-doc/src/graph_tokens.rs::<module>::KEYED  # hasher initialized only from the fixed logical-body domain; guest bytes update a per-call clone
 crates/lash-regress/src/unicodetables.rs::<module>::BASIC_EMOJI  # Unicode property data table; no guest input
 crates/lash-regress/src/unicodetables.rs::<module>::EMOJI_KEYCAP_SEQUENCE  # Unicode property data table; no guest input
 crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_FLAG_SEQUENCE  # Unicode property data table; no guest input
@@ -16,6 +19,4 @@ crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI  # Unicode propert
 crates/lash-vm-library/src/lib.rs::standard::STANDARD  # the shipped function registry, assembled from the constant helper releases; no guest input
 crates/lash-vm-worker/src/heap_profile.rs::<module>::WINDOW  # opt-in dhat profiler window of the worker process; holds no guest value
 crates/lash-vm-worker/src/main.rs::<module>::ALLOCATOR  # dhat-heap feature global allocator; holds no guest value
-crates/lash-kernel-vm/src/perf_witness.rs::<module>::CURRENT  # opt-in diagnostic timing/cardinality receipts, no guest values; cfg(any(test, feature = "perf-witness")) excludes default/release builds
 crates/lash-kernel-vm/src/perf_witness.rs::<module>::WORK  # opt-in diagnostic work counters, no guest values; cfg(any(test, feature = "perf-witness")) excludes default/release builds
-crates/lash-kernel-vm/src/perf_witness.rs::<module>::PROBE  # opt-in diagnostic probe selection, no guest values; cfg(any(test, feature = "perf-witness")) excludes default/release builds
