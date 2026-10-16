@@ -1693,7 +1693,12 @@ fn a_malformed_fence_is_answered_by_naming_the_rule() {
             message.parts.iter().any(|part| {
                 part.content().contains("grammar could not read")
                     && part.content().contains("stand alone on its own line")
-                    && part.content().contains("stand alone on a later line")
+                    && part
+                        .content()
+                        .contains("must start a later line after any whitespace")
+                    && part
+                        .content()
+                        .contains("Everything after that close is discarded")
                     && part.content().contains(open)
                     && part.content().contains(close)
             })
