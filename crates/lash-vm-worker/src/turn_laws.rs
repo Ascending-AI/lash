@@ -71,6 +71,20 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
 
+/// Both process CPU limits: an in-process server must not leave either
+/// changed for another law in the same test binary (FIG-6533).
+fn cpu_limit() -> (libc::rlim_t, libc::rlim_t) {
+    let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+    // SAFETY: limit points to writable rlimit storage.
+    #[expect(unsafe_code, reason = "the law observes the process CPU limits")]
+    let result = unsafe { libc::getrlimit(libc::RLIMIT_CPU, limit.as_mut_ptr()) };
+    assert_eq!(result, 0, "read the process CPU limits");
+    // SAFETY: successful getrlimit initialized the limit.
+    #[expect(unsafe_code, reason = "successful getrlimit initialized rlimit")]
+    let limit = unsafe { limit.assume_init() };
+    (limit.rlim_cur, limit.rlim_max)
+}
+
 /// A store a fresh cell's page service never reads: the cell reads only
 /// what it stages.
 struct Unread;
@@ -320,6 +334,10 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
 /// start asked for about 34 MB more.
 #[test]
 fn a_ready_worker_serves_its_first_turn_at_a_warm_turns_cost() {
+    isolation::run(measure_ready_worker_turns);
+}
+
+fn measure_ready_worker_turns() {
     let config = PoolConfig::codemode(WorkerEntry::helper("unused"));
     let codec = FrameCodec::new(config.protocol.decode);
     let bootstrap = Bootstrap::from(&config);
@@ -385,4 +403,57 @@ fn a_ready_worker_serves_its_first_turn_at_a_warm_turns_cost() {
         first <= warm + 1024 * 1024,
         "the first turn allocated {first} bytes, a warm one {warm}: {turns:?}"
     );
+}
+
+/// The test harness is the host for the real server's process boundary.
+#[cfg(test)]
+mod isolation {
+    use super::cpu_limit;
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test harness hosts the real server in a child so its CPU ceiling cannot reach other laws"
+    )]
+    pub(super) fn run(measure: impl FnOnce()) {
+        const CHILD: &str = "LASH_WARM_TURN_LAW_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            measure();
+            assert_ne!(
+                cpu_limit().0,
+                libc::RLIM_INFINITY,
+                "the real server must still install its CPU ceiling in the child"
+            );
+            return;
+        }
+
+        // RLIMIT_CPU belongs to a process, not the serving thread. Re-exec
+        // this law so other laws cannot consume its ceiling, even while it
+        // serves. The child's allocator still counts the real server thread.
+        let original_cpu_limit = cpu_limit();
+        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "turn_laws::a_ready_worker_serves_its_first_turn_at_a_warm_turns_cost",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .expect("run the serving law in its own process");
+        assert_eq!(
+            cpu_limit(),
+            original_cpu_limit,
+            "the serving law must leave the test process CPU limits unchanged"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "the serving law failed: {}\n{stdout}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            stdout.contains("1 passed; 0 failed"),
+            "the child must execute the serving law: {stdout}"
+        );
+    }
 }
