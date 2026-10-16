@@ -65,7 +65,8 @@ pub(crate) fn recorded_namespace(options: RlmCreateExtras) -> lash_core::Protoco
             .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
             .memory_limit(lash_protocol_rlm::MemoryBound::unbounded())
             .build()
-            .recorded_behaviour(),
+            .recorded_behaviour(&lash_protocol_rlm::CellDialect::typescript())
+            .expect("the standard tool presentation admits"),
     })
     .expect("the recorded namespace encodes")
 }

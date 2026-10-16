@@ -9,16 +9,12 @@ use crate::plugin::RlmChannel;
 /// Only the tag-line strip remains a transform: tool-doc and host-surface
 /// sections carry contributed prose, and a standalone cell-tag line in that
 /// prose must not reach a channel that has no cells.
-#[expect(
-    clippy::expect_used,
-    reason = "the dialect's authoritative execution section validates its catalog by construction"
-)]
 pub(crate) fn execution_section(
     dialect: &SessionDialect,
     features: crate::protocol::RlmPromptFeatures,
     catalog: &lash_core::ToolCatalog,
     discovery: Option<&crate::plugin::RlmDiscovery>,
-) -> ExecutionSection {
+) -> Result<ExecutionSection, lash_core::SessionError> {
     let tags = dialect.cell_tags();
     let without_tag_lines = |text: String| {
         text.lines()
@@ -26,11 +22,10 @@ pub(crate) fn execution_section(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let section = dialect
-        .execution_section(features, catalog, RlmChannel::NativeTool, discovery)
-        .expect("validated dialect catalog");
-    ExecutionSection {
+    let section =
+        dialect.execution_section(features, catalog, RlmChannel::NativeTool, discovery)?;
+    Ok(ExecutionSection {
         prose: without_tag_lines(section.prose),
         declarations: without_tag_lines(section.declarations),
-    }
+    })
 }

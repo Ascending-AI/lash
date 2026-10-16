@@ -20,7 +20,9 @@ use crate::{
 pub use lash_core_store::tool_surface::ReconfigureError;
 
 /// Project every surface tool to a JSON record for host-owned discovery
-/// (e.g. the production `tools.search` path in agent-workbench).
+/// (e.g. the production `tools.search` path in agent-workbench): its
+/// manifest's identity and its contract as data. How a tool reads to a model
+/// is the execution mode's tool presenter's, never this record's.
 #[expect(
     clippy::expect_used,
     reason = "`projected` is built one line above by a `json!` object literal, so it is always a JSON object"
@@ -33,7 +35,6 @@ where
         .into_iter()
         .map(|entry| {
             let manifest = entry.manifest;
-            let compact_contract = entry.contract.compact_contract_shared(&manifest);
             let mut projected = serde_json::json!({
                 "id": manifest.id,
                 "name": manifest.name,
@@ -44,7 +45,7 @@ where
             projected
                 .as_object_mut()
                 .expect("projected tool catalog entry is an object")
-                .insert("contract".to_string(), serde_json::json!(compact_contract));
+                .insert("contract".to_string(), serde_json::json!(entry.contract));
             projected
         })
         .collect()
@@ -220,7 +221,7 @@ impl ToolRegistry {
 /// `manifest` as its provider serves it under `config`, with its contract.
 fn served_definition(
     provider: &dyn ToolProvider,
-    mut manifest: ToolManifest,
+    manifest: ToolManifest,
     config: &OwnerConfigView,
 ) -> Result<ToolDefinition, crate::PluginError> {
     let contract = provider
@@ -229,9 +230,6 @@ fn served_definition(
             tool_id: manifest.id.clone(),
             name: manifest.name.clone(),
         })?;
-    if manifest.compact_contract.is_none() {
-        manifest.compact_contract = Some(contract.compact_contract_shared(&manifest));
-    }
     Ok(ToolDefinition {
         manifest,
         contract: (*contract).clone(),

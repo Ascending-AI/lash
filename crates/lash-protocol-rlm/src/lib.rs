@@ -86,12 +86,19 @@ pub use call_feedback::{CallFeedbackPolicy, CallFeedbackPolicyError};
 pub use feedback::{
     CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, SESSION_BINDING_NOT_CARRIED,
 };
-/// The schema shapes a [`DialectPrompts`] spells: the contract layer's reading of a
-/// tool's JSON Schemas, also constructed directly by runtime-value inference.
-pub use lash_sansio::{
+/// The schema shapes a [`DialectPrompts`] and a tool presenter spell: the
+/// shared reading of a tool's JSON Schemas, also constructed directly by
+/// runtime-value inference.
+pub use lash_tool_shape::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,
 };
+/// The tool presenters a [`CellDialect`] ships with, and their building
+/// blocks for a host presenter that spells the same way.
+pub mod tool_presenters {
+    pub use lash_tool_presenter_python as python;
+    pub use lash_tool_presenter_typescript as typescript;
+}
 pub use lash_vm_runtime::ResolvedToolBinding;
 pub use plugin::{
     ExecutionBounds, HelperReleaseGate, InstructionBound, MemoryBound, RLM_PROTOCOL_PLUGIN_ID,

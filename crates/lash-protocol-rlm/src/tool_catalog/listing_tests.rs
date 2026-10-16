@@ -91,11 +91,12 @@ fn a_partial_catalogue_lists_namespaces_in_turn_and_counts_what_it_leaves_out() 
 
     let disclosure = tool_catalogue_disclosure(
         &crate::dialect::CellDialect::typescript(),
-        crate::RlmPresentationConfig::standard(),
+        &json!({}),
         Default::default(),
         &members,
         &discovery(budget),
-    );
+    )
+    .expect("the catalogue presents");
     assert_eq!(
         disclosure.listed,
         ["tools_search", "big_a", "big_b", "small_only"]
@@ -136,7 +137,8 @@ fn a_partial_catalogue_lists_namespaces_in_turn_and_counts_what_it_leaves_out() 
         &typescript_test_dialect(),
         Default::default(),
         Some(&discovery(0)),
-    );
+    )
+    .expect("the catalogue presents");
     assert_eq!(
         none.disclosure.expect("a discovery listing").listed,
         ["tools_search"]
@@ -232,7 +234,7 @@ fn a_discovered_tool_carries_its_field_notes() {
     .with_tool_binding(ToolBinding::new(["tracker"], "issues_search"));
     let found = discovered_tool_doc(
         &crate::dialect::CellDialect::typescript(),
-        crate::RlmPresentationConfig::standard(),
+        &json!({}),
         &search,
     )
     .expect("an addressable tool");
@@ -248,7 +250,12 @@ fn a_discovered_tool_carries_its_field_notes() {
         found.contains("- `sort[].field: string` — The issue field to order by."),
         "{found}"
     );
-    let text = discovery_text(crate::RlmPresentationConfig::standard(), &search);
+    let text = discovery_text(
+        &crate::dialect::CellDialect::typescript(),
+        &json!({}),
+        &search,
+    )
+    .expect("the presenter writes discovery text");
     assert!(
         text.contains("sort[].field: The issue field to order by."),
         "{text}"
@@ -259,7 +266,7 @@ fn a_discovered_tool_carries_its_field_notes() {
     assert!(
         discovered_tool_doc(
             &crate::dialect::CellDialect::typescript(),
-            crate::RlmPresentationConfig::standard(),
+            &json!({}),
             &search,
         )
         .is_err()
@@ -304,14 +311,14 @@ fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["tracker", "issues"], "search"));
-    let presentation = crate::RlmPresentationConfig::standard();
+    let presentation = json!({});
     for dialect in [
         crate::dialect::CellDialect::typescript(),
         crate::dialect::CellDialect::python(),
     ] {
         let signature = discovered_tool_signature(
             &dialect,
-            presentation,
+            &presentation,
             &ToolBinding::from_path("tracker.issues.search"),
             &tool.contract.input_schema.canonical,
             &tool.contract.output_schema.canonical,
@@ -320,11 +327,10 @@ fn a_path_and_schemas_render_the_loaded_tool_signature_in_each_dialect() {
         if dialect.name() == "typescript" {
             insta::assert_snapshot!(signature, @r"tracker.issues.search({ filter: { query: string } }): Promise<{ issue: { title: string } }>");
         }
-        let doc = discovered_tool_doc(&dialect, presentation, &tool).expect("an addressable tool");
+        let doc = discovered_tool_doc(&dialect, &presentation, &tool).expect("an addressable tool");
         let signature_line = format!("`{signature}`");
         assert_eq!(doc.lines().next(), Some(signature_line.as_str()));
         let prompt = crate::dialect::SessionDialect::prompt_only(dialect)
-            .with_presentation(presentation)
             .render_execution_section(
                 Default::default(),
                 &catalog(vec![tool.clone()]),

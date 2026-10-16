@@ -7,7 +7,7 @@ use crate::dialect::DialectPrompts;
 use crate::render::CodeRenderer;
 use lash_core::LlmUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue};
-use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
+use lash_tool_shape::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
 use serde_json::Value as FlowValue;
 
 /// How a turn may end: the termination its session recorded at creation.

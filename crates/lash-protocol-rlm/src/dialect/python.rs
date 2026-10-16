@@ -1,4 +1,5 @@
-use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeKind};
+use lash_tool_presenter_python::render_shape;
+use lash_tool_shape::SchemaShape;
 
 use super::{
     CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal, DialectRefusalKind,
@@ -8,7 +9,8 @@ use super::{
 /// The name `lash-dialect-python` is installed under.
 pub(crate) const LANGUAGE_ID: &str = "python";
 
-/// Python's prompt adapter: it spells Python prompts, types and tool names.
+/// Python's prompt adapter: it spells Python prompts, value types and tool
+/// names. Its types are the Python tool presenter's spelling.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PythonPrompts;
 
@@ -54,34 +56,12 @@ impl DialectPrompts for PythonPrompts {
         Ok(name)
     }
 
-    fn tool_signature(
-        &self,
-        call_path: &str,
-        input: &SchemaShape,
-        input_omittable: bool,
-        output: &SchemaShape,
-    ) -> String {
-        // An omitted input is exactly `{}`: the default the call shows.
-        format!(
-            "async def {call_path}(input: {}{}) -> {}",
-            render_shape(input),
-            if input_omittable { " = {}" } else { "" },
-            render_shape(output)
-        )
-    }
-
     fn schema_type(&self, shape: &SchemaShape) -> String {
         render_shape(shape)
     }
 
     fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String {
-        format!("{name} = {}", render_shape(shape))
-    }
-
-    /// Authored examples are written in the call shape of dotted paths,
-    /// which no Python cell writes: they are left out of the prompt.
-    fn render_tool_example(&self, _authored: &str) -> Option<String> {
-        None
+        lash_tool_presenter_python::schema_definition(name, shape)
     }
 
     fn prompt_vocabulary(&self) -> DialectPromptVocabulary {
@@ -174,80 +154,3 @@ const PYTHON_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabular
     unjoined_task_repair: "Await every task before the cell ends: `await` it, or collect them with `await asyncio.gather(...)`. A cell does not leave work running behind it.",
     field_miss_rule: "Never write a key you haven't seen in the key sets below: reading a key that is not there raises `KeyError`. If a name is not listed, it does not exist on that value.",
 };
-
-/// Spells a schema shape as a Python type.
-fn render_shape(shape: &SchemaShape) -> String {
-    match &shape.kind {
-        ShapeKind::Unknown => "Any".to_string(),
-        ShapeKind::Null => "None".to_string(),
-        ShapeKind::Bool => "bool".to_string(),
-        ShapeKind::Int => "int".to_string(),
-        ShapeKind::Float => "float".to_string(),
-        ShapeKind::Str => "str".to_string(),
-        ShapeKind::Literals(values) => format!(
-            "Literal[{}]",
-            values
-                .iter()
-                .map(serde_json::Value::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        ShapeKind::List(item) => format!("list[{}]", render_shape(item)),
-        ShapeKind::Tuple(items) => format!(
-            "tuple[{}]",
-            items
-                .iter()
-                .map(render_shape)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        ShapeKind::Object(object) => render_object(object),
-        ShapeKind::Union(members) => {
-            let mut spelled = Vec::<String>::new();
-            for member in members.iter().map(render_shape) {
-                if !spelled.contains(&member) {
-                    spelled.push(member);
-                }
-            }
-            spelled.join(" | ")
-        }
-        ShapeKind::Named(name) => name.replace('.', "_"),
-        // `ShapeKind` is non-exhaustive: a kind this dialect has no spelling
-        // for is shown as the widest type rather than guessed at.
-        _ => "Any".to_string(),
-    }
-}
-
-/// A record as the dict it is in a cell: its keys with their types, a key
-/// that may be absent marked `?`.
-fn render_object(object: &ObjectShape) -> String {
-    let extra = match &object.extra_keys {
-        ExtraKeys::Closed => None,
-        ExtraKeys::Unstated if object.fields.is_empty() => Some("Any".to_string()),
-        ExtraKeys::Unstated => None,
-        ExtraKeys::Open(extra) => Some(render_shape(extra)),
-        _ => Some("Any".to_string()),
-    };
-    if object.fields.is_empty() {
-        return format!(
-            "dict[str, {}]",
-            extra.unwrap_or_else(|| "Never".to_string())
-        );
-    }
-    let mut members = object
-        .fields
-        .iter()
-        .map(|field| {
-            format!(
-                "{}{}: {}",
-                serde_json::Value::String(field.name.clone()),
-                if field.required { "" } else { "?" },
-                render_shape(&field.shape)
-            )
-        })
-        .collect::<Vec<_>>();
-    if let Some(extra) = extra {
-        members.push(format!("str: {extra}"));
-    }
-    format!("{{{}}}", members.join(", "))
-}

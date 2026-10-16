@@ -732,7 +732,9 @@ fn a_control_member_inside_a_batch_finishes_with_its_identity() {
 /// The namespace of a session whose turns only a control call ends.
 fn terminal_required() -> lash_core::ProtocolTurnOptions {
     lash_core::ProtocolTurnOptions::from_payload(serde_json::json!({
-        "behaviour": StandardProtocolConfig::default().recorded_behaviour(),
+        "behaviour": StandardProtocolConfig::default()
+            .recorded_behaviour()
+            .expect("the standard tool presentation admits"),
         "termination": "terminal_required",
     }))
 }

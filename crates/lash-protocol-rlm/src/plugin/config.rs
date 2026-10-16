@@ -1,10 +1,10 @@
 use super::{ExecutionBounds, InstructionBound, MemoryBound};
 
-/// Prompt presentation. These choices are pinned with protocol behaviour.
+/// Prompt presentation of values and calls. These choices are pinned with
+/// protocol behaviour; how tools read is the dialect's tool presenter's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmPresentationConfig {
-    pub tools: lash_sansio::ToolPresentationConfig,
     pub max_inline_keys: usize,
     /// How many of a cell's calls its next prompt lists; durable history
     /// keeps all calls.
@@ -26,15 +26,13 @@ impl Default for RlmPresentationConfig {
     }
 }
 impl RlmPresentationConfig {
-    /// Standard preset: standard tool/schema presentation, 12 inline
-    /// catalogue keys, 128 calls listed in the next prompt with 512-byte
+    /// Standard preset: 12 inline catalogue keys, 128 calls listed in the next prompt with 512-byte
     /// result summaries in a 16 KiB block,
     /// 32 binding-change names and a 24 KiB bound-variables listing, which
     /// leaves room under the standard 32 KiB prompt section.
     /// These historical presentation cuts have no universal workload measurement.
     pub const fn standard() -> Self {
         Self {
-            tools: lash_sansio::ToolPresentationConfig::standard(),
             max_inline_keys: 12,
             prompt_max_tool_calls: 128,
             call_feedback: crate::CallFeedbackPolicy::standard(),
@@ -61,10 +59,12 @@ pub struct RlmDiscovery {
 
 /// A host's RLM protocol configuration.
 ///
-/// The physical slots (the code renderer) are bound live. Every behavioural
+/// The physical slots (the code renderer, and each dialect's tool
+/// presenter) are bound live. Every behavioural
 /// choice — the execution bounds, the Lash VM language
 /// features, the prompt features, discovery, the output limit, the soft
-/// context-budget warning and the render — is this deployment's creation
+/// context-budget warning, the render and the tool presentation — is this
+/// deployment's creation
 /// default: a session
 /// records it in its RLM namespace when it is created
 /// ([`RlmRecordedBehaviour`]), and every open, run and process of that
@@ -79,6 +79,11 @@ pub struct RlmProtocolPluginConfig {
     pub render: lash_rlm_types::RlmRenderPatch,
     #[serde(default)]
     pub presentation: RlmPresentationConfig,
+    /// The config a new session's tool presenter is admitted with: the keys
+    /// it states over the presenter's standard ones
+    /// ([`lash_tool_presenter_api::ToolPresenter::admit_config`]).
+    #[serde(default = "default_tool_presentation")]
+    pub tool_presentation: serde_json::Value,
     /// The discovery a new session records, if any.
     #[serde(skip)]
     pub discovery: Option<RlmDiscovery>,
@@ -92,6 +97,10 @@ pub struct RlmProtocolPluginConfig {
     pub max_output_chars: usize,
     #[serde(default = "default_continue_as_soft_warn_tokens")]
     pub continue_as_soft_warn_tokens: Option<usize>,
+}
+
+fn default_tool_presentation() -> serde_json::Value {
+    serde_json::json!({})
 }
 
 fn default_max_output_chars() -> usize {
@@ -129,6 +138,11 @@ pub struct RlmRecordedBehaviour {
     #[serde(deserialize_with = "deserialize_recorded_render")]
     pub render: lash_rlm_types::RlmRenderPatch,
     pub presentation: RlmPresentationConfig,
+    /// The session's dialect's tool presenter and the complete config it
+    /// admitted at creation. A session reopened on a host whose dialect
+    /// holds another presenter is refused; its config is never read again
+    /// from a host's defaults.
+    pub tool_presenter: lash_tool_presenter_api::RecordedToolPresenter,
 }
 
 /// A builder slot that has not been filled in yet. [`RlmProtocolPluginConfigBuilder::build`]
@@ -194,6 +208,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             code_renderer: crate::render::CodeRendererSlot::default(),
             render: crate::render::ResolvedRlmRender::standard().as_patch(),
             presentation: RlmPresentationConfig::standard(),
+            tool_presentation: default_tool_presentation(),
             discovery: None,
             channel: self.channel,
             instruction_limit: self.instruction_limit,
@@ -234,10 +249,18 @@ impl RlmProtocolPluginConfig {
         ExecutionBounds::new(self.instruction_limit, self.memory_limit)
     }
 
-    /// The behaviour a session created under this configuration records:
-    /// every behavioural choice it states.
-    pub fn recorded_behaviour(&self) -> RlmRecordedBehaviour {
-        RlmRecordedBehaviour {
+    /// The behaviour a session created in `dialect` under this
+    /// configuration records: every behavioural choice it states, with the
+    /// dialect's tool presenter and the config it admits.
+    ///
+    /// # Errors
+    ///
+    /// The dialect's tool presenter refuses [`Self::tool_presentation`].
+    pub fn recorded_behaviour(
+        &self,
+        dialect: &crate::CellDialect,
+    ) -> Result<RlmRecordedBehaviour, lash_tool_presenter_api::PresentationRefusal> {
+        Ok(RlmRecordedBehaviour {
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
             prompt_features: self.prompt_features,
@@ -247,7 +270,8 @@ impl RlmProtocolPluginConfig {
             render: crate::render::ResolvedRlmRender::resolve(&self.render, &Default::default())
                 .as_patch(),
             presentation: self.presentation,
-        }
+            tool_presenter: dialect.tool_presenter().admit(&self.tool_presentation)?,
+        })
     }
 
     /// This configuration's physical slots under a session's recorded
@@ -262,6 +286,7 @@ impl RlmProtocolPluginConfig {
         self.discovery = behaviour.discovery.clone();
         self.render = behaviour.render.clone();
         self.presentation = behaviour.presentation;
+        self.tool_presentation = behaviour.tool_presenter.config.clone();
         self
     }
 }

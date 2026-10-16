@@ -20,6 +20,9 @@
 
 use lash_sansio::TurnId;
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+pub use lash_tool_presenter_api::{
+    PresentationRefusal, PresentedToolSection, RecordedToolPresenter, ToolPresenterSlot,
+};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -44,7 +47,9 @@ mod batch;
 mod finish;
 mod prompt;
 mod round;
+mod tool_presentation;
 pub use prompt::section_keys;
+use tool_presentation::tool_presentation_refused;
 pub mod render;
 pub use batch::BatchResultRow;
 pub use render::{
@@ -144,16 +149,23 @@ pub struct StandardProtocolPluginFactory {
     config: StandardProtocolConfig,
 }
 
-/// A host's standard-protocol configuration. The renderer slot is bound
-/// live; the discovery operation and the batch choice are this deployment's
-/// creation defaults, which a session records at creation and runs under on
-/// every open, whichever deployment opens it (FIG-4398).
+/// A host's standard-protocol configuration. The renderer and tool
+/// presenter slots are bound live; the discovery operation, the batch choice
+/// and the tool presentation are this deployment's creation defaults, which
+/// a session records at creation and runs under on every open, whichever
+/// deployment opens it (FIG-4398).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StandardProtocolConfig {
     pub discovery: Option<lash_core::ToolDiscovery>,
     pub render: StandardRenderConfig,
     pub renderer: ToolOutputRendererSlot,
     pub batch: BatchSugar,
+    /// The presenter that documents the session's tools outside their
+    /// provider specs ([`Self::tool_docs`]). A host replaces or wraps it.
+    pub tool_presenter: ToolPresenterSlot,
+    /// The config a new session's tool presenter is admitted with: the keys
+    /// it states over the presenter's standard ones.
+    pub tool_presentation: serde_json::Value,
 }
 
 impl Default for StandardProtocolConfig {
@@ -172,6 +184,10 @@ impl StandardProtocolConfig {
             render: StandardRenderConfig::standard(),
             renderer: ToolOutputRendererSlot::default(),
             batch: BatchSugar::standard(),
+            tool_presenter: ToolPresenterSlot::new(
+                lash_tool_presenter_standard::StandardToolPresenter,
+            ),
+            tool_presentation: serde_json::json!({}),
         }
     }
 
@@ -182,16 +198,22 @@ impl StandardProtocolConfig {
         self
     }
 
-    /// The behaviour a session created under this configuration records.
-    pub fn recorded_behaviour(&self) -> StandardRecordedBehaviour {
-        StandardRecordedBehaviour {
+    /// The behaviour a session created under this configuration records,
+    /// with its tool presenter and the config it admits.
+    ///
+    /// # Errors
+    ///
+    /// The tool presenter refuses [`Self::tool_presentation`].
+    pub fn recorded_behaviour(&self) -> Result<StandardRecordedBehaviour, PresentationRefusal> {
+        Ok(StandardRecordedBehaviour {
             discovery_operation: self
                 .discovery
                 .as_ref()
                 .map(|discovery| discovery.operation.clone()),
             batch: self.batch,
             render: self.render.recorded_base(),
-        }
+            tool_presenter: self.tool_presenter.admit(&self.tool_presentation)?,
+        })
     }
 
     /// This configuration's renderer under a session's recorded `behaviour`:
@@ -203,6 +225,7 @@ impl StandardProtocolConfig {
             .map(|operation| lash_core::ToolDiscovery { operation });
         self.batch = behaviour.batch;
         self.render = behaviour.render.clone();
+        self.tool_presentation = behaviour.tool_presenter.config.clone();
         self
     }
 }
@@ -225,6 +248,10 @@ pub struct StandardRecordedBehaviour {
     /// (FIG-4527).
     #[serde(deserialize_with = "deserialize_recorded_render")]
     pub render: StandardRenderConfig,
+    /// The tool presenter and the complete config it admitted at creation.
+    /// A session reopened on a host whose slot holds another presenter is
+    /// refused; its config is never read again from a host's defaults.
+    pub tool_presenter: RecordedToolPresenter,
 }
 
 fn deserialize_recorded_render<'de, D: serde::Deserializer<'de>>(
@@ -362,7 +389,9 @@ impl TryFrom<serde_json::Value> for StandardRunOptions {
 /// the behaviour pinned.
 #[derive(Clone, Debug)]
 pub struct StandardConfigOwner {
-    behaviour: StandardRecordedBehaviour,
+    /// The behaviour a session created here records, or why this host's
+    /// tool presenter refuses its tool presentation.
+    behaviour: Result<StandardRecordedBehaviour, StandardConfigRefusal>,
 }
 
 /// Why the standard owner refused a candidate.
@@ -373,6 +402,8 @@ pub enum StandardConfigRefusal {
     /// The candidate changes the behaviour the session recorded at
     /// creation.
     BehaviourChanged { recorded: String, candidate: String },
+    /// The host's tool presenter refuses its tool presentation.
+    ToolPresentationRefused { presenter: String, message: String },
 }
 
 /// Why the standard protocol resolved no render for a run.
@@ -411,6 +442,10 @@ impl std::fmt::Display for StandardConfigRefusal {
                 "the session's standard-protocol behaviour is recorded as {recorded} and cannot \
                  become {candidate}"
             ),
+            Self::ToolPresentationRefused { presenter, message } => write!(
+                formatter,
+                "tool presenter `{presenter}` refuses the tool presentation: {message}"
+            ),
         }
     }
 }
@@ -433,7 +468,7 @@ impl ConfigOwner for StandardConfigOwner {
         Ok(Some(StandardRecordedConfig {
             render: input.render,
             termination: input.termination,
-            behaviour: self.behaviour.clone(),
+            behaviour: self.behaviour.clone()?,
         }))
     }
 
@@ -565,8 +600,21 @@ impl PluginFactory for StandardProtocolPluginFactory {
                                 },
                             );
                         }
-                        None => self.config.recorded_behaviour(),
+                        None => self
+                            .config
+                            .recorded_behaviour()
+                            .map_err(|refusal| tool_presentation_refused(&self.config, &refusal))?,
                     };
+                    if !self.config.tool_presenter.holds(&behaviour.tool_presenter) {
+                        return Err(
+                            lash_core::plugin::PluginError::RecordedSessionConfigConflict {
+                                plugin_id: STANDARD_PROTOCOL_PLUGIN_ID.to_string(),
+                                field: "tool_presenter".to_string(),
+                                recorded: behaviour.tool_presenter.id.clone(),
+                                requested: self.config.tool_presenter.presenter().id().to_owned(),
+                            },
+                        );
+                    }
                     if let BatchSugar::Enabled { max_members } = behaviour.batch
                         && max_members.get() > BATCH_MEMBER_CEILING
                     {
@@ -598,7 +646,12 @@ impl StandardProtocolPluginFactory {
     ) -> Result<(), ConfigRegistrationError> {
         registrar.owner_with_run_options(
             StandardConfigOwner {
-                behaviour: self.config.recorded_behaviour(),
+                behaviour: self.config.recorded_behaviour().map_err(|refusal| {
+                    StandardConfigRefusal::ToolPresentationRefused {
+                        presenter: self.config.tool_presenter.presenter().id().to_owned(),
+                        message: refusal.to_string(),
+                    }
+                }),
             },
             STANDARD_RUN_OPTIONS,
         )?;

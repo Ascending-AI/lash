@@ -91,6 +91,11 @@ plugin_error_samples! {
         operation: "sampled".to_string(),
     },
     InvalidBatchMaximum { .. } => PluginError::InvalidBatchMaximum { requested: 2, ceiling: 1 },
+    ToolPresentationRefused { .. } => PluginError::ToolPresentationRefused {
+        plugin_id: "sampled".to_string(),
+        presenter: "sampled".to_string(),
+        message: "sampled".to_string(),
+    },
     ResidentToolContractUnavailable { .. } => PluginError::ResidentToolContractUnavailable {
         tool_id: crate::ToolId::from("tool:sampled"),
         name: "sampled".to_string(),

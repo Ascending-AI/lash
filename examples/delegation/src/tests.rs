@@ -314,17 +314,11 @@ fn a_delegated_child_may_fail_its_task_and_may_not_delegate() {
 /// parsed.
 #[test]
 fn spawn_agent_examples_render_as_parseable_typescript() {
-    use lash::rlm::DialectPrompts as _;
-
     let definition = spawn_agent_tool_definition();
     let examples = &definition.contract().examples;
     let rendered = examples
         .iter()
-        .map(|example| {
-            lash::rlm::TypescriptPrompts
-                .render_tool_example(example)
-                .expect("TypeScript spells every authored example")
-        })
+        .map(|example| lash::rlm::typescript_tool_presenter::render_tool_example(example))
         .collect::<Vec<_>>();
     // Parsed rather than linked: examples name host modules and free
     // identifiers no isolated environment has, so an unknown binding is

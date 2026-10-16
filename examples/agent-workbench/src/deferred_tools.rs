@@ -382,23 +382,32 @@ impl DeferredSearchResult {
     /// A catalogued tool as the session's dialect shows it: the same
     /// signature and examples its resident tool docs would carry.
     fn new(call_path: &str, definition: &ToolDefinition) -> Self {
-        use lash::rlm::DialectPrompts as _;
-        let dialect = lash::rlm::TypescriptPrompts;
+        use lash::rlm::typescript_tool_presenter::{
+            TypescriptPresenterConfig, render_tool_example, tool_signature,
+        };
+        use lash::tools::SchemaShape;
+        let config = TypescriptPresenterConfig::standard();
         let contract = definition.contract();
+        let shape =
+            |schema: &serde_json::Value| SchemaShape::from_json_schema(schema, config.schema_depth);
+        let input = &contract.input_schema.canonical;
         Self {
             call_path: call_path.to_string(),
-            signature: dialect.tool_signature(
+            signature: tool_signature(
                 call_path,
-                &contract.input_shape(),
-                contract.input_schema.canonical.accepts_empty_object(),
-                &contract.output_shape(),
+                &shape(input.as_value()),
+                input.accepts_empty_object(),
+                &shape(contract.output_schema.canonical.as_value()),
             ),
             description: definition.description().trim().to_string(),
-            examples: contract
-                .compact_examples()
-                .iter()
-                .filter_map(|example| dialect.render_tool_example(example))
-                .collect(),
+            examples: lash::tools::presenter_listing::compact_examples(
+                &contract.examples,
+                config.example_limit,
+                config.example_chars,
+            )
+            .iter()
+            .map(|example| render_tool_example(example))
+            .collect(),
         }
     }
 }

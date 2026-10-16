@@ -109,7 +109,8 @@ impl RlmRecordedConfig {
                 .instruction_limit(super::InstructionBound::unbounded())
                 .memory_limit(super::MemoryBound::unbounded())
                 .build()
-                .recorded_behaviour(),
+                .recorded_behaviour(&crate::CellDialect::typescript())
+                .expect("the standard tool presentation admits"),
         })
         .expect("the recorded namespace encodes")
     }
@@ -145,6 +146,8 @@ pub enum RlmConfigRefusal {
     },
     /// The stated finish value schema is not a schema a tool admits.
     FinishValueSchemaRefused { message: String },
+    /// The dialect's tool presenter refuses the host's tool presentation.
+    ToolPresentationRefused { presenter: String, message: String },
 }
 
 /// `schema`, refused unless a tool's input admits it.
@@ -176,6 +179,12 @@ impl std::fmt::Display for RlmConfigRefusal {
             ),
             Self::FinishValueSchemaRefused { message } => {
                 write!(formatter, "the finish value schema is refused: {message}")
+            }
+            Self::ToolPresentationRefused { presenter, message } => {
+                write!(
+                    formatter,
+                    "tool presenter `{presenter}` refuses the tool presentation: {message}"
+                )
             }
         }
     }
@@ -209,7 +218,7 @@ impl std::fmt::Display for RlmRenderRefusal {
 #[derive(Clone, Debug)]
 pub struct RlmConfigOwner {
     pub(crate) channel: RlmChannel,
-    pub(crate) dialect: String,
+    pub(crate) dialect: crate::CellDialect,
     pub(crate) config: RlmProtocolPluginConfig,
 }
 
@@ -226,13 +235,19 @@ impl ConfigOwner for RlmConfigOwner {
         input: Option<RlmCreateConfig>,
     ) -> Result<Option<RlmRecordedConfig>, RlmConfigRefusal> {
         let stated = input.unwrap_or_default().0;
-        let behaviour = self.config.recorded_behaviour();
+        let behaviour = self
+            .config
+            .recorded_behaviour(&self.dialect)
+            .map_err(|refusal| RlmConfigRefusal::ToolPresentationRefused {
+                presenter: self.dialect.tool_presenter().presenter().id().to_owned(),
+                message: refusal.to_string(),
+            })?;
         Ok(Some(RlmRecordedConfig {
             render: stated.render,
             termination: stated.termination,
             finish_value_schema: admitted_finish_schema(stated.finish_value_schema)?,
             channel: Some(self.channel),
-            dialect: Some(self.dialect.clone()),
+            dialect: Some(self.dialect.name().to_owned()),
             behaviour,
         }))
     }
@@ -363,7 +378,7 @@ mod tests {
     fn owner() -> RlmConfigOwner {
         RlmConfigOwner {
             channel: RlmChannel::Cell,
-            dialect: "typescript".to_string(),
+            dialect: crate::CellDialect::typescript(),
             config: config(),
         }
     }
@@ -625,7 +640,9 @@ mod tests {
     fn the_configured_render_is_recorded_behaviour() {
         let mut creating = config();
         creating.render.print.max_chars = Some(11);
-        let recorded = creating.recorded_behaviour();
+        let recorded = creating
+            .recorded_behaviour(&crate::CellDialect::typescript())
+            .expect("the standard tool presentation admits");
         assert_eq!(recorded.render, creating.render);
         let opened = config().under_recorded_behaviour(&recorded);
         assert_eq!(opened.render, creating.render);

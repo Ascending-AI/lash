@@ -180,7 +180,6 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
     // example names host modules and free identifiers that no isolated
     // environment has, so `TS_UNKNOWN_BINDING` is expected and a *syntax* error
     // is not.
-    let typescript = crate::dialect::TypescriptPrompts;
     let tuning = lash_vm_client::WorkerTuning::standard();
     let embedding = lash_vm_worker::Embedder::kernel()
         .and_then(|embedder| embedder.dialect(lash_vm_worker::typescript(&tuning)))
@@ -192,9 +191,7 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
     );
     let mut unparseable = Vec::new();
     for example in authored_tool_examples() {
-        let rendered = typescript
-            .render_tool_example(example)
-            .expect("TypeScript spells every authored example");
+        let rendered = lash_tool_presenter_typescript::render_tool_example(example);
         if let Err(error) = lash_dialect_typescript::lower(
             &rendered,
             &lash_kernel_dialect::Environment {
@@ -231,16 +228,16 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
 
     // The rewriter itself: a reader must be shown the examples rewritten.
     assert_eq!(
-        typescript
-            .render_tool_example(r#"await web.fetch({ url: "https://example.test/" })?"#)
-            .as_deref(),
-        Some(r#"await web.fetch({ url: "https://example.test/" });"#)
+        lash_tool_presenter_typescript::render_tool_example(
+            r#"await web.fetch({ url: "https://example.test/" })?"#
+        ),
+        r#"await web.fetch({ url: "https://example.test/" });"#
     );
     assert_eq!(
-        typescript
-            .render_tool_example("page = await web.fetch({ url: \"u\" })?")
-            .as_deref(),
-        Some("const page = await web.fetch({ url: \"u\" });")
+        lash_tool_presenter_typescript::render_tool_example(
+            "page = await web.fetch({ url: \"u\" })?"
+        ),
+        "const page = await web.fetch({ url: \"u\" });"
     );
 
     // And the markers themselves must be present in the retired surface's real

@@ -1,4 +1,5 @@
-use super::typescript_types as types;
+use lash_tool_presenter_typescript::{is_identifier, is_reserved_word};
+
 use super::{
     CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal, DialectRefusalKind,
     ExecutionSection, ExecutionSectionRequest,
@@ -7,8 +8,8 @@ use super::{
 /// The name `lash-dialect-typescript` is installed under.
 pub(crate) const LANGUAGE_ID: &str = "typescript";
 
-/// TypeScript's prompt adapter: it spells TypeScript prompts, types and
-/// tool paths.
+/// TypeScript's prompt adapter: it spells TypeScript prompts, value types
+/// and tool paths. Its types are the TypeScript tool presenter's spelling.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TypescriptPrompts;
 
@@ -24,43 +25,19 @@ impl DialectPrompts for TypescriptPrompts {
         binding: &lash_vm_runtime::ResolvedToolBinding,
     ) -> Result<String, DialectRefusal> {
         let call_path = binding.call_path();
-        types::ensure_tool_call_path_addressable(&call_path).map_err(|error| DialectRefusal {
+        ensure_tool_call_path_addressable(&call_path).map_err(|error| DialectRefusal {
             kind: DialectRefusalKind::UnaddressableToolPath,
             message: format!("no TypeScript cell can call `{call_path}` as a tool: {error}"),
         })?;
         Ok(call_path)
     }
 
-    fn tool_signature(
-        &self,
-        call_path: &str,
-        input: &lash_sansio::SchemaShape,
-        input_omittable: bool,
-        output: &lash_sansio::SchemaShape,
-    ) -> String {
-        let input = types::render_schema_shape(input);
-        // An omitted input is exactly `{}`: the default the call shows. A
-        // tool whose only input is `{}` is called with nothing.
-        let input = match (input.as_str(), input_omittable) {
-            ("Record<string, never>", true) => String::new(),
-            ("Record<string, never>", false) => "{}".to_owned(),
-            (_, true) => format!("{input} = {{}}"),
-            (_, false) => input,
-        };
-        let output = types::render_schema_shape(output);
-        format!("{call_path}({input}): Promise<{output}>")
+    fn schema_type(&self, shape: &lash_tool_shape::SchemaShape) -> String {
+        lash_tool_presenter_typescript::render_schema_shape(shape)
     }
 
-    fn schema_type(&self, shape: &lash_sansio::SchemaShape) -> String {
-        types::render_schema_shape(shape)
-    }
-
-    fn schema_definition(&self, name: &str, shape: &lash_sansio::SchemaShape) -> String {
-        format!("type {name} = {}", self.schema_type(shape))
-    }
-
-    fn render_tool_example(&self, authored: &str) -> Option<String> {
-        Some(render_tool_example(authored))
+    fn schema_definition(&self, name: &str, shape: &lash_tool_shape::SchemaShape) -> String {
+        lash_tool_presenter_typescript::schema_definition(name, shape)
     }
 
     fn prompt_vocabulary(&self) -> DialectPromptVocabulary {
@@ -76,14 +53,6 @@ const TYPESCRIPT_CELL_TAGS: CellTags = CellTags {
     open: "<typescript>",
     close: "</typescript>",
 };
-
-fn is_plain_identifier(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '_')
-        && !text.starts_with(|character: char| character.is_ascii_digit())
-}
 
 const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabulary {
     language_name: "TypeScript",
@@ -135,48 +104,57 @@ A started handle outlives the turn; Stop cancels only the awaited handle; cancel
         .to_string()
 }
 
-/// Rewrites an authored Lash VM example into this dialect.
-///
-/// Deliberately a small, total rewriter over the shapes the authored corpus
-/// actually uses rather than a translator: every example is a sequence of
-/// statement lines that are either an awaited call or an assignment.
-/// Anything it does not recognize still loses the try-operator
-/// and gains a terminator, which is the difference between "reads like
-/// TypeScript" and "is a syntax error".
-///
-/// It rewrites line by line, so an example whose *string literal* spans a
-/// real newline would have a terminator inserted inside the literal. No
-/// authored example does that (they escape it as `\n`), and the walker
-/// parses every rendered example, so the day one does the check fails
-/// rather than the model reading a syntax error.
-fn render_tool_example(example: &str) -> String {
-    example
-        .lines()
-        .map(|line| {
-            let trimmed = line.trim_end();
-            if trimmed.is_empty() {
-                return String::new();
-            }
-            let indent_len = trimmed.len() - trimmed.trim_start().len();
-            let (indent, body) = trimmed.split_at(indent_len);
-            // `expr?` — the Lash VM try-operator. TypeScript propagates a
-            // rejection from `await` itself, so the operator has no twin.
-            let body = body.strip_suffix('?').unwrap_or(body);
-            let body = match body.split_once(" = ") {
-                Some((name, value)) if is_plain_identifier(name) => {
-                    format!("const {name} = {value}")
-                }
-                _ => body.to_string(),
-            };
-            let body = if body.ends_with(';') || body.ends_with('{') || body.ends_with(',') {
-                body
-            } else {
-                format!("{body};")
-            };
-            format!("{indent}{body}")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+/// The names a TypeScript cell resolves itself: a tool under one of them
+/// could never be called.
+const GLOBAL_NAMESPACES: &[&str] = &[
+    "Array",
+    "Boolean",
+    "Date",
+    "Error",
+    "JSON",
+    "Map",
+    "Math",
+    "Number",
+    "Object",
+    "Promise",
+    "RegExp",
+    "Set",
+    "String",
+    "URL",
+    "URLSearchParams",
+    "console",
+    "globalThis",
+];
+
+/// Confirms a TypeScript cell can write `call_path` verbatim as a tool call:
+/// it has a module to call the operation on, its receiver is a name a cell
+/// can write in expression position, every member is an identifier, and its
+/// module is not a namespace the language resolves itself. A path that fails
+/// is refused at registration rather than advertised as a callable nothing
+/// (FIG-1444).
+pub(crate) fn ensure_tool_call_path_addressable(call_path: &str) -> Result<(), String> {
+    let segments = call_path.split('.').collect::<Vec<_>>();
+    if segments.len() < 2 {
+        return Err(format!(
+            "tool call path `{call_path}` has no module path, so a TypeScript cell has no receiver to call it on"
+        ));
+    }
+    // A member name may be a reserved word (`processes.await(…)`); the
+    // receiver, which a cell writes as an identifier, may not.
+    if let Some(segment) = segments.iter().enumerate().find_map(|(index, segment)| {
+        (!is_identifier(segment) || (index == 0 && is_reserved_word(segment))).then_some(segment)
+    }) {
+        return Err(format!(
+            "`{segment}` is a word no cell can write in expression position"
+        ));
+    }
+    if GLOBAL_NAMESPACES.contains(&segments[0]) {
+        return Err(format!(
+            "`{}` is an ECMAScript global namespace, which the dialect resolves itself",
+            segments[0]
+        ));
+    }
+    Ok(())
 }
 
 fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSection {
@@ -268,22 +246,14 @@ An `async` function starts running when it is called, and async callbacks run co
 
 #[cfg(test)]
 mod tests {
-    use crate::dialect::{CodeModeDialectServices, SessionDialect};
+    use crate::dialect::SessionDialect;
     use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
     #[test]
     fn the_process_section_follows_the_catalogue_and_teaches_the_argument_convention() {
         let dialect = SessionDialect::new(
             crate::dialect::CellDialect::typescript(),
-            CodeModeDialectServices {
-                kernel: crate::executor::KernelCarry::default(),
-                presentation: crate::RlmPresentationConfig::standard(),
-                workers: lash_vm_client::service::Service::default(),
-                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-                code_renderer: Default::default(),
-                channel: crate::plugin::RlmChannel::Cell,
-                helpers: None,
-            },
+            crate::dialect::test_dialect_services(),
         );
         let render = |catalog: &lash_core::ToolCatalog| {
             dialect
@@ -349,7 +319,8 @@ mod tests {
     /// language resolves itself is refused at registration.
     #[test]
     fn a_tool_path_no_cell_can_write_is_refused() {
-        use super::types::{ensure_tool_call_path_addressable, reserved_words};
+        use super::ensure_tool_call_path_addressable;
+        use lash_tool_presenter_typescript::reserved_words;
         ensure_tool_call_path_addressable("web.fetch").expect("an ordinary path is addressable");
         ensure_tool_call_path_addressable("a.b.c").expect("a nested module path is addressable");
         // A member name may be a reserved word; only the receiver is written

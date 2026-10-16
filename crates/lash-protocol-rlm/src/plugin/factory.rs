@@ -215,9 +215,42 @@ impl RlmProtocolPluginFactory {
                     field: "behaviour".to_string(),
                 })
             }
-            None => Ok(self.config.recorded_behaviour()),
+            None => self
+                .config
+                .recorded_behaviour(self.creation_dialect())
+                .map_err(|refusal| tool_presentation_refused(self.creation_dialect(), &refusal)),
         }
     }
+}
+
+/// `dialect`'s tool presenter's `refusal`, as the plugin's.
+pub(crate) fn tool_presentation_refused(
+    dialect: &CellDialect,
+    refusal: &lash_tool_presenter_api::PresentationRefusal,
+) -> PluginError {
+    PluginError::ToolPresentationRefused {
+        plugin_id: RLM_PROTOCOL_PLUGIN_ID.to_string(),
+        presenter: dialect.tool_presenter().presenter().id().to_owned(),
+        message: refusal.to_string(),
+    }
+}
+
+/// `dialect`, refused unless its tool presenter is the one `behaviour`
+/// recorded: a session presents its tools only through the presenter it
+/// was created with, under the config it recorded.
+fn presenting_as_recorded(
+    dialect: CellDialect,
+    behaviour: &RlmRecordedBehaviour,
+) -> Result<CellDialect, PluginError> {
+    if dialect.tool_presenter().holds(&behaviour.tool_presenter) {
+        return Ok(dialect);
+    }
+    Err(PluginError::RecordedSessionConfigConflict {
+        plugin_id: RLM_PROTOCOL_PLUGIN_ID.to_string(),
+        field: "tool_presenter".to_string(),
+        recorded: behaviour.tool_presenter.id.clone(),
+        requested: dialect.tool_presenter().presenter().id().to_owned(),
+    })
 }
 
 impl PluginFactory for RlmProtocolPluginFactory {
@@ -263,13 +296,17 @@ impl PluginFactory for RlmProtocolPluginFactory {
                         self.config.channel,
                         ctx.materialization,
                     )?;
-                    let dialect = self.session_dialect(recorded.as_ref(), ctx.materialization)?;
+                    let dialect = presenting_as_recorded(
+                        self.session_dialect(recorded.as_ref(), ctx.materialization)?,
+                        &behaviour,
+                    )?;
                     #[cfg(feature = "synthetic-next")]
                     let writes = self.kernel_writes;
                     #[cfg(not(feature = "synthetic-next"))]
                     let writes = None;
                     let services = CodeModeDialectServices {
                         presentation: config.presentation,
+                        tool_presentation: config.tool_presentation.clone(),
                         workers: self.workers.clone(),
                         code_renderer: config.code_renderer.clone(),
                         execution_bounds: config.execution_bounds(),
@@ -330,7 +367,7 @@ impl RlmProtocolPluginFactory {
             registrar,
             super::config_owner::RlmConfigOwner {
                 channel: self.config.channel,
-                dialect: self.creation_dialect().name().to_owned(),
+                dialect: self.creation_dialect().clone(),
                 config: self.config.clone(),
             },
         )
@@ -416,7 +453,9 @@ mod tests {
             termination: None,
             channel: Some(crate::RlmChannel::Cell),
             dialect: dialect.map(str::to_owned),
-            behaviour: config.recorded_behaviour(),
+            behaviour: config
+                .recorded_behaviour(&CellDialect::typescript())
+                .expect("the standard tool presentation admits"),
         }
     }
 
@@ -464,6 +503,122 @@ mod tests {
             .memory_limit(crate::MemoryBound::unbounded())
             .build();
         RlmProtocolPluginFactory::new(config, CellDialect::typescript())
+    }
+
+    /// A host whose tool presentation states `presentation`, presenting
+    /// through `dialect`.
+    fn presenting_host(
+        dialect: CellDialect,
+        presentation: serde_json::Value,
+    ) -> RlmProtocolPluginFactory {
+        let mut config = RlmProtocolPluginConfig::standard()
+            .channel(crate::RlmChannel::Cell)
+            .instruction_limit(crate::InstructionBound::unbounded())
+            .memory_limit(crate::MemoryBound::unbounded())
+            .build();
+        config.tool_presentation = presentation;
+        RlmProtocolPluginFactory::new(config, dialect)
+    }
+
+    /// FIG-6489: a session records its tool presenter's id and the complete
+    /// config the presenter admitted, and every open presents under that
+    /// record: a reopening host's changed tool presentation is never read,
+    /// a host whose slot holds another presenter is refused with a typed
+    /// conflict, and a record that names no presenter is refused.
+    #[test]
+    fn a_session_presents_its_tools_as_its_record_names() {
+        let creator = presenting_host(
+            CellDialect::typescript(),
+            serde_json::json!({ "example_limit": 0 }),
+        );
+        let behaviour = creator
+            .session_behaviour(&lash_core::PluginConfig::default(), Creation)
+            .expect("a session being created");
+        assert_eq!(
+            behaviour.tool_presenter,
+            lash_tool_presenter_api::RecordedToolPresenter {
+                id: "lash.tools.typescript.v1".to_owned(),
+                config: serde_json::json!({
+                    "example_limit": 0,
+                    "example_chars": 240,
+                    "schema_depth": 8
+                }),
+            },
+            "the record is the admitted config whole, not the keys the host stated"
+        );
+        let mut namespace = recorded(Some("typescript"));
+        namespace.behaviour = behaviour.clone();
+        let mut stored = lash_core::PluginConfig::default();
+        stored.insert(
+            RLM_PROTOCOL_PLUGIN_ID,
+            serde_json::to_value(&namespace).expect("the recorded namespace encodes"),
+        );
+
+        let reopening = presenting_host(
+            CellDialect::typescript(),
+            serde_json::json!({ "example_limit": 5, "schema_depth": 2 }),
+        );
+        let reopened = reopening
+            .session_behaviour(&stored, Rematerialization)
+            .expect("a recorded session");
+        assert_eq!(reopened, behaviour);
+        assert_eq!(
+            reopening
+                .config
+                .clone()
+                .under_recorded_behaviour(&reopened)
+                .tool_presentation,
+            behaviour.tool_presenter.config,
+            "the session presents under its record, never this host's presentation"
+        );
+        presenting_as_recorded(CellDialect::typescript(), &reopened)
+            .expect("the recorded presenter is installed");
+
+        let replaced = CellDialect::typescript().with_tool_presenter(
+            lash_tool_presenter_api::ToolPresenterSlot::new(
+                lash_tool_presenter_api::WrappedToolPresenter::new(
+                    "host.tools.v1",
+                    lash_tool_presenter_typescript::TypescriptToolPresenter,
+                ),
+            ),
+        );
+        let refused = presenting_as_recorded(replaced, &reopened)
+            .expect_err("the recorded presenter is not in this host's slot");
+        assert!(
+            matches!(
+                &refused,
+                PluginError::RecordedSessionConfigConflict { field, recorded, requested, .. }
+                    if field == "tool_presenter"
+                        && recorded == "lash.tools.typescript.v1"
+                        && requested == "host.tools.v1"
+            ),
+            "{refused:?}"
+        );
+
+        let mut unpresented = serde_json::to_value(&namespace).expect("the namespace encodes");
+        unpresented["behaviour"]
+            .as_object_mut()
+            .expect("a recorded behaviour")
+            .remove("tool_presenter");
+        let mut stored = lash_core::PluginConfig::default();
+        stored.insert(RLM_PROTOCOL_PLUGIN_ID, unpresented);
+        let missing = reopening
+            .session_behaviour(&stored, Rematerialization)
+            .expect_err("a record that names no presenter");
+        assert!(
+            matches!(&missing, PluginError::Session(message) if message.contains("tool_presenter")),
+            "{missing:?}"
+        );
+
+        let refusing = presenting_host(
+            CellDialect::typescript(),
+            serde_json::json!({ "example_limit": "two" }),
+        );
+        assert!(matches!(
+            refusing.session_behaviour(&lash_core::PluginConfig::default(), Creation),
+            Err(PluginError::ToolPresentationRefused { ref presenter, .. })
+                if presenter == "lash.tools.typescript.v1"
+        ));
     }
 
     /// A session runs in the dialect its record names, whatever this host

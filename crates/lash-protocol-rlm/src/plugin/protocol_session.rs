@@ -506,7 +506,9 @@ mod tests {
                 termination: None,
                 channel: Some(crate::RlmChannel::Cell),
                 dialect: Some("typescript".to_string()),
-                behaviour: creating.recorded_behaviour(),
+                behaviour: creating
+                    .recorded_behaviour(&crate::CellDialect::typescript())
+                    .expect("the standard tool presentation admits"),
             })
             .expect("recorded namespace"),
         );

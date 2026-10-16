@@ -1,0 +1,27 @@
+[package]
+name = "lash-internal-tool-presenter-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The replaceable tool presenter slot an execution-mode plugin presents its tools through in the lash agent runtime."
+keywords = ["lash", "agent", "tools", "prompt"]
+categories = ["api-bindings"]
+
+[lib]
+name = "lash_tool_presenter_api"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-sansio = { workspace = true }
+lash-tool-shape = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

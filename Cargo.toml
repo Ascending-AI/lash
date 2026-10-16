@@ -7,6 +7,11 @@ members = [
     "crates/lash-sansio",
     "crates/lash-trace",
     "crates/lash-rlm-types",
+    "crates/lash-tool-shape",
+    "crates/lash-tool-presenter-api",
+    "crates/lash-tool-presenter-typescript",
+    "crates/lash-tool-presenter-python",
+    "crates/lash-tool-presenter-standard",
     "crates/lash-core-ids",
     "crates/lash-core-llm",
     "crates/lash-core-store",
@@ -99,6 +104,11 @@ default-members = [
     "crates/lash",
     "crates/lash-trace",
     "crates/lash-rlm-types",
+    "crates/lash-tool-shape",
+    "crates/lash-tool-presenter-api",
+    "crates/lash-tool-presenter-typescript",
+    "crates/lash-tool-presenter-python",
+    "crates/lash-tool-presenter-standard",
     "crates/lash-http-transport",
     "crates/lash-llm-transport",
     "crates/lash-llm-tools",
@@ -328,6 +338,11 @@ lash-provider-openai = { package = "lash-internal-provider-openai", path = "crat
 lash-regress = { path = "crates/lash-regress", version = "=0.0.0-dev", features = ["utf16"] }
 lash-rlm-types = { package = "lash-internal-rlm-types", path = "crates/lash-rlm-types", version = "=0.0.0-dev" }
 lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", version = "=0.0.0-dev" }
+lash-tool-shape = { package = "lash-internal-tool-shape", path = "crates/lash-tool-shape", version = "=0.0.0-dev" }
+lash-tool-presenter-api = { package = "lash-internal-tool-presenter-api", path = "crates/lash-tool-presenter-api", version = "=0.0.0-dev" }
+lash-tool-presenter-typescript = { package = "lash-internal-tool-presenter-typescript", path = "crates/lash-tool-presenter-typescript", version = "=0.0.0-dev" }
+lash-tool-presenter-python = { package = "lash-internal-tool-presenter-python", path = "crates/lash-tool-presenter-python", version = "=0.0.0-dev" }
+lash-tool-presenter-standard = { package = "lash-internal-tool-presenter-standard", path = "crates/lash-tool-presenter-standard", version = "=0.0.0-dev" }
 lash-store-sql = { package = "lash-internal-store-sql", path = "crates/lash-store-sql", version = "=0.0.0-dev" }
 lash-durable = { package = "lash-internal-durable", path = "crates/lash-durable", version = "=0.0.0-dev" }
 lash-durable-test = { package = "lash-internal-durable-test", path = "crates/lash-durable-test" }

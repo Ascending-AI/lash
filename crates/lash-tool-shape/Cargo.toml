@@ -1,0 +1,24 @@
+[package]
+name = "lash-internal-tool-shape"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The dialect-neutral shape a tool presenter reads from a JSON Schema in the lash agent runtime."
+keywords = ["lash", "agent", "tools", "json-schema"]
+categories = ["data-structures"]
+
+[lib]
+name = "lash_tool_shape"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

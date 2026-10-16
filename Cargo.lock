@@ -2618,6 +2618,11 @@ dependencies = [
  "lash-internal-rlm-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-tool-presenter-api",
+ "lash-internal-tool-presenter-python",
+ "lash-internal-tool-presenter-standard",
+ "lash-internal-tool-presenter-typescript",
+ "lash-internal-tool-shape",
  "lash-internal-trace",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
@@ -2647,6 +2652,8 @@ dependencies = [
  "lash-internal-render",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-tool-presenter-api",
+ "lash-internal-tool-presenter-standard",
  "lash-internal-tool-support",
  "lash-runtime",
  "mutants",
@@ -2727,6 +2734,7 @@ version = "0.0.0-dev"
 dependencies = [
  "lash-internal-render",
  "lash-internal-sansio",
+ "lash-internal-tool-shape",
  "schemars",
  "serde",
  "serde_json",
@@ -2793,6 +2801,58 @@ dependencies = [
 [[package]]
 name = "lash-internal-store-sql"
 version = "0.0.0-dev"
+
+[[package]]
+name = "lash-internal-tool-presenter-api"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-sansio",
+ "lash-internal-tool-shape",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "lash-internal-tool-presenter-python"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-sansio",
+ "lash-internal-tool-presenter-api",
+ "lash-internal-tool-shape",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lash-internal-tool-presenter-standard"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-sansio",
+ "lash-internal-tool-presenter-api",
+ "lash-internal-tool-shape",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lash-internal-tool-presenter-typescript"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-internal-sansio",
+ "lash-internal-tool-presenter-api",
+ "lash-internal-tool-shape",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lash-internal-tool-shape"
+version = "0.0.0-dev"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "lash-internal-tool-support"
@@ -3280,6 +3340,9 @@ dependencies = [
  "lash-internal-s3-store",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-tool-presenter-api",
+ "lash-internal-tool-presenter-standard",
+ "lash-internal-tool-shape",
  "lash-internal-tool-support",
  "lash-internal-trace",
  "lash-internal-vm-client",

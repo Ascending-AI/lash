@@ -1,0 +1,27 @@
+[package]
+name = "lash-internal-tool-presenter-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The Python tool presenter code-mode sessions ship with in the lash agent runtime."
+keywords = ["lash", "agent", "tools", "prompt"]
+categories = ["api-bindings"]
+
+[lib]
+name = "lash_tool_presenter_python"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-sansio = { workspace = true }
+lash-tool-presenter-api = { workspace = true }
+lash-tool-shape = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

@@ -6,7 +6,6 @@
 use serde_json::Value;
 
 use super::Path;
-use crate::tool_contract::schema_docs::resolve_ref_node_with_siblings;
 
 /// Inline a `$ref` that carries sibling keywords.
 ///
@@ -60,5 +59,87 @@ pub(super) fn inline_ref_with_siblings(
         diagnostics.push(format!(
             "{path}: truncated recursive `$ref` `{cycle}` while inlining `{reference}`"
         ));
+    }
+}
+
+/// Inline one schema node whose `$ref` carries sibling keywords.
+///
+/// The reference chain is expanded against `root` and the node's own siblings
+/// are merged over the resolved definition, so a sibling `description` wins
+/// over the definition's, per JSON Schema draft annotation semantics. Returns
+/// `None` when the reference is not a resolvable local pointer, leaving the
+/// caller to report it rather than emit a schema the provider will reject.
+/// References whose expansion was cut short by a cycle are reported in
+/// `cycles`.
+fn resolve_ref_node_with_siblings(
+    root: &serde_json::Value,
+    node: &serde_json::Value,
+    cycles: &mut Vec<String>,
+) -> Option<serde_json::Value> {
+    let mut resolving = Vec::new();
+    let resolved = resolve_schema_ref_value(root, node, &mut resolving, cycles);
+    if resolved.get("$ref").is_some() {
+        return None;
+    }
+    Some(resolved)
+}
+
+fn resolve_schema_ref_value(
+    root: &serde_json::Value,
+    schema: &serde_json::Value,
+    resolving: &mut Vec<String>,
+    cycles: &mut Vec<String>,
+) -> serde_json::Value {
+    match schema {
+        serde_json::Value::Object(map) => {
+            if let Some(reference) = map.get("$ref").and_then(serde_json::Value::as_str)
+                && let Some(pointer) = reference.strip_prefix('#')
+            {
+                if resolving.iter().any(|active| active == reference) {
+                    cycles.push(reference.to_string());
+                    return serde_json::json!({});
+                }
+                if let Some(target) = root.pointer(pointer) {
+                    resolving.push(reference.to_string());
+                    let mut resolved = resolve_schema_ref_value(root, target, resolving, cycles);
+                    resolving.pop();
+
+                    let sibling_count = map.keys().filter(|key| key.as_str() != "$ref").count();
+                    if sibling_count == 0 {
+                        return resolved;
+                    }
+                    if let serde_json::Value::Object(resolved_map) = &mut resolved {
+                        for (key, value) in map {
+                            if key == "$ref" {
+                                continue;
+                            }
+                            resolved_map.insert(
+                                key.clone(),
+                                resolve_schema_ref_value(root, value, resolving, cycles),
+                            );
+                        }
+                        return resolved;
+                    }
+                }
+            }
+
+            serde_json::Value::Object(
+                map.iter()
+                    .map(|(key, value)| {
+                        (
+                            key.clone(),
+                            resolve_schema_ref_value(root, value, resolving, cycles),
+                        )
+                    })
+                    .collect(),
+            )
+        }
+        serde_json::Value::Array(values) => serde_json::Value::Array(
+            values
+                .iter()
+                .map(|value| resolve_schema_ref_value(root, value, resolving, cycles))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }

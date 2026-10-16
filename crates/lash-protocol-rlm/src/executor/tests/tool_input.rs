@@ -284,10 +284,7 @@ async fn tool_input_omission_follows_canonical_schema() {
 
         let docs = crate::tool_catalog::rlm_prompt_tool_docs(
             &lash_core::ToolCatalog::from_tool_definitions(forms()),
-            &crate::dialect::SessionDialect::new(
-                spelling.dialect.clone(),
-                crate::dialect::test_dialect_services(),
-            ),
+            &crate::dialect::SessionDialect::prompt_only(spelling.dialect.clone()),
             Default::default(),
         );
         let signature = |operation: &str| {

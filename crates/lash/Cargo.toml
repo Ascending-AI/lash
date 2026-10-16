@@ -54,6 +54,9 @@ lash-http-transport = { workspace = true, optional = true }
 lash-protocol-rlm = { workspace = true, optional = true }
 lash-render = { workspace = true, optional = true }
 lash-protocol-standard = { workspace = true }
+lash-tool-presenter-api = { workspace = true }
+lash-tool-presenter-standard = { workspace = true }
+lash-tool-shape = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-rlm-types = { workspace = true, optional = true }

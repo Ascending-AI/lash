@@ -416,8 +416,9 @@ async fn builder_configured_tools_and_hooks_are_never_discarded_on_postgres() ->
     builder_configured_tools_and_hooks_are_never_discarded(backend).await
 }
 
-/// D-DEFAULTS2: compact contracts and catalogue advertisements use the facade's
-/// non-default presentation values, including their cached render identity.
+/// D-DEFAULTS2: a standard session's tool docs and catalogue advertisements
+/// use the host's non-default presentation values: the standard presenter's
+/// config, admitted over its standard one.
 #[test]
 fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
     let definition = crate::tools::ToolDefinition::raw(
@@ -425,25 +426,28 @@ fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
         serde_json::json!({"type":"object", "properties":{"nested":{"type":"object", "properties":{"deep":{"type":"string"}}}}}),
         serde_json::json!({"type":"string"}),
     ).expect("schemas").with_execution(std::time::Duration::from_secs(30)).with_examples(vec!["abcdefghijklmnopqrstuvwxyz".into(), "second".into()]);
-    let contract = definition.contract();
-    let manifest = definition.manifest();
-    let base = contract.compact_contract_with_presentation(
-        &manifest,
-        "display",
-        &crate::tools::ToolPresentationConfig::standard(),
+    let catalog = crate::plugins::ToolCatalog::from_tool_definitions(vec![definition]);
+    let mut host = crate::plugins::StandardProtocolConfig::standard();
+    let base = host.tool_docs(&catalog).expect("the standard presentation");
+    host.tool_presentation =
+        serde_json::json!({ "example_limit": 1, "example_chars": 8, "schema_depth": 0 });
+    let selected = host.tool_docs(&catalog).expect("the selected presentation");
+    let examples = selected
+        .text
+        .lines()
+        .find_map(|line| line.strip_prefix("Examples: "))
+        .expect("an examples row");
+    assert!(
+        !examples.contains(';') && examples.chars().count() <= 8,
+        "{examples}"
     );
-    let selected = crate::tools::ToolPresentationConfig {
-        example_limit: 1,
-        example_chars: 8,
-        schema_depth: 0,
-    };
-    let compact = contract.compact_contract_with_presentation(&manifest, "display", &selected);
-    assert_eq!(compact.examples.len(), 1);
-    assert!(compact.examples[0].chars().count() <= 8);
-    assert_ne!(compact.signature, base.signature);
+    assert_ne!(selected.text, base.text);
     assert_eq!(
-        contract.compact_contract_with_presentation(&manifest, "display", &selected),
-        compact
+        host.recorded_behaviour()
+            .expect("the selected presentation admits")
+            .tool_presenter
+            .config["schema_depth"],
+        0
     );
     #[cfg(feature = "rlm")]
     {
@@ -485,7 +489,9 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
     config.render.preview.max_chars = Some(9);
     config.max_output_chars = 500;
 
-    let recorded = config.recorded_behaviour();
+    let recorded = config
+        .recorded_behaviour(&crate::rlm::CellDialect::typescript())
+        .expect("the standard tool presentation admits");
     assert_eq!(recorded.presentation, config.presentation);
     let factory =
         crate::rlm::RlmProtocolPluginFactory::new(config, crate::rlm::CellDialect::typescript())
@@ -618,7 +624,9 @@ console.log("abcdefghijklmnopqrstuvwxyz");"#,
 /// Replay requires resolved bases; an empty authored patch remains inheritance.
 #[test]
 fn facade_recorded_render_refuses_omitted_base_choices() {
-    let recorded = crate::plugins::StandardProtocolConfig::standard().recorded_behaviour();
+    let recorded = crate::plugins::StandardProtocolConfig::standard()
+        .recorded_behaviour()
+        .expect("the standard tool presentation admits");
     let mut omission = serde_json::to_value(&recorded).expect("behaviour");
     omission["render"]["defaults"]["value"]
         .as_object_mut()
@@ -648,7 +656,8 @@ fn facade_recorded_render_refuses_omitted_base_choices() {
             .instruction_limit(crate::rlm::InstructionBound::unbounded())
             .memory_limit(crate::rlm::MemoryBound::unbounded())
             .build()
-            .recorded_behaviour();
+            .recorded_behaviour(&crate::rlm::CellDialect::typescript())
+            .expect("the standard tool presentation admits");
         let mut omission = serde_json::to_value(&recorded).expect("behaviour");
         omission["render"]["print"]
             .as_object_mut()
@@ -675,7 +684,9 @@ fn facade_recording_preserves_per_tool_inheritance() {
             ..Default::default()
         },
     );
-    let recorded = host.recorded_behaviour();
+    let recorded = host
+        .recorded_behaviour()
+        .expect("the standard tool presentation admits");
     let mut run = crate::render::StandardRenderConfig::default();
     run.defaults.value.max_chars = Some(11);
     let resolved = crate::render::resolve(

@@ -1,8 +1,6 @@
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 use crate::core_support::TOOL_BINDING_KEY;
-use crate::sync::MutexExt;
 use crate::{
     JsonSchema, SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaPurpose,
     ToolCatalogBuildError, ToolDeclaration,
@@ -272,58 +270,6 @@ impl ToolOutputContract {
     pub fn is_static(&self) -> bool {
         matches!(self, Self::Static)
     }
-
-    fn return_type_label(&self, output: &SchemaShape) -> String {
-        match self {
-            Self::Static => compact_type(output),
-            Self::FromInputSchema { .. } => "T".to_string(),
-        }
-    }
-
-    fn type_parameter_suffix(&self) -> Option<String> {
-        match self {
-            Self::Static => None,
-            Self::FromInputSchema { default_schema, .. } => {
-                let default = default_schema
-                    .as_ref()
-                    .map(|schema| compact_type(&SchemaShape::from_json_schema(schema.as_value())))
-                    .unwrap_or_else(|| "any".to_string());
-                Some(format!("<T = {default}>"))
-            }
-        }
-    }
-
-    /// The input shape as the compact contract shows it: the field that
-    /// carries the output's type is a `TypeSpec<T>` witness, not a record.
-    fn witnessed_input(&self, input: &SchemaShape) -> SchemaShape {
-        let mut input = input.clone();
-        if let Self::FromInputSchema { input_field, .. } = self
-            && let ShapeKind::Object(object) = &mut input.kind
-            && let Some(field) = object
-                .fields
-                .iter_mut()
-                .find(|field| field.name == *input_field)
-        {
-            field.shape = SchemaShape {
-                kind: ShapeKind::Named("TypeSpec<T>".to_string()),
-                description: field.shape.description.take(),
-                default: None,
-                constraints: ShapeConstraints::default(),
-            };
-        }
-        input
-    }
-
-    fn return_fields(&self, output: &SchemaShape) -> Vec<serde_json::Value> {
-        match self {
-            Self::Static => output
-                .rows()
-                .iter()
-                .map(|row| compact_row(row, "path"))
-                .collect(),
-            Self::FromInputSchema { .. } => Vec::new(),
-        }
-    }
 }
 
 #[derive(
@@ -443,9 +389,8 @@ pub struct ToolModule {
 
 /// Tool metadata exposed to prompts, catalogs, and UI. Catalog membership —
 /// being present in a [`ToolProvider`]'s manifest list — is the execution gate;
-/// there is no per-manifest tier. The optional compact contract is the
-/// catalog-facing projection of the resolved contract; full schemas stay in
-/// [`ToolContract`].
+/// there is no per-manifest tier. Its schemas stay in [`ToolContract`]; how
+/// they read to a model is the execution mode's tool presenter's.
 ///
 /// A manifest is complete by construction: it holds its host-set bounds and a
 /// valid declaration, and one built or decoded without them is refused
@@ -460,8 +405,6 @@ pub struct ToolManifest {
     pub description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module: Option<Arc<ToolModule>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compact_contract: Option<Arc<CompactToolContract>>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub bindings: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(
@@ -503,8 +446,6 @@ struct ManifestRecord {
     #[serde(default)]
     module: Option<Arc<ToolModule>>,
     #[serde(default)]
-    compact_contract: Option<Arc<CompactToolContract>>,
-    #[serde(default)]
     bindings: std::collections::BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     argument_projection: ToolArgumentProjectionPolicy,
@@ -540,7 +481,6 @@ impl<'de> serde::Deserialize<'de> for ToolManifest {
             name: record.name,
             description: record.description,
             module: record.module,
-            compact_contract: record.compact_contract,
             bindings: record.bindings,
             argument_projection: record.argument_projection,
             execution_policy: record.execution_policy,
@@ -685,17 +625,13 @@ fn read_refusal(
     })
 }
 
-/// Heavy tool contract resolved only when a prompt or call needs schemas/docs.
+/// Heavy tool contract resolved only when a prompt or call needs its schemas.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct ToolContract {
     #[serde(skip)]
     identity: Option<ToolContractIdentity>,
-    #[serde(skip)]
-    compact_cache: CompactContractCache,
-    #[serde(skip)]
-    shapes: ShapeCache,
     #[serde(default = "ToolContract::default_input_schema_contract")]
     pub input_schema: SchemaContract,
     #[serde(default)]
@@ -704,62 +640,6 @@ pub struct ToolContract {
     pub output_contract: ToolOutputContract,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub examples: Vec<String>,
-}
-
-/// Memoized [`CompactToolContract`] projections, keyed by the inputs that
-/// actually shape the compact output (the signature name, the example limit,
-/// and the manifest description). Schema `$ref` resolution behind the compact
-/// contract deep-copies the schema tree; without this memo that copy ran once
-/// per doc render per tool.
-///
-/// Cloning or comparing a contract never carries or observes the memo, so the
-/// cache cannot leak into wire/persisted state or equality semantics.
-#[derive(Debug, Default)]
-struct CompactContractCache(Mutex<BTreeMap<CompactContractKey, Arc<CompactToolContract>>>);
-
-impl Clone for CompactContractCache {
-    fn clone(&self) -> Self {
-        Self::default()
-    }
-}
-
-impl PartialEq for CompactContractCache {
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
-}
-
-impl Eq for CompactContractCache {}
-
-/// The contract's schemas read once as [`SchemaShape`]s.
-///
-/// Like [`CompactContractCache`], the memo is invisible to cloning, equality
-/// and the wire.
-#[derive(Debug, Default)]
-struct ShapeCache {
-    input: OnceLock<Arc<SchemaShape>>,
-    output: OnceLock<Arc<SchemaShape>>,
-}
-
-impl Clone for ShapeCache {
-    fn clone(&self) -> Self {
-        Self::default()
-    }
-}
-
-impl PartialEq for ShapeCache {
-    fn eq(&self, _other: &Self) -> bool {
-        true
-    }
-}
-
-impl Eq for ShapeCache {}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct CompactContractKey {
-    signature_name: String,
-    presentation: ToolPresentationConfig,
-    description: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -772,8 +652,6 @@ impl Default for ToolContract {
     fn default() -> Self {
         Self {
             identity: None,
-            compact_cache: CompactContractCache::default(),
-            shapes: ShapeCache::default(),
             input_schema: Self::default_input_schema_contract(),
             output_schema: JsonSchema::any().into(),
             output_contract: ToolOutputContract::Static,
@@ -817,175 +695,6 @@ impl ToolContract {
         self.identity
             .as_ref()
             .is_some_and(|identity| identity.id == manifest.id && identity.name == manifest.name)
-    }
-
-    /// The prompt-facing shape of the canonical input schema. Every surface
-    /// that shows a model what this tool accepts spells this shape.
-    pub fn input_shape(&self) -> Arc<SchemaShape> {
-        Arc::clone(
-            self.shapes.input.get_or_init(|| {
-                Arc::new(SchemaShape::from_json_schema(self.input_schema.canonical()))
-            }),
-        )
-    }
-
-    /// The prompt-facing shape of the canonical output schema.
-    pub fn output_shape(&self) -> Arc<SchemaShape> {
-        Arc::clone(self.shapes.output.get_or_init(|| {
-            Arc::new(SchemaShape::from_json_schema(
-                self.output_schema.canonical(),
-            ))
-        }))
-    }
-
-    /// The input schema under the host's prompt depth bound.
-    pub fn input_shape_with(&self, config: &ToolPresentationConfig) -> Arc<SchemaShape> {
-        if config.schema_depth == ToolPresentationConfig::standard().schema_depth {
-            return self.input_shape();
-        }
-        Arc::new(SchemaShape::from_json_schema_with_depth(
-            self.input_schema.canonical(),
-            config.schema_depth,
-        ))
-    }
-    /// The output schema under the host's prompt depth bound.
-    pub fn output_shape_with(&self, config: &ToolPresentationConfig) -> Arc<SchemaShape> {
-        if config.schema_depth == ToolPresentationConfig::standard().schema_depth {
-            return self.output_shape();
-        }
-        Arc::new(SchemaShape::from_json_schema_with_depth(
-            self.output_schema.canonical(),
-            config.schema_depth,
-        ))
-    }
-    /// Authored examples under the host's prompt cuts.
-    pub fn compact_examples_with(&self, config: &ToolPresentationConfig) -> Vec<String> {
-        schema_docs::compact_examples_with_chars(
-            &self.examples,
-            config.example_limit,
-            config.example_chars,
-        )
-    }
-
-    /// The authored examples a prompt shows: the first few, each bounded.
-    pub fn compact_examples(&self) -> Vec<String> {
-        compact_examples(&self.examples, COMPACT_TOOL_EXAMPLE_LIMIT)
-    }
-
-    pub fn compact_contract(&self, manifest: &ToolManifest) -> CompactToolContract {
-        (*self.compact_contract_shared(manifest)).clone()
-    }
-
-    pub fn compact_contract_with_signature_name(
-        &self,
-        manifest: &ToolManifest,
-        signature_name: &str,
-    ) -> CompactToolContract {
-        (*self.compact_contract_shared_with_signature_name(manifest, signature_name)).clone()
-    }
-
-    /// Shared standard projection, avoiding deep schema copies for read-only consumers.
-    pub fn compact_contract_shared(&self, manifest: &ToolManifest) -> Arc<CompactToolContract> {
-        self.compact_contract_shared_with_signature_name(manifest, &manifest.name)
-    }
-
-    /// Shared standard projection with a host-selected signature name.
-    pub fn compact_contract_shared_with_signature_name(
-        &self,
-        manifest: &ToolManifest,
-        signature_name: &str,
-    ) -> Arc<CompactToolContract> {
-        self.compact_contract_with_presentation(
-            manifest,
-            signature_name,
-            &ToolPresentationConfig::standard(),
-        )
-    }
-
-    /// A memoized compact contract under the host's complete presentation policy.
-    pub fn compact_contract_with_presentation(
-        &self,
-        manifest: &ToolManifest,
-        signature_name: &str,
-        config: &ToolPresentationConfig,
-    ) -> Arc<CompactToolContract> {
-        if signature_name == manifest.name
-            && *config == ToolPresentationConfig::standard()
-            && let Some(stored) = &manifest.compact_contract
-            && stored.name == signature_name
-            && stored.description == manifest.description.trim()
-        {
-            return Arc::clone(stored);
-        }
-        let key = CompactContractKey {
-            signature_name: signature_name.to_string(),
-            presentation: *config,
-            description: manifest.description.trim().to_string(),
-        };
-        if let Some(hit) = self.compact_cache.0.lock_recover().get(&key) {
-            return Arc::clone(hit);
-        }
-        let input = self.input_shape_with(config);
-        let output = self.output_shape_with(config);
-        let witnessed_input = self.output_contract.witnessed_input(&input);
-        let computed = Arc::new(CompactToolContract {
-            name: signature_name.to_string(),
-            signature: format!(
-                "{}{}({})",
-                signature_name,
-                self.output_contract
-                    .type_parameter_suffix()
-                    .unwrap_or_default(),
-                compact_arguments(&witnessed_input)
-            ),
-            returns: self.output_contract.return_type_label(&output),
-            parameters: witnessed_input
-                .rows()
-                .iter()
-                .map(|row| compact_row(row, "name"))
-                .collect(),
-            return_fields: self.output_contract.return_fields(&output),
-            description: manifest.description.trim().to_string(),
-            examples: self.compact_examples_with(config),
-        });
-        self.compact_cache
-            .0
-            .lock_recover()
-            .insert(key, Arc::clone(&computed));
-        computed
-    }
-
-    pub fn input_signature(&self, manifest: &ToolManifest) -> String {
-        self.input_signature_with_name(manifest, &manifest.name)
-    }
-
-    pub fn input_signature_with_name(
-        &self,
-        _manifest: &ToolManifest,
-        signature_name: &str,
-    ) -> String {
-        let body = compact_arguments(&self.output_contract.witnessed_input(&self.input_shape()));
-        format!(
-            "{}{}({})",
-            signature_name,
-            self.output_contract
-                .type_parameter_suffix()
-                .unwrap_or_default(),
-            body
-        )
-    }
-
-    pub fn output_summary(&self) -> String {
-        self.output_contract.return_type_label(&self.output_shape())
-    }
-
-    pub fn parameter_metadata(&self) -> Vec<serde_json::Value> {
-        self.output_contract
-            .witnessed_input(&self.input_shape())
-            .rows()
-            .iter()
-            .map(|row| compact_row(row, "name"))
-            .collect()
     }
 
     pub fn model_tool(&self, manifest: &ToolManifest) -> ModelTool {
@@ -1068,7 +777,6 @@ impl ToolDraft {
                 name: self.name,
                 description: self.description,
                 module: None,
-                compact_contract: None,
                 bindings: self.bindings,
                 argument_projection: ToolArgumentProjectionPolicy::default(),
                 execution_policy: default_tool_execution_policy(),
@@ -1088,128 +796,6 @@ pub struct ModelTool {
     pub description: String,
     pub input_schema: SchemaContract,
     pub output_schema: SchemaContract,
-}
-
-/// Prompt-facing schema and example cuts; validation always uses the full schema.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-#[serde(default, deny_unknown_fields)]
-pub struct ToolPresentationConfig {
-    pub example_limit: usize,
-    pub example_chars: usize,
-    pub schema_depth: usize,
-}
-impl Default for ToolPresentationConfig {
-    fn default() -> Self {
-        Self::standard()
-    }
-}
-impl ToolPresentationConfig {
-    /// Standard preset: two examples, 240 characters each, eight schema
-    /// container levels. Historical cuts with no universal workload measurement.
-    pub const fn standard() -> Self {
-        Self {
-            example_limit: 2,
-            example_chars: 240,
-            schema_depth: 8,
-        }
-    }
-}
-const COMPACT_TOOL_EXAMPLE_LIMIT: usize = ToolPresentationConfig::standard().example_limit;
-const COMPACT_TOOL_EXAMPLE_CHAR_LIMIT: usize = ToolPresentationConfig::standard().example_chars;
-
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-pub struct CompactToolContract {
-    pub name: String,
-    pub signature: String,
-    pub returns: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parameters: Vec<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub return_fields: Vec<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub description: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub examples: Vec<String>,
-}
-
-impl CompactToolContract {
-    pub(crate) fn render_signature_head(&self) -> String {
-        format!("{} -> {}", self.signature.trim(), self.returns.trim())
-    }
-
-    pub fn render_signature(&self) -> String {
-        let mut sections = vec![self.render_signature_head()];
-        let parameter_lines = self
-            .parameters
-            .iter()
-            .filter_map(compact_doc_line)
-            .collect::<Vec<_>>();
-        if !parameter_lines.is_empty() {
-            sections.push(format!("Parameters:\n{}", parameter_lines.join("\n")));
-        }
-        let return_field_lines = self
-            .return_fields
-            .iter()
-            .filter_map(compact_doc_line)
-            .collect::<Vec<_>>();
-        if !return_field_lines.is_empty() {
-            sections.push(format!("Return fields:\n{}", return_field_lines.join("\n")));
-        }
-        sections.join("\n")
-    }
-
-    #[cfg(test)]
-    pub(crate) fn render_returns(&self) -> String {
-        let mut sections = Vec::new();
-        let return_field_lines = self
-            .return_fields
-            .iter()
-            .filter_map(compact_doc_line)
-            .collect::<Vec<_>>();
-        if !return_field_lines.is_empty() {
-            sections.push(format!("Return fields:\n{}", return_field_lines.join("\n")));
-        }
-        sections.join("\n")
-    }
-
-    /// The contract as one markdown block: the oracle the contract's
-    /// rendering laws read. No model-facing text is built from it; a tool's
-    /// guidance is a prompt section (ADR 0133).
-    #[cfg(test)]
-    pub(crate) fn render_markdown(&self) -> String {
-        let mut sections = vec![format!("### {}", self.render_signature_head())];
-        if !self.description.trim().is_empty() {
-            sections.push(self.description.trim().to_string());
-        }
-        if !self.parameters.is_empty() {
-            sections.push(format!(
-                "Parameters:\n{}",
-                self.parameters
-                    .iter()
-                    .filter_map(compact_doc_line)
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
-        }
-        if !self.return_fields.is_empty() {
-            sections.push(format!(
-                "Return fields:\n{}",
-                self.return_fields
-                    .iter()
-                    .filter_map(compact_doc_line)
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
-        }
-        if !self.examples.is_empty() {
-            sections.push(format!("Examples: {}", self.examples.join("; ")));
-        }
-        sections.join("\n")
-    }
 }
 
 impl ToolDefinition {
@@ -1369,7 +955,6 @@ impl ToolDefinition {
             .controls
             .clone()
             .with_finish(value_schema.clone());
-        self.manifest.compact_contract = None;
         self.contract = ToolContract {
             input_schema: SchemaContract::new(value_schema),
             ..self.contract.clone()
@@ -1464,32 +1049,13 @@ impl ToolDefinition {
         &self.manifest.description
     }
 
-    pub fn input_signature(&self) -> String {
-        self.contract.input_signature(&self.manifest)
-    }
-
-    pub fn output_summary(&self) -> String {
-        self.contract.output_summary()
-    }
-
-    pub fn signature(&self) -> String {
-        format!("{} -> {}", self.input_signature(), self.output_summary())
-    }
-
-    pub fn compact_contract(&self) -> CompactToolContract {
-        self.contract.compact_contract(&self.manifest)
-    }
-
     pub fn model_tool(&self) -> ModelTool {
         self.contract.model_tool(&self.manifest)
     }
 
-    /// Project the manifest, computing the catalog-facing compact contract from
-    /// the resolved [`ToolContract`].
+    /// The manifest projection: what a provider advertises.
     pub fn manifest(&self) -> ToolManifest {
-        let mut manifest = self.manifest.clone();
-        manifest.compact_contract = Some(self.contract.compact_contract_shared(&manifest));
-        manifest
+        self.manifest.clone()
     }
 
     pub fn contract(&self) -> ToolContract {
@@ -1510,31 +1076,20 @@ impl ToolDefinition {
         });
         Self { manifest, contract }
     }
-
-    pub fn parameter_metadata(&self) -> Vec<serde_json::Value> {
-        self.contract.parameter_metadata()
-    }
 }
 
 mod binding;
 pub use binding::{ToolBinding, ToolDefinitionBindingExt};
 
-pub(crate) mod schema_docs;
-pub mod schema_shape;
-pub use schema_docs::schema_for;
-use schema_docs::{
-    compact_arguments, compact_doc_line, compact_examples, compact_row, compact_type,
-};
-pub use schema_shape::{
-    ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
-    ShapeField, ShapeKind, ShapeRow, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
-    is_named_type_reference,
-};
+/// The JSON Schema of `T`, as schemars generates it.
+pub fn schema_for<T>() -> serde_json::Value
+where
+    T: schemars::JsonSchema,
+{
+    serde_json::to_value(schemars::schema_for!(T)).unwrap_or_else(|_| serde_json::json!({}))
+}
 
 #[cfg(feature = "schema-validation")]
 mod schema_validation;
 #[cfg(feature = "schema-validation")]
 pub use schema_validation::validate_tool_input;
-
-#[cfg(test)]
-mod tests;

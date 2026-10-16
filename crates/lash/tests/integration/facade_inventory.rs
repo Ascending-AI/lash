@@ -44,6 +44,7 @@ use lash::TurnEvent as _;
 use lash::TurnOutcome as _;
 use lash::TurnStop as _;
 use lash::TurnWorkDriver as _;
+// How a mode's tools read: the presenter slot and the shape it reads.
 use lash::attachments::AttachmentCreateMeta as _;
 use lash::attachments::AttachmentId as _;
 use lash::attachments::AttachmentPosition as _;
@@ -132,6 +133,20 @@ use lash::provider::StreamTermination as _;
 use lash::provider::TemplateError as _;
 use lash::provider::TransientJson as _;
 use lash::secrets::Redacted as _;
+use lash::standard::CompactToolContract as _;
+use lash::standard::StandardToolPresenter as _;
+use lash::tools::ExtraKeys as _;
+use lash::tools::ObjectShape as _;
+use lash::tools::ProcessParamShape as _;
+use lash::tools::ProcessShape as _;
+use lash::tools::RecordedToolPresenter as _;
+use lash::tools::SchemaShape as _;
+use lash::tools::ShapeConstraints as _;
+use lash::tools::ShapeField as _;
+use lash::tools::ShapeKind as _;
+use lash::tools::ToolPresenter as _;
+use lash::tools::ToolPresenterSlot as _;
+use lash::tools::WrappedToolPresenter as _;
 use lash::usage::LlmUsage as _;
 // `async_trait` is an attribute macro re-exported at the facade root so
 // `#[async_trait]` facade traits can be implemented without a host-side
@@ -239,18 +254,12 @@ mod rlm_inventory {
     use lash::rlm::DialectPrompts as _;
     use lash::rlm::DialectRefusalKind as _;
     use lash::rlm::ExecutionSectionRequest as _;
-    use lash::rlm::ExtraKeys as _;
-    use lash::rlm::ObjectShape as _;
-    use lash::rlm::ProcessParamShape as _;
-    use lash::rlm::ProcessShape as _;
     use lash::rlm::ProjectedBindingError as _;
     use lash::rlm::PythonPrompts as _;
     use lash::rlm::ResolvedToolBinding as _;
-    use lash::rlm::SchemaShape as _;
-    use lash::rlm::ShapeConstraints as _;
-    use lash::rlm::ShapeField as _;
-    use lash::rlm::ShapeKind as _;
     use lash::rlm::TypescriptPrompts as _;
+    use lash::rlm::python_tool_presenter as _;
+    use lash::rlm::typescript_tool_presenter as _;
 
     // What a code-mode prompt discloses (FIG-1435, FIG-1438).
     use lash::rlm::GlobalsPage as _;
@@ -906,12 +915,12 @@ fn loaded_tool_signature_example_matches_the_loaded_documentation() {
     .expect("valid tool schemas")
     .with_execution(std::time::Duration::from_secs(30))
     .with_tool_binding(ToolBinding::from_path("tools.lookup"));
-    let presentation = lash::rlm::RlmPresentationConfig::standard();
+    let presentation = json!({});
     for dialect in [
         lash::rlm::CellDialect::typescript(),
         lash::rlm::CellDialect::python(),
     ] {
-        let signature = lash::rlm::loaded_tool_signature(&dialect, presentation, &tool)
+        let signature = lash::rlm::loaded_tool_signature(&dialect, &presentation, &tool)
             .expect("an addressable tool");
         if dialect.name() == "typescript" {
             assert_eq!(
@@ -919,7 +928,7 @@ fn loaded_tool_signature_example_matches_the_loaded_documentation() {
                 "tools.lookup({ query: string }): Promise<string>"
             );
         }
-        let doc = lash::rlm::discovered_tool_doc(&dialect, presentation, &tool)
+        let doc = lash::rlm::discovered_tool_doc(&dialect, &presentation, &tool)
             .expect("an addressable tool");
         assert_eq!(doc.lines().next(), Some(format!("`{signature}`").as_str()));
         assert!(!signature.contains('\n'));

@@ -1,6 +1,8 @@
 use lash_core::plugin::{PluginError, ToolCatalogContext};
-use lash_core::{ToolCatalog, facade_support::ToolCatalogContribution};
-use lash_sansio::SchemaShape;
+use lash_core::{SessionError, ToolCatalog, facade_support::ToolCatalogContribution};
+use lash_tool_presenter_api::{
+    PresentationRefusal, ToolDisclosure, ToolPresentationEntry, ToolPresentationRequest,
+};
 use lash_vm_runtime::{ToolBindingResolutionExt, required_tool_binding, required_tool_executable};
 
 use crate::dialect::SessionDialect;
@@ -30,78 +32,14 @@ pub(crate) fn rlm_prompt_tool_docs(
     dialect: &crate::dialect::SessionDialect,
     features: crate::protocol::RlmPromptFeatures,
 ) -> String {
-    ToolListing::of(tool_catalog, dialect, features, None).docs
+    ToolListing::of(tool_catalog, dialect, features, None)
+        .expect("the test catalogue presents")
+        .docs
 }
-
-/// One member's prompt doc.
-struct ToolDoc<'a> {
-    manifest: &'a lash_core::ToolManifest,
-    call_path: String,
-    text: String,
-}
-
-impl ToolDoc<'_> {
-    /// The root of its call path: the namespace selection is fair across.
-    fn namespace(&self) -> &str {
-        self.call_path
-            .split_once('.')
-            .map_or(self.call_path.as_str(), |(root, _)| root)
-    }
-
-    fn module(&self) -> Option<&str> {
-        self.manifest
-            .module
-            .as_deref()
-            .map(|module| module.name.as_str())
-    }
-}
-
-/// A tool's doc as a session in `dialect` lists it: its signature, its
-/// description, the notes of the fields that say more than their type, and
-/// its examples. A tool a host's discovery finds is shown the same doc.
-fn tool_doc_text(
-    dialect: &crate::dialect::SessionDialect,
-    signature: &str,
-    manifest: &lash_core::ToolManifest,
-    contract: &lash_core::ToolContract,
-) -> String {
-    let presentation = dialect.presentation().tools;
-    let input = contract.input_shape_with(&presentation);
-    let output = contract.output_shape_with(&presentation);
-    // The signature carries every field's name and type. The rows under
-    // it add what a type cannot say, for the fields that say it.
-    let mut sections = vec![format!("`{signature}`")];
-    let description = manifest.description.trim();
-    if !description.is_empty() {
-        sections.push(description.to_string());
-    }
-    for (title, shape) in [("Parameters", &input), ("Return fields", &output)] {
-        let rows = dialect.noted_field_rows(shape);
-        if !rows.is_empty() {
-            sections.push(format!("{title}:\n{}", rows.join("\n")));
-        }
-    }
-    // Authored examples are Lash VM source; the dialect spells them,
-    // and leaves out the ones it cannot.
-    let examples = contract
-        .compact_examples_with(&presentation)
-        .iter()
-        .filter_map(|example| dialect.render_tool_example(example))
-        .collect::<Vec<_>>();
-    if !examples.is_empty() {
-        sections.push(format!("Examples: {}", examples.join("; ")));
-    }
-    sections.join("\n")
-}
-
-/// The heading of tools of no module listed after a module's tools.
-const UNGROUPED_HEADING: &str = "#### Ungrouped tools";
 
 /// What a session's prompt lists of its catalogue.
 pub(crate) struct ToolListing {
-    /// The listed docs, in catalogue order. A module's heading opens each run
-    /// of its tools, so a member appended to the catalogue appends its doc
-    /// and leaves every byte before it as it was (FIG-1435).
+    /// The listed docs, as the session's tool presenter wrote them.
     pub(crate) docs: String,
     /// What a discovery session lists and leaves to discovery; `None`
     /// without discovery, where every member is listed.
@@ -109,10 +47,12 @@ pub(crate) struct ToolListing {
 }
 
 impl ToolListing {
-    /// Without `discovery`, every member. With it, the discovery tool and
-    /// the control tools, then the inline members that fit the recorded
-    /// budget, taken one namespace at a time in turn so that no namespace
-    /// crowds the others out.
+    /// The catalogue as the session's tool presenter lists it. Without
+    /// `discovery`, every member. With it, the discovery tool and the
+    /// control tools, then what fits the recorded budget. The presenter
+    /// words the listing; which tools are offered, and under which call
+    /// paths, is this mode's, and a listing that does not account for
+    /// exactly the offered tools is refused.
     #[expect(
         clippy::expect_used,
         reason = "catalog registration validates every tool binding against the session's dialect, so tool_call_path only errs on an unregistered manifest"
@@ -122,8 +62,8 @@ impl ToolListing {
         dialect: &crate::dialect::SessionDialect,
         features: crate::protocol::RlmPromptFeatures,
         discovery: Option<&crate::plugin::RlmDiscovery>,
-    ) -> Self {
-        let docs = tool_catalog
+    ) -> Result<Self, SessionError> {
+        let offered = tool_catalog
             .tools
             .iter()
             .filter(|tool| features.decomposition || tool.manifest.name != "continue_as")
@@ -131,129 +71,57 @@ impl ToolListing {
                 let call_path = dialect.tool_call_path(&tool.manifest).expect(
                     "RLM tool catalog registration validates the session dialect's binding",
                 );
-                let signature = tool_signature_text(
-                    dialect.language(),
-                    dialect.presentation(),
-                    &call_path,
-                    &tool.contract.input_schema.canonical,
-                    &tool.contract.output_schema.canonical,
-                );
-                let text = tool_doc_text(dialect, &signature, &tool.manifest, &tool.contract);
-                ToolDoc {
-                    manifest: &tool.manifest,
-                    call_path,
-                    text,
-                }
+                (tool, call_path)
             })
             .collect::<Vec<_>>();
-        let Some(discovery) = discovery else {
-            return Self {
-                docs: render_docs(docs.iter()),
-                disclosure: None,
-            };
+        let entries = offered
+            .iter()
+            .map(|(tool, call_path)| ToolPresentationEntry {
+                manifest: &tool.manifest,
+                contract: &tool.contract,
+                call_path,
+                pinned: discovery.is_some_and(|discovery| *call_path == discovery.operation)
+                    || !tool.manifest.declaration().controls.is_empty(),
+            })
+            .collect::<Vec<_>>();
+        let request = ToolPresentationRequest {
+            tools: &entries,
+            config: dialect.tool_presentation(),
+            disclosure: match discovery {
+                Some(discovery) => ToolDisclosure::Budget {
+                    catalogue_bytes: discovery.catalogue_bytes,
+                },
+                None => ToolDisclosure::Complete,
+            },
         };
-        let listed = select_within_budget(&docs, discovery);
-        let disclosure = ToolCatalogueDisclosure {
-            discovery_operation: discovery.operation.clone(),
-            listed: docs
+        let presenter = dialect.tool_presenter().presenter();
+        let section = presenter
+            .present(request)
+            .map_err(|refusal| SessionError::Protocol(refusal.to_string()))?;
+        if !section.accounts_for(&request) {
+            return Err(SessionError::Protocol(
+                PresentationRefusal::Listing {
+                    presenter: presenter.id().to_owned(),
+                }
+                .to_string(),
+            ));
+        }
+        let names = |ids: &[lash_core::ToolId]| {
+            entries
                 .iter()
-                .zip(&listed)
-                .filter(|(_, listed)| **listed)
-                .map(|(doc, _)| doc.manifest.name.clone())
-                .collect(),
-            omitted: docs
-                .iter()
-                .zip(&listed)
-                .filter(|(_, listed)| !**listed)
-                .map(|(doc, _)| doc.manifest.name.clone())
-                .collect(),
+                .filter(|entry| ids.contains(&entry.manifest.id))
+                .map(|entry| entry.manifest.name.clone())
+                .collect()
         };
-        Self {
-            docs: render_docs(
-                docs.iter()
-                    .zip(&listed)
-                    .filter(|(_, listed)| **listed)
-                    .map(|(doc, _)| doc),
-            ),
-            disclosure: Some(disclosure),
-        }
+        Ok(Self {
+            disclosure: discovery.map(|discovery| ToolCatalogueDisclosure {
+                discovery_operation: discovery.operation.clone(),
+                listed: names(&section.listed),
+                omitted: names(&section.omitted),
+            }),
+            docs: section.text,
+        })
     }
-}
-
-/// Which of `docs` a discovery session lists: the pinned ones (the discovery
-/// tool and the control tools), then rounds over the namespaces in the order
-/// the catalogue first names them, each round taking every namespace's next
-/// inline doc that still fits the budget. A namespace whose next doc does not
-/// fit is done, so a namespace's listed tools are always its first.
-fn select_within_budget(
-    docs: &[ToolDoc<'_>],
-    discovery: &crate::plugin::RlmDiscovery,
-) -> Vec<bool> {
-    let pinned = |doc: &ToolDoc<'_>| {
-        doc.call_path == discovery.operation || !doc.manifest.declaration().controls.is_empty()
-    };
-    let mut listed = docs.iter().map(pinned).collect::<Vec<_>>();
-    let mut used = docs
-        .iter()
-        .filter(|doc| pinned(doc))
-        .map(|doc| doc.text.len())
-        .sum::<usize>();
-    let mut namespaces = Vec::<(&str, std::collections::VecDeque<usize>)>::new();
-    for (index, doc) in docs.iter().enumerate() {
-        if listed[index] || !doc.manifest.inline {
-            continue;
-        }
-        match namespaces
-            .iter_mut()
-            .find(|(namespace, _)| *namespace == doc.namespace())
-        {
-            Some((_, queue)) => queue.push_back(index),
-            None => namespaces.push((doc.namespace(), [index].into())),
-        }
-    }
-    let mut progressed = true;
-    while progressed {
-        progressed = false;
-        for (_, queue) in &mut namespaces {
-            let Some(&index) = queue.front() else {
-                continue;
-            };
-            let bytes = docs[index].text.len();
-            if used.saturating_add(bytes) <= discovery.catalogue_bytes {
-                used += bytes;
-                listed[index] = true;
-                queue.pop_front();
-                progressed = true;
-            } else {
-                queue.clear();
-            }
-        }
-    }
-    listed
-}
-
-/// `docs` in their order, a module's heading opening each run of its tools.
-fn render_docs<'a, 'b: 'a>(docs: impl Iterator<Item = &'a ToolDoc<'b>>) -> String {
-    let mut parts = Vec::new();
-    // The heading the last doc sat under: `None` before any, `Some(None)`
-    // under the ungrouped heading.
-    let mut open: Option<Option<&str>> = None;
-    for doc in docs {
-        let module = doc.module();
-        match (module, open) {
-            (Some(name), current) if current != Some(Some(name)) => {
-                parts.push(format!("#### {name}"));
-                open = Some(Some(name));
-            }
-            (None, Some(Some(_))) => {
-                parts.push(UNGROUPED_HEADING.to_string());
-                open = Some(None);
-            }
-            _ => {}
-        }
-        parts.push(doc.text.clone());
-    }
-    parts.join("\n\n")
 }
 
 /// Which tools a discovery session's prompt lists and which it leaves for
@@ -282,62 +150,89 @@ impl ToolCatalogueDisclosure {
     }
 }
 
-/// What a session in `dialect` under `presentation` and `features` lists of
-/// `tool_catalog` under `discovery`: the facts the protocol's declarations
-/// render, for a host that renders its catalogue itself. `tool_catalog` is a
-/// session's validated catalogue: every member has a binding `dialect` can
-/// call.
+fn presentation_refused(refusal: impl std::fmt::Display) -> crate::dialect::DialectRefusal {
+    crate::dialect::DialectRefusal {
+        kind: crate::dialect::DialectRefusalKind::PresentationRefused,
+        message: refusal.to_string(),
+    }
+}
+
+/// `tool_presentation` admitted by `dialect`'s tool presenter: a host's raw
+/// config, or a session's recorded one, which admits as itself.
+fn admitted(
+    dialect: &crate::dialect::CellDialect,
+    tool_presentation: &serde_json::Value,
+) -> Result<serde_json::Value, crate::dialect::DialectRefusal> {
+    dialect
+        .tool_presenter()
+        .presenter()
+        .admit_config(tool_presentation)
+        .map_err(presentation_refused)
+}
+
+/// What a session in `dialect` with tool presentation `tool_presentation`
+/// and `features` lists of `tool_catalog` under `discovery`: the facts the
+/// protocol's declarations render, for a host that renders its catalogue
+/// itself. `tool_catalog` is a session's validated catalogue: every member
+/// has a binding `dialect` can call.
+///
+/// # Errors
+///
+/// The dialect's tool presenter refuses the config or the listing.
 pub fn tool_catalogue_disclosure(
     dialect: &crate::dialect::CellDialect,
-    presentation: crate::plugin::RlmPresentationConfig,
+    tool_presentation: &serde_json::Value,
     features: crate::protocol::RlmPromptFeatures,
     tool_catalog: &ToolCatalog,
     discovery: &crate::plugin::RlmDiscovery,
-) -> ToolCatalogueDisclosure {
-    let dialect = SessionDialect::prompt_only(dialect.clone()).with_presentation(presentation);
-    ToolListing::of(tool_catalog, &dialect, features, Some(discovery))
-        .disclosure
-        .unwrap_or_else(|| ToolCatalogueDisclosure {
-            discovery_operation: discovery.operation.clone(),
-            listed: Vec::new(),
-            omitted: Vec::new(),
-        })
-}
-
-fn tool_signature_text(
-    dialect: &dyn crate::dialect::DialectPrompts,
-    presentation: crate::plugin::RlmPresentationConfig,
-    call_path: &str,
-    input: &lash_core::JsonSchema,
-    output: &lash_core::JsonSchema,
-) -> String {
-    dialect.tool_signature(
-        call_path,
-        &SchemaShape::from_json_schema_with_depth(
-            input.as_value(),
-            presentation.tools.schema_depth,
-        ),
-        input.accepts_empty_object(),
-        &SchemaShape::from_json_schema_with_depth(
-            output.as_value(),
-            presentation.tools.schema_depth,
-        ),
+) -> Result<ToolCatalogueDisclosure, crate::dialect::DialectRefusal> {
+    let session = SessionDialect::prompt_only(dialect.clone())
+        .with_tool_presentation(admitted(dialect, tool_presentation)?);
+    Ok(
+        ToolListing::of(tool_catalog, &session, features, Some(discovery))
+            .map_err(presentation_refused)?
+            .disclosure
+            .unwrap_or_else(|| ToolCatalogueDisclosure {
+                discovery_operation: discovery.operation.clone(),
+                listed: Vec::new(),
+                omitted: Vec::new(),
+            }),
     )
 }
 
 /// A discovered tool's signature from its binding and admitted schemas in the
-/// session's `dialect` and `presentation`, without Markdown or documentation.
-/// This is the signature line shown when the tool is loaded into the prompt.
+/// session's `dialect` and `tool_presentation`, without Markdown or
+/// documentation. This is the signature line shown when the tool is loaded
+/// into the prompt.
 ///
 /// # Errors
 ///
-/// The binding names a path `dialect` cannot call.
+/// The binding names a path `dialect` cannot call, or the dialect's tool
+/// presenter refuses.
 pub fn discovered_tool_signature(
     dialect: &crate::dialect::CellDialect,
-    presentation: crate::plugin::RlmPresentationConfig,
+    tool_presentation: &serde_json::Value,
     binding: &lash_core::ToolBinding,
     input: &lash_core::JsonSchema,
     output: &lash_core::JsonSchema,
+) -> Result<String, crate::dialect::DialectRefusal> {
+    let call_path = binding_call_path(dialect, binding)?;
+    dialect
+        .tool_presenter()
+        .presenter()
+        .tool_signature(
+            &call_path,
+            input,
+            output,
+            &admitted(dialect, tool_presentation)?,
+        )
+        .map_err(presentation_refused)
+}
+
+/// The call path `dialect` spells `binding` as.
+fn binding_call_path(
+    dialect: &crate::dialect::CellDialect,
+    binding: &lash_core::ToolBinding,
 ) -> Result<String, crate::dialect::DialectRefusal> {
     let name = format!(
         "{}.{}",
@@ -351,15 +246,20 @@ pub fn discovered_tool_signature(
                 kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
                 message: error.to_string(),
             })?;
-    let prompts = dialect.prompts();
-    let call_path = prompts.tool_call_path(&binding)?;
-    Ok(tool_signature_text(
-        prompts.as_ref(),
-        presentation,
-        &call_path,
-        input,
-        output,
-    ))
+    dialect.prompts().tool_call_path(&binding)
+}
+
+/// The call path `dialect` spells `tool`'s binding as.
+fn tool_call_path(
+    dialect: &crate::dialect::CellDialect,
+    tool: &lash_core::ToolDefinition,
+) -> Result<String, crate::dialect::DialectRefusal> {
+    let binding =
+        required_tool_binding(&tool.manifest).map_err(|error| crate::dialect::DialectRefusal {
+            kind: crate::dialect::DialectRefusalKind::UnaddressableToolPath,
+            message: error.to_string(),
+        })?;
+    binding_call_path(dialect, &binding)
 }
 
 /// A loaded tool's one-line signature, without Markdown or field notes.
@@ -368,7 +268,7 @@ pub fn discovered_tool_signature(
 /// [`discovered_tool_signature`].
 ///
 /// ```rust
-/// use lash::rlm::{CellDialect, RlmPresentationConfig, loaded_tool_signature};
+/// use lash::rlm::{CellDialect, loaded_tool_signature};
 /// use lash::tools::{ToolBinding, ToolDefinition, ToolDefinitionBindingExt};
 /// use serde_json::json;
 ///
@@ -384,19 +284,18 @@ pub fn discovered_tool_signature(
 /// )?
 /// .with_execution(std::time::Duration::from_secs(30))
 /// .with_tool_binding(ToolBinding::from_path("tools.lookup"));
-/// let signature = loaded_tool_signature(
-///     &CellDialect::typescript(), RlmPresentationConfig::standard(), &tool,
-/// )?;
+/// let signature = loaded_tool_signature(&CellDialect::typescript(), &json!({}), &tool)?;
 /// assert_eq!(signature, "tools.lookup({ query: string }): Promise<string>");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
 /// # Errors
 ///
-/// The tool has no binding, or one `dialect` cannot call.
+/// The tool has no binding, or one `dialect` cannot call, or the dialect's
+/// tool presenter refuses.
 pub fn loaded_tool_signature(
     dialect: &crate::dialect::CellDialect,
-    presentation: crate::plugin::RlmPresentationConfig,
+    tool_presentation: &serde_json::Value,
     tool: &lash_core::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
     let binding =
@@ -406,7 +305,7 @@ pub fn loaded_tool_signature(
         })?;
     discovered_tool_signature(
         dialect,
-        presentation,
+        tool_presentation,
         &binding,
         &tool.contract.input_schema.canonical,
         &tool.contract.output_schema.canonical,
@@ -414,54 +313,58 @@ pub fn loaded_tool_signature(
 }
 
 /// A tool a host's discovery operation found, as a session in `dialect`
-/// under `presentation` shows it: the doc a listed tool has, its field notes
-/// included, so a discovered signature that collapses a field to an open
-/// record still says what the field holds (FIG-1435).
+/// with `tool_presentation` shows it: the doc a listed tool has, its field
+/// notes included, so a discovered signature that collapses a field to an
+/// open record still says what the field holds (FIG-1435).
 ///
 /// # Errors
 ///
-/// The tool has no binding, or one `dialect` cannot call.
+/// The tool has no binding, or one `dialect` cannot call, or the dialect's
+/// tool presenter refuses.
 pub fn discovered_tool_doc(
     dialect: &crate::dialect::CellDialect,
-    presentation: crate::plugin::RlmPresentationConfig,
+    tool_presentation: &serde_json::Value,
     tool: &lash_core::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
-    let signature = loaded_tool_signature(dialect, presentation, tool)?;
-    let dialect = SessionDialect::prompt_only(dialect.clone()).with_presentation(presentation);
-    Ok(tool_doc_text(
-        &dialect,
-        &signature,
-        &tool.manifest,
-        &tool.contract,
-    ))
+    let call_path = tool_call_path(dialect, tool)?;
+    dialect
+        .tool_presenter()
+        .presenter()
+        .tool_doc(
+            &ToolPresentationEntry {
+                manifest: &tool.manifest,
+                contract: &tool.contract,
+                call_path: &call_path,
+                pinned: false,
+            },
+            &admitted(dialect, tool_presentation)?,
+        )
+        .map_err(presentation_refused)
 }
 
-/// The text a host's discovery search matches a tool against: its name, its
+/// The text a host's discovery search matches a tool against, as `dialect`'s
+/// tool presenter with `tool_presentation` writes it: its name, its
 /// description, and every input and output field's path with its
-/// description under `presentation`, one per line, so a query that names
-/// what a field holds finds the tool (FIG-1435).
+/// description, one per line, so a query that names what a field holds
+/// finds the tool (FIG-1435).
+///
+/// # Errors
+///
+/// The dialect's tool presenter refuses.
 pub fn discovery_text(
-    presentation: crate::plugin::RlmPresentationConfig,
+    dialect: &crate::dialect::CellDialect,
+    tool_presentation: &serde_json::Value,
     tool: &lash_core::ToolDefinition,
-) -> String {
-    let presentation = presentation.tools;
-    let mut lines = vec![tool.manifest.name.clone()];
-    let description = tool.manifest.description.trim();
-    if !description.is_empty() {
-        lines.push(description.to_string());
-    }
-    for shape in [
-        tool.contract.input_shape_with(&presentation),
-        tool.contract.output_shape_with(&presentation),
-    ] {
-        for row in shape.rows() {
-            lines.push(match &row.shape.description {
-                Some(description) => format!("{}: {description}", row.path),
-                None => row.path,
-            });
-        }
-    }
-    lines.join("\n")
+) -> Result<String, crate::dialect::DialectRefusal> {
+    dialect
+        .tool_presenter()
+        .presenter()
+        .discovery_text(
+            &tool.manifest,
+            &tool.contract,
+            &admitted(dialect, tool_presentation)?,
+        )
+        .map_err(presentation_refused)
 }
 
 fn validate_rlm_language_bindings(
@@ -957,6 +860,7 @@ mod discovery_tests {
                             &visible,
                             discovery.as_ref(),
                         )
+                        .expect("the catalogue presents")
                         .joined()
                     } else {
                         dialect
@@ -971,6 +875,7 @@ mod discovery_tests {
                     let text = execution;
                     let docs =
                         ToolListing::of(&visible, &dialect, Default::default(), discovery.as_ref())
+                            .expect("the catalogue presents")
                             .docs;
                     assert!(docs.contains("Description for search"));
                     assert!(docs.contains("Description for visible"));
@@ -1001,3 +906,5 @@ mod discovery_tests {
 
 #[cfg(test)]
 mod listing_tests;
+#[cfg(test)]
+mod presenter_tests;

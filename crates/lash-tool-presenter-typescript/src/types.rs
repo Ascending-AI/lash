@@ -1,15 +1,16 @@
-//! TypeScript's spelling of the contract layer's schema shapes and of the
-//! names a prompt shows: what the TypeScript prompt adapter writes, and
-//! nothing a cell's lowering reads.
+//! TypeScript's spelling of the shared schema shapes and of the names a
+//! prompt shows: what the TypeScript presenter writes, and nothing a cell's
+//! lowering reads.
 
-use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeKind};
+use lash_tool_shape::{ExtraKeys, ObjectShape, SchemaShape, ShapeKind};
 
+/// A schema shape as a TypeScript type.
 ///
 /// The shape is the contract layer's one reading of a JSON Schema; this is
 /// TypeScript's spelling of it and reads no schema itself. An object keeps
 /// its fields whether or not it is closed, and gains an index signature only
 /// when the schema says extra keys are allowed.
-pub(crate) fn render_schema_shape(shape: &SchemaShape) -> String {
+pub fn render_schema_shape(shape: &SchemaShape) -> String {
     match &shape.kind {
         ShapeKind::Unknown => "unknown".to_string(),
         ShapeKind::Null => "null".to_string(),
@@ -60,59 +61,6 @@ fn render_union(members: impl Iterator<Item = String>) -> String {
     spelled.join(" | ")
 }
 
-/// The names a TypeScript cell resolves itself: a tool under one of them
-/// could never be called.
-const GLOBAL_NAMESPACES: &[&str] = &[
-    "Array",
-    "Boolean",
-    "Date",
-    "Error",
-    "JSON",
-    "Map",
-    "Math",
-    "Number",
-    "Object",
-    "Promise",
-    "RegExp",
-    "Set",
-    "String",
-    "URL",
-    "URLSearchParams",
-    "console",
-    "globalThis",
-];
-
-/// Confirms a TypeScript cell can write `call_path` verbatim as a tool call:
-/// it has a module to call the operation on, its receiver is a name a cell
-/// can write in expression position, every member is an identifier, and its
-/// module is not a namespace the language resolves itself. A path that fails
-/// is refused at registration rather than advertised as a callable nothing
-/// (FIG-1444).
-pub(crate) fn ensure_tool_call_path_addressable(call_path: &str) -> Result<(), String> {
-    let segments = call_path.split('.').collect::<Vec<_>>();
-    if segments.len() < 2 {
-        return Err(format!(
-            "tool call path `{call_path}` has no module path, so a TypeScript cell has no receiver to call it on"
-        ));
-    }
-    // A member name may be a reserved word (`processes.await(…)`); the
-    // receiver, which a cell writes as an identifier, may not.
-    if let Some(segment) = segments.iter().enumerate().find_map(|(index, segment)| {
-        (!is_identifier(segment) || (index == 0 && is_reserved_word(segment))).then_some(segment)
-    }) {
-        return Err(format!(
-            "`{segment}` is a word no cell can write in expression position"
-        ));
-    }
-    if GLOBAL_NAMESPACES.contains(&segments[0]) {
-        return Err(format!(
-            "`{}` is an ECMAScript global namespace, which the dialect resolves itself",
-            segments[0]
-        ));
-    }
-    Ok(())
-}
-
 fn render_object(object: &ObjectShape) -> String {
     let extra = match &object.extra_keys {
         ExtraKeys::Closed => None,
@@ -156,7 +104,7 @@ fn render_object(object: &ObjectShape) -> String {
 /// against the declaration above it. A name still not writable — a reserved
 /// word, or one colliding with the generated-binding namespace — takes the
 /// generated encoding instead.
-pub(crate) fn render_type_name(name: &str) -> String {
+pub fn render_type_name(name: &str) -> String {
     render_identifier(&name.replace('.', "_"))
 }
 
@@ -186,7 +134,8 @@ fn render_property_name(name: &str) -> String {
     }
 }
 
-fn is_identifier(name: &str) -> bool {
+/// Whether `name` is a TypeScript identifier.
+pub fn is_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()
@@ -195,7 +144,8 @@ fn is_identifier(name: &str) -> bool {
             .all(|character| character == '_' || character == '$' || character.is_alphanumeric())
 }
 
-fn is_reserved_word(name: &str) -> bool {
+/// Whether `name` is a word this dialect declines in identifier position.
+pub fn is_reserved_word(name: &str) -> bool {
     RESERVED_WORDS.contains(&name)
 }
 
@@ -288,7 +238,6 @@ const RESERVED_WORDS: &[&str] = &[
 ];
 
 /// Every word this dialect declines to render in identifier position.
-#[cfg(test)]
-pub(crate) fn reserved_words() -> &'static [&'static str] {
+pub fn reserved_words() -> &'static [&'static str] {
     RESERVED_WORDS
 }

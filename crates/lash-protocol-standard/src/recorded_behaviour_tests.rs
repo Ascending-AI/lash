@@ -10,7 +10,9 @@ fn recorded_under(render: Option<StandardRenderConfig>) -> StandardRecordedConfi
     StandardRecordedConfig {
         render,
         termination: None,
-        behaviour: StandardProtocolConfig::default().recorded_behaviour(),
+        behaviour: StandardProtocolConfig::default()
+            .recorded_behaviour()
+            .expect("the standard tool presentation admits"),
     }
 }
 
@@ -27,7 +29,9 @@ fn defaults(max_lines: Option<usize>, head_share_percent: Option<u8>) -> Standar
 
 fn standard_owner() -> StandardConfigOwner {
     StandardConfigOwner {
-        behaviour: StandardProtocolConfig::default().recorded_behaviour(),
+        behaviour: Ok(StandardProtocolConfig::default()
+            .recorded_behaviour()
+            .expect("the standard tool presentation admits")),
     }
 }
 

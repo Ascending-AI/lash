@@ -1,6 +1,5 @@
 pub(crate) mod python;
 pub(crate) mod typescript;
-mod typescript_types;
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -9,7 +8,8 @@ use lash_core::plugin::SessionPages;
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError};
 use lash_kernel_doc::NumberPolicy;
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
-use lash_sansio::{SchemaShape, ShapeRow};
+use lash_tool_presenter_api::ToolPresenterSlot;
+use lash_tool_shape::SchemaShape;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_runtime::ResolvedToolBinding;
 
@@ -20,52 +20,78 @@ use crate::executor::{CellServices, CodeModeExecutionState, execute_cell};
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 
 /// The language a code-mode session's model writes: an installed kernel
-/// dialect package, by name, with the adapter that words prompts in it.
+/// dialect package, by name, with the adapter that words prompts in it and
+/// the tool presenter that shows its tools.
 ///
 /// A cell is one kernel program. The package named here lowers its source,
 /// in a worker, to a kernel document (`lash-kernel-dialect`); nothing in
 /// this crate parses a cell. A session records the name at creation and
 /// reads it back from its record on every later run, so it only ever runs
 /// its cells in the dialect it was created in.
+///
+/// The tool presenter is the dialect's physical slot: a host replaces or
+/// wraps it with [`Self::with_tool_presenter`]. A session records the
+/// presenter's id and admitted config at creation, and a session reopened
+/// on a host whose dialect holds another presenter is refused.
 #[derive(Clone)]
 pub struct CellDialect {
     name: Arc<str>,
     numbers: NumberPolicy,
     prompts: Arc<dyn DialectPrompts>,
+    tool_presenter: ToolPresenterSlot,
 }
 
 impl CellDialect {
     /// The dialect package installed as `name`, whose documents read
-    /// numbers under `numbers`, worded by `prompts`.
+    /// numbers under `numbers`, worded by `prompts`, its tools shown by
+    /// `tool_presenter`.
     pub fn new(
         name: impl Into<Arc<str>>,
         numbers: NumberPolicy,
         prompts: Arc<dyn DialectPrompts>,
+        tool_presenter: ToolPresenterSlot,
     ) -> Self {
         Self {
             name: name.into(),
             numbers,
             prompts,
+            tool_presenter,
         }
     }
 
-    /// TypeScript (`lash-dialect-typescript`): every number is a float.
+    /// TypeScript (`lash-dialect-typescript`): every number is a float. Its
+    /// tools are shown by the TypeScript presenter.
     pub fn typescript() -> Self {
         Self::new(
             typescript::LANGUAGE_ID,
             NumberPolicy::Float,
             Arc::new(TypescriptPrompts),
+            ToolPresenterSlot::new(lash_tool_presenter_typescript::TypescriptToolPresenter),
         )
     }
 
     /// Python (`lash-dialect-python`): a number is an integer or a float
-    /// by its spelling.
+    /// by its spelling. Its tools are shown by the Python presenter.
     pub fn python() -> Self {
         Self::new(
             python::LANGUAGE_ID,
             NumberPolicy::BySpelling,
             Arc::new(PythonPrompts),
+            ToolPresenterSlot::new(lash_tool_presenter_python::PythonToolPresenter),
         )
+    }
+
+    /// This dialect with its tools shown by `tool_presenter`: a host's own
+    /// presenter, or one wrapping the shipped one.
+    #[must_use]
+    pub fn with_tool_presenter(mut self, tool_presenter: ToolPresenterSlot) -> Self {
+        self.tool_presenter = tool_presenter;
+        self
+    }
+
+    /// The presenter that shows this dialect's tools.
+    pub fn tool_presenter(&self) -> &ToolPresenterSlot {
+        &self.tool_presenter
     }
 
     /// The name the dialect package is installed under: what a session
@@ -90,43 +116,27 @@ impl std::fmt::Debug for CellDialect {
         f.debug_struct("CellDialect")
             .field("name", &self.name)
             .field("numbers", &self.numbers)
+            .field("tool_presenter", &self.tool_presenter)
             .finish_non_exhaustive()
     }
 }
 
-/// How one dialect words what a model reads: tool paths, signatures, types
-/// and the prompt fragments that speak its syntax. It lowers nothing; the
-/// dialect's kernel package does that in a worker.
+/// How one dialect words what a model reads: tool paths, value types and
+/// the prompt fragments that speak its syntax. It lowers nothing; the
+/// dialect's kernel package does that in a worker. How its tools read is
+/// its [`CellDialect`]'s tool presenter's.
 pub trait DialectPrompts: Send + Sync + 'static {
     /// The call path a cell in this dialect writes to call a bound tool, or
     /// the refusal when no cell in this dialect can address it. The tool is
     /// offered to the cell as the effect of this name.
     fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal>;
 
-    /// A catalog tool's callable signature, in this dialect's syntax. The
-    /// shapes are the contract layer's reading of the tool's schemas; a
-    /// dialect spells them and reads no JSON Schema itself. When
-    /// `input_omittable`, the tool's input schema accepts the empty object,
-    /// and a call may leave the input out to pass exactly `{}`.
-    fn tool_signature(
-        &self,
-        call_path: &str,
-        input: &SchemaShape,
-        input_omittable: bool,
-        output: &SchemaShape,
-    ) -> String;
-
     /// A schema shape as a type, in this dialect's syntax. Shared code calls
-    /// it wherever a prompt shows the type of a field or of a required value.
+    /// it wherever a prompt shows the type of a value or of a history item.
     fn schema_type(&self, shape: &SchemaShape) -> String;
 
     /// Defines a named inferred record using the same shape spelling as tools.
     fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String;
-
-    /// A tool's authored example in this dialect's syntax, or `None` when the
-    /// dialect cannot spell it; an example it cannot spell is left out of the
-    /// prompt.
-    fn render_tool_example(&self, authored: &str) -> Option<String>;
 
     /// The words, tags and notation shared prompt fragments read.
     fn prompt_vocabulary(&self) -> DialectPromptVocabulary;
@@ -176,6 +186,8 @@ pub struct DialectRefusal {
 pub enum DialectRefusalKind {
     /// No cell in the dialect can call the tool binding's path as a tool.
     UnaddressableToolPath,
+    /// The dialect's tool presenter refused to present the tool.
+    PresentationRefused,
 }
 
 impl std::fmt::Display for DialectRefusal {
@@ -200,8 +212,8 @@ pub struct CellTags {
 pub struct ExecutionSectionRequest<'a> {
     /// The transport programs arrive on.
     pub channel: crate::plugin::RlmChannel,
-    /// The callable tools' docs, already rendered through this dialect's
-    /// call paths, signatures and examples; empty when there are none.
+    /// The callable tools' docs, as the session's tool presenter showed
+    /// them; empty when there are none.
     pub tools: &'a str,
     /// The catalog the docs were rendered from.
     pub tool_catalog: &'a lash_core::ToolCatalog,
@@ -267,6 +279,8 @@ impl DialectPromptVocabulary {
 #[derive(Clone)]
 pub(crate) struct CodeModeDialectServices {
     pub(crate) presentation: crate::RlmPresentationConfig,
+    /// The complete config the session's tool presenter was admitted with.
+    pub(crate) tool_presentation: serde_json::Value,
     pub(crate) workers: lash_vm_client::service::Service,
     pub(crate) code_renderer: crate::render::CodeRendererSlot,
     pub(crate) execution_bounds: crate::plugin::ExecutionBounds,
@@ -340,6 +354,11 @@ impl SessionDialect {
     /// given no host to execute against. The protocol driver needs one to
     /// answer questions about cells without an execution environment.
     pub(crate) fn prompt_only(dialect: CellDialect) -> Self {
+        let tool_presentation = dialect
+            .tool_presenter()
+            .presenter()
+            .admit_config(&serde_json::json!({}))
+            .unwrap_or_default();
         Self {
             dialect,
             events: Arc::default(),
@@ -349,15 +368,17 @@ impl SessionDialect {
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
                 presentation: crate::RlmPresentationConfig::standard(),
+                tool_presentation,
                 kernel: crate::executor::KernelCarry::default(),
                 helpers: None,
             },
         }
     }
 
-    /// This dialect presenting tools and values under `presentation`.
-    pub(crate) fn with_presentation(mut self, presentation: crate::RlmPresentationConfig) -> Self {
-        self.services.presentation = presentation;
+    /// This dialect presenting its tools under the admitted
+    /// `tool_presentation`.
+    pub(crate) fn with_tool_presentation(mut self, tool_presentation: serde_json::Value) -> Self {
+        self.services.tool_presentation = tool_presentation;
         self
     }
 
@@ -368,6 +389,16 @@ impl SessionDialect {
 
     pub(crate) fn presentation(&self) -> crate::RlmPresentationConfig {
         self.services.presentation
+    }
+
+    /// The complete config the session's tool presenter was admitted with.
+    pub(crate) fn tool_presentation(&self) -> &serde_json::Value {
+        &self.services.tool_presentation
+    }
+
+    /// The presenter that shows the session's tools.
+    pub(crate) fn tool_presenter(&self) -> &ToolPresenterSlot {
+        self.dialect.tool_presenter()
     }
 
     pub(crate) fn renderer(&self) -> crate::render::CodeRendererSlot {
@@ -403,10 +434,6 @@ impl SessionDialect {
         self.language()
             .tool_call_path(&binding)
             .map_err(|refusal| SessionError::Protocol(refusal.to_string()))
-    }
-
-    pub(crate) fn render_tool_example(&self, example: &str) -> Option<String> {
-        self.language().render_tool_example(example)
     }
 
     pub(crate) fn create_session(&self) -> DialectSession {
@@ -462,7 +489,8 @@ impl SessionDialect {
         channel: crate::plugin::RlmChannel,
         discovery: Option<&crate::plugin::RlmDiscovery>,
     ) -> Result<ExecutionSection, SessionError> {
-        let listing = crate::tool_catalog::ToolListing::of(tool_catalog, self, features, discovery);
+        let listing =
+            crate::tool_catalog::ToolListing::of(tool_catalog, self, features, discovery)?;
         Ok(self
             .language()
             .render_execution_section(ExecutionSectionRequest {
@@ -481,38 +509,6 @@ impl SessionDialect {
             self.prompt_vocabulary().history_item_name,
             &lash_rlm_types::history_item_shape(images),
         )
-    }
-
-    /// The fields of `shape` that say more than their type — a description,
-    /// a constraint or a default — one prompt row each. Every field's name
-    /// and type is already in the signature the rows sit under.
-    pub(crate) fn noted_field_rows(&self, shape: &SchemaShape) -> Vec<String> {
-        shape
-            .rows()
-            .iter()
-            .filter(|row| row.shape.has_notes())
-            .map(|row| self.field_row(row))
-            .collect()
-    }
-
-    fn field_row(&self, row: &ShapeRow) -> String {
-        let mut line = format!(
-            "- `{}{}: {}`",
-            row.path,
-            if row.required { "" } else { "?" },
-            self.language().schema_type(&row.shape)
-        );
-        let mut notes = row.shape.constraints.notes();
-        if let Some(default) = &row.shape.default {
-            notes.push(format!("default {default}"));
-        }
-        if !notes.is_empty() {
-            line.push_str(&format!(" ({})", notes.join(", ")));
-        }
-        if let Some(description) = &row.shape.description {
-            line.push_str(&format!(" — {description}"));
-        }
-        line
     }
 
     /// How a cell calls the finish tool `manifest`: Lash's `control.finish`
@@ -1006,26 +1002,12 @@ mod tests {
             Ok(binding.call_path())
         }
 
-        fn tool_signature(
-            &self,
-            call_path: &str,
-            _input: &SchemaShape,
-            _input_omittable: bool,
-            _output: &SchemaShape,
-        ) -> String {
-            call_path.to_string()
-        }
-
         fn schema_type(&self, shape: &SchemaShape) -> String {
-            shape.compact_type()
+            lash_tool_presenter_standard::compact_type(shape)
         }
 
         fn schema_definition(&self, name: &str, shape: &SchemaShape) -> String {
             format!("shape {name} = {}", self.schema_type(shape))
-        }
-
-        fn render_tool_example(&self, _authored: &str) -> Option<String> {
-            None
         }
 
         fn render_execution_section(
@@ -1042,6 +1024,7 @@ mod tests {
             "typescript",
             NumberPolicy::Float,
             Arc::new(ExtensionFixture),
+            CellDialect::typescript().tool_presenter().clone(),
         )
     }
 
@@ -1230,6 +1213,11 @@ pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
     CodeModeDialectServices {
         kernel: crate::executor::KernelCarry::default(),
         presentation: crate::RlmPresentationConfig::standard(),
+        tool_presentation: crate::dialect::CellDialect::typescript()
+            .tool_presenter()
+            .presenter()
+            .admit_config(&serde_json::json!({}))
+            .unwrap_or_default(),
         workers: lash_vm_client::service::Service::default(),
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         code_renderer: Default::default(),

@@ -90,7 +90,8 @@ mod tests {
                 .instruction_limit(super::super::InstructionBound::unbounded())
                 .memory_limit(super::super::MemoryBound::unbounded())
                 .build()
-                .recorded_behaviour(),
+                .recorded_behaviour(&crate::CellDialect::typescript())
+                .expect("the standard tool presentation admits"),
         }
     }
 

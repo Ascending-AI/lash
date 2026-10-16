@@ -203,6 +203,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::Declaration(_)
             | PluginError::InvalidToolDiscovery { .. }
             | PluginError::InvalidBatchMaximum { .. }
+            | PluginError::ToolPresentationRefused { .. }
             | PluginError::ResidentToolContractUnavailable { .. }
             | PluginError::ResidentToolDuplicateId { .. }
             | PluginError::ResidentToolDuplicateName { .. }

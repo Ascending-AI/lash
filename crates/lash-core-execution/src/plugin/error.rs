@@ -268,6 +268,16 @@ define_plugin_errors! {
         => Self::InvalidBatchMaximum { .. }
         => "invalid_batch_maximum"
         => crate::ToolFailureClass::InvalidRequest;
+/// An execution mode's tool presenter refused: the host's presentation
+    /// config at a session's creation, or a section it could not present.
+    #[error("plugin `{plugin_id}`'s tool presenter `{presenter}` refused: {message}")]
+    ToolPresentationRefused { plugin_id: String, presenter: String, message: String }
+        => PluginError::ToolPresentationRefused { plugin_id, presenter, message }
+        => { plugin_id: String, presenter: String, message: String }
+        => Self::ToolPresentationRefused { plugin_id: plugin_id.clone(), presenter: presenter.clone(), message: message.clone() }
+        => Self::ToolPresentationRefused { .. }
+        => "tool_presentation_refused"
+        => crate::ToolFailureClass::InvalidRequest;
     #[error("{source}")]
     UnusableSchema { source: Box<crate::SchemaAdmissionError> }
         => PluginError::UnusableSchema { source }
@@ -1015,6 +1025,7 @@ impl PluginError {
             | Self::ProcessEnvRefused { .. }
             | Self::InvalidToolDiscovery { .. }
             | Self::InvalidBatchMaximum { .. }
+            | Self::ToolPresentationRefused { .. }
             | Self::ResidentToolContractUnavailable { .. }
             | Self::ResidentToolDuplicateId { .. }
             | Self::ResidentToolDuplicateName { .. }

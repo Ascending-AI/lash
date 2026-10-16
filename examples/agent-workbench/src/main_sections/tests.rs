@@ -1064,15 +1064,6 @@ async fn inbox_authority_resolves_for_any_account_name() {
     let send_manifest = active_send()
         .await
         .expect("the session catalog composes the workbench plugin's inbox tool");
-    let compact = send_manifest
-        .compact_contract
-        .as_ref()
-        .expect("the recorded manifest carries its compact contract");
-    assert!(
-        compact.signature.contains("title"),
-        "the recorded contract names the runtime input schema: {}",
-        compact.signature
-    );
     select(
         lash::tools::ToolSelection::AllExcept(vec![send_manifest.id.clone()]),
         "deselect-send",

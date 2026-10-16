@@ -6,9 +6,9 @@
 use super::*;
 
 /// FIG-4544. A standard session shows a tool's schema in two places: the
-/// provider spec, which is the canonical schema itself, and the catalog's
-/// schema docs, which discovery and catalog projections hand back. An
-/// MCP-style schema — open, nested, one field undescribed — reaches both whole.
+/// provider spec, which is the canonical schema itself, and the docs its tool
+/// presenter writes for a host to hand back from discovery. An MCP-style
+/// schema — open, nested, one field undescribed — reaches both whole.
 #[test]
 fn an_open_nested_schema_reaches_the_provider_spec_and_the_schema_docs_whole() {
     let input_schema = serde_json::json!({
@@ -61,16 +61,16 @@ fn an_open_nested_schema_reaches_the_provider_spec_and_the_schema_docs_whole() {
         &input_schema
     );
 
-    let entry = &catalog.tools[0];
+    let docs = StandardProtocolConfig::default()
+        .tool_docs(&catalog)
+        .expect("the standard presenter documents the catalog");
     assert_eq!(
-        entry
-            .contract
-            .compact_contract_shared(&entry.manifest)
-            .render_signature(),
+        docs.text,
         concat!(
-            "issues_search({ query: str min length 1, ",
+            "### issues_search({ query: str min length 1, ",
             "filter?: record{labels?: list[str], state?: enum[\"open\", \"closed\"]}, ",
             "sort?: list[record{field: str}] }) -> str\n",
+            "Search issues.\n",
             "Parameters:\n",
             "- `query: str min length 1`\n",
             "- `filter.labels?: list[str]`\n",

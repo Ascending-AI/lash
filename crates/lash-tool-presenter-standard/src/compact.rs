@@ -3,20 +3,18 @@
 //! The compact contract is the catalog-facing projection of a tool contract:
 //! a one-line signature and one row per field. It spells the shared shape
 //! model in a terse, language-neutral notation (`record{query: str}`,
-//! `list[int]`); a dialect that shows a model its own syntax spells the same
-//! model itself.
+//! `list[int]`); a presenter that shows a model its own syntax spells the
+//! same model itself.
 
-use super::*;
-
-pub fn schema_for<T>() -> serde_json::Value
-where
-    T: schemars::JsonSchema,
-{
-    serde_json::to_value(schemars::schema_for!(T)).unwrap_or_else(|_| serde_json::json!({}))
-}
+use lash_tool_shape::{ExtraKeys, ObjectShape, SchemaShape, ShapeKind, ShapeRow};
 
 /// A shape's type in compact notation.
-pub(crate) fn compact_type(shape: &SchemaShape) -> String {
+///
+/// ```rust,ignore
+/// let shape = SchemaShape::from_json_schema(&json!({"type": "array", "items": {"type": "integer"}}), 8);
+/// assert_eq!(compact_type(&shape), "list[int]");
+/// ```
+pub fn compact_type(shape: &SchemaShape) -> String {
     match &shape.kind {
         ShapeKind::Unknown => "any".to_string(),
         ShapeKind::Null => "null".to_string(),
@@ -66,6 +64,9 @@ pub(crate) fn compact_type(shape: &SchemaShape) -> String {
                 .join(", "),
             compact_type(&signature.output)
         ),
+        // `ShapeKind` is non-exhaustive: a kind this notation has no
+        // spelling for yet is shown as the widest type rather than guessed at.
+        _ => "any".to_string(),
     }
 }
 
@@ -154,88 +155,6 @@ pub(crate) fn compact_row(row: &ShapeRow, name_key: &str) -> serde_json::Value {
     serde_json::Value::Object(out)
 }
 
-/// Inline one schema node whose `$ref` carries sibling keywords.
-///
-/// The reference chain is expanded against `root` and the node's own siblings
-/// are merged over the resolved definition, so a sibling `description` wins
-/// over the definition's, per JSON Schema draft annotation semantics. Returns
-/// `None` when the reference is not a resolvable local pointer, leaving the
-/// caller to report it rather than emit a schema the provider will reject.
-/// References whose expansion was cut short by a cycle are reported in
-/// `cycles`.
-pub(crate) fn resolve_ref_node_with_siblings(
-    root: &serde_json::Value,
-    node: &serde_json::Value,
-    cycles: &mut Vec<String>,
-) -> Option<serde_json::Value> {
-    let mut resolving = Vec::new();
-    let resolved = resolve_schema_ref_value(root, node, &mut resolving, cycles);
-    if resolved.get("$ref").is_some() {
-        return None;
-    }
-    Some(resolved)
-}
-
-fn resolve_schema_ref_value(
-    root: &serde_json::Value,
-    schema: &serde_json::Value,
-    resolving: &mut Vec<String>,
-    cycles: &mut Vec<String>,
-) -> serde_json::Value {
-    match schema {
-        serde_json::Value::Object(map) => {
-            if let Some(reference) = map.get("$ref").and_then(serde_json::Value::as_str)
-                && let Some(pointer) = reference.strip_prefix('#')
-            {
-                if resolving.iter().any(|active| active == reference) {
-                    cycles.push(reference.to_string());
-                    return serde_json::json!({});
-                }
-                if let Some(target) = root.pointer(pointer) {
-                    resolving.push(reference.to_string());
-                    let mut resolved = resolve_schema_ref_value(root, target, resolving, cycles);
-                    resolving.pop();
-
-                    let sibling_count = map.keys().filter(|key| key.as_str() != "$ref").count();
-                    if sibling_count == 0 {
-                        return resolved;
-                    }
-                    if let serde_json::Value::Object(resolved_map) = &mut resolved {
-                        for (key, value) in map {
-                            if key == "$ref" {
-                                continue;
-                            }
-                            resolved_map.insert(
-                                key.clone(),
-                                resolve_schema_ref_value(root, value, resolving, cycles),
-                            );
-                        }
-                        return resolved;
-                    }
-                }
-            }
-
-            serde_json::Value::Object(
-                map.iter()
-                    .map(|(key, value)| {
-                        (
-                            key.clone(),
-                            resolve_schema_ref_value(root, value, resolving, cycles),
-                        )
-                    })
-                    .collect(),
-            )
-        }
-        serde_json::Value::Array(values) => serde_json::Value::Array(
-            values
-                .iter()
-                .map(|value| resolve_schema_ref_value(root, value, resolving, cycles))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
-}
-
 pub(crate) fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
     let signature = value.get("signature")?.as_str()?.trim();
     if signature.is_empty() {
@@ -250,34 +169,6 @@ pub(crate) fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
         Some(description) => format!("- `{signature}` — {description}"),
         None => format!("- `{signature}`"),
     })
-}
-
-pub(crate) fn compact_examples(examples: &[String], limit: usize) -> Vec<String> {
-    compact_examples_with_chars(examples, limit, COMPACT_TOOL_EXAMPLE_CHAR_LIMIT)
-}
-
-pub(crate) fn compact_examples_with_chars(
-    examples: &[String],
-    limit: usize,
-    max_chars: usize,
-) -> Vec<String> {
-    examples
-        .iter()
-        .map(|example| example.trim())
-        .filter(|example| !example.is_empty())
-        .take(limit)
-        .map(|example| {
-            if example.chars().count() <= max_chars {
-                return example.to_string();
-            }
-            let mut out = example
-                .chars()
-                .take(max_chars.saturating_sub(3))
-                .collect::<String>();
-            out.extend("...".chars().take(max_chars.min(3)));
-            out
-        })
-        .collect()
 }
 
 fn display_value(value: &serde_json::Value) -> String {

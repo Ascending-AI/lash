@@ -689,6 +689,7 @@ PACKAGE_DEPS = {
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "lash_tool_presenter_standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker"
@@ -705,6 +706,10 @@ PACKAGE_DEPS = {
             "lash_render": "//crates/lash-render:lash-render",
             "lash_rlm_types": "//crates/lash-rlm-types:lash-rlm-types",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_tool_presenter_api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api",
+            "lash_tool_presenter_python": "//crates/lash-tool-presenter-python:lash-tool-presenter-python",
+            "lash_tool_presenter_typescript": "//crates/lash-tool-presenter-typescript:lash-tool-presenter-typescript",
+            "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
@@ -736,6 +741,8 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_render": "//crates/lash-render:lash-render",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_tool_presenter_api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api",
+            "lash_tool_presenter_standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard",
             "lash_tool_support": "//crates/lash-tool-support:lash-tool-support",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322"
@@ -825,6 +832,7 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_render": "//crates/lash-render:lash-render",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
             "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322"
@@ -900,6 +908,58 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {},
         "normal": {}
+    },
+    "lash-internal-tool-presenter-api": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322",
+            "thiserror": "//third-party/rust:p0375"
+        }
+    },
+    "lash-internal-tool-presenter-python": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_tool_presenter_api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api",
+            "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322"
+        }
+    },
+    "lash-internal-tool-presenter-standard": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_tool_presenter_api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api",
+            "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322"
+        }
+    },
+    "lash-internal-tool-presenter-typescript": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "lash_tool_presenter_api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api",
+            "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322"
+        }
+    },
+    "lash-internal-tool-shape": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322"
+        }
     },
     "lash-internal-tool-support": {
         "build": {},
@@ -1440,6 +1500,9 @@ PACKAGE_DEPS = {
             "lash_rlm_types": "//crates/lash-rlm-types:lash-rlm-types",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "lash_tool_presenter_api": "//crates/lash-tool-presenter-api:lash-tool-presenter-api",
+            "lash_tool_presenter_standard": "//crates/lash-tool-presenter-standard:lash-tool-presenter-standard",
+            "lash_tool_shape": "//crates/lash-tool-shape:lash-tool-shape",
             "lash_tool_support": "//crates/lash-tool-support:lash-tool-support",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",

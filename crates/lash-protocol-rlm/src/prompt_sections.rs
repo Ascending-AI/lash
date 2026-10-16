@@ -87,25 +87,19 @@ pub(crate) struct RlmSectionBehaviour {
 
 /// The execution section a session on `behaviour.channel` renders over
 /// `tool_catalog`: every tool, or, when the session has a discovery
-/// operation, the tools its recorded budget lists.
-#[expect(
-    clippy::expect_used,
-    reason = "catalog registration validates every tool binding against the session's dialect; the execution section only errs on an unvalidated catalog"
-)]
+/// operation, the tools its recorded budget lists. A tool presenter that
+/// refuses the listing fails the section.
 pub(crate) fn execution_section(
     behaviour: &RlmSectionBehaviour,
     tool_catalog: &lash_core::ToolCatalog,
-) -> ExecutionSection {
+) -> Result<ExecutionSection, PromptRenderError> {
     match behaviour.channel {
-        RlmChannel::Cell => behaviour
-            .dialect
-            .execution_section(
-                behaviour.prompt_features,
-                tool_catalog,
-                RlmChannel::Cell,
-                behaviour.discovery.as_ref(),
-            )
-            .expect("validated dialect surface"),
+        RlmChannel::Cell => behaviour.dialect.execution_section(
+            behaviour.prompt_features,
+            tool_catalog,
+            RlmChannel::Cell,
+            behaviour.discovery.as_ref(),
+        ),
         RlmChannel::NativeTool => crate::native::prompt::execution_section(
             &behaviour.dialect,
             behaviour.prompt_features,
@@ -113,6 +107,7 @@ pub(crate) fn execution_section(
             behaviour.discovery.as_ref(),
         ),
     }
+    .map_err(|error| PromptRenderError::new(error.to_string()))
 }
 
 fn text_or_omit(text: impl AsRef<str>) -> SectionText {
@@ -145,7 +140,7 @@ fn execution(
     behaviour: &RlmSectionBehaviour,
     input: &PromptInput<'_>,
 ) -> Result<SectionText, PromptRenderError> {
-    let ExecutionSection { prose, .. } = execution_section(behaviour, input.offered().catalog());
+    let ExecutionSection { prose, .. } = execution_section(behaviour, input.offered().catalog())?;
     let title = behaviour.dialect.prompt_vocabulary().execution_title;
     Ok(match text_or_omit(prose) {
         SectionText::Text(prose) => SectionText::Text(format!("## {title}\n\n{prose}")),
@@ -158,7 +153,7 @@ fn declarations(
     input: &PromptInput<'_>,
 ) -> Result<SectionText, PromptRenderError> {
     let ExecutionSection { declarations, .. } =
-        execution_section(behaviour, input.offered().catalog());
+        execution_section(behaviour, input.offered().catalog())?;
     let mut parts = Vec::new();
     let declarations = declarations.trim();
     if !declarations.is_empty() {

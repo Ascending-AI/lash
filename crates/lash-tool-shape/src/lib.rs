@@ -1,26 +1,22 @@
 //! The language-neutral, prompt-facing shape of a JSON Schema.
 //!
-//! A tool contract's schemas are JSON Schema, and every prompt surface has to
-//! show a model what they accept: the TypeScript dialect as a type, the
-//! compact contract as signature rows. [`SchemaShape`] is the one reading of a
-//! schema those surfaces share. It is imported once, here, and each surface
-//! only spells it; no surface reads the raw schema again. Runtime-value
-//! inference constructs the same shape directly.
+//! A tool contract's schemas are JSON Schema, and every tool presenter has to
+//! show a model what they accept: the TypeScript presenter as a type, the
+//! standard presenter as compact signature rows. [`SchemaShape`] is the one
+//! reading of a schema those presenters share. It is imported here, and each
+//! presenter only spells it; no presenter reads the raw schema again.
+//! Runtime-value inference constructs the same shape directly.
 //!
 //! The shape is a *view*, not a validator. It keeps what a reader needs: the
 //! fields of open objects and whether extra keys are allowed, which fields are
 //! required, nested objects and arrays, enums, unions and nullability, field
 //! descriptions, and constraints as annotations. Anything it cannot say
 //! becomes [`ShapeKind::Unknown`] rather than an error, because a schema that
-//! must be refused is refused where it enters the catalog.
+//! must be refused is refused where it enters the catalog. Validation never
+//! reads this crate; how deep a presenter imports is its own recorded choice.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
-
-/// How deep the importer follows nested containers and references before it
-/// answers [`ShapeKind::Unknown`]. The bound keeps a recursive schema's
-/// rendered shape finite.
-const MAX_SHAPE_DEPTH: usize = super::ToolPresentationConfig::standard().schema_depth;
 
 /// The JSON Schema keyword that carries the types JSON Schema cannot say.
 ///
@@ -269,19 +265,11 @@ impl From<ShapeKind> for SchemaShape {
 }
 
 impl SchemaShape {
-    /// Spells this shape using the compact tool contract's type notation.
-    pub fn compact_type(&self) -> String {
-        super::schema_docs::compact_type(self)
-    }
-
-    /// Reads a JSON Schema document as a shape. Local `#` references are
-    /// resolved against `schema` itself.
-    pub fn from_json_schema(schema: &Value) -> Self {
-        Self::from_json_schema_with_depth(schema, MAX_SHAPE_DEPTH)
-    }
-
-    /// Reads a prompt shape to the host's selected depth; schema validation is unchanged.
-    pub fn from_json_schema_with_depth(schema: &Value, max_depth: usize) -> Self {
+    /// Reads a JSON Schema document as a shape, following nested containers
+    /// and references `max_depth` levels deep before it answers
+    /// [`ShapeKind::Unknown`]; the bound keeps a recursive schema's shape
+    /// finite. Local `#` references are resolved against `schema` itself.
+    pub fn from_json_schema(schema: &Value, max_depth: usize) -> Self {
         ShapeImporter {
             root: schema,
             max_depth,
@@ -718,8 +706,11 @@ mod tests {
 
     use super::*;
 
+    /// The depth the shipped presenters import to.
+    const MAX_SHAPE_DEPTH: usize = 8;
+
     fn shape(schema: Value) -> SchemaShape {
-        SchemaShape::from_json_schema(&schema)
+        SchemaShape::from_json_schema(&schema, MAX_SHAPE_DEPTH)
     }
 
     fn field<'a>(shape: &'a SchemaShape, name: &str) -> &'a ShapeField {

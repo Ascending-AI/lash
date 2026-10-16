@@ -25,15 +25,7 @@ impl RlmRuntimeState {
 
     #[cfg(test)]
     pub(crate) fn new_for_tests() -> Result<Self, SessionError> {
-        let services = crate::dialect::CodeModeDialectServices {
-            kernel: crate::executor::KernelCarry::default(),
-            presentation: crate::RlmPresentationConfig::standard(),
-            workers: lash_vm_client::service::Service::default(),
-            execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
-            code_renderer: Default::default(),
-            channel: crate::plugin::RlmChannel::Cell,
-            helpers: None,
-        };
+        let services = crate::dialect::test_dialect_services();
         Self::new(Arc::new(crate::dialect::SessionDialect::new(
             crate::dialect::CellDialect::typescript(),
             services,

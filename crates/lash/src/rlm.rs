@@ -79,6 +79,12 @@ pub use lash_protocol_rlm::is_rlm_protocol_output;
 /// The initial nodes that bind a [`RlmSeed`] in a session being created: a
 /// creator states them on its create request (FIG-5296).
 pub use lash_protocol_rlm::rlm_seed_initial_nodes;
+/// The tool presenters a [`CellDialect`] ships with
+/// ([`CellDialect::with_tool_presenter`] replaces one), with their building
+/// blocks: spelling a type, a definition, a signature and note rows.
+pub use lash_protocol_rlm::tool_presenters::{
+    python as python_tool_presenter, typescript as typescript_tool_presenter,
+};
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CallFeedbackPolicy, CallFeedbackPolicyError, CodeRenderer,
     CodeRendererSlot, ExecutionBounds, InstructionBound, MemoryBound, RLM_PROTOCOL_PLUGIN_ID,
@@ -108,12 +114,6 @@ pub use lash_protocol_rlm::{
 /// session's command lane records as an [`RlmSeed`] event (FIG-5134).
 pub use lash_protocol_rlm::{
     CodeModeProjectedBindings, ProjectedBindingError, RlmSeed, rlm_session_projection_extension,
-};
-/// The schema shapes a [`DialectPrompts`] is handed to spell: one reading of a tool's
-/// JSON Schemas, shared by every prompt surface.
-pub use lash_protocol_rlm::{
-    ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
-    ShapeField, ShapeKind, ShapeRow,
 };
 /// Lash's control tools, as a session advertises them.
 pub use lash_protocol_rlm::{

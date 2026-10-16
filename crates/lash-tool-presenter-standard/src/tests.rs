@@ -1,4 +1,15 @@
 use super::*;
+use lash_sansio::{JsonSchema, ToolDefinition};
+
+/// `tool` compacted under its own name and the standard config.
+fn compact(tool: &ToolDefinition) -> CompactToolContract {
+    compact_contract(
+        &tool.manifest,
+        &tool.contract,
+        tool.name(),
+        &StandardPresenterConfig::standard(),
+    )
+}
 
 #[test]
 fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
@@ -34,7 +45,7 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
         "await tools.search_docs({ query: \"ignored\" })?".to_string(),
     ]);
 
-    let contract = tool.compact_contract();
+    let contract = compact(&tool);
     assert_eq!(
         contract.signature,
         "search_docs({ query: str, limit?: int <= 10 = 5 })"
@@ -62,7 +73,7 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
     );
     assert_eq!(contract.examples.len(), 2);
 
-    let docs = tool.compact_contract().render_markdown();
+    let docs = compact(&tool).render_markdown();
     assert!(docs.contains(
         "### search_docs({ query: str, limit?: int <= 10 = 5 }) -> record{matches: list[str], next_page?: str | null}"
     ));
@@ -112,7 +123,7 @@ fn compact_tool_contract_resolves_local_refs_in_string_or_list_parameters() {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120));
 
-    let signature = tool.compact_contract().render_signature();
+    let signature = compact(&tool).render_signature();
 
     assert!(
         signature.contains("module?: str | list[str] | null"),
@@ -139,7 +150,7 @@ fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
     .with_execution(std::time::Duration::from_secs(120))
     .with_output_from_input_schema("output", None);
 
-    let contract = tool.compact_contract();
+    let contract = compact(&tool);
     assert_eq!(
         contract.signature,
         "spawn_agent<T = any>({ output?: TypeSpec<T> })"
@@ -148,7 +159,7 @@ fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
     assert!(contract.return_fields.is_empty());
     assert_eq!(contract.render_returns(), "");
     assert_eq!(
-        tool.compact_contract().render_markdown(),
+        compact(&tool).render_markdown(),
         "### spawn_agent<T = any>({ output?: TypeSpec<T> }) -> T\nRun a child session\nParameters:\n- `output?: TypeSpec<T>`"
     );
 }
@@ -174,12 +185,12 @@ fn dynamic_output_contract_renders_default_schema() {
     .with_output_from_input_schema(
         "output",
         Some(
-            crate::JsonSchema::admit(serde_json::json!({ "type": "string" }))
+            JsonSchema::admit(serde_json::json!({ "type": "string" }))
                 .expect("valid output default schema"),
         ),
     );
 
-    let contract = tool.compact_contract();
+    let contract = compact(&tool);
     assert_eq!(
         contract.signature,
         "llm_query<T = str>({ task: str, output?: TypeSpec<T> })"
@@ -282,7 +293,7 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
     }))
     .unwrap();
 
-    let contract = tool.compact_contract();
+    let contract = compact(&tool);
     assert_eq!(
         serde_json::to_value(&contract).unwrap(),
         serde_json::json!({
@@ -421,7 +432,7 @@ fn compact_contract_renders_an_open_nested_schema_with_full_fidelity() {
     .with_execution(std::time::Duration::from_secs(120));
 
     assert_eq!(
-        tool.compact_contract().render_markdown(),
+        compact(&tool).render_markdown(),
         concat!(
             "### issues_search({ query: str min length 1, ",
             "filter?: record{labels?: list[str], state?: enum[\"open\", \"closed\"], ...: str}, ",

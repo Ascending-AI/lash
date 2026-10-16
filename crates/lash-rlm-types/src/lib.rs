@@ -1,7 +1,8 @@
 use lash_sansio::{
     CellFailure, CellFailureKind, CellOutcome, CellRecord, ExecutedCall, ExecutedCallOutcome,
-    OutputValue, RetainedValue, SchemaShape, ShapeKind, TerminationMode, TurnProtocol, ValueShape,
+    OutputValue, RetainedValue, TerminationMode, TurnProtocol, ValueShape,
 };
+use lash_tool_shape::{SchemaShape, ShapeKind};
 
 /// Read-only legacy protocol-owned assistant context paired with a code mode
 /// trajectory entry.
@@ -268,12 +269,14 @@ impl RlmHistoryItem {
 /// renderer. `images` drops the step's `images` key for a session whose
 /// model is shown no images.
 pub fn history_item_shape(images: bool) -> SchemaShape {
+    /// Deep enough for every nesting the item's own type has.
+    const HISTORY_ITEM_DEPTH: usize = 8;
     // The serialize contract: a key the item may skip is optional.
     let schema = schemars::generate::SchemaSettings::default()
         .for_serialize()
         .into_generator()
         .into_root_schema_for::<RlmHistoryItem>();
-    let mut shape = SchemaShape::from_json_schema(schema.as_value());
+    let mut shape = SchemaShape::from_json_schema(schema.as_value(), HISTORY_ITEM_DEPTH);
     if !images && let ShapeKind::Union(members) = &mut shape.kind {
         for member in members {
             if let ShapeKind::Object(object) = &mut member.kind {
@@ -288,7 +291,8 @@ pub fn history_item_shape(images: bool) -> SchemaShape {
 mod rlm_step_serde_tests {
     use std::collections::BTreeSet;
 
-    use lash_sansio::{CellFailure, CellFailureKind, ShapeKind};
+    use lash_sansio::{CellFailure, CellFailureKind};
+    use lash_tool_shape::ShapeKind;
 
     use lash_sansio::{CellOutcome, CellRecord};
 

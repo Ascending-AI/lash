@@ -189,6 +189,13 @@ pub mod standard {
         StandardRenderRefusal, StandardRunOptions, StandardTurnOptions,
         section_keys as standard_section_keys,
     };
+    /// The compact tool presenter standard sessions ship with, and its
+    /// building blocks: the compact contract of one tool and the compact
+    /// spelling of a shape.
+    pub use lash_tool_presenter_standard::{
+        CompactToolContract, STANDARD_TOOL_PRESENTER_ID, StandardPresenterConfig,
+        StandardToolPresenter, compact_contract, compact_type,
+    };
 }
 pub mod render {
     pub use lash_protocol_standard::render::{
@@ -454,8 +461,23 @@ pub mod observe {
 pub mod tools {
     #[cfg(feature = "codemode")]
     pub use lash_llm_tools::{LLM_TOOLS_CONFIG, LlmToolsComponent, LlmToolsPluginFactory};
-    pub use lash_sansio::ToolPresentationConfig;
     pub use lash_sansio::schema_contract::OutputSchemaLimits;
+    /// How an execution mode's tools read to a model: the replaceable
+    /// presenter a mode holds in its slot, what it is handed and what it
+    /// answers, the record a session keeps of it, and a wrapper that
+    /// decorates one. [`presenter_listing`] is the catalogue listing the
+    /// shipped presenters share.
+    pub use lash_tool_presenter_api::{
+        PresentationRefusal, PresentedToolSection, RecordedToolPresenter, ToolDisclosure,
+        ToolPresentationEntry, ToolPresentationRequest, ToolPresenter, ToolPresenterSlot,
+        WrappedToolPresenter, admit_over_standard, listing as presenter_listing, read_config,
+    };
+    /// The shape a presenter reads a tool's JSON Schemas as.
+    pub use lash_tool_shape::{
+        ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
+        ShapeField, ShapeKind, ShapeRow, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
+        is_named_type_reference,
+    };
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{GetDefinitionIntent, PublishDefinitionIntent};
     pub use lash_sansio::{ModelTool, ToolCallStatus};
@@ -471,20 +493,20 @@ pub mod tools {
     pub use lash_core::sansio::PendingToolCall;
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
-        CompactToolContract, ExecutionOwner, IsolatedProcessRequest, IsolatedStart,
-        PendingCompletion, PendingResolver, PreparedToolCall, ResolveTargetError,
-        StartProcessIntent, SurfaceTools, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
-        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolArgumentProjectionPolicy,
-        ToolAttachmentClient, ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput,
-        ToolCallRecord, ToolCatalogEntry, ToolContract, ToolDefinition, ToolDirectCompletionClient,
-        ToolDiscovery, ToolDraft, ToolExecutionGrant, ToolFailure, ToolFailureCause,
-        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentCommandFailure,
-        ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentLimits,
-        ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents,
-        ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
-        ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolSessionLlmProfile,
-        ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
-        facade_support::ReconfigureError, turn_stop_from_tool_control,
+        ExecutionOwner, IsolatedProcessRequest, IsolatedStart, PendingCompletion, PendingResolver,
+        PreparedToolCall, ResolveTargetError, StartProcessIntent, SurfaceTools,
+        TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND,
+        TOOL_INTENT_PROTOCOL_V3, ToolArgumentProjectionPolicy, ToolAttachmentClient,
+        ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+        ToolCatalogEntry, ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
+        ToolDraft, ToolExecutionGrant, ToolFailure, ToolFailureCause, ToolFailureClass,
+        ToolFailureSource, ToolIntent, ToolIntentCommandFailure, ToolIntentExecutionOutcome,
+        ToolIntentIdentity, ToolIntentKind, ToolIntentLimits, ToolIntentRealized,
+        ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents, ToolManifest, ToolModule,
+        ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
+        ToolProvider, ToolRegistry, ToolSessionLlmProfile, ToolValue, ToolView, ToolViewBlock,
+        ToolViewMeta, derive_tool_intent_identity, facade_support::ReconfigureError,
+        turn_stop_from_tool_control,
     };
     /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
     pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};
