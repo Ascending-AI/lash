@@ -46,6 +46,22 @@ impl PostgresBlobProbe {
 
 #[async_trait::async_trait]
 impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
+    async fn session_config_ref(
+        &self,
+        session_id: &lash_core_execution::SessionId,
+    ) -> lash_core_execution::BlobRef {
+        let config_ref: String = sqlx::query_scalar(
+            "SELECT revision.config_ref FROM lash_session_head AS head
+             JOIN lash_session_revisions AS revision USING (session_id, head_revision)
+             WHERE head.session_id = $1",
+        )
+        .bind(session_id.as_str())
+        .fetch_one(self.storage.pool())
+        .await
+        .expect("query Postgres config root");
+        config_ref.into()
+    }
+
     async fn blob_exists(&self, blob_ref: &lash_core_execution::BlobRef) -> bool {
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM lash_blobs WHERE hash = $1)")
             .bind(blob_ref.as_str())

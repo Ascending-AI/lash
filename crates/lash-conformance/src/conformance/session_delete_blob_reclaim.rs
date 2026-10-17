@@ -12,6 +12,12 @@ use pretty_assertions::assert_eq;
 /// blob-deletion boundary.
 #[async_trait::async_trait]
 pub trait SessionDeleteBlobProbe: Send + Sync {
+    /// Observe the config graph root referenced by a session's current revision.
+    ///
+    /// Integrator class (ADR 0051): **conformance-suite embedders** read the
+    /// stored reference rather than deriving it from a serialized payload.
+    async fn session_config_ref(&self, session_id: &SessionId) -> crate::BlobRef;
+
     /// Observe whether one exact content address exists.
     ///
     /// Integrator class (ADR 0051): **conformance-suite embedders** implement
@@ -680,25 +686,16 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
     // Config is owned by each session; the checkpoint closure is shared.
     // Observe those lifetimes directly instead of assuming every deletion
     // candidate belongs to the shared checkpoint closure.
-    let config_ref = |head: crate::store::SessionHeadMeta| {
-        crate::BlobRef::for_content(&serde_json::to_vec(&head.payload()).expect("config payload"))
-    };
-    let source_config = config_ref(
-        committed
-            .store
-            .load_session_head_meta(&committed.request.session_id)
-            .await
-            .expect("source head")
-            .expect("source config"),
-    );
-    let fork_config = config_ref(
-        committed
-            .store
-            .load_session_head_meta(&fork_request.session_id)
-            .await
-            .expect("fork head")
-            .expect("fork config"),
-    );
+    // FIG-6599 (fd0652f96d) stores a ConfigValue graph root, so a hash of
+    // the head's JSON payload no longer names its config blob.
+    let source_config = handles
+        .probe
+        .session_config_ref(&committed.request.session_id)
+        .await;
+    let fork_config = handles
+        .probe
+        .session_config_ref(&fork_request.session_id)
+        .await;
     assert!(handles.probe.blob_exists(&source_config).await);
     assert!(handles.probe.blob_exists(&fork_config).await);
 

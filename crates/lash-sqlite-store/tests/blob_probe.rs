@@ -28,6 +28,23 @@ impl SqliteBlobProbe {
 
 #[async_trait::async_trait]
 impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
+    async fn session_config_ref(
+        &self,
+        session_id: &lash_core_execution::SessionId,
+    ) -> lash_core_execution::BlobRef {
+        let config_ref: String = rusqlite::Connection::open(&self.catalog)
+            .expect("open SQLite config-root probe")
+            .query_row(
+                "SELECT revision.config_ref FROM session_head AS head
+                 JOIN session_revisions AS revision USING (session_id, head_revision)
+                 WHERE head.session_id = ?1",
+                rusqlite::params![session_id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("query SQLite config root");
+        config_ref.into()
+    }
+
     async fn blob_exists(&self, blob_ref: &lash_core_execution::BlobRef) -> bool {
         rusqlite::Connection::open(&self.catalog)
             .expect("open SQLite blob probe")
