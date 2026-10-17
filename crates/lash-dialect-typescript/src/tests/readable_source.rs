@@ -952,3 +952,71 @@ fn nested_library_actions_and_await_policies_have_exact_expression_inverses() {
         );
     }
 }
+
+/// FIG-6641: source field writes now use the kernel's place-first order.
+/// The readable codec must retain that order, including actions in a place.
+#[test]
+fn place_first_writes_keep_their_order_and_nested_actions_when_read_back() {
+    let lowered =
+        super::lower_with_effects("const row = { n: 0 }; row.n = 1; console.log(row.n);").unwrap();
+    assert!(lowered.document.main.iter().any(|stmt| matches!(
+        stmt,
+        k::Stmt::Assign {
+            order: k::AssignOrder::PlaceFirst,
+            ..
+        }
+    )));
+    let printed = roundtrip(&lowered.document, true);
+    assert!(
+        printed.source.contains("k.assignPlaceFirst(row.n,"),
+        "{}",
+        printed.source
+    );
+    let mut document = k::Document::new(
+        k::NumberPolicy::BySpelling,
+        vec![
+            k::Stmt::Let {
+                name: "slot".into(),
+                value: k::Rhs::Expr(literal(k::Literal::Null)),
+            },
+            k::Stmt::Let {
+                name: "xs".into(),
+                value: k::Rhs::Expr(k::Expr::List(vec![literal(k::Literal::Null)])),
+            },
+        ],
+    );
+    for place in [
+        k::Place::Variable("slot".into()),
+        k::Place::Member(k::Member::Field {
+            target: k::Expr::Act(Box::new(k::ActExpr {
+                kind: k::ActKind::Call(k::Callee::Declared("object".into())),
+                args: vec![],
+            })),
+            field: "value".into(),
+        }),
+        k::Place::Member(k::Member::Index {
+            target: variable("xs"),
+            index: integer(0),
+        }),
+    ] {
+        document.main.push(k::Stmt::Assign {
+            place,
+            value: k::Rhs::Action(k::Action::Call {
+                callee: k::Callee::Declared("object".into()),
+                args: vec![],
+            }),
+            order: k::AssignOrder::PlaceFirst,
+        });
+    }
+    document.functions.insert(
+        "object".into(),
+        k::Function {
+            params: vec![],
+            body: vec![k::Stmt::Return {
+                value: k::Expr::Record(vec![]),
+            }],
+            start: None,
+        },
+    );
+    roundtrip(&document, true);
+}

@@ -63,22 +63,9 @@ impl Reader {
         if annotation.is_none()
             && let Some(action) = self.authored_action(expr)
         {
-            return Some(action.map(|action| {
-                let k::Action::Call { callee, args } = action else {
-                    unreachable!()
-                };
-                NativeAction(k::ActExpr {
-                    kind: k::ActKind::Call(callee),
-                    args: args
-                        .into_iter()
-                        .map(|atom| match atom {
-                            k::Atom::Variable(name) => k::Expr::Variable(name),
-                            k::Atom::Literal(value) => k::Expr::Literal(value),
-                        })
-                        .collect(),
-                })
-            }));
+            return Some(action);
         }
+
         if matches!(expr, s::Expr::Call(call) if matches!(&call.callee, s::Callee::Expr(callee) if path(callee).as_deref() == Some("spawn")))
         {
             return Some((|| {
@@ -109,7 +96,7 @@ impl Reader {
     /// A library action spelled as an author writes it: `console.log(...args)`.
     /// None when the expression is not one; the base document must hold the
     /// helper once.
-    fn authored_action(&mut self, expr: &s::Expr) -> Option<Result<k::Action, Diagnostic>> {
+    fn authored_action(&mut self, expr: &s::Expr) -> Option<Result<NativeAction, Diagnostic>> {
         let s::Expr::Call(call) = expr else {
             return None;
         };
@@ -134,13 +121,13 @@ impl Reader {
         }
         let function = self.operators.unique("ts.console.log")?;
         Some((|| {
-            Ok(k::Action::Call {
-                callee: k::Callee::Library(function),
+            Ok(NativeAction(k::ActExpr {
+                kind: k::ActKind::Call(k::Callee::Library(function)),
                 args: vec![
-                    k::Atom::Literal(k::Literal::Absent),
-                    self.atom(&argument.expr)?,
+                    k::Expr::Literal(k::Literal::Absent),
+                    self.expression(&argument.expr)?,
                 ],
-            })
+            }))
         })())
     }
     fn native_callee(&self, expr: &s::Expr) -> Result<k::Callee, Diagnostic> {

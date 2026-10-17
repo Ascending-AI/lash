@@ -51,9 +51,9 @@ use text.utf16_len = @7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5
 use text.utf16_slice = @e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409
 use ts.array.integer = @8df1d969e9c22c727d7b2a400ceb7659601c65a52b49f309c7ed3a6f02cb41f8
 use ts.array.is = @8f0ac10cd41f7f321f99efd18a09659b5555c40aed70767e3c1c094506efb497
-use ts.array.iterator = @82460f15849f4b95356945c2803794441b8ba78a19921f1410ed26609b9361b8
-use ts.array.length = @4276699706fdd94ac26f98642c92e5136110480e35f0239a9541477075e0ee2f
-use ts.array.values = @ba251e18e03086f01b791df3107818c73b920dd30a37351d6f3f74e8295e6d3e
+use ts.array.iterator = @eda7234f0205e8e88b61e555730cd43a3dda6c8b16dbc4bb96818d99ae0e2aa2
+use ts.array.length = @edde654ca115ac78be1e751c7fd2764e0962311a2b83651375c1b440998ed521
+use ts.array.values = @5779f5d47b6907e0ea4c13b99865e20f8b0917d4e406ed68776c86a9c0a78a23
 use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
 use ts.boundary = @4979682bd7501b8088dc50a0b7839615c9541621786252504fbf17afc282d4fc
 use ts.callable = @2c0ae8a7768df5037a9df976731713c14477549f94ea2c0b8bfa7aebe6659b0d
@@ -61,15 +61,15 @@ use ts.exotic.error_name = @799893f49074236205ea6b36ca9e69ced9e260b62f15900f596c
 use ts.exotic.get = @61ed18c01b2e6a6fdf2724666770667f847bb65ad8d80fc1f1f77376a8f884fa
 use ts.exotic.iterate = @2c74401017d3794e407f06ff4ad46a4107116d8035a3d4a5dd1bfbc53ffb0c87
 use ts.exotic.to_primitive = @37255f2d52deb065c526f82140fd43f3887f233445a271784d28fd50d93da987
-use ts.for_of.item = @ab76adc47904f735262818289c18d512ce4c2ddcf096ec2531f87c4691ec9db8
-use ts.for_of.next = @18f7959f398ebd494fec75f9466343be3c23894982f61c7b27ade64e814d5294
-use ts.for_of.open = @d0c659fff1e8aa891b65d36de3c998e999ee722a5aecf74b1011b2666cbf8e2c
-use ts.get = @3648687447214149a2e515a88903b3cbb45cb86106242fe4aac435d3bc36a320
-use ts.hole_value = @f9d20d6da4d0527fe6ae92c14c49d5a6f55c7cc9af3ae36c5ea9d3c00dfdbecb
+use ts.for_of.item = @6585f22445928ed43ef39576d72e06635d8228d1d9a91d9717bef99f0fb0698c
+use ts.for_of.next = @9e9c01d72279ab324bbcc60a834a9acfbebb441d5f05c2dedd2fd2dfb6f26742
+use ts.for_of.open = @0f1cd2dce4049ff02d816d6f017766f1415b99e9cf7212f8d948c7cbee6796cd
+use ts.get = @dd5b9b23df407edcb92a8108a830c9b8fd616907a4033e91686cd227ed136005
+use ts.hole_value = @af83febeaaab28e57a26e91735c22e5d58be3852ea16e377a1242e498b82e0f7
 use ts.is_nullish = @cf60a1db735461d78476e0e746903789152c640f5a92730cde4f3b3e796297d5
 use ts.is_primitive = @1ab4b07450b50e2eb1d8d8b7f23faa96fdf308b5d2bb32beb7938ac217a8a4e4
 use ts.iterate = @25ebe639310e75f50e2f98697e6920edd8e7bab63759f0eadfb5f269475faa42
-use ts.list_index = @8084eaeca3022f23d6ba7912b9184b0fb7a09118a057d53c28d72ad189c2db89
+use ts.list_index = @a97f3405a71ec62f478100ed9a03eead3258c138dd620ea531e5b9733855e06e
 use ts.map.value = @3fb9e43ef811b5bf9101ac77219851b073447a74463783645121f1061a32a454
 use ts.number.digit = @10d461e6f9192ce8ceddbb5dc4676e3ccf9af80bbb33f962c0ce95e0c14db1dc
 use ts.number.layout = @3c6dcd59d6db9ad336bb51823de9e539b96b973f5cc2b3c11d13e01ffcff355c
@@ -78,7 +78,7 @@ use ts.number.parse_decimal = @6d8fd79e4238f63fbe12611cb73a867b9d0815ed326bb71a7
 use ts.number.parse_int = @b811c17ddecf5214a038f7ffe5ea0c72a04801ee1f9407259201a8efc4078868
 use ts.number.parts = @c06d5d6a4c1e60bcbf0e431d86c7e7a6a31d60dcd606e547c92928480a014b0f
 use ts.number.to_string = @bbb9dce7354218bdce6d02442f90974a5cff393625a4dbdf767ac05788488cda
-use ts.number_index = @2846cd4a7e382de93752da056715a5884f589f87a4e7367d01024046b8afc30a
+use ts.number_index = @49da85f074e7f331b8a7e6d15995d9a0598677328804c8ba6a84e9c7207eb3c5
 use ts.primitive_to_number = @ad02d8e25efbacf5d1a409cca8fb7975aae191f7cdd31f5267eb915dc426f715
 use ts.primitive_to_string = @ce452ee11eca78020d6ebfe84d0cf308c5738b68daa8f1772b85f54ba2214aa3
 use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
@@ -88,20 +88,17 @@ use ts.regexp.escaped_source = @326719b934273dad2daaaeffe5d1dc15319a85ae0f7a72b1
 use ts.regexp.spell = @96cffb14c2793a02e2fa2b46e50a627e8cebeb324b751ed9a5335725b3164046
 use ts.require_object_coercible = @115a04ae31620995a232e6e2f6bb17dd5a421945f58a30baee4033694c22d016
 use ts.string.trim_value = @1e2c4cd075b48eb80bd85b68d25c9996afee079c00ea334fe52549825adc623c
-use ts.to_boolean = @5edeb540d455fd9c48e93ed6a4b43826c7a066402eb401357f5e081b7d242b94
+use ts.to_boolean = @8f00b99b5b3112d81b72176795615a6a30b1d5d141dc51b46bb0ba7b1ae32c74
 use ts.to_number = @a026c1ba843a2f1bf485f959efc80aa780fef9394d7a8756a9cb8ed03133b2fd
 use ts.to_primitive = @1376a5afb8cd4f716fcdf8f4c4c37660e1b33120a9bdf785d7a5ad5de7e6e933
-use ts.to_property_key = @3360fd167e2174596e5c60a00936fc593e2bbaf9de6705fde916834887fa3812
-use ts.to_string = @0d4e32ecc2847e28538f93d70487f5e7effaed80b6008a59dc46cbab07e65201
+use ts.to_property_key = @23f23a4eed1f1c08fd75efc6fd6fa7c04253dd9665334db9c2d2dcd20f8622b7
+use ts.to_string = @065cdf6e636cf9ff1a4182cd6a9a00a8f66848d592d3d8cc7c308979d598d247
 entry demo(items: Any) -> Any ts_direct(ts.await)
 
 fn demo(items) {
   let out = []
-  for t1 in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {
-    let item = t1
-    let t2 = out
-    let t3 = invoke ts.boundary(item)
-    set t2[list.len(t2)] = perform corpus.echo(t3) as Any then yield
+  for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {
+    set out[list.len(out)] = perform corpus.echo(invoke ts.boundary(item)) as Any then yield
   }
   return out via ts.promise.adopt
 }
@@ -110,4 +107,4 @@ main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=7 scopes=2 sites=10
+unit Function(Name("demo")): statements=4 scopes=2 sites=7

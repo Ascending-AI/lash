@@ -10,8 +10,7 @@
 -entry demo() -> Any ts_direct(ts.await)
 -
 -fn demo() {
--  let t1 = perform corpus.echo("hello") as Any then yield
--  return t1 via ts.promise.adopt
+-  return perform corpus.echo("hello") as Any then yield via ts.promise.adopt
 -}
 -
 -main {
@@ -29,8 +28,7 @@
 +entry demo() -> Any ts_direct(ts.await)
 +
 +fn demo() {
-+  let t1 = perform corpus.echo("edited λ") as Any then yield
-+  return t1 via ts.promise.adopt
++  return perform corpus.echo("edited λ") as Any then yield via ts.promise.adopt
 +}
 +
 +main {
@@ -39,8 +37,8 @@
 
 Correspondence:
 {
-  "base": "bd46f01583853c6c58a9a3e78bd8a9bd62562af0c757b700462f4865b2687878",
-  "result": "a28360b4c30964b95697d6a26b8dc96bd1d3adc9d5f79bc98aef1c854e814dda",
+  "base": "538789d3cacd2737f0a39725dc6dd44772b9a23fc72d81105e91910d7c9d1032",
+  "result": "d11bbc2cf555b2fa9ec6251f31b39ddb4cfe5ef7a2455921d49a9e2ac231ff7d",
   "entries": [
     {
       "from": {
@@ -130,52 +128,13 @@ Correspondence:
         ]
       },
       "edited": true
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          1
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          1
-        ]
-      }
-    },
-    {
-      "from": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          1,
-          0
-        ]
-      },
-      "to": {
-        "unit": {
-          "function": "demo"
-        },
-        "path": [
-          1,
-          0
-        ]
-      }
     }
   ]
 }
 
 Reprinted source:
 export async function demo() {
-  let t1 = await await tools.corpus.echo("edited λ");
-  return k.returnVia(t1, helper_ts_promise_adopt);
+  return k.returnVia((await await tools.corpus.echo("edited λ")), helper_ts_promise_adopt);
 }
 async function main() {
   let demo = declared.demo;

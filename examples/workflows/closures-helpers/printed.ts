@@ -1,35 +1,23 @@
 export async function demo(items) {
-  let t5 = async function(this2, args2) {
-    let t1 = args2;
-    if (helper_list_len(args2) < 1.0) {
-      t1 = await helper_ts_pad(args2, 1.0);
-    }
-    let item = t1[0.0];
-    let t4 = await helper_ts_property_length(item);
-    return t4;
-  };
-  let size = ["ts.function", "", "size", 1.0, t5, {}] as const;
-  let t6 = items;
-  let t7 = helper_same(helper_kind(t6), "list");
-  if (t7) {
+  let size = ["ts.function", "", "size", 1.0, async function(this2, args2) {
+    return (await (async (t1) => ((await (async (item) => ((await helper_ts_property_length(item))))(t1[0.0]))))((helper_list_len(args2) < 1.0 ? (await helper_ts_pad(args2, 1.0)) : args2)));
+  }, {}] as const;
+  let t5 = helper_same(helper_kind(items), "list");
+  if (t5) {
   } else {
-    let t8 = await helper_ts_array_is(t6);
-    if (t8) {
+    if ((await helper_ts_array_is(items))) {
     } else {
       throw helper_error_new("type_error", "expected an array", null);
     }
   }
-  let t9 = undefined;
-  if (t7) {
-    let t10 = [size];
-    t9 = await helper_ts_array_map(t6, t10);
+  let t6 = undefined;
+  if (t5) {
+    t6 = (await helper_ts_array_map(items, [size]));
   } else {
-    let t12 = await helper_ts_member_map(t6);
-    let t13 = [size];
-    let t14 = helper_ts_callable(t12);
-    t9 = await (t14)(t6, t13);
+    let t7 = await helper_ts_member_map(items);
+    t6 = (await (async (t8) => ((await (async (t9) => ((await (async (t10) => ((await (t10)(items, t9))))(helper_ts_callable(t8)))))([size]))))(t7));
   }
-  return k.returnVia(t9, helper_ts_promise_adopt);
+  return k.returnVia(t6, helper_ts_promise_adopt);
 }
 async function main() {
   let demo = declared.demo;

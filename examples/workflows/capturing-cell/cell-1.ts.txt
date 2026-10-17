@@ -816,29 +816,21 @@ entry run(x: Number) -> Any ts_direct(ts.await)
 fn f0(v0, v1) start(x: Number) -> Any token("ts.function", 4) ts_direct(ts.await) {
   let v2 = 3.0
   let v3 = [1.0]
-  let v4 = absent
-  set v4 = fn(v5, v6) {
-    let v7 = v6
-    if num.lt(list.len(v6), 1.0) {
-      set v7 = invoke ts.pad(v6, 1.0)
-    }
-    let v8 = v7[0.0]
-    let v9 = num.add(num.to_float(v8), v2)
-    let v10 = absent
+  return invoke ts.promise.start(fn(v4, v5) {
+    let v6 = if(num.lt(list.len(v5), 1.0), invoke ts.pad(v5, 1.0), v5)
+    let v7 = v6[0.0]
+    let v8 = num.add(num.to_float(v7), v2)
+    let v9 = absent
     if num.lt(0.0, list.len(v3)) {
-      set v10 = v3[0.0]
-      if same(v10, ()) {
-        set v10 = absent
+      set v9 = v3[0.0]
+      if same(v9, ()) {
+        set v9 = absent
       }
     } else {
-      set v10 = invoke ts.get_computed(v3, 0.0)
+      set v9 = invoke ts.get_computed(v3, 0.0)
     }
-    return ts.add(v9, v10) via ts.promise.adopt
-  }
-  let v11 = list.copy(v1)
-  let v12 = invoke ts.promise.pending()
-  set v12.task = spawn invoke ts.promise.run(v12, v4, v0, v11)
-  return v12
+    return ts.add(v8, v9) via ts.promise.adopt
+  }, v0, list.copy(v1))
 }
 
 fn run(x) {

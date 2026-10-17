@@ -8,6 +8,7 @@ use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe
 use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
 use ts.promise.pending = @656aeb7c2f80aaa8c1a1f930bf330144f4d2b86e156f57a111e2b66c4bd7f9be
 use ts.promise.run = @1f532a178ec4dc76b622a2ce6f487cbb91ea1fe40f9a11911124c4316a761178
+use ts.promise.start = @379f2a0bc62ce0cf6bb692d5b5199bb78ef2a5839cde7babe132416ff021d09a
 entry arrow(value: Number) -> Any ts_direct(ts.await)
 entry declared() -> Any ts_direct(ts.await)
 
@@ -23,29 +24,19 @@ main {
   let arrow = &arrow
   let declared = &declared
   if true {
-    let t1 = fn(this3, args3) {
-      return "block" via ts.promise.adopt
-    }
-    let t4 = fn(this4, args4) start() -> Any token("ts.function", 4) ts_direct(ts.await) {
-      let t2 = list.copy(args4)
-      let t3 = invoke ts.promise.pending()
-      set t3.task = spawn invoke ts.promise.run(t3, t1, this4, t2)
-      return t3
-    }
-    let local_1 = ("ts.function", "", "local", 0.0, t4, {})
-    let t5 = fn(this5, args5) {
-      return "block" via ts.promise.adopt
-    }
-    let t8 = fn(this6, args6) start() -> Any token("ts.function", 4) ts_direct(ts.await) {
-      let t6 = list.copy(args6)
-      let t7 = invoke ts.promise.pending()
-      set t7.task = spawn invoke ts.promise.run(t7, t5, this6, t6)
-      return t7
-    }
-    let alsoLocal_1 = ("ts.function", "", "alsoLocal", 0.0, t8, {})
+    let local_1 = ("ts.function", "", "local", 0.0, fn(this4, args4) start() -> Any token("ts.function", 4) ts_direct(ts.await) {
+      return invoke ts.promise.start(fn(this3, args3) {
+        return "block" via ts.promise.adopt
+      }, this4, list.copy(args4))
+    }, {})
+    let alsoLocal_1 = ("ts.function", "", "alsoLocal", 0.0, fn(this6, args6) start() -> Any token("ts.function", 4) ts_direct(ts.await) {
+      return invoke ts.promise.start(fn(this5, args5) {
+        return "block" via ts.promise.adopt
+      }, this6, list.copy(args6))
+    }, {})
   }
 }
 
-unit Function(Name("arrow")): statements=1 scopes=1 sites=25
+unit Function(Name("arrow")): statements=1 scopes=1 sites=13
 
-unit Function(Name("declared")): statements=1 scopes=1 sites=25
+unit Function(Name("declared")): statements=1 scopes=1 sites=13

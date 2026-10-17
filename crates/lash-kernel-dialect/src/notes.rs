@@ -113,20 +113,31 @@ impl Layers {
             }
             if let Some(span) = note.span {
                 self.locate(statement_site.clone(), span);
-                for (child, index) in Node::Stmt(statement).children().into_iter().zip(0u32..) {
-                    if matches!(
-                        child,
-                        Node::Action(_) | Node::Expr(lash_kernel_doc::Expr::Act(_))
-                    ) {
-                        self.locate(statement_site.child(index), span);
-                    }
-                }
+                self.actions(Node::Stmt(statement), &statement_site, span);
             }
             let mut nested = Vec::new();
             nested_blocks(Node::Stmt(statement), &statement_site, &mut nested);
             for ((inner, inner_site), inner_notes) in nested.into_iter().zip(&note.blocks) {
                 self.block(inner, inner_notes, &inner_site);
             }
+        }
+    }
+
+    /// A statement owns every nested action up to its inner blocks. Those
+    /// blocks carry their own source notes, including inline closure bodies.
+    fn actions(&mut self, node: Node<'_>, site: &Site, span: Span) {
+        for (index, child) in (0u32..).zip(node.children()) {
+            if matches!(child, Node::Block(_)) {
+                continue;
+            }
+            let site = site.child(index);
+            if matches!(
+                child,
+                Node::Action(_) | Node::Expr(lash_kernel_doc::Expr::Act(_))
+            ) {
+                self.locate(site.clone(), span);
+            }
+            self.actions(child, &site, span);
         }
     }
 

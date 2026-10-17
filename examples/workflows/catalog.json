@@ -315,5 +315,57 @@
       ]
     },
     "refusal": "WORKFLOW_ENTRY_DEFAULT"
+  },
+  {
+    "name": "probe-digest",
+    "mode": "module",
+    "entries": [
+      "digest"
+    ],
+    "dialects": [
+      "ts"
+    ],
+    "exceptions": {
+      "ts": []
+    }
+  },
+  {
+    "name": "probe-typed",
+    "mode": "module",
+    "entries": [
+      "digest"
+    ],
+    "dialects": [
+      "ts"
+    ],
+    "exceptions": {
+      "ts": []
+    }
+  },
+  {
+    "name": "probe-inbox",
+    "mode": "module",
+    "entries": [
+      "digest"
+    ],
+    "dialects": [
+      "ts"
+    ],
+    "exceptions": {
+      "ts": []
+    }
+  },
+  {
+    "name": "probe-flat",
+    "mode": "module",
+    "entries": [
+      "demo"
+    ],
+    "dialects": [
+      "ts"
+    ],
+    "exceptions": {
+      "ts": []
+    }
   }
 ]

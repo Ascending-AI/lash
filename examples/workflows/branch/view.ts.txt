@@ -1,9 +1,8 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Variable(Name("flag")), then_block: [Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("yes"))], result: Any, then_yield: true }) }, ReturnVia { value: Variable(Name("t1")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }], else_block: [] }
-statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("yes"))], result: Any, then_yield: true }) }
-statement fn demo/0/1/1 ordinal=6 depth=1 block=fn demo/0/1 ReturnVia { value: Variable(Name("t1")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
-statement fn demo/1 ordinal=8 depth=0 block=fn demo ReturnVia { value: Literal(Text("no")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
+statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Variable(Name("flag")), then_block: [ReturnVia { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("yes"))] }), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }], else_block: [] }
+statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 ReturnVia { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("yes"))] }), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
+statement fn demo/1 ordinal=7 depth=0 block=fn demo ReturnVia { value: Literal(Text("no")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
 scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/0/1 ordinal=4 depth=1 Then
-scope fn demo/0/2 ordinal=7 depth=1 Else
+scope fn demo/0/2 ordinal=6 depth=1 Else
 action fn demo/0/1/0/0 Some(Effect(QualifiedName("corpus.echo")))

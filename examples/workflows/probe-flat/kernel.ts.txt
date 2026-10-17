@@ -1,0 +1,38 @@
+kernel 1
+numbers float
+effect display.set_status(input: Any) -> Any
+effect display.show_message(input: Any) -> Any
+effect gmail.list_recent(input: Any) -> Any
+use collection.holds_none = @a58e0ba0d11b84096fd0264a5a281ef308aa5fe9a7bf26dd7b662b283fa491fe
+use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+use list.copy_deep = @dc940e0118f81f9684c5d9d0111b22d535f6b48369eb7d6373009da276a17c4b
+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
+use map.copy_deep = @0b8756185acbba5254579b4e28b3609cbd353673a46350444efe5bac54d03e97
+use map.values = @52849f963c318359e81934c83cd35ce4364ec742a159a8e99be42dff2351d980
+use num.add = @9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343
+use num.lt = @34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e
+use num.sub = @f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28
+use record.copy_deep = @a6d4171fd163b1a7519a83d38916149be44c801ebe223d1d7a7db311e9bf2008
+use record.values = @5d1db382f1280cf8e9ce7f0356c7117b1fe0f0d7f6f3acf2874fec1807f5facf
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use set.copy_deep = @3bca75c884c39293ac043da1ab4ca91be4d9585702aa3304f394b9812215c6d7
+use ts.await = @1463b538a6614aa09a001e6db86e6d54cd2b0fb6826493c23043a41273c0860a
+use ts.boundary = @4979682bd7501b8088dc50a0b7839615c9541621786252504fbf17afc282d4fc
+use ts.promise.adopt = @beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65
+use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f1015559f
+entry demo() -> Any ts_direct(ts.await)
+
+fn demo() {
+  let greeting = "Inbox review started"
+  do perform display.show_message(invoke ts.boundary({text: greeting})) as Any then yield
+  let emails = perform gmail.list_recent(invoke ts.boundary({count: 3.0})) as Any then yield
+  do perform display.set_status(invoke ts.boundary({key: "inbox", value: "Reviewed three mock emails"})) as Any then yield
+  return emails via ts.promise.adopt
+}
+
+main {
+  let demo = &demo
+}
+
+unit Function(Name("demo")): statements=5 scopes=1 sites=12

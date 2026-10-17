@@ -4,5 +4,4 @@ main/0 [7..109] "async function demo(flag: boolean) {\n  if (flag) { return awai
 fn demo/0 [46..92] "if (flag) { return await corpus.echo(\"yes\"); }"
 fn demo/0/1/0 [58..90] "return await corpus.echo(\"yes\");"
 fn demo/0/1/0/0 [58..90] "return await corpus.echo(\"yes\");"
-fn demo/0/1/1 [58..90] "return await corpus.echo(\"yes\");"
 fn demo/1 [95..107] "return \"no\";"

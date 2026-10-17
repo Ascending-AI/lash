@@ -115,10 +115,10 @@ fn spans_map_sites_and_label_comments_are_trivia() {
             .find(|located| located.site.path == path)
             .map(|located| located.ranges[0].start)
     };
-    assert_eq!(start(&[1]), source.find("console"));
+    assert_eq!(start(&[0]), source.find("console"));
     let last = map.sites.last().unwrap();
-    assert_eq!(last.site.path, [2]);
-    assert_eq!(start(&[2]), source.find("let z"));
+    assert_eq!(last.site.path, [1]);
+    assert_eq!(start(&[1]), source.find("let z"));
     assert!(
         map.sites
             .iter()

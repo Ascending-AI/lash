@@ -1,6 +1,6 @@
 //! Members, calls and the globals a built-in row answers for.
 
-use lash_kernel_doc::{Action, AssignOrder, Atom, Callee, Expr, Literal, Member, Place, Stmt};
+use lash_kernel_doc::{AssignOrder, Callee, Expr, Literal, Member, Place, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
@@ -123,7 +123,7 @@ impl Lowerer<'_> {
                 )?;
                 self.discard(checked);
                 let key = self.invoke("ts.to_property_key", &[value], Ty::Text)?;
-                Ok(Key::Computed(key))
+                Ok(Key::Computed(self.pin(key)))
             }
             Key::Computed(value) => Ok(Key::Computed(self.pin(value))),
             key => Ok(key),
@@ -522,6 +522,53 @@ impl Lowerer<'_> {
         Ok(Operand { ty, ..result })
     }
 
+    /// A discarded assignment evaluates its reference before its value.
+    /// Keep a proven plain field write, with actions in the place; dynamic
+    /// writes use the dialect helper without document-level write branches.
+    pub(super) fn assign_member_statement(
+        &mut self,
+        object: &ast::Expr,
+        property: &ast::MemberProperty,
+        value: &ast::Expr,
+    ) -> Lowering<()> {
+        if let Some(refused) = self.reflection_on(object, "assigning a property of") {
+            return Err(refused);
+        }
+        let (object_buf, object) = self.aside(|this| this.lower_expr(object))?;
+        let (key_buf, key) = self.aside(|this| this.lower_key(property))?;
+        let (value_buf, value) = self.aside(|this| this.lower_expr(value))?;
+        let values = self.ordered(vec![
+            (object_buf, object),
+            (key_buf, key.operand()),
+            (value_buf, value),
+        ]);
+        let [object, key_value, value]: [Operand; 3] = values
+            .try_into()
+            .unwrap_or_else(|_| unreachable!("three assignment operands"));
+        let key = match key {
+            Key::Static(name) => Key::Static(name),
+            Key::Computed(_) => Key::Computed(key_value),
+        };
+        if let Key::Static(field) = &key
+            && self
+                .record_tests(&object)?
+                .is_some_and(|tests| tests.is_empty())
+        {
+            self.emit(Stmt::Assign {
+                place: Place::Member(Member::Field {
+                    target: object.expr(),
+                    field: field.clone(),
+                }),
+                value: lash_kernel_doc::Rhs::Expr(value.expr()),
+                order: AssignOrder::PlaceFirst,
+            });
+        } else {
+            let value = self.invoke("ts.set", &[object, key.operand(), value], Ty::Unknown)?;
+            self.discard(value);
+        }
+        Ok(())
+    }
+
     /// `object[key] = value`. A plain record's field by a name the source
     /// spells or a text key gives, and a list's element at one of its positions or just past
     /// them, are written in place, as `ts.set` writes them; any other write
@@ -680,19 +727,12 @@ impl Lowerer<'_> {
                 let args = self.fresh("args");
                 let body = self.block(|lowerer| {
                     let passed = match class {
-                        Some(class) => vec![lash_kernel_doc::Atom::Literal(Literal::Text(
-                            class.to_string(),
-                        ))],
-                        None => vec![
-                            lash_kernel_doc::Atom::Variable(this.clone()),
-                            lash_kernel_doc::Atom::Variable(args.clone()),
-                        ],
+                        Some(class) => vec![Expr::Literal(Literal::Text(class.to_string()))],
+                        None => vec![Expr::Variable(this.clone()), Expr::Variable(args.clone())],
                     };
-                    let result = lowerer.emit_action(
-                        Action::Call {
-                            callee: Callee::Library(function),
-                            args: passed,
-                        },
+                    let result = lowerer.action(
+                        lash_kernel_doc::ActKind::Call(Callee::Library(function)),
+                        passed,
                         Ty::Unknown,
                     );
                     lowerer.emit(Stmt::Return {
@@ -778,29 +818,53 @@ impl Lowerer<'_> {
         // A function the source made, held where nothing else is ever
         // assigned, is its token (`types::facts`).
         let declared = declared || matches!(function.ty, Ty::Function(_));
-        let function = self.reuse(function);
-        let args = self.atoms(&[this, args]);
-        let function = if declared {
-            let closure = self.let_expr(Self::element(&function, 4), Ty::Unknown);
-            super::statements::variable_of(&closure)
-        } else if matches!(function.expr, Expr::Literal(_)) {
-            let held = self.let_expr(function.expr, function.ty);
-            super::statements::variable_of(&held)
+        // Read the callee first, then evaluate arguments, then require a
+        // callable. In particular a non-callable callee cannot suppress an
+        // argument's effect. Scoped lets keep each value exactly once.
+        let target = self.temp();
+        let supplied = self.temp();
+        let held_function = Operand::temp(target.clone(), function.ty.clone());
+        let closure = if declared {
+            Self::element(&held_function, 4)
         } else {
-            let callable = self.invoke("ts.callable", &[function], Ty::Unknown)?;
-            let callable = self.pin(callable);
-            super::statements::variable_of(&callable)
+            self.invoke("ts.callable", &[held_function], Ty::Unknown)?
+                .expr()
         };
-        Ok(self.emit_action(
-            Action::Call {
-                callee: Callee::Value(function),
-                args,
+        let name = self.temp();
+        let call = self.action(
+            lash_kernel_doc::ActKind::Call(Callee::Value(name.clone())),
+            vec![this.expr(), Expr::Variable(supplied.clone())],
+            returned.clone(),
+        );
+        Ok(self.inline(
+            Expr::Let {
+                name: target,
+                value: Box::new(function.expr()),
+                body: Box::new(Expr::Let {
+                    name: supplied,
+                    value: Box::new(args.expr()),
+                    body: Box::new(Expr::Let {
+                        name,
+                        value: Box::new(closure),
+                        body: Box::new(call.expr()),
+                    }),
+                }),
             },
             returned,
         ))
     }
 
     pub(super) fn lower_call(
+        &mut self,
+        callee: &ast::Expr,
+        args: &[ast::CallArg],
+        span: SourceSpan,
+        discard_result: bool,
+    ) -> Lowering<Operand> {
+        self.expression_block(|this| this.call(callee, args, span, discard_result))
+    }
+
+    fn call(
         &mut self,
         callee: &ast::Expr,
         args: &[ast::CallArg],
@@ -861,6 +925,7 @@ impl Lowerer<'_> {
                 && let Some(function) = self.table.functions.get(base).copied()
             {
                 let passed = self.arguments(args)?;
+                let passed = self.pin(passed);
                 let padded = self.invoke(
                     "ts.pad",
                     &[passed.clone(), Operand::number(2.0)],
@@ -931,27 +996,39 @@ impl Lowerer<'_> {
                 .and_then(|(_, binding)| binding.positional.clone())
         {
             let returned = self.lower_expr(callee)?.ty.returned();
-            let mut passed = vec![Atom::Literal(Literal::Absent)];
-            for (index, arg) in args.iter().enumerate() {
-                let ast::CallArg::Value(arg) = arg else {
-                    unreachable!("plain arguments were checked")
-                };
-                let value = self.lower_expr(arg)?;
+            let values: Vec<_> = args
+                .iter()
+                .map(|arg| match arg {
+                    ast::CallArg::Value(value) => value,
+                    ast::CallArg::Spread(_) => unreachable!("plain arguments were checked"),
+                })
+                .collect();
+            let values = self.operands(&values)?;
+            let extra_statements = values
+                .iter()
+                .skip(entry.arity)
+                .any(|value| !matches!(value.expr, Expr::Literal(_) | Expr::Variable(_)));
+            let mut passed = vec![Expr::Literal(Literal::Absent)];
+            for (index, value) in values.into_iter().enumerate() {
+                // Extra arguments still evaluate before the call.
                 if index < entry.arity {
-                    let value = self.pin(value);
-                    passed.push(self.atom(value));
+                    let value = if extra_statements {
+                        self.pin(value)
+                    } else {
+                        value
+                    };
+                    passed.push(value.expr());
                 } else {
                     self.discard(value);
                 }
             }
-            return Ok(self.emit_action(
-                Action::Call {
-                    callee: Callee::Value(entry.name),
-                    args: passed,
-                },
+            return Ok(self.action(
+                lash_kernel_doc::ActKind::Call(Callee::Value(entry.name)),
+                passed,
                 returned,
             ));
         }
+
         match callee {
             ast::Expr::Member {
                 object, property, ..

@@ -10,8 +10,7 @@ entry demo(flag: Bool) -> Any ts_direct(ts.await)
 
 fn demo(flag) {
   if flag {
-    let t1 = perform corpus.echo("yes") as Any then yield
-    return t1 via ts.promise.adopt
+    return perform corpus.echo("yes") as Any then yield via ts.promise.adopt
   }
   return "no" via ts.promise.adopt
 }
@@ -20,4 +19,4 @@ main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=4 scopes=3 sites=6
+unit Function(Name("demo")): statements=3 scopes=3 sites=5

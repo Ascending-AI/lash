@@ -2,5 +2,5 @@ language: TypeScript
 exceptions: none
 main/0 [7..68] "async function demo() {\n  await sleep(5);\n  return \"awake\";\n}"
 fn demo/0 [33..48] "await sleep(5);"
-fn demo/0/0 [33..48] "await sleep(5);"
+fn demo/0/0/0 [33..48] "await sleep(5);"
 fn demo/1 [51..66] "return \"awake\";"

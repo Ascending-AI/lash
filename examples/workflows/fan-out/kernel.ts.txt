@@ -82,37 +82,16 @@ use ts.to_primitive = @1376a5afb8cd4f716fcdf8f4c4c37660e1b33120a9bdf785d7a5ad5de
 entry demo() -> Any ts_direct(ts.await)
 
 fn demo() {
-  let t6 = fn(this2, args2) {
-    let t1 = args2
-    if num.lt(list.len(args2), 1.0) {
-      set t1 = invoke ts.pad(args2, 1.0)
-    }
-    let value = t1[0.0]
-    let t4 = invoke ts.boundary(value)
-    let t5 = perform corpus.echo(t4) as Any then yield
-    return t5 via ts.promise.adopt
-  }
-  let t9 = fn(this3, args3) start(value: Text) -> Any token("ts.function", 4) ts_direct(ts.await) {
-    let t7 = list.copy(args3)
-    let t8 = invoke ts.promise.pending()
-    set t8.task = spawn invoke ts.promise.run(t8, t6, this3, t7)
-    return t8
-  }
-  let work = ("ts.function", "", "work", 1.0, t9, {})
-  let t10 = ["a"]
-  let t11 = ts.callable(work)
-  let t12 = apply t11(absent, t10)
-  let t13 = ["b"]
-  let t14 = ts.callable(work)
-  let t15 = apply t14(absent, t13)
-  let t16 = [[t12, t15]]
-  let t17 = invoke ts.promise.all(absent, t16)
-  let t18 = await t17 via ts.await
-  return t18 via ts.promise.adopt
+  let work = ("ts.function", "", "work", 1.0, fn(this3, args3) start(value: Text) -> Any token("ts.function", 4) ts_direct(ts.await) {
+    return invoke ts.promise.start(fn(this2, args2) {
+      return let(t1 = if(num.lt(list.len(args2), 1.0), invoke ts.pad(args2, 1.0), args2), let(value = t1[0.0], perform corpus.echo(invoke ts.boundary(value)) as Any then yield)) via ts.promise.adopt
+    }, this3, list.copy(args3))
+  }, {})
+  return await(invoke ts.promise.all(absent, [[let(t6 = work, let(t7 = ["a"], let(t8 = ts.callable(t6), apply t8(absent, t7)))), let(t9 = work, let(t10 = ["b"], let(t11 = ts.callable(t9), apply t11(absent, t10))))]])) via ts.await via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=24 scopes=5 sites=34
+unit Function(Name("demo")): statements=4 scopes=3 sites=13

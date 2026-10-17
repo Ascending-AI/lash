@@ -24,14 +24,11 @@ entry demo(name: Text) -> Any ts_direct(ts.await)
 
 fn demo(name) {
   let `größe` = "日本 🦀"
-  let t1 = text.concat(`größe`, name)
-  let t2 = invoke ts.boundary(t1)
-  let t3 = perform corpus.echo(t2) as Any then yield
-  return t3 via ts.promise.adopt
+  return perform corpus.echo(invoke ts.boundary(text.concat(`größe`, name))) as Any then yield via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=5 scopes=1 sites=8
+unit Function(Name("demo")): statements=2 scopes=1 sites=5

@@ -250,6 +250,23 @@ impl Reader {
             }
         };
         Ok(match (name.as_str(), args.as_slice()) {
+            ("assignPlaceFirst", [place, value]) => {
+                let place = match place {
+                    s::Expr::Ident(name) => k::Place::Variable(self.name(name)?),
+                    s::Expr::Member(member) => k::Place::Member(self.native_member(member)?),
+                    _ => {
+                        return Err(invalid(
+                            "k.assignPlaceFirst needs a variable or member place",
+                            Some(place.span()),
+                        ));
+                    }
+                };
+                k::Stmt::Assign {
+                    place,
+                    value: self.rhs(value)?,
+                    order: k::AssignOrder::PlaceFirst,
+                }
+            }
             ("try", [body]) => {
                 let function = self.function(body)?;
                 if !function.params.is_empty() {

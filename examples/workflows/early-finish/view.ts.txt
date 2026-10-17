@@ -1,7 +1,6 @@
 unit Main
-statement main/0 ordinal=1 depth=0 block=main Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("finish"), args: [Literal(Text("done"))], result: Any, then_yield: true }) }
-statement main/1 ordinal=2 depth=0 block=main Finish { value: Literal(Null) }
-statement main/2 ordinal=3 depth=0 block=main Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("unreachable"))] }) }
+statement main/0 ordinal=1 depth=0 block=main Finish { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Perform { effect: QualifiedName("finish"), result: Any, then_yield: true }, args: [Literal(Text("done"))] }), body: Literal(Null) } }
+statement main/1 ordinal=2 depth=0 block=main Do { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("unreachable"))] }) }
 scope main ordinal=0 depth=0 Entry
-action main/0/0 Some(Effect(QualifiedName("finish")))
-action main/2/0 Some(Effect(QualifiedName("corpus.echo")))
+action main/0/0/0 Some(Effect(QualifiedName("finish")))
+action main/1/0 Some(Effect(QualifiedName("corpus.echo")))

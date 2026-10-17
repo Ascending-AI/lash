@@ -3,6 +3,5 @@ exceptions: none
 main/0 [7..127] "async function demo(items: number[]) {\n  let total = 0;\n  for (const item of items) { total += item; }\n  return total;\n}"
 fn demo/0 [48..62] "let total = 0;"
 fn demo/1 [65..109] "for (const item of items) { total += item; }"
-fn demo/1/1/0 [65..109] "for (const item of items) { total += item; }"
-fn demo/1/1/1 [93..107] "total += item;"
+fn demo/1/1/0 [93..107] "total += item;"
 fn demo/2 [112..125] "return total;"

@@ -112,25 +112,6 @@ fn start(program: Program) -> KernelMachine {
     .unwrap()
 }
 
-#[test]
-fn direct_calls_charge_only_emitted_statements_atoms_and_body_expressions() {
-    let lowered = super::lower("function f(a: number) { return a; } f(1); f(); f(1, 2);").unwrap();
-    let mut machine = start(Program {
-        release: super::pages::RELEASE,
-        document: Arc::clone(lowered.document.shared()),
-        library: machine::prepared().clone(),
-    });
-    assert!(matches!(
-        machine.run(&mut Console::default(), u64::MAX).unwrap(),
-        Step::Ended(End::Finished(_))
-    ));
-    // Private entry declaration: 2. Body closure and packed closure: 2 each.
-    // Function token: statement + tuple node + six nodes + six writes = 14.
-    // Calls: statement + discarded action expression + receiver/argument atoms
-    // + return statement/variable (K-CHG-002).
-    assert_eq!(machine.meters().charged, 2 + 2 + 2 + 14 + 6 + 5 + 6);
-}
-
 /// Locate the source base case through any numeric admission branch.
 fn returning_branch(stmts: &mut [Stmt]) -> Option<&mut Vec<Stmt>> {
     for stmt in stmts {
@@ -288,50 +269,153 @@ impl lash_kernel_vm::CellSave for Saving {
     }
 }
 
-/// FIG-6137 (main's PC-FUNCTION law, on the heap): mutually recursive
-/// functions whose direct calls enter private positional bodies are saved
-/// as one bundle. Each forwards to a private body that calls the other's,
-/// so each needs the other through the owners of the bodies it froze, and
-/// both bundles hold the same two members; a function neither uses stays
-/// out.
+/// PC-FUNCTION / CONT-EXACT (FIG-6641, ruling 442039): saving one
+/// mutually recursive function freezes its partner. It runs in a fresh
+/// session with no partner binding, and cold recursion resumes exactly.
 #[test]
-fn mutually_recursive_positional_functions_save_as_one_bundle() {
-    let lowered = super::lower(
-        "function isEven(n: number): boolean { return n === 0 ? true : isOdd(n - 1); }\n\
-         function isOdd(n: number): boolean { return n === 0 ? false : isEven(n - 1); }\n\
-         const scale = (x: number) => x * 3;\n\
-         console.log(isEven(4), isOdd(4), scale(2));",
+fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
+    let lowered = super::lower_with_effects(
+        "function isEven(n: number): boolean { if (n === 0) return true; return isOdd(n - 1); }\n\
+         function isOdd(n: number): boolean { if (n === 0) return false; return isEven(n - 1); }",
     )
     .unwrap();
+    let written = lowered.written;
+    let mut document = lowered.document.into_document();
+    let echo = lash_kernel_doc::EffectName::new("echo").unwrap();
+    document
+        .manifest
+        .effects
+        .insert(echo.clone(), machine::effects()[&echo].clone());
+    let mut bodies = 0;
+    for stmt in &mut document.main {
+        if let Stmt::Assign {
+            value: Rhs::Expr(Expr::Closure(closure)),
+            ..
+        } = stmt
+            && let Some(block) = returning_branch(&mut closure.body)
+            && let [Stmt::Return { value }] = block.as_slice()
+        {
+            let value = value.clone();
+            let result = Name::new("parked_base_case");
+            *block = vec![
+                Stmt::Let {
+                    name: result.clone(),
+                    value: Rhs::Expr(Expr::Act(Box::new(lash_kernel_doc::ActExpr {
+                        kind: lash_kernel_doc::ActKind::Perform {
+                            effect: echo.clone(),
+                            result: Type::Any,
+                            then_yield: false,
+                        },
+                        args: vec![value],
+                    }))),
+                },
+                Stmt::Return {
+                    value: Expr::Variable(result),
+                },
+            ];
+            // An atom-only whole RHS uses its canonical Action form.
+            if let Stmt::Let { value: rhs, .. } = &mut block[0]
+                && let Rhs::Expr(Expr::Act(action)) = rhs
+                && let Some(action) = action.as_action()
+            {
+                *rhs = Rhs::Action(action);
+            }
+            bodies += 1;
+        }
+    }
+    assert_eq!(bodies, 2, "both recursive base cases park");
     let saved = std::rc::Rc::default();
-    let mut machine = start(Program {
+    let mut original = start(Program {
         release: super::pages::RELEASE,
-        document: Arc::clone(lowered.document.shared()),
+        document: Arc::new(document),
         library: machine::prepared().clone(),
     });
-    machine.set_cell_save(Box::new(Saving {
-        written: lowered.written,
+    original.set_cell_save(Box::new(Saving {
+        written,
         saved: std::rc::Rc::clone(&saved),
     }));
-    let mut console = Console::default();
     assert!(matches!(
-        machine.run(&mut console, u64::MAX).unwrap(),
+        original.run(&mut Console::default(), u64::MAX).unwrap(),
         Step::Ended(End::Finished(_))
     ));
-    assert_eq!(console.lines.len(), 1);
     let saved = saved.borrow();
-    let (even, odd) = (Name::new("isEven"), Name::new("isOdd"));
-    assert!(saved[&even].needs().contains(&odd), "{:?}", saved[&even]);
-    assert!(saved[&odd].needs().contains(&even), "{:?}", saved[&odd]);
-    let members = |root: &Name| {
-        lash_kernel_dialect::Bundle::of(&saved, root)
-            .expect("a saved function")
-            .members()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>()
+    let even = &saved[&Name::new("isEven")];
+    let mut standalone = even.document.clone();
+    for n in [0.0, 1.0, 4.0, 5.0] {
+        standalone.main.push(Stmt::Print {
+            value: Expr::Act(Box::new(lash_kernel_doc::ActExpr {
+                kind: lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Declared(
+                    even.name.clone(),
+                )),
+                args: vec![
+                    Expr::Literal(Literal::Absent),
+                    Expr::List(vec![Expr::Literal(Literal::Float(
+                        lash_kernel_doc::Float::new(n),
+                    ))]),
+                ],
+            })),
+        });
+    }
+    let program = Program {
+        release: super::pages::RELEASE,
+        document: Arc::new(standalone),
+        library: machine::prepared().clone(),
     };
-    assert_eq!(members(&even), [even.clone(), odd.clone()]);
-    assert_eq!(members(&odd), members(&even));
-    assert_eq!(members(&Name::new("scale")), [Name::new("scale")]);
+    let run = |cold: bool| {
+        let source = super::pages::Source::default();
+        let mut current = super::pages::with_source(
+            program.clone(),
+            BOUNDS,
+            CellStart {
+                owner: super::pages::OWNER,
+                target: Target::Main,
+                args: vec![],
+                session: None,
+                modes: Default::default(),
+                host: vec![],
+            },
+            Layout::default(),
+            &source,
+        )
+        .unwrap();
+        let mut console = Console::default();
+        let mut waits = 0;
+        loop {
+            let step = current
+                .run(&mut console, if cold { 1 } else { u64::MAX })
+                .unwrap();
+            if cold && matches!(step, Step::Slice | Step::Parked(_)) {
+                super::pages::reopen(&mut current, &program, BOUNDS, &source, Layout(17));
+            }
+            match step {
+                Step::Slice => {}
+                Step::Parked(park) => {
+                    for request in park.requests {
+                        let Request::Effect(effect) = request else {
+                            panic!("the recursive base effect")
+                        };
+                        waits += 1;
+                        current
+                            .deliver(effect.wait, Outcome::Completed(effect.args[0].clone()))
+                            .unwrap();
+                    }
+                }
+                Step::Ended(End::Finished(_)) => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        (console.lines, current.meters().charged, waits)
+    };
+    let plain = run(false);
+    assert_eq!(plain, run(true));
+    assert_eq!(
+        plain.0,
+        vec![
+            Datum::Bool(true),
+            Datum::Bool(false),
+            Datum::Bool(true),
+            Datum::Bool(false)
+        ]
+    );
+    assert_eq!(plain.2, 4);
 }

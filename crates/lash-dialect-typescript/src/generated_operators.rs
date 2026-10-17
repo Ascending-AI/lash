@@ -243,4 +243,11 @@ impl Operators {
                 [k::Atom::Literal(k::Literal::Absent), k::Atom::Variable(_)]
             )
     }
+    pub(crate) fn console_log_expression(&self, id: &k::FunctionId, args: &[k::Expr]) -> bool {
+        self.functions
+            .get(id)
+            .is_some_and(|label| label.as_str() == "ts.console.log")
+            && self.unique("ts.console.log") == Some(*id)
+            && matches!(args, [k::Expr::Literal(k::Literal::Absent), _])
+    }
 }

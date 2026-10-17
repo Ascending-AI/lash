@@ -1,5 +1,4 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("t1"), value: Action(Perform { effect: QualifiedName("corpus.echo"), args: [Literal(Text("hello"))], result: Any, then_yield: true }) }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo ReturnVia { value: Variable(Name("t1")), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
+statement fn demo/0 ordinal=3 depth=0 block=fn demo ReturnVia { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("hello"))] }), policy: FunctionId(beb668fcff1d4b6a800ce55e84378e510311221bf756dfa360b0ecfe47714e65) }
 scope fn demo ordinal=2 depth=0 Entry
 action fn demo/0/0 Some(Effect(QualifiedName("corpus.echo")))

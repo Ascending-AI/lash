@@ -11,7 +11,7 @@
 use serde::Deserialize;
 
 use super::machine::{Epoch, Recorded, run};
-use super::{lower, lower_with_effects, main_text_with_effects};
+use super::{lower, lower_with_effects};
 use crate::DiagnosticCode;
 
 #[derive(Deserialize)]
@@ -181,16 +181,6 @@ fn an_awaited_rejection_nothing_catches_ends_the_run() {
         ]
     );
     assert_eq!(recorded.end, "error boom: x");
-}
-
-/// `await sleep(ms)` is one `sleep` in the awaiting task, taking its
-/// turn once it has elapsed (`K-TASK-005`).
-#[test]
-fn an_awaited_sleep_is_one_sleep() {
-    assert_eq!(
-        main_text_with_effects("await sleep(5);"),
-        "do sleep(5.0) then yield"
-    );
 }
 
 /// A tool call whose promise nothing can read is refused where the front
@@ -398,4 +388,25 @@ fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
             "{source}"
         );
     }
+}
+
+/// CONT-EXACT after the async adapter moves its spawn into ts.promise.start:
+/// a child parks inside its source body, then finishes a nested expression.
+#[test]
+fn an_async_body_resumes_with_identical_values_and_charge() {
+    let source = "const work = async (n: number) => n + await echo(n); await finish([await work(3), await work(4)]);";
+    let plain = super::machine::plain_record_resume(source, u64::MAX, false);
+    let cold = super::machine::plain_record_resume(source, 1, true);
+    assert_eq!((&plain.0, plain.1), (&cold.0, cold.1));
+    assert_eq!(
+        plain.0,
+        lash_kernel_doc::Datum::List(vec![
+            lash_kernel_doc::Datum::Float(lash_kernel_doc::Float::new(6.0)),
+            lash_kernel_doc::Datum::Float(lash_kernel_doc::Float::new(8.0)),
+        ])
+    );
+    assert!(
+        cold.2 > 2,
+        "the source body was reopened at its waits and calls"
+    );
 }

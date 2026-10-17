@@ -8,7 +8,7 @@ use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f101
 entry demo() -> Any ts_direct(ts.await)
 
 fn demo() {
-  do sleep(5.0) then yield
+  do let(t1 = sleep(5.0) then yield, absent)
   return "awake" via ts.promise.adopt
 }
 

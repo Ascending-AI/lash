@@ -1,5 +1,4 @@
 async function main() {
-  let t1 = await await tools.finish("done");
-  finish(null);
+  finish(((t1) => (null))((await await tools.finish("done"))));
   await await tools.corpus.echo("unreachable");
 }

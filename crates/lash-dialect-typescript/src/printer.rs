@@ -240,15 +240,19 @@ impl Renderer<'_> {
                 self.rhs(value);
                 self.out.write(";");
             }
-            // The front end writes no place-first assignment yet, so its
-            // source has no spelling for one.
             k::Stmt::Assign {
+                place,
+                value,
                 order: k::AssignOrder::PlaceFirst,
-                ..
             } => {
-                self.out.refuse(PrintError::Invalid(
-                    "a place-first assignment has no generated TypeScript spelling".into(),
-                ));
+                self.out.write("k.assignPlaceFirst(");
+                match place {
+                    k::Place::Variable(name) => self.name(name),
+                    k::Place::Member(member) => self.member(member),
+                }
+                self.out.write(", ");
+                self.rhs(value);
+                self.out.write(");");
             }
             k::Stmt::Assign { place, value, .. } => {
                 match place {
@@ -629,11 +633,8 @@ impl Renderer<'_> {
             self.out.write("(");
         }
         if !grouped
-            && let Some(k::Action::Call {
-                callee: k::Callee::Library(id),
-                args,
-            }) = act.as_action()
-            && self.operators.console_log(&id, &args)
+            && let k::ActKind::Call(k::Callee::Library(id)) = &act.kind
+            && self.operators.console_log_expression(id, &act.args)
         {
             // The console receiver spells the fixed absent receiver argument.
             self.out.begin_node(None);

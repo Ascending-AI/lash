@@ -55,6 +55,10 @@ impl Lowerer<'_> {
     /// `deleted` is the record of the two the program has deleted, which
     /// then read Function.prototype's.
     pub(super) fn function_token(&mut self, function: &ast::Function, closure: Operand) -> Operand {
+        let (closure_expr, note) = match self.take_binding_of(&closure) {
+            Some((lash_kernel_doc::Rhs::Expr(expr), note)) => (expr, Some(note)),
+            _ => (closure.expr(), None),
+        };
         let length = function
             .params
             .iter()
@@ -70,10 +74,22 @@ impl Lowerer<'_> {
             text(""),
             text(function.name.as_deref().unwrap_or_default()),
             Expr::Literal(Literal::Float(length)),
-            closure.expr(),
+            closure_expr,
             Expr::Record(Vec::new()),
         ]);
-        self.inline(token, closure.ty)
+        if let Some(note) = note {
+            let value = self.let_expr(token, closure.ty);
+            if let Some(last) = self.buf.notes.last_mut() {
+                last.blocks = note.blocks;
+                last.nested_written = note.nested_written;
+                if let Some(written) = note.written {
+                    last.nested_written.push((vec![0, 4], written));
+                }
+            }
+            value
+        } else {
+            self.inline(token, closure.ty)
+        }
     }
 
     /// Anonymous function definitions receive a name only in named evaluation.
@@ -137,8 +153,16 @@ impl Lowerer<'_> {
         });
         let outer_span = self.span;
         let body = self.scoped_block(|lowerer| {
-            lowerer.parameters(&function.params, &args)?;
-            lowerer.admitted_body(function, Some(&args))?;
+            if let ast::FunctionBody::Expression(expr) = &function.body {
+                let value = lowerer.expression_block(|this| {
+                    this.parameters(&function.params, &args)?;
+                    this.lower_expr(expr)
+                })?;
+                lowerer.source_return(value)?;
+            } else {
+                lowerer.parameters(&function.params, &args)?;
+                lowerer.function_body(function)?;
+            }
             if lowerer.frame().arguments_used {
                 let prefix = lowerer.block(|this| {
                     let object = this.invoke(
@@ -202,7 +226,7 @@ impl Lowerer<'_> {
                 };
                 params.push(lowerer.declare(name, BindingKind::Local));
             }
-            lowerer.admitted_body(function, None)?;
+            lowerer.function_body(function)?;
             if lowerer.frame().context_used || lowerer.frame().arguments_used {
                 let prefix = lowerer.block(|lowerer| {
                     lowerer.parameters(&function.params, &args)?;
@@ -229,58 +253,17 @@ impl Lowerer<'_> {
         Ok((params, body?, frame.context_used || frame.arguments_used))
     }
 
-    /// Admit normalized numeric parameters before the shared source body.
-    /// Positional entries have already discarded extra arguments; packed
-    /// entries retain their arity check before selecting numeric facts.
-    fn admitted_body(
-        &mut self,
-        function: &ast::Function,
-        args: Option<&lash_kernel_doc::Name>,
-    ) -> Lowering<()> {
-        if !self.facts.numeric_function(function) {
-            return self.function_body(function);
-        }
-        let [ast::Pattern::Ident(parameter, None)] = function.params.as_slice() else {
-            unreachable!("numeric body has one plain parameter");
+    pub(super) fn source_return(&mut self, value: Operand) -> Lowering<()> {
+        let (value, note) = match self.take_binding_of(&value) {
+            Some((rhs, note)) => (
+                match rhs {
+                    lash_kernel_doc::Rhs::Expr(expr) => expr,
+                    lash_kernel_doc::Rhs::Action(action) => action.into(),
+                },
+                Some(note),
+            ),
+            None => (value.expr(), None),
         };
-        let Some(name) = function.name.as_ref() else {
-            unreachable!("numeric function name");
-        };
-        let operand = self.read(parameter, None)?;
-        let kind = self.native("kind", vec![operand.expr()])?;
-        let admitted_test = self.same(kind, Operand::text("float").expr())?;
-        let generic = self.block(|this| this.function_body(function))?;
-        let fast = self.block(|this| {
-            this.narrowed(
-                vec![
-                    (parameter.clone(), Ty::Float),
-                    (name.clone(), Ty::Function(Box::new(Ty::Float))),
-                ],
-                |this| this.function_body(function),
-            )
-        })?;
-        let admitted = if let Some(args) = args {
-            let length = self.native("list.len", vec![Expr::Variable(args.clone())])?;
-            let arity = self.native("num.le", vec![length, Operand::number(1.0).expr()])?;
-            self.block(|this| {
-                this.emit_if(
-                    arity,
-                    fast,
-                    Buf {
-                        stmts: generic.stmts.clone(),
-                        notes: generic.notes.clone(),
-                    },
-                );
-                Ok(())
-            })?
-        } else {
-            fast
-        };
-        self.emit_if(admitted_test, admitted, generic);
-        Ok(())
-    }
-
-    pub(super) fn source_return(&mut self, value: Expr) -> Lowering<()> {
         let stmt = if self.frame().async_body {
             Stmt::ReturnVia {
                 value,
@@ -289,7 +272,15 @@ impl Lowerer<'_> {
         } else {
             Stmt::Return { value }
         };
-        self.emit(stmt);
+        self.push(
+            stmt,
+            note.as_ref()
+                .map_or_else(Vec::new, |note| note.blocks.clone()),
+        );
+        if let (Some(note), Some(last)) = (note, self.buf.notes.last_mut()) {
+            last.nested_written = note.nested_written;
+            last.written = note.written;
+        }
         Ok(())
     }
 
@@ -303,14 +294,14 @@ impl Lowerer<'_> {
             }
             ast::FunctionBody::Expression(value) => {
                 let value = self.lower_expr(value)?;
-                self.source_return(value.expr())?;
+                self.source_return(value)?;
             }
         }
         if !matches!(
             self.buf.stmts.last(),
             Some(Stmt::Return { .. } | Stmt::ReturnVia { .. })
         ) {
-            self.source_return(Expr::Literal(Literal::Absent))?;
+            self.source_return(Operand::undefined())?;
         }
         Ok(())
     }
@@ -349,7 +340,7 @@ impl Lowerer<'_> {
                     )?;
                 }
             }
-            lowerer.admitted_body(function, None)
+            lowerer.function_body(function)
         });
         self.span = outer_span;
         let Some(frame) = self.functions.pop() else {
@@ -362,19 +353,20 @@ impl Lowerer<'_> {
         let this = self.fresh("this");
         let args = self.fresh("args");
         let body = self.block(|lowerer| {
-            let supplied = lowerer.supplied_arguments(entry.arity, &args)?;
-            let mut passed = vec![lash_kernel_doc::Atom::Variable(this.clone())];
-            for index in 0..entry.arity {
-                let value = lowerer.let_expr(Self::element(&supplied, index), Ty::Unknown);
-                passed.push(lowerer.atom(value));
-            }
-            let result = lowerer.emit_action(
-                lash_kernel_doc::Action::Call {
-                    callee: lash_kernel_doc::Callee::Value(entry.name.clone()),
-                    args: passed,
-                },
-                Ty::Unknown,
-            );
+            let result = lowerer.expression_block(|lowerer| {
+                let supplied = lowerer.supplied_arguments(entry.arity, &args)?;
+                let mut passed = vec![Expr::Variable(this.clone())];
+                for index in 0..entry.arity {
+                    passed.push(Self::element(&supplied, index));
+                }
+                Ok(lowerer.action(
+                    lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Value(
+                        entry.name.clone(),
+                    )),
+                    passed,
+                    Ty::Unknown,
+                ))
+            })?;
             lowerer.emit(Stmt::Return {
                 value: result.expr(),
             });
@@ -426,25 +418,21 @@ impl Lowerer<'_> {
         let args = Operand::variable(args.clone(), Ty::Unknown);
         #[expect(clippy::cast_precision_loss, reason = "a function's parameter count")]
         let count = Operand::number(positional as f64);
-        let supplied = if positional == 0 {
-            args.clone()
-        } else {
-            // Most calls already supply every position. Only a short list
-            // needs a copy with undefined slots; retain the original args for
-            // rest and the independent strict arguments object.
-            let slot = self.temp();
-            self.bind(slot.clone(), args.clone());
-            let length = self.native("list.len", vec![args.expr()])?;
-            let missing = self.native("num.lt", vec![length, count.expr()])?;
-            let fill = self.block(|this| {
-                let padded = this.invoke("ts.pad", &[args.clone(), count.clone()], Ty::Unknown)?;
-                this.store(Place::Variable(slot.clone()), padded);
-                Ok(())
-            })?;
-            self.emit_if(missing, fill, Buf::default());
-            Operand::variable(slot, Ty::Unknown)
-        };
-        Ok(supplied)
+        if positional == 0 {
+            return Ok(args);
+        }
+        let length = self.native("list.len", vec![args.expr()])?;
+        let missing = self.native("num.lt", vec![length, count.expr()])?;
+        let padded = self.invoke("ts.pad", &[args.clone(), count], Ty::Unknown)?;
+        let supplied = self.inline(
+            Expr::If {
+                cond: Box::new(missing),
+                then: Box::new(padded.expr()),
+                r#else: Box::new(args.expr()),
+            },
+            Ty::Unknown,
+        );
+        Ok(self.pin(supplied))
     }
 
     /// The enclosing function's `this`, which an arrow shares with the

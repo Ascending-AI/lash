@@ -342,7 +342,19 @@ impl Lowerer<'_> {
     pub(super) fn read(&mut self, name: &str, span: Option<SourceSpan>) -> Lowering<Operand> {
         let span = span.or(self.span);
         if let Some(kernel) = self.resolve(name, span)? {
-            return Ok(Operand::variable(kernel, self.type_of_binding(name)));
+            let stable = !self.assigned.contains(name)
+                && self.binding_mut(name).is_some_and(|(_, binding)| {
+                    binding.live
+                        && binding.kernel == kernel
+                        && matches!(
+                            binding.kind,
+                            super::BindingKind::Const | super::BindingKind::Local
+                        )
+                });
+            return Ok(Operand {
+                stable,
+                ..Operand::variable(kernel, self.type_of_binding(name))
+            });
         }
         match name {
             "undefined" => return Ok(Operand::undefined()),
@@ -484,7 +496,10 @@ impl Lowerer<'_> {
                         ast::PropertyKey::Static(name) => Key::Static(name.clone()),
                         ast::PropertyKey::Computed(key) => {
                             let key = self.lower_expr(key)?;
-                            Key::Computed(self.invoke("ts.to_property_key", &[key], Ty::Text)?)
+                            {
+                                let key = self.invoke("ts.to_property_key", &[key], Ty::Text)?;
+                                Key::Computed(self.pin(key))
+                            }
                         }
                     };
                     let value = match &key {

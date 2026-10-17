@@ -9,12 +9,11 @@ use ts.promise.is = @9bbac75194bfa51163e6d545771d89e1abb9cdbae40ff1611ce11e0f101
 entry demo() -> Any ts_direct(ts.await)
 
 fn demo() {
-  let t1 = perform corpus.echo("hello") as Any then yield
-  return t1 via ts.promise.adopt
+  return perform corpus.echo("hello") as Any then yield via ts.promise.adopt
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=2 scopes=1 sites=4
+unit Function(Name("demo")): statements=1 scopes=1 sites=3

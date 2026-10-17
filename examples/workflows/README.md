@@ -55,13 +55,20 @@ adds one loop per `for` clause, one statement per `if` clause, and one collect /
 result binding. A loop target needed after its loop permits one operand pin;
 otherwise its binding belongs to the header. An inline closure whose only
 statement returns the author's deferred call represents that call and adds no
-statement; named thunks and other closure bodies count normally. These are the
+statement. A function or closure whose only statement returns a dialect-helper
+call taking the author's inline body closure counts zero extra; that body's
+statements count normally (441660). These are the
 same rules for both dialects wherever the construct exists (owner rulings
 437657 and 437803).
 
-The Python corpus law pins every case's statement and loop counts. It records
-run-root task cleanup separately as `entry_cleanup`, pending its move into the
-entry convention, and kernel-required while-test / assignment-place action
-hoists separately as `kernel_hoist`, pending FIG-6657. Neither is an operand
-pin allowance. The inequality remains statements ≤ author statements + operand
-pins, with exactly one body per author loop, including comprehension loops.
+Both corpus laws pin each case's statement and loop counts. The TypeScript
+law also includes the original digest, typed, inbox and flat probes. Their
+old 96/87/96/27 statement counts are now 14/14/12/5, of which 6/6/6/0 are
+retained tested read ladders: the source counts are 8/8/6/5. The `read_ladder`
+column records those unresolved paths separately, pending FIG-6672 and
+FIG-6643's new ladders-off measurement; it is never an operand-pin allowance.
+The capturing cell also pins one §12 operand-order binding before its read
+ladder. Python records run-root cleanup separately as `entry_cleanup`.
+`kernel_hoist` is zero: calls remain nested in while tests and assignment
+places (FIG-6657). The SHAPE contract remains statements ≤ author statements
++ operand pins, with one body per author loop, including comprehensions.

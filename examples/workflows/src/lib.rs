@@ -176,6 +176,25 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
         )?;
     }
     let mut effects = boundary.signatures();
+    // The original source-shape probes name these host effects. They are
+    // fixture declarations; the example's offered toolbox stays in tools().
+    for name in [
+        "display.show_message",
+        "display.set_status",
+        "gmail.list_recent",
+    ] {
+        effects.insert(
+            k::EffectName::new(name)?,
+            k::Signature {
+                params: vec![k::Param {
+                    name: "input".into(),
+                    ty: k::Type::Any,
+                    optional: false,
+                }],
+                result: k::Type::Any,
+            },
+        );
+    }
     // Finish belongs only to cells; it is not a process tool offered by the example.
     effects.insert(
         k::EffectName::new("finish")?,

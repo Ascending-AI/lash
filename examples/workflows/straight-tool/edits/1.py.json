@@ -10,7 +10,34 @@
       ],
       "result": "any"
     },
+    "display.set_status": {
+      "params": [
+        {
+          "name": "input",
+          "ty": "any"
+        }
+      ],
+      "result": "any"
+    },
+    "display.show_message": {
+      "params": [
+        {
+          "name": "input",
+          "ty": "any"
+        }
+      ],
+      "result": "any"
+    },
     "finish": {
+      "params": [
+        {
+          "name": "input",
+          "ty": "any"
+        }
+      ],
+      "result": "any"
+    },
+    "gmail.list_recent": {
       "params": [
         {
           "name": "input",

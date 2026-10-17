@@ -1,0 +1,14 @@
+language: TypeScript
+exceptions: none
+main/0 [7..281] "async function demo() {\n  const greeting = \"Inbox review started\";\n  await display.show_message({ text: greeting });\n  const emails = await gmail.list_recent({ count: 3 });\n  await display.set_status({ key: \"inbox\", value: \"Reviewed three mock emails\" });\n  return emails;\n}"
+fn demo/0 [33..73] "const greeting = \"Inbox review started\";"
+fn demo/1 [76..123] "await display.show_message({ text: greeting });"
+fn demo/1/0 [76..123] "await display.show_message({ text: greeting });"
+fn demo/1/0/0 [76..123] "await display.show_message({ text: greeting });"
+fn demo/2 [126..179] "const emails = await gmail.list_recent({ count: 3 });"
+fn demo/2/0 [126..179] "const emails = await gmail.list_recent({ count: 3 });"
+fn demo/2/0/0 [126..179] "const emails = await gmail.list_recent({ count: 3 });"
+fn demo/3 [182..262] "await display.set_status({ key: \"inbox\", value: \"Reviewed three mock emails\" });"
+fn demo/3/0 [182..262] "await display.set_status({ key: \"inbox\", value: \"Reviewed three mock emails\" });"
+fn demo/3/0/0 [182..262] "await display.set_status({ key: \"inbox\", value: \"Reviewed three mock emails\" });"
+fn demo/4 [265..279] "return emails;"

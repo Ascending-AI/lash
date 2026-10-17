@@ -1,8 +1,8 @@
 //! Lowers the adapter's tree to a kernel document.
 //!
 //! Native calls, member reads and constructions stay in expressions
-//! (`K-LIB-002`). Actions remain statements with atom arguments: the front
-//! end nests none (`K-EVAL-008`). An earlier operand is pinned when a later
+//! (`K-LIB-002`). Calls, awaits and effects nest too (`K-EVAL-008`).
+//! An earlier operand is pinned when a later
 //! operand emits statements that could change its value or run before its
 //! raise (`K-EVAL-001`).
 //!
@@ -15,9 +15,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Library, Lowered, Mode, workflow};
 use lash_kernel_doc::{
-    Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float,
-    FunctionCatalog, FunctionId, FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs,
-    Signature, Stmt, TryStmt,
+    AssignOrder, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float, FunctionCatalog,
+    FunctionId, FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs, Signature, Stmt,
+    TryStmt,
 };
 
 use crate::adapter as ast;
@@ -105,6 +105,7 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.pow",
     "ts.promise.pending",
     "ts.promise.run",
+    "ts.promise.start",
     "ts.promise.adopt",
     "ts.read",
     "ts.rem",
@@ -127,7 +128,7 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.ushr",
 ];
 
-/// A native-only expression, its representation facts, and whether later
+/// An expression, its representation facts, and whether later
 /// statements can change its value or run before it raises.
 #[derive(Clone, Debug)]
 pub(crate) struct Operand {
@@ -740,8 +741,9 @@ impl Lowerer<'_> {
             &[Operand::variable(kernel, Ty::Unknown), Operand::text(name)],
             Ty::Unknown,
         )?;
+        let checked = self.pin(checked);
         let Expr::Variable(checked) = checked.expr else {
-            unreachable!("a call is bound to a temporary");
+            unreachable!("a pinned check is a variable");
         };
         Ok(checked)
     }
@@ -825,7 +827,13 @@ impl Lowerer<'_> {
         }
     }
 
-    fn push(&mut self, stmt: Stmt, blocks: Vec<Vec<Note>>) {
+    fn push(&mut self, mut stmt: Stmt, blocks: Vec<Vec<Note>>) {
+        if let Stmt::Let { value, .. } | Stmt::Assign { value, .. } = &mut stmt
+            && let Rhs::Expr(Expr::Act(action)) = value
+            && let Some(action) = action.as_action()
+        {
+            *value = Rhs::Action(action);
+        }
         if let Stmt::Let { name, .. } = &stmt {
             let name = name.clone();
             self.note_private(&name);
@@ -1014,14 +1022,11 @@ impl Lowerer<'_> {
         Operand::temp(name, ty)
     }
 
-    /// Runs an action and binds its result to a temporary.
-    pub(crate) fn emit_action(&mut self, action: Action, ty: Ty) -> Operand {
-        let name = self.temp();
-        self.emit(Stmt::Let {
-            name: name.clone(),
-            value: Rhs::Action(action),
-        });
-        Operand::temp(name, ty)
+    fn action(&mut self, kind: lash_kernel_doc::ActKind, args: Vec<Expr>, ty: Ty) -> Operand {
+        self.inline(
+            Expr::Act(Box::new(lash_kernel_doc::ActExpr { kind, args })),
+            ty,
+        )
     }
 
     /// The identity of a library function, listed in the manifest.
@@ -1039,7 +1044,7 @@ impl Lowerer<'_> {
         Ok(function)
     }
 
-    /// Native calls nest; helpers with kernel bodies remain actions.
+    /// Native and body helpers both nest, using their admitted call form.
     pub(crate) fn invoke(&mut self, function: &str, args: &[Operand], ty: Ty) -> Lowering<Operand> {
         let function = self.function(function)?;
         // A helper's checked Text result is representation proof. Losing it
@@ -1069,12 +1074,9 @@ impl Lowerer<'_> {
                 ty,
             ));
         }
-        let args = self.atoms(args);
-        Ok(self.emit_action(
-            Action::Call {
-                callee: Callee::Library(function),
-                args,
-            },
+        Ok(self.action(
+            lash_kernel_doc::ActKind::Call(Callee::Library(function)),
+            args.iter().map(Operand::expr).collect(),
             ty,
         ))
     }
@@ -1257,28 +1259,6 @@ impl Lowerer<'_> {
         } else {
             self.pin(operand)
         }
-    }
-
-    /// Arguments of the actions the front end emits are atoms.
-    fn atom(&mut self, operand: Operand) -> Atom {
-        match operand.expr {
-            Expr::Literal(literal) => Atom::Literal(literal),
-            Expr::Variable(name) => Atom::Variable(name),
-            expr => {
-                let bound = self.let_expr(expr, operand.ty);
-                let Expr::Variable(name) = bound.expr else {
-                    unreachable!("a bound expression is a variable");
-                };
-                Atom::Variable(name)
-            }
-        }
-    }
-
-    fn atoms(&mut self, operands: &[Operand]) -> Vec<Atom> {
-        operands
-            .iter()
-            .map(|operand| self.atom(operand.clone()))
-            .collect()
     }
 
     /// Statements emitted while lowering one operand, without opening a scope.

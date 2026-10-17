@@ -84,12 +84,7 @@ struct Collector<'a> {
     plain: super::plain::Collector<'a>,
     function_depth: usize,
     aliases: Vec<(&'a str, &'a TypeAnnotation)>,
-    functions: HashMap<&'a str, &'a Function>,
-    reads: HashMap<&'a str, usize>,
-    calls: HashMap<&'a str, usize>,
     direct_calls: HashSet<&'a str>,
-    contexts: Vec<Option<&'a str>>,
-    captured_calls: HashSet<&'a str>,
 }
 
 /// What the analysis found.
@@ -99,7 +94,6 @@ pub(crate) struct Facts {
     types: HashMap<String, Ty>,
     narrowable: HashSet<String>,
     aliases: BTreeMap<String, Ty>,
-    numeric_functions: HashSet<String>,
     direct_calls: HashSet<String>,
     /// Declared results of tools whose root no source or session binding shadows.
     effect_results: BTreeMap<String, Ty>,
@@ -134,21 +128,6 @@ impl Facts {
                 .direct_calls
                 .iter()
                 .map(|name| (*name).to_owned())
-                .collect(),
-            numeric_functions: collector
-                .functions
-                .iter()
-                .filter(|(name, function)| {
-                    let entry = &collector.entries[**name];
-                    entry.declarations == 1
-                        && entry.assignments == 0
-                        && !session.contains(&Name::new(**name))
-                        && collector.calls.contains_key(**name)
-                        && !collector.captured_calls.contains(**name)
-                        && collector.reads.get(**name) == collector.calls.get(**name)
-                        && numeric_function(name, function)
-                })
-                .map(|(name, _)| (*name).to_string())
                 .collect(),
             plain: std::mem::take(&mut collector.plain).finish(session, terminal),
             types: collector
@@ -191,15 +170,6 @@ impl Facts {
             .map(|(name, _)| (*name).to_string())
             .collect();
         facts
-    }
-
-    /// A closed scalar body can be lowered under a float entry admission.
-    /// This is never an unconditional parameter or saved-function fact.
-    pub(crate) fn numeric_function(&self, function: &Function) -> bool {
-        function
-            .name
-            .as_ref()
-            .is_some_and(|name| self.numeric_functions.contains(name))
     }
 
     /// Only plain identifier calls can use a positional entry. A name
@@ -520,9 +490,6 @@ impl<'a> Collector<'a> {
                 }
             }
             Stmt::Function { name, function } => {
-                if self.function_depth == 0 {
-                    self.functions.insert(name, function);
-                }
                 self.name(
                     name,
                     Role::Declared { hoisted: true },
@@ -623,7 +590,6 @@ impl<'a> Collector<'a> {
 
     fn function(&mut self, function: &'a Function) {
         self.function_depth += 1;
-        self.contexts.push(function.name.as_deref());
         for param in &function.params {
             self.pattern(param, Role::Declared { hoisted: false });
         }
@@ -632,7 +598,6 @@ impl<'a> Collector<'a> {
             FunctionBody::Expression(value) => self.expr(value),
         }
         self.function_depth -= 1;
-        self.contexts.pop();
     }
 
     fn property(&mut self, property: &'a MemberProperty) {
@@ -673,9 +638,6 @@ impl<'a> Collector<'a> {
     }
 
     fn expr(&mut self, expr: &'a Expr) {
-        if let Expr::Ident(name, _) = expr {
-            *self.reads.entry(name).or_default() += 1;
-        }
         if self.function_depth > 0
             && let Expr::Ident(name, _) = expr
         {
@@ -786,18 +748,10 @@ impl<'a> Collector<'a> {
                 self.function(function);
             }
             Expr::Call { callee, args, .. } => {
-                if let Expr::Ident(name, _) = callee.as_ref() {
-                    if args.iter().all(|arg| matches!(arg, CallArg::Value(_))) {
-                        self.direct_calls.insert(name);
-                    }
-                    *self.calls.entry(name).or_default() += 1;
-                    if self
-                        .contexts
-                        .last()
-                        .is_some_and(|owner| *owner != Some(name.as_str()))
-                    {
-                        self.captured_calls.insert(name);
-                    }
+                if let Expr::Ident(name, _) = callee.as_ref()
+                    && args.iter().all(|arg| matches!(arg, CallArg::Value(_)))
+                {
+                    self.direct_calls.insert(name);
                 }
                 self.plain.call(callee, args);
                 self.expr(callee);
@@ -848,108 +802,5 @@ fn loop_source(kind: Option<VarKind>, source: Source<'_>) -> Source<'_> {
         Source::Opaque
     } else {
         source
-    }
-}
-
-/// The first admitted family is a pure, one-parameter scalar recursion.
-/// No mutation, captures, defaults, destructuring, implicit return or opaque
-/// call can invalidate the entry assumption or manufacture a return fact.
-fn numeric_function(name: &str, function: &Function) -> bool {
-    if function.is_async || function.return_ty.is_some() {
-        return false;
-    }
-    let [Pattern::Ident(parameter, None)] = function.params.as_slice() else {
-        return false;
-    };
-    if parameter == name {
-        return false;
-    }
-    fn number(expr: &Expr, name: &str, parameter: &str) -> bool {
-        match expr {
-            Expr::Number(_) => true,
-            Expr::Ident(id, _) => id == parameter,
-            Expr::Unary {
-                op: crate::adapter::UnaryOp::Plus | crate::adapter::UnaryOp::Minus,
-                value,
-            } => number(value, name, parameter),
-            Expr::Binary {
-                left,
-                op:
-                    BinaryOp::Add
-                    | BinaryOp::Subtract
-                    | BinaryOp::Multiply
-                    | BinaryOp::Divide
-                    | BinaryOp::Remainder,
-                right,
-                ..
-            } => number(left, name, parameter) && number(right, name, parameter),
-            Expr::Call { callee, args, .. } => {
-                matches!(callee.as_ref(), Expr::Ident(id, _) if id == name)
-                    && matches!(args.as_slice(), [CallArg::Value(value)] if number(value, name, parameter))
-            }
-            Expr::Conditional {
-                test,
-                consequent,
-                alternate,
-            } => {
-                boolean(test, name, parameter)
-                    && number(consequent, name, parameter)
-                    && number(alternate, name, parameter)
-            }
-            _ => false,
-        }
-    }
-    fn boolean(expr: &Expr, name: &str, parameter: &str) -> bool {
-        match expr {
-            Expr::Bool(_) => true,
-            Expr::Binary {
-                left,
-                op:
-                    BinaryOp::Less
-                    | BinaryOp::LessEqual
-                    | BinaryOp::Greater
-                    | BinaryOp::GreaterEqual
-                    | BinaryOp::StrictEqual
-                    | BinaryOp::StrictNotEqual
-                    | BinaryOp::LooseEqual
-                    | BinaryOp::LooseNotEqual,
-                right,
-                ..
-            } => number(left, name, parameter) && number(right, name, parameter),
-            _ => false,
-        }
-    }
-    // Both return admission and absence of effects are structural. Recursive
-    // return facts hold inductively for every terminating numeric invocation.
-    fn statement(stmt: &Stmt, name: &str, parameter: &str) -> Option<bool> {
-        match stmt {
-            Stmt::Spanned(_, stmt) => statement(stmt, name, parameter),
-            Stmt::Empty => Some(false),
-            Stmt::Return(Some(value)) if number(value, name, parameter) => Some(true),
-            Stmt::If {
-                test,
-                consequent,
-                alternate,
-            } if boolean(test, name, parameter) => {
-                let yes = statement(consequent, name, parameter)?;
-                let no = alternate
-                    .as_ref()
-                    .map_or(Some(false), |stmt| statement(stmt, name, parameter))?;
-                Some(yes && no)
-            }
-            Stmt::Block(body) => statements(body, name, parameter),
-            _ => None,
-        }
-    }
-    fn statements(body: &[Stmt], name: &str, parameter: &str) -> Option<bool> {
-        let mut returns = false;
-        for stmt in body {
-            returns |= statement(stmt, name, parameter)?;
-        }
-        Some(returns)
-    }
-    match &function.body {
-        FunctionBody::Block(body) => statements(body, name, parameter) == Some(true),
-        FunctionBody::Expression(value) => number(value, name, parameter),
     }
 }

@@ -58,6 +58,7 @@ impl Lowerer<'_> {
             }
             ast::Pattern::Array { elements, rest } => {
                 let iterator = self.invoke("ts.array.iterator", &[value], Ty::Unknown)?;
+                let iterator = self.pin(iterator);
                 let next = self.invoke(
                     "ts.get",
                     &[iterator.clone(), Operand::text("next")],
@@ -107,7 +108,10 @@ impl Lowerer<'_> {
                         ast::PropertyKey::Static(name) => Key::Static(name.clone()),
                         ast::PropertyKey::Computed(key) => {
                             let key = self.lower_expr(key)?;
-                            Key::Computed(self.invoke("ts.to_property_key", &[key], Ty::Text)?)
+                            {
+                                let key = self.invoke("ts.to_property_key", &[key], Ty::Text)?;
+                                Key::Computed(self.pin(key))
+                            }
                         }
                     };
                     taken.push(key.operand().expr());
@@ -133,15 +137,14 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         let value = self.let_expr(Operand::undefined().expr(), Ty::Unknown);
         let step = self.block(|this| {
-            let args = this.let_expr(Expr::List(Vec::new()), Ty::Unknown);
-            let args = this.atoms(&[iterator.clone(), args]);
-            let step = this.emit_action(
-                lash_kernel_doc::Action::Call {
-                    callee: lash_kernel_doc::Callee::Value(super::statements::variable_of(next)),
-                    args,
-                },
+            let step = this.action(
+                lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Value(
+                    super::statements::variable_of(next),
+                )),
+                vec![iterator.expr(), Expr::List(Vec::new())],
                 Ty::Unknown,
             );
+            let step = this.pin(step);
             let done = this.invoke(
                 "ts.get",
                 &[step.clone(), Operand::text("done")],

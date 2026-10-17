@@ -82,3 +82,14 @@ fn every_cell_statement_and_action_is_mapped() {
     let lowered = super::lower_with_effects(source).unwrap();
     assert_eq!(unmapped(&lowered), BTreeMap::new());
 }
+
+/// FIG-6641: folding a while test must carry its inline closure's notes
+/// before the loop body's notes, including the source-written function.
+#[test]
+fn a_while_test_keeps_its_inline_function_body_mapped() {
+    let source =
+        "while ((() => { console.log('test'); return false; })()) { console.log('body'); }";
+    let lowered = super::lower_with_effects(source).unwrap();
+    assert_eq!(unmapped(&lowered), BTreeMap::new());
+    assert_eq!(lowered.written.len(), 1);
+}

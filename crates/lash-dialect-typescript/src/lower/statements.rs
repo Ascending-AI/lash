@@ -186,6 +186,14 @@ impl Lowerer<'_> {
                     ast::Expr::Call { callee, args, span } => {
                         self.lower_call(callee, args, *span, true)?
                     }
+                    ast::Expr::Assign {
+                        target: ast::AssignTarget::Member { object, property },
+                        op: ast::AssignOp::Assign,
+                        value,
+                    } => {
+                        self.assign_member_statement(object, property, value)?;
+                        Operand::undefined()
+                    }
                     _ => self.lower_expr(expr)?,
                 };
                 self.discard(value);
@@ -218,7 +226,7 @@ impl Lowerer<'_> {
                     Some(value) => self.lower_expr(value)?,
                     None => Operand::undefined(),
                 };
-                self.source_return(value.expr())
+                self.source_return(value)
             }
             ast::Stmt::If {
                 test,
@@ -239,13 +247,32 @@ impl Lowerer<'_> {
                 Ok(())
             }
             ast::Stmt::While { test, body } => {
-                let body = self.loop_block(Vec::new(), |this| {
+                let (test_buf, condition) = self.aside(|this| {
                     let test = this.lower_expr(test)?;
-                    let condition = this.condition(test)?;
-                    this.exit_unless(condition);
-                    this.lower_statement(body)
+                    this.condition(test)
                 })?;
-                self.emit_while(truth(), body);
+                if let Some(condition) = self.branch_expression(&test_buf, condition.clone()) {
+                    let nested_written = Self::branch_written(&test_buf, &[0]);
+                    let mut blocks: Vec<_> = test_buf
+                        .notes
+                        .into_iter()
+                        .flat_map(|note| note.blocks)
+                        .collect();
+                    let body = self.loop_block(Vec::new(), |this| this.lower_statement(body))?;
+                    self.emit_while(condition, body);
+                    if let Some(note) = self.buf.notes.last_mut() {
+                        blocks.append(&mut note.blocks);
+                        note.blocks = blocks;
+                        note.nested_written = nested_written;
+                    }
+                } else {
+                    let body = self.loop_block(Vec::new(), |this| {
+                        this.append(test_buf);
+                        this.exit_unless(condition);
+                        this.lower_statement(body)
+                    })?;
+                    self.emit_while(truth(), body);
+                }
                 Ok(())
             }
             ast::Stmt::DoWhile { body, test, .. } => {
@@ -542,10 +569,16 @@ impl Lowerer<'_> {
             item: Some(self.function("ts.for_of.item")?),
             check: None,
         };
-        let item = self.temp();
-        let element = Operand::variable(item.clone(), Ty::Unknown);
+        let mut item = self.temp();
         let body = self.loop_block(Vec::new(), |this| {
-            this.destructure(pattern, element, mode_of(kind))?;
+            if let ast::Pattern::Ident(name, _) = pattern
+                && matches!(kind, Some(VarKind::Let | VarKind::Const))
+            {
+                item = this.declare(name, BindingKind::Local);
+            } else {
+                let element = Operand::variable(item.clone(), Ty::Unknown);
+                this.destructure(pattern, element, mode_of(kind))?;
+            }
             this.lower_statement(body)
         })?;
         self.emit_for(item, subject.expr(), Some(via), body);

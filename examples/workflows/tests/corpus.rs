@@ -26,7 +26,9 @@ fn design_8_corpus_pins_readable_per_dialect_outputs() -> anyhow::Result<()> {
 /// otherwise binding it belongs to the header. These rules apply to both
 /// dialects where the construct exists (owner ruling 437657). An inline
 /// closure containing only the return of a deferred source call contributes
-/// no extra statement (437803); a named thunk or any other body counts normally.
+/// no extra statement (437803). A function or closure whose only statement
+/// returns a dialect-helper call taking the author's inline body closure
+/// counts zero extra; the body's statements count normally (441660).
 /// Run-root task cleanup is pinned separately as entry_cleanup (437760).
 /// A `while` test and an assignment's place keep their actions nested
 /// (FIG-6657), so no action is hoisted for the kernel. The cleanup column is
@@ -254,6 +256,238 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         );
         if statements > author.statements || loops != author.loops {
             failures.push(format!("{name}: {statements} statements / {loops} loops for {} author statements / {} loops\n{}", author.statements, author.loops, lash_kernel_doc::print_document(document)));
+        }
+    }
+    assert!(failures.is_empty(), "SHAPE: {}", failures.join("\n"));
+}
+
+/// FIG-6402 rev2 §15 SHAPE. Count the source statements (including catch
+/// clauses), with one body per source loop. Loop header bindings add no
+/// statement; an escaping target adds one operand pin. Comprehensions count
+/// each for/if clause and one collect binding (437657). Deferred-call-only
+/// inline closures add no statement (437803). A function or closure whose
+/// only statement returns a dialect-helper call taking the author's inline
+/// body closure counts zero extra; the body's statements count normally
+/// (441660). Retained tested reads are pinned separately as read_ladder,
+/// pending FIG-6672/FIG-6643, and never included in operand pins. Kernel
+/// action hoists are forbidden (FIG-6657). The four original probes have
+/// 8/8/6/5 author statements, against the old 96/87/96/27 lowered baselines.
+#[test]
+fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_loop() {
+    use lash_kernel_doc::{Node, Stmt};
+    let embedding = lash_vm_worker::built_dialects(&Default::default()).unwrap();
+    let effects = [
+        "corpus.echo",
+        "finish",
+        "display.show_message",
+        "display.set_status",
+        "gmail.list_recent",
+    ]
+    .into_iter()
+    .map(|name| {
+        (
+            lash_kernel_doc::EffectName::new(name).unwrap(),
+            lash_kernel_doc::Signature {
+                params: vec![lash_kernel_doc::Param {
+                    name: "input".into(),
+                    ty: lash_kernel_doc::Type::Any,
+                    optional: false,
+                }],
+                result: lash_kernel_doc::Type::Any,
+            },
+        )
+    })
+    .collect();
+    let controls = std::collections::BTreeMap::from([(
+        lash_kernel_doc::EffectName::new("finish").unwrap(),
+        std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
+    )]);
+    let env = lash_kernel_dialect::Environment {
+        library: embedding.library(),
+        effects: &effects,
+        controls: &controls,
+        tool_roots: &Default::default(),
+    };
+    let mut failures = Vec::new();
+    let sources = [
+        (
+            "straight-tool",
+            include_str!("../straight-tool/source.ts"),
+            1,
+            0,
+        ),
+        ("branch", include_str!("../branch/source.ts"), 3, 0),
+        (
+            "iteration-typed",
+            include_str!("../iteration-typed/source.ts"),
+            4,
+            1,
+        ),
+        (
+            "iteration-untyped",
+            include_str!("../iteration-untyped/source.ts"),
+            4,
+            1,
+        ),
+        (
+            "try-finally",
+            include_str!("../try-finally/source.ts"),
+            7,
+            0,
+        ),
+        ("fan-out", include_str!("../fan-out/source.ts"), 3, 0),
+        ("sleep", include_str!("../sleep/source.ts"), 2, 0),
+        (
+            "closures-helpers",
+            include_str!("../closures-helpers/source.ts"),
+            3,
+            0,
+        ),
+        (
+            "early-return",
+            include_str!("../early-return/source.ts"),
+            4,
+            0,
+        ),
+        ("non-ascii", include_str!("../non-ascii/source.ts"), 2, 0),
+        (
+            "entry-boundary",
+            include_str!("../entry-boundary/source.ts"),
+            2,
+            0,
+        ),
+        (
+            "early-finish",
+            include_str!("../early-finish/source.ts"),
+            2,
+            0,
+        ),
+        (
+            "capturing-cell",
+            include_str!("../capturing-cell/source.ts"),
+            6,
+            0,
+        ),
+        ("digest", include_str!("../probe-digest/source.ts"), 8, 1),
+        ("typed", include_str!("../probe-typed/source.ts"), 8, 1),
+        ("inbox", include_str!("../probe-inbox/source.ts"), 6, 1),
+        ("flat", include_str!("../probe-flat/source.ts"), 5, 0),
+    ];
+    let catalog: Vec<serde_json::Value> =
+        serde_json::from_str(include_str!("../catalog.json")).unwrap();
+    let admitted: std::collections::BTreeSet<_> = catalog
+        .iter()
+        .filter(|case| {
+            case.get("refusal").is_none()
+                && case["dialects"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|dialect| dialect == "ts")
+        })
+        .map(|case| case["name"].as_str().unwrap())
+        .collect();
+    let measured: std::collections::BTreeSet<_> = sources
+        .iter()
+        .map(|(name, ..)| match *name {
+            "digest" => "probe-digest",
+            "typed" => "probe-typed",
+            "inbox" => "probe-inbox",
+            "flat" => "probe-flat",
+            name => name,
+        })
+        .collect();
+    assert_eq!(
+        measured, admitted,
+        "every admitted TypeScript corpus case is measured"
+    );
+    for (name, source, author, source_loops) in sources {
+        let cell = matches!(name, "early-finish" | "capturing-cell");
+        let lowered = lash_dialect_typescript::lower(
+            source,
+            &env,
+            if cell {
+                lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first())
+            } else {
+                lash_kernel_dialect::Mode::Module
+            },
+        )
+        .unwrap();
+        let mut pending: Vec<_> = if cell {
+            vec![Node::Block(&lowered.document.main)]
+        } else {
+            lowered
+                .document
+                .entries
+                .keys()
+                .map(|name| Node::Block(&lowered.document.functions[name].body))
+                .collect()
+        };
+        let (mut statements, mut loops) = (0, 0);
+        let mut adapters = 0;
+        while let Some(node) = pending.pop() {
+            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node
+                && let [
+                    Stmt::Return {
+                        value: lash_kernel_doc::Expr::Act(action),
+                    },
+                ] = closure.body.as_slice()
+                && let lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Library(function)) =
+                    action.kind
+                && lowered
+                    .document
+                    .manifest
+                    .functions
+                    .get(&function)
+                    .is_some_and(|name| name.as_str() == "ts.promise.start")
+                && matches!(action.args.first(), Some(lash_kernel_doc::Expr::Closure(_)))
+            {
+                adapters += 1;
+                pending.extend(action.args.iter().map(Node::Expr));
+                continue;
+            }
+            statements += usize::from(matches!(node, Node::Stmt(_)));
+            loops += usize::from(matches!(
+                node,
+                Node::Stmt(Stmt::For { .. } | Stmt::While { .. })
+            ));
+            pending.extend(node.children());
+        }
+        // These are reviewed source counts and measured statement counts,
+        // pinned per fixture: no blanket multiplier or spare allowance.
+        // Capturing-cell's two parameter bindings remain outside its return
+        // solely because the retained read ladder splits that expression;
+        // its arithmetic left operand is the one §12 order pin.
+        let (expected, read_ladder, operand_pins, expected_adapters) = match name {
+            "straight-tool" => (1, 0, 0, 0),
+            "branch" => (3, 0, 0, 0),
+            "iteration-typed" | "iteration-untyped" => (4, 0, 0, 0),
+            "try-finally" => (6, 0, 0, 0),
+            "fan-out" => (3, 0, 0, 1),
+            "sleep" => (2, 0, 0, 0),
+            "closures-helpers" => (12, 9, 0, 0),
+            "early-return" => (4, 0, 0, 0),
+            "non-ascii" | "entry-boundary" | "early-finish" => (2, 0, 0, 0),
+            "capturing-cell" => (15, 8, 1, 1),
+            "digest" | "typed" => (14, 6, 0, 0),
+            "inbox" => (12, 6, 0, 0),
+            "flat" => (5, 0, 0, 0),
+            _ => unreachable!(),
+        };
+        let kernel_hoist = 0;
+        println!(
+            "{name}: statements={statements} author={author} loops={loops} operand_pins={operand_pins} read_ladder={read_ladder} adapters={adapters} kernel_hoist={kernel_hoist}"
+        );
+        assert_eq!(
+            (statements, loops, adapters, kernel_hoist),
+            (expected, source_loops, expected_adapters, 0),
+            "{name}: pinned SHAPE columns"
+        );
+        lash_kernel_doc::validate_document(&lowered.document, env.library).unwrap();
+        if statements - read_ladder > author + operand_pins || loops != source_loops {
+            failures.push(format!(
+                "{name}: {statements}/{author} statements, {loops}/{source_loops} loops"
+            ));
         }
     }
     assert!(failures.is_empty(), "SHAPE: {}", failures.join("\n"));

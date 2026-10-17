@@ -3,4 +3,3 @@ exceptions: none
 main/0 [7..69] "async function demo() {\n  return await corpus.echo(\"hello\");\n}"
 fn demo/0 [33..67] "return await corpus.echo(\"hello\");"
 fn demo/0/0 [33..67] "return await corpus.echo(\"hello\");"
-fn demo/1 [33..67] "return await corpus.echo(\"hello\");"

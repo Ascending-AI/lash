@@ -130,16 +130,6 @@ impl Reader {
             )),
         }
     }
-    pub(super) fn atom(&mut self, expr: &s::Expr) -> Result<k::Atom, Diagnostic> {
-        match self.expression(expr)? {
-            k::Expr::Literal(value) => Ok(k::Atom::Literal(value)),
-            k::Expr::Variable(name) => Ok(k::Atom::Variable(name)),
-            _ => Err(invalid(
-                "an action operand must be a variable or literal",
-                Some(expr.span()),
-            )),
-        }
-    }
     pub(super) fn rhs(&mut self, expr: &s::Expr) -> Result<k::Rhs, Diagnostic> {
         if let Some(action) = self.native_action(expr) {
             action.map(super::native::NativeAction::rhs)

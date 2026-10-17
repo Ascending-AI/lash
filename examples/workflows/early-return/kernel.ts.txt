@@ -26,8 +26,7 @@ fn demo(value) {
   if num.lt(num.to_float(value), 0.0) {
     return "negative" via ts.promise.adopt
   }
-  let t1 = invoke ts.boundary(value)
-  do perform corpus.echo(t1) as Any then yield
+  do perform corpus.echo(invoke ts.boundary(value)) as Any then yield
   return "done" via ts.promise.adopt
 }
 
@@ -35,4 +34,4 @@ main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=5 scopes=3 sites=8
+unit Function(Name("demo")): statements=4 scopes=3 sites=7

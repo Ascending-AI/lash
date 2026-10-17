@@ -1,6 +1,6 @@
-//! Lazy, action-free regions and the statement boundary for branches that act.
+//! Lazy expression regions and the boundary for statement control flow.
 
-use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Place, Rhs, Stmt};
+use lash_kernel_doc::{Expr, Literal, Place, Rhs, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand};
 
@@ -18,7 +18,7 @@ impl Lowerer<'_> {
         Ok((buf, value))
     }
 
-    /// Only native calls (`K-LIB-002`) and pure bindings nest here.
+    /// Ordered bindings, including actions, nest without evaluating a branch early.
     pub(super) fn branch_expression(&self, buf: &Buf, mut body: Expr) -> Option<Expr> {
         for stmt in buf.stmts.iter().rev() {
             let Stmt::Let { name, value } = stmt else {
@@ -26,26 +26,7 @@ impl Lowerer<'_> {
             };
             let value = match value {
                 Rhs::Expr(value) => value.clone(),
-                Rhs::Action(Action::Call {
-                    callee: Callee::Library(function),
-                    args,
-                }) if self
-                    .library
-                    .definition(function)
-                    .is_some_and(|definition| definition.has_native()) =>
-                {
-                    Expr::Call {
-                        function: *function,
-                        args: args
-                            .iter()
-                            .map(|arg| match arg {
-                                Atom::Variable(name) => Expr::Variable(name.clone()),
-                                Atom::Literal(value) => Expr::Literal(value.clone()),
-                            })
-                            .collect(),
-                    }
-                }
-                Rhs::Action(_) => return None,
+                Rhs::Action(action) => action.clone().into(),
             };
             body = Expr::Let {
                 name: name.clone(),
@@ -65,7 +46,10 @@ impl Lowerer<'_> {
         Some(body)
     }
 
-    fn branch_written(buf: &Buf, prefix: &[u32]) -> Vec<(Vec<u32>, lash_kernel_dialect::Written)> {
+    pub(super) fn branch_written(
+        buf: &Buf,
+        prefix: &[u32],
+    ) -> Vec<(Vec<u32>, lash_kernel_dialect::Written)> {
         let mut out = Vec::new();
         let mut prefix = prefix.to_vec();
         for note in &buf.notes {
@@ -84,7 +68,7 @@ impl Lowerer<'_> {
         out
     }
 
-    /// Both branches stay lazy. An action in either branch keeps statement control flow.
+    /// Both branches stay lazy; statement control flow stays in its own block.
     pub(super) fn choose(
         &mut self,
         condition: Expr,

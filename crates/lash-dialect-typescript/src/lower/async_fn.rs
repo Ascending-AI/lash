@@ -25,13 +25,11 @@
 //! The turn is taken when the effect fails or is cancelled too, before the
 //! raise reaches any `catch`.
 //!
-//! The spawn is written in the document, not inside a helper, so a task's
-//! identity (`K-TASK-020`) names the async function or the tool call that
-//! started it.
+//! Async function adapters hand their inline source body to ts.promise.start.
+//! Unawaited tool calls use the same adapter with an inline effect body. The
+//! actual spawn site and its occurrence name the child (`K-TASK-020`).
 
-use lash_kernel_doc::{
-    Action, AssignOrder, Atom, Callee, EffectName, Expr, Literal, Member, Place, Rhs, Stmt,
-};
+use lash_kernel_doc::{ActKind, EffectName, Expr, Literal, Rhs, Stmt};
 
 use super::{Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
@@ -55,35 +53,32 @@ impl Lowerer<'_> {
         _span: Option<SourceSpan>,
     ) -> Lowering<Operand> {
         let body = self.closure(function)?;
-        // The function the source wrote is the one that starts the task,
-        // not the closure of its body: the body neither carries what the
-        // source wrote nor crosses on its own.
-        if let Some(note) = self.buf.notes.last_mut() {
-            note.written = None;
-        }
-        let mut convention = None;
-        if let Some(Stmt::Let {
-            value: lash_kernel_doc::Rhs::Expr(Expr::Closure(closure)),
-            ..
-        }) = self.buf.stmts.last_mut()
-        {
-            convention = closure.start.take().map(|start| start.convention);
-        }
+        let Some((Rhs::Expr(Expr::Closure(mut source_body)), note)) = self.take_binding_of(&body)
+        else {
+            unreachable!("a source body is a fresh closure");
+        };
+        let convention = source_body.start.take().map(|start| start.convention);
         let written = self.written(function);
         let this = self.fresh("this");
         let args = self.fresh("args");
         let params = vec![this.clone(), args.clone()];
         let block = self.block(|lowerer| {
-            // The caller may reuse its invocation buffer once this task waits,
-            // including during a default parameter's call. Own the slots before
-            // spawning; values in them retain their original shared identities.
+            // Own the packed invocation slots before the child starts. The
+            // source body stays inline; ts.promise.start owns its task setup.
             let owned = lowerer.native("list.copy", vec![Expr::Variable(args)])?;
-            let owned = lowerer.let_expr(owned, Ty::Unknown);
-            let owned = lowerer.atom(owned);
-            let promise = lowerer.start_promise(&body, Atom::Variable(this), owned)?;
-            lowerer.emit(Stmt::Return {
-                value: promise.expr(),
-            });
+            let owned = lowerer.inline(owned, Ty::Unknown);
+            let body = lowerer.inline(Expr::Closure(source_body), Ty::Unknown);
+            let promise = lowerer.invoke(
+                "ts.promise.start",
+                &[body, Operand::variable(this, Ty::Unknown), owned],
+                Ty::Unknown,
+            )?;
+            lowerer.push(
+                Stmt::Return {
+                    value: promise.expr(),
+                },
+                note.blocks,
+            );
             Ok(())
         })?;
         self.written = Some(written);
@@ -117,16 +112,21 @@ impl Lowerer<'_> {
                 // The call settled, so the turn is over: nothing after it
                 // runs (`K-FORM-019`). The host reads the control from the
                 // settled call, never from this value.
+                let name = self.temp();
                 self.emit(Stmt::Finish {
-                    value: Expr::Literal(Literal::Null),
+                    value: Expr::Let {
+                        name,
+                        value: Box::new(result.expr()),
+                        body: Box::new(Expr::Literal(Literal::Null)),
+                    },
                 });
+                return Ok(Operand::undefined());
             }
             return Ok(result);
         }
         let value = self.lower_expr(value)?;
         let policy = self.function("ts.await")?;
-        let value = self.atom(value);
-        let awaited = self.emit_action(Action::Await { policy, value }, Ty::Unknown);
+        let awaited = self.action(ActKind::Await(policy), vec![value.expr()], Ty::Unknown);
         self.await_process(awaited, span)
     }
 
@@ -142,21 +142,37 @@ impl Lowerer<'_> {
             return Err(self.control_placement(&wait, span));
         }
         let args = self.wait_arguments(&wait, args, span)?;
+        // Construct the owned invocation list before the child starts.
+        // Its body reads those slots instead of capturing live bindings.
         let this = self.fresh("this");
-        let ignored = self.fresh("args");
+        let supplied = self.fresh("args");
+        let slots = Operand::variable(supplied.clone(), Ty::Unknown);
+        let values = (0..args.len())
+            .map(|index| Self::element(&slots, index))
+            .collect();
         let block = self.block(|lowerer| {
-            let result = lowerer.wait_action(wait, args, false)?;
+            let result = lowerer.wait_action(wait, values, false)?;
             lowerer.emit(Stmt::Return {
                 value: result.expr(),
             });
             Ok(())
         })?;
-        let body = self.emit_closure(vec![this, ignored], block, None);
-        self.start_promise(
-            &body,
-            Atom::Literal(Literal::Absent),
-            Atom::Literal(Literal::Absent),
-        )
+        let body = self.emit_closure(vec![this, supplied], block, None);
+        let Some((Rhs::Expr(body), note)) = self.take_binding_of(&body) else {
+            unreachable!("a wait body is a fresh closure");
+        };
+        let body = self.inline(body, Ty::Unknown);
+        let args = self.inline(Expr::List(args), Ty::Unknown);
+        let promise = self.invoke(
+            "ts.promise.start",
+            &[body, Operand::undefined(), args],
+            Ty::Unknown,
+        )?;
+        let promise = self.let_expr(promise.expr(), Ty::Unknown);
+        if let Some(last) = self.buf.notes.last_mut() {
+            last.blocks = note.blocks;
+        }
+        Ok(promise)
     }
 
     /// Whether the wait is a call of an effect that ends the turn.
@@ -220,14 +236,13 @@ impl Lowerer<'_> {
         (!self.is_bound(root)).then_some(path)
     }
 
-    /// The arguments of a wait, evaluated left to right, as the atoms its
-    /// action takes.
+    /// The arguments of a wait, nested in their left-to-right evaluation order.
     fn wait_arguments(
         &mut self,
         wait: &Wait,
         args: &[ast::CallArg],
         span: SourceSpan,
-    ) -> Lowering<Vec<Atom>> {
+    ) -> Lowering<Vec<Expr>> {
         let mut values = Vec::with_capacity(args.len());
         for arg in args {
             match arg {
@@ -265,13 +280,13 @@ impl Lowerer<'_> {
             ));
         }
         let operands = self.operands(&values)?;
-        Ok(self.atoms(&operands))
+        Ok(operands.iter().map(Operand::expr).collect())
     }
 
     /// The wait as one statement, giving its result. Awaited where it
     /// stands, it takes one more turn once its outcome is in (see the
     /// module).
-    fn wait_action(&mut self, wait: Wait, args: Vec<Atom>, then_yield: bool) -> Lowering<Operand> {
+    fn wait_action(&mut self, wait: Wait, args: Vec<Expr>, then_yield: bool) -> Lowering<Operand> {
         match wait {
             Wait::Effect(effect) => {
                 let signature = self.effects[&effect].clone();
@@ -282,27 +297,24 @@ impl Lowerer<'_> {
                 let ty = Ty::decoded(&result);
                 self.performed.insert(effect.clone(), signature);
                 let mut copied = Vec::with_capacity(args.len());
-                for atom in args {
+                for expr in args {
                     // The boundary gives a literal back as it is: it holds
                     // no array slot to fill and no function token.
-                    if matches!(atom, Atom::Literal(_)) {
-                        copied.push(atom);
+                    if matches!(expr, Expr::Literal(_)) {
+                        copied.push(expr);
                         continue;
                     }
-                    let value = match atom {
-                        Atom::Variable(name) => Operand::variable(name, Ty::Unknown),
-                        Atom::Literal(_) => unreachable!("literals crossed the boundary above"),
-                    };
+                    let value = self.inline(expr, Ty::Unknown);
                     let value = self.invoke("ts.boundary", &[value], Ty::Unknown)?;
-                    copied.push(self.atom(value));
+                    copied.push(value.expr());
                 }
-                Ok(self.emit_action(
-                    Action::Perform {
+                Ok(self.action(
+                    ActKind::Perform {
                         effect,
-                        args: copied,
                         result,
                         then_yield,
                     },
+                    copied,
                     ty,
                 ))
             }
@@ -310,44 +322,19 @@ impl Lowerer<'_> {
                 let Some(duration) = args.into_iter().next() else {
                     unreachable!("`sleep` is checked to take one argument");
                 };
-                self.emit(Stmt::Do {
-                    value: (Action::Sleep {
-                        duration,
-                        then_yield,
-                    })
-                    .into(),
-                });
-                Ok(Operand::undefined())
+                // Sleep returns Null in the kernel, whereas JavaScript sleep
+                // resolves to undefined. A scoped role preserves that value.
+                let sleep = self.action(ActKind::Sleep { then_yield }, vec![duration], Ty::Unknown);
+                let name = self.temp();
+                Ok(self.inline(
+                    Expr::Let {
+                        name,
+                        value: Box::new(sleep.expr()),
+                        body: Box::new(Operand::undefined().expr()),
+                    },
+                    Ty::Undefined,
+                ))
             }
         }
-    }
-
-    /// Starts `body(this, args)` as a task and gives its promise:
-    ///
-    /// ```text
-    /// let p = invoke ts.promise.pending()
-    /// set p.task = spawn invoke ts.promise.run(p, body, this, args)
-    /// ```
-    fn start_promise(&mut self, body: &Operand, this: Atom, args: Atom) -> Lowering<Operand> {
-        let promise = self.invoke("ts.promise.pending", &[], Ty::Unknown)?;
-        let run = self.function("ts.promise.run")?;
-        let passed = vec![
-            self.atom(promise.clone()),
-            self.atom(body.clone()),
-            this,
-            args,
-        ];
-        self.emit(Stmt::Assign {
-            place: Place::Member(Member::Field {
-                target: promise.expr(),
-                field: "task".to_string(),
-            }),
-            value: Rhs::Action(Action::Spawn {
-                callee: Callee::Library(run),
-                args: passed,
-            }),
-            order: AssignOrder::ValueFirst,
-        });
-        Ok(promise)
     }
 }
