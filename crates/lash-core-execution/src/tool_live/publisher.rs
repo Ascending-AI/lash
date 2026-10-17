@@ -1,7 +1,4 @@
-use super::{
-    policy::{TOOL_LIVE_COMPLETION_LINGER, TOOL_LIVE_ENVELOPE_BYTES, TOOL_LIVE_WRITE_TIMEOUT},
-    *,
-};
+use super::{policy::TOOL_LIVE_ENVELOPE_BYTES, *};
 use std::{
     collections::VecDeque,
     io::Write,
@@ -409,7 +406,7 @@ impl Owner {
             let (records, restores) = self.batch(&mut self.pending.lock_recover());
             if !records.is_empty() {
                 let result = tokio::time::timeout(
-                    TOOL_LIVE_WRITE_TIMEOUT,
+                    self.policy.write_timeout,
                     transport.publish(&self.address, records),
                 )
                 .await;
@@ -430,7 +427,7 @@ impl Owner {
                 !(slot.drained()
                     && slot
                         .settled_at
-                        .is_some_and(|at| now.duration_since(at) >= TOOL_LIVE_COMPLETION_LINGER))
+                        .is_some_and(|at| now.duration_since(at) >= self.policy.completed_linger))
             });
             if pending.slots.is_empty() && pending.refused == 0 {
                 pending.flushing = false;

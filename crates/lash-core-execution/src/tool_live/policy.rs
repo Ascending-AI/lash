@@ -6,12 +6,6 @@ use super::*;
 /// record scope, emission identity (producer epoch and ordinal) and payload
 /// tags. It bounds the serialized record from above.
 pub const TOOL_LIVE_ENVELOPE_BYTES: usize = 256;
-/// A sealed call's slot outlives its last flushed item by this long, so a
-/// late publication on a retained handle is still attributed to the call.
-pub const TOOL_LIVE_COMPLETION_LINGER: Duration = Duration::from_secs(2);
-/// A store write that has not finished by then counts as failed.
-pub const TOOL_LIVE_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-
 /// Per-owner publisher admission.
 ///
 /// Memory is split three ways, and the three parts never borrow from each
@@ -29,6 +23,9 @@ pub const TOOL_LIVE_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// [`TOOL_LIVE_ENVELOPE_BYTES`]. Defaults: 64 records and 16 logs per 100 ms
 /// interval, 512 KiB, 64 KiB per fact, 1 KiB per progress record and 128
 /// calls (a 128 KiB reserve and 192 KiB each for waiting logs and the write).
+/// Store writes time out after 5 s; drained completed slots linger for 2 s.
+/// The policy is captured when the node creates the publisher, and remains
+/// fixed for its lifetime. It governs live delivery, outside durable results.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToolLivePolicy {
     pub(super) events: usize,
@@ -38,6 +35,8 @@ pub struct ToolLivePolicy {
     pub(super) progress_bytes: usize,
     pub(super) calls: usize,
     pub(super) interval: Duration,
+    pub(super) write_timeout: Duration,
+    pub(super) completed_linger: Duration,
 }
 impl Default for ToolLivePolicy {
     fn default() -> Self {
@@ -49,6 +48,8 @@ impl Default for ToolLivePolicy {
             progress_bytes: 1024,
             calls: 128,
             interval: Duration::from_millis(100),
+            write_timeout: Duration::from_secs(5),
+            completed_linger: Duration::from_secs(2),
         }
     }
 }
@@ -64,6 +65,8 @@ pub enum ToolLivePolicyField {
     ProgressBytes,
     Calls,
     Interval,
+    WriteTimeout,
+    CompletedLinger,
     RetentionEvents,
     RetentionBytes,
     RetentionAge,
@@ -193,7 +196,9 @@ impl ToolLivePolicy {
     /// Validates every field's range, then the relationships between them.
     /// Ranges: events 2..=4096, logs 0..=1024, bytes 4 KiB..=16 MiB, fact
     /// bytes 1 KiB..=1 MiB, progress bytes 512..=64 KiB, calls 1..=4096 and
-    /// interval 10 ms..=60 s.
+    /// interval 10 ms..=60 s, write timeout 10 ms..=1 h and completed
+    /// linger 0..=1 h. The duration maxima are hard safety ceilings.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         events: usize,
         logs: usize,
@@ -202,6 +207,8 @@ impl ToolLivePolicy {
         progress_bytes: usize,
         calls: usize,
         interval: Duration,
+        write_timeout: Duration,
+        completed_linger: Duration,
     ) -> Result<Self, ToolLivePolicyError> {
         use ToolLivePolicyField as Field;
         count_in(Field::Events, events, 2..=4096)?;
@@ -214,6 +221,16 @@ impl ToolLivePolicy {
             Field::Interval,
             interval,
             Duration::from_millis(10)..=Duration::from_secs(60),
+        )?;
+        duration_in(
+            Field::WriteTimeout,
+            write_timeout,
+            Duration::from_millis(10)..=Duration::from_secs(3600),
+        )?;
+        duration_in(
+            Field::CompletedLinger,
+            completed_linger,
+            Duration::ZERO..=Duration::from_secs(3600),
         )?;
         relation(
             Field::Logs,
@@ -241,6 +258,8 @@ impl ToolLivePolicy {
             progress_bytes,
             calls,
             interval,
+            write_timeout,
+            completed_linger,
         };
         relation(
             Field::FactBytes,
@@ -277,6 +296,19 @@ impl ToolLivePolicy {
     pub fn interval(&self) -> Duration {
         self.interval
     }
+    /// Store writes exceeding this bound count as failed. Default: 5 s.
+    pub fn write_timeout(&self) -> Duration {
+        self.write_timeout
+    }
+    /// Idle lifetime of a drained, sealed slot. Default: 2 s.
+    /// Retirement is checked on each flush at elapsed time >= this bound;
+    /// new calls can reuse drained slots sooner. Zero disables idle linger.
+    /// Late facts are always omitted after `finish`, even during linger.
+    /// A retained handle can reopen a retired omission-only slot; only lack
+    /// of capacity stops call attribution, producing owner `RoutesFull`.
+    pub fn completed_linger(&self) -> Duration {
+        self.completed_linger
+    }
     /// `calls × progress_bytes`.
     pub fn reserve_bytes(&self) -> usize {
         self.calls * self.progress_bytes
@@ -303,8 +335,8 @@ impl ToolLivePolicy {
             log_bytes: self.log_bytes(),
             write_bytes: self.write_bytes(),
             envelope_bytes: TOOL_LIVE_ENVELOPE_BYTES,
-            completion_linger: TOOL_LIVE_COMPLETION_LINGER,
-            write_timeout: TOOL_LIVE_WRITE_TIMEOUT,
+            completion_linger: self.completed_linger,
+            write_timeout: self.write_timeout,
         }
     }
 }
@@ -324,6 +356,7 @@ pub struct ToolLivePolicySnapshot {
     pub log_bytes: usize,
     pub write_bytes: usize,
     pub envelope_bytes: usize,
+    /// The selected `ToolLivePolicy::completed_linger` idle lifetime.
     pub completion_linger: Duration,
     pub write_timeout: Duration,
 }

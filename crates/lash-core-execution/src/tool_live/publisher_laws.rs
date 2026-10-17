@@ -25,7 +25,18 @@ fn progress(value: usize) -> ToolLiveFact {
     }
 }
 fn policy() -> ToolLivePolicy {
-    ToolLivePolicy::new(16, 2, 16384, 1024, 512, 8, Duration::from_millis(100)).unwrap()
+    ToolLivePolicy::new(
+        16,
+        2,
+        16384,
+        1024,
+        512,
+        8,
+        Duration::from_millis(100),
+        Duration::from_secs(5),
+        Duration::from_secs(2),
+    )
+    .unwrap()
 }
 
 struct Witness {
@@ -249,7 +260,17 @@ async fn every_admitted_parallel_call_delivers_its_final_gauge_at_the_default_po
 #[tokio::test(start_paused = true)]
 async fn refusals_late_facts_and_non_finite_gauges_are_counted_where_they_belong() {
     let window = Arc::new(ToolLiveMemoryWindow::default());
-    let narrow = ToolLivePolicy::new(16, 2, 16384, 1024, 512, 2, Duration::from_millis(100));
+    let narrow = ToolLivePolicy::new(
+        16,
+        2,
+        16384,
+        1024,
+        512,
+        2,
+        Duration::from_millis(100),
+        Duration::from_secs(5),
+        Duration::from_secs(2),
+    );
     let lane = ToolLive::new(Some(window), None, narrow.unwrap());
     let mut feed = lane
         .subscribe(ToolLiveFilter::Owner(owner()))
@@ -349,8 +370,18 @@ async fn refusals_late_facts_and_non_finite_gauges_are_counted_where_they_belong
 /// and the bound or relationship it broke (figments feedback-14 b4).
 #[test]
 fn a_refused_policy_names_its_field_value_and_bound() {
-    let error = ToolLivePolicy::new(64, 64, 524288, 65536, 1024, 128, Duration::from_millis(100))
-        .unwrap_err();
+    let error = ToolLivePolicy::new(
+        64,
+        64,
+        524288,
+        65536,
+        1024,
+        128,
+        Duration::from_millis(100),
+        Duration::from_secs(5),
+        Duration::from_secs(2),
+    )
+    .unwrap_err();
     assert_eq!(
         error,
         ToolLivePolicyError {
@@ -362,8 +393,18 @@ fn a_refused_policy_names_its_field_value_and_bound() {
             },
         }
     );
-    let error = ToolLivePolicy::new(64, 16, 524288, 65536, 1024, 128, Duration::from_millis(5))
-        .unwrap_err();
+    let error = ToolLivePolicy::new(
+        64,
+        16,
+        524288,
+        65536,
+        1024,
+        128,
+        Duration::from_millis(5),
+        Duration::from_secs(5),
+        Duration::from_secs(2),
+    )
+    .unwrap_err();
     assert_eq!(error.field, ToolLivePolicyField::Interval);
     assert_eq!(
         error.bound,
@@ -372,7 +413,77 @@ fn a_refused_policy_names_its_field_value_and_bound() {
             max: ToolLivePolicyValue::Duration(Duration::from_secs(60)),
         }
     );
+    for (write_timeout, completed_linger, field, value, min, max) in [
+        (
+            Duration::ZERO,
+            Duration::from_secs(2),
+            ToolLivePolicyField::WriteTimeout,
+            Duration::ZERO,
+            Duration::from_millis(10),
+            Duration::from_secs(3600),
+        ),
+        (
+            Duration::from_secs(3601),
+            Duration::from_secs(2),
+            ToolLivePolicyField::WriteTimeout,
+            Duration::from_secs(3601),
+            Duration::from_millis(10),
+            Duration::from_secs(3600),
+        ),
+        (
+            Duration::from_secs(5),
+            Duration::from_secs(3601),
+            ToolLivePolicyField::CompletedLinger,
+            Duration::from_secs(3601),
+            Duration::ZERO,
+            Duration::from_secs(3600),
+        ),
+    ] {
+        assert_eq!(
+            ToolLivePolicy::new(
+                64,
+                16,
+                524288,
+                65536,
+                1024,
+                128,
+                Duration::from_millis(100),
+                write_timeout,
+                completed_linger
+            )
+            .unwrap_err(),
+            ToolLivePolicyError {
+                field,
+                value: ToolLivePolicyValue::Duration(value),
+                bound: ToolLivePolicyBound::Range {
+                    min: ToolLivePolicyValue::Duration(min),
+                    max: ToolLivePolicyValue::Duration(max)
+                }
+            }
+        );
+    }
+    for (write_timeout, completed_linger) in [
+        (Duration::from_millis(10), Duration::ZERO),
+        (Duration::from_secs(3600), Duration::from_secs(3600)),
+    ] {
+        let policy = ToolLivePolicy::new(
+            64,
+            16,
+            524288,
+            65536,
+            1024,
+            128,
+            Duration::from_millis(100),
+            write_timeout,
+            completed_linger,
+        )
+        .unwrap();
+        assert_eq!(policy.snapshot().write_timeout, write_timeout);
+        assert_eq!(policy.snapshot().completion_linger, completed_linger);
+    }
     let snapshot = ToolLivePolicy::default().snapshot();
+    assert_eq!(snapshot.write_timeout, Duration::from_secs(5));
+    assert_eq!(snapshot.completion_linger, Duration::from_secs(2));
     assert_eq!(
         snapshot.reserve_bytes + snapshot.log_bytes + snapshot.write_bytes,
         snapshot.bytes

@@ -306,8 +306,14 @@ the fields named as in Rust, so a host route can carry them unchanged.
 `LashCoreBuilder::tool_live_policy` sets validated per-owner publisher bounds;
 `ToolLivePolicy::snapshot()` reads every configured and derived bound back.
 The defaults are 64 records and 16 logs per 100 ms interval, 512 KiB, 64 KiB
-per fact, 1 KiB per progress record and 128 calls. The owner's bytes are split
-three ways that never borrow from each other:
+per fact, 1 KiB per progress record and 128 calls. Store writes have a
+five-second timeout, and completed slots have a two-second idle linger.
+`ToolLivePolicy::new` takes `write_timeout` and `completed_linger` as typed
+`Duration` values after `interval`. Write timeout accepts 10 ms through one
+hour; completed linger accepts zero through one hour. These maxima are hard
+safety ceilings. Zero linger retires drained slots on the next flush. The
+policy is captured at publisher creation and stays fixed for its lifetime.
+The owner's bytes are split three ways that never borrow from each other:
 
 - the final-gauge reserve, `calls × progress_bytes` (128 KiB). Admitting a
   call admits its reservation, so its latest progress, and so its final gauge,
@@ -326,15 +332,23 @@ intervals. The completion fence seals the publisher and writes its final
 progress again, even when an earlier interval carried it.
 
 A call is admitted only with a free slot. A sealed call whose writes are done
-keeps its slot for `TOOL_LIVE_COMPLETION_LINGER` (two seconds) after its last
-write and gives it up early when a new call needs it. A call that finds every
+keeps its slot for the selected `completed_linger` after its completion
+fence or latest finished write, whichever is later. A flush retires a drained
+slot when elapsed time is **greater than or equal to** that duration; checks
+run on the publisher interval, after any write in flight completes. A new
+call can reuse a drained slot earlier. A call that finds every
 slot held by a live or unwritten call is refused at admission: it publishes
 nothing, and the owner receives an `OwnerOmitted` `RoutesFull` count. That
 cause is owner-scoped; a call-scoped `RoutesFull` comes only from the MCP
 plugin's own route bound. Publication after the fence counts as
 `AfterCompletion` on the call's address for as long as the handle lives: once
 its slot retired, a late fact reopens an omission-only slot (or, with none
-free, counts as an owner `RoutesFull`).
+free, counts as an owner `RoutesFull`). There is no time-based cutoff for
+this omission attribution: it stops being call-scoped only when a slot cannot
+be admitted. A late fact itself is never accepted after the completion fence,
+including during linger. Writes exceeding the selected `write_timeout` use
+the ordinary failed-write accounting: logs become `StoreFailed` omissions,
+progress is retried, and the tool outcome is unchanged.
 
 `ToolLive::diagnostics(owner)` and `ToolLivePublisher::diagnostics()` report
 the owner's live and sealed calls, reserved bytes, waiting progress and logs,
