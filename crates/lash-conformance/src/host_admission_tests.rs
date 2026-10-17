@@ -147,6 +147,7 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
         output_spec: None,
         stream_events: None,
         provider_trace: None,
+        attempt_control: Default::default(),
     };
     let mut first_call = Box::pin(first.complete(
         request.clone(),

@@ -61,6 +61,7 @@ fn malformed_history_request(model: &str) -> LlmRequest {
         stream_events: None,
         generation: Default::default(),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 

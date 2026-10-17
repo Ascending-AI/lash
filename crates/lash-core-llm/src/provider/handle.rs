@@ -650,14 +650,15 @@ impl ProviderHandle {
             };
             match result {
                 Ok(response) => {
-                    let outcome = success_outcome(response.terminal_reason);
+                    // Returning Ok is the terminal fact that answers the call.
+                    // A missing dialect stop does not imply a dropped attempt.
                     let usage = (response.provider_usage.is_some() || !response.usage.is_zero())
                         .then(|| response.usage.clone());
                     sideband.seal_attempt(
                         AttemptRecord {
                             ordinal: attempt_ordinal,
-                            outcome,
-                            protocol_position: success_protocol_position(&response, outcome),
+                            outcome: AttemptOutcome::Completed,
+                            protocol_position: ProtocolPosition::TerminalObserved,
                             retry_budget_consumed: true,
                             retry_decision: None,
                             error: None,
@@ -971,29 +972,6 @@ fn model_total_exceeded(
     ProviderCompletionError {
         error,
         call_record: Box::new(sideband.call_record(call_id)),
-    }
-}
-
-fn success_outcome(reason: LlmTerminalReason) -> AttemptOutcome {
-    match reason {
-        LlmTerminalReason::Cancelled => AttemptOutcome::Aborted,
-        LlmTerminalReason::Unknown => AttemptOutcome::Interrupted,
-        LlmTerminalReason::Stop
-        | LlmTerminalReason::ToolUse
-        | LlmTerminalReason::OutputLimit
-        | LlmTerminalReason::ContextOverflow
-        | LlmTerminalReason::ContentFilter
-        | LlmTerminalReason::ProviderError => AttemptOutcome::Completed,
-    }
-}
-
-fn success_protocol_position(response: &LlmResponse, outcome: AttemptOutcome) -> ProtocolPosition {
-    if outcome == AttemptOutcome::Completed {
-        ProtocolPosition::TerminalObserved
-    } else if response_has_output_evidence(response) {
-        ProtocolPosition::OutputStarted
-    } else {
-        ProtocolPosition::ResponseObserved
     }
 }
 

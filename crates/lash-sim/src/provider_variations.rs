@@ -688,6 +688,7 @@ mod tests {
             output_spec: None,
             stream_events: Some(LlmEventSender::new(|_event| {})),
             provider_trace: Some(provider_trace),
+            attempt_control: Default::default(),
         }
     }
 }

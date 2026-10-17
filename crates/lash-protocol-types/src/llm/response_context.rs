@@ -83,14 +83,14 @@ impl ResponseContext {
     }
 
     /// The context of the call `request` lowers to, reporting through the
-    /// request's own senders.
+    /// request's own senders and attempt control.
     pub fn of_request(request: &LlmRequest) -> Self {
         Self {
             scope: request.scope.clone(),
             contract: Arc::new(ResponseContract::of_request(request)),
             stream_events: request.stream_events.clone(),
             provider_trace: request.provider_trace.clone(),
-            attempt_control: Default::default(),
+            attempt_control: request.attempt_control.clone(),
         }
     }
 

@@ -239,6 +239,7 @@ impl Dialect {
             output_spec: None,
             stream_events: Some(LlmEventSender::new(|_| {})),
             provider_trace: None,
+            attempt_control: Default::default(),
         }
     }
 }

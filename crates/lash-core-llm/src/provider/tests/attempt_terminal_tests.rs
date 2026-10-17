@@ -320,3 +320,94 @@ async fn a_provider_gets_one_terminal_per_attempt_and_both_cancellation_waits_ar
         );
     }
 }
+
+// FIG-6698: canonical forwarding retains the caller's live receipt channel.
+#[derive(Clone, Debug)]
+struct CanonicalLeaf {
+    hops: u8,
+}
+
+#[async_trait::async_trait]
+impl Provider for CanonicalLeaf {
+    fn kind(&self) -> &'static str {
+        "canonical-leaf"
+    }
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+    fn options(&self) -> ProviderOptions {
+        ProviderOptions::default()
+    }
+    fn set_options(&mut self, _: ProviderOptions) {}
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+    async fn send(
+        &mut self,
+        body: &LiveRequestBody,
+        context: ResponseContext,
+    ) -> Result<LlmResponse, LlmTransportError> {
+        if self.hops == 0 {
+            context
+                .attempt_control
+                .capture_metadata([("header:x-cost".into(), serde_json::json!("0.01"))].into());
+            return Ok(bare_ok_response());
+        }
+        let mut inner = Self {
+            hops: self.hops - 1,
+        };
+        if self.hops == 2 {
+            let (request, deliveries) = crate::provider::canonical_call(
+                body,
+                context,
+                &lash_protocol_types::llm::attachment_delivery::DeliveryContext {
+                    valid_through_ms: 0,
+                    live_file_scope: None,
+                },
+                crate::provider::AttachmentReadPolicy::STANDARD,
+            )?;
+            inner
+                .complete(
+                    request,
+                    &deliveries,
+                    &crate::provider::LiveCallHorizon::fixture(),
+                )
+                .await
+        } else {
+            let request = crate::provider::canonical_request(body, context)?;
+            inner
+                .complete(
+                    request,
+                    &NoSlotDeliveries,
+                    &crate::provider::LiveCallHorizon::fixture(),
+                )
+                .await
+        }
+    }
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+}
+
+#[tokio::test]
+async fn canonical_forwarding_retains_the_callers_header_capture_control() {
+    let request = empty_request();
+    let context = ResponseContext::of_request(&request);
+    let caller_control = context.attempt_control.clone();
+    let mut provider = CanonicalLeaf { hops: 2 };
+    let template = Arc::new(
+        provider
+            .lower(&request, &SegmentCache::disabled())
+            .await
+            .unwrap(),
+    );
+    let body = LiveRequestBody::fill(template, Default::default()).unwrap();
+    provider
+        .send(&body, context)
+        .await
+        .expect("canonical leaf returns");
+    let partial = caller_control
+        .partial_response()
+        .expect("leaf headers reach the caller's control");
+    assert_eq!(partial.response_metadata["header:x-cost"], "0.01");
+}

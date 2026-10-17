@@ -69,6 +69,7 @@ fn request() -> LlmRequest {
         stream_events: None::<LlmEventSender>,
         generation: lash_core::GenerationOptions::default(),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 

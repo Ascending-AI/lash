@@ -54,12 +54,6 @@ struct FailingProvider {
 }
 
 #[derive(Clone, Debug)]
-struct TerminalProvider {
-    reason: LlmTerminalReason,
-    text: &'static str,
-}
-
-#[derive(Clone, Debug)]
 struct PartialStreamFailureProvider;
 
 #[derive(Clone, Debug)]
@@ -454,47 +448,6 @@ impl Provider for PaidPartialThenSuccessProvider {
     }
 }
 
-#[async_trait::async_trait]
-impl Provider for TerminalProvider {
-    fn kind(&self) -> &'static str {
-        "terminal"
-    }
-
-    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
-        ProviderRouteIdentity::new(self.kind(), self.kind(), model)
-    }
-
-    fn options(&self) -> ProviderOptions {
-        ProviderOptions::default()
-    }
-
-    fn set_options(&mut self, _options: ProviderOptions) {}
-
-    fn serialize_config(&self) -> serde_json::Value {
-        serde_json::Value::Null
-    }
-
-    async fn send(
-        &mut self,
-        _body: &LiveRequestBody,
-        _context: ResponseContext,
-    ) -> Result<LlmResponse, LlmTransportError> {
-        Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: self.text.to_string(),
-                response_meta: None,
-            }],
-            terminal_reason: self.reason,
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        })
-    }
-
-    fn clone_boxed(&self) -> Box<dyn Provider> {
-        Box::new(self.clone())
-    }
-}
-
 impl FailingProvider {
     fn into_components(self) -> ProviderComponents {
         ProviderComponents::new(Box::new(self))
@@ -748,6 +701,7 @@ pub(super) fn empty_request() -> LlmRequest {
         stream_events: None,
         generation: GenerationOptions::default(),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 
@@ -1191,43 +1145,6 @@ fn non_negative_finite_f64_rejects_integers_binary64_cannot_hold() {
     for rejected in ["9007199254740993", "18446744073709551615"] {
         serde_json::from_str::<NonNegativeFiniteF64>(rejected)
             .expect_err("an inexact integer must not decode");
-    }
-}
-
-#[tokio::test]
-async fn provider_handle_records_aborted_and_interrupted_outcomes() {
-    for (reason, text, expected_outcome, expected_position) in [
-        (
-            LlmTerminalReason::Cancelled,
-            "partial",
-            AttemptOutcome::Aborted,
-            ProtocolPosition::OutputStarted,
-        ),
-        (
-            LlmTerminalReason::Unknown,
-            "",
-            AttemptOutcome::Interrupted,
-            ProtocolPosition::ResponseObserved,
-        ),
-    ] {
-        let mut handle = ProviderHandle::new(ProviderComponents::new(Box::new(TerminalProvider {
-            reason,
-            text,
-        })));
-        let completion = handle
-            .complete(
-                empty_request(),
-                crate::ChargeSafetyPolicy::RequireGuarantee,
-                lash_protocol_types::ExecutionBudgets::recommended(),
-                &NoSlotDeliveries,
-            )
-            .await
-            .expect("completion");
-        assert_eq!(completion.call_record.attempts[0].outcome, expected_outcome);
-        assert_eq!(
-            completion.call_record.attempts[0].protocol_position,
-            expected_position
-        );
     }
 }
 

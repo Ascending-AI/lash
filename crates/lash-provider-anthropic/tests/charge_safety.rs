@@ -78,6 +78,7 @@ fn request() -> LlmRequest {
             ..GenerationOptions::default()
         },
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 

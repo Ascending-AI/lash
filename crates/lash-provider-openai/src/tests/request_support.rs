@@ -32,5 +32,6 @@ pub(super) fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         stream_events: None,
         generation: lash_core::GenerationOptions::default(),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }

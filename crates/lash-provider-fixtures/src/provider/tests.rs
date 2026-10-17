@@ -639,6 +639,7 @@ fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
         output_spec: None,
         stream_events,
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 
@@ -674,5 +675,6 @@ fn responses_request() -> LlmRequest {
         output_spec: None,
         stream_events: Some(LlmEventSender::new(|_event| {})),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }

@@ -87,6 +87,7 @@ fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
         stream_events: None,
         generation: Default::default(),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 

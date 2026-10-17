@@ -1416,8 +1416,71 @@ request content decodes that body; an in-process provider using canonical
 lowering may use `LiveRequestBody::canonical_request`. Reconstructing another
 request beside it would let a resend disagree with the admitted call.
 See [provider trait](../../crates/lash-core-llm/src/provider/traits.rs),
-[response context](../../crates/lash-sansio/src/llm/response_context.rs) and
+[response context](../../crates/lash-protocol-types/src/llm/response_context.rs) and
 `lash::provider` in [facade rustdoc](../../crates/lash/src/lib.rs).
+
+### Canonical forwarding retains the attempt
+
+Use `canonical_request(body, context)` or `canonical_call(body, context, ...)`
+when decoding a canonical send. Both retain `context.attempt_control` in
+`LlmRequest::attempt_control`, alongside its live stream and trace senders.
+The default `Provider::complete` carries that same control into the leaf's
+`ResponseContext`. A decorator forwarding a decoded request must preserve
+this field: header `capture_metadata` and cooperative cancellation then reach
+all participants in the same attempt. Explicit request literals initialize
+`attempt_control: Default::default()` for a new call. The control is skipped
+by serialization; no stored request or wire format changes.
+
+A returned `Ok(LlmResponse)` is the fact that answers the logical call and
+completes its attempt (`Answered`, `Completed` / `TerminalObserved`). This
+includes `LlmResponse::default()`: no stop reason or usage does not establish
+an interrupted send. It reports no usage, not an observed zero-token bill.
+`TerminalObserved` here means the provider future returned its response;
+the response's dialect stop reason remains unchanged. A transport that
+cannot accept an incomplete stream returns an error with its partial response
+under the selected stream-termination policy below.
+
+### Completion ownership and dropped direct calls
+
+Lash drives admitted turn model calls submitted through `send()` and direct
+model effects made inside a Lash tool, hook or process execution, including
+`ToolDirectCompletionClient::complete` and execution-bound
+`DirectCompletionClient::direct_completion`. Those calls retain an independent
+provider task: cancellation or dropping the execution's awaiter signals that
+task, which keeps polling through the bounded drain and delivers the result
+or `Provider::attempt_ended` terminal described in
+[ADR 0127](../adr/0127-usage-is-result-data-hosts-meter-spend.md#the-settle-point).
+Dropping a send follower does not cancel its admitted turn.
+
+A host polling `ProviderHandle::complete`, `Provider::complete`,
+`Provider::send`, or a standalone `DirectLlmClient::complete` owns that future.
+Any bounds provided by that API or transport apply while the future is
+polled; Lash retains no independent task if the host drops it. No automatic
+abandoned-terminal callback follows that drop. Prefer a host-owned task that retains and awaits
+the completion even if its UI or request awaiter disappears. If the host
+must drop a direct completion, its owner must settle the reserved attempt
+itself in its provider decorator or receipt store, using the call/attempt
+identity and partial receipts it retained before the drop. A raw provider
+owner can deliver `attempt_ended` after dropping the borrowed future;
+`ProviderHandle` exposes no such post-drop delivery operation. Make this
+settlement idempotent and reconcile any receipt whose result was lost. A
+process crash also requires host reconciliation; the callback is not durable.
+
+### Failed-turn messages are typed classification text
+
+Since FIG-6565, the settled `TurnOutcome`'s failure message is
+`TurnErrorCause::detail()`: Lash's text for its typed cause, such as
+"provider authentication rejected". It is not `LlmTransportError::message`
+or the provider's response body. Child-turn failure projection uses the
+same committed code and detail. This avoids committing provider bodies,
+credentials or user content into the terminal.
+
+A host that wants to display the provider's own text can capture the returned
+`LlmTransportError::message` (and any permitted raw evidence) in its provider
+`send` decorator before Lash projects the error. The host decides what is
+safe to display and retains that text itself if it must survive a reload.
+The committed outcome and normalized call-attempt error contain typed facts,
+not that original text, so it cannot be recovered from those reads later.
 
 ## 14. Stream termination policy
 

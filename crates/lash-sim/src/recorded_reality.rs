@@ -124,6 +124,7 @@ fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
         }),
         stream_events: stream.then(|| LlmEventSender::new(|_event| {})),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 

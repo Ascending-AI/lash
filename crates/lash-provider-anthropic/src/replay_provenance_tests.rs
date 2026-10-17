@@ -66,6 +66,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
             ..lash_core::GenerationOptions::default()
         },
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 

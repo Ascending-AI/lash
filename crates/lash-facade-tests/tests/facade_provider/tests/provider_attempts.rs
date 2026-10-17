@@ -672,6 +672,7 @@ mod facade_settings {
             stream_events: None,
             generation: lash::direct::GenerationOptions::default(),
             provider_trace: None,
+            attempt_control: Default::default(),
         }
     }
 
@@ -1435,5 +1436,46 @@ async fn provider_stop_detail_excludes_secret_body() {
     assert_eq!(detail, "provider authentication rejected");
     assert!(!detail.contains("sk-secret-6013"));
     assert!(detail.len() <= 512);
+    core.shutdown().await.expect("shutdown");
+}
+
+/// FIG-6698: returning a response is the same terminal fact for call and attempt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_default_response_answers_the_call_and_completes_its_attempt() {
+    let model = lash::testing::TestProvider::builder()
+        .kind("mock")
+        .complete(|_: LlmRequest| async { Ok(LlmResponse::default()) })
+        .build()
+        .into_handle();
+    let core = core_over(sqlite_memory_store_backend().await, model);
+    let session = created(&core, "default-response-call-attempt").await;
+    let turn_id = lash::TurnId::from("default-response-call-attempt-run");
+    let held = session
+        .send(TurnInput::text("answer"))
+        .id(turn_id.clone())
+        .await
+        .expect("accepted");
+    held.output().await.expect("settled");
+    let committed = session
+        .committed_turn(&turn_id)
+        .await
+        .expect("read")
+        .expect("committed");
+    let [call] = committed.model_calls.as_slice() else {
+        panic!("one call")
+    };
+    assert_eq!(call.end, lash::turn::ModelCallEnd::Answered);
+    let [attempt] = call.record.attempts.as_slice() else {
+        panic!("one attempt")
+    };
+    assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Completed);
+    assert_eq!(
+        attempt.protocol_position,
+        lash_core::ProtocolPosition::TerminalObserved
+    );
+    assert!(
+        attempt.usage.is_none(),
+        "a default response reports no usage"
+    );
     core.shutdown().await.expect("shutdown");
 }

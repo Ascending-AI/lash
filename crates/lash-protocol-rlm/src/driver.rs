@@ -131,6 +131,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             stream_events: None,
             generation,
             provider_trace: None,
+            attempt_control: Default::default(),
         }))
     }
 }

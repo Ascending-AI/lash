@@ -23,6 +23,7 @@ fn envelope(request: &LlmRequest) -> LlmRequest {
         output_spec,
         stream_events,
         provider_trace,
+        attempt_control,
     } = request;
     LlmRequest {
         instructions: instructions.clone(),
@@ -36,6 +37,7 @@ fn envelope(request: &LlmRequest) -> LlmRequest {
         output_spec: output_spec.clone(),
         stream_events: stream_events.clone(),
         provider_trace: provider_trace.clone(),
+        attempt_control: attempt_control.clone(),
     }
 }
 

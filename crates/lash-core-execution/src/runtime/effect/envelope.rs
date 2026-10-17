@@ -1133,6 +1133,7 @@ impl LlmRequestSpec {
             output_spec: self.output_spec,
             stream_events,
             provider_trace,
+            attempt_control: Default::default(),
         }
     }
 }

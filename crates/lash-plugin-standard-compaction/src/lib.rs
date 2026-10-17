@@ -623,6 +623,7 @@ async fn summarize_compaction_prefix(
         output_spec: None,
         stream_events: None,
         provider_trace: None,
+        attempt_control: Default::default(),
     };
     let caused_by = scoped_effect_controller
         .execution_scope()

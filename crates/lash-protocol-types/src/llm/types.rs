@@ -980,6 +980,10 @@ pub struct LlmRequest {
     pub stream_events: Option<LlmEventSender>,
     #[serde(default, skip)]
     pub provider_trace: Option<LlmProviderTraceSender>,
+    /// Live cancellation and receipt retention shared by canonical forwarding
+    /// and the leaf's response context. Never part of the recorded request.
+    #[serde(skip)]
+    pub attempt_control: ProviderAttemptControl,
 }
 
 impl LlmRequest {

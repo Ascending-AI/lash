@@ -177,6 +177,7 @@ fn frame(request: &LlmRequest) -> LlmRequest {
         output_spec: request.output_spec.clone(),
         stream_events: None,
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 

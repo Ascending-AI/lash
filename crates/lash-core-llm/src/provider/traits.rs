@@ -210,7 +210,8 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     /// route's own timeouts. The call runs under `horizon`: its deliveries
     /// stay valid for the route's request timeout, or the caller's recorded
     /// per-request limit when the route sets none, read on the caller's
-    /// clock.
+    /// clock. The request carries the caller's live `attempt_control`;
+    /// canonical forwarding must preserve it through to the leaf.
     async fn complete(
         &mut self,
         request: LlmRequest,
@@ -288,8 +289,8 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
 /// The request an in-process model decides from: the one `body` says. It is
 /// the canonical body ([`Provider::lower`]'s default) read back, under
 /// `context`'s scope, which names this attempt, and reporting through
-/// `context`'s senders. Every model that answers from what a call asks
-/// decodes it here, so a resend, which is handed the admitted body and no
+/// `context`'s senders and live attempt control. Every model that answers
+/// from what a call asks decodes it here, so a resend, which is handed the admitted body and no
 /// request, is answered as its first attempt was.
 ///
 /// # Errors
@@ -306,6 +307,7 @@ pub fn canonical_request(
     request.scope = context.scope;
     request.stream_events = context.stream_events;
     request.provider_trace = context.provider_trace;
+    request.attempt_control = context.attempt_control;
     Ok(request)
 }
 

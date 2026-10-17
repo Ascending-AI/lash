@@ -505,6 +505,7 @@ pub fn build_llm_request(
         output_spec,
         stream_events,
         provider_trace: None,
+        attempt_control: Default::default(),
     })
 }
 

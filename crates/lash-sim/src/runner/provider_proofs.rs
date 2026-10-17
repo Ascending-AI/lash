@@ -146,6 +146,7 @@ fn codex_request(tools: bool, stream_events: Option<LlmEventSender>) -> LlmReque
         output_spec: None,
         stream_events: Some(stream_events.unwrap_or_else(|| LlmEventSender::new(|_event| {}))),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 
@@ -961,6 +962,7 @@ fn openai_compatible_request_with_events(stream_events: Option<LlmEventSender>) 
         output_spec: None,
         stream_events,
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 
@@ -1003,6 +1005,7 @@ fn openai_responses_request() -> LlmRequest {
         output_spec: None,
         stream_events: Some(LlmEventSender::new(|_event| {})),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 
@@ -1042,6 +1045,7 @@ fn anthropic_messages_request() -> LlmRequest {
         output_spec: None,
         stream_events: Some(LlmEventSender::new(|_event| {})),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 
@@ -1075,5 +1079,6 @@ fn google_request(stream: bool) -> LlmRequest {
         output_spec: None,
         stream_events: stream.then(|| LlmEventSender::new(|_event| {})),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }

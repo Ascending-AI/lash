@@ -965,6 +965,7 @@ fn matrix_request(
             events.lock_recover().push(event);
         })),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 

@@ -79,6 +79,7 @@ fn request(events: Arc<Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {
         })),
         generation: lash_core::GenerationOptions::default(),
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 

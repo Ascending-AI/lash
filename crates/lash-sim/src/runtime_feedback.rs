@@ -33,6 +33,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         output_spec: None,
         stream_events: None,
         provider_trace: None,
+        attempt_control: Default::default(),
     }
 }
 
