@@ -27,10 +27,13 @@ pub enum Stmt {
         name: Name,
         value: Rhs,
     },
-    /// Writes a variable, a field or an index.
+    /// Writes a variable, a field or an index, evaluating its parts in
+    /// `order` (`K-EVAL-003`).
     Assign {
         place: Place,
         value: Rhs,
+        #[serde(default, skip_serializing_if = "AssignOrder::is_value_first")]
+        order: AssignOrder,
     },
     /// Removes a field of a record, an element of a list, an entry of a map
     /// or a member of a set.
@@ -436,6 +439,27 @@ pub enum Place {
     Member(Member),
 }
 
+/// The order an assignment to a member evaluates its parts in
+/// (`K-EVAL-003`): each dialect's own, written in the document.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AssignOrder {
+    /// The right-hand side, then the place's target, then its index, as
+    /// Python assigns.
+    #[default]
+    ValueFirst,
+    /// The place's target, then its index, then the right-hand side, as
+    /// TypeScript assigns. Only a member is written in this order, and its
+    /// right-hand side is an expression: an action there is nested.
+    PlaceFirst,
+}
+
+impl AssignOrder {
+    pub fn is_value_first(&self) -> bool {
+        *self == Self::ValueFirst
+    }
+}
+
 /// A function value written in place. It shares the variables of the scope
 /// that defines it (`K-CLO-001`); which ones is derived, never written.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -555,7 +579,7 @@ impl<'a> Node<'a> {
             Node::Action(_) => {}
             Node::Stmt(stmt) => match stmt {
                 Stmt::Let { value, .. } => out.push(rhs_node(value)),
-                Stmt::Assign { place, value } => {
+                Stmt::Assign { place, value, .. } => {
                     if let Place::Member(member) = place {
                         push_member(member, &mut out);
                     }
@@ -676,7 +700,7 @@ pub fn each_closure_mut(block: &mut [Stmt], visit: &mut dyn FnMut(&mut Closure))
 fn stmt_closures(stmt: &mut Stmt, visit: &mut dyn FnMut(&mut Closure)) {
     match stmt {
         Stmt::Let { value, .. } => rhs_closures(value, visit),
-        Stmt::Assign { place, value } => {
+        Stmt::Assign { place, value, .. } => {
             if let Place::Member(member) = place {
                 member_closures(member, visit);
             }

@@ -56,7 +56,7 @@ impl CodeReads {
                 self.rhs(value, bound);
                 bound.push(name.clone());
             }
-            Stmt::Assign { place, value } => {
+            Stmt::Assign { place, value, .. } => {
                 match place {
                     Place::Variable(name) => self.name(name, bound),
                     Place::Member(member) => self.member(member, bound),

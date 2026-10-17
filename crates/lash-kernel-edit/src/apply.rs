@@ -89,7 +89,7 @@ fn rhs_at<'a>(document: &'a mut Document, site: &Site) -> Option<&'a mut Rhs> {
     let parent = Site::new(site.unit.clone(), parent);
     let (place, value) = match node(document, &parent)? {
         NodeMut::Stmt(Stmt::Let { value, .. }) => (None, value),
-        NodeMut::Stmt(Stmt::Assign { place, value }) => (Some(&*place), value),
+        NodeMut::Stmt(Stmt::Assign { place, value, .. }) => (Some(&*place), value),
         _ => return None,
     };
     // The right-hand side is the statement's last child, after the place's

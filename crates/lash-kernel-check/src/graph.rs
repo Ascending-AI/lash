@@ -10,7 +10,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    EffectName, FunctionId, JoinMode, Literal, Name, Protocol, Signature, Site, Type, Unit,
+    AssignOrder, EffectName, FunctionId, JoinMode, Literal, Name, Protocol, Signature, Site, Type,
+    Unit,
 };
 
 macro_rules! dense_id {
@@ -217,6 +218,9 @@ pub enum StmtNode {
     Assign {
         place: PlaceNode,
         value: NodeId,
+        /// Which of the place and the value is evaluated first
+        /// (`K-EVAL-003`).
+        order: AssignOrder,
     },
     Remove {
         member: MemberNode,
@@ -449,7 +453,7 @@ impl GraphNode {
             NodeKind::Action(_) => {}
             NodeKind::Stmt(stmt) => match stmt {
                 StmtNode::Let { value, .. } => out.push(*value),
-                StmtNode::Assign { place, value } => {
+                StmtNode::Assign { place, value, .. } => {
                     if let PlaceNode::Member(member) = place {
                         member.push_children(&mut out);
                     }

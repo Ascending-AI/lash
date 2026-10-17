@@ -4,10 +4,11 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    Action, Atom, Callee, Document, Expr, Float, Formula, FunctionDefinition, FunctionId,
-    FunctionRegistry, Implementation, InvalidReason, Literal, MAX_NESTING_DEPTH, Name, Node,
-    NumberPolicy, ParseErrorReason, RegistryError, StatementForm, Stmt, ValidatedFunctions,
-    parse_definition, parse_document, print_definition, print_document, validate_document,
+    Action, AssignOrder, Atom, Callee, Document, Expr, Float, Formula, FunctionDefinition,
+    FunctionId, FunctionRegistry, Implementation, InvalidReason, Literal, MAX_NESTING_DEPTH, Name,
+    Node, NumberPolicy, ParseErrorReason, Place, RegistryError, Rhs, StatementForm, Stmt,
+    ValidatedFunctions, parse_definition, parse_document, print_definition, print_document,
+    validate_document,
 };
 
 /// A definition named `name` taking one `Any`: native when `native`, with a
@@ -141,6 +142,12 @@ main {{
   let waits = [perform fetch("y") as Any then yield, sleep(1) then yield, join(h), join all([h2, h3]), await([h][0]) via helper.twice]
   let awaited = await h via helper.twice
   set nested[0] = (sleep 5, spawn apply g(first))
+  set [perform fetch("t") as Any, nested][1][call worker(1)] = 0
+  set [perform fetch("t") as Any, nested][1][call worker(1)] = sleep 5 place first
+  set nested[0].f = [1, perform fetch("v") as Any] place first
+  while [perform fetch("w") as Any, false][1] {{
+    break
+  }}
   let direct = call worker([1][0])
   do perform fetch("x") as Union(Null, Number, Tuple(Bool, Bytes), Map(Text, Set(Timestamp)), Enum("a", "b"), Task(Error), Handle("db"), Fn(a: Int, b?: Float) -> Absent, Record{{}}, Record{{..Text}})
   return null
@@ -256,6 +263,7 @@ fn kernel_text_round_trips_documents_that_use_every_form() {
         "literal:null",
         "literal:text",
         "stmt:assign",
+        "stmt:assign:place_first",
         "stmt:break",
         "stmt:continue",
         "stmt:do",
@@ -293,6 +301,10 @@ fn collect_forms(node: Node<'_>, forms: &mut std::collections::BTreeSet<&'static
         Node::Stmt(stmt) => {
             forms.insert(match stmt {
                 Stmt::Let { .. } => "stmt:let",
+                Stmt::Assign {
+                    order: AssignOrder::PlaceFirst,
+                    ..
+                } => "stmt:assign:place_first",
                 Stmt::Assign { .. } => "stmt:assign",
                 Stmt::Remove { .. } => "stmt:remove",
                 Stmt::Do { .. } => "stmt:do",
@@ -489,6 +501,59 @@ fn a_body_only_library_function_is_invoked_inside_an_expression() {
     ))
     .unwrap();
     assert_eq!(validate_document(&invoked, &catalog), Ok(()));
+}
+
+/// `K-EVAL-003`, `K-DOC-005`: a place-first assignment writes a member
+/// from an expression. Its text reads a whole-action value as the nested
+/// action; a variable place, which evaluates nothing, and the statement's
+/// own action, which no continuation holds the place across, are refused,
+/// naming the node.
+#[test]
+fn a_place_first_assignment_writes_a_member_from_an_expression() {
+    let (catalog, _) = catalog();
+    let document = parse_document(&main_of(
+        "let xs = [0]\nset xs[0] = call declared(1) place first",
+    ))
+    .unwrap();
+    assert_eq!(validate_document(&document, &catalog), Ok(()));
+    let Stmt::Assign { value, order, .. } = &document.main[1] else {
+        panic!("{:?}", document.main[1]);
+    };
+    assert_eq!(*order, AssignOrder::PlaceFirst);
+    assert!(matches!(value, Rhs::Expr(Expr::Act(_))), "{value:?}");
+
+    let mut stated = document.clone();
+    if let Stmt::Assign { value, .. } = &mut stated.main[1] {
+        *value = Rhs::Action(Action::Call {
+            callee: Callee::Declared(Name::new("declared")),
+            args: vec![Atom::Literal(Literal::Int(1.into()))],
+        });
+    }
+    let error = validate_document(&stated, &catalog).unwrap_err();
+    assert!(
+        matches!(
+            error.reason.as_ref(),
+            InvalidReason::PlaceFirstAssignment { .. }
+        ),
+        "{error}"
+    );
+    assert_eq!(error.site.unwrap().to_string(), "main/1/2");
+
+    let mut variable = document;
+    variable.main[1] = Stmt::Assign {
+        place: Place::Variable(Name::new("xs")),
+        value: Rhs::Expr(Expr::Literal(Literal::Null)),
+        order: AssignOrder::PlaceFirst,
+    };
+    let error = validate_document(&variable, &catalog).unwrap_err();
+    assert!(
+        matches!(
+            error.reason.as_ref(),
+            InvalidReason::PlaceFirstAssignment { .. }
+        ),
+        "{error}"
+    );
+    assert_eq!(error.site.unwrap().to_string(), "main/1");
 }
 
 /// `K-ID-001`: the identity is over behaviour alone, and over all of it.

@@ -204,7 +204,18 @@ impl Renderer<'_> {
                 self.suite();
                 self.rhs(value);
             }
-            k::Stmt::Assign { place, value } => {
+            // The front end writes Python's own order, the right-hand side
+            // first, so its source has no spelling for another.
+            k::Stmt::Assign {
+                order: k::AssignOrder::PlaceFirst,
+                ..
+            } => {
+                self.out.refuse(PrintError::Invalid(
+                    "a place-first assignment has no generated Python spelling".into(),
+                ));
+                return;
+            }
+            k::Stmt::Assign { place, value, .. } => {
                 match place {
                     k::Place::Variable(n) => {
                         self.out.write("with k.assign(");
@@ -740,6 +751,7 @@ fn awaits(body: &k::Block) -> bool {
                 | k::Stmt::Assign {
                     place: k::Place::Variable(_),
                     value: k::Rhs::Expr(k::Expr::Closure(_)),
+                    ..
                 },
             ) => false,
             _ => node.children().into_iter().any(node_awaits),

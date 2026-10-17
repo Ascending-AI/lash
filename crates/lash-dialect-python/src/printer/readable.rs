@@ -455,6 +455,7 @@ impl Renderer<'_> {
             | k::Stmt::Assign {
                 place: k::Place::Variable(name),
                 value: k::Rhs::Expr(k::Expr::Closure(c)),
+                ..
             } => {
                 self.out.write(if awaits(&c.body) {
                     "async def "
@@ -490,6 +491,7 @@ impl Renderer<'_> {
             k::Stmt::Assign {
                 place: k::Place::Member(k::Member::Field { target, field }),
                 value,
+                order: k::AssignOrder::ValueFirst,
             } if !attribute_identifier(field)
                 && self.inline.contains(target)
                 && self.inline_rhs(value) =>
@@ -502,12 +504,15 @@ impl Renderer<'_> {
                 self.write_inline_rhs(value);
                 self.out.write(")\n");
             }
-            k::Stmt::Assign { place, value }
-                if self.inline_rhs(value)
-                    && match place {
-                        k::Place::Variable(_) => true,
-                        k::Place::Member(m) => self.inline_member(m),
-                    } =>
+            k::Stmt::Assign {
+                place,
+                value,
+                order: k::AssignOrder::ValueFirst,
+            } if self.inline_rhs(value)
+                && match place {
+                    k::Place::Variable(_) => true,
+                    k::Place::Member(m) => self.inline_member(m),
+                } =>
             {
                 match place {
                     k::Place::Variable(n) => {

@@ -110,14 +110,17 @@ fn native_members_preserve_field_index_and_assignment_targets() {
             k::Stmt::Assign {
                 place: k::Place::Member(field("value")),
                 value: k::Rhs::Expr(integer(1)),
+                order: k::AssignOrder::ValueFirst,
             },
             k::Stmt::Assign {
                 place: k::Place::Member(field("not a field")),
                 value: k::Rhs::Expr(integer(2)),
+                order: k::AssignOrder::ValueFirst,
             },
             k::Stmt::Assign {
                 place: k::Place::Member(index),
                 value: k::Rhs::Expr(integer(3)),
+                order: k::AssignOrder::ValueFirst,
             },
             k::Stmt::Remove {
                 member: field("ready"),

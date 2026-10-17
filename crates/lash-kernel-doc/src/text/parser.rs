@@ -7,8 +7,9 @@ use num_traits::ToPrimitive;
 use super::lexer::{Spanned, Token, lex};
 use super::{ParseError, ParseErrorReason, is_keyword};
 use crate::ast::{
-    ActExpr, ActKind, Action, Atom, Block, Callee, Catch, Closure, Expr, Function, JoinMode,
-    Literal, MapEntry, Member, Place, ProjectionRead, Protocol, RecordEntry, Rhs, Stmt, TryStmt,
+    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, Function,
+    JoinMode, Literal, MapEntry, Member, Place, ProjectionRead, Protocol, RecordEntry, Rhs, Stmt,
+    TryStmt,
 };
 use crate::document::{Document, Manifest};
 use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Operand};
@@ -520,9 +521,26 @@ impl Parser {
                     }
                 };
                 self.expect(&Token::Equals)?;
-                Stmt::Assign {
-                    place,
-                    value: self.rhs()?,
+                let value = self.rhs()?;
+                // `place first`: the place before the right-hand side, which
+                // is then an expression (`K-EVAL-003`).
+                if self.eat_word("place") {
+                    self.expect_keyword("first")?;
+                    let value = match value {
+                        Rhs::Action(action) => Rhs::Expr(action.into()),
+                        value => value,
+                    };
+                    Stmt::Assign {
+                        place,
+                        value,
+                        order: AssignOrder::PlaceFirst,
+                    }
+                } else {
+                    Stmt::Assign {
+                        place,
+                        value,
+                        order: AssignOrder::ValueFirst,
+                    }
                 }
             }
             "remove" => {

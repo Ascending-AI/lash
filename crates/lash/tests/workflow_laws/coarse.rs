@@ -3,7 +3,7 @@
 
 use super::*;
 use lash::workflow::document::{
-    EffectIdentity, FunctionRegistry, Site, TaskIdentity, parse_document,
+    AssignOrder, EffectIdentity, FunctionRegistry, Site, TaskIdentity, parse_document,
 };
 use lash::workflow::view::{
     self, ActionObservation, ActionState, FlowKind, FlowTarget, ReadableLens, ReadableRefusal,
@@ -120,7 +120,8 @@ fn coarse_partition() {
 }
 
 /// COARSE-EVAL: post-order arguments, lazy alternatives, header/return sites
-/// and the specific RHS-before-member assignment rule survive projection.
+/// and each assignment order's issue of its value and place survive
+/// projection.
 #[test]
 fn coarse_eval() {
     let mut document = parse_document(&format!(
@@ -148,63 +149,76 @@ fn coarse_eval() {
             args: Vec::new(),
         }))
     };
+    // K-EVAL-003: a value-first assignment issues its right-hand side
+    // before its place's target and index; a place-first one after them.
     let pure_place = match &document.functions[&Name::new("flow")].body[4] {
         Stmt::Assign { place, .. } => place.clone(),
         _ => unreachable!(),
     };
-    document.functions.get_mut(&Name::new("flow")).unwrap().body[4] = Stmt::Assign {
-        place: Place::Member(lash::workflow::document::Member::Index {
-            target: action("target"),
-            index: action("index"),
-        }),
-        value: Rhs::Action(lash::workflow::document::Action::Perform {
-            effect: lash::workflow::document::EffectName::new("value").unwrap(),
-            args: Vec::new(),
-            result: lash::workflow::document::Type::Any,
-            then_yield: false,
-        }),
+    let acting_place = Place::Member(lash::workflow::document::Member::Index {
+        target: action("target"),
+        index: action("index"),
+    });
+    let value = || lash::workflow::document::Action::Perform {
+        effect: lash::workflow::document::EffectName::new("value").unwrap(),
+        args: Vec::new(),
+        result: lash::workflow::document::Type::Any,
+        then_yield: false,
     };
-    let refuse = |candidate, position| {
-        let error = lash::workflow::WorkflowDocument::derive(
+    let issued = |assignment: Stmt| {
+        let mut candidate = document.clone();
+        candidate
+            .functions
+            .get_mut(&Name::new("flow"))
+            .unwrap()
+            .body[4] = assignment;
+        let holder = lash::workflow::WorkflowDocument::derive(
             candidate,
             WorkflowDocumentEntry::Entry {
                 function: Name::new("flow"),
             },
             &FunctionRegistry::default(),
         )
-        .unwrap_err();
-        let lash::workflow::WorkflowDocumentError::Invalid(invalid) = error else {
-            panic!("expected a typed structural refusal: {error:?}");
-        };
-        assert!(
-            matches!(*invalid.reason,
-            lash::workflow::document::InvalidReason::NestedActionPosition { position: ref actual }
-                if actual.as_ref() == position),
-            "expected {position}, got {invalid:?}"
-        );
+        .unwrap();
+        let view = view::derive(&holder).unwrap();
+        let assignment = view
+            .statements
+            .iter()
+            .find(|statement| matches!(statement.statement, Stmt::Assign { .. }));
+        assignment
+            .unwrap()
+            .actions
+            .iter()
+            .map(|site| {
+                let action = view.dataflow.actions.iter().find(|a| a.site == *site);
+                match &action.unwrap().callee {
+                    Some(view::CalleeView::Effect(name)) => name.as_str().to_owned(),
+                    other => format!("{other:?}"),
+                }
+            })
+            .collect::<Vec<_>>()
     };
-    refuse(document.clone(), "an assignment's place");
+    assert_eq!(
+        issued(Stmt::Assign {
+            place: acting_place.clone(),
+            value: Rhs::Action(value()),
+            order: AssignOrder::ValueFirst,
+        }),
+        ["value", "target", "index"]
+    );
+    assert_eq!(
+        issued(Stmt::Assign {
+            place: acting_place,
+            value: Rhs::Expr(value().into()),
+            order: AssignOrder::PlaceFirst,
+        }),
+        ["target", "index", "value"]
+    );
     document.functions.get_mut(&Name::new("flow")).unwrap().body[4] = Stmt::Assign {
         place: pure_place,
-        value: Rhs::Action(lash::workflow::document::Action::Perform {
-            effect: lash::workflow::document::EffectName::new("value").unwrap(),
-            args: Vec::new(),
-            result: lash::workflow::document::Type::Any,
-            then_yield: false,
-        }),
+        value: Rhs::Action(value()),
+        order: AssignOrder::ValueFirst,
     };
-    let mut forbidden_while = document.clone();
-    forbidden_while
-        .functions
-        .get_mut(&Name::new("flow"))
-        .unwrap()
-        .body
-        .push(Stmt::While {
-            condition: action("test"),
-            body: Vec::new(),
-            else_block: Vec::new(),
-        });
-    refuse(forbidden_while, "a `while` condition");
     for name in ["target", "index"] {
         document
             .manifest

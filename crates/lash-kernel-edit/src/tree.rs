@@ -57,7 +57,7 @@ impl<'a> NodeMut<'a> {
             Self::Action(_) => {}
             Self::Stmt(stmt) => match stmt {
                 Stmt::Let { value, .. } => out.push(rhs(value)),
-                Stmt::Assign { place, value } => {
+                Stmt::Assign { place, value, .. } => {
                     if let Place::Member(member) = place {
                         push_member(member, &mut out);
                     }

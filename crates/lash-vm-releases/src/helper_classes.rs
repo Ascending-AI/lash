@@ -391,7 +391,7 @@ impl Graph {
                     self.alias(value, binding);
                     scope.insert(name.clone(), binding);
                 }
-                Stmt::Assign { place, value } => {
+                Stmt::Assign { place, value, .. } => {
                     let value = self.rhs(value, &scope, owner);
                     let target = match place {
                         Place::Variable(name) => Self::variable(&scope, name),

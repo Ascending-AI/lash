@@ -2,7 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{Closure, Expr, Literal, Member, Name, Place, Protocol, Rhs, Stmt};
+use lash_kernel_doc::{
+    AssignOrder, Closure, Expr, Literal, Member, Name, Place, Protocol, Rhs, Stmt,
+};
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -330,14 +332,8 @@ impl Lowerer<'_> {
         let mut simple = None;
         let mut going = None;
         let block = self.block(|this| {
-            let mut condition = test(this)?;
-            fn acts(node: lash_kernel_doc::Node<'_>) -> bool {
-                matches!(node, lash_kernel_doc::Node::Expr(Expr::Act(_)))
-                    || node.children().into_iter().any(acts)
-            }
-            if acts(lash_kernel_doc::Node::Expr(&condition)) {
-                condition = this.let_rhs(Rhs::Expr(condition), Ty::Bool).expr;
-            }
+            // Actions stay nested in the condition (`K-EVAL-008`).
+            let condition = test(this)?;
             if this.buf.is_empty() {
                 simple = Some(condition);
                 return this.loop_body(body);
@@ -352,6 +348,7 @@ impl Lowerer<'_> {
             this.emit(Stmt::Assign {
                 place: Place::Variable(go.clone()),
                 value: Rhs::Expr(condition),
+                order: AssignOrder::ValueFirst,
             });
             let pass = this.block(|this| this.loop_body(body))?;
             this.emit_if(Expr::Variable(go.clone()), pass, Buf::default());
@@ -675,6 +672,7 @@ impl Lowerer<'_> {
             this.emit(Stmt::Assign {
                 place: Place::Variable(pending.clone()),
                 value: Rhs::Expr(Expr::Variable(raised.clone())),
+                order: AssignOrder::ValueFirst,
             });
             this.emit(Stmt::Throw {
                 value: Expr::Variable(raised.clone()),
@@ -699,6 +697,7 @@ impl Lowerer<'_> {
                 let inherit = this.single(Stmt::Assign {
                     place: Place::Variable(active.clone()),
                     value: Rhs::Expr(outer.expr),
+                    order: AssignOrder::ValueFirst,
                 });
                 this.emit_if(none, inherit, Buf::default());
             }
@@ -736,6 +735,7 @@ impl Lowerer<'_> {
                 this.emit(Stmt::Assign {
                     place: Place::Variable(flag.clone()),
                     value: Rhs::Expr(Expr::Literal(Literal::Bool(true))),
+                    order: AssignOrder::ValueFirst,
                 });
             }
             Ok(())
@@ -818,12 +818,14 @@ impl Lowerer<'_> {
         self.emit(Stmt::Assign {
             place: Place::Variable(variable.clone()),
             value: Rhs::Expr(Expr::Variable(caught.clone())),
+            order: AssignOrder::ValueFirst,
         });
         self.mark_bound(id);
         let block = self.suite(body)?;
         let unbind = self.single(Stmt::Assign {
             place: Place::Variable(variable),
             value: Rhs::Expr(Expr::Literal(Literal::Absent)),
+            order: AssignOrder::ValueFirst,
         });
         self.emit_try(block, None, Some(unbind));
         self.mark_unbound(id);
@@ -1033,6 +1035,7 @@ impl Lowerer<'_> {
                     body: body.stmts,
                     start,
                 }))),
+                order: AssignOrder::ValueFirst,
             },
             vec![body.notes],
         );
@@ -1168,6 +1171,7 @@ impl Lowerer<'_> {
                 let assign = this.single(Stmt::Assign {
                     place: Place::Variable(Name::new(param.as_str())),
                     value: Rhs::Expr(default.expr.clone()),
+                    order: AssignOrder::ValueFirst,
                 });
                 this.emit_if(missing, assign, Buf::default());
             }

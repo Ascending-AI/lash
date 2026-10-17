@@ -625,6 +625,7 @@ fn ordinary_python_body_uses_native_bindings_collections_and_definitions() {
             callee: k::Callee::Declared("worker".into()),
             args: vec![k::Atom::Variable("items".into())],
         }),
+        order: k::AssignOrder::ValueFirst,
     });
     doc.main.push(finish(variable("items")));
     let printed = roundtrip(&doc, true);
@@ -750,6 +751,7 @@ fn native_collections_preserve_variants_order_and_expression_fallbacks() {
         let doc = document(k::Stmt::Assign {
             place,
             value: k::Rhs::Expr(int(4)),
+            order: k::AssignOrder::ValueFirst,
         });
         check_map(&doc, &roundtrip(&doc, true));
     }
@@ -777,6 +779,7 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
             k::Stmt::Assign {
                 place: k::Place::Variable("x".into()),
                 value: k::Rhs::Expr(int(2)),
+                order: k::AssignOrder::ValueFirst,
             },
             k::Stmt::Let {
                 name: "x".into(),
@@ -785,6 +788,7 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
             k::Stmt::Assign {
                 place: k::Place::Variable("earlier".into()),
                 value: k::Rhs::Expr(int(4)),
+                order: k::AssignOrder::ValueFirst,
             },
             k::Stmt::Let {
                 name: "nested".into(),
@@ -794,6 +798,7 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
                         k::Stmt::Assign {
                             place: k::Place::Variable("x".into()),
                             value: k::Rhs::Expr(int(5)),
+                            order: k::AssignOrder::ValueFirst,
                         },
                         k::Stmt::Return {
                             value: variable("x"),
@@ -805,6 +810,7 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
             k::Stmt::Assign {
                 place: k::Place::Variable("nested".into()),
                 value: k::Rhs::Expr(closure()),
+                order: k::AssignOrder::ValueFirst,
             },
             k::Stmt::Let {
                 name: "nested".into(),
@@ -856,6 +862,7 @@ fn binding_inference_preserves_shadowing_initial_assignments_and_closures() {
             body: vec![k::Stmt::Assign {
                 place: k::Place::Variable("x".into()),
                 value: k::Rhs::Expr(int(1)),
+                order: k::AssignOrder::ValueFirst,
             }],
             start: None,
         },
@@ -1084,6 +1091,7 @@ def main():
             k::Stmt::Assign {
                 place: k::Place::Variable("items".into()),
                 value: k::Rhs::Expr(k::Expr::Tuple(vec![int(2)])),
+                order: k::AssignOrder::ValueFirst,
             },
             k::Stmt::Let {
                 name: "items".into(),
@@ -1110,6 +1118,7 @@ def main():
                 k::Stmt::Assign {
                     place: k::Place::Variable("incoming".into()),
                     value: k::Rhs::Expr(int(3)),
+                    order: k::AssignOrder::ValueFirst,
                 },
                 k::Stmt::Return {
                     value: variable("incoming"),
@@ -1159,6 +1168,7 @@ fn generic_member_assignments_decode_native_await_rhs() {
             let mut doc = document(k::Stmt::Assign {
                 place: k::Place::Member(member),
                 value: k::Rhs::Action(action),
+                order: k::AssignOrder::ValueFirst,
             });
             doc.manifest.effects.insert(
                 k::EffectName::new("echo").unwrap(),

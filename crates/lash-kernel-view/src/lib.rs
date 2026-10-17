@@ -7,7 +7,8 @@
 //! nodes, lexical callable roots, control roles and exact flow destinations.
 //! Statements, scopes, dataflow and execution sites support selection and ports;
 //! hosts render the supplied nodes. Action issue order follows runtime evaluation,
-//! including RHS-before-place assignment, rather than universal child order.
+//! including a value-first assignment's RHS before its place, rather than
+//! universal child order.
 //! Canonical printer lines and optional readable-lens ranges belong to this
 //! document revision. Every kernel form is matched here, so a new form fails to
 //! compile here instead of requiring a host to learn it.
@@ -48,8 +49,9 @@ use lash_kernel_check::{
     NodeKind, Reference, StmtNode, WorkflowDocument,
 };
 use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Atom, Callee, Document, EffectName, Expr, FunctionDeclarations,
-    FunctionId, FunctionName, Name, Node, Param, Place, Site, Stmt, Type, Unit,
+    ActExpr, ActKind, Action, AssignOrder, Atom, Callee, Document, EffectName, Expr,
+    FunctionDeclarations, FunctionId, FunctionName, Name, Node, Param, Place, Site, Stmt, Type,
+    Unit,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1001,8 +1003,16 @@ fn issued(graph: &Graph, statement: &GraphNode) -> Vec<Site> {
     }
     let mut out = Vec::new();
     let mut children = statement.children();
-    // K-FORM-005/006: RHS before the member place, unlike Site order.
-    if matches!(statement.kind, NodeKind::Stmt(StmtNode::Assign { .. })) && children.len() > 1 {
+    // K-EVAL-003: a value-first assignment evaluates its right-hand side
+    // before its member place, unlike Site order.
+    if matches!(
+        statement.kind,
+        NodeKind::Stmt(StmtNode::Assign {
+            order: AssignOrder::ValueFirst,
+            ..
+        })
+    ) && children.len() > 1
+    {
         children.rotate_right(1);
     }
     for child in children {

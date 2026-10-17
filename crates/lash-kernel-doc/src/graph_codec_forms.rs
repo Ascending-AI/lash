@@ -9,11 +9,11 @@ use crate::graph_tokens::{
     CanonicalFault, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter,
 };
 use crate::{
-    ActExpr, ActKind, Action, Atom, Block, Bytes, Callee, Catch, Closure, Document, Expr, Float,
-    Formula, Function, FunctionBody, FunctionDefinition, FunctionId, Guard, Implementation,
-    Integer, JoinMode, Literal, Manifest, MapEntry, MapType, Member, Name, NumberPolicy, Operand,
-    Param, Place, ProjectionRead, Protocol, QualifiedName, RecordEntry, RecordType,
-    RecordTypeField, Rhs, Signature, Stmt, TryStmt, Type,
+    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Bytes, Callee, Catch, Closure, Document,
+    Expr, Float, Formula, Function, FunctionBody, FunctionDefinition, FunctionId, Guard,
+    Implementation, Integer, JoinMode, Literal, Manifest, MapEntry, MapType, Member, Name,
+    NumberPolicy, Operand, Param, Place, ProjectionRead, Protocol, QualifiedName, RecordEntry,
+    RecordType, RecordTypeField, Rhs, Signature, Stmt, TryStmt, Type,
 };
 use crate::{FunctionRepresentation, FunctionValue, StartAdapter, StartConvention};
 
@@ -885,7 +885,7 @@ impl TokenCodec for Stmt {
                 name.encode(out);
                 value.encode(out);
             }
-            Self::Assign { place, value } => {
+            Self::Assign { place, value, .. } => {
                 out.sum(number, 2);
                 place.encode(out);
                 value.encode(out);
@@ -964,7 +964,7 @@ impl TokenCodec for Stmt {
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.nested(|input| {
             let number = variant(input, |variant| match variant {
-                0 | 1 | 6 | 17 => Some(2),
+                0 | 1 | 6 | 17 | 18 => Some(2),
                 2 | 3 | 9..=14 => Some(1),
                 4 | 5 | 16 => Some(3),
                 15 => Some(5),
@@ -979,6 +979,12 @@ impl TokenCodec for Stmt {
                 1 => Self::Assign {
                     place: Place::decode(input)?,
                     value: Rhs::decode(input)?,
+                    order: AssignOrder::ValueFirst,
+                },
+                18 => Self::Assign {
+                    place: Place::decode(input)?,
+                    value: Rhs::decode(input)?,
+                    order: AssignOrder::PlaceFirst,
                 },
                 2 => Self::Remove {
                     member: Member::decode(input)?,

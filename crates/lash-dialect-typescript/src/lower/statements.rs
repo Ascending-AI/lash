@@ -1,6 +1,6 @@
 //! Statements and control flow.
 
-use lash_kernel_doc::{Expr, Literal, Member, Name, Place, Stmt};
+use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Name, Place, Stmt};
 
 use super::patterns::Mode;
 use super::{BindingKind, Buf, Control, Lowerer, Lowering, Note, Operand, Ty, walk};
@@ -416,6 +416,7 @@ impl Lowerer<'_> {
         let lower_flag = self.one(Stmt::Assign {
             place: Place::Variable(variable_of(first)),
             value: lash_kernel_doc::Rhs::Expr(Expr::Literal(Literal::Bool(false))),
+            order: AssignOrder::ValueFirst,
         });
         let later = self.block(lower)?;
         self.emit_if(first.expr(), lower_flag, later);
@@ -469,6 +470,7 @@ impl Lowerer<'_> {
                 .map(|(_, outer, inner)| Stmt::Assign {
                     place: Place::Variable(outer.clone()),
                     value: lash_kernel_doc::Rhs::Expr(Expr::Variable(inner.clone())),
+                    order: AssignOrder::ValueFirst,
                 })
                 .collect()
         };
@@ -517,6 +519,7 @@ impl Lowerer<'_> {
         let absent = self.one(Stmt::Assign {
             place: Place::Variable(element.clone()),
             value: lash_kernel_doc::Rhs::Expr(Expr::Literal(Literal::Absent)),
+            order: AssignOrder::ValueFirst,
         });
         self.emit_if(hole, absent, Buf::default());
         Ok(())
@@ -592,6 +595,7 @@ impl Lowerer<'_> {
         let choose = |index: usize| Stmt::Assign {
             place: Place::Variable(chosen_name.clone()),
             value: lash_kernel_doc::Rhs::Expr(position(index)),
+            order: AssignOrder::ValueFirst,
         };
         for (index, case) in cases.iter().enumerate() {
             let Some(test) = &case.test else { continue };
@@ -625,6 +629,7 @@ impl Lowerer<'_> {
                     this.one(Stmt::Assign {
                         place: Place::Variable(running_name.clone()),
                         value: lash_kernel_doc::Rhs::Expr(truth()),
+                        order: AssignOrder::ValueFirst,
                     }),
                     Buf::default(),
                 );
@@ -698,6 +703,7 @@ impl Lowerer<'_> {
                 self.emit(Stmt::Assign {
                     place: Place::Variable(flag),
                     value: lash_kernel_doc::Rhs::Expr(truth()),
+                    order: AssignOrder::ValueFirst,
                 });
                 self.emit(Stmt::Break);
             }

@@ -209,6 +209,52 @@ fn nested_actions_keep_the_authors_statement_shape() {
     );
 }
 
+/// FIG-6657, SHAPE: a `while` test keeps its awaited call in the loop's own
+/// condition, evaluated afresh at each pass; the loop prints and reads back,
+/// and its `else` runs on exhaustion.
+#[test]
+fn a_while_test_keeps_its_actions_in_the_condition() {
+    let source = "async def more(k):\n    return await echo(k) < 2\nn = 0\nwhile await more(n):\n    n = n + 1\nelse:\n    print('done')\nprint(n)\n";
+    let lowered = machine::lower(source).expect("the admitted program");
+    let mut statements = 0;
+    let mut nested_test = false;
+    let mut pending = vec![lash_kernel_doc::Node::Block(&lowered.document.main)];
+    while let Some(node) = pending.pop() {
+        statements += usize::from(matches!(node, lash_kernel_doc::Node::Stmt(_)));
+        if let lash_kernel_doc::Node::Stmt(lash_kernel_doc::Stmt::While { condition, .. }) = node {
+            let mut inside = vec![lash_kernel_doc::Node::Expr(condition)];
+            while let Some(part) = inside.pop() {
+                nested_test |= matches!(
+                    part,
+                    lash_kernel_doc::Node::Expr(lash_kernel_doc::Expr::Act(_))
+                );
+                inside.extend(part.children());
+            }
+        }
+        pending.extend(node.children());
+    }
+    let text = machine::kernel_text(source);
+    assert!(nested_test, "the loop's test holds no action\n{text}");
+    assert!(
+        statements <= 7,
+        "SHAPE: {statements} statements for 7 author statements\n{text}"
+    );
+    // It prints, and its printed source reads back to it (`K-DIALECT-001`).
+    let printed =
+        crate::print(&lowered.document, Default::default()).expect("the lowered loop prints");
+    let read = crate::read(&printed.source, &lowered.document, Default::default())
+        .expect("its source reads back");
+    assert_eq!(
+        read.canonical_bytes(),
+        lowered.document.canonical_bytes(),
+        "{}",
+        printed.source
+    );
+    let run = machine::run(source, &[]);
+    assert_eq!(run.lines(), ["done", "2"]);
+    assert_eq!(run.end, "ok");
+}
+
 /// FIG-6402 rev2 §11: capture needs a slot even when its first binding comes later.
 #[test]
 fn a_closure_captures_a_slot_first_bound_later() {

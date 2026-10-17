@@ -450,7 +450,8 @@ fn derived_ids_and_sites_are_a_function_of_the_document_alone() {
 
 /// `K-SITE-001` to `K-SITE-004`: an action is named by its own site, its
 /// statement by that site less the last index, and its loops by their
-/// statements, a closure body bounding them.
+/// statements, a closure body bounding them; a `while` encloses an action
+/// in its own condition.
 #[test]
 fn execution_sites_name_the_action_its_statement_and_its_loops() {
     let library = library();
@@ -460,7 +461,7 @@ effect fetch(url: Text) -> Any
 
 main {
   for x in [[1]] {
-    while true {
+    while [perform fetch("c") as Any, true][1] {
       let f = fn() {
         do yield
       }
@@ -471,16 +472,22 @@ main {
 "#;
     let graph = derive(&document(text), &library.catalog).unwrap_or_else(|e| panic!("{e}"));
     let sites = graph.execution_sites();
-    assert_eq!(sites.len(), 2);
+    assert_eq!(sites.len(), 3);
 
-    let wait = &sites[0];
+    let condition = &sites[0];
+    assert_eq!(condition.kind, SiteKind::Perform);
+    assert_eq!(condition.site, main_site(&[0, 1, 0, 0, 0, 0]));
+    assert_eq!(condition.statement, main_site(&[0, 1, 0]));
+    assert_eq!(condition.loops, [main_site(&[0]), main_site(&[0, 1, 0])]);
+
+    let wait = &sites[1];
     assert_eq!(wait.kind, SiteKind::Yield);
     assert!(wait.kind.waits());
     assert_eq!(wait.site, main_site(&[0, 1, 0, 1, 0, 0, 0, 0, 0]));
     assert_eq!(wait.statement, main_site(&[0, 1, 0, 1, 0, 0, 0, 0]));
     assert!(wait.loops.is_empty());
 
-    let perform = &sites[1];
+    let perform = &sites[2];
     assert_eq!(perform.kind, SiteKind::Perform);
     assert_eq!(perform.site, main_site(&[0, 1, 0, 1, 1, 2]));
     assert_eq!(perform.statement, main_site(&[0, 1, 0, 1, 1]));

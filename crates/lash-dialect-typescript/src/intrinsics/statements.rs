@@ -235,6 +235,7 @@ impl Reader {
             return Ok(k::Stmt::Assign {
                 place,
                 value: self.rhs(&assign.right)?,
+                order: k::AssignOrder::ValueFirst,
             });
         }
         if let Some(native) = self.native_statement(expr) {

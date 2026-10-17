@@ -70,6 +70,7 @@ impl Types {
             | k::Stmt::Assign {
                 place: k::Place::Variable(name),
                 value,
+                ..
             } => {
                 let kind = self.rhs(value, functions);
                 self.0.insert(name.clone(), kind);

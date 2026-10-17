@@ -20,6 +20,9 @@
 //! caller standing at the call (`Called`). Every cut ends it with the
 //! uncut run's result.
 //!
+//! Another parks at the same places inside a `while` condition, which
+//! resumes in the evaluation it stood in.
+//!
 //! A third parks at the same places on `then yield` waits: each step that
 //! delivers an outcome leaves its task delivered, owing one more turn
 //! (`K-TASK-005`), and every cut of that step ends as the uncut run.
@@ -99,6 +102,33 @@ fn inner(x) {
 fn worker() {
   let v = [1, sleep 5 then yield, call inner("b")]
   return v
+}
+
+main {
+  finish null
+}
+"#;
+
+/// `worker()`: a `while` whose condition, on its first evaluation, holds
+/// a `sleep` and a call that sleeps, both nested (`K-EVAL-008`); its body
+/// makes the second evaluation false. Three `kernel_run` steps, as
+/// `WORKER`'s: one to the condition's `sleep` (`Waiting`), one to the
+/// callee's (the condition standing `Called`) and one to the return.
+const WHILE_CONDITION: &str = r#"kernel 1
+numbers float
+entry worker() -> Any
+
+fn inner(x) {
+  do sleep 7
+  return x
+}
+
+fn worker() {
+  let n = true
+  while if(n, [sleep 5, call inner(true)][1], false) {
+    set n = false
+  }
+  return ["b", n]
 }
 
 main {
@@ -457,6 +487,33 @@ async fn a_run_parked_inside_an_expression_resumes_exactly_across_a_cut() {
     report.assert_held();
     let uncut = UNCUT.lock_recover();
     let ended = uncut.iter().find(|(source, _)| *source == NESTED);
+    assert!(
+        ended.is_some_and(|(_, output)| output.contains(r#""b""#)),
+        "{ended:?}"
+    );
+}
+
+/// `K-EVAL-008`: a run parked inside a `while` condition, at `Waiting`
+/// and at `Called`, resumes in that evaluation of the condition on the
+/// other node wherever its step's outcome was cut, and ends as the uncut
+/// run.
+#[tokio::test]
+async fn a_run_parked_in_a_while_condition_resumes_exactly_across_a_cut() {
+    let report = Matrix::new()
+        .labels(&[CommitLabel::STEP_OUTCOME])
+        .faults(&[
+            Fault::FailBefore,
+            Fault::Abort,
+            Fault::AckHidden,
+            Fault::CommitThenAbort,
+        ])
+        .horizon(Duration::from_secs(600))
+        .run_test(|| KernelSteps::new(WHILE_CONDITION))
+        .await;
+    eprintln!("while condition kernel steps: {} cells", report.cells.len());
+    report.assert_held();
+    let uncut = UNCUT.lock_recover();
+    let ended = uncut.iter().find(|(source, _)| *source == WHILE_CONDITION);
     assert!(
         ended.is_some_and(|(_, output)| output.contains(r#""b""#)),
         "{ended:?}"

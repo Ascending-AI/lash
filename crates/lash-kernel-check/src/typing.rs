@@ -62,7 +62,7 @@ impl Typer<'_> {
                 let facet = self.value(value);
                 self.bind(binding, &facet);
             }
-            StmtNode::Assign { place, value } => {
+            StmtNode::Assign { place, value, .. } => {
                 if let PlaceNode::Member(member) = &place {
                     self.member_parts(member);
                 }

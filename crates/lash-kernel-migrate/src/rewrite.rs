@@ -127,7 +127,7 @@ pub(crate) fn replace_in_block(block: &mut Block, functions: &BTreeMap<FunctionI
     for stmt in block {
         match stmt {
             Stmt::Let { value, .. } => replace_in_rhs(value, functions),
-            Stmt::Assign { place, value } => {
+            Stmt::Assign { place, value, .. } => {
                 if let Place::Member(member) = place {
                     replace_in_member(member, functions);
                 }

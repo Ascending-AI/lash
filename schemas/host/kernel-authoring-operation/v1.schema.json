@@ -368,6 +368,21 @@
         }
       ]
     },
+    "AssignOrder": {
+      "description": "The order an assignment to a member evaluates its parts in\n(`K-EVAL-003`): each dialect's own, written in the document.",
+      "oneOf": [
+        {
+          "const": "value_first",
+          "description": "The right-hand side, then the place's target, then its index, as\nPython assigns.",
+          "type": "string"
+        },
+        {
+          "const": "place_first",
+          "description": "The place's target, then its index, then the right-hand side, as\nTypeScript assigns. Only a member is written in this order, and its\nright-hand side is an expression: an action there is nested.",
+          "type": "string"
+        }
+      ]
+    },
     "Atom": {
       "description": "An argument of an action: a variable or a literal, never a computation.",
       "oneOf": [
@@ -1533,11 +1548,14 @@
         },
         {
           "additionalProperties": false,
-          "description": "Writes a variable, a field or an index.",
+          "description": "Writes a variable, a field or an index, evaluating its parts in\n`order` (`K-EVAL-003`).",
           "properties": {
             "assign": {
               "additionalProperties": false,
               "properties": {
+                "order": {
+                  "$ref": "#/$defs/AssignOrder"
+                },
                 "place": {
                   "$ref": "#/$defs/Place"
                 },

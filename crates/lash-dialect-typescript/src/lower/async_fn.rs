@@ -29,7 +29,9 @@
 //! identity (`K-TASK-020`) names the async function or the tool call that
 //! started it.
 
-use lash_kernel_doc::{Action, Atom, Callee, EffectName, Expr, Literal, Member, Place, Rhs, Stmt};
+use lash_kernel_doc::{
+    Action, AssignOrder, Atom, Callee, EffectName, Expr, Literal, Member, Place, Rhs, Stmt,
+};
 
 use super::{Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
@@ -343,6 +345,7 @@ impl Lowerer<'_> {
                 callee: Callee::Library(run),
                 args: passed,
             }),
+            order: AssignOrder::ValueFirst,
         });
         Ok(promise)
     }

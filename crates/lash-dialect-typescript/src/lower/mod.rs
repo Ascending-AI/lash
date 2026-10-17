@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Library, Lowered, Mode, workflow};
 use lash_kernel_doc::{
-    Action, Atom, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float,
+    Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float,
     FunctionCatalog, FunctionId, FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs,
     Signature, Stmt, TryStmt,
 };
@@ -1194,7 +1194,14 @@ impl Lowerer<'_> {
             }
             None => (Rhs::Expr(value.expr()), Vec::new(), Vec::new()),
         };
-        self.push(Stmt::Assign { place, value: rhs }, blocks);
+        self.push(
+            Stmt::Assign {
+                place,
+                value: rhs,
+                order: AssignOrder::ValueFirst,
+            },
+            blocks,
+        );
         self.note_written();
         if let Some(note) = self.buf.notes.last_mut() {
             note.nested_written = nested_written

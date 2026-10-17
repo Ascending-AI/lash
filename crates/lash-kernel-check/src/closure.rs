@@ -331,6 +331,7 @@ fn closure_bindings(graph: &Graph) -> BTreeSet<BindingId> {
             NodeKind::Stmt(StmtNode::Assign {
                 place: PlaceNode::Variable(Reference::Binding(binding)),
                 value,
+                ..
             }) => (*binding, *value),
             _ => continue,
         };
@@ -400,6 +401,7 @@ fn function_targets(graph: &Graph) -> BTreeMap<BindingId, BTreeSet<Name>> {
                 | NodeKind::Stmt(StmtNode::Assign {
                     place: PlaceNode::Variable(Reference::Binding(binding)),
                     value,
+                    ..
                 }) => (*binding, *value),
                 NodeKind::Stmt(StmtNode::For {
                     binding, iterable, ..

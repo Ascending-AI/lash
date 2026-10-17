@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 use super::is_keyword;
 use super::lexer::write_quoted;
 use crate::ast::{
-    ActKind, Action, Atom, Block, Callee, Expr, JoinMode, Literal, Member, Place, Rhs, Stmt,
+    ActKind, Action, AssignOrder, Atom, Block, Callee, Expr, JoinMode, Literal, Member, Place, Rhs,
+    Stmt,
 };
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Operand};
@@ -241,7 +242,11 @@ impl<'a> Printer<'a> {
                 self.out.push_str(" = ");
                 self.rhs(value);
             }
-            Stmt::Assign { place, value } => {
+            Stmt::Assign {
+                place,
+                value,
+                order,
+            } => {
                 self.out.push_str("set ");
                 match place {
                     Place::Variable(name) => self.name(name),
@@ -249,6 +254,9 @@ impl<'a> Printer<'a> {
                 }
                 self.out.push_str(" = ");
                 self.rhs(value);
+                if *order == AssignOrder::PlaceFirst {
+                    self.out.push_str(" place first");
+                }
             }
             Stmt::Remove { member } => {
                 self.out.push_str("remove ");

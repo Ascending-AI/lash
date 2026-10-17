@@ -23,9 +23,9 @@ use lash_kernel_dialect::{
     CellEnvironment, Diagnostic, Environment, Library, Lowered, Mode, workflow,
 };
 use lash_kernel_doc::{
-    ActExpr, ActKind, Callee, Catch, Closure, Document, EffectName, Expr, FunctionCatalog,
-    FunctionId, FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Signature, Stmt, TryStmt,
-    validate_document,
+    ActExpr, ActKind, AssignOrder, Callee, Catch, Closure, Document, EffectName, Expr,
+    FunctionCatalog, FunctionId, FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Signature,
+    Stmt, TryStmt, validate_document,
 };
 use ruff_python_ast::{self as ast};
 use ruff_text_size::{Ranged, TextRange};
@@ -520,6 +520,7 @@ impl Lowerer<'_> {
                 if let Stmt::Assign {
                     place: Place::Variable(write),
                     value,
+                    ..
                 } = &body.stmts[next]
                     && write == &name
                 {
@@ -548,7 +549,7 @@ impl Lowerer<'_> {
                     && !mentions(lash_kernel_doc::Node::Expr(iterable), &name)
                     && !mentions(lash_kernel_doc::Node::Block(else_block), &name)
                     && matches!(pass.first(), Some(Stmt::Assign {
-                        place: Place::Variable(write), value: Rhs::Expr(Expr::Variable(read)),
+                        place: Place::Variable(write), value: Rhs::Expr(Expr::Variable(read)), ..
                     }) if write == &name && read == binding)
                     && !body.stmts[next + 1..]
                         .iter()
@@ -1170,7 +1171,14 @@ impl Lowerer<'_> {
         };
         match self.take_binding(&value) {
             Some((rhs, note)) => {
-                self.push(Stmt::Assign { place, value: rhs }, note.blocks);
+                self.push(
+                    Stmt::Assign {
+                        place,
+                        value: rhs,
+                        order: AssignOrder::ValueFirst,
+                    },
+                    note.blocks,
+                );
                 if let Some(assigned) = self.buf.notes.last_mut() {
                     assigned.written = note.written;
                     assigned.nested_written = note
@@ -1188,6 +1196,7 @@ impl Lowerer<'_> {
             None => self.emit(Stmt::Assign {
                 place,
                 value: Rhs::Expr(value.expr),
+                order: AssignOrder::ValueFirst,
             }),
         }
     }

@@ -7,16 +7,20 @@
 //! what a restore checks its saved roles against.
 //!
 //! The walk follows the evaluation order (`K-EVAL-001`): left siblings in
-//! child order, except that an assignment evaluates its right-hand side
-//! before its place (`K-EVAL-003`), so the right-hand side is live in the
-//! place and nothing of the place is live in the right-hand side, and a
+//! child order, except that a value-first assignment evaluates its
+//! right-hand side before its place (`K-EVAL-003`), so the right-hand side
+//! is live in the place and nothing of the place is live in the right-hand
+//! side, while a place-first one keeps child order: its target and index
+//! are live in its right-hand side; and a
 //! nested call or `spawn` reads a callee held in a variable before its
 //! arguments (`K-EVAL-004`), a role named by the action's own site. The
 //! condition of an `if` expression is consumed when its branch is chosen,
 //! and the value of a `let` expression is held by its binding, so neither
 //! is a role inside the branches or the body.
 
-use crate::ast::{ActKind, Block, Callee, Expr, Member, Node, Place, Site, Stmt, Unit};
+use crate::ast::{
+    ActKind, AssignOrder, Block, Callee, Expr, Member, Node, Place, Site, Stmt, Unit,
+};
 use crate::document::Document;
 
 /// Why [`live_roles`] gives no answer.
@@ -88,6 +92,7 @@ pub fn live_roles_in(body: &Block, site: &Site) -> Result<Vec<Site>, LiveRolesEr
         let before = match parent {
             Node::Stmt(Stmt::Assign {
                 place: Place::Member(member),
+                order: AssignOrder::ValueFirst,
                 ..
             }) => {
                 let value = match member {

@@ -444,6 +444,180 @@ fn library_bodies_inside_expressions_resume_exactly() {
     );
 }
 
+/// A `while` whose condition holds a library body, a wait and a call that
+/// waits, each nested (`K-EVAL-008`): the condition is evaluated afresh at
+/// every header, a park inside it resumes in that evaluation, and the loop
+/// runs its `else` on exhaustion and skips it on `break` (`K-FORM-013`).
+const WHILE_CONDITION: &str = "fn more(i) { let v = perform echo(i) as Any return num.lt(v, 2) }\n\
+    main { let i = 0\n\
+    let seen = []\n\
+    while [body.say(i), perform echo(\"w\") as Any, call more(i)][2] {\n\
+      set seen[list.len(seen)] = i\n\
+      set i = body.inc(i)\n\
+    } else { print \"exhausted\" }\n\
+    let j = 0\n\
+    while [perform echo(\"b\") as Any, call more(j)][1] {\n\
+      set j = body.inc(j)\n\
+      if num.lt(0, j) { break }\n\
+    } else { print \"never\" }\n\
+    return (i, seen, j) }\n";
+
+const WHILE_CONDITION_HOISTED: &str = "fn more(i) { let v = perform echo(i) as Any return num.lt(v, 2) }\n\
+    main { let i = 0\n\
+    let seen = []\n\
+    let t0 = body.say(i)\n\
+    let t1 = perform echo(\"w\") as Any\n\
+    let go = call more(i)\n\
+    while go {\n\
+      set seen[list.len(seen)] = i\n\
+      set i = body.inc(i)\n\
+      set t0 = body.say(i)\n\
+      set t1 = perform echo(\"w\") as Any\n\
+      set go = call more(i)\n\
+    } else { print \"exhausted\" }\n\
+    let j = 0\n\
+    let u0 = perform echo(\"b\") as Any\n\
+    let more_j = call more(j)\n\
+    while more_j {\n\
+      set j = body.inc(j)\n\
+      if num.lt(0, j) { break }\n\
+      set u0 = perform echo(\"b\") as Any\n\
+      set more_j = call more(j)\n\
+    } else { print \"never\" }\n\
+    return (i, seen, j) }\n";
+
+#[test]
+fn while_condition_actions_resume_exactly() {
+    let expected = tuple(&[int(2), list(&[int(0), int(1)]), int(1)]);
+    let printed = [int(0), int(1), int(2), text("exhausted")];
+    case(
+        WHILE_CONDITION,
+        &[],
+        &expected,
+        &printed,
+        &[PhaseRecord::Called, PhaseRecord::Waiting],
+    );
+    case(WHILE_CONDITION_HOISTED, &[], &expected, &printed, &[]);
+}
+
+/// An assignment's place holds actions in its target and its index
+/// (`K-EVAL-003`): value first, the right-hand side waits and then the
+/// place is evaluated, the value held as a role; place first, the target
+/// and the index are evaluated, then the right-hand side waits holding
+/// them as roles. A park between the place and the write evaluates none
+/// of it again.
+const PLACES: &str = "fn key(k) { let v = perform echo(k) as Any return v }\n\
+    fn same(x) { return x }\n\
+    main { let t = [0, 0, 0]\n\
+    let r = {f: 0}\n\
+    set [body.say(\"target\"), t][1][[perform echo(2) as Any, call key(1)][1]] = [body.say(\"value\"), perform echo(\"v\") as Any][1]\n\
+    set [body.say(\"first target\"), t][1][[perform echo(0) as Any, call key(2)][1]] = [body.say(\"first value\"), perform echo(\"w\") as Any][1] place first\n\
+    set t[0] = perform echo(\"x\") as Any place first\n\
+    set [call same(r)][0].f = call key(\"f\") place first\n\
+    return (t, r) }\n";
+
+const PLACES_HOISTED: &str = "fn key(k) { let v = perform echo(k) as Any return v }\n\
+    fn same(x) { return x }\n\
+    main { let t = [0, 0, 0]\n\
+    let r = {f: 0}\n\
+    let a0 = body.say(\"value\")\n\
+    let a1 = perform echo(\"v\") as Any\n\
+    let a2 = body.say(\"target\")\n\
+    let a3 = perform echo(2) as Any\n\
+    let a4 = call key(1)\n\
+    set [a2, t][1][[a3, a4][1]] = [a0, a1][1]\n\
+    let b0 = body.say(\"first target\")\n\
+    let b1 = perform echo(0) as Any\n\
+    let b2 = call key(2)\n\
+    let b3 = body.say(\"first value\")\n\
+    let b4 = perform echo(\"w\") as Any\n\
+    set [b0, t][1][[b1, b2][1]] = [b3, b4][1]\n\
+    let c0 = perform echo(\"x\") as Any\n\
+    set t[0] = c0\n\
+    let d0 = call same(r)\n\
+    let d1 = call key(\"f\")\n\
+    set [d0][0].f = d1\n\
+    return (t, r) }\n";
+
+#[test]
+fn assignment_place_actions_resume_exactly() {
+    let expected = tuple(&[
+        list(&[text("x"), text("v"), text("w")]),
+        Datum::Record(vec![("f".to_string(), text("f"))]),
+    ]);
+    let printed = [
+        text("value"),
+        text("target"),
+        text("first target"),
+        text("first value"),
+    ];
+    case(
+        PLACES,
+        &[],
+        &expected,
+        &printed,
+        &[PhaseRecord::Called, PhaseRecord::Waiting],
+    );
+    case(PLACES_HOISTED, &[], &expected, &printed, &[]);
+}
+
+/// `K-EVAL-003`: which of a place's target and an action in the value is
+/// evaluated first is the assignment's order. The value's callee
+/// rebinds the target's variable and waits; value first, the write goes
+/// to the rebound list, place first, to the one the place read before.
+#[test]
+fn an_assignments_order_decides_what_its_place_reads() {
+    let program = |order: &str| {
+        format!(
+            "main {{ let a = [0]\n\
+             let b = [0]\n\
+             let u = a\n\
+             let swap = fn() {{ set u = b let x = perform echo(\"s\") as Any return x }}\n\
+             set u[0] = apply swap(){order}\n\
+             return (a, b) }}\n"
+        )
+    };
+    let written = list(&[text("s")]);
+    let untouched = list(&[int(0)]);
+    case(
+        &program(""),
+        &[],
+        &tuple(&[untouched.clone(), written.clone()]),
+        &[],
+        &[],
+    );
+    case(
+        &program(" place first"),
+        &[],
+        &tuple(&[written, untouched]),
+        &[],
+        &[PhaseRecord::Called],
+    );
+}
+
+/// CONT-GRAMMAR at the new sites: a frame parked in a `while` condition,
+/// or in a place-first assignment's value with its target and index as
+/// roles, refuses a restore that drops a role.
+#[test]
+fn a_missing_role_at_a_condition_or_a_place_is_refused() {
+    for source in [
+        "main { let i = 0\n\
+         while [i, perform echo(false) as Any][1] { set i = 1 }\n\
+         return i }\n",
+        "main { let t = [0]\n\
+         set t[0] = [1, perform echo(\"w\") as Any][1] place first\n\
+         return t }\n",
+    ] {
+        let mut embedder = park_where(source, |phases| phases == only(PhaseRecord::Waiting));
+        edit_roles(&mut embedder, |roles| {
+            assert!(!roles.is_empty(), "{source}");
+            roles.remove(0);
+        });
+        let problem = refused(&mut embedder);
+        assert!(problem.contains("is not saved"), "{problem}: {source}");
+    }
+}
+
 /// `K-EVAL-004`: a nested call reads a callee held in a variable before its
 /// arguments and keeps it as a role while they run, so an argument that
 /// assigns the variable changes the next call's callee, not this one's.
@@ -510,6 +684,44 @@ fn each_nested_wait_is_named_by_its_own_site() {
             (sleep.clone(), 0, 0),
             (perform, 1, 1),
             (sleep, 1, 1),
+        ]
+    );
+}
+
+/// SITE-NESTED, `K-SITE-004`: a wait in a `while` condition is named by
+/// its own site, counted at each evaluation of the condition, and inside
+/// its loop, as the derived execution site names it.
+#[test]
+fn a_wait_in_a_while_condition_is_named_inside_its_loop() {
+    const SOURCE: &str = "main { let i = 0\n\
+        while [perform echo(\"c\") as Any, num.lt(i, 2)][1] { set i = num.add(i, 1) }\n\
+        return i }\n";
+    let mut embedder = Embedder::with(SOURCE, setup(u64::MAX));
+    embedder.run_to_end(&[]);
+    let named: Vec<(String, u64, Vec<String>)> = embedder
+        .requests
+        .iter()
+        .map(|request| {
+            let Request::Effect(effect) = request else {
+                panic!("{request:?}");
+            };
+            let identity = &effect.identity;
+            let loops = identity
+                .loops
+                .iter()
+                .map(|at| at.site.to_string())
+                .collect();
+            (identity.site.to_string(), identity.occurrence, loops)
+        })
+        .collect();
+    let perform = embedder::main_site([1, 0, 0, 0]).to_string();
+    let inside = vec![embedder::main_site([1]).to_string()];
+    assert_eq!(
+        named,
+        [
+            (perform.clone(), 0, inside.clone()),
+            (perform.clone(), 1, inside.clone()),
+            (perform, 2, inside),
         ]
     );
 }
@@ -876,6 +1088,10 @@ fn live_roles_match_every_resume_entry() {
         let e = [if(true, perform echo(\"then\") as Any, 0), let(v = 1, [v, perform echo(\"in\") as Any])]\n\
         let sp = [1, spawn call inner(2)]\n\
         let sl = [2, sleep(1)]\n\
+        while [perform echo(\"wh\") as Any, false][1] { let w = 0 }\n\
+        set [perform echo(\"pt\") as Any, t][1][perform echo(\"pi\") as Any] = [1, perform echo(\"pv\") as Any]\n\
+        set [perform echo(\"ft\") as Any, t][1][perform echo(\"fi\") as Any] = [1, perform echo(\"fv\") as Any] place first\n\
+        set [t][0][0] = perform echo(\"fa\") as Any place first\n\
         return (a, perform echo(\"ret\") as Any)\n\
         }\n";
     for layout in [Layout::default(), Layout(0x9e37_79b9 | 1)] {
@@ -930,7 +1146,7 @@ fn live_roles_match_every_resume_entry() {
                 }
             }
         }
-        assert!(found >= 28, "only {found} nested actions compiled");
+        assert!(found >= 36, "only {found} nested actions compiled");
         let site = |path: Vec<u32>| lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, path);
         assert_eq!(
             lash_kernel_doc::live_roles(document, &site(vec![0])),
@@ -939,74 +1155,6 @@ fn live_roles_match_every_resume_entry() {
         assert_eq!(
             lash_kernel_doc::live_roles(document, &site(vec![999])),
             Err(lash_kernel_doc::LiveRolesError::NoSuchNode)
-        );
-    }
-}
-
-/// K-EVAL-008: actions in a `while` condition or an assignment's place
-/// are refused at admission with their typed reason and site, before even
-/// an earlier effect can run.
-#[test]
-fn refused_positions_are_typed() {
-    for (body, position, path) in [
-        (
-            "let x = 1\n  while [perform echo(\"w\") as Any][0] { let c = x }",
-            "a `while` condition",
-            vec![2, 0, 0, 0],
-        ),
-        (
-            "let t = [0]\n  set t[perform echo(\"i\") as Any] = 9",
-            "an assignment's place",
-            vec![2, 1],
-        ),
-        (
-            "let t = [0]\n  set [perform echo(\"t\") as Any][0] = 9",
-            "an assignment's place",
-            vec![2, 0, 0],
-        ),
-        (
-            "while [yield] { return null }",
-            "a `while` condition",
-            vec![1, 0, 0],
-        ),
-        (
-            "let t = [0] set t[yield] = 9",
-            "an assignment's place",
-            vec![2, 1],
-        ),
-        (
-            "let h = spawn call f() while [cancel h] { return null }",
-            "a `while` condition",
-            vec![2, 0, 0],
-        ),
-        (
-            "let h = spawn call f() let t = [0] set t[cancel h] = 9",
-            "an assignment's place",
-            vec![3, 1],
-        ),
-    ] {
-        let text =
-            format!("fn f() {{ return 1 }}\nmain {{ do perform echo(\"before\") as Any {body} }}");
-        // Starting takes no Host: refusal precedes the first run and any effect.
-        let problem = match Embedder::try_with(&text, Setup::default()) {
-            Err(crate::StartError::NotAdmitted(problem)) => problem,
-            Err(error) => panic!("`{text}` refused with {error}"),
-            Ok(_) => panic!("`{text}` was admitted"),
-        };
-        assert_eq!(
-            *problem.reason,
-            lash_kernel_doc::InvalidReason::NestedActionPosition {
-                position: position.into(),
-            },
-            "{text}"
-        );
-        assert_eq!(
-            problem.site,
-            Some(lash_kernel_doc::Site::new(
-                lash_kernel_doc::Unit::Main,
-                path
-            )),
-            "{text}"
         );
     }
 }

@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use lash_kernel_dialect::workflow::{Entry, ModuleError, ModuleRefusal};
 use lash_kernel_doc::{
-    Expr, Function, Literal, MapType, Name, Param, Place, Rhs, Signature, Stmt, Type,
+    AssignOrder, Expr, Function, Literal, MapType, Name, Param, Place, Rhs, Signature, Stmt, Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
@@ -89,6 +89,7 @@ impl Lowerer<'_> {
         self.emit(Stmt::Assign {
             place: Place::Variable(variable),
             value: Rhs::Expr(Expr::Literal(Literal::Function(entry))),
+            order: AssignOrder::ValueFirst,
         });
         Ok(())
     }

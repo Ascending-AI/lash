@@ -46,7 +46,7 @@ fn header(expr: &Expr, base: &Site) -> Result<(), Fault> {
 fn step(stmt: &Stmt) -> Option<u32> {
     let (rhs, index) = match stmt {
         Stmt::Let { value, .. } => (Some(value), 0),
-        Stmt::Assign { place, value } => {
+        Stmt::Assign { place, value, .. } => {
             let index = match place {
                 Place::Variable(_) => 0,
                 Place::Member(lash_kernel_doc::Member::Field { .. }) => 1,

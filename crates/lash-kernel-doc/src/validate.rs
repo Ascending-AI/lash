@@ -12,8 +12,8 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use crate::ast::{
-    ActExpr, ActKind, Action, Atom, Block, Callee, Closure, Expr, Literal, Member, Node, Place,
-    Protocol, Rhs, Site, Stmt, Unit,
+    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Closure, Expr, Literal, Member,
+    Node, Place, Protocol, Rhs, Site, Stmt, Unit,
 };
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
@@ -167,10 +167,11 @@ pub enum InvalidReason {
     /// cannot wait.
     #[error("the body stands beside a native implementation, so it cannot `{}`", .form.keyword())]
     NativeBodyMayWait { form: StatementForm },
-    /// An action nested where no frame can stand at it: a `while`
-    /// condition, or an assignment's place.
-    #[error("an action cannot be nested in {position}")]
-    NestedActionPosition { position: Cow<'static, str> },
+    /// `K-EVAL-003`: an assignment evaluates its place before its
+    /// right-hand side only when it writes a member, and that right-hand
+    /// side is an expression, any action in it nested.
+    #[error("a place-first assignment {problem}")]
+    PlaceFirstAssignment { problem: Cow<'static, str> },
     /// A right-hand side that is one action with variable and literal
     /// arguments is the statement's action, not an expression: the one
     /// spelling kernel text reads back.
@@ -481,27 +482,42 @@ impl Scope<'_> {
                 check_name(name, Some(site))?;
                 self.check_rhs(value, &child())
             }
-            Stmt::Assign { place, value } => {
+            Stmt::Assign {
+                place,
+                value,
+                order,
+            } => {
                 match place {
-                    Place::Variable(name) => check_name(name, Some(site))?,
-                    Place::Member(member) => {
-                        let mut first = 0;
-                        let mut place = |expr: &Expr| {
-                            let at = site.child(first);
-                            first += 1;
-                            nested_action(expr, &at, "an assignment's place")
-                        };
-                        match member {
-                            Member::Field { target, .. } => place(target)?,
-                            Member::Index { target, index } => {
-                                place(target)?;
-                                place(index)?;
-                            }
+                    Place::Variable(name) => {
+                        check_name(name, Some(site))?;
+                        if *order == AssignOrder::PlaceFirst {
+                            return Err(invalid(
+                                Some(site),
+                                InvalidReason::PlaceFirstAssignment {
+                                    problem: "writes a variable, so nothing of its place is \
+                                              evaluated"
+                                        .into(),
+                                },
+                            ));
                         }
-                        self.check_member(member, &mut child)?
                     }
+                    Place::Member(member) => self.check_member(member, &mut child)?,
                 }
-                self.check_rhs(value, &child())
+                let at = child();
+                match (order, value) {
+                    // The place is held across a wait only by a nested
+                    // action's continuation (`K-EVAL-008`).
+                    (AssignOrder::PlaceFirst, Rhs::Action(_)) => Err(invalid(
+                        Some(&at),
+                        InvalidReason::PlaceFirstAssignment {
+                            problem: "has an action as its right-hand side, which is nested \
+                                      after the place"
+                                .into(),
+                        },
+                    )),
+                    (AssignOrder::PlaceFirst, Rhs::Expr(expr)) => self.check_expr(expr, &at),
+                    (AssignOrder::ValueFirst, value) => self.check_rhs(value, &at),
+                }
             }
             Stmt::Remove { member } => self.check_member(member, &mut child),
             Stmt::Do { value } => self.check_expr(value, &child()),
@@ -534,9 +550,7 @@ impl Scope<'_> {
                 body,
                 else_block,
             } => {
-                let at = child();
-                nested_action(condition, &at, "a `while` condition")?;
-                self.check_expr(condition, &at)?;
+                self.check_expr(condition, &child())?;
                 self.check_block(body, &child(), true)?;
                 self.check_block(else_block, &child(), in_loop)
             }
@@ -974,29 +988,6 @@ impl Scope<'_> {
 /// Refuses an action nested in `expr`, at `site`, which stands in
 /// `position`: no frame can stand at one there. A closure's body is code of
 /// its own.
-fn nested_action(expr: &Expr, site: &Site, position: &'static str) -> Result<(), Invalid> {
-    let mut pending = vec![(Node::Expr(expr), site.clone())];
-    while let Some((node, at)) = pending.pop() {
-        match node {
-            Node::Expr(Expr::Act(_)) => {
-                return Err(invalid(
-                    Some(&at),
-                    InvalidReason::NestedActionPosition {
-                        position: position.into(),
-                    },
-                ));
-            }
-            Node::Expr(Expr::Closure(_)) => {}
-            node => pending.extend(
-                (0u32..)
-                    .zip(node.children())
-                    .map(|(index, child)| (child, at.child(index))),
-            ),
-        }
-    }
-    Ok(())
-}
-
 impl Scope<'_> {
     /// A start adapter (`K-CLO-004`): a valid signature, a direct start's
     /// arity, a token's tag and slot, and the functions a TypeScript start

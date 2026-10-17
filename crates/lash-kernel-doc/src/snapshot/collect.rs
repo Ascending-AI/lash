@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::heap::{Chunk, EntityId, HeapFault, Identity, TupleRef};
 use crate::{
-    Closure, Document, EffectName, Element, Expr, FunctionId, Literal, Name, NativeHeap, Node,
-    Place, Rhs, Site, Stmt, Unit, Value, ValueKind,
+    AssignOrder, Closure, Document, EffectName, Element, Expr, FunctionId, Literal, Name,
+    NativeHeap, Node, Place, Rhs, Site, Stmt, Unit, Value, ValueKind,
 };
 
 use super::reads::CodeReads;
@@ -466,6 +466,7 @@ pub fn gather<H: SnapshotHeap>(
         body.push(Stmt::Assign {
             place: Place::Variable(helper.name),
             value: Rhs::Expr(value),
+            order: AssignOrder::ValueFirst,
         });
     }
     body.extend(code.body.iter().cloned());

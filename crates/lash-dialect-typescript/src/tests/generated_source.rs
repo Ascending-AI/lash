@@ -571,6 +571,35 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     ));
 }
 
+/// `K-DIALECT-001`: a place-first assignment, which this front end does not
+/// write, has no generated spelling, so printing one refuses.
+#[test]
+fn a_place_first_assignment_does_not_print() {
+    let xs = || k::Expr::Variable("xs".into());
+    let document = k::Document::new(
+        k::NumberPolicy::Float,
+        vec![
+            k::Stmt::Let {
+                name: "xs".into(),
+                value: k::Rhs::Expr(k::Expr::List(vec![k::Expr::Literal(k::Literal::Null)])),
+            },
+            k::Stmt::Assign {
+                place: k::Place::Member(k::Member::Index {
+                    target: xs(),
+                    index: k::Expr::Literal(k::Literal::Int(0.into())),
+                }),
+                value: k::Rhs::Expr(k::Expr::Literal(k::Literal::Null)),
+                order: k::AssignOrder::PlaceFirst,
+            },
+            k::Stmt::Finish { value: xs() },
+        ],
+    );
+    assert!(matches!(
+        crate::print(&document, Default::default()),
+        Err(crate::PrintError::Invalid(_))
+    ));
+}
+
 fn inventory_document() -> k::Document {
     use k::{Action as A, Atom, Callee as C, Expr as E, Literal as L, Rhs, Stmt as S};
     let null = E::Literal(L::Null);
@@ -592,6 +621,7 @@ fn inventory_document() -> k::Document {
         S::Assign {
             place: k::Place::Variable("value".into()),
             value: Rhs::Expr(E::List(vec![null.clone()])),
+            order: k::AssignOrder::ValueFirst,
         },
         S::Assign {
             place: k::Place::Member(k::Member::Index {
@@ -599,6 +629,7 @@ fn inventory_document() -> k::Document {
                 index: E::Literal(L::Int(0.into())),
             }),
             value: Rhs::Action(A::Yield),
+            order: k::AssignOrder::ValueFirst,
         },
         S::Remove {
             member: member.clone(),
@@ -826,8 +857,12 @@ fn inventory_node(node: k::Node<'_>, forms: &mut BTreeSet<&'static str>) {
                 let _ = (name, value);
                 "let"
             }
-            k::Stmt::Assign { place, value } => {
-                let _ = value;
+            k::Stmt::Assign {
+                place,
+                value,
+                order,
+            } => {
+                let _ = (value, order);
                 match place {
                     k::Place::Variable(name) => {
                         let _ = name;

@@ -1294,8 +1294,8 @@ fn canvas_refusal_wire() {
     let causes = causes
         .into_iter()
         .chain(checker_causes.into_iter().map(Cause::Refused))
-        .chain([Cause::Invalid(InvalidReason::NestedActionPosition {
-            position: "a while condition".into(),
+        .chain([Cause::Invalid(InvalidReason::PlaceFirstAssignment {
+            problem: "writes a variable, so nothing of its place is evaluated".into(),
         })]);
     for kind in causes {
         let error = EditRefusal {

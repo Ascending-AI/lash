@@ -147,6 +147,12 @@ export type Action = ({
 });
 
 /**
+ * The order an assignment to a member evaluates its parts in
+ * (`K-EVAL-003`): each dialect's own, written in the document.
+ */
+export type AssignOrder = ("value_first" | "place_first");
+
+/**
  * An argument of an action: a variable or a literal, never a computation.
  */
 export type Atom = ({
@@ -487,6 +493,7 @@ export type Stmt = (("break" | "continue") | {
   };
 } | {
   "assign": {
+    "order"?: AssignOrder;
     "place": Place;
     "value": Rhs;
   };

@@ -197,6 +197,12 @@ export type ArgumentView = {
 };
 
 /**
+ * The order an assignment to a member evaluates its parts in
+ * (`K-EVAL-003`): each dialect's own, written in the document.
+ */
+export type AssignOrder = ("value_first" | "place_first");
+
+/**
  * One assignment.
  */
 export type AssignmentView = {
@@ -911,6 +917,7 @@ export type Stmt = (("break" | "continue") | {
   };
 } | {
   "assign": {
+    "order"?: AssignOrder;
     "place": Place;
     "value": Rhs;
   };

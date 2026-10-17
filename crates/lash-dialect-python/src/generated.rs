@@ -628,6 +628,7 @@ impl<'a> Reader<'a> {
                     k::Stmt::Assign {
                         place: k::Place::Variable(name),
                         value,
+                        order: k::AssignOrder::ValueFirst,
                     }
                 }
             }
@@ -637,6 +638,7 @@ impl<'a> Reader<'a> {
                     k::Stmt::Assign {
                         place: k::Place::Member(member),
                         value: self.rhs(i, d)?,
+                        order: k::AssignOrder::ValueFirst,
                     }
                 } else {
                     k::Stmt::Remove { member }
@@ -857,6 +859,7 @@ impl<'a> Reader<'a> {
                 k::Stmt::Assign {
                     place: k::Place::Member(member),
                     value,
+                    order: k::AssignOrder::ValueFirst,
                 }
             } else {
                 k::Stmt::Remove { member }
@@ -895,6 +898,7 @@ impl<'a> Reader<'a> {
                 k::Stmt::Assign {
                     place: k::Place::Variable(name),
                     value,
+                    order: k::AssignOrder::ValueFirst,
                 }
             }
         } else if c.take("del ") {
@@ -1077,10 +1081,12 @@ impl<'a> Reader<'a> {
                     k::Expr::Variable(name) => k::Stmt::Assign {
                         place: k::Place::Variable(name),
                         value,
+                        order: k::AssignOrder::ValueFirst,
                     },
                     k::Expr::Member(m) if !declaration => k::Stmt::Assign {
                         place: k::Place::Member(*m),
                         value,
+                        order: k::AssignOrder::ValueFirst,
                     },
                     _ => return Err(invalid("invalid assignment place")),
                 }

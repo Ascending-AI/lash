@@ -10,9 +10,9 @@
 
 use crate::graph_tokens::CodecVariant;
 use crate::{
-    ActKind, Action, Atom, Callee, Datum, Expr, Formula, Identity, Implementation, JoinMode,
-    Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt, TaskIdentity, Type, Unit,
-    Value,
+    ActKind, Action, AssignOrder, Atom, Callee, Datum, Expr, Formula, Identity, Implementation,
+    JoinMode, Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt, TaskIdentity,
+    Type, Unit, Value,
 };
 
 #[doc(hidden)]
@@ -83,6 +83,12 @@ impl CodecVariant for Stmt {
     fn codec_variant(&self) -> u32 {
         match self {
             Self::Let { .. } => 0,
+            // A place-first assignment takes a number of its own, so that
+            // every value-first one keeps its encoding.
+            Self::Assign {
+                order: AssignOrder::PlaceFirst,
+                ..
+            } => 18,
             Self::Assign { .. } => 1,
             Self::Remove { .. } => 2,
             Self::Do { .. } => 3,

@@ -240,7 +240,17 @@ impl Renderer<'_> {
                 self.rhs(value);
                 self.out.write(";");
             }
-            k::Stmt::Assign { place, value } => {
+            // The front end writes no place-first assignment yet, so its
+            // source has no spelling for one.
+            k::Stmt::Assign {
+                order: k::AssignOrder::PlaceFirst,
+                ..
+            } => {
+                self.out.refuse(PrintError::Invalid(
+                    "a place-first assignment has no generated TypeScript spelling".into(),
+                ));
+            }
+            k::Stmt::Assign { place, value, .. } => {
                 match place {
                     k::Place::Variable(n) => self.name(n),
                     k::Place::Member(m) => {

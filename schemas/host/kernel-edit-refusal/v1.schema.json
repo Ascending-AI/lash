@@ -769,23 +769,23 @@
         },
         {
           "additionalProperties": false,
-          "description": "An action nested where no frame can stand at it: a `while`\ncondition, or an assignment's place.",
+          "description": "`K-EVAL-003`: an assignment evaluates its place before its\nright-hand side only when it writes a member, and that right-hand\nside is an expression, any action in it nested.",
           "properties": {
-            "nested_action_position": {
+            "place_first_assignment": {
               "additionalProperties": false,
               "properties": {
-                "position": {
+                "problem": {
                   "type": "string"
                 }
               },
               "required": [
-                "position"
+                "problem"
               ],
               "type": "object"
             }
           },
           "required": [
-            "nested_action_position"
+            "place_first_assignment"
           ],
           "type": "object"
         },

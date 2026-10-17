@@ -186,7 +186,11 @@ impl Linker {
                 let binding = self.declare(name, BindingKind::Let, id, scope);
                 StmtNode::Let { binding, value }
             }
-            Stmt::Assign { place, value } => {
+            Stmt::Assign {
+                place,
+                value,
+                order,
+            } => {
                 let place = match place {
                     Place::Variable(name) => {
                         let reference = self.resolve(name, scope, &site, id);
@@ -200,7 +204,11 @@ impl Linker {
                     }
                 };
                 let value = self.rhs(value, slots.take(), id, scope);
-                StmtNode::Assign { place, value }
+                StmtNode::Assign {
+                    place,
+                    value,
+                    order: *order,
+                }
             }
             Stmt::Remove { member } => StmtNode::Remove {
                 member: self.member(member, &mut slots, id, scope),

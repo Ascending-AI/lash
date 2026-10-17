@@ -28,8 +28,9 @@ fn design_8_corpus_pins_readable_per_dialect_outputs() -> anyhow::Result<()> {
 /// closure containing only the return of a deferred source call contributes
 /// no extra statement (437803); a named thunk or any other body counts normally.
 /// Run-root task cleanup is pinned separately as entry_cleanup (437760).
-/// Kernel-required action hoists are pinned as kernel_hoist, owned by FIG-6657
-/// (437938). Neither column is an operand-pin allowance.
+/// A `while` test and an assignment's place keep their actions nested
+/// (FIG-6657), so no action is hoisted for the kernel. The cleanup column is
+/// not an operand-pin allowance.
 #[test]
 fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflation() {
     use ruff_python_ast::visitor::{self, Visitor};
@@ -169,7 +170,6 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         let mut statements = 0;
         let mut loops = 0;
         let mut entry_cleanup = 0;
-        let kernel_hoist = 0; // No L5 Python input uses an action in a while test/place.
         let mut deferred_calls = 0;
         let mut pending = if cell {
             vec![lash_kernel_doc::Node::Block(&document.main)]
@@ -231,30 +231,24 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
             pending.extend(node.children());
         }
         println!(
-            "{name}: author={} lowered={statements} source_loops={} lowered_loops={loops} entry_cleanup={entry_cleanup} kernel_hoist={kernel_hoist} deferred_calls={deferred_calls}",
+            "{name}: author={} lowered={statements} source_loops={} lowered_loops={loops} entry_cleanup={entry_cleanup} deferred_calls={deferred_calls}",
             author.statements, author.loops
         );
         let expected = match name {
-            "straight-tool" => (1, 0, 0, 0, 0),
-            "branch" => (3, 0, 0, 0, 0),
-            "iteration-typed" | "iteration-untyped" => (4, 1, 0, 0, 0),
-            "try-finally" => (8, 0, 0, 0, 0),
-            "fan-out" => (3, 0, 2, 0, 2),
-            "sleep" => (2, 0, 0, 0, 0),
-            "closures-helpers" => (6, 1, 0, 0, 0),
-            "early-return" => (4, 0, 0, 0, 0),
-            "non-ascii" | "entry-boundary" | "early-finish" => (2, 0, 0, 0, 0),
-            "capturing-cell" => (6, 0, 0, 0, 0),
+            "straight-tool" => (1, 0, 0, 0),
+            "branch" => (3, 0, 0, 0),
+            "iteration-typed" | "iteration-untyped" => (4, 1, 0, 0),
+            "try-finally" => (8, 0, 0, 0),
+            "fan-out" => (3, 0, 2, 2),
+            "sleep" => (2, 0, 0, 0),
+            "closures-helpers" => (6, 1, 0, 0),
+            "early-return" => (4, 0, 0, 0),
+            "non-ascii" | "entry-boundary" | "early-finish" => (2, 0, 0, 0),
+            "capturing-cell" => (6, 0, 0, 0),
             _ => unreachable!(),
         };
         assert_eq!(
-            (
-                statements,
-                loops,
-                entry_cleanup,
-                kernel_hoist,
-                deferred_calls
-            ),
+            (statements, loops, entry_cleanup, deferred_calls),
             expected,
             "{name}: pinned per-case shape"
         );

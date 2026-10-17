@@ -107,7 +107,26 @@ impl Compiler<'_> {
                 }
                 form
             }
-            doc::Stmt::Assign { place, value } => match place {
+            doc::Stmt::Assign {
+                place: doc::Place::Member(member),
+                value: doc::Rhs::Expr(value),
+                order: doc::AssignOrder::PlaceFirst,
+            } => {
+                // The target and the index are evaluated first, into
+                // registers 0 and 1, and stay there while the right-hand
+                // side is evaluated after them: roles of any action nested
+                // in it (`K-EVAL-003`).
+                let (field, next) = self.member(&mut ops, member, 0, Reg(0));
+                let src = Reg(next);
+                self.child(next, |c| c.expr(&mut ops, value, src));
+                let target = Reg(0);
+                ops.push(match target_of(field) {
+                    Target::Field(field) => Op::SetField { target, field, src },
+                    Target::Index => Op::SetIndex { target, src },
+                });
+                Form::Plain
+            }
+            doc::Stmt::Assign { place, value, .. } => match place {
                 doc::Place::Variable(name) => {
                     let var = self.resolve(name);
                     let form = self.child(0, |c| c.rhs(&mut ops, value));

@@ -376,8 +376,15 @@ fn execution_sites(graph: &Graph) -> Vec<ExecutionSite> {
             continue;
         };
         // The loops between the action and its function body, which a
-        // closure expression bounds.
+        // closure expression bounds. A `while` evaluates its condition
+        // inside its loop, so it encloses an action there (`K-SITE-004`).
         let mut loops = Vec::new();
+        if matches!(
+            graph.node(statement).kind,
+            NodeKind::Stmt(StmtNode::While { .. })
+        ) {
+            loops.push(graph.node(statement).site.clone());
+        }
         let mut cursor = graph.node(statement).parent;
         while let Some(id) = cursor {
             let ancestor = graph.node(id);

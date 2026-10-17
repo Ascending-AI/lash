@@ -32,6 +32,7 @@ fn generic(node: k::Node<'_>, source: &str) -> Option<&'static str> {
                 | k::Stmt::Assign {
                     place: k::Place::Variable(_),
                     value: k::Rhs::Expr(k::Expr::Closure(_)),
+                    ..
                 },
             ) => "avoidable",
             k::Node::Stmt(_) if block_expression(node) => "statement-child-suite",

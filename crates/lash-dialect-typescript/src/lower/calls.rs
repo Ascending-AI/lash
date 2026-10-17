@@ -1,6 +1,6 @@
 //! Members, calls and the globals a built-in row answers for.
 
-use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Member, Place, Stmt};
+use lash_kernel_doc::{Action, AssignOrder, Atom, Callee, Expr, Literal, Member, Place, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
@@ -214,6 +214,7 @@ impl Lowerer<'_> {
                     this.emit(Stmt::Assign {
                         place: place.clone(),
                         value: lash_kernel_doc::Rhs::Expr(read.clone()),
+                        order: AssignOrder::ValueFirst,
                     });
                     if direct.hole {
                         let hole = this.same(result.expr(), Expr::Tuple(Vec::new()))?;
@@ -221,6 +222,7 @@ impl Lowerer<'_> {
                             this.emit(Stmt::Assign {
                                 place: place.clone(),
                                 value: lash_kernel_doc::Rhs::Expr(Expr::Literal(Literal::Absent)),
+                                order: AssignOrder::ValueFirst,
                             });
                             Ok(())
                         })?;
@@ -582,6 +584,7 @@ impl Lowerer<'_> {
                 this.emit(Stmt::Assign {
                     place: place.clone(),
                     value: lash_kernel_doc::Rhs::Expr(value.expr()),
+                    order: AssignOrder::ValueFirst,
                 });
                 Ok(())
             },

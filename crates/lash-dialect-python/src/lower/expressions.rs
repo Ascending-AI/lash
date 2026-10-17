@@ -1,6 +1,8 @@
 //! Expressions.
 
-use lash_kernel_doc::{Expr, Float, Integer, Literal, MapEntry, Member, Name, Place, Rhs, Stmt};
+use lash_kernel_doc::{
+    AssignOrder, Expr, Float, Integer, Literal, MapEntry, Member, Name, Place, Rhs, Stmt,
+};
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -645,6 +647,7 @@ impl Lowerer<'_> {
                         index: value.expr,
                     }),
                     value: Rhs::Expr(Expr::Literal(Literal::Bool(true))),
+                    order: AssignOrder::ValueFirst,
                 });
             }
             Collect::Dict(key, value) => {
@@ -656,6 +659,7 @@ impl Lowerer<'_> {
                         index: key.expr,
                     }),
                     value: Rhs::Expr(operands[1].expr.clone()),
+                    order: AssignOrder::ValueFirst,
                 });
             }
         }

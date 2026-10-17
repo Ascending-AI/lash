@@ -180,7 +180,7 @@ impl Renamer<'_, '_> {
                 self.rhs(value);
                 self.binding(name);
             }
-            Stmt::Assign { place, value } => {
+            Stmt::Assign { place, value, .. } => {
                 match place {
                     Place::Variable(name) => self.variable(name),
                     Place::Member(member) => self.member(member),
