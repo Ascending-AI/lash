@@ -486,6 +486,9 @@ fn parse_from_goal(
         type_parameters: adapter.type_parameters.take(),
         assigned: adapter.assigned.take(),
     };
+    if let Some(diagnostic) = adapter.reserved_identifier.take() {
+        return Err(crate::lower::printed_source_reference(&program).unwrap_or(diagnostic));
+    }
     if workflow {
         // Two entries of one name break the workflow contract before they
         // break JavaScript's redeclaration rule.
@@ -501,6 +504,8 @@ struct Adapter<'a> {
     /// The text SWC read, whose byte offsets every span indexes.
     source: &'a str,
     workflow: bool,
+    /// A module's unresolved printed references take priority over `k`.
+    reserved_identifier: RefCell<Option<Diagnostic>>,
     goal: Goal,
     /// Where the Script-goal parse read a placeholder for `await`.
     respelled_awaits: BTreeSet<u32>,

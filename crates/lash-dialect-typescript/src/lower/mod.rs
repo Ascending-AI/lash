@@ -27,7 +27,7 @@ use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod async_fn;
 mod calls;
-pub(crate) use calls::tool_calls;
+pub(crate) use calls::{printed_source_reference, tool_calls};
 mod expressions;
 mod functions;
 mod lazy;
@@ -1346,10 +1346,14 @@ impl Lowerer<'_> {
     }
 }
 
+fn is_printed_source_name(name: &str) -> bool {
+    name.starts_with("helper_") || name.starts_with("kernel_name_") || name == "declared"
+}
+
 pub(crate) fn unknown_binding(name: &str, span: Option<SourceSpan>) -> Diagnostic {
     // These unbound spellings are references into the printer's base, not
     // authored variables. Bound names have already resolved before this point.
-    if name.starts_with("helper_") || name.starts_with("kernel_name_") || name == "declared" {
+    if is_printed_source_name(name) {
         return Diagnostic::refusal(
             DiagnosticCode::PrintedSourceNeedsBase,
             format!(

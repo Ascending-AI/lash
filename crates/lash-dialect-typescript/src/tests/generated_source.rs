@@ -1472,6 +1472,41 @@ fn authored_import_of_printed_source_needs_its_base() {
             .any(|repair| repair.contains("typescript::read(source, base)"))
     );
     for source in [
+        "k.returnVia(1, helper_ts_promise_adopt);",
+        "k; { const helper_list_len = 1; } helper_list_len;",
+    ] {
+        let refusal = crate::lower(source, &environment, module).unwrap_err();
+        assert_eq!(
+            refusal.code,
+            crate::DiagnosticCode::PrintedSourceNeedsBase,
+            "{source}: {refusal}"
+        );
+    }
+    for source in [
+        "k;",
+        "const k = 1;",
+        "k.returnVia(1, 2);",
+        "k; const text = 'helper_list_len'; // declared.digest\n",
+        "const helper_list_len = 1; k.returnVia(1, helper_list_len);",
+        "function f(helper_list_len) { return k.returnVia(1, helper_list_len); }",
+        "function f() { k; return helper_list_len; var helper_list_len; }",
+    ] {
+        let refusal = crate::lower(source, &environment, module).unwrap_err();
+        assert_eq!(
+            refusal.code,
+            crate::DiagnosticCode::ReservedIdentifier,
+            "{source}: {refusal}"
+        );
+        let span = refusal.span.expect("reserved identifiers name their token");
+        assert_eq!(&source[span.start..span.end], "k");
+        assert!(
+            refusal
+                .suggestions
+                .iter()
+                .any(|repair| repair == "choose a different name")
+        );
+    }
+    for source in [
         "helper_list_len([]);",
         "const f = declared.digest;",
         "kernel_name_1;",

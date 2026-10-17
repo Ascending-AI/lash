@@ -89,11 +89,20 @@ impl Adapter<'_> {
         self.validate_respelling(ident.span);
         self.check_identifier_spelling(ident.span, name)?;
         if name == "k" {
-            return Err(Diagnostic::new(
+            let diagnostic = Diagnostic::new(
                 DiagnosticCode::ReservedIdentifier,
                 "`k` is the reserved kernel namespace",
                 span,
-            ));
+            );
+            if !self.workflow {
+                return Err(diagnostic);
+            }
+            // Printed modules can mention an unresolved helper inside a
+            // `k.returnVia` call. Resolve those references before reporting
+            // the reserved namespace, which cannot explain the missing base.
+            self.reserved_identifier
+                .borrow_mut()
+                .get_or_insert(diagnostic);
         }
         if is_strict_reserved_word(name) {
             return Err(syntax_error(

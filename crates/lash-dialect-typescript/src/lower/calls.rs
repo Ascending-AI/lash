@@ -8,7 +8,7 @@ use crate::builtins::Receiver;
 use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 
 mod discovery;
-pub(crate) use discovery::tool_calls;
+pub(crate) use discovery::{printed_source_reference, tool_calls};
 
 /// A statically spelled path and its root, before lexical resolution.
 /// Computed properties and expression receivers are value operations.

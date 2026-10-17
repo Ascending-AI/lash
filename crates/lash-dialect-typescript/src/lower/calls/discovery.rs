@@ -12,22 +12,40 @@ use crate::adapter as ast;
 use crate::lower::walk;
 
 pub(crate) fn tool_calls(program: &ast::Program, session: &BTreeSet<Name>) -> BTreeSet<String> {
+    discover(program, session, false).calls
+}
+
+/// A module's printed aliases require its base even when a reserved kernel
+/// operation surrounds them. Authored bindings with those spellings win.
+pub(crate) fn printed_source_reference(program: &ast::Program) -> Option<crate::Diagnostic> {
+    discover(program, &BTreeSet::new(), true).printed
+}
+
+fn discover<'a>(
+    program: &ast::Program,
+    session: &'a BTreeSet<Name>,
+    find_printed: bool,
+) -> Discovery<'a> {
     let mut discovery = Discovery {
         session,
         scopes: Vec::new(),
         calls: BTreeSet::new(),
+        find_printed,
+        printed: None,
     };
     let mut names = Vec::new();
     walk::var_names(&program.statements, &mut names);
     discovery.scopes.push(names.into_iter().collect());
     discovery.block(&program.statements);
-    discovery.calls
+    discovery
 }
 
 struct Discovery<'a> {
     session: &'a BTreeSet<Name>,
     scopes: Vec<HashSet<String>>,
     calls: BTreeSet<String>,
+    find_printed: bool,
+    printed: Option<crate::Diagnostic>,
 }
 
 impl Discovery<'_> {
@@ -294,9 +312,17 @@ impl Discovery<'_> {
             | ast::Expr::Number(_)
             | ast::Expr::String(_)
             | ast::Expr::RegExp { .. }
-            | ast::Expr::Ident(..)
             | ast::Expr::This
             | ast::Expr::LoneSurrogateString => {}
+            ast::Expr::Ident(name, span) => {
+                if self.find_printed
+                    && self.printed.is_none()
+                    && super::super::is_printed_source_name(name)
+                    && !self.is_bound(name)
+                {
+                    self.printed = Some(super::super::unknown_binding(name, *span));
+                }
+            }
             ast::Expr::Array(elements) => {
                 for element in elements {
                     match element {
