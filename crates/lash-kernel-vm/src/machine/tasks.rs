@@ -328,15 +328,67 @@ impl Tasks {
         }
         Ok(self.cache[slot].as_mut().map(|(_, task)| task.as_mut()))
     }
+    /// Whether `task` is the task at the slot the cursor holds: set at
+    /// the running task's first lookup in a segment, and dropped where the
+    /// slot can move (a load, a push, another task's lookup), at a
+    /// refinement's reconciliation and at another task's step. A
+    /// refinement moves no task or frame, so the cursor's lookups do not
+    /// check for one.
+    #[inline(always)]
+    pub(super) fn cursor(&self, task: TaskId) -> bool {
+        matches!(self.active, Some((id, _)) if id == task.0)
+    }
+    /// Whether the cursor names `task` and its top frame.
+    #[inline(always)]
+    pub(super) fn frame_cursor(&self, task: TaskId) -> bool {
+        match self.active {
+            Some((id, slot)) if id == task.0 => self.cache[slot]
+                .as_ref()
+                .is_some_and(|(_, task)| task.frames.cursor()),
+            _ => false,
+        }
+    }
+    #[inline(always)]
+    pub(super) fn cursor_task(&mut self) -> Option<&mut Task> {
+        let (_, slot) = self.active?;
+        self.cache[slot].as_mut().map(|(_, task)| task.as_mut())
+    }
+    #[inline(always)]
+    pub(super) fn cursor_frame(&mut self) -> Option<&mut super::Frame> {
+        self.cursor_task()?.frames.cursor_frame()
+    }
+    /// Whether the cursor of `task` is where a fresh lookup finds it: the
+    /// protected task's slot in its bucket, and its top frame when the
+    /// cursor holds one.
+    pub(super) fn cursor_is_fresh(&self, task: TaskId) -> bool {
+        let Some((id, slot)) = self.active else {
+            return false;
+        };
+        let range = bucket(id);
+        let found = self.cache[range.clone()]
+            .iter()
+            .position(|entry| entry.as_ref().is_some_and(|(at, _)| *at == id))
+            .map(|way| range.start + way);
+        id == task.0
+            && self.protected.is_none_or(|protected| protected == task)
+            && found == Some(slot)
+            && self.cache[slot]
+                .as_ref()
+                .is_some_and(|(_, task)| task.frames.cursor_is_fresh())
+    }
     /// The running statement may have consumed its incoming state before it
     /// finishes reading another task. Its frame must remain resident until
     /// the step completes: Ready alone cannot restore that in-flight resume.
+    /// The cursor outlives the step: only a step of another task starts a
+    /// new segment, since whatever moves a slot between steps drops it.
     pub(super) fn protect(&mut self, task: Option<TaskId>) {
-        self.invalidate_active();
+        if task.is_some_and(|task| !self.cursor(task)) {
+            self.invalidate_active();
+        }
         self.protected = task;
     }
-    /// End a segment before a native can refine the heap, or before a
-    /// task-cache or statement boundary changes the active location.
+    /// End a segment before a task-cache change or another task's step
+    /// moves the active location, or at a refinement's reconciliation.
     pub(super) fn invalidate_active(&mut self) {
         if let Some((_, slot)) = self.active.take()
             && let Some((_, task)) = &mut self.cache[slot]

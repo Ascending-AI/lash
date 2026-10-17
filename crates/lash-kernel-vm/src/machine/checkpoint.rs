@@ -338,7 +338,9 @@ impl KernelMachine {
         if self.ended {
             return Err(SealError::Ended);
         }
-        self.tasks.project_occurrences().map_err(SealError::Heap)?;
+        self.task_table()
+            .and_then(|tasks| tasks.project_occurrences())
+            .map_err(SealError::Heap)?;
         self.publish_roots().map_err(|error| SealError::Fault {
             problem: format!("{error:?}"),
         })?;

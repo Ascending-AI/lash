@@ -583,26 +583,73 @@ impl KernelMachine {
         )
     }
 
+    /// The task `task`: the running task through its cursor
+    /// (`tasks::Tasks::cursor`), any other after a refinement since the
+    /// last lookup is reconciled.
+    #[inline(always)]
     fn task(&mut self, task: TaskId) -> Result<&mut Task, Halt> {
+        if self.tasks.cursor(task) {
+            debug_assert!(self.tasks.cursor_is_fresh(task));
+            return self
+                .tasks
+                .cursor_task()
+                .ok_or_else(|| fault("the task cursor names no task"));
+        }
+        self.resolve_task(task)
+    }
+
+    #[inline(never)]
+    fn resolve_task(&mut self, task: TaskId) -> Result<&mut Task, Halt> {
         self.reconcile_sweep()?;
         self.tasks
             .get_mut(task.0 as usize)?
             .ok_or_else(|| fault("a handle names no task"))
     }
 
+    /// The top frame of `task`: the running frame through its task's
+    /// cursor, with no lookup or check between the register operations
+    /// that reach it.
+    #[inline(always)]
     fn frame(&mut self, task: TaskId) -> Result<&mut Frame, Halt> {
+        if self.tasks.frame_cursor(task) {
+            debug_assert!(self.tasks.cursor_is_fresh(task));
+            return self
+                .tasks
+                .cursor_frame()
+                .ok_or_else(|| fault("the frame cursor names no frame"));
+        }
+        self.resolve_frame(task)
+    }
+
+    #[inline(never)]
+    fn resolve_frame(&mut self, task: TaskId) -> Result<&mut Frame, Halt> {
         self.task(task)?
             .frames
             .last_mut()?
             .ok_or_else(|| fault("a running task has no frame"))
     }
 
-    fn reconcile_sweep(&mut self) -> Result<(), Halt> {
-        let refinements = self.heap.certificate().refinements;
-        if refinements != self.census_refinements {
-            self.tasks.after_refinement(self.heap.task_root().clone())?;
-            self.census_refinements = refinements;
+    /// The task table, with the rows of a refinement since the last lookup
+    /// reconciled: what a read or write of the rows needs, since the
+    /// cursor's lookups leave a refinement unreconciled.
+    fn task_table(&mut self) -> Result<&mut tasks::Tasks, HeapFault> {
+        self.reconcile_sweep()?;
+        Ok(&mut self.tasks)
+    }
+
+    #[inline(always)]
+    fn reconcile_sweep(&mut self) -> Result<(), HeapFault> {
+        if self.heap.certificate().refinements != self.census_refinements {
+            self.reconcile_refinement()?;
         }
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn reconcile_refinement(&mut self) -> Result<(), HeapFault> {
+        self.tasks.after_refinement(self.heap.task_root().clone())?;
+        self.census_refinements = self.heap.certificate().refinements;
         Ok(())
     }
     /// Publishes what the run holds as the census's persistent and
@@ -663,7 +710,7 @@ impl KernelMachine {
                 HeapWriteError::Memory => bound(Bound::Memory, self.bounds.memory),
                 other => write_halt(other),
             })?;
-        self.reconcile_sweep()
+        Ok(self.reconcile_sweep()?)
     }
 
     /// Gives the new objects the projection is about to save their
@@ -923,7 +970,7 @@ impl KernelMachine {
         self.publish_holdings().map_err(machine_error)?;
         self.heap.collect().map_err(MachineError::Heap)?;
         self.arena.borrow_mut().rebased();
-        self.reconcile_sweep().map_err(machine_error)
+        self.reconcile_sweep().map_err(MachineError::Heap)
     }
 
     /// The collection point: under pressure, publishes what the run holds
@@ -1138,7 +1185,7 @@ impl KernelMachine {
         let mut unfinished = Vec::new();
         let mut unobserved = Vec::new();
         let access = self.heap.pages().clone();
-        self.tasks.visit(&mut |id, task| {
+        self.task_table()?.visit(&mut |id, task| {
             if id != TaskId::MAIN && ender != Some(id) && !task.passed {
                 match task.state {
                     TaskState::Ended(_) if task.failed && !task.observed => {
@@ -1195,12 +1242,14 @@ impl KernelMachine {
         }
         if self.waits.is_empty() {
             let mut waiting = Vec::new();
-            self.tasks
-                .visit(&mut |_, task| {
-                    if task.is_live() {
-                        waiting.push(task.identity);
-                    }
-                    true
+            self.task_table()
+                .and_then(|tasks| {
+                    tasks.visit(&mut |_, task| {
+                        if task.is_live() {
+                            waiting.push(task.identity);
+                        }
+                        true
+                    })
                 })
                 .map_err(MachineError::Heap)?;
             let waiting = waiting
@@ -1218,10 +1267,9 @@ impl KernelMachine {
         while let Some(wait) = self.withdrawn.pop_front().map_err(MachineError::Heap)? {
             withdrawn.push(lash_kernel_doc::kernel_internals::wait_id(wait));
         }
-        self.tasks
-            .project_occurrences()
-            .map_err(MachineError::Heap)?;
-        let (_, outstanding) = self.tasks.sealed_root().map_err(MachineError::Heap)?;
+        let tasks = self.task_table().map_err(MachineError::Heap)?;
+        tasks.project_occurrences().map_err(MachineError::Heap)?;
+        let (_, outstanding) = tasks.sealed_root().map_err(MachineError::Heap)?;
         let live = u64::from(self.live_tasks.saturating_sub(1));
         Ok(Step::Parked(Park {
             requests,

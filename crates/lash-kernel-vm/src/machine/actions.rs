@@ -802,6 +802,7 @@ impl KernelMachine {
         let intent: lash_kernel_state::AdmittedRequest = decode_body(bytes.as_slice())
             .map_err(|error| lash_kernel_doc::heap::HeapFault::Malformed(error.to_string()))?;
         let access = self.heap.pages().clone();
+        self.reconcile_sweep()?;
         let running = self.tasks.get_mut(task.0 as usize)?.ok_or_else(|| {
             lash_kernel_doc::heap::HeapFault::Malformed("issued task is missing".into())
         })?;
@@ -900,7 +901,7 @@ impl KernelMachine {
         }
 
         let parent = self.task(task)?.identity;
-        let child = TaskId(self.tasks.len() as u64);
+        let child = TaskId(self.task_table()?.len() as u64);
         self.tasks.push(Task::fresh(
             lash_kernel_state::paged::TaskIdentityRef::spawn(
                 parent,

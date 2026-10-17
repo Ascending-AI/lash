@@ -782,7 +782,7 @@ impl KernelMachine {
             },
             LibRun::Machine(MachineFunction::TasksUnfinished) => {
                 let mut unfinished = Vec::new();
-                self.tasks.visit(&mut |id, other| {
+                self.task_table()?.visit(&mut |id, other| {
                     if id != task && !matches!(other.state, TaskStateRecord::Ended(_)) {
                         unfinished.push(Value::Task(id));
                     }

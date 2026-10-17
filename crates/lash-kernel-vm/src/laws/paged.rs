@@ -699,3 +699,49 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
         "equal lists with broken sharing are different graphs"
     );
 }
+
+/// FIG-6737: a refinement under pressure in the middle of a statement,
+/// whose later lookups of the running task go through its cursor, is
+/// reconciled before the task table's rows are written. `g` takes an id at
+/// the park, so dropping it leaves its bytes held, and the argument of the
+/// spawn of task 64 refines; that spawn then evicts task 32 from main's
+/// bucket, and the row the eviction writes is the one task 32 resumes from.
+#[test]
+fn a_mid_statement_refinement_is_reconciled_before_a_spawn_evicts_a_task() {
+    let mut embedder = Embedder::with(
+        r#"
+fn w(log, tag, pad) {
+  set log[list.len(log)] = tag
+  do yield
+  set log[list.len(log)] = tag
+  return tag
+}
+main {
+  let log = []
+  let hs = []
+  let g = [work.repeat(16777216)]
+  let v = perform echo("park") as Any
+  set g = null
+  let i = 1
+  while num.lt(i, 64) {
+    let h = spawn call w(log, i, null)
+    set hs[list.len(hs)] = h
+    set i = num.add(i, 1)
+  }
+  let last = spawn call w(log, 64, work.repeat(16777216))
+  set hs[list.len(hs)] = last
+  do join all hs
+  return log
+}"#,
+        Setup {
+            bounds: crate::Bounds {
+                memory: 40 << 20,
+                ..super::embedder::ROOMY
+            },
+            ..Setup::default()
+        },
+    );
+    let end = embedder.run_to_end(&[]);
+    let order: Vec<_> = (1..=64).chain(1..=64).map(int).collect();
+    assert_eq!(result(end), lash_kernel_doc::Datum::List(order));
+}

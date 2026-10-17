@@ -635,7 +635,7 @@ pub(super) struct Frames {
     // Resident frames are ordered by depth. Cold lower frames stay in rows
     // until a return reaches them; push and pop always use the resident top.
     cache: Vec<(u64, Box<Frame>)>,
-    /// The resident top validated for this statement segment. Stack edits
+    /// The resident top validated for this segment. Stack edits
     /// and the task cache's segment boundaries invalidate this index.
     active: Option<usize>,
     /// The rows below this index hold what their frames hold: only a frame
@@ -695,6 +695,22 @@ impl Frames {
     }
     pub(super) fn invalidate_active(&mut self) {
         self.active = None;
+    }
+    /// Whether the resident top is validated for this segment.
+    #[inline(always)]
+    pub(super) fn cursor(&self) -> bool {
+        self.active.is_some()
+    }
+    #[inline(always)]
+    pub(super) fn cursor_frame(&mut self) -> Option<&mut Frame> {
+        let at = self.active?;
+        self.cache.get_mut(at).map(|(_, frame)| frame.as_mut())
+    }
+    /// Whether the validated top is the stack's top, as a fresh
+    /// [`Self::last_mut`] finds it; true when none is validated.
+    pub(super) fn cursor_is_fresh(&self) -> bool {
+        self.active
+            .is_none_or(|at| at + 1 == self.cache.len() && self.cache[at].0 + 1 == self.len)
     }
     #[inline(always)]
     pub(super) fn last_mut(&mut self) -> Result<Option<&mut Frame>, HeapFault> {
