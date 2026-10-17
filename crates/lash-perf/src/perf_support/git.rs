@@ -13,10 +13,17 @@ pub fn head_commit() -> Option<String> {
 }
 
 pub fn git_dirty() -> bool {
+    // Status persists the refresh of a racily clean index. Diff's quiet
+    // shortcut leaves it racy, re-hashing unchanged sources in every process.
     std::process::Command::new("git")
-        .args(["diff", "--quiet", "--ignore-submodules", "--"])
-        .status()
-        .map(|status| !status.success())
+        .args([
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=no",
+            "--ignore-submodules",
+        ])
+        .output()
+        .map(|output| !output.status.success() || !output.stdout.is_empty())
         .unwrap_or(true)
 }
 

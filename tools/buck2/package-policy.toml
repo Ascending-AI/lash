@@ -32,6 +32,15 @@
 
 # --- Test partition policy ---------------------------------------------------
 
+# Git provenance needs the host's Git executable; the pool has no Git tool.
+[[rule]]
+packages = ["lash-perf"]
+kinds = ["test"]
+targets = ["git_provenance"]
+tags = ["lash.service=local"]
+reason = "exercises real Git index refresh and tracked-source provenance with the host Git tool, locally and uncached"
+serial = true
+
 [[rule]]
 packages = ["lash-internal-s3-store"]
 kinds = ["unit-test", "bin", "bin-unit-test", "test", "example", "bench"]
