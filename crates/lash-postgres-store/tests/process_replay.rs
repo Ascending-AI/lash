@@ -547,7 +547,7 @@ async fn byte_trimming_keeps_exactly_the_newest_two_events() {
     .await;
     let process = ProcessId::fixture("byte-suffix");
     let start = earliest(&b, &process).await;
-    let labels = ["old", "mid", "new"].map(|name| format!("{name}{}", "x".repeat(1_000)));
+    let labels = ["old", "mid", "new"].map(|name| format!("{name}{}", "x".repeat(500)));
     let first = publish(&a, &process, "old", &labels[0]).await;
     publish(&a, &process, "mid", &labels[1]).await;
     let pool = sqlx::PgPool::connect(database.url())
