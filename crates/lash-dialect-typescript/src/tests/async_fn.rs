@@ -219,21 +219,36 @@ fn a_tool_call_with_the_wrong_number_of_arguments_is_refused() {
     assert!(lower_with_effects("await echo(1, 2);").is_err());
 }
 
-/// A tool's argument crosses as plain data: a function the program made
-/// or a built-in, at the top or inside an array, an object or a map, is
-/// refused with `not_data` before the tool is asked.
+/// FN-CROSS: guest functions cross as frozen function values, including
+/// inside arrays. Builtins still refuse with `not_data` before dispatch.
 #[test]
-fn a_function_in_a_tool_argument_is_not_data() {
+fn tool_arguments_freeze_guest_functions_but_refuse_builtins() {
+    use lash_kernel_doc::{Datum, Float};
+
+    use super::machine::{Ended, end};
+
+    let direct = end("const value = () => 1; await finish(value);");
+    let Ended::Finished(Datum::FunctionValue(function)) = direct else {
+        panic!("a guest function crosses as a function value: {direct:?}");
+    };
+    assert_eq!(
+        end("const value = [1, [2, () => 1]]; await finish(value);"),
+        Ended::Finished(Datum::List(vec![
+            Datum::Float(Float::new(1.0)),
+            Datum::List(vec![
+                Datum::Float(Float::new(2.0)),
+                Datum::FunctionValue(function)
+            ]),
+        ]))
+    );
     for argument in [
-        "() => 1",
         "Math",
-        "[1, [2, () => 1]]",
         "{ a: 1, b: { f: Math.max } }",
         "new Map([['k', [Math.abs]]])",
     ] {
         assert_eq!(
-            super::machine::end(&format!("const value = {argument}; await finish(value);")),
-            super::machine::Ended::Raised("not_data".to_string()),
+            end(&format!("const value = {argument}; await finish(value);")),
+            Ended::Raised("not_data".to_string()),
             "{argument}"
         );
     }

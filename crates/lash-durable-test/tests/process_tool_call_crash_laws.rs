@@ -541,18 +541,61 @@ async fn tool_call_limit_counts_what_a_process_holds_across_a_worker_kill(tier: 
 /// eviction.
 const AGGREGATE_SLEEP_MS: u64 = 300_000;
 
-/// The turn's one cell: start a detached process whose body awaits a call
-/// and a sleep together, and end the turn.
-fn sleeping_cell() -> lash_core::llm::types::LlmResponse {
+/// Publish the aggregate body and start it by id: its inline start declaration
+/// exceeds the intent byte bound. This law concerns the durable sleep, not
+/// function transport, so keep the body and the admission bound intact.
+async fn sleeping_cell(deployment: &Holding) -> lash_core::llm::types::LlmResponse {
     let body = format!(
         "const body = async () => {{\n  \
            const both = await Promise.all([tools.{PROBE}({{ label: \"quick\" }}), \
            sleep({AGGREGATE_SLEEP_MS})]);\n  \
            return both[1] === undefined ? \"woke\" : \"early\";\n}};"
     );
+    let environment = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(LIMIT))
+        .component(PROBE_COMPONENT, &())
+        .component(lash::process_controls::PROCESS_CONTROLS_CONFIG, &())
+        .link_tool(
+            PROBE_COMPONENT.tool_provider(lash::tool_provider_key!("tools")),
+            &probe_definition(),
+        )
+        .link_tool(
+            lash::process_controls::PROCESS_CONTROLS_CONFIG
+                .tool_provider(lash::tool_provider_key!("tools")),
+            &lash::process_controls::process_tool_definition(
+                lash::process_controls::ProcessControlTool::Await,
+            ),
+        )
+        .build()
+        .expect("the sleeping workflow's environment");
+    let artifacts = deployment.core().host_artifacts();
+    let imported = artifacts
+        .import_workflow(
+            lash::workflow::document::SourceLanguage::TypeScript,
+            &body,
+            &environment,
+            None,
+        )
+        .await
+        .expect("the sleeping workflow imports");
+    let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+        panic!("the sleeping workflow is admitted: {imported:?}");
+    };
+    let published = artifacts
+        .publish_workflow(
+            &lash_core::HostArtifactPin::mint(),
+            &document,
+            &lash::workflow::document::Name::new("body"),
+            &environment,
+            None,
+        )
+        .await
+        .expect("the sleeping workflow publishes");
+    let lash::workflow::WorkflowPublish::Published(publication) = published else {
+        panic!("the sleeping workflow is published: {published:?}");
+    };
+    let definition_id = publication.definition.id.to_tagged_json();
     served::cell(&format!(
-        "{body}\n\
-         await processes.start({{ definition: body }});\n\
+        "await processes.start({{ definition_id: {definition_id} }});\n\
          await control.finish(\"started\");"
     ))
 }
@@ -575,9 +618,12 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
             (Dialect::Postgres, Some(url))
         }
     };
-    let deployment = Holding::running(dialect, postgres_url, sleeping_cell());
+    let deployment = Holding::new(dialect, postgres_url);
     let clock = SimClock::new();
     let database = deployment.database(Arc::clone(&clock)).await;
+    deployment
+        .scripts
+        .register(INPUT, vec![sleeping_cell(&deployment).await]);
     let nodes = SimNodes::new(
         Arc::clone(&database),
         Arc::clone(&clock),
@@ -619,8 +665,9 @@ async fn an_aggregate_sleep_past_every_step_bound_wakes_at_its_deadline_across_a
         }
         assert!(
             nodes.step().await.is_some() && clock.logical_ms() < half,
-            "the process never parked on its sleep by {half} ms:\n{}",
-            nodes.script().rendered_trace()
+            "the process never parked on its sleep by {half} ms:\n{}\nrequests: {:#?}",
+            nodes.script().rendered_trace(),
+            deployment.scripts.requests(INPUT)
         );
     };
     let parked_at = clock.logical_ms();

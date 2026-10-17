@@ -512,7 +512,7 @@ impl ArtifactCleanupRelay {
 
     /// Every artifact the retained record names: its environment, its
     /// engine's start artifacts and, for a start by id, its definition's
-    /// descriptor and manifest and those of its sibling definitions.
+    /// descriptor and authoritative stored manifest.
     async fn retained_names(
         &self,
         retained: &RetainedStart,
